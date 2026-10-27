@@ -153,7 +153,7 @@ def test_open_tick_distribute_confirm_end_through_the_routes(w):
     # a second Confirm of the same drop: refused, never a duplicate row
     r = w.c.post(f"/api/loot/{w.ev.key}/confirm", json={"only": ["d1"], "expect_to": w.ms[1].main.label}, headers=H | {"X-Oibot-Actor": str(OFFICER)})
     assert r.status_code == 400 and "Already recorded" in r.json()["error"] and len(ledger(w.reg)) == 2
-    assert "End " in w.c.post(f"/api/loot/{w.ev.key}/end", json={"preview": True}, headers=H).json()["preview"]
+    assert "is finished" in w.c.post(f"/api/loot/{w.ev.key}/end", json={"preview": True}, headers=H).json()["preview"]
     r = w.c.post(f"/api/loot/{w.ev.key}/end", json={}, headers=H)
     assert r.status_code == 200 and w.rs.events[w.ev.key].state == "done", r.text
     hist = w.c.get("/api/loot/history", headers=H).json()["rows"]
@@ -673,7 +673,7 @@ def test_scores_only_keep_open_remove_candidate_and_one_run(w):
     assert r.status_code == 200 and "no longer a candidate" in r.json()["message"] and not s.departed
     assert w.c.post(f"/api/loot/{w.ev.key}/candidate/remove", json={"who": "nobody"}, headers=H).status_code == 400
     one = w.c.get(f"/api/loot/run/{w.ev.key}", headers=H).json()
-    assert one["key"] == w.ev.key and one["councils"][0]["id"] == w.ev.key and "End " in one["end_consequence"]
+    assert one["key"] == w.ev.key and one["councils"][0]["id"] == w.ev.key and "is finished" in one["end_consequence"]
 
 
 def test_a_split_runs_councils_are_addressed_by_session_or_by_their_id(reg, rs, env):

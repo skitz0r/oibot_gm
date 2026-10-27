@@ -311,7 +311,7 @@ def test_approving_a_shared_profile_edit_needs_every_owner(duo):
     assert owners == [("Demo Guild", OWNER), ("Duo Guild", OWNER2)]
     with pytest.raises(PermissionError, match="Duo Guild also uses"):
         ps.move(p.id, "approved", "Demo owner", officer=True, job=False, by_id=OWNER)
-    with pytest.raises(PermissionError, match=r"that Duo Guild also uses: the owner"):  # never names the proposing guild itself
+    with pytest.raises(PermissionError, match=r"that Duo Guild also uses\. The owner"):  # never names the proposing guild itself
         ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5)
     assert ps.move(p.id, "dismissed", "an officer", officer=True, job=False, by_id=5).state == "dismissed", "dismissing stays open"
     newer = "https://example.com/news/newer"  # a dismissed game-data proposal's news alone is refused (design §3.4 OFF-14)
@@ -382,7 +382,7 @@ def test_a_single_guild_approves_profile_proposals_owner_only(reg):
     add_news(reg)
     ps = ProposalStore(reg.store, GUILD)
     p = ps.create(reg, proposal_data(kind="profile", edit=PROFILE_EDIT))
-    with pytest.raises(PermissionError, match="only the owner approves a game-data change"):
+    with pytest.raises(PermissionError, match="Only the owner approves a game-data change"):
         ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5)
     assert ps.move(p.id, "approved", "the owner", officer=True, job=False, by_id=OWNER).state == "approved"
 

@@ -96,7 +96,7 @@ def test_role_flip_on_a_locked_recurring_run_keeps_the_seat_and_tells_officers(r
     res = run(bot.save_characters(reg, healer.discord_id, [{"label": healer.main.label, "cls": "Priest", "spec": "Shadow"}], healer.display_name, by_id=healer.discord_id))
     seat = ev.seat_of(healer)
     assert seat is not None and seat[1].role == "healer" and seat[1].spec == "Holy", "the roster stays as locked: an officer decides"
-    assert any("kept as it is" in t for _k, t in bot.updates) and any("officers are told" in r for r in res["ripple"])
+    assert any("keeps the healer seat" in t for _k, t in bot.updates) and any("The officers are told and decide." in r for r in res["ripple"])
     assert any(level == "warn" and "respecced" in text for level, text in bot.ops.lines)
     assert not bot.fills and not bot.sent_dms  # nothing freed, nobody DMed (D24, the DM rule)
     assert reg.members[healer.discord_id].main.spec == "Shadow"
@@ -143,7 +143,7 @@ def test_deleting_a_seated_character_frees_the_seat_and_asks_the_bench(reg, rs, 
     res = run(bot.save_characters(reg, m.discord_id, [{"label": label, "delete": True}], "Officer", by_id=OWNER, officer=True))
     assert ev.seat_of(m) is None and ev.signups[str(m.discord_id)].status == "out"
     assert bot.fills == [(ev.key, "character deleted")]
-    assert any("handed back and the bench is asked" in r for r in res["ripple"])
+    assert any(r.endswith("seat for " + rc.run_on(reg, ev) + " is released. The bench is asked to fill it.") for r in res["ripple"]), res["ripple"]
     assert reg.members[m.discord_id].main.label == "Spareone"
     assert not bot.sent_dms
 
@@ -156,7 +156,7 @@ def test_retire_clears_an_open_join_and_drops_the_regular(reg, rs, bot):
     ev = real_run(reg, rs)
     rc.set_signup(reg, rs, ev, m, "Altoni", "in", source="member")
     preview = discord_people.character_preview(bot, reg, m.discord_id, [{"label": "Altoni", "retire": True}])
-    assert any("comes off it" in p for p in preview) and any("answer is cleared" in p for p in preview)
+    assert any("stops being a regular of" in p for p in preview) and any("answer for" in p and "is cleared" in p for p in preview), preview
     run(bot.save_characters(reg, m.discord_id, [{"label": "Altoni", "retire": True}], m.display_name, by_id=m.discord_id))
     assert str(m.discord_id) not in ev.signups
     assert not reg.regulars("barrow_deeps:default")
@@ -168,7 +168,7 @@ def test_preview_writes_nothing_and_refuses_like_the_save(reg, rs, bot):
     rev = reg.characters_rev(m)
     res = run(bot.save_characters(reg, m.discord_id, [{"label": m.main.label, "delete": True}], "Officer", by_id=OWNER, officer=True, preview=True))
     assert res["preview"] if "preview" in res else True
-    assert any("handed back" in r for r in res["ripple"]) and reg.characters_rev(reg.members[m.discord_id]) == rev and ev.seat_of(m)
+    assert any("is released" in r for r in res["ripple"]) and reg.characters_rev(reg.members[m.discord_id]) == rev and ev.seat_of(m)
     with pytest.raises(RegistryError, match="Only an officer sets a rank"):
         run(bot.save_characters(reg, m.discord_id, [{"label": m.main.label, "rank": "core"}], m.display_name, by_id=m.discord_id, preview=True))
 
@@ -295,7 +295,7 @@ def test_im_back_reopens_the_sheet_the_absence_answered(reg, rs, bot):
     day = rc.run_day(reg, ev)
     _m, a, touched = run(bot.record_absence(reg, m.discord_id, day, None, "trip", m.display_name, by_id=m.discord_id))
     assert touched == [ev.key] and ev.signups[str(m.discord_id)].source == "absence"
-    assert discord_people.absence_clear_lines(reg, rs, reg.members[m.discord_id], a) == [f"{rc._run_words(reg, ev)}: the sheet re-opens — answer it again"]
+    assert discord_people.absence_clear_lines(reg, rs, reg.members[m.discord_id], a) == [f"The sheet for {rc.run_on(reg, ev)} opens again for an answer."]
     a2, lines = run(bot.im_back(reg, m.discord_id, a.start, m.display_name, by_id=m.discord_id))
     assert a2.start == a.start and str(m.discord_id) not in ev.signups and lines
     assert not reg.members[m.discord_id].absences
@@ -329,7 +329,7 @@ def test_set_owner_refusals_and_the_write(reg):
         reg.set_owner(m.discord_id, "Owner", by_id=OWNER, bot=True, name=m.display_name)
     with pytest.raises(RegistryError, match="not in"):
         reg.set_owner(m.discord_id, "Owner", by_id=OWNER, membership="no", name=m.display_name)
-    with pytest.raises(RegistryError, match="Couldn't check Discord"):
+    with pytest.raises(RegistryError, match="Discord couldn't be checked"):
         reg.set_owner(m.discord_id, "Owner", by_id=OWNER, membership="unknown", name=m.display_name)
     with pytest.raises(RegistryError, match="already owns"):
         reg.set_owner(OWNER, "Owner", by_id=OWNER, name="Owner")
@@ -338,7 +338,7 @@ def test_set_owner_refusals_and_the_write(reg):
     assert reg.config.owner_discord_id == OWNER
     reg.set_owner(m.discord_id, "Owner", by_id=OWNER, name=m.display_name)
     assert reg.config.owner_discord_id == m.discord_id and reg.load_config().owner_discord_id == m.discord_id
-    assert "You lose owner rights" in reg.owner_consequence("X", OWNER) and "nobody is DMed" in reg.owner_consequence("X", OWNER)
+    assert "You lose owner rights" in reg.owner_consequence("X", OWNER) and "Nobody gets a DM" in reg.owner_consequence("X", OWNER)
 
 
 def test_transfer_owner_verb_audits_and_dms_nobody(reg, rs, bot, monkeypatch):
@@ -360,7 +360,8 @@ def test_removing_a_schedule_drops_its_regulars_without_a_dm(reg, bot):
     reg.regular_add(a.discord_id, "barrow_deeps:alt", "t")
     reg.regular_add(b.discord_id, "barrow_deeps:alt", "t")
     op = ConfigOp(op="schedule_remove", target="barrow_deeps", field="alt")
-    assert "2 regulars come off it" in configops.describe(reg, op) and "nobody is DMed" in configops.describe(reg, op)
+    assert "2 regulars come off it" in configops.describe(reg, op) and "nobody is DMed" in configops.describe(reg, op)  # the diff line
+    assert any("come off its regulars and see a notice on their Me page" in c for c in configops.op_consequences(reg, op))
     line = reg.remove_schedule("barrow_deeps", "alt", "Owner")
     assert "2 regulars off it" in line and a.display_name in line
     assert not any("barrow_deeps:alt" in c.rosters for m in reg.members.values() for c in m.characters)
@@ -551,7 +552,7 @@ def test_plain_text_diff_prints_the_ripple_for_every_character_field(reg, rs):
     name = configops.describe(reg, ConfigOp(op="character", member="Planname", character=p.main.label, field="name", value="Newname"))
     assert "now names Newname" in name
     retire = configops.describe(reg, ConfigOp(op="character", member=m.display_name, character=m.main.label, field="retire"))
-    assert "answer is cleared" in retire or "stays No thanks" in retire
+    assert "is cleared" in retire or "stays, now as" in retire
 
 
 # ---------------------------------------------------------------- review fixes (the C fixer)
@@ -614,7 +615,7 @@ def test_a_host_superuser_transfers_a_guild_they_host_but_do_not_own(reg, rs, bo
     m = real(reg, 0)
     assert reg.config.owner_discord_id == OWNER and reg.is_owner_id(su)
     words = reg.owner_consequence(m.display_name, su)
-    assert "you act as the host here" in words and "You lose owner rights" not in words
+    assert "You act here as the host" in words and "You lose owner rights" not in words
 
     async def member_of(_bot, _reg, uid, timeout=None, max_age=None):
         return "yes", type("M", (), {"display_name": m.display_name, "bot": False})()

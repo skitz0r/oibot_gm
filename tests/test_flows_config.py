@@ -615,4 +615,4 @@ def test_an_aura_field_set_back_to_the_games_value_is_no_override(reg):
     base = next(b for b in reg.base_profile.buffs if b.id == "moonkin_aura")
     reg.set_buff_overrides("moonkin_aura", {"scope": base.scope}, "Jon")
     assert "moonkin_aura" not in reg.config.buffs
-    assert reg.aura_reset_sentence().startswith("Nothing to reset")
+    assert reg.aura_reset_sentence().endswith("so there is nothing to reset.")

@@ -179,10 +179,12 @@ class AbsenceClearWizard(Wizard):
             await self.finish(interaction, "That absence is no longer on file (cleared meanwhile) — nothing to do.")
             return
         self.draft["start"] = a.start
-        who = self.member_name if self.officer else "You"
-        lines = [f"**{who}** back: the absence **{self.reg.span_label(a.start, a.end)}** is cleared" + (f" (reason: {a.reason})" if a.reason and self.officer else "") + "."]
+        whose = f"**{self.member_name}**'s" if self.officer else "Your"
+        lines = [f"{whose} absence **{self.reg.span_label(a.start, a.end)}** is cleared."]
+        if a.reason and self.officer:
+            lines.append(f"-# Reason, for officers only: {a.reason}")
         effects = absence_clear_lines(self.reg, self.rs, m, a)
-        lines += [f"• {e}" for e in effects] or ["-# No sheet changes: no live sheet had been answered for the absence."]
+        lines += [f"• {e}" for e in effects] or ["-# No sheet changes, because no live sheet was answered for the absence."]
         await self.decide(interaction, "\n".join(lines), do=self.save, do_label="I'm back")
 
     async def save(self, interaction: discord.Interaction, _note: str | None) -> None:

@@ -178,7 +178,7 @@ def test_imported_rows_carry_an_import_id_and_an_undo_voids_them(reg):
     added = ledger(reg)
     assert [r["import_id"] for r in added] == [f"{batch}-1", f"{batch}-2"] and {r["import_batch"] for r in added} == {batch}
     (b,) = reg.import_batches()
-    assert (b["batch"], b["rows"], b["live"], b["kind"]) == (batch, 2, 2, "generic") and "Voids the 2 award(s)" in b["consequence"]
+    assert (b["batch"], b["rows"], b["live"], b["kind"]) == (batch, 2, 2, "generic") and "The 2 awards this import added stop counting" in b["consequence"]
     assert ":" in b["at_label"] and ("AM" in b["at_label"] or "PM" in b["at_label"]), "a time a person reads (12-hour)"
     before = ledger_bytes(reg)
     out = reg.undo_import(batch, "Officer", "the received column held the export date", 7)

@@ -67,7 +67,7 @@ async def proposal_decide(interaction: discord.Interaction, reg: Registry, *, pi
         if not await bot.is_officer_anywhere(reg, i.user.id):
             return "Officers only."
         if needs_owner and not reg.is_owner_id(i.user.id):
-            return news.PROFILE_OWNER_ONLY[:1].upper() + news.PROFILE_OWNER_ONLY[1:] + "."
+            return news.PROFILE_OWNER_ONLY
         return None
 
     wiz = Wizard(reg, uid, title=f"{verb}: proposal {p.id}", guard=guard)
@@ -91,4 +91,6 @@ async def proposal_decide(interaction: discord.Interaction, reg: Registry, *, pi
         await wiz.finish(i, f"{STATE_TEXT.get(moved.state, moved.state)} — {tail}")
 
     text = "\n".join(bot.proposal_consequence(reg, p, state)) + f"\n-# {p.title[:150]}"
+    if p.kind == "guild_setting":  # the exact edit, as the review diff writes it (a value, beside the confirm's sentences)
+        text += f"\n-# {news.edit_words(reg, p)[:300]}"
     await wiz.decide(interaction, text, do=do, note=NOTE, do_label=verb, danger=state == "dismissed" and p.state == "approved")

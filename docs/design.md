@@ -3530,6 +3530,43 @@ path); controls were under 44 px.
   line — the role icons, then *not on the sheet: A, B, C* — instead of the same line under each short role
   (`rc.cover_hints`, `health_json.hints`).
 
+### 5.57 Confirms read aloud (user decision 2026-10-26)
+
+**Why.** The user read two confirms on the live site and called them "unintelligible text blobs": the ad hoc lock with an
+on-behalf Join (*"The board becomes the roster. No confirmations — Join is the commitment. the lock decides the roster.
+cbottoms sees a notice on their Me page — no new DM."*) and an officer's Can't make it before the lock (*"cbottoms goes to
+No thanks on Barrow Deeps Wed 4 Nov 7:00 PM and a callout is recorded (hours before counted; your note, if any, is for
+officers). cbottoms sees a notice on their Me page — no new DM."*). Fragments glued with dashes, colons and semicolons;
+one sentence in lower case; bracketed asides; the same person named twice; the run with its full stamp jammed in; a
+negative ("no new DM") the DM rule already makes the default, repeated on every confirm; code words.
+
+**The rule** (CLAUDE.md, the Confirm rule). Anything a `decide` screen, a `useConfirm`, a review diff or a preview prints
+before a press is read aloud by a raid leader with a finger on the button: at most three sentences, in the order what
+changes · who is told and how · what can still be undone; each a full sentence (a capital, one idea, a full stop, twenty
+words or fewer); no parentheses, semicolons, colon chaining, dash glue or bracketed notes; the person named once, then
+"they"; the run as "<raid> on <day>" (`rc.run_on`), the clock only when the sentence is about the time; counts open a
+sentence ("The 6 rostered …"); the confirmation card named by its buttons ("the Confirm or Can't make it DM",
+`consequences.CONFIRM_DM`); what doesn't happen only where the reader would expect it, as one plain sentence ("Nobody
+gets a DM."). The register is the user's own rewrites, e.g. *"cbottoms goes to No thanks for Barrow Deeps on Wed 4 Nov.
+The bot records a callout and how late it came. They see it on their Me page."*
+
+**Shared pieces.** `rc.run_on` (the run's name in a confirm), `rc.refill_sentence` (what a released seat does: the bench
+asked, or waiting for Fill seats when automatic asks are off or paused — one sentence for the board, the on-behalf
+actions, absences and character changes), `rc.no_confirm_sentence` (a run that asks nobody to confirm), `rc.open_rules`
+(what kind of run an open makes — the preview and the /raid open wizard), `consequences.reopen_sentence` / `ended_line`
+(Reopen's window from `rc.reopen_window`), `consequences.series_words`. Several runs at once (a timezone change) are one
+sentence per fate, not one per run. A diff's own value lines ("timezone: A → B") stay values: the proposal's exact edit
+is the decide screen's context line, beside the confirm. The Me page's Can't make it… now prints the server's
+`cant_consequence` (the browser wrote it before).
+
+**The harness.** `tests/test_confirm_readability.py` renders every generator across its cases (every run verb × open /
+locked recurring with DMs on and off / locked ad hoc / automatic asks on, off and paused / done / cancelled; every
+on-behalf action × the same runs × own record; the refusals, previews, absences, character ripples, the loot council's
+End, owner, timezone, schedule, aura, import, application, channel, companion, appeal, news and test-bench sentences),
+lints each sentence (capital or digit or a name to start; . ! or ? to end; ≤ 20 words; no "(" ")" ";" ": " " — " or
+"no new DM"; ≤ 3 sentences a confirm) and writes them all to `out/confirm_sentences.txt` (and `$OIBOT_CONFIRM_SENTENCES`)
+to be read. A sentence that fails is rewritten in its generator — there is no allow list.
+
 ## 6. Architecture
 
 ```mermaid

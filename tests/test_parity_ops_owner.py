@@ -122,7 +122,7 @@ def test_proposal_approve_then_dismiss(reg):
     assert ProposalStore(reg.store, reg.key).get(p.id).state == "dismissed"
     # an owner-only setting (raid_set) through a proposal stays the owner's in plain text too
     o = a_proposal(reg, title="Barrow Deeps resets weekly (lockout)", edit={"op": "raid_set", "target": "barrow_deeps", "field": "lockout_days", "value": "7"})
-    with pytest.raises(RegistryError, match="only the owner approves this change"):
+    with pytest.raises(RegistryError, match="Only the owner approves this change"):
         asyncio.run(configops.apply_async(reg, ConfigOp(op="proposal", target=o.id, value="approve"), "Officer", False, bot=bot, by_id=42))
     assert "dismissed: it can't become dismissed" in configops.describe(reg, ConfigOp(op="proposal", target=p.id, value="dismiss"))
 

@@ -1618,7 +1618,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         p["channel_name"] = getattr(ch, "name", None)
         # where the sheet goes, in one sentence from code (the confirm prints it; the page composes none)
         p["posts"] = (f"The sheet posts in #{p['channel_name'] or 'the signup channel'}." if p.get("channel")
-                      else "No signup channel is set: the sheet isn't posted until one is (/raid sheet).")
+                      else "No signup channel is set, so the sheet waits until one is.")
         return p
 
     @app.post("/api/raid/{rid}/open")
@@ -1805,11 +1805,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return {"message": ("; ".join(done)) if done else "nobody left to answer (seed more, or they've all answered)", "key": ev.key, "answered": len(done)}
 
     async def test_clear_do(v, d) -> dict:
-        from ..flows_misc import test_clear_consequence
+        from ..flows_misc import TEST_BENCH_EMPTY, test_clear_consequence
 
         lines = test_clear_consequence(v.reg, bot.raids.store(v.reg))  # the decide screen's words: the browser never composes them
         if d.get("preview"):
-            return {"consequence": lines, "empty": lines[0].startswith("Nothing to clear")}
+            return {"consequence": lines, "empty": lines == [TEST_BENCH_EMPTY]}
         line = await bot.test_bench_clear(v.reg, v.name, via=v.via, by_id=v.uid)  # the verb writes its own audit line
         return {"message": line, "consequence": lines}
 

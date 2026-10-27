@@ -426,7 +426,7 @@ def test_decide_application_returns_the_line_and_never_removes_anyone(reg):
     assert "welcome to stay" in dms[0][1] and "not this time" in dms[0][1]
     assert msg.edits and msg.edits[0]["view"] is None and "declined" in msg.edits[0]["embed"].footer.text
     assert any("Declined" in t for _, t in client.ops.lines)
-    with pytest.raises(RegistryError, match=r"Already declined by Officer \("):  # a second decision names the first (design §3.3 D)
+    with pytest.raises(RegistryError, match=r"Officer already declined it on "):  # a second decision names the first (design §3.3 D)
         run(settle_application(client, reg, NEW_ID, True, "Officer", None))
     # accept: registered as a confirmed trial, surname carried
     b = reg.apply(NEW_ID + 1, "Other", "Borin", "Warrior", "Arms", None, None, None, None, surname="Stone")
@@ -451,7 +451,7 @@ def test_the_card_buttons_use_the_clients_decide_path(reg, monkeypatch):
     async def go():
         # Accept: the ONE decide screen (consequence from code, Accept · Accept with a note… · Back), then the client's path
         await view.children[0].callback(h.card_press())
-        assert "registered as **Kessa Dawnfire**" in h.text and h.buttons() == ["Accept", "Accept with a note…", "Back"]
+        assert "registered and confirmed as **Kessa Dawnfire**" in h.text and h.buttons() == ["Accept", "Accept with a note…", "Back"]
         assert calls == [], "nothing is written before the press"
         await h.press("Accept")
         assert calls == [(NEW_ID, True, "Officer", None)] and h.text.endswith("✅ line from the client")

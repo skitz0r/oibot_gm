@@ -264,7 +264,7 @@ def test_buttons_are_officer_only_and_flip_the_state(reg):
         assert client.card_edits == [(p.id, "approved")] and any("Kessa" in x and "→ approved" in x for x in lines) and "the card is updated" in h.text
         itx2 = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=6, display_name="Jonny"), response=FakeResp())
         await ProposalButton(reg.key, p.id, "approve").callback(itx2)  # a second press: refused before any screen, nothing changes
-        assert itx2.response.sent and itx2.response.sent[0].startswith("already approved by Kessa <t:"), "the first decider is named, never a silent success"
+        assert itx2.response.sent and itx2.response.sent[0].startswith("Kessa already approved it on <t:"), "the first decider is named, never a silent success"
         assert client.card_edits[-1] == (p.id, "approved"), "a refused press redraws the card"
         # D34: Dismiss gets the same screen (an approved proposal can still be dismissed until the job picks it up)
         h2 = Harness(reg, user=SimpleNamespace(id=5, display_name="Kessa"), client=client)

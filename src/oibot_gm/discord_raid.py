@@ -806,7 +806,7 @@ class RaidMixin:
         text "use it" puts it on the board, also after a restart — configops._propose). RegistryError (SolverBusy, or the
         solver's own sentence) when no preview can be made."""
         if ev.state != "open":
-            raise RegistryError(f"{run_title(reg, ev)} is {ev.state} — the preview is for an open sheet.")
+            raise RegistryError(f"{run_title(reg, ev)} is already {rc.RUN_STATE_WORDS.get(ev.state, ev.state).split(' — ')[0]}, and the preview is for an open sheet.")
         strategy = ev.split_strategy or reg.raid_def(ev.instance).get("split_policy") or "balanced"
         async with self.solving(reg, ev.key):
             try:

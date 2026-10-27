@@ -113,8 +113,13 @@ def words(missing) -> str:
 
 
 def cant_post(channel_name: str, missing) -> str:
-    """THE refusal / warning sentence: 'I can't post in #raids: missing Send Messages, Embed Links.'"""
-    return f"I can't post in #{channel_name}: missing {words(missing)}."
+    """THE refusal / warning sentence, read aloud (the Confirm rule, design §5.57): 'I can't post in #raids without Send
+    Messages and Manage Messages. I need Manage Messages to pin the card.'"""
+    names = list(dict.fromkeys(WORDS.get(p, p) for p in missing))
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    whys = [f"{WORDS.get(p, p)} {WHY[p]}" for p in dict.fromkeys(missing) if p in WHY]
+    why = (" I need " + (whys[0] if len(whys) == 1 else ", ".join(whys[:-1]) + " and " + whys[-1]) + ".") if whys else ""
+    return f"I can't post in #{channel_name} without {listed}.{why}"
 
 
 def optional_missing(guild) -> list[str]:

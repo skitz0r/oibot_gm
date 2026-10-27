@@ -229,7 +229,7 @@ def test_perms_server_wide_invite_and_words():
     g = FakeGuild(**{k: v for k, v in ALL.items() if k not in ("manage_webhooks", "embed_links")})
     assert set(perms.missing_for(g)) == {"manage_webhooks", "embed_links"}
     assert perms.optional_missing(g) == ["manage_roles", "manage_channels"]
-    assert perms.cant_post("raids", ["send_messages", "manage_messages"]) == "I can't post in #raids: missing Send Messages, Manage Messages (to pin the card)."
+    assert perms.cant_post("raids", ["send_messages", "manage_messages"]) == "I can't post in #raids without Send Messages and Manage Messages. I need Manage Messages to pin the card."
     assert "permissions=" + str(perms.permissions_value()) in perms.invite_link("42") and "guild_id=9" in perms.invite_link("42", 9)
 
 
@@ -238,7 +238,7 @@ def test_perms_server_wide_invite_and_words():
 def test_set_channel_refuses_a_channel_it_cant_post_in_and_saves_nothing(reg):
     bot = SetupBot(reg)
     bot.add(50, "raids", view_channel=True, send_messages=True)  # no Embed Links
-    with pytest.raises(ValueError, match=r"I can't post in #raids: missing Embed Links\."):
+    with pytest.raises(ValueError, match=r"I can't post in #raids without Embed Links\."):
         run(bot.set_channel(reg, "signup", 50, "Jon"))
     assert reg.config.signup_channel_id is None and bot.ops.lines == []
     bot.add(51, "cards", view_channel=True, send_messages=True, embed_links=True)  # no Manage Messages: the card can't be pinned
@@ -325,12 +325,12 @@ def test_channel_consequences_from_code(reg):
     bot.add(51, "nopost", view_channel=True)
     reg.config.signup_channel_id = 50
     assert channel_consequences(reg, "signup", None, bot) == ["Sheets will have nowhere to post until a signup channel is set."]
-    assert channel_consequences(reg, "signup", 50, bot) == ["Signups is already #raids — nothing changes."]
+    assert channel_consequences(reg, "signup", 50, bot) == ["Signups is already #raids, so nothing changes."]
     reg.config.ops_channel_id = 50
     reg.config.applications_channel_id = 51
     assert channel_consequences(reg, "applications", None, bot) == ["Applications fall back to the ops channel #raids."]
     lines = channel_consequences(reg, "registration", 51, bot)
-    assert lines[0] == "Posts and pins the registration card in #nopost." and any("I can't post in #nopost: missing Send Messages" in x for x in lines)
+    assert lines[0] == "The bot posts and pins the registration card in #nopost." and any("I can't post in #nopost without Send Messages" in x for x in lines)
     assert "creates a webhook" in channel_consequences(reg, "news", 50, bot)[0]
     # the same sentences ride into every surface's review through configops.CONSEQUENCE_HOOKS
     perms.CLIENT = bot
@@ -733,7 +733,7 @@ def test_decide_adds_the_character_first_and_caps_the_note(reg):
     with pytest.raises(RegistryError, match="limited to 400"):
         reg.decide(a.discord_id, False, "Jon", "x" * 401)
     reg.decide(a.discord_id, False, "Jon", "full on mages")
-    with pytest.raises(RegistryError, match=r"Already declined by Jon \("):
+    with pytest.raises(RegistryError, match=r"Jon already declined it on "):
         reg.decide(a.discord_id, True, "Ana")
 
 
@@ -936,7 +936,7 @@ def test_channel_shortcut_confirm_then_set_channel(reg):
     assert "Sheets will have nowhere to post" in h.text and h.buttons() == ["Clear it", "Back"]
     bot.add(51, "mute", view_channel=True)
     run(FLOWS["channel_set"](h.command(), reg, kind="ops", channel=bot.chans[51]))
-    assert "❌ I can't post in #mute: missing Send Messages, Embed Links." in h.text and reg.config.ops_channel_id is None
+    assert "❌ I can't post in #mute without Send Messages and Embed Links." in h.text and reg.config.ops_channel_id is None
 
 
 def test_news_channel_hands_the_owner_the_webhook(reg):
@@ -1013,14 +1013,14 @@ def test_officers_hub_role_picker_review_and_save(reg):
     run(h.press("Map Old Officers…"))
     run(pick_widget(h, discord.ui.RoleSelect, "The role for Old Officers", bot.guild.get_role(66)))
     run(h.press("Review"))
-    assert "Officer roles" in h.text and "No officer roles now" not in h.text
+    assert "Officer roles" in h.text and "With no officer roles left" not in h.text
     run(h.press("Save"))
     assert reg.config.officer_role_ids == [66] and reg.config.officer_roles == []
 
 
 def test_officer_role_command_says_the_empty_list_consequence(reg):
     op = ConfigOp(op="role_remove", value=str(OFFICER_ROLE))
-    assert configops.op_consequences(reg, op) == ["No officer roles now: only the server owner and Manage Server count."]
+    assert configops.op_consequences(reg, op) == ["With no officer roles left, only the server owner and Manage Server count as officers."]
     bot = SetupBot(reg)
     with pytest.raises(RegistryError, match="@everyone can't be an officer role"):
         run(configops.apply_async(reg, ConfigOp(op="role_add", value=str(bot.guild.id)), "Owner", True, bot=bot, by_id=OWNER, via="discord"))
@@ -1118,7 +1118,7 @@ def test_structured_save_of_a_channel_reviews_with_the_consequences(wc, web_bot,
     try:
         h = as_user(wc, OWNER)
         r = wc.post("/api/ops/change", json={"changes": [{"kind": "settings", "fields": {"channel:registration": "50"}}], "apply": True}, headers=h).json()
-        assert r["needs_review"] and any("Posts and pins the registration card in #raids" in c for c in r["described"]["consequences"])
+        assert r["needs_review"] and any("The bot posts and pins the registration card in #raids" in c for c in r["described"]["consequences"])
         assert reg.config.registration_channel_id is None
         done = wc.post("/api/ops/change", json={"token": r["token"], "apply": True}, headers=h).json()
         assert done["applied"] and reg.config.registration_channel_id == 50
@@ -1195,13 +1195,13 @@ def test_applications_routes(wc, web_bot, reg):
     h = as_user(wc, OFFICER_UID)
     d = wc.get("/api/applications", headers=h).json()
     o = d["open"][0]
-    assert d["note_max"] == 400 and o["prior"] is None and o["consequence"]["accept"][0].startswith("User8100 is registered as **Kessa Dawnfire**")
+    assert d["note_max"] == 400 and o["prior"] is None and o["consequence"]["accept"][0].startswith("User8100 is registered and confirmed as **Kessa Dawnfire**")
     assert wc.post("/api/admin/application/decide", json={"uid": "8100", "accept": False, "note": "x" * 401}, headers=h).json()["error"].startswith("The note is limited")
     r = wc.post("/api/admin/application/decide", json={"uid": "8100", "accept": False, "note": "full"}, headers=h)
     assert r.status_code == 200 and r.json()["application"]["status"] == "declined"
     assert web_bot.ops.lines == [(GUILD, "info", "[web] Offi: Declined User8100 (Kessa Dawnfire) — full")], "one line, from the verb"
     r = wc.post("/api/admin/application/decide", json={"uid": "8100", "accept": True}, headers=h)
-    assert r.status_code == 400 and r.json()["error"].startswith("Already declined by Offi")
+    assert r.status_code == 400 and r.json()["error"].startswith("Offi already declined it")
     apply_one(reg, uid=8100, name="Kessia")
     assert wc.get("/api/applications", headers=h).json()["open"][0]["prior"].endswith("by Offi — full")
 

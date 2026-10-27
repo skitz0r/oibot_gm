@@ -20,19 +20,29 @@ from .. import inbox
 from .. import raidcycle as rc
 from ..registry import RegistryError
 
-QUEUE_NOTE = "You'll go to the back of the queue — change anyway?"
+QUEUE_NOTE = "You'll go to the back of the queue if you change. Change anyway?"
+
+
+def cant_consequence(reg, ev, seated: bool) -> str:
+    """The Me page's Can't make it… confirm, from code (the Confirm rule, design §5.57): a member's own callout
+    (RaidMixin.call_out) — a rostered seat is released and the bench asked when automatic asks are on."""
+    run = rc.run_on(reg, ev)
+    if seated:
+        return f"Your seat for {run} is released, and the officers see it as a callout. {rc.refill_sentence(reg, ev)}"
+    return f"You go to No thanks for {run}, and the officers see it as a callout."
 
 
 def sheet_row_extras(reg, ev, m) -> dict:
     """What the Me page's My sheets row needs to be actionable (rendered from server state only): may_answer (open: Join /
-    Bench / No thanks), may_cant (locked and rostered: Can't make it… with a note), queue_note (ad hoc and joined: a change
-    away from Join asks once), receipt (rc.answer_receipt, plain)."""
+    Bench / No thanks), may_cant (locked and rostered: Can't make it… with a note) and cant_consequence (its confirm's
+    sentences), queue_note (ad hoc and joined: a change away from Join asks once), receipt (rc.answer_receipt, plain)."""
     s = ev.signups.get(str(m.discord_id)) if m else None
     locked = ev.state == "locked"
     seated = bool(m and locked and ev.seat_of(m))
     adhoc = rc.run_kind(reg, ev) == "adhoc"
     return {"may_answer": ev.state == "open" and rc.on_bench_side(reg, ev, m) if m else False,
             "may_cant": seated or (locked and s is not None and s.status == "in"),
+            "cant_consequence": cant_consequence(reg, ev, seated) if locked else None,
             "queue_note": QUEUE_NOTE if adhoc and ev.state == "open" and s is not None and s.status == "in" else None,
             "receipt": rc.answer_receipt(reg, ev, m).replace("**", "") if m else None}
 

@@ -30,6 +30,12 @@ from pydantic import BaseModel, Field
 
 from .store import GitStore
 
+
+def join_words(words: list[str]) -> str:
+    """'A', 'A and B', 'A, B and C' (registry.join_words, kept here so news imports no registry)."""
+    words = [str(w) for w in words]
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1] if words else ""
+
 NEWS_FILE = "news.jsonl"
 PROPOSALS_DIR = "proposals"
 KINDS = ("guild_setting", "profile", "needs_developer")
@@ -39,12 +45,12 @@ CONFIDENCE = ("low", "medium", "high")
 OFFICER_MOVES = {("proposed", "approved"), ("proposed", "dismissed"), ("approved", "dismissed"), ("failed", "approved"), ("failed", "dismissed")}
 JOB_MOVES = {("approved", "applying"), ("approved", "failed"), ("applying", "applied"), ("applying", "failed"), ("applying", "reverted"), ("applied", "reverted")}
 # a guild setting is one of these config ops (configops.ConfigOp fields); anything else is a profile edit or a developer's job
-PROFILE_OWNER_ONLY = ("only the owner approves a game-data change: it edits the shared game files, and the bot restarts for every "
-                      "server it serves")
-SETTING_OWNER_ONLY = ("only the owner approves this change: raids and buffs are the owner's settings on every surface, and a "
-                      "proposal does not widen that")
+PROFILE_OWNER_ONLY = ("Only the owner approves a game-data change. It edits the shared game files, and the bot restarts for every "
+                      "server it serves.")
+SETTING_OWNER_ONLY = ("Only the owner approves this change. Raids and buffs are the owner's settings on every surface, and a "
+                      "proposal doesn't widen that.")
 JOB_NOT_OFFICER = "the apply job only reports its own steps; an officer decides whether a proposal goes ahead"
-INTERRUPTED = "the apply run was interrupted; approve again to retry"  # the job's recovery note and the owner's Mark as interrupted
+INTERRUPTED = "The apply run was interrupted. Approve it again to retry."  # the job's recovery note and the owner's Mark as interrupted
 RECOVER_MOVE = ("applying", "failed")  # the owner's "Mark as interrupted" (Agents page) while the apply job is not running
 DECISIONS = ("approved", "dismissed")  # an officer's verdict (OFFICER_MOVES' targets); from MCP it needs X-Oibot-Actor (D8)
 MCP_ACTOR_NEEDED = ("Approving or dismissing a proposal is a decision a person makes: from MCP it needs the X-Oibot-Actor header "
@@ -221,7 +227,7 @@ def already_text(p: "Proposal", when=None) -> str:
     success (design §3.4 X2). `when` formats the time per surface (Discord: `stamp`; the site: Registry.local12)."""
     verb = "approved" if p.state == "approved" else "dismissed"
     at = (when or stamp)(p.decided_at) if p.decided_at else ""
-    return f"already {verb} by {p.decided_by or 'someone'}" + (f" {at}" if at else "") + " — nothing to do"
+    return f"{p.decided_by or 'Someone'} already {verb} it" + (f" on {at}" if at else "") + ", so there is nothing to do."
 
 
 class AlreadyDecided(ProposalError):
@@ -448,8 +454,8 @@ def shared_profile_refusal(guilds, key: str, by_id: int | None) -> str | None:
     if not same or all(r.is_owner_id(by_id) for r in same):
         return None
     others = shared_profile_others(guilds, key)
-    return (f"this edits game data that {', '.join(others)} also use{'s' if len(others) == 1 else ''}: "
-            "the owner of every guild on this game version approves it")
+    return (f"This edits game data that {join_words(others)} also use{'s' if len(others) == 1 else ''}. "
+            "The owner of every guild on this game version approves it.")
 
 
 def profile_approval_refusal(guilds, reg, p) -> str | None:
@@ -461,7 +467,7 @@ def profile_approval_refusal(guilds, reg, p) -> str | None:
     by_id = getattr(p, "decided_by_id", None)
     if by_id is not None and reg.is_owner_id(by_id) and shared_profile_refusal(guilds, reg.key, by_id) is None:
         return None
-    return f"not applied: {PROFILE_OWNER_ONLY} (approved by {getattr(p, 'decided_by', None) or '?'}) — the owner approves it again to apply it"
+    return f"{PROFILE_OWNER_ONLY} It was approved by {getattr(p, 'decided_by', None) or 'someone else'}, so the owner approves it again to apply it."
 
 
 def dismissed_cover(store: GitStore, reg, urls) -> str | None:
@@ -517,9 +523,9 @@ def decision_refusal(store: GitStore, reg, pid: str, state: str, by_id: int | No
     if p.state == state and state in ("approved", "dismissed"):
         return already_text(p, when)
     if (p.state, state) not in OFFICER_MOVES:
-        return f"{p.id} is {p.state}: it can't become {state}"
+        return f"This proposal is {p.state}, so it can't be {state}."
     if state == "approved" and p.kind == "needs_developer":
-        return "this one needs a developer: the apply job can't do it (dismiss it once it's handled)"
+        return "This one needs a developer, so the apply job can't do it. Dismiss it once it's handled."
     if state == "approved" and p.kind == "profile":
         why = shared_profile_refusal(getattr(store, "guilds", None), reg.key, by_id)
         if why:
@@ -555,28 +561,29 @@ def consequence(p: Proposal, reg, state: str, guilds=None, *, busy: dict[str, di
     gets the same screen). The Discord `decide` screen, the site's confirm and GET /api/proposals print these lines;
     none composes its own. `busy`: {guild key: guild_busy(...)} for every served guild (a profile approval names each
     one raiding: the job waits, D33); `next_run`: the apply job's next poll in words ('Tue 7:45 PM')."""
-    when = f"at its next run ({next_run})" if next_run else "at its next run (it polls every 15 minutes)"
+    when = f"at its next run, {next_run}" if next_run else "at its next run, within 15 minutes"
     if state == "approved":
         if p.kind == "guild_setting":
-            return [f"Approved: the apply job carries it out {when}, no restart: {edit_words(reg, p)}."]
+            return [f"The apply job makes this change {when}.", "The bot doesn't restart for it."]
+        at = f"At the apply job's next run, {next_run}" if next_run else "At the apply job's next run, within 15 minutes"
         if p.kind == "profile":
             version = getattr(reg.base_profile, "name", None) or reg.config.game_profile
-            lines = [f"Claude edits the game data for {version}, the tests run, and the bot restarts for every server it serves "
-                     f"({', '.join(served_names(guilds, reg))}) for about two minutes — {when}."]
+            served = served_names(guilds, reg)
+            lines = [f"{at}, Claude edits the game data for {version}.",
+                     f"The tests run, then the bot restarts for about two minutes for {join_words(served) if len(served) <= 3 else f'all {len(served)} servers it serves'}."]
             ordered = getattr(guilds, "ordered", None)
-            for r in (list(ordered()) if ordered else [reg]):
-                b = (busy or {}).get(r.key) or {}
-                if b.get("raiding"):
-                    lines.append(f"⚠ {r.config.name} has a run right now ({b.get('why') or 'raid time'}) — the job will wait until it is over.")
+            busy_names = [r.config.name for r in (list(ordered()) if ordered else [reg]) if ((busy or {}).get(r.key) or {}).get("raiding")]
+            if busy_names:
+                lines.append(f"⚠ {join_words(busy_names)} {'has' if len(busy_names) == 1 else 'have'} a run right now, so the job waits until it's over.")
             return lines
-        return ["This one needs a developer: the apply job can't do it."]
+        return ["This one needs a developer, so the apply job can't do it."]
     if state == "interrupted":
-        return ["Marks it failed: the apply run that held it is gone (nothing is committed, restarted or reverted by this); "
-                "approve it again to retry."]
+        return ["This marks it failed, because the apply run that held it is gone.", "Nothing is committed, restarted or reverted by this.",
+                "Approve it again to retry."]
     if state == "dismissed":
-        lines = ["Dismissed: nothing changes, and the review is told not to propose it again unless newer news says more."]
+        lines = ["Nothing changes, and the review won't propose it again unless newer news says more."]
         if p.kind == "profile":
-            lines[0] = "Dismissed: nothing changes, and a game-data proposal citing only this news is refused from now on (newer news can say more)."
+            lines = ["Nothing changes.", "A game-data proposal citing only this news is refused from now on, unless newer news says more."]
         if p.state == "approved":
             lines.insert(0, "This withdraws the approval before the job picks it up.")
         return lines

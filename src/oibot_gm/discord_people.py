@@ -154,11 +154,20 @@ async def after_character_change(bot, reg: Registry, rs, m: Member, changes: lis
 # ---------------------------------------------------------------- absences
 
 def absence_lines(reg: Registry, rs, m: Member | None, start: str, end: str) -> list[str]:
-    """What recording an absence does to each live sheet, in words ('Barrow Deeps Tue 6 Oct 7:30 PM: seat freed …')."""
+    """What recording an absence does to each live sheet, one sentence per run ('The sheet for Barrow Deeps on Tue 6 Oct
+    is answered No thanks.') — the Confirm rule's words (design §5.57)."""
     if rs is None:
         return []
-    words = {"seat freed": "the seat is handed back and the bench is asked", "No thanks": "marked No thanks", "already No thanks": "already No thanks"}
-    return [f"{rc._run_words(reg, ev)}: {words.get(what, what)}" for ev, what in rc.absence_effects(reg, rs, m, start, end)]
+    out = []
+    for ev, what in rc.absence_effects(reg, rs, m, start, end):
+        run = rc.run_on(reg, ev)
+        if what == "seat freed":
+            out.append(f"The seat for {run} is released. {rc.refill_sentence(reg, ev)}")
+        elif what == "already No thanks":
+            out.append(f"The sheet for {run} already says No thanks.")
+        else:
+            out.append(f"The sheet for {run} is answered No thanks.")
+    return out
 
 
 def absence_clear_lines(reg: Registry, rs, m: Member, a) -> list[str]:
@@ -174,7 +183,8 @@ def absence_clear_lines(reg: Registry, rs, m: Member, a) -> list[str]:
         sg = ev.signups.get(str(m.discord_id))
         if not sg or sg.status != "out" or sg.source != "absence":
             continue
-        out.append(f"{rc._run_words(reg, ev)}: " + ("the sheet re-opens — answer it again" if ev.state == "open" else "the seat it handed back stays handed back"))
+        run = rc.run_on(reg, ev)
+        out.append(f"The sheet for {run} opens again for an answer." if ev.state == "open" else f"The seat for {run} that the absence released stays released.")
     return out
 
 

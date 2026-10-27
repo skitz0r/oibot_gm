@@ -76,10 +76,10 @@ def test_family_slug_collisions_get_a_number(reg):
 
 
 def test_aura_reset_sentence_counts_the_overrides(reg):
-    assert reg.aura_reset_sentence().startswith("Nothing to reset")
+    assert reg.aura_reset_sentence().endswith("so there is nothing to reset.")
     reg.set_buff_overrides("blood_pact", {"scope": "raid"}, "Jon")
     s = reg.aura_reset_sentence()
-    assert "1 buff" in s and reg.buff("blood_pact").short in s
+    assert reg.buff("blood_pact").short in s and "families it declared included" in s
 
 
 # ---------------------------------------------------------------- ops_from_fields, coalesce, Described, WARN_OPS
@@ -605,13 +605,13 @@ def test_resetting_one_aura_is_reviewed_with_its_sentence_on_every_surface(owner
     with the same sentence from code (configops.aura_reset_one_sentence)."""
     reg.set_buff_overrides("blood_pact", {"scope": "raid"}, "Jon")
     sentence = configops.aura_reset_one_sentence(reg, "blood_pact")
-    assert reg.buff("blood_pact").short in sentence and "its own family's beneficiaries" in sentence
+    assert reg.buff("blood_pact").short in sentence and "Its own family's beneficiaries" in sentence
     d = owner_client.post(CHANGE, json={"changes": [{"kind": "aura_reset", "target": "blood_pact"}], "apply": True}, headers=bearer()).json()
     assert d["needs_review"] and not d.get("applied") and reg.buff("blood_pact").scope == "raid"
     assert sentence in d["described"]["consequences"]
     r = owner_client.post(CHANGE, json={"token": d["token"], "apply": True}, headers=bearer())
     assert r.json()["applied"] and reg.buff("blood_pact").scope == "party"
-    assert configops.aura_reset_one_sentence(reg, "blood_pact").startswith("Nothing to reset")
+    assert configops.aura_reset_one_sentence(reg, "blood_pact").endswith("so there is nothing to reset.")
 
 
 def test_stands_alone_targets_the_buffs_own_family_in_ops_and_verbs(reg, store):
@@ -661,7 +661,7 @@ def test_removing_every_officer_role_in_one_batch_says_no_officer_roles(reg):
     ops = configops.ops_from_fields(reg, "settings", None, {"officer_roles": []})
     assert [o.op for o in ops] == ["role_remove", "role_remove"]
     d = configops.describe_ops(reg, ops)
-    assert any(c.startswith("No officer roles now") for c in d.consequences)
+    assert any(c.startswith("With no officer roles left") for c in d.consequences)
     keep_one = configops.describe_ops(reg, configops.ops_from_fields(reg, "settings", None, {"officer_roles": ["222"]}))
     assert not any(c.startswith("No officer roles now") for c in keep_one.consequences)
     swap = configops.describe_ops(reg, configops.ops_from_fields(reg, "settings", None, {"officer_roles": ["333"]}))

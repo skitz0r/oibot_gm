@@ -776,7 +776,8 @@ def test_end_run_archives_the_council_and_keeps_what_was_pending(council):
     tick_one(c, copies=3)
     run(c.bot.distribute(c.reg, c.s, by="Officer", only={"d1", "d2"}))
     run(c.bot.confirm(c.reg, c.s, only={"d1"}, by="Mira"))
-    assert "1 award(s), 0 override(s), 1 proposal(s) never confirmed, 1 drop(s) never distributed" in c.bot.end_consequence(c.reg, c.rs, c.ev)
+    told = c.bot.end_consequence(c.reg, c.rs, c.ev)
+    assert "loot council closes with 1 award." in told and "1 drop never distributed and 1 proposal never confirmed" in told, told
     text = run(c.bot.end_run(c.reg, c.rs, c.ev, by="Mira", by_id=2))
     assert "1 proposal(s) never confirmed" in text and "1 drop(s) never distributed" in text
     assert c.rs.events[c.ev.key].state == "done" and not c.bot.events and c.bot.event_for(c.s.raid_thread_id) is None

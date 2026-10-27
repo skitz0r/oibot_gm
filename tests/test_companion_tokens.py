@@ -132,7 +132,7 @@ def test_hub_rows_carry_presence_and_never_a_value(reg):
     pres = [{"character": "Rhozy", "state": "live", "events": 3, "last_seen": "2026-10-22T03:00:00+00:00", "token_id": rec.id}]
     rows = {r["label"]: r for r in token_rows(reg, pres)}
     assert rows["Jon's PC"]["state"] == "live" and rows["Jon's PC"]["characters"] == ["Rhozy"] and rows["Jon's PC"]["events"] == 3
-    assert "cut off at its next message" in rows["Jon's PC"]["revoke_consequence"]
+    assert "is cut at its next message" in rows["Jon's PC"]["revoke_consequence"]
     assert re.search(r"\d:\d\d [AP]M$", rows["Jon's PC"]["last_seen_label"]), "12-hour guild time"
     assert rows["Old PC"]["state"] == "revoked" and rows["Old PC"]["revoke_consequence"] is None
     assert [r["label"] for r in token_rows(reg, [])] == ["Old PC", "Jon's PC"], "newest first"
@@ -562,7 +562,7 @@ def test_the_hub_dms_the_token_once_to_the_chosen_member(reg, rs, in_server):
         await h.submit(label="Jon's PC")
         assert "DMed to them once" in h.text
         await h.pick_member("Pick the raid leader", leader)
-        assert "DMed once to **Rhozy**" in h.text and "Issue and DM" in h.buttons()
+        assert "goes once by DM to **Rhozy**" in h.text and "Issue and DM" in h.buttons()
         await h.press("Issue and DM")
         assert "✅ Token “Jon's PC” sent to Rhozy." in h.text
     run(go())

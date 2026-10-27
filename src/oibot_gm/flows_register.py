@@ -516,7 +516,7 @@ class CharNameWizard(Wizard):
         full = f"{self.reg.normalise_name(d['first'])}" + (f" {self.reg.normalise_name(d['last'])}" if d["last"] else "")
         effects = discord_people.character_preview(interaction.client, self.reg, uid, self.rows())
         what = f"Name your planned {d['slot']} **{d['label']}** → **{full}**. An officer confirms it afterwards."
-        text = "\n".join([what, *[f"• {e}" for e in effects]]) if effects else what + "\n-# Nothing else changes: no sheet or seat holds it."
+        text = "\n".join([what, *[f"• {e}" for e in effects]]) if effects else what + "\n-# Nothing else changes, because no sheet or seat holds it."
         await self.decide(interaction, text, do=self.save, do_label=f"Name it {full}"[:80])
 
     async def save(self, interaction: discord.Interaction, _note: str | None) -> None:

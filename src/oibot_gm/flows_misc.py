@@ -412,6 +412,9 @@ __all__ = ["TEMPOS", "TestRunWizard", "TestAnswerWizard", "TestSeedWizard", "Rul
 
 # ---------------------------------------------------------------- /gm test clear
 
+TEST_BENCH_EMPTY = "The test bench is already empty."  # test_clear_consequence when there is nothing to clear
+
+
 def test_clear_consequence(reg: Registry, rs) -> list[str]:
     """What clearing the test bench does, from the state (dual interfaces §2.3): the `decide` screen's text, and the
     site's Delete-all confirm reads the same numbers."""
@@ -420,15 +423,15 @@ def test_clear_consequence(reg: Registry, rs) -> list[str]:
     puppets = len(reg.test_members())
     runs = [ev for ev in rs.live() if rc.is_test_run(reg, ev)]
     if not puppets and not runs:
-        return ["Nothing to clear — no test members and no test runs."]
+        return [TEST_BENCH_EMPTY]
     parts = []
     if runs:
-        parts.append(f"cancels {len(runs)} test run{'s' if len(runs) != 1 else ''}")
+        parts.append(f"{len(runs)} test run{'s are' if len(runs) != 1 else ' is'} cancelled")
     if puppets:
-        parts.append(f"deletes {puppets} puppet{'s' if puppets != 1 else ''}")
-    parts.append("analytics cards resume")
-    line = ", ".join(parts) + "."
-    return [line[:1].upper() + line[1:], "Real members and their answers are untouched; the cancelled test runs post nothing where members read."]
+        parts.append(f"{puppets} puppet{'s are' if puppets != 1 else ' is'} deleted")
+    line = ", ".join(parts) + " and the analytics cards resume."
+    return [line[:1].upper() + line[1:], "Real members and their answers stay as they are.",
+            "The cancelled test runs post nothing where members read."]
 
 
 @flow("test_clear")
@@ -439,7 +442,7 @@ async def open_test_clear(interaction: discord.Interaction, reg: Registry, **_se
         return
     rs = interaction.client.raids.store(reg)
     lines = test_clear_consequence(reg, rs)
-    if lines[0].startswith("Nothing to clear"):
+    if lines == [TEST_BENCH_EMPTY]:
         await interaction.response.send_message(lines[0], ephemeral=True)
         return
     wiz = Wizard(reg, interaction.user.id, title="Clear the test bench", guard=_officer_guard(reg))

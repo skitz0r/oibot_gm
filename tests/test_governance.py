@@ -51,7 +51,7 @@ def test_a_game_data_approval_is_the_owners_even_in_a_lone_guild(reg):
     ps = ProposalStore(reg.store, reg.key)
     p = ps.create(reg, proposal_data(kind="profile", edit=PROFILE_EDIT))
     assert news.decision_refusal(reg.store, reg, p.id, "approved", 5) == news.PROFILE_OWNER_ONLY
-    with pytest.raises(PermissionError, match="only the owner approves a game-data change"):
+    with pytest.raises(PermissionError, match="Only the owner approves a game-data change"):
         ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5, owner=False)
     assert news.decision_refusal(reg.store, reg, p.id, "approved", OWNER) is None
     assert ps.move(p.id, "approved", "the owner", officer=True, job=False, by_id=OWNER, owner=True).state == "approved"
@@ -66,9 +66,9 @@ def test_a_repeated_decision_names_who_decided_first(reg):
     ps.move(p.id, "approved", "Kessa", officer=True, job=False, by_id=5)
     with pytest.raises(AlreadyDecided) as e:
         ps.move(p.id, "approved", "Jonny", officer=True, job=False, by_id=6)
-    assert str(e.value).startswith("already approved by Kessa <t:") and str(e.value).endswith("— nothing to do"), "Discord's stamp by default"
+    assert str(e.value).startswith("Kessa already approved it on <t:") and str(e.value).endswith(", so there is nothing to do."), "Discord's stamp by default"
     site = news.already_text(e.value.p, reg.local12)
-    assert "<t:" not in site and (" AM " in site or " PM " in site), "the site's words are 12-hour guild time"
+    assert "<t:" not in site and (" AM" in site or " PM" in site), "the site's words are 12-hour guild time"
     assert ps.get(p.id).decided_by == "Kessa", "the first decider stays on record"
 
 
@@ -82,7 +82,7 @@ def test_the_job_header_carries_job_moves_only_and_never_an_officers_decision(re
     assert c.post(f"/api/proposals/{pid}/resolve", json={"state": "approved"}, headers=job).status_code == 403, "a job never decides"
     assert c.post(f"/api/proposals/{pid}/resolve", json={"state": "approved"}, headers=site).status_code == 200
     r = c.post(f"/api/proposals/{pid}/resolve", json={"state": "approved"}, headers=site)
-    assert r.status_code == 409 and r.json()["error"].startswith("Already approved by Viewer"), r.text
+    assert r.status_code == 409 and r.json()["error"].startswith("Viewer already approved it"), r.text
     bearer = {k: v for k, v in job.items() if k != "X-Oibot-Job"}
     r = c.post(f"/api/proposals/{pid}/resolve", json={"state": "applying"}, headers=bearer)
     assert r.status_code == 403 and "apply job" in r.json()["error"], "the owner's token alone reports no job step"
@@ -151,8 +151,8 @@ def test_get_proposals_carries_the_consequence_and_the_card_state(reg, rs, monke
     bot, c, job, site = clients(reg, rs, monkeypatch, officer=True)
     pid = c.post("/api/proposals", json=PROP, headers=job).json()["id"]
     p = next(x for x in c.get("/api/proposals").json()["proposals"] if x["id"] == pid)
-    assert p["consequence"]["approved"][0].startswith("Approved: the apply job carries it out at its next run") and "no restart" in p["consequence"]["approved"][0]
-    assert p["consequence"]["dismissed"][0].startswith("Dismissed: nothing changes")
+    assert p["consequence"]["approved"][0].startswith("The apply job makes this change at its next run") and p["consequence"]["approved"][1] == "The bot doesn't restart for it."
+    assert p["consequence"]["dismissed"][0].startswith("Nothing changes")
 
     async def card_down(r, prop):
         return False  # Discord unreachable
@@ -167,8 +167,9 @@ def test_a_profile_approval_names_every_served_server_and_each_busy_one(duo):
     p = ProposalStore(duo.a.store, GUILD).create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
     busy = {GUILD: {"raiding": False}, GUILD2: {"raiding": True, "why": "Barrow Deeps Tue 7:30 PM is locked"}}
     lines = news.consequence(p, duo.a, "approved", guilds=duo.guilds, busy=busy, next_run="Tue 7:45 PM")
-    assert "restarts for every server it serves (Demo Guild, Duo Guild)" in lines[0] and "at its next run (Tue 7:45 PM)" in lines[0]
-    assert lines[1] == "⚠ Duo Guild has a run right now (Barrow Deeps Tue 7:30 PM is locked) — the job will wait until it is over."
+    assert lines[0] == "At the apply job's next run, Tue 7:45 PM, Claude edits the game data for forever."
+    assert lines[1] == "The tests run, then the bot restarts for about two minutes for Demo Guild and Duo Guild."
+    assert lines[2] == "⚠ Duo Guild has a run right now, so the job waits until it's over."
 
 
 # ---------------------------------------------------------------- D33: busy per guild
@@ -528,7 +529,7 @@ def test_the_decide_flow_refuses_an_officers_game_data_approval_at_once(reg):
     # the owner: the restart sentence names every served server, then Approve writes
     owner = Harness(reg, user=SimpleNamespace(id=OWNER, display_name="Owner"), client=client)
     run(ProposalButton(reg.key, p.id, "approve").callback(owner.card_press()))
-    assert "the bot restarts for every server it serves (Demo Guild)" in owner.text and owner.buttons() == ["Approve", "Approve with a note…", "Back"]
+    assert "the bot restarts for about two minutes for Demo Guild." in owner.text and owner.buttons() == ["Approve", "Approve with a note…", "Back"]
     run(owner.press("Approve"))
     assert ProposalStore(reg.store, reg.key).get(p.id).state == "approved" and "the card is updated" in owner.text
     assert client.card_edits[-1] == (p.id, "approved")
@@ -542,7 +543,7 @@ def test_the_decide_flow_on_a_dismiss_and_back_changes_nothing(reg):
     client, lines = fake_client(reg, officer=True)
     h = Harness(reg, user=SimpleNamespace(id=5, display_name="Kessa"), client=client)
     run(ProposalButton(reg.key, p.id, "dismiss").callback(h.card_press()))
-    assert "the review is told not to propose it again" in h.text and h.buttons() == ["Dismiss", "Dismiss with a note…", "Back"]
+    assert "the review won't propose it again" in h.text and h.buttons() == ["Dismiss", "Dismiss with a note…", "Back"]
     run(h.press("Back"))
     assert ProposalStore(reg.store, reg.key).get(p.id).state == "proposed" and not lines
     run(ProposalButton(reg.key, p.id, "dismiss").callback(h.card_press()))
@@ -764,7 +765,7 @@ def test_the_owner_marks_an_interrupted_apply_run_while_the_job_is_not_running(r
     ps.move(p.id, "approved", "Kessa", officer=True, job=False, by_id=5)
     ps.move(p.id, "applying", "the apply job", officer=False, job=True)
     shown = next(x for x in c.get("/api/proposals").json()["proposals"] if x["id"] == p.id)
-    assert shown["consequence"]["interrupted"][0].startswith("Marks it failed") and "approve it again" in shown["consequence"]["interrupted"][0]
+    assert shown["consequence"]["interrupted"][0].startswith("This marks it failed") and "Approve it again" in shown["consequence"]["interrupted"][-1]
     url = f"/api/proposals/{p.id}/interrupted"
     assert c.post(url, json={}, headers=site).status_code == 403, "an officer who isn't the owner"
     bearer = {k: v for k, v in job.items() if k != "X-Oibot-Job"}
@@ -808,7 +809,7 @@ def test_a_game_data_proposal_citing_only_dismissed_news_is_refused(duo):
     add_news(duo.b)
     with pytest.raises(news.ProposalError, match=f"Demo Guild's {first.id}"):
         ProposalStore(duo.b.store, GUILD2).create(duo.b, proposal_data(kind="profile", edit=PROFILE_EDIT))
-    assert news.consequence(first, duo.a, "dismissed")[0].startswith("Dismissed: nothing changes, and a game-data proposal citing only this news is refused")
+    assert news.consequence(first, duo.a, "dismissed")[1].startswith("A game-data proposal citing only this news is refused")
 
 
 def test_every_policy_write_publishes_to_the_officers_policy_pages(reg, monkeypatch):

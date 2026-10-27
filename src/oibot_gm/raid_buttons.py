@@ -18,7 +18,7 @@ import re
 import discord
 
 from . import raidcycle as rc
-from .consequences import consequence
+from .consequences import consequence, ended_line
 from .guild_routing import resolve_button
 from .registry import RegistryError
 
@@ -298,7 +298,7 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None
         except RegistryError as e:
             await wiz.finish(i, str(e))
             return
-        await wiz.finish(i, f"Ended {run_title(reg, cur)}. Pressed by mistake? The closed card's Reopen works for {rc.reopen_window()}.")
+        await wiz.finish(i, ended_line(reg, cur))
 
     # THE End sentence (LootMixin.end_consequence: the council's part + consequences.consequence("end")) — the site's
     # End the run and Loot › Tonight's End print the same words

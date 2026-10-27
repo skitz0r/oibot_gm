@@ -134,7 +134,7 @@ def test_one_appeal_per_award_with_the_members_words_as_data_and_no_scores_in_th
     row = next(r for r in rows["rows"] if r["item"] == "Robe of Tests")
     assert row["award"] == a.aid and row["appeal"] is None and "reason" not in row
     pv = a.c.post(f"/api/me/loot/{a.aid}/appeal", json={"preview": True}, headers=h).json()
-    assert pv["preview"] and "nobody is DMed" in pv["consequence"] and not appeals.store_of(a.reg).all(), "a preview writes nothing"
+    assert pv["preview"] and "notice on your Me page" in pv["consequence"] and not appeals.store_of(a.reg).all(), "a preview writes nothing"
     r = a.c.post(f"/api/me/loot/{a.aid}/appeal", json={"text": "short"}, headers=h)
     assert r.status_code == 400 and "at least" in r.json()["error"] and not appeals.store_of(a.reg).all()
     r = ask(a, a.m.discord_id)
@@ -192,7 +192,7 @@ def test_resolve_writes_a_notice_never_a_dm_and_the_member_cannot_resolve(a):
     r = a.c.post(f"/api/loot/appeals/{a.aid}/resolve", json={"outcome": "stands"}, headers=H)
     assert r.status_code == 403 and "X-Oibot-Actor" in r.json()["error"], "D8: resolving answers a person"
     pv = a.c.post(f"/api/loot/appeals/{a.aid}/resolve", json={"outcome": "stands", "preview": True}, headers=H).json()
-    assert "nobody is DMed" in pv["consequence"] and appeals.store_of(a.reg).get(a.aid).state == "open"
+    assert "on their Me page" in pv["consequence"] and appeals.store_of(a.reg).get(a.aid).state == "open"
     ho = as_user(a.c, OFFICER)
     lst = a.c.get("/api/loot/appeals", headers=ho).json()
     (row,) = lst["open"]
@@ -233,7 +233,7 @@ def test_mcp_lists_and_resolves_with_the_named_officer_and_never_opens(a, monkey
         monkeypatch.delenv(ms.ACTOR_ENV, raising=False)
         lst = ms.list_appeals()
         assert [x["id"] for x in lst["open"]] == [a.aid] and {o["value"] for o in lst["outcomes"]} == set(appeals.OUTCOMES)
-        assert "nobody is DMed" in ms.resolve_appeal(a.aid, "noted", preview=True), "a preview needs no actor"
+        assert "on their Me page" in ms.resolve_appeal(a.aid, "noted", preview=True), "a preview needs no actor"
         with pytest.raises(ToolError, match="X-Oibot-Actor"):
             ms.resolve_appeal(a.aid, "noted")
         assert appeals.store_of(a.reg).get(a.aid).state == "open"
@@ -278,7 +278,7 @@ def test_me_loot_ask_wizard_picks_writes_reviews_and_sends(a):
         assert "at least" in h.text or "❌" in h.text
         await h.press("Fix my words")
         await h.submit(h.modal, text="I was promised this one after the last reset")
-        assert "nobody is DMed" in h.text and "> I was promised" in h.text and f"{a.m.display_name} wrote:" in h.text
+        assert "notice on your Me page" in h.text and "> I was promised" in h.text and f"{a.m.display_name} wrote:" in h.text
         assert not appeals.store_of(a.reg).all(), "nothing written before Send"
         await h.press("Send to the council")
         assert h.text.startswith("**Ask the council about an award**\n✅")

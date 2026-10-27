@@ -150,7 +150,7 @@ function SheetRow({ s, me, meta, ask, onDone }: { s: MySheet; me: Me; meta: Meta
     } catch (e) { fail(e); } finally { setBusy(null); setPick(null); onDone(); }
   }
   async function cant() {
-    const r = await ask({ title: `Can't make ${s.raid} · ${s.when}?`, message: s.rostered ? "Your seat is freed and the bench is asked; the officers see it as a callout." : "You go to No thanks and the officers see it as a callout.",
+    const r = await ask({ title: `Can't make ${s.raid} · ${s.when}?`, message: s.cant_consequence || "",
       confirmLabel: "Can't make it", color: "red", note: { label: "Note for the officers (optional — never on the public sheet)", maxLength: 300 } });
     if (!r) return;
     setBusy("cant");

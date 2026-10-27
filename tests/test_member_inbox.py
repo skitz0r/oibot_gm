@@ -331,13 +331,13 @@ def test_action_consequences_say_who_is_told_and_never_promise_a_dm(reg, rs):
     join(reg, rs, ev, [m])
     for a in rc.member_actions(reg, ev, m):
         text = inbox.action_consequence(reg, ev, m, a["key"])
-        assert "DM" not in text.replace("no new DM", "").replace("DM card", ""), text
+        assert "DM" not in text.replace("DM card", ""), text
         if a["key"].startswith("pin"):
-            assert "Nobody is told" in text
+            assert "Only officers see pins." in text
         else:
-            assert "notice on their Me page" in text
-    assert "callout is recorded" in inbox.action_consequence(reg, ev, m, "callout")
-    assert "no callout is recorded" in inbox.action_consequence(reg, ev, m, "no_thanks")
+            assert "They see it on their Me page." in text
+    assert "The bot records a callout" in inbox.action_consequence(reg, ev, m, "callout")
+    assert "No callout is recorded." in inbox.action_consequence(reg, ev, m, "no_thanks")
 
 
 def test_consequence_on_the_officers_own_record_promises_no_notice(reg, rs):
@@ -348,8 +348,8 @@ def test_consequence_on_the_officers_own_record_promises_no_notice(reg, rs):
     join(reg, rs, ev, [m])
     for key in ("bench", "no_thanks", "callout"):
         mine = inbox.action_consequence(reg, ev, m, key, by_id=m.discord_id)
-        assert "notice on their Me page" not in mine and "no notice is written" in mine, mine
-        assert "notice on their Me page" in inbox.action_consequence(reg, ev, m, key, by_id=m.discord_id + 1)
+        assert "Me page" not in mine, mine
+        assert "They see it on their Me page." in inbox.action_consequence(reg, ev, m, key, by_id=m.discord_id + 1)
     bot = NightBot(reg, rs)
     run(inbox.do_member_action(bot, reg, rs, ev, m, "bench", by=m.display_name, by_id=m.discord_id))
     assert not texts(reg, m), "and indeed none is written"
@@ -586,14 +586,17 @@ def test_on_behalf_join_after_lock_says_the_confirm_dm_it_sends(reg, rs):
     m = next(x for x in reg.test_members() if x not in seated)
     assert rc.run_confirms(reg, ev) and not ev.seat_of(m)
     text = inbox.action_consequence(reg, ev, m, "join", by_id=1)
-    assert "Confirm / Can't DM" in text and "no new DM" not in text, text
+    assert "They get the Confirm or Can't make it DM." in text and "no new DM" not in text, text
     bot = NightBot(reg, rs)
     run(inbox.do_member_action(bot, reg, rs, ev, m, "join", by="Jon", by_id=1))
     assert ev.seat_of(m) and any(a["roster"] == ev.team and a.get("dm") for a in reg.members[m.discord_id].placement_asks), "the Confirm DM card went out"
     other = next(x for x in reg.test_members() if x not in seated and x is not m)
-    other.dm_opt_out = True  # DMs off: the ask waits on the Me page, and the sentence says so
+    other.dm_opt_out = True  # every seat is taken now: the sentence says the board can move them in, no DM promised
     off = inbox.action_consequence(reg, ev, other, "join", by_id=1)
-    assert "Me page (DMs off)" in off and "Confirm / Can't DM" not in off, off
+    assert "Every seat is taken" in off and "DM" not in off, off
+    rc.free_seat(reg, rs, ev, m.discord_id, "officer")  # a seat free again: DMs off, they confirm on the Me page
+    off = inbox.action_consequence(reg, ev, other, "join", by_id=1)
+    assert "With DMs off, they confirm on their Me page." in off and "Confirm or Can't make it DM" not in off, off
 
 
 def test_a_members_plain_text_sheet_ask_posts_a_copy_and_never_moves_the_live_sheet(reg, rs):

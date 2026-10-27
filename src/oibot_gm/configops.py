@@ -2300,10 +2300,9 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         if ev.state in ("done", "cancelled"):
             raise RegistryError(f"{ev.key} is already {ev.state}")
         quiet = not _cancel_notify(op)
-        lines = consequence("cancel", reg, ev)[:1]  # who it touches, from code (the confirm screen's own sentence)
-        return (f"cancel {label}" + (f": {op.reason}" if op.reason else "") + " — " + " ".join(lines)
-                + " Nobody is DMed: the sheet and every open ask card say Cancelled"
-                + ("; no line in the signup channel." if quiet else "; one fixed line goes to the signup channel (never the reason)."))
+        lines = consequence("cancel", reg, ev)  # who it touches and how they hear, from code (the confirm screen's own sentences)
+        return (f"cancel {label}" + (f": {op.reason}" if op.reason else "") + ". " + " ".join(lines)
+                + (" No line goes to the signup channel." if quiet else " One fixed line goes to the signup channel, never the reason."))
     if op.op == "run_fill":
         v = (op.value or "preview").strip().lower()
         if v not in ("preview", "send"):
@@ -3806,14 +3805,14 @@ def schedule_pause_sentence(reg: Registry, rid: str, sid: str, pause: bool, rs=N
         from . import raidcycle as rc
 
         nxt = rc.next_runs_of(reg, rid, s, n=1) if s and s.get("kind") != "pickup" else []
-        return f"{name} opens its sheets again on its usual week" + (f" — next run {reg.local12(nxt[0])}." if nxt else ".")
+        return f"{name} opens its sheets again on its usual week." + (f" The next run is {reg.local12(nxt[0])}." if nxt else "")
     try:
         runs = [str(t.get("name") or t.get("key")) for t in reg.schedule_runs_open(rid, sid, rs)]
     except Exception:  # noqa: BLE001 — the sentence without the run names is still true
         runs = []
-    held = (f"; {join_words(runs)} {'is' if len(runs) == 1 else 'are'} already open and keep{'s' if len(runs) == 1 else ''} "
-            f"{'its' if len(runs) == 1 else 'their'} sheet") if runs else "; a run already open keeps its sheet"
-    return f"Nothing new opens from {name}{held}. Regulars stay."
+    held = (f"{runs[0]} is already open and keeps its sheet." if len(runs) == 1 else
+            f"The {len(runs)} runs already open keep their sheets." if runs else "A run already open keeps its sheet.")
+    return f"Nothing new opens from {name}. {held} Its regulars stay."
 
 
 def _timezone_consequences(reg: Registry, op: ConfigOp) -> list[str]:
@@ -3834,11 +3833,11 @@ def aura_reset_one_sentence(reg: Registry, target: str) -> str:
     fam = reg.profile.families.get(target)
     name = b.short if b else (fam.name if fam else target)
     if not reg.config.buffs.get(target) and not reg.config.families.get(target):
-        return f"Nothing to reset: {name} already reads the game defaults."
+        return f"{name} already reads the game defaults, so there is nothing to reset."
     if b is not None:
-        return (f"{name} goes back to the game's scope, family, strength, status and note, and its own family's beneficiaries with them. "
-                "Other buffs and shared families keep the guild's changes.")
-    return f"The {name} family goes back to the game's name, status, note and beneficiaries; the buffs in it keep their own changes."
+        return (f"{name} goes back to the game's scope, family, strength, status and note. "
+                "Its own family's beneficiaries go back with it. Other buffs and shared families keep the guild's changes.")
+    return f"The {name} family goes back to the game's name, status, note and beneficiaries. The buffs in it keep their own changes."
 
 
 def officer_roles_after(reg: Registry, ops) -> list[int]:
@@ -3880,14 +3879,14 @@ def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None =
             rid = reg.role_id_for(op.value)
             left = roles_after if roles_after is not None else [r for r in reg.config.officer_role_ids if r != rid]
             if reg.config.officer_role_ids and not left:
-                out.append("No officer roles now: only the server owner and Manage Server count.")
+                out.append(NO_OFFICER_ROLES)
         elif op.op == "recruit" and is_warn(reg, op):
-            out.append("/apply and the Apply button say applications are closed; open applications stay open.")
+            out.append("The /apply command and the Apply button say applications are closed. Open applications stay open.")
         elif op.op == "set" and op.path in CHANNEL_PATHS and _clear_word(op.value) and getattr(reg.config, f"{op.path}_id", None):
             if op.path == "signup_channel":
                 out.append("Sheets will have nowhere to post until a signup channel is set.")
             else:
-                out.append(f"Nothing is posted in <#{getattr(reg.config, f'{op.path}_id')}> for this any more (what is there stays).")
+                out.append(f"The bot stops posting this in <#{getattr(reg.config, f'{op.path}_id')}>, and what is already there stays.")
         elif op.op == "plain" and _warn_plain(reg, op):
             patch, _ = _plain_patch(reg, op)
             sh = reg.shadow()
@@ -3896,7 +3895,7 @@ def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None =
             before, after = reg.plain_mode(cid), sh.plain_mode(cid)
             where = "in DMs" if cid is None else f"in the ops channel <#{cid}>"
             if before != after:
-                out.append(f"Plain text {where} goes from {before} to {after}" + (" — the bot would ignore @mentions there, yours too." if after == "ignore" else "."))
+                out.append(f"Plain text {where} goes from {before} to {after}." + (" The bot then ignores @mentions there, yours too." if after == "ignore" else ""))
     except RegistryError:
         pass  # the line's own refusal says what is wrong
     for hook in CONSEQUENCE_HOOKS:
@@ -4224,12 +4223,12 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
     return d
 
 
-NO_OFFICER_ROLES = "No officer roles now: only the server owner and Manage Server count."
+NO_OFFICER_ROLES = "With no officer roles left, only the server owner and Manage Server count as officers."
 
 
 def _batch_roles(reg: Registry, ops: list[ConfigOp], d: Described) -> None:
     """op_consequences reads each op alone, so a batch that swaps the officer roles (remove A, add B — the officers hub,
-    the web's MultiSelect) would say 'No officer roles now'. The sentence stands only when the WHOLE batch leaves none."""
+    the web's MultiSelect) would say there are no officer roles left. The sentence stands only when the WHOLE batch leaves none."""
     if not any(o.op == "role_remove" for o in ops):
         return
     roles = list(reg.config.officer_role_ids)

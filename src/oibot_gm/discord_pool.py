@@ -414,7 +414,7 @@ def channel_consequences(reg: Registry, kind: str, channel_id: int | None, bot=N
     cid = int(channel_id) if channel_id else None
     out: list[str] = []
     if cid is not None and cur == cid:
-        return [f"{CHANNEL_LABELS.get(kind, (kind,))[0]} is already {channel_name(bot, cid)} — nothing changes."]
+        return [f"{CHANNEL_LABELS.get(kind, (kind,))[0].split(' (')[0]} is already {channel_name(bot, cid)}, so nothing changes."]
     if cid is None:
         if not cur:
             return []
@@ -429,11 +429,11 @@ def channel_consequences(reg: Registry, kind: str, channel_id: int | None, bot=N
             out.append(f"Officer cards and the loot council's thread fall back to the ops channel {channel_name(bot, cfg.ops_channel_id)}." if cfg.ops_channel_id
                        else "Officer cards and the loot council have nowhere to go until a roster or ops channel is set.")
         elif kind == "ops":
-            out.append("The ops feed stops: actions and warnings go to the bot's log only (error alerts still DM).")
+            out.append("The ops feed stops, and actions and warnings go to the bot's log only. Error alerts still arrive by DM.")
         elif kind in ("registration", "absences"):
-            out.append(f"The {kind} card in {old} is forgotten (not deleted).")
+            out.append(f"The bot forgets the {kind} card in {old} but doesn't delete it.")
         elif kind == "analytics":
-            out.append(f"The analytics cards in {old} are forgotten (not deleted); the change log stops.")
+            out.append(f"The bot forgets the analytics cards in {old} but doesn't delete them. The change log stops.")
         elif kind == "news":
             out.append(f"News posts in {old} are no longer read.")
         elif kind == "loot":
@@ -443,20 +443,20 @@ def channel_consequences(reg: Registry, kind: str, channel_id: int | None, bot=N
     old = channel_name(bot, cur) if cur else None
     if kind in ("registration", "absences"):
         had = getattr(cfg, f"{kind}_message_id", None)
-        out.append(f"Posts and pins the {kind} card in {new}" + (f" and removes the old one from {old}." if had and old else "."))
+        out.append(f"The bot posts and pins the {kind} card in {new}" + (f" and removes the old one from {old}." if had and old else "."))
         if kind == "registration":
-            out.append("@everyone is made read-only there when the bot has Manage Channels (the buttons still work).")
+            out.append("With Manage Channels, the bot makes it read-only for @everyone, and the buttons still work.")
     elif kind == "analytics":
-        out.append(f"Posts one readiness card per raid in {new}" + (f"; the cards in {old} are forgotten (not deleted)." if old else "."))
+        out.append(f"The bot posts one readiness card per raid in {new}." + (f" It forgets the cards in {old} but doesn't delete them." if old else ""))
     elif kind == "signup":
-        out.append(f"New sheets post in {new}" + ("; sheets already open stay where they are." if old else "."))
+        out.append(f"New sheets post in {new}." + (" Sheets already open stay where they are." if old else ""))
     elif kind == "news":
         ch = bot.get_channel(cid) if bot is not None and getattr(bot, "get_channel", None) else None
         can = bool(ch is not None and getattr(getattr(ch, "guild", None), "me", None) is not None and ch.permissions_for(ch.guild.me).manage_webhooks)
-        out.append(f"The bot reads the news posts in {new}; " + ("it creates a webhook there for your news source." if can
-                   else "give it Manage Webhooks there and it creates the webhook for your news source (or create one yourself)."))
+        out.append(f"The bot reads the news posts in {new}." + (" It creates a webhook there for your news source." if can
+                   else " Give it Manage Webhooks there and it creates the webhook for your news source, or create one yourself."))
     elif kind == "applications":
-        out.append(f"New application cards post in {new}; cards already posted stay where they are.")
+        out.append(f"New application cards post in {new}. Cards already posted stay where they are.")
     elif kind == "roster":
         out.append(f"Officer cards and the loot council's thread post in {new}.")
     if bot is not None and getattr(bot, "get_channel", None):
@@ -710,9 +710,9 @@ class SetupMixin:
         if role is None:
             return f"This server has no role with id {rid}."
         if role.is_default():
-            return "@everyone can't be an officer role — everyone would be an officer."
+            return "@everyone can't be an officer role, because everyone would be an officer."
         if role.managed:
-            return f"@{role.name} belongs to a bot or an integration — pick a role people hold."
+            return f"@{role.name} belongs to a bot or an integration. Pick a role people hold."
         return None
 
     def discord_links(self, reg: Registry) -> dict:

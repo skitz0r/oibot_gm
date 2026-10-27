@@ -188,14 +188,15 @@ def award_words(reg: Registry, ap: Appeal | None = None, *, character=None, item
 def open_consequence(reg: Registry, award) -> str:
     """What sending the question does (the wizard's review screen and the web's Confirm print exactly this)."""
     name = award.item_name or f"item {award.item_id}"
-    where = "a thread in the officers' channel" if (reg.config.roster_channel_id or reg.config.ops_channel_id) else "the officers' Loot page on the site"
-    return (f"Your words go to the officers as written, with this award ({name}), as {where}. Their answer comes back as a notice on "
-            "your Me page and in /me view — nobody is DMed. One question per award; it can't be edited after it's sent.")
+    where = "in a thread in the officers' channel" if (reg.config.roster_channel_id or reg.config.ops_channel_id) else "on the officers' Loot page"
+    return (f"Your words about {name} go to the officers as written, {where}. "
+            "Their answer comes back as a notice on your Me page and in /me view. "
+            "You get one question per award, and it can't be edited once sent.")
 
 
 def resolve_consequence(reg: Registry, ap: Appeal, outcome: str) -> str:
-    return (f"Closes {ap.member_name}'s question about {ap.item}. They see on their Me page: “{OUTCOMES[outcome]}” — nobody is DMed. "
-            "A note stays with the officers; the card and thread are closed.")
+    return (f"{ap.member_name}'s question about {ap.item} closes, and the card and thread close with it. "
+            f"They see “{OUTCOME_LABELS[outcome]}” on their Me page. Your note stays with the officers.")
 
 
 def notice_text(ap: Appeal) -> str:

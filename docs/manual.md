@@ -23,6 +23,9 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 ## 1a. The words
 
 The bot, the site and this manual use one word for each thing. When you ask the bot, these are the words it answers in.
+Before any button that changes something, the bot says what happens in at most three short sentences — what changes, who
+is told and how, what can still be undone — so it reads aloud the first time (*"Kestrel goes to No thanks for Barrow
+Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it on their Me page."*).
 
 - **Limits** (owner) — the fewest and most of each role (tank, healer, dps) a run takes; the lock builds rosters
   within them (one nobody could fill to its minimum says *Locked short*). The owner sets them on the Raids page
@@ -238,9 +241,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
 - **Your characters: `/me char`** — one command. Alone it lists your characters and asks what to change; with
   `action:` (Spec · Main · Flex · Retire · Delete · Name a planned character · Add an alt) it goes straight there. You
   pick the character from your own list (spec choices are always that character's class), then one confirm screen
-  says what changes — and what it does beyond your record, worked out by the bot: *"Holds a healer seat on Barrow
-  Deeps Tue 9 Dec 7:30 PM — the seat is handed back and the bench is asked"*, *"Answered Join on … — the answer now
-  reads Shadow"*, *"Regular of Barrow Deeps · Raid nights — comes off it"*. The Me page's characters card and telling
+  says what changes — and what it does beyond your record, worked out by the bot: *"Larkspur's healer seat for Barrow
+  Deeps on Tue 9 Dec is released. The bench is asked to fill it."*, *"The Join answer for … now reads Shadow."*,
+  *"Larkspur stops being a regular of Barrow Deeps Raid nights, because retired characters aren't regulars."*. The Me page's characters card and telling
   the bot do exactly the same (one verb behind all three).
   - **Alts**: *Add an alt* button, `/me char action:Add an alt` (first and last name, like the button), `/me plan alt`.
   - **Spec/offspec**: a sheet you answered shows the new spec at once (sheets keep the spec you answered with) — a
@@ -347,8 +350,8 @@ which shows every answer in full, the earlier verdicts, and Accept / Decline wit
 **Accept** registers the character as the applicant's main, rank trial, already confirmed, and gives them the guild's
 **member role** (the first one in the recruitment settings) when the bot has Manage Roles and the role sits below the
 bot's own — otherwise the verdict says it couldn't and you add it by hand; **Decline…** turns them down. A second
-decision on the same application is refused with who made the first (*"Already declined by Jonny (Tue 12 Mar 8:02
-PM)."*); the note to the applicant holds up to 400 characters. Both open the same small screen first: one sentence saying exactly what happens to the applicant, then
+decision on the same application is refused with who made the first (*"Jonny already declined it on Tue 12 Mar 8:02
+PM."*); the note to the applicant holds up to 400 characters. Both open the same small screen first: one sentence saying exactly what happens to the applicant, then
 **Accept** (or **Decline**), **… with a note…** (a box for a note that goes into their DM) and **Back**. Nothing is
 written before that press. Either way the applicant gets a DM, the card updates to show the decision, and the ops
 channel logs it. The same decision is on `/roster applicant`, in plain text ("accept Nyx", "decline nyxie: we're full on
@@ -453,9 +456,9 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   same character on two schedules of one raid is allowed with a warning (one lockout). A test puppet is never a
   regular — a test run treats every puppet as one. Removing a schedule never strips its regulars silently: the Rosters
   page lists them to clear. Removing a regular (× on the site, `/roster remove`) and clearing a removed schedule's one
-  both ask first with the same sentence — *"Bramble stops being a regular of Barrow Deeps · Raid nights: its sheets no
-  longer expect them or list them as not answered, and at the lock they no longer get a regular's seat weight. They can
-  still Join any sheet; nobody is told."* — and if the member's record changed since the page loaded, nothing is written
+  both ask first with the same sentences — *"Bramble stops being a regular of Barrow Deeps Raid nights. Its sheets no
+  longer wait for their answer, and the lock no longer weights them as a regular. They can still join any sheet, and
+  nobody is told."* — and if the member's record changed since the page loaded, nothing is written
   and the page asks you to reload.
 - The **Members** page shows each character's **Rank** (it weighs on seating) and **Regular on** (the schedules it is a
   regular of); officers change regulars on the Rosters page and ranks with `/roster rank`.
@@ -564,7 +567,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    who joined and isn't in a group yet) and the groups of the run; its ⓘ says what the marks mean. Drag names from Not placed into groups, between groups, or back to Not placed; dropping on
    someone swaps them. On a phone, or without a mouse, each name's **⋮** menu has **Move to…**: every group with room
    (*Group 2 · 3/5*) and *Not placed* — tap one, and the confirm says where they go (*"Move Nettle to Group 2? Nettle
-   takes an open seat in Group 2. Before the lock nobody is told — the roster is decided at the lock."* · **Back** ·
+   takes an open seat in Group 2. Nothing is sent before the lock."* · **Back** ·
    **Move**). It is the same move a drag makes. On a phone every button and menu row on the page is at least 44 px. Every group shows its auras as you go (coloured = present, greyed with a red edge =
    someone in the group wants it and nobody brings it, one totem per element) and the raid-wide buffs
    update too. The board is **shared**: every officer sees the same one, a change anywhere (another officer, a
@@ -639,24 +642,24 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    *Lock failed <time> — the sheet stays open, retrying* and so does the site. With confirmations off (the ad hoc default) nobody is asked and
    no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable,
    and every change — a drag or **Move to…** — asks first with one sentence from the bot: moving people between groups
-   (*"Nettle moves to Group 2 and stays rostered — nobody is told."*) or swapping two changes nothing else; bringing
-   someone in from *Not rostered* to an open seat asks them to confirm (*"Nettle gets a confirmation DM (on the site if
-   their DMs are off); the seat is theirs once they say yes."* — on an ad hoc run *"No confirmations — Join is the
-   commitment: the seat is Nettle's now, with no DM."*); dropping them on someone is a **substitution** — *"Ivy's seat
-   goes to Nettle: Ivy sees it was released — on their confirmation card and the site, no DM."* plus Nettle's line (the
-   bench isn't asked: the seat is taken); dragging someone out releases the seat — they see it on their confirmation
-   card and the site, never a DM — and the bench is asked to fill it when automatic asks are on (paused or off, the
-   sentence says the seat waits for **Fill seats…**). A
+   (*"Nettle moves to Group 2 and stays rostered. Nobody is told."*) or swapping two changes nothing else; bringing
+   someone in from *Not rostered* to an open seat asks them to confirm (*"Nettle takes an open seat in Group 2 and gets
+   the Confirm or Can't make it DM. With DMs off it waits on their Me page. The seat is theirs once they say yes."* — on
+   an ad hoc run *"On an ad hoc run Join is the commitment, so the seat is theirs now."*); dropping them on someone is a
+   **substitution** — *"Nettle takes Ivy's seat in Group 2 and gets the Confirm or Can't make it DM. … Ivy sees the seat
+   was released on their card and their Me page."* (the bench isn't asked: the seat is taken); dragging someone out
+   releases the seat — they see it on their card and their Me page, never a DM — and the bench is asked to fill it when
+   automatic asks are on (paused or off, the sentence says the seat waits for **Fill seats**). A
    drag started on the open board and dropped after the run locked is refused ("The run locked while you were
    dragging") and the board shows the roster — it is never applied as a change to the locked roster.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
-   counts as out; their seat is released and their confirmation card is edited to say so (no new DM). Only someone who
+   counts as out; their seat is released and their confirmation card is edited to say so (never a new DM). Only someone who
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for
    "no answer". **Remind the unanswered** (the lock card's second row, the same button on the site's locked run card) sends the Confirm / Can't
    DM again to everyone still unanswered — the same ask, the same deadline — at most once an hour per run; the ones
-   waiting on the site aren't DMed. It asks first, on both surfaces, with the same sentence: *"3 rostered members who
-   haven't answered get the Confirm / Can't DM again — the same card, the same deadline. 1 more waits on the site with
-   DMs off — no DM. Once an hour per run."* The older Confirm card loses its buttons and reads *Reminded — see the newer message
+   waiting on the site aren't DMed. It asks first, on both surfaces, with the same sentences: *"The 3 rostered who
+   haven't answered get their Confirm or Can't make it DM again. One more waits on the site with DMs off. Remind works
+   once an hour."* The older Confirm card loses its buttons and reads *Reminded — see the newer message
    below*, so only the newest card answers. Two officers pressing it at once send one round; the second is told who reminded.
 6. **Fill seats…** — the bot asks people on its own (*automatic asks*) only after lock (before lock an officer sends suggestions, see
    *Suggestions* above). Whenever a seat frees (decline, callout, absence, missed
@@ -698,9 +701,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
 7. **Raid** — `/raid loot` (or the lock card's **Loot**, or Loot › Tonight on the site) opens the loot council;
    `/raid end` ends the run and its council (§9) — so does **End the run** on the lock card's second row and on the
    site's locked run card, both after the scheduled start and both through one confirm screen with the same sentence
-   (*"End Barrow Deeps Tue 15 Dec 4:00 AM: 6 award(s), 1 override(s). The summary posts in the council's thread … The run
-   is marked finished: the sheet and the lock card close and no more fill asks go out. Pressed by mistake? Reopen works
-   for an hour after."*). Ended by mistake? The closed
+   (*"The run is finished and its loot council closes with 6 awards and 1 override. The summary posts in the council's
+   thread. Reopen works for an hour if this was a mistake."*; with no council: *"The run is finished. The sheet and the
+   lock card close and no more fill asks go out. Reopen works for an hour if this was a mistake."*). Ended by mistake? The closed
    officer card keeps a **Reopen** button (and the run's page in History a *Reopen*) for an hour: the run goes back to
    locked with its roster and asks as they were (the loot council stays archived — open it again with /raid loot).
    Never a cancelled run, and not after its scheduled close.
@@ -740,10 +743,10 @@ applies to that person, never a test run (answer for puppets with `/gm test answ
 first: *Confirm for them* / *Can't make it for them* (their open Confirm ask) · *Confirm their fill* / *No to their fill*
 (their open seat or swap question) · *Record a callout…* (with an optional note; before lock it is No thanks + the
 callout) · *Join* (as which character, "as <alt>") · *Bench* · *No thanks* · *Pin to roster* / *Keep off the roster* /
-*Unpin* (open sheet). The confirm screen says what happens and who is told — *"Kestrel goes to No thanks on Barrow
-Deeps Tue 7:30 PM; no callout is recorded. Kestrel sees a notice on their Me page — no new DM."* — and if the member
+*Unpin* (open sheet). The confirm screen says what happens and who is told — *"Kestrel goes to No thanks for Barrow
+Deeps on Tue 9 Dec. No callout is recorded. They see it on their Me page."* — and if the member
 pressed something meanwhile it says so first (*"Kestrel is now Bench as Kestrel (since 5:12 PM) — keep going?"*).
-On your own record it is your own answer, and the screen says so: *"Your own record: no notice is written."* On
+On your own record it is your own answer, so the screen promises no notice. On
 the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
 list, and **Answer for someone…** beside the run's headcount does it for anyone not on it. Plain text ("Kestrel can't make it tonight,
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
@@ -781,8 +784,8 @@ Fill seats… · Loot · Cancel run… (the *Suggested* block has its own row: *
 a second row: **Remind the unanswered** · **Pause automatic asks** · **End the run**. **One confirm screen, the same
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
 a news proposal, the bot shows one sentence computed from the run as it stands — for a lock: *"The board becomes the
-roster. 18 rostered get a confirmation DM (2 with DMs off see it on the site). Confirm by Tue 6:30 PM."*; on an ad hoc
-run: *"No confirmations — Join is the commitment."* (the one sentence every surface uses for a run that asks nobody to confirm) — then **Do it** (named for the verb: *Lock now*,
+roster. The 18 rostered get the Confirm or Can't make it DM, 2 of them on the site instead. They have until Tue 9 Dec
+6:30 PM to answer."*; on an ad hoc run: *"On an ad hoc run Join is the commitment, so nobody is asked to confirm."* — then **Do it** (named for the verb: *Lock now*,
 *Cancel the run*, *Approve*…), **… with a note…** where a note makes sense, and **Back**. The site's dialogs print the
 very same sentence (it comes from the bot, the page never writes its own), so no surface promises a DM the bot would
 not send. Tables (Me, Members, Raids, Auras)
@@ -1137,8 +1140,8 @@ as the owner, so a transfer through it would give the guild away and silently ch
 `signup-channel`, `absences-channel`, `applications-channel`, `news-channel` — each takes `channel:` (Discord's picker)
 or `clear:` (stop using one; neither or both is refused) and shows **one confirm screen** first: what happens — the card
 posted and pinned there and the old one removed, cards forgotten (not deleted), applications falling back to the ops
-channel, *"Sheets will have nowhere to post until a signup channel is set"* — and *"I can't post in #x: missing Send
-Messages, Embed Links"* when the bot lacks a permission there (then nothing can be saved until it's fixed). A card is
+channel, *"Sheets will have nowhere to post until a signup channel is set"* — and *"I can't post in #x without Send
+Messages and Embed Links."* when the bot lacks a permission there (then nothing can be saved until it's fixed). A card is
 always posted in the new channel **before** the old one is removed, so a refused post loses nothing. `/gm config
 channels` is all of them on one screen: each function with its channel (and a ⚠ line for one the bot can't post in),
 **Change which?** → Discord's channel picker or **— not set —**, as many as you like as a draft, **Review** (every change
@@ -1192,11 +1195,11 @@ paused one: *Paused — nothing opens; it would next run …*); the owner adds, 
 schedule's row: weekday + 12-hour time pickers, lockout-day picks; the draft's week as a timeline — a step left empty
 shows what it inherits from the raid; the **Standard / Short notice / Same week** presets fill the hours and the one the
 hours match lights up; under the form *With these rules* shows the next three runs the bot computes from the draft, or
-the refusal the Save would give) and removes them. **Pause / Resume** sits beside Edit with one confirm (*"Nothing new opens from Alt run;
-… is already open and keeps its sheet. Regulars stay."*). The editor saves only the fields you changed, so a pause made in
-Discord a moment ago is never undone by a Save on the site. **Remove** confirms with what goes: *"Removes Alt run (Saturdays
-8:00 PM). 3 regulars come off it (Ana, Bo, Cy); they see a notice on the Me page, nobody is DMed. 1 run already open from it
-keeps its time and sheet (…), but locks with the raid's weights instead of the schedule's own and no regulars."* — the
+the refusal the Save would give) and removes them. **Pause / Resume** sits beside Edit with one confirm (*"Nothing new opens from Alt run.
+… is already open and keeps its sheet. Its regulars stay."*). The editor saves only the fields you changed, so a pause made in
+Discord a moment ago is never undone by a Save on the site. **Remove** confirms with what goes: *"The Alt run schedule is
+removed. Ana, Bo and Cy come off its regulars and see a notice on their Me page. Barrow Deeps Sat 12 Dec 8:00 PM is already
+open and keeps its time and sheet, but locks with the raid's weights and no regulars."* — the
 same lines on the wizard, the review, plain text and MCP. If someone changed the raid meanwhile, Pause, Remove and the
 editor's Save say so and write nothing; the page reloads. In plain text: `schedule_set` (e.g. "add an alt run on Saturdays at 8 to Barrow Deeps",
 "Barrow Deeps alt run locks 12 hours before", "make the alt run two rosters") and `schedule_remove`. Limits:

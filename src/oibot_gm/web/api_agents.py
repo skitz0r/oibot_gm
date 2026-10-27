@@ -217,7 +217,7 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
 
     def refusal(v, e: Exception) -> HTTPException:
         if isinstance(e, AlreadyDecided):
-            return HTTPException(409, news.already_text(e.p, v.reg.local12)[:1].upper() + news.already_text(e.p, v.reg.local12)[1:] + ".")
+            return HTTPException(409, news.already_text(e.p, v.reg.local12))
         text = str(e)
         if isinstance(e, PermissionError):
             return HTTPException(403, text[:1].upper() + text[1:] + ("" if text.endswith(".") else "."))
@@ -273,7 +273,7 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
                     "duplicate": True}
         if job != "review" and not v.owner and str(d.get("kind") or "") == "guild_setting" \
                 and news.owner_setting(news.Proposal.model_construct(kind="guild_setting", edit=d.get("edit") or {})):
-            raise HTTPException(403, news.SETTING_OWNER_ONLY[:1].upper() + news.SETTING_OWNER_ONLY[1:] + ".")  # no owner write by proposal
+            raise HTTPException(403, news.SETTING_OWNER_ONLY)  # no owner write by proposal
         try:
             p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).create, v.reg, d, job or v.name)
         except (ProposalError, ValueError) as e:
@@ -357,7 +357,7 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
             raise HTTPException(400, f"{p.id} is a {p.kind} proposal: only guild settings are applied here")
         if news.owner_setting(p) and not (p.decided_by_id is not None and v.reg.is_owner_id(p.decided_by_id)):
             # re-authorized by privilege at the apply, whoever approved it and however (an approval from before this check)
-            why = f"not applied: {news.SETTING_OWNER_ONLY} (approved by {p.decided_by or '?'})"
+            why = f"{news.SETTING_OWNER_ONLY} It was approved by {p.decided_by or 'someone else'}, so it wasn't applied."
             if p.state == "approved":
                 p, _ = await move(request, v, pid, "failed", note=why)
             return JSONResponse({"error": why, "proposal": proposal_json(v.reg, p)}, status_code=403)

@@ -197,7 +197,7 @@ def test_applications_list_shape_and_decide(client, bot, reg):
     assert r.status_code == 200, r.text
     assert bot.decided == [(a.discord_id, True, "Offi", "welcome")] and "accepted" in r.json()["message"]
     r = client.post("/api/admin/application/decide", json={"uid": str(a.discord_id), "accept": False}, headers=h)
-    assert r.status_code == 400 and "Already accepted by Offi" in r.json()["error"]
+    assert r.status_code == 400 and "Offi already accepted it" in r.json()["error"]
     as_user(client, MEMBER_UID)
     assert client.post("/api/admin/application/decide", json={"uid": "1", "accept": True}, headers=h).status_code == 403
 

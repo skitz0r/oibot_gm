@@ -2329,7 +2329,7 @@ async def open_channels(interaction: discord.Interaction, reg: Registry, **_seed
 class OfficersWizard(OwnerWizard):
     """`/gm config officers`: the officer roles by mention, legacy names that never resolved (from an older config) each
     with "Map <name>…"; Discord's role picker (the current roles preselected) → a draft → Review (describe_ops +
-    op_consequences: "No officer roles now: only the server owner and Manage Server count.") → Save (apply_ops; @everyone,
+    op_consequences: "With no officer roles left, only the server owner and Manage Server count as officers.") → Save (apply_ops; @everyone,
     a bot's or integration's managed role refused — SetupMixin.role_refusal)."""
 
     def __init__(self, reg: Registry, owner_id: int):

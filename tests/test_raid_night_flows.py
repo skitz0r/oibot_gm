@@ -58,7 +58,7 @@ class NightFlowBot(FakeBot):
         return "paused" if paused else "on"
 
     def end_consequence(self, reg, rs, ev):
-        return f"End {ev.key}: no loot council is open — the run is marked done."
+        return f"{rc.run_on(reg, ev)} is finished. The sheet and the lock card close and no more fill asks go out."
 
     async def end_run(self, reg, rs, ev, *, by, by_id=None, via="discord", refresh=True):
         self.calls.append(("end_run", ev.key, by))
@@ -184,7 +184,7 @@ def test_a_one_off_at_a_scheduled_minute_opens_as_that_run(reg, rs, officer, cha
         await h.press("Ad hoc run…")
         local = nxt.astimezone(reg.tz)
         await h.submit(h.modal, day=local.date().isoformat(), hour=str(local.hour), minute=str(local.minute))
-        assert "opens as scheduled" in h.text and "Ad hoc:" not in h.text
+        assert "It's a scheduled run" in h.text and "ad hoc run" not in h.text
         await h.press("Open")
     run(go())
     assert bot.calls[0][:3] == ("open_run_and_post", "barrow_deeps", nxt) and len(bot.calls[0]) == 4, "the raid's own run, not a one-off"
@@ -233,10 +233,10 @@ def test_lock_card_remind_pause_end_and_reopen(reg, rs, monkeypatch):
         assert "hasn't started yet" in h.text, "End is for after the start"
         monkeypatch.setattr(rc, "end_refusal", lambda ev_, at=None: None)
         await RunButton(reg.key, ev.key, "end").callback(h.card_press())
-        assert "no loot council is open" in h.text and h.buttons() == ["End the run", "Back"]
+        assert "is finished. The sheet and the lock card close" in h.text and h.buttons() == ["End the run", "Back"]
         assert h.screen["view"].children[0].style == discord.ButtonStyle.danger
         await h.press("End the run")
-        assert ev.state == "done" and "Reopen works for an hour" in h.text
+        assert ev.state == "done" and "Reopen on the closed card works for an hour" in h.text
         await RunButton(reg.key, ev.key, "reopen").callback(h.card_press())
         assert ev.state == "locked" and "Reopened" in h.text
     run(go())

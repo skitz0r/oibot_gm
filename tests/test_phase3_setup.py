@@ -118,13 +118,13 @@ def test_schedule_removal_effects_names_regulars_and_open_runs(reg, rs):
     eff = reg.schedule_removal_effects("barrow_deeps", "alt", rs)
     assert eff.regulars == [m.display_name] and eff.open_runs == [reg.config.roster(ev.team)["name"]]
     s = eff.sentence()
-    assert s.startswith("Removes Alt run (Saturdays 8:00 PM).") and "1 regular comes off it" in s and "nobody is DMed" in s and "keeps its time and sheet" in s
+    assert s.startswith("The Alt run schedule is removed.") and f"{m.display_name} comes off its regulars and sees a notice" in s and "keeps its time and sheet" in s
     cons = configops.op_consequences(reg, ConfigOp(op="schedule_remove", target="barrow_deeps", field="alt"))
     assert cons == eff.lines()
     with pytest.raises(RegistryError, match="has no schedule"):
         reg.schedule_removal_effects("barrow_deeps", "nope", rs)
     reg.set_schedule("barrow_deeps", "sun", {"kind": "weekly", "slots": "Sun 20:00", "name": "Sundays"}, "t")
-    assert reg.schedule_removal_effects("barrow_deeps", "sun", rs).lines() == ["No run from it is open right now."]
+    assert reg.schedule_removal_effects("barrow_deeps", "sun", rs).lines() == [], "nothing beyond the schedule itself: no line"
 
 
 def test_rosters_copy_reaches_the_next_run_only(reg, rs):
@@ -142,8 +142,8 @@ def test_pause_sentence_names_the_open_run(reg, rs):
     alt_schedule(reg)
     ev = open_real(reg, rs)
     s = configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", True, rs)
-    assert s.startswith("Nothing new opens from Alt run; ") and reg.config.roster(ev.team)["name"] in s and s.endswith("Regulars stay.")
-    assert configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", False).startswith("Alt run opens its sheets again on its usual week — next run ")
+    assert s.startswith("Nothing new opens from Alt run. ") and reg.config.roster(ev.team)["name"] in s and s.endswith("Its regulars stay.")
+    assert configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", False).startswith("Alt run opens its sheets again on its usual week. The next run is ")
 
 
 # ---------------------------------------------------------------- timezone change with live runs
@@ -153,9 +153,9 @@ def test_timezone_change_effects_lists_live_runs_whose_clock_moves(reg, rs):
     ev = open_real(reg, rs)
     effects = reg.timezone_change_effects("America/New_York", rs)
     assert len(effects) == 1 and "stays at its real moment" in effects[0] and "11:00 PM in America/New_York" in effects[0]
-    assert "move open runs with the clock to keep its time" in effects[0] and not MILITARY.search(effects[0])
+    assert "Move open runs with the clock to keep its time." in effects[0] and not MILITARY.search(effects[0])
     moving = reg.timezone_change_effects("America/New_York", rs, mode="move")
-    assert "moves with the clock: still " in moving[0] and "8:00 PM on the new clock, its signups kept" in moving[0]
+    assert "moves with the clock and keeps its signups" in moving[0] and "8:00 PM on the new clock." in moving[0]
     assert reg.timezone_change_effects(reg.config.timezone, rs) == []
     with pytest.raises(RegistryError, match="isn't a timezone"):
         reg.timezone_change_effects("Mars/Olympus", rs)
@@ -178,8 +178,8 @@ def test_a_locked_run_refuses_a_timezone_change_unless_the_owner_says_keep(reg, 
     ev = lock(rs, open_real(reg, rs))
     was = ev.starts_at
     eff = reg.timezone_change_effects("America/New_York", rs, mode="move")
-    assert "is locked: it stays at its real moment" in eff[0] and "moves with the clock" not in eff[0]
-    with pytest.raises(RegistryError, match=r"is locked, and America/New_York reads its time differently: say keep"):
+    assert "is locked, so it stays at its real moment" in eff[0] and "moves with the clock" not in eff[0]
+    with pytest.raises(RegistryError, match=r"is locked, and America/New_York reads its time differently\. Say keep"):
         configops.apply(reg, ConfigOp(op="set", path="timezone", value="America/New_York"), "Jon", True, raids=rs)
     assert reg.config.timezone == "America/Los_Angeles"
     # the structured preview shows the refusal on the line, so the review never offers a Save that can't land
@@ -244,7 +244,7 @@ def test_timezone_wizard_offers_keep_or_move_and_moves(reg, rs, monkeypatch):
         await FLOWS["timezone"](h.command(), reg)
         await h.press("Eastern · New York")
         assert "Save · keep runs at their moment" in h.buttons() and "Save · move open runs with the clock" in h.buttons() and "Save" not in h.buttons()
-        assert "moves with the clock: still " in h.text
+        assert "moves with the clock and keeps its signups. It still starts at " in h.text
         await h.press("Save · move open runs with the clock")
         assert "✅ Timezone **America/New_York**" in h.text and "moved with the clock" in h.text
     run(go())
@@ -279,8 +279,8 @@ def test_schedule_removal_names_the_open_runs_lock_fate(reg, rs):
     ev = open_real(reg, rs)
     assert rc.run_weights(reg, ev)["regular"] == 9 and rc.run_regulars(reg, ev)
     eff = reg.schedule_removal_effects("barrow_deeps", "alt", rs)
-    assert eff.loses == ["the raid's weights instead of the schedule's own", "no regulars"]
-    assert eff.lines()[-1].endswith("keeps its time and sheet (" + reg.config.roster(ev.team)["name"] + "), but locks with the raid's weights instead of the schedule's own and no regulars.")
+    assert eff.loses == ["the raid's weights", "no regulars"]
+    assert eff.lines()[-1] == reg.config.roster(ev.team)["name"] + " is already open and keeps its time and sheet, but locks with the raid's weights and no regulars."
     reg.remove_schedule("barrow_deeps", "alt", "t")
     assert rc.run_weights(reg, ev)["regular"] != 9  # the raid's weights now
     assert rc.run_regulars(reg, ev) == []
@@ -407,7 +407,7 @@ def test_raids_route_schedule_words_paused_and_sentences(owner_client, reg, rs):
     s = next(x for r in raids if r["id"] == "barrow_deeps" for x in r["schedules"] if x["id"] == "alt")
     assert s["next"] == [] and len(s["next_if_active"]) == 3 and not any(MILITARY.search(x) for x in s["next_if_active"])
     assert s["pause_sentence"].startswith("Nothing new opens from Alt run") and s["resume_sentence"].startswith("Alt run opens its sheets again")
-    assert s["removal_sentence"].startswith("Removes Alt run") and s["rosters_copy"]["2"] == "From the next run: the sheet advertises 2 × 10 seats."
+    assert s["removal_sentence"].startswith("The Alt run schedule is removed.") and s["rosters_copy"]["2"] == "From the next run: the sheet advertises 2 × 10 seats."
 
 
 def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypatch):

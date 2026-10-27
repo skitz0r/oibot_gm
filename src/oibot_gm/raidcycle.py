@@ -570,8 +570,9 @@ def closed_run_refusal(rs: "RaidStore", key: str) -> str | None:
     if ev is None or ev.state not in ("done", "cancelled"):
         return None
     if ev.state == "cancelled":
-        return f"That time's run was cancelled ({ev.key}) — a cancelled run isn't opened again; pick another time."
-    return f"That time's run already ended ({ev.key}) — Reopen it within the hour if that was a mistake, or pick another time."
+        return "That time's run was cancelled, and a cancelled run isn't opened again. Pick another time."
+    return (f"That time's run already ended. Reopen works for {reopen_window()} after the end if that was a mistake. "
+            "Otherwise pick another time.")
 
 
 def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None) -> "RaidEvent":
@@ -2639,16 +2640,16 @@ def reopen_refusal(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> 
     within REOPEN_GRACE_HOURS of the end, before its scheduled close, and only back to the state it ended from. A
     cancelled run is never reopened — open a new one."""
     if ev.state == "cancelled":
-        return "A cancelled run can't be reopened — open a new run instead."
+        return "A cancelled run can't be reopened. Open a new run instead."
     if ev.state != "done":
-        return f"{ev.key} is {ev.state}, not ended — nothing to reopen."
+        return "This run hasn't ended, so there is nothing to reopen."
     t = at or datetime.now(ev.start.tzinfo)
     if not closed_recently(ev, at=t):
-        return f"It ended more than {REOPEN_GRACE_HOURS:g} hour ago — reopening is for a run ended by mistake, within the hour."
+        return f"It ended more than {reopen_window()} ago. Reopen is only for a run ended by mistake."
     if t >= run_close_at(reg, ev):
-        return "Its scheduled close has passed — the run is over."
+        return "Its scheduled close has passed, so the run is over."
     if not reg.config.team(ev.team):
-        return "Its roster settings were already cleaned up — open a new run instead."
+        return "Its roster settings are already cleaned up. Open a new run instead."
     return None
 
 
@@ -2772,19 +2773,20 @@ def remind_refusal(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> 
     """Why Remind can't go now, or None: a locked run with confirmations, someone still unconfirmed whom a DM can reach,
     and not within the hour of the last reminder."""
     if ev.state != "locked" or not ev.all_rosters:
-        return "Remind is for a locked roster — the sheet is still open." if ev.state == "open" else f"That run is {ev.state}."
+        return ("Remind is for a locked roster, and this sheet is still open." if ev.state == "open" else
+                f"This run is already {RUN_STATE_WORDS.get(ev.state, ev.state)}.")
     if not run_confirms(reg, ev):
-        return f"Nothing to remind: {NO_CONFIRMATIONS}."
+        return no_confirm_sentence(reg, ev, "there is nothing to remind")
     t = at or datetime.now(ev.start.tzinfo)
     if ev.reminded_at and t - datetime.fromisoformat(ev.reminded_at) < REMIND_EVERY:
         nxt = datetime.fromisoformat(ev.reminded_at) + REMIND_EVERY
-        return (f"Reminded at {reg.local12(ev.reminded_at, '%I:%M %p')}" + (f" by {ev.reminded_by}" if ev.reminded_by else "")
-                + f" — once an hour; again after {reg.local12(nxt, '%I:%M %p')}.")
+        return (f"{ev.reminded_by or 'An officer'} reminded them at {reg.local12(ev.reminded_at, '%I:%M %p')}. "
+                f"Remind works once an hour, so try again after {reg.local12(nxt, '%I:%M %p')}.")
     rows = open_placement_rows(reg, ev)
     if not rows:
-        return "Everyone rostered has answered — nobody to remind."
+        return "Everyone rostered has answered, so there is nobody to remind."
     if not any(a.get("channel", "dm") == "dm" and not m.dm_opt_out for m, a in rows):
-        return "The unconfirmed all wait on the site (DMs off) — a reminder can't reach them."
+        return "Everyone who hasn't answered has DMs off, so a reminder can't reach them. Their asks wait on the site."
     return None
 
 
@@ -2873,9 +2875,9 @@ def open_when(reg: Registry, instance: str, value: str | None, schedule: str | N
 def dst_words(reg: Registry, note: str, start: datetime) -> str:
     """The DST note in words for a person (the wizard's when_note, the site's preview): "" on an ordinary night."""
     if note == "gap":
-        return f"That time doesn't exist that night (the clocks go forward) — using {reg.local12(start, '%I:%M %p')}."
+        return f"That time doesn't exist that night because the clocks go forward. The run uses {reg.local12(start, '%I:%M %p')} instead."
     if note == "ambiguous":
-        return f"{reg.local12(start, '%I:%M %p')} happens twice that night (the clocks go back) — using the first."
+        return f"{reg.local12(start, '%I:%M %p')} happens twice that night because the clocks go back. The run uses the first one."
     return ""
 
 
@@ -2883,21 +2885,14 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     """What Open would do, before anything is written (POST /api/raid/{rid}/open/preview; the wizard's confirm shows
     the same facts): {kind, schedule, schedule_name, key, start (ISO — the exact instant Open must carry back), label
     (12-hour guild time), when_note (the DST line or ""), exists (the live run's state at that key, or None), channel
-    (the signup channel id the sheet posts in, or None), rules (what kind of run it is, in one line), past, closed
+    (the signup channel id the sheet posts in, or None), rules (what kind of run it is, in sentences), past, closed
     (done | cancelled when that time's run is closed — Open is refused) and refusal (the sentence why, or None)}."""
     start, sid, note = open_when(reg, instance, value, schedule)
     w = which_run(reg, instance, start, sid if sid is not None else DEFAULT_SCHEDULE)
     ev = rs.events.get(w["key"])
     live = ev if ev is not None and ev.state not in ("done", "cancelled") else None
     refusal = closed_run_refusal(rs, w["key"])
-    sd = reg.schedule_def(instance, w["schedule"])
-    lock_h = float(sd["lock_hours_before"])
-    if w["kind"] == "adhoc":
-        rules = (f"Ad hoc: {FIRST_COME}; no regulars, no reminder" + ("" if sd.get("confirm") else f"; {NO_CONFIRMATIONS}")
-                 + f"; locks {lock_h:g} h before; a role swap waits for an officer.")
-    else:
-        rules = ("Scheduled: its regulars are expected" + ("; the rostered are asked to confirm" if sd.get("confirm", True) else "")
-                 + f"; locks {lock_h:g} h before.")
+    rules = " ".join(open_rules(reg, instance, w["schedule"], w["kind"]))
     return {**w, "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
             "closed": ev.state if refusal else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
@@ -2915,8 +2910,8 @@ def open_row_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datet
     now = now or reg.now_local()
     if start > now + timedelta(days=OPEN_HORIZON_DAYS):
         early = start - timedelta(days=OPEN_HORIZON_DAYS)
-        return (f"Too far ahead to open now: Open works from {reg.local12(early)}, three weeks before the run"
-                + (f"; its sheet opens on its own {reg.local12(opens)}." if opens > early else "."))
+        return (f"Too far ahead to open now. Open works from {reg.local12(early)}, three weeks before the run."
+                + (f" Its sheet opens on its own {reg.local12(opens)}." if opens > early else ""))
     return None
 
 
@@ -3082,9 +3077,10 @@ def end_refusal(ev: RaidEvent, at: datetime | None = None) -> str | None:
     """Why "End the run now" can't go (the lock card, the SheetCard): only a locked run, and only after its scheduled
     start — before then, Cancel is the verb. None = it may."""
     if ev.state != "locked":
-        return f"That run is {ev.state} — End is for a locked run." if ev.state in ("done", "cancelled") else "End is for a locked run — the sheet is still open."
+        return (f"This run is already {RUN_STATE_WORDS[ev.state]}." if ev.state in ("done", "cancelled") else
+                "End is for a locked run, and this sheet is still open.")
     if (at or datetime.now(ev.start.tzinfo)) < ev.start:
-        return "The run hasn't started yet — End is for after the start; before then, Cancel it."
+        return "The run hasn't started yet. Before the start, use Cancel instead."
     return None
 
 
@@ -3093,10 +3089,6 @@ def end_refusal(ev: RaidEvent, at: datetime | None = None) -> str | None:
 # can retire, delete, respec, name or promote a character that live sheets and locked rosters already hold. Sheets
 # snapshot cls/spec/role at the press and the lock solves from the snapshot, so the run files are rewritten here (data
 # only); seats to free go back to RaidMixin.drop_seated (free_seat + the card edit + the fill engine).
-
-def _run_words(reg: Registry, ev: RaidEvent) -> str:
-    return f"{reg.raid_def(ev.instance).get('name', ev.instance or ev.team)} {reg.local12(ev.start)}"
-
 
 def character_changes(reg: Registry, m: Member | None, rows) -> list[dict]:
     """What a table save would change for runs, read from its rows against the member AS STORED NOW (call it before the
@@ -3155,36 +3147,40 @@ def character_effects(reg: Registry, rs: RaidStore, m: Member, change: dict) -> 
     char = next((c for c in m.characters if c.label == label), None)
     if kind == "main":
         if m.main is not None and m.main.label != label:
-            out.append({"ev": None, "kind": "rank", "action": "none", "text": f"Rank {m.main.rank} moves to {label} with the main; {m.main.label} reads alt"})
+            out.append({"ev": None, "kind": "rank", "action": "none", "text": f"Rank {m.main.rank} moves to {label} with the main, and {m.main.label} becomes an alt."})
         return out
     if kind in ("retire", "delete") and char is not None:
         for k in [k for k in char.rosters if ":" in k]:
+            from .consequences import series_words
+
             out.append({"ev": None, "kind": "regular", "action": "none",
-                        "text": f"Regular of {reg.series_label(k)} — comes off it ({'retired' if kind == 'retire' else 'deleted'} characters aren't regulars)"})
+                        "text": f"{label} stops being a regular of {series_words(reg, k)}, because {'retired' if kind == 'retire' else 'deleted'} characters aren't regulars."})
     for ev in rs.live():
         if not on_bench_side(reg, ev, m):
             continue
-        words = _run_words(reg, ev)
+        words = run_on(reg, ev)
         sg = ev.signups.get(str(m.discord_id))
         seat = ev.seat_of(m) if ev.state != "open" else None
         if seat is not None and (seat[1].character or seat[1].signup_name) != label:
             seat = None
         if kind in ("retire", "delete", "spec") and any(a.discord_id == m.discord_id and a.pending and a.character == label for a in ev.fill_asks):
-            out.append({"ev": ev, "kind": "ask", "action": "clear", "text": f"Has an open ask on {words} as {label} — it closes"})
+            out.append({"ev": ev, "kind": "ask", "action": "clear", "text": f"The open ask for {label} on {words} closes."})
         if seat is not None:
             role = seat[1].role
             if kind in ("retire", "delete"):
-                out.append({"ev": ev, "kind": "seat", "action": "free", "text": f"Holds a {role} seat on {words} — the seat is handed back and the bench is asked"})
+                out.append({"ev": ev, "kind": "seat", "action": "free",
+                            "text": f"{label}'s {role} seat for {words} is released. {refill_sentence(reg, ev)}"})
             elif kind == "spec" and change["role"] == role:
-                out.append({"ev": ev, "kind": "seat", "action": "rewrite", "text": f"Rostered on {words} — the seat now reads {change['spec']}"})
+                out.append({"ev": ev, "kind": "seat", "action": "rewrite", "text": f"{label}'s seat for {words} now reads {change['spec']}."})
             elif kind == "spec" and run_kind(reg, ev) == "recurring":
                 out.append({"ev": ev, "kind": "seat", "action": "keep",
-                            "text": f"Holds a {role} seat on {words} — {change['spec']} plays {change['role']}: the seat is kept as it is and the officers are told (they decide)"})
+                            "text": f"{label} keeps the {role} seat for {words}, though {change['spec']} plays {change['role']}. The officers are told and decide."})
             elif kind == "spec":
                 out.append({"ev": ev, "kind": "seat", "action": "free",
-                            "text": f"Holds a {role} seat on {words} — {change['spec']} plays {change['role']}, so the seat is handed back (ad hoc: Join again to queue)"})
+                            "text": f"{label}'s {role} seat for {words} is released, because {change['spec']} plays {change['role']}. "
+                                    "On an ad hoc run, Join again to queue."})
             elif kind == "name":
-                out.append({"ev": ev, "kind": "seat", "action": "rewrite", "text": f"Rostered on {words} — the seat now reads {change['new_label']}"})
+                out.append({"ev": ev, "kind": "seat", "action": "rewrite", "text": f"The seat for {words} now reads {change['new_label']}."})
             continue
         if sg is None or sg.character != label:
             continue
@@ -3192,13 +3188,14 @@ def character_effects(reg: Registry, rs: RaidStore, m: Member, change: dict) -> 
         if kind in ("retire", "delete"):
             other = next((c for c in m.active() if c.label != label), None)
             if sg.status == "out" and other is not None:
-                out.append({"ev": ev, "kind": "answer", "action": "repoint", "text": f"Answered No thanks on {words} — it stays No thanks, as {other.label}"})
+                out.append({"ev": ev, "kind": "answer", "action": "repoint", "text": f"The No thanks for {words} stays, now as {other.label}."})
             else:
-                out.append({"ev": ev, "kind": "answer", "action": "clear", "text": f"Answered {what} on {words} with {label} — that answer is cleared (answer again with another character)"})
+                out.append({"ev": ev, "kind": "answer", "action": "clear",
+                            "text": f"The {what} answer for {words} with {label} is cleared. Answer again with another character."})
         elif kind == "spec":
-            out.append({"ev": ev, "kind": "answer", "action": "rewrite", "text": f"Answered {what} on {words} — the answer now reads {change['spec']}"})
+            out.append({"ev": ev, "kind": "answer", "action": "rewrite", "text": f"The {what} answer for {words} now reads {change['spec']}."})
         elif kind == "name":
-            out.append({"ev": ev, "kind": "answer", "action": "rewrite", "text": f"Answered {what} on {words} — the answer now names {change['new_label']}"})
+            out.append({"ev": ev, "kind": "answer", "action": "rewrite", "text": f"The {what} answer for {words} now names {change['new_label']}."})
     return out
 
 
@@ -3291,6 +3288,53 @@ RELEASE_NOTICE = {"no-confirm": "no confirmation came in time", "absence": "you'
 def run_words(reg: Registry, ev: RaidEvent) -> str:
     """A run as a notice reads it: raid name + 12-hour guild time ('Barrow Deeps Tue 9 Dec 7:30 PM'), never the key."""
     return f"{reg.raid_def(ev.instance).get('name', ev.instance or ev.team)} {reg.local12(ev.start)}"
+
+
+def run_on(reg: Registry, ev: RaidEvent) -> str:
+    """A run as a confirm reads it (the Confirm rule, design §5.57): '<raid> on <day>' ('Barrow Deeps on Tue 9 Dec') —
+    the clock only where the sentence is about the time (run_words)."""
+    return f"{reg.raid_def(ev.instance).get('name', ev.instance or ev.team)} on {reg.day_label(run_day(reg, ev))}"
+
+
+def fill_button_words() -> str:
+    """The officers' Fill seats button as a sentence names it (raid_buttons.RUN_WORDS, without its ellipsis)."""
+    from .raid_buttons import RUN_WORDS
+
+    return RUN_WORDS["fill"].rstrip("…").rstrip(".")
+
+
+def refill_sentence(reg: Registry, ev: RaidEvent, it: str = "it") -> str:
+    """What happens to a seat a release leaves open, as one sentence: the bench is asked only when the run's automatic
+    asks are on and not paused (RaidMixin.drop_seated → run_fill); otherwise it waits for an officer's Fill seats.
+    `it`: "it" for one seat, "them" for several."""
+    if not team_setting(run_team(reg, ev), "autofill"):
+        return f"The seat{'s wait' if it == 'them' else ' waits'} until an officer presses {fill_button_words()}."
+    if ev.autofill_paused:
+        return f"Automatic asks are paused, so the seat{'s wait' if it == 'them' else ' waits'} for {fill_button_words()}."
+    return f"The bench is asked to fill {it}."
+
+
+def no_confirm_sentence(reg: Registry, ev: RaidEvent, tail: str = "nobody is asked to confirm") -> str:
+    """Why nobody confirms on this run (D5): 'On an ad hoc run Join is the commitment, so nobody is asked to confirm.'"""
+    where = "On an ad hoc run" if run_kind(reg, ev) == "adhoc" else "On this run"
+    return f"{where} Join is the commitment, so {tail}."
+
+
+def hours_words(h: float) -> str:
+    """24 → '24 hours', 1 → '1 hour', 1.5 → '1.5 hours'."""
+    return f"{h:g} hour" + ("" if float(h) == 1 else "s")
+
+
+def open_rules(reg: Registry, instance: str, sid: str | None, kind: str) -> list[str]:
+    """What kind of run an open makes, in sentences (open_preview's `rules`, the /raid open wizard's confirm)."""
+    sd = reg.schedule_def(instance, sid)
+    lock = hours_words(float(sd["lock_hours_before"]))
+    if kind == "adhoc":
+        return [f"It's an ad hoc run, so seats go {FIRST_COME}.",
+                "There are no regulars or reminders" + (", and the rostered are asked to confirm." if sd.get("confirm") else ", and Join is the commitment."),
+                f"It locks {lock} before the start, and a role swap waits for an officer."]
+    return ["It's a scheduled run, so its regulars are expected." + (" The rostered are asked to confirm." if sd.get("confirm", True) else ""),
+            f"It locks {lock} before the start."]
 
 
 def reachable(m: Member | None) -> bool:

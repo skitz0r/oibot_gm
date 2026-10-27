@@ -351,7 +351,7 @@ def test_set_picks_run_then_only_what_applies_then_the_character(reg, rs, office
         await h.press("Join")
         assert h.selects() == ["Pick the character"]
         await h.pick("Pick the character", "Altonar")
-        assert "Altonar" in h.text and "notice on their Me page" in h.text and "no new DM" in h.text
+        assert "Altonar" in h.text and "They see it on their Me page." in h.text and "no new DM" not in h.text
         assert h.buttons() == ["Join", "Back"]
         assert not bot.calls
         await h.press("Join")
@@ -367,7 +367,7 @@ def test_set_with_what_goes_straight_to_the_confirm_screen_and_back_writes_nothi
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="no_thanks")
-        assert h.buttons() == ["No thanks", "Back"] and "No thanks" in h.text and "no callout is recorded" in h.text
+        assert h.buttons() == ["No thanks", "Back"] and "No thanks" in h.text and "No callout is recorded." in h.text
         await h.press("Back")
         assert "Nothing was changed" in h.text
     asyncio.run(go())
@@ -421,7 +421,7 @@ def test_set_records_a_callout_with_a_note_before_lock(reg, rs, officer, channel
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="callout")
         assert h.buttons() == ["Record the callout", "Record the callout with a note…", "Back"]
-        assert "No thanks" in h.text and "callout is recorded" in h.text
+        assert "No thanks" in h.text and "The bot records a callout" in h.text
         await h.press("Record the callout with a note…")
         await h.submit(note="flight delayed")
     asyncio.run(go())
@@ -657,7 +657,7 @@ def test_cancel_shows_the_consequence_then_one_form_with_reason_and_notify(reg, 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
         # THE cancel screen (phase 2): the consequence from code, then one Form — nothing written before Submit
-        assert h.buttons() == ["Cancel the run…", "Back"] and "Nobody is DMed" in h.text and not bot.calls
+        assert h.buttons() == ["Cancel the run…", "Back"] and "Nobody gets a DM" in h.text and not bot.calls
         await h.press("Cancel the run…")
         assert h.modal is not None and set(h.modal._items) == {"reason", "notify"}
         await h.submit(reason="tank flu", notify="post")

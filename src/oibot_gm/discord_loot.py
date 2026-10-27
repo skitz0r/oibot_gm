@@ -1072,26 +1072,40 @@ class LootMixin:
 
     def end_consequence(self, reg, rs, ev) -> str:
         """THE End sentence, every surface (the lock card's End, /raid end, the site's End the run and Loot › Tonight's
-        End, MCP): the council's part — 'End <run>: 6 awards, 1 override, 2 drops never distributed, 1 award waiting for
-        a reason.' — then the run's (consequences.consequence("end"): the sheet and lock card close, Reopen's window from
-        rc.REOPEN_GRACE_HOURS)."""
-        from .consequences import consequence
-        from .raid_views import run_title
+        End, MCP), in at most three sentences (the Confirm rule, design §5.57), the run named (/raid end may pick one of
+        several). No council: the run's own (consequences.consequence("end")). A council: 'Barrow Deeps on Tue 9 Dec is
+        finished and its loot council closes with 6 awards and 1 override.', what its summary still lists, and Reopen's
+        window (rc.REOPEN_GRACE_HOURS)."""
+        from .consequences import consequence, reopen_sentence
+        from .registry import join_words
 
-        run_part = " ".join(consequence("end", reg, ev))
         sessions = [s for s in self.events.values() if s.guild == reg.key and s.run_key == ev.key]
-        if not sessions:
-            return f"End {run_title(reg, ev)}: no loot council is open. {run_part}"
-        parts = []
-        for key, label in (("awards", "award(s)"), ("overrides", "override(s)")):
-            n = sum(self.loot_summary(reg, s)[key] for s in sessions)
-            parts.append(f"{n} {label}")
-        for key, label in (("never_confirmed", "proposal(s) never confirmed"), ("undistributed", "drop(s) never distributed"), ("reasons_pending", "award(s) waiting for a reason")):
-            n = sum(len(self.loot_summary(reg, s)[key]) for s in sessions)
+        from . import raidcycle as rc
+
+        run = rc.run_on(reg, ev)  # the run is named: /raid end may pick one of several
+        if not sessions or ev.state in ("done", "cancelled"):
+            lines = consequence("end", reg, ev)
+            return " ".join([f"{run} is finished."] + lines[1:] if lines[:1] == ["The run is finished."] else lines)
+
+        def n_of(n: int, one: str, many: str) -> str:
+            return f"{n} {one if n == 1 else many}"
+
+        summaries = [self.loot_summary(reg, s) for s in sessions]
+        awards = sum(x["awards"] for x in summaries)
+        overrides = sum(x["overrides"] for x in summaries)
+        got = [n_of(awards, "award", "awards")] + ([n_of(overrides, "override", "overrides")] if overrides else [])
+        loose = []
+        for key, one, many in (("undistributed", "drop never distributed", "drops never distributed"),
+                               ("never_confirmed", "proposal never confirmed", "proposals never confirmed"),
+                               ("reasons_pending", "award awaiting a reason", "awards awaiting a reason")):
+            n = sum(len(x[key]) for x in summaries)
             if n:
-                parts.append(f"{n} {label}")
-        return (f"End {run_title(reg, ev)}: " + ", ".join(parts) + ". The summary posts in the council's thread (what was never confirmed stays in it). "
-                + run_part)
+                loose.append(n_of(n, one, many))
+        lines = [f"{run} is finished and its loot council closes with {join_words(got)}."]
+        lines.append(f"The summary in its thread lists {join_words(loose)}."
+                     if loose else "The summary posts in the council's thread.")
+        lines.append(reopen_sentence())
+        return " ".join(lines)
 
     async def end_run(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord", refresh: bool = True) -> str:
         """The run is over: every session of it is archived with its summary (pending proposals and overrides kept

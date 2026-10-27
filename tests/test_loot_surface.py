@@ -418,7 +418,7 @@ def test_decide_later_holds_one_drop_and_discard_asks_first(night):
 
     async def go():
         await button(m.view, "Discard batch").callback(h.card_press())
-        assert "Discard 1 proposal(s)?" in h.text and "nothing was recorded" in h.text
+        assert "The proposal goes, and the ticks stay." in h.text and "Nothing was recorded" in h.text
         assert n.s.pending("d2") is not None, "nothing before the press"
         await h.press("Discard")
     run(go())
@@ -826,7 +826,7 @@ def test_end_council_shows_the_decide_screen_then_archives_and_closes_the_thread
 
     async def go():
         await button(card(n), "End council").callback(h.card_press())
-        assert h.text.split("\n")[1].startswith(f"End {views.run_title(n.reg, n.ev)}: 1 award(s), 0 override(s), 1 proposal(s) never confirmed")
+        assert "is finished and its loot council closes with 1 award." in h.text.split("\n")[1] and "1 proposal never confirmed" in h.text
         assert h.buttons() == ["End", "Not yet"] and n.ev.state == "locked"
         await h.press("End")
     run(go())
@@ -846,7 +846,7 @@ def test_raid_end_prefers_the_run_with_a_council(night, officer):
     lock_with_board(n.reg, n.rs, other, [m.display_name for m in n.members])
     h = officer_h(n)
     run(FLOWS["loot_end"](h.command(), n.reg))
-    assert f"End {views.run_title(n.reg, n.ev)}" in h.text and h.buttons() == ["End", "Not yet"]
+    assert f"{rc.run_on(n.reg, n.ev)} is finished" in h.text and h.buttons() == ["End", "Not yet"]
 
 
 def test_raid_distribute_judges_the_live_council(night):

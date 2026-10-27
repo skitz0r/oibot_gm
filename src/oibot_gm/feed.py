@@ -499,17 +499,19 @@ def token_line(row: dict) -> str:
 
 def issue_consequence(reg, label: str | None, name: str | None = None) -> str:
     """THE sentence of an issue: DMed once to `name` (Discord's confirm), or shown once to the owner (the site's hint)."""
-    where = (f"DMed once to **{name}** — they start the companion with it on their PC. You won't see it." if name else
-             "shown to you ONCE on this page — copy it to the raid leader's PC; it can't be shown again.")
-    what = f"A new companion token “{label}”" if label else "A new companion token"
-    return (f"{what} for **{reg.config.name}** is {where} It feeds this guild's raids only, works at once "
-            "(no restart) and stops at its next message when you revoke it.")
+    what = f"A new companion token “{label}” for **{reg.config.name}**" if label else f"A new companion token for **{reg.config.name}**"
+    if name:
+        lines = [f"{what} goes once by DM to **{name}**, and you won't see it.", "They start the companion with it on their PC."]
+    else:
+        lines = [f"{what} shows here once, and it can't be shown again.", "Copy it to the raid leader's PC."]
+    return " ".join(lines + ["It feeds this guild's raids at once and stops at its next message when you revoke it."])
 
 
 def revoke_consequence(reg, rec, row: dict | None = None) -> str:
     """THE confirm sentence of a revoke (the decide screen, the site's confirm, MCP's preview)."""
     state = (row or {}).get("state")
-    who = ", ".join((row or {}).get("characters") or [])
-    on = f"connected now{f' ({who})' if who else ''} — it is cut off at its next message"
-    now = {"live": on, "quiet": on, "disconnected": "not connected — it can't reconnect"}.get(state or "", "it can't connect again")
-    return f"“{rec.label}” stops working: {now}. Whoever runs that companion needs a new token. Nothing else changes; nobody is DMed."
+    who = " and ".join((row or {}).get("characters") or [])
+    tok = f"The companion token “{rec.label}”"
+    on = f"{tok} stops working, and its connection" + (f" for {who}" if who else "") + " is cut at its next message."
+    now = {"live": on, "quiet": on, "disconnected": f"{tok} stops working and can't reconnect."}.get(state or "", f"{tok} stops working and can't connect again.")
+    return f"{now} Whoever runs that companion needs a new token. Nobody gets a DM."

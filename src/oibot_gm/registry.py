@@ -1140,22 +1140,22 @@ class Effects(BaseModel):
     loses: list[str] = Field(default_factory=list)
 
     def lines(self) -> list[str]:
+        """At most two sentences (the Confirm rule, design §5.57): who comes off it and how they hear, then what the runs
+        already open keep and lose. Nothing to say → [] (removing a schedule is reviewed anyway: WARN_OPS)."""
         out = []
         n = len(self.regulars)
         if n:
-            out.append(f"{n} regular{'s' if n != 1 else ''} come{'' if n != 1 else 's'} off it ({join_words(self.regulars)}); "
-                       "they see a notice on the Me page, nobody is DMed.")
+            who = f"{join_words(self.regulars)} come{'s' if n == 1 else ''}" if n <= 3 else f"Its {n} regulars come"
+            out.append(f"{who} off its regulars and see{'s' if n == 1 else ''} a notice on their Me page.")
         k = len(self.open_runs)
         if k:
-            fate = f", but lock{'' if k != 1 else 's'} with {join_words(self.loses)}" if self.loses else ""
-            out.append(f"{k} run{'s' if k != 1 else ''} already open from it keep{'' if k != 1 else 's'} {'their' if k != 1 else 'its'} "
-                       f"time and sheet ({join_words(self.open_runs)}){fate}.")
-        else:
-            out.append("No run from it is open right now.")
+            head = f"{self.open_runs[0]} is already open and keeps" if k == 1 else f"The {k} runs already open keep"
+            fate = f", but lock{'s' if k == 1 else ''} with {join_words(self.loses)}" if self.loses else ""
+            out.append(f"{head} {'its' if k == 1 else 'their'} time and sheet{fate}.")
         return out
 
     def sentence(self) -> str:
-        return f"Removes {self.name}" + (f" ({self.label})" if self.label else "") + ". " + " ".join(self.lines())
+        return " ".join([f"The {self.name} schedule is removed."] + self.lines())
 
 
 class Registry:
@@ -1173,24 +1173,24 @@ class Registry:
         guild's Discord server — or 'unknown' (Discord couldn't say): a write that moves owner rights needs certainty."""
         who, guild = name or "They", self.config.name
         if bot:
-            return "A bot can't own a guild — pick a person."
+            return "A bot can't own a guild. Pick a person."
         if self.config.owner_discord_id is not None and int(uid) == int(self.config.owner_discord_id):
             return f"{who} already own{'s' if name else ''} {guild}."
         if by_id is not None and int(uid) == int(by_id):
-            return "That's you — pick the person who takes over."
+            return "That's you. Pick the person who takes over."
         if membership == "no":
-            return f"{who} {'is' if name else 'are'} not in {guild}'s Discord server — the owner must be a member of it."
+            return f"{who} {'is' if name else 'are'} not in {guild}'s Discord server, and the owner must be a member of it."
         if membership != "yes":
-            return "Couldn't check Discord just now, so nothing was changed — try again in a minute."
+            return "Discord couldn't be checked just now, so nothing changed. Try again in a minute."
         return None
 
     def owner_consequence(self, name: str, by_id: int | None = None) -> str:
         """THE confirm sentence of an owner transfer (the Discord decide screen and the Config page print it)."""
         host = by_id is not None and is_superuser(by_id) and by_id != self.config.owner_discord_id
-        lead = (f"**{name}** becomes the owner of **{self.config.name}** (you act as the host here)." if host else
-                f"**{name}** becomes the owner of **{self.config.name}**. You lose owner rights here (you keep officer rights only if your Discord roles grant them).")
-        return lead + (" The site, MCP, plain text and the error alerts treat them as the owner from now on; nobody is DMed."
-                       " A host superuser can reassign it.")
+        lead = [f"**{name}** becomes the owner of **{self.config.name}** on every surface."]
+        lead.append("You act here as the host, so your own rights don't change." if host else
+                    "You lose owner rights here and keep officer rights only if your Discord roles grant them.")
+        return " ".join(lead + ["Nobody gets a DM, and a host superuser can reassign it."])
 
     @_config_verb("settings")
     def set_owner(self, uid: int, by: str, *, by_id: int | None = None, bot: bool = False, membership: str = "yes", name: str | None = None) -> str:
@@ -1606,7 +1606,8 @@ class Registry:
 
     def timezone_change_effects(self, zone: str, rs=None, mode: str = "") -> list[str]:
         """What moving the guild to `zone` does to the runs already open or locked (dual interfaces §3.5 "Settings edit
-        mode"), one sentence per run whose clock reading changes, from code — the TimezoneWizard's confirm, the Config
+        mode"), from code — a single run in two sentences with both clock readings, several in one sentence per fate (the
+        Confirm rule, design §5.57) — the TimezoneWizard's confirm, the Config
         page's review and MCP's preview. A run's key and sheet were made from the old wall clock, so by default (`mode`
         "" or "keep") it stays at its real moment and its reading changes; `mode` "move" moves every OPEN real run with
         the clock (the same wall-clock time on the new zone, its signups kept — rc.move_runs_with_clock). A LOCKED run
@@ -1617,18 +1618,50 @@ class Registry:
         zone, _z = self._tz_zone(zone)
         mode = str(mode or "").strip().lower()
         out = []
-        for r in self.timezone_runs(zone, rs):
-            was, now_ = f"{r['name']} {fmt12(r['old'])}", f"now {fmt12(r['new'])} in {zone}"
+        rows = self.timezone_runs(zone, rs)
+        if len(rows) == 1:  # one run: its own two sentences, with both clock readings
+            r = rows[0]
+            was, now_ = f"{r['name']} {fmt12(r['old'])}", f"That reads {fmt12(r['new'])} in {zone}."
             if r["locked"]:
-                out.append(f"{was} is locked: it stays at its real moment ({now_}) — its roster was confirmed for that moment.")
-            elif r["test"]:
-                out.append(f"{was} (a test run) stays at its real moment ({now_}).")
-            elif mode == "move" and r["movable"]:
-                out.append(f"{was} moves with the clock: still {fmt12(r['moved'])} on the new clock, its signups kept.")
-            elif mode == "move":
-                out.append(f"{was} stays at its real moment ({now_}): moved, its lock would already be past.")
-            else:
-                out.append(f"{was} stays at its real moment ({now_}) — move open runs with the clock to keep its time.")
+                return [f"{was} is locked, so it stays at its real moment. {now_}"]
+            if r["test"]:
+                return [f"{was} is a test run, so it stays at its real moment. {now_}"]
+            if mode == "move" and r["movable"]:
+                return [f"{was} moves with the clock and keeps its signups. It still starts at {fmt12(r['moved'])} on the new clock."]
+            if mode == "move":
+                return [f"{was} can't move with the clock, because its lock would already be past. {now_}"]
+            return [f"{was} stays at its real moment. {now_}" + ("" if mode == "keep" else " Move open runs with the clock to keep its time.")]
+        if not rows:
+            return out
+        # several runs: one sentence per fate, at most three (the Confirm rule, design §5.57)
+
+        def runs(n: int, what: str) -> str:
+            return f"the {n} {what} runs" if n > 1 else f"the one {what} run"
+
+        fixed = [r for r in rows if r["locked"] or r["test"]]
+        locked = [r for r in fixed if r["locked"]]
+        tests = [r for r in fixed if not r["locked"]]
+        opened = [r for r in rows if r not in fixed]
+        if fixed:
+            parts = ([runs(len(locked), "locked")] if locked else []) + ([runs(len(tests), "test")] if tests else [])
+            head = " and ".join(parts)
+            out.append(head[:1].upper() + head[1:] + f" stay{'s' if len(fixed) == 1 else ''} at {'its' if len(fixed) == 1 else 'their'} real moment.")
+        if opened and mode == "move":
+            moved = [r for r in opened if r["movable"]]
+            stay = [r for r in opened if not r["movable"]]
+            if moved:
+                h = runs(len(moved), "open")
+                out.append(h[:1].upper() + h[1:] + f" move{'s' if len(moved) == 1 else ''} with the clock and keep{'s' if len(moved) == 1 else ''} "
+                           f"{'its' if len(moved) == 1 else 'their'} time and signups.")
+            if stay:
+                h = runs(len(stay), "open")
+                out.append(h[:1].upper() + h[1:] + f" whose lock would pass stay{'s' if len(stay) == 1 else ''} at {'its' if len(stay) == 1 else 'their'} real moment.")
+        elif opened:
+            h = runs(len(opened), "open")
+            out.append(h[:1].upper() + h[1:] + f" stay{'s' if len(opened) == 1 else ''} at {'its' if len(opened) == 1 else 'their'} real moment, "
+                       f"so {'its' if len(opened) == 1 else 'their'} clock time changes.")
+            if mode != "keep":
+                out.append("Move open runs with the clock to keep their times.")
         return out
 
     def timezone_refusal(self, zone: str, rs=None, mode: str = "") -> str | None:
@@ -1642,8 +1675,10 @@ class Registry:
         locked = [f"{r['name']} {self.local12(r['old'])}" for r in self.timezone_runs(zone, rs) if r["locked"]]
         if not locked:
             return None
-        return (f"{join_words(locked)} {'is' if len(locked) == 1 else 'are'} locked, and {zone} reads {'its' if len(locked) == 1 else 'their'} time differently: "
-                "say keep to change it anyway (locked runs stay at their real moment), or move to also move the open runs with the clock")
+        head = f"{locked[0]} is locked" if len(locked) == 1 else f"{len(locked)} runs are locked"
+        return (f"{head}, and {zone} reads {'its' if len(locked) == 1 else 'their'} time differently. "
+                "Say keep to change it anyway, and locked runs stay at their real moment. "
+                "Say move to also move the open runs with the clock.")
 
     def load_config(self) -> GuildConfig:
         p = self.store.root / self.key / "guild.yaml"
@@ -1886,8 +1921,8 @@ class Registry:
         """'Already declined by Jonny (Tue 12 Mar 8:02 PM).' — a second decision names who made the first (every surface)."""
         if not a:
             return "No open application for that member."
-        when = f" ({self.local12(a.decided_at)})" if a.decided_at else ""
-        return f"Already {a.status} by {a.decided_by}{when}." if a.decided_by else f"That application is {a.status}."
+        when = f" on {self.local12(a.decided_at)}" if a.decided_at else ""
+        return f"{a.decided_by} already {a.status} it{when}." if a.decided_by else f"That application is already {a.status}."
 
     def application_state(self, discord_id: int) -> dict | None:
         """A person's OWN application as they read it (GET /api/me.application, the Me page's card, /me view, and the
@@ -2425,8 +2460,8 @@ class Registry:
         names = [str(n) for n in dict.fromkeys(live_councils or []) if str(n or "").strip()]
         if not names:
             return None
-        return (f"A loot council is live ({', '.join(names)}): it records awards as they're confirmed, so an import now could count "
-                "tonight's awards twice. Import after the council ends — the preview works meanwhile.")
+        return (f"A loot council is live for {join_words(names)}. It records awards as they're confirmed, so an import now could count "
+                "them twice. Import after the council ends, and use the preview meanwhile.")
 
     def import_awards(self, rows, by: str, by_id: int | None = None, *, preview: bool = False, kind: str = "generic", rev: str | None = None,
                       live_councils=()) -> dict:
@@ -2522,9 +2557,10 @@ class Registry:
     @staticmethod
     def undo_consequence(o: dict) -> str:
         if not o.get("live"):
-            return "Every award this import added is already voided; nothing to undo."
-        return (f"Voids the {o['live']} award(s) this import added: they stop counting in recent loot and in 'already has'. "
-                "The rows stay in the ledger with a void row beside each (the audit trail); importing a fixed file afterwards adds them again.")
+            return "Every award this import added is already voided, so there is nothing to undo."
+        n = int(o["live"])
+        return (f"The {n} award{'s' if n != 1 else ''} this import added stop counting in recent loot and in 'already has'. "
+                "The rows stay in the ledger, each with a void row beside it. Importing a fixed file afterwards adds them again.")
 
     def undo_import(self, batch: str, by: str, reason: str = "", by_id: int | None = None) -> dict:
         """Undo one import: a `kind: void` row (lootctx.void_row — the council's correction path) for every award of the
@@ -3188,9 +3224,9 @@ class Registry:
         if runs:
             adhoc = schedule_class(s.get("kind")) == "adhoc"
             if s.get("weights") and not adhoc:
-                loses.append("the raid's weights instead of the schedule's own")
+                loses.append("the raid's weights")
             elif s.get("weights"):
-                loses.append("the ad hoc defaults' weights instead of the schedule's own")
+                loses.append("the ad hoc weights")
             if regs and not adhoc:
                 loses.append("no regulars")
         return Effects(name=s.get("name") or sid, label=self.schedule_label(instance, s), regulars=regs, open_runs=runs, loses=loses)
@@ -3829,11 +3865,13 @@ class Registry:
         MCP's preview, the plain-text diff)."""
         c = self.aura_override_counts()
         if not c["buffs"] and not c["families"]:
-            return "Nothing to reset: every aura already reads the game defaults."
-        parts = [f"{c['buffs']} buff{'' if c['buffs'] == 1 else 's'} ({', '.join(c['buff_names'])})" if c["buffs"] else "",
-                 f"{c['families']} famil{'y' if c['families'] == 1 else 'ies'} ({', '.join(c['family_names'])})" if c["families"] else ""]
-        return (f"The guild's changes to {' and '.join(p for p in parts if p)} go, guild-declared families included. From the next run on, the "
-                "groups, the cards and the board use the game's defaults; a roster already locked stays as it is.")
+            return "Every aura already reads the game defaults, so there is nothing to reset."
+        parts = [f"{c['buffs']} buff{'' if c['buffs'] == 1 else 's'}" if c["buffs"] else "",
+                 f"{c['families']} famil{'y' if c['families'] == 1 else 'ies'}" if c["families"] else ""]
+        names = [re.sub(r"\s*\(.*?\)", "", n) for n in c["buff_names"] + c["family_names"]]
+        what = join_words(names) if len(names) <= 3 else " and ".join(p for p in parts if p)
+        return (f"The guild drops its changes to {what}, families it declared included. "
+                "From the next run on, the groups, cards and board use the game's defaults. A roster already locked stays as it is.")
 
     @_config_verb("buffs")
     def clear_aura_overrides(self, by: str, bid: str | None = None) -> str:
@@ -4219,7 +4257,7 @@ class Registry:
         testers = self.testers()
         if not testers or int(by_id) in testers:
             return None
-        return f"{m.display_name} is a test puppet of another officer's rehearsal — only they (or the owner) change it."
+        return f"{m.display_name} is a test puppet in another officer's rehearsal. Only that officer or the owner changes it."
 
     def _own_character(self, discord_id: int, label: str) -> tuple[Member, RegisteredCharacter]:
         m = self.members.get(discord_id)

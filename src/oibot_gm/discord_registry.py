@@ -597,9 +597,11 @@ async def assign_member_role(client, reg: Registry, discord_id: int) -> str | No
 
 def remove_record_consequence(reg: Registry, m) -> str:
     """THE sentence of an officer's Remove record (the decide screen, the Members page's confirm)."""
-    chars = ", ".join(c.label for c in m.characters) or "no characters"
-    return (f"{m.display_name}'s record goes: {chars}, their absences, wishlists and notices. Loot already awarded stays in the ledger; the data repo's "
-            "history keeps the file. They registered again from scratch if they come back. Nobody is DMed.")
+    from .registry import join_words
+
+    chars = ", ".join(c.label for c in m.characters)
+    return (f"{m.display_name}'s record goes, along with " + (f"{chars}, " if chars else "") + "absences, wishlists and notices. "
+            "Loot already awarded stays in the ledger, and nobody gets a DM. If they come back, they register again from scratch.")
 
 
 async def remove_record(client, reg: Registry, discord_id: int, by: str, *, by_id: int | None = None, via: str = "discord") -> str:
@@ -695,17 +697,16 @@ async def client_decide(client, reg: Registry, discord_id: int, accept: bool, by
 
 def application_consequence(reg: Registry, a, accept: bool) -> list[str]:
     """What Accept / Decline does to the applicant, from code (dual interfaces §2.3) — the `decide` screen's text and the
-    Applications page's confirm (GET /api/applications `consequence`). The DM is one they are waiting on (the DM rule);
-    a note typed on the screen rides along with it; the decision also lands on their Me page (a notice)."""
-    prior = reg.prior_decision_line(a)
-    lead = [f"-# {prior}"] if prior else []
+    Applications page's confirm (GET /api/applications `consequence`), three sentences (the Confirm rule, design §5.57).
+    The DM is one they are waiting on (the DM rule); a note typed on the screen rides along with it. An earlier verdict
+    (Registry.prior_decision_line) is the screen's context line, not part of the confirm."""
     if accept:
         rids = list(reg.config.member_role_ids or [])
-        role = (f" They get the member role <@&{rids[0]}> when the bot has Manage Roles (it says so if it can't)." if rids else "")
-        return lead + [f"{a.display_name} is registered as **{a.label}** ({a.cls} {a.spec}), rank trial, confirmed, and gets a DM with the decision (your note included).{role}",
-                       "The review card shows it decided."]
-    return lead + [f"{a.display_name} gets a DM that the application for **{a.label}** wasn't accepted this time (your note included); they keep the server and can apply again.",
-                   "The review card shows it decided."]
+        role = f"They also get <@&{rids[0]}> when the bot has Manage Roles." if rids else "The review card shows it decided."
+        return [f"{a.display_name} is registered and confirmed as **{a.label}**, a {a.spec} {a.cls} at rank trial.",
+                "They get a DM with the decision and your note.", role]
+    return [f"{a.display_name} gets a DM that **{a.label}** wasn't accepted this time, with your note.",
+            "They keep the server and can apply again.", "The review card shows it decided."]
 
 
 async def application_decide(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None = None) -> None:
@@ -734,7 +735,8 @@ async def application_decide(interaction: discord.Interaction, reg: Registry, di
             return
         await wiz.finish(i, verdict)
 
-    text = "\n".join(application_consequence(reg, a, accept)) + (f"\nYour note: {_clip(note, 400)}" if note else "")
+    prior = reg.prior_decision_line(a)  # the applicant's history, above the confirm's own sentences
+    text = (f"-# {prior}\n" if prior else "") + "\n".join(application_consequence(reg, a, accept)) + (f"\nYour note: {_clip(note, 400)}" if note else "")
     await wiz.decide(interaction, text, do=do,
                      note={"label": "Note to the applicant (optional)", "max_length": DECISION_NOTE_MAX, "placeholder": "goes into their DM"}, do_label=verb, danger=not accept)
 

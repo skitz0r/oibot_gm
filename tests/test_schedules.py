@@ -477,7 +477,7 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
         await h2.press("Pickup — pick a time")
         assert h2.modal.title == "Open Pickup"
         await h2.submit(h2.modal, day=day, hour="21", minute="0")
-        assert "Pickup" in h2.text and "9:00 PM" in h2.text and "Ad hoc: first come" in h2.text
+        assert "Pickup" in h2.text and "9:00 PM" in h2.text and "seats go first come, first rostered" in h2.text
         await h2.press("Open")
     asyncio.run(go2())
     opens = [c for c in bot.calls if c[0] == "open_run_and_post"]

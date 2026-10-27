@@ -404,7 +404,7 @@ def test_state_route_names_the_missing_signup_channel_and_the_tempos(reg, rs, si
     assert "signup channel" in d["open_refusal"] and d["signup_channel"] == {"set": False, "name": None}
     assert [t["id"] for t in d["tempos"]] == list(TEMPOS) and d["default_tempo"] == "standard"
     assert d["seed"][-1]["count"] == 0 and d["seed"][-1]["label"].startswith("all ")
-    assert d["clear_consequence"][0].startswith("Deletes ")
+    assert d["clear_consequence"][0].startswith(f"{len(reg.test_members())} puppets are deleted")
     reg.config.signup_channel_id = 66  # set, but not a channel the bot can resolve: the card says so (the words open_test_run refuses with)
     d = client.get("/api/test", headers=bearer()).json()
     assert d["open_refusal"] == UNREACHABLE_TEST_CHANNEL and d["signup_channel"] == {"set": True, "name": None}
@@ -473,7 +473,7 @@ def test_clear_route_previews_the_consequence_then_clears(reg, rs, site):
     ev = open_test_run(reg, rs, test_by=OWNER)
     n = len(reg.test_members())
     r = client.post("/api/test/clear", json={"preview": True}, headers=bearer())
-    assert r.status_code == 200 and r.json()["consequence"][0] == f"Cancels 1 test run, deletes {n} puppets, analytics cards resume."
+    assert r.status_code == 200 and r.json()["consequence"][0] == f"1 test run is cancelled, {n} puppets are deleted and the analytics cards resume."
     assert reg.test_members() and ev.state == "open", "a preview writes nothing"
     r = client.post("/api/test/clear", json={}, headers=bearer())
     assert r.status_code == 200 and not reg.test_members() and rs.events[ev.key].state == "cancelled"
@@ -639,7 +639,7 @@ def test_clear_wizard_shows_the_consequence_from_code(reg, rs, officer):
 
     async def go():
         await FLOWS["test_clear"](h.command(), reg)
-        assert f"Cancels 1 test run, deletes {n} puppets, analytics cards resume." in h.text
+        assert f"1 test run is cancelled, {n} puppets are deleted and the analytics cards resume." in h.text
         await h.press("Clear the test bench")
     run(go())
     assert not reg.test_members() and rs.events[ev.key].state == "cancelled"

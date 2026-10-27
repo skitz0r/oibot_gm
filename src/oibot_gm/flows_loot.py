@@ -186,8 +186,9 @@ async def _press_discard(interaction, bot, reg, session, btn) -> None:
             return
         await wiz.finish(i, line)
 
-    text = (f"Discard {n} proposal(s)? Ticks stay" + (f"; {n_ov} pending override(s) are dropped" if n_ov else "")
-            + " — nothing was recorded, so nothing is undone. Distribute judges the drops again.")
+    text = (("The proposal goes" if n == 1 else f"The {n} proposals go") + ", and the ticks stay."
+            + (f" {'One pending override is' if n_ov == 1 else f'{n_ov} pending overrides are'} dropped too." if n_ov else "")
+            + " Nothing was recorded, so Distribute can judge the drops again.")
     await wiz.decide(interaction, text, do=do, do_label="Discard", danger=True)
 
 

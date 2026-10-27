@@ -113,7 +113,7 @@ def inbox_lines(reg: Registry, rs, uid: int, limit: int = 6) -> list[str]:
 
 def _told(reg: Registry, ev, m: Member, card: bool) -> str:
     """How the member hears of an officer's write — truthfully (the DM rule: a notice, plus their open DM card edited)."""
-    return f"{m.display_name} sees a notice on their Me page" + (" and their open DM card is edited" if card else "") + " — no new DM."
+    return "They see it on their DM card and their Me page." if card else "They see it on their Me page."
 
 
 def _has_card(reg: Registry, ev, m: Member, key: str) -> bool:
@@ -130,51 +130,70 @@ def _has_card(reg: Registry, ev, m: Member, key: str) -> bool:
 
 def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | None = None, *, by_id: int | None = None) -> str:
     """What one on-behalf action does, from code (design §2.3) — the SetWizard's decide screen and the site's confirm print
-    exactly this. Says who is told and how (a notice; their open DM card edited) — never more than happens. `by_id` = the
-    officer recording it: on their OWN record the verbs treat it as their own answer and write no notice, so the
-    sentence promises none."""
-    run = rc.run_words(reg, ev)
+    exactly this, in at most three sentences (the Confirm rule, design §5.57): what changes, who is told and how. Says
+    who is told and how (a notice; their open DM card edited) — never more than happens. `by_id` = the officer recording
+    it: on their OWN record the verbs treat it as their own answer and write no notice, so the sentence promises none."""
+    from .consequences import CONFIRM_DM
+
+    name, run = m.display_name, rc.run_on(reg, ev)
     locked = ev.state == "locked"
     seated = bool(ev.seat_of(m)) if locked else False
     s = ev.signups.get(str(m.discord_id))
     char = character or (s.character if s else (m.main.label if m.main else "their main"))
-    fill = rc.team_setting(rc.run_team(reg, ev), "autofill")
     own = by_id is not None and int(by_id) == m.discord_id
-    tail = " Your own record: no notice is written." if own else " " + _told(reg, ev, m, _has_card(reg, ev, m, key))
+    told = [] if own else [_told(reg, ev, m, _has_card(reg, ev, m, key))]
+
+    def say(*lines: str) -> str:
+        return " ".join([*lines, *told])
+
     if key == "callout":
         if locked and seated:
-            return f"{m.display_name} is recorded as a callout on {run} (hours before counted) and their seat is freed" + ("; the bench is asked." if fill else ".") + tail
-        return f"{m.display_name} goes to No thanks on {run} and a callout is recorded (hours before counted; your note, if any, is for officers)." + tail
+            return say(f"{name}'s seat for {run} is released and the bot records a callout.", rc.refill_sentence(reg, ev))
+        return say(f"{name} goes to No thanks for {run}.", "The bot records a callout and how late it came.")
     if key == "no_thanks":
         if locked and seated:
-            return f"{m.display_name} goes to No thanks on {run} — their seat is freed" + (" and the bench is asked" if fill else "") + "; no callout is recorded." + tail
-        return f"{m.display_name} goes to No thanks on {run}; no callout is recorded." + tail
+            return say(f"{name} goes to No thanks for {run} and loses their seat.", rc.refill_sentence(reg, ev).removesuffix(".") + ", and no callout is recorded.")
+        return say(f"{name} goes to No thanks for {run}.", "No callout is recorded.")
     if key == "join":
         if not locked:
-            return f"{m.display_name} joins {run} as {char}; the lock decides the roster." + tail
+            return say(f"{name} joins {run} as {char}.", "The lock decides the roster.")
         if seated:
-            return f"{m.display_name} plays {char} on {run} and keeps the seat." + tail
+            return say(f"{name} plays {char} on {run} and keeps their seat.")
+        free = any(len(r.selected) < rc.run_size(reg, ev) for r in ev.all_rosters)
+        if not free:
+            return say(f"{name} joins {run} as {char}.", "Every seat is taken, so an officer can move them in on the board.")
         if not rc.run_confirms(reg, ev):
-            return f"{m.display_name} joins {run} as {char}: rostered if a seat is free, else a Join the board can move in." + tail
+            return say(f"{name} is rostered on {run} as {char}.", rc.no_confirm_sentence(reg, ev, "they aren't asked to confirm"))
         if not rc.reachable(m):  # DMs off: the confirmation waits on the Me page (confirm_one's channel "web")
-            return f"{m.display_name} joins {run} as {char}: rostered if a seat is free and asked to confirm on their Me page (DMs off), else a Join the board can move in." + tail
+            return " ".join([f"{name} is rostered on {run} as {char}.", "With DMs off, they confirm on their Me page."])
         # DMs on: a seat taken means confirm_one sends the Confirm / Can't card — an ask they must act on, so say so
-        told = " Your own record: no notice is written." if own else f" {m.display_name} sees a notice on their Me page."
-        return (f"{m.display_name} joins {run} as {char}: rostered if a seat is free and then gets the Confirm / Can't DM (an ask to answer), "
-                f"else a Join the board can move in." + told)
+        return f"{name} is rostered on {run} as {char}. They get {CONFIRM_DM}."
     if key == "bench":
-        return f"{m.display_name} goes to Bench on {run}" + (" — still rostered until set to No thanks." if seated else ".") + tail
+        if seated:
+            return say(f"{name} goes to Bench for {run}.", "They stay rostered until set to No thanks.")
+        return say(f"{name} goes to Bench for {run}.")
     if key == "confirm_yes":
-        return f"{m.display_name}'s seat on {run} is confirmed for them." + tail
+        return say(f"{name}'s seat for {run} is confirmed.")
     if key == "confirm_no":
-        return f"{m.display_name} can't make {run}: their seat is freed" + (" and the bench is asked." if fill else ".") + tail
+        return say(f"{name} can't make {run} and their seat is released.", rc.refill_sentence(reg, ev))
+    ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.open), None)
+    prelock = ask is not None and ask.phase == "prelock"
     if key == "fill_yes":
-        return f"{m.display_name} takes the fill ask on {run} (placed the way they were asked, if the seat is still free)." + tail
+        if prelock:
+            return say(f"{name} says yes for {run} and joins with {ask.character} as {ask.spec}.", "The lock decides the roster.")
+        return say(f"{name} says yes to the open seat for {run}.", "They take it if it's still free.")
     if key == "fill_no":
-        return f"{m.display_name} declines the fill ask on {run}; the next person is asked." + tail
-    if key in ("pin_in", "pin_out", "unpin"):
-        what = {"pin_in": "is pinned to the roster", "pin_out": "is kept on the bench", "unpin": "is unpinned"}[key]
-        return f"{m.display_name} {what} for the lock of {run}. Nobody is told (a pin is officer planning)."
+        if prelock:
+            return say(f"{name} says no to coming to {run}.")
+        nxt = "The bot asks the next person." if rc.team_setting(rc.run_team(reg, ev), "autofill") and not ev.autofill_paused else \
+            f"The seat waits for {rc.fill_button_words()}."
+        return say(f"{name} says no to the open seat for {run}.", nxt)
+    if key == "pin_in":
+        return f"{name} is pinned to the roster for the lock of {run}. Only officers see pins."
+    if key == "pin_out":
+        return f"{name} is kept off the roster at the lock of {run}. Only officers see pins."
+    if key == "unpin":
+        return f"{name}'s pin comes off, so the lock places them like anyone else. Only officers see pins."
     raise RegistryError(f"unknown action {key}")
 
 

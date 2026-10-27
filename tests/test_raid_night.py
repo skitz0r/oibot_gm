@@ -569,7 +569,7 @@ def test_reopen_an_end_by_mistake_within_the_hour_and_the_roster_entry_survives(
     assert ev.state == "locked" and "Reopened" in line and ev.closed_at is None
     rc.end_run(reg, rs, ev, "Jon")
     ev.closed_at = (datetime.now(ev.start.tzinfo) - timedelta(minutes=61)).isoformat()
-    with pytest.raises(RegistryError, match="more than 1 hour"):
+    with pytest.raises(RegistryError, match="more than an hour ago"):
         run(bot.reopen_run(reg, rs, ev, by="Jon"))
     run(bot.cleanup_ephemeral(reg, rs))
     assert not reg.config.team(ev.team), "after the grace hour the entry goes"
@@ -595,7 +595,7 @@ def test_open_preview_resolves_dst_nights_and_matches_a_scheduled_run(reg, rs):
     assert "clocks go back" in amb["when_note"] and datetime.fromisoformat(amb["start"]).utcoffset() == timedelta(hours=-7), "the first 1:30 (still PDT)"
     wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)  # a Wednesday 1–2 weeks out
     plain = rc.open_preview(reg, rs, "barrow_deeps", f"{wed.isoformat()} 20:00", "adhoc")
-    assert plain["when_note"] == "" and "8:00 PM" in plain["label"] and "Ad hoc" in plain["rules"]
+    assert plain["when_note"] == "" and "8:00 PM" in plain["label"] and "ad hoc run" in plain["rules"]
     reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
     hit = rc.open_preview(reg, rs, "barrow_deeps", f"{wed.isoformat()} 20:00", None)
     assert hit["kind"] == "scheduled" and hit["key"] == rc.event_key("barrow_deeps", datetime.fromisoformat(hit["start"]), None)
@@ -863,7 +863,7 @@ def test_two_officers_pressing_remind_at_once_send_one_round(reg, rs):
         return await asyncio.gather(a, b, return_exceptions=True)
     ra, rb = run(go())
     assert isinstance(ra, str) and "Reminded 10 by DM" in ra
-    assert isinstance(rb, RegistryError) and "by Jon" in str(rb), "the second press is told who reminded"
+    assert isinstance(rb, RegistryError) and "Jon reminded them" in str(rb), "the second press is told who reminded"
     one_round = len(bot.cards) - before
     assert one_round <= 2 * len(seated), "one card (plus the test bench's prefix) per unconfirmed member — never two rounds"
     assert ev.reminded_by == "Jon"
@@ -910,7 +910,7 @@ def test_plain_text_cancel_keeps_its_surface_and_can_be_quiet(reg, rs):
     ev.channel_id = bot.signup.id
     owner = reg.config.owner_discord_id
     preview = configops.describe(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"))
-    assert "Nobody is DMed" in preview and "no line in the signup channel" in preview
+    assert "Nobody gets a DM" in preview and "No line goes to the signup channel." in preview
     line = run(configops.apply_async(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"), "Jon", True, bot=bot, by_id=owner, via="chat"))
     assert "no line in the signup channel" in line and not bot.signup.sent
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t and ev.key in t]

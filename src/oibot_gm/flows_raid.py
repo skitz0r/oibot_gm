@@ -307,22 +307,19 @@ class OpenWizard(Wizard):
         label = f"**{self.name()}**" + (f" · {self.sched_name(sid)}" if sid and (sid != "default" or self.many()) else "")
         lines = [f"Open {label} at {both_clocks(self.reg, start)}?"]
         if self.draft.get("matched"):
-            lines.append(f"-# That time is the {self.draft['matched']} run — it opens as scheduled: its regulars are expected"
-                         + (" and the rostered are asked to confirm." if self.reg.schedule_def(self.rid, sid).get("confirm", True) else "."))
+            lines.append(f"-# That time is the {self.draft['matched']} run. " + " ".join(rc.open_rules(self.reg, self.rid, sid, "scheduled")))
         if self.is_adhoc(sid):
-            sd = self.reg.schedule_def(self.rid, sid)
-            lines.append(f"-# Ad hoc: {rc.FIRST_COME}; no regulars, no reminder" + ("" if sd.get("confirm") else f"; {rc.NO_CONFIRMATIONS}")
-                         + f"; locks {sd['lock_hours_before']:g} h before.")
+            lines.append("-# " + " ".join(rc.open_rules(self.reg, self.rid, sid, "adhoc")))
         if sid:
             sd = self.reg.schedule_def(self.rid, sid)
             n = int(sd["schedule"].get("rosters") or 1)
             if n > 1:
-                lines.append(f"-# {n} rosters of {sd.get('size', '?')}: the sheet advertises {n * int(sd.get('size') or 0)} seats.")
+                lines.append(f"-# It has {n} rosters of {sd.get('size', '?')}, so the sheet offers {n * int(sd.get('size') or 0)} seats.")
         if self.draft["note"]:
             lines.append(when_note(self.draft["note"], start))
         ev = self.existing(start)
         if ev:
-            lines.append(f"-# A run for that time already exists ({sheet_state(ev)}); Open points you at it instead of making a second.")
+            lines.append(f"-# A run for that time already exists and is {sheet_state(ev)}. Open points you at it instead of making a second.")
         closed = rc.closed_run_refusal(self.rs, rc.event_key(self.rid, start, self.draft.get("schedule")))
         if closed:  # open_run refuses it: the screen says so instead of offering an Open that would fail
             lines.append(f"-# {closed}")

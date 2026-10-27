@@ -87,7 +87,7 @@ def test_me_char_delete_of_a_seated_character_says_the_seat_goes(reg, rs):
     async def go():
         await FLOWS["member_char"](h.command(), reg, action="delete")
         await h.pick("Pick the character", next(o.value for o in h._items()[0].options if o.label == m.main.label))
-        assert "handed back and the bench is asked" in h.text and f"Delete {m.main.label}" in h.buttons()
+        assert "is released. The bench is asked to fill it." in h.text and f"Delete {m.main.label}" in h.buttons()
         await h.press(f"Delete {m.main.label}")
         assert "✅ Deleted" in h.text
     run(go())
@@ -187,7 +187,7 @@ def test_me_absent_clear_is_im_back_with_what_reopens(reg, rs):
 
     async def go():
         await FLOWS["absence_clear"](h.command(), reg)  # one absence: straight to the decide screen
-        assert "re-opens" in h.text and "I'm back" in h.buttons()
+        assert "opens again for an answer" in h.text and "I'm back" in h.buttons()
         await h.press("I'm back")
         assert "✅ Your absence" in h.text
     run(go())
@@ -281,7 +281,7 @@ def test_a_host_superuser_transfers_a_guild_they_host(reg, rs, in_server, monkey
 
     async def go():
         await FLOWS["owner_transfer"](h.command(), reg, user=user(m))
-        assert "you act as the host here" in h.text and "You lose owner rights" not in h.text
+        assert "You act here as the host" in h.text and "You lose owner rights" not in h.text
         await h.press("Transfer ownership")
         assert "✅" in h.text
     run(go())

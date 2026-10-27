@@ -158,7 +158,7 @@ class MemberWizard(OfficerWizard):
 CHAR_ACTIONS = {"spec": "Spec", "main": "Main", "flex": "Flex", "retire": "Retire", "delete": "Delete", "name": "Name", "rank": "Rank"}
 SELF_ACTIONS = ("spec", "main", "flex", "retire", "delete", "name")
 OFFICER_ACTIONS = ("spec", "main", "flex", "rank", "retire", "delete")
-DELETE_WORDS = "Deleting removes it outright — only the ops lines keep a trace. Prefer Retire if you may come back to it."
+DELETE_WORDS = "Deleting removes it outright, and only the ops lines keep a trace. Prefer Retire if you may come back to it."
 
 
 class CharWizard(MemberWizard):
@@ -323,7 +323,7 @@ class CharWizard(MemberWizard):
         if action == "rank":
             return f"**{self.member_name}**: **{d['old']}** → **{d['rank']}**.", "Set the rank", False
         if action == "retire":
-            return f"Retire **{d['label']}** — it leaves sheets and rosters; its history is kept.", f"Retire {d['label']}", True
+            return f"Retire **{d['label']}**. It leaves sheets and rosters, and its history is kept.", f"Retire {d['label']}", True
         return f"Delete **{d['label']}**. {DELETE_WORDS}", f"Delete {d['label']}", True
 
     async def review(self, interaction: discord.Interaction) -> None:
@@ -338,7 +338,7 @@ class CharWizard(MemberWizard):
             return
         what, label, danger = self.summary()
         effects = self.ripple(interaction, self.rows())
-        text = "\n".join([what, *[f"• {e}" for e in effects]]) if effects else what + "\n-# Nothing else changes: no sheet or seat holds it."
+        text = "\n".join([what, *[f"• {e}" for e in effects]]) if effects else what + "\n-# Nothing else changes, because no sheet or seat holds it."
         await self.decide(interaction, text, do=self.save, do_label=label, danger=danger)
 
     async def save(self, interaction: discord.Interaction, _note: str | None) -> None:

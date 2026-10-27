@@ -35,6 +35,15 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
   #loot" is a value, not an empty state. A tooltip adds only why or where; a number's owner is in its label. Read-aloud test: a
   raid leader who never saw the code gets it first time. `tests/test_copy.py` lints it; the only exceptions are the operator
   surfaces (the Host card, the Agents page) and code a person types or pastes — an `ALLOW` entry each, scoped and reasoned.
+- **Confirm rule (user decision 2026-10-26):** a confirm sentence — anything a `decide` screen, a `useConfirm`, a review diff or a
+  preview prints before a press (consequences.py, inbox.action_consequence, every `*_consequence` / `*_effects` / `*_sentence` /
+  `*_refusal` generator) — is read aloud by a raid leader with their finger on the button. At most three sentences, in this order:
+  what changes, who is told and how, what can still be undone. Each one a full sentence: a capital letter, one idea, a period,
+  twenty words or fewer. No parentheses, no semicolons, no colon chaining two clauses, no dash-glued fragments, no notes in
+  brackets ("hours before counted"), no code nouns. Name the person once, then "they". Say what happens, not what doesn't:
+  "nobody is told", "no new DM", "no callout is recorded" appear only where the reader would otherwise expect the opposite, as
+  one plain sentence ("Nobody gets a DM."). `tests/test_confirm_readability.py` renders every generator across its cases and lints
+  each sentence; a sentence that fails is rewritten, never allow-listed.
 - **Native vs foreign data.** Native guild state (characters, events, ledger, precedents, policy) lives in the private sibling repo `../oibot_gm-data` via `store.py` (file per entity, commit per change, debounced push; git log = audit trail). Foreign reference data (profiles/) lives here. `fixtures/demo` is an anonymized copy for public use; never commit real guild data to this repo.
 
 ## Layout
@@ -50,6 +59,8 @@ src/oibot_gm/
                        {to} tokens the board fills — shared.fillNames), remind and end (Reopen's window from rc.REOPEN_GRACE_HOURS; LootMixin.end_consequence
                        puts the council's part in front), regular_remove(reg, m, key): the ONE confirm sentence from code (design §5.33, §5.56 phase 3);
                        ev_json.consequences carries it to the site (a regular's `remove` / an orphan's `clear` on /api/rosters), wizard.decide shows it in Discord
+                       — under the Confirm rule (design §5.57): CONFIRM_DM, reopen_sentence, ended_line, series_words; rc.run_on / rc.refill_sentence /
+                       rc.no_confirm_sentence / rc.open_rules are the shared words; tests/test_confirm_readability.py renders and lints every generator
   inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =

@@ -188,7 +188,7 @@ def test_seated_delete_from_the_members_page_frees_the_seat(w):
     h = as_user(w, OFFICER)
     body = {"rows": [{"uid": str(m.discord_id), "deletes": [m.main.label]}]}
     p = w.c.post("/api/members/save", json={**body, "preview": True}, headers=h).json()
-    assert any("handed back" in x for x in p["ripple"]) and ev.seat_of(m)
+    assert any("is released" in x for x in p["ripple"]) and ev.seat_of(m)
     assert w.c.post("/api/members/save", json=body, headers=h).status_code == 200
     assert ev.seat_of(m) is None and w.bot.fills
 
@@ -218,7 +218,7 @@ def test_im_back_preview_then_clear_on_the_web(w):
     assert w.c.post("/api/me/absence", json={"start": day, "days": 1}, headers=h).status_code == 200
     assert ev.signups[str(m.discord_id)].source == "absence"
     p = w.c.post("/api/me/absence/clear", json={"start": day, "preview": True}, headers=h).json()
-    assert p["preview"] and "re-opens" in p["lines"][0] and w.reg.members[m.discord_id].absences
+    assert p["preview"] and "opens again for an answer" in p["lines"][0] and w.reg.members[m.discord_id].absences
     r = w.c.post("/api/me/absence/clear", json={"start": day}, headers=h)
     assert r.status_code == 200 and str(m.discord_id) not in ev.signups and not w.reg.members[m.discord_id].absences
     h = as_user(w, OFFICER)

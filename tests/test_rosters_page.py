@@ -51,7 +51,7 @@ def test_a_raid_that_opens_later_lists_its_first_runs_and_says_why_they_cant_ope
     rows = r["upcoming"]
     assert len(rows) == 3, "no 'No upcoming runs before the raid opens': the first runs are listed"
     assert not any(u["can_open"] for u in rows)
-    assert all(u["why"].startswith("Too far ahead to open now: Open works from ") and "three weeks before the run" in u["why"] for u in rows)
+    assert all(u["why"].startswith("Too far ahead to open now. Open works from ") and "three weeks before the run" in u["why"] for u in rows)
     assert r["next_run"] == {"when": rows[0]["start"], "schedule": rows[0]["schedule_name"], "opens": rows[0]["opens"]}
     assert r["live_runs"] == [] and r["opened"] is False and r["first_open_words"]
     # the row's reason matches what Open next run says on every surface
@@ -213,7 +213,7 @@ def test_the_confirmations_off_sentence_is_one_constant_on_every_discord_card(re
     text = "\n".join(i.content for i in card.walk_children() if isinstance(getattr(i, "content", None), str))
     assert rc.NO_CONFIRMATIONS in text and "synergy" not in text and "first come —" not in text
     lock = " ".join(consequences.consequence("lock", reg, fresh))
-    assert rc.NO_CONFIRMATIONS[1:] in lock and "Joining was" not in lock
+    assert "Join is the commitment, so nobody is asked to confirm." in lock and "Joining was" not in lock
 
 
 # ---------------------------------------------------------------- phase 3: behaviour (design §5.56 "Phase 3 — behaviour")
@@ -244,29 +244,30 @@ def test_board_moves_before_the_lock_tell_nobody_on_either_kind_of_run(reg, rs, 
         text = said(verb, reg, ev)
         assert text.endswith(cq.BEFORE_LOCK) and "DM" not in text and "bench is asked" not in text, (verb, text)
     assert said("move", reg, ev).startswith("Nettle takes an open seat in Group 2.")  # the Board mockup's confirm
-    assert said("substitute", reg, ev).startswith("Nettle takes Ivy's place in Group 2; Ivy goes back to not placed.")
-    assert said("remind", reg, ev) == "Remind is for a locked roster — the sheet is still open."
-    assert "Reopen works for an hour after." in said("end", reg, ev)
+    assert said("substitute", reg, ev).startswith("Nettle takes Ivy's place in Group 2. Ivy goes back to Not placed.")
+    assert said("remind", reg, ev) == "Remind is for a locked roster, and this sheet is still open."
+    assert "Reopen works for an hour if this was a mistake." in said("end", reg, ev)
 
 
 def test_board_moves_after_the_lock_on_a_run_with_confirmations(reg, rs):
     ev, seated = locked_ten(reg, rs, asks=True)
-    assert said("move", reg, ev) == "Nettle moves to Group 2 and stays rostered — nobody is told."
-    assert said("swap", reg, ev) == "Nettle and Ivy trade places and both stay rostered — nobody is told."
+    assert said("move", reg, ev) == "Nettle moves to Group 2 and stays rostered. Nobody is told."
+    assert said("swap", reg, ev) == "Nettle and Ivy swap places and both stay rostered. Nobody is told."
     roster = said("roster", reg, ev)
-    assert roster.startswith("Nettle takes an open seat in Group 2.") and "Nettle gets a confirmation DM (on the site if their DMs are off)" in roster
+    assert roster == ("Nettle takes an open seat in Group 2 and gets the Confirm or Can't make it DM. With DMs off it waits on their Me page. "
+                      "The seat is theirs once they say yes.")
     sub = said("substitute", reg, ev)
-    assert sub.startswith("Ivy's seat goes to Nettle: Ivy sees it was released — on their confirmation card and the site, no DM.")
-    assert "Nettle gets a confirmation DM" in sub
+    assert sub.startswith("Nettle takes Ivy's seat in Group 2 and gets the Confirm or Can't make it DM.")
+    assert sub.endswith("Ivy sees the seat was released on their card and their Me page.")
     assert "bench is asked" not in sub and "Ivy is told" not in sub, "the substitute takes the seat: nobody else is asked, Ivy is never DMed"
-    assert "the bench is asked to fill it" in said("release", reg, ev)
+    assert "The bench is asked to fill it." in said("release", reg, ev)
     ev.autofill_paused = True
-    assert "automatic asks are paused, so the seat waits for Fill seats…" in said("release", reg, ev)
+    assert "Automatic asks are paused, so the seat waits for Fill seats." in said("release", reg, ev)
     # Remind: who gets the card again, who waits on the site
     seated[0].dm_opt_out = True
     reg.save(seated[0], "dms off")
-    assert said("remind", reg, ev) == ("9 rostered members who haven't answered get the Confirm / Can't DM again — the same card, the same deadline. "
-                                       "1 more waits on the site with DMs off — no DM. Once an hour per run.")
+    assert said("remind", reg, ev) == ("The 9 rostered who haven't answered get their Confirm or Can't make it DM again. "
+                                       "One more waits on the site with DMs off. Remind works once an hour.")
 
 
 def test_board_moves_after_the_lock_on_an_ad_hoc_run_promise_no_dm(reg, rs):
@@ -274,18 +275,20 @@ def test_board_moves_after_the_lock_on_an_ad_hoc_run_promise_no_dm(reg, rs):
     lock_with_board(reg, rs, ev, [m.display_name for m in reg.test_members()[:8]])
     roster, sub = said("roster", reg, ev), said("substitute", reg, ev)
     for text in (roster, sub):
-        assert "No confirmations — Join is the commitment: the seat is Nettle's now, with no DM." in text and "confirmation DM" not in text
-    assert "Ivy sees it was released — on the site, no DM." in sub and "confirmation card" not in sub
-    assert said("remind", reg, ev) == f"Nothing to remind: {rc.NO_CONFIRMATIONS}."
-    assert "confirmation card" not in said("release", reg, ev)
+        assert "Confirm or Can't make it" not in text and "DM" not in text, text
+    assert roster == "Nettle takes an open seat in Group 2. On an ad hoc run Join is the commitment, so the seat is theirs now."
+    assert sub == ("Nettle takes Ivy's seat in Group 2. On an ad hoc run they aren't asked to confirm. "
+                   "Ivy sees the seat was released on their Me page.")
+    assert said("remind", reg, ev) == "On an ad hoc run Join is the commitment, so there is nothing to remind."
+    assert "card" not in said("release", reg, ev)
 
 
 def test_end_reads_the_reopen_window_from_code(reg, rs, monkeypatch):
     ev, _ = locked_ten(reg, rs)
-    assert said("end", reg, ev) == ("The run is marked finished: the sheet and the lock card close and no more fill asks go out. "
-                                    "Pressed by mistake? Reopen works for an hour after.")
+    assert said("end", reg, ev) == ("The run is finished. The sheet and the lock card close and no more fill asks go out. "
+                                    "Reopen works for an hour if this was a mistake.")
     monkeypatch.setattr(rc, "REOPEN_GRACE_HOURS", 2)
-    assert said("end", reg, ev).endswith("Reopen works for 2 hours after.")
+    assert said("end", reg, ev).endswith("Reopen works for 2 hours if this was a mistake.")
     rc.end_run(reg, rs, ev, "t")
     assert said("end", reg, ev) == "This run is already finished."
 
@@ -307,7 +310,7 @@ def test_a_regulars_remove_and_an_orphan_clear_carry_the_servers_sentence_and_a_
     m = reg.members[REAL]
     row = next(x for s in raid(c)["series"] for x in s["regulars"] if x["uid"] == str(REAL))
     assert row["remove"] == " ".join(cq.regular_remove(reg, m, f"{RID}:default"))
-    assert row["remove"].startswith("Bramble stops being a regular of ") and "nobody is told" in row["remove"] and "seat weight" in row["remove"]
+    assert row["remove"].startswith("Bramble stops being a regular of ") and "nobody is told" in row["remove"] and "weights them as a regular" in row["remove"]
     post = lambda body: c.post("/api/admin/raid/regulars", json=body, headers={**bearer(), "X-Requested-With": "oibot"})  # noqa: E731
     stale = post({"raid": RID, "schedule": "default", "uid": str(REAL), "on": False, "rev": "0" * 12})
     assert stale.status_code == 409 and "changed since you loaded them" in stale.json()["error"]
@@ -316,7 +319,7 @@ def test_a_regulars_remove_and_an_orphan_clear_carry_the_servers_sentence_and_a_
     m.main.rosters.append(f"{RID}:gone")
     reg.save(m, "t")
     o = next(x for x in raid(c)["orphan_regulars"] if x["key"] == f"{RID}:gone")
-    assert "no longer runs" in o["clear"] and o["rev"] == reg.characters_rev(m)
+    assert "a removed Barrow Deeps schedule" in o["clear"] and o["rev"] == reg.characters_rev(m)
     ok = post({"raid": RID, "schedule": "gone", "uid": str(REAL), "on": False, "rev": o["rev"]})
     assert ok.status_code == 200 and f"{RID}:gone" not in m.main.rosters
 

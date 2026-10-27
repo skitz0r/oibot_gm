@@ -48,10 +48,13 @@ def test_lock_consequence_counts_dms_and_names_the_deadline_in_words(reg, rs):
     lines = consequences.consequence("lock", reg, ev)
     text = " ".join(lines)
     assert lines[0] == "The board becomes the roster."
-    assert "6 rostered get a confirmation DM (1 with DMs off sees it on the site)." in text
-    assert re.search(r"Confirm by \w{3} \d\d \w{3} \d{1,2}:\d\d [AP]M\.", text), text
+    assert "The 6 rostered get the Confirm or Can't make it DM, and the puppets' DMs come to the tester." in lines, "a test run says where the DMs really go"
+    assert re.search(r"They have until \w{3} \d{1,2} \w{3} \d{1,2}:\d\d [AP]M to answer\.", text), text
     assert not MILITARY.search(text) and not ISO_DAY.search(text), "the clock rule: words, never 24-hour or ISO"
-    assert "Test run: the puppets' DMs arrive in the tester's DMs." in lines, "a test run says where the DMs really go"
+    ms[1].dm_opt_out = True
+    rc.run_team(reg, ev)["test"] = False  # a real run: the DMs-off count is said
+    ev.test = False
+    assert "The 6 rostered get the Confirm or Can't make it DM, 2 of them on the site instead." in consequences.consequence("lock", reg, ev)
 
 
 def test_lock_consequence_on_an_ad_hoc_run_promises_no_dms(reg, rs):
@@ -60,7 +63,7 @@ def test_lock_consequence_on_an_ad_hoc_run_promises_no_dms(reg, rs):
     join(reg, rs, ev, reg.test_members()[:4])
     assert rc.run_kind(reg, ev) == "adhoc" and not rc.run_confirms(reg, ev)
     text = " ".join(consequences.consequence("lock", reg, ev))
-    assert "No confirmations — Join is the commitment." in text and "confirmation DM" not in text
+    assert "On an ad hoc run Join is the commitment, so nobody is asked to confirm." in text and "DM" not in text
 
 
 def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
@@ -68,20 +71,20 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     names = [m.display_name for m in reg.test_members()[:5]]
     join(reg, rs, ev, reg.test_members()[:5])
     assert consequences.consequence("cancel", reg, ev)[0] == "The sheet closes for the 5 people who answered."
-    assert consequences.consequence("cancel", reg, ev)[1].startswith("Nobody is DMed")  # the DM rule (phase 2)
-    assert consequences.consequence("clear", reg, ev) == ["The board is empty — nothing to clear."]
+    assert consequences.consequence("cancel", reg, ev)[1].startswith("Nobody gets a DM")  # the DM rule (phase 2)
+    assert consequences.consequence("clear", reg, ev) == ["The board is already empty."]
     ev.layout = [names[:3], names[3:]]
-    assert consequences.consequence("clear", reg, ev)[0] == "5 placements go back to not placed."
-    assert consequences.consequence("release", reg, ev) == ["Nothing is sent before lock — the seat only comes off the board."]
+    assert consequences.consequence("clear", reg, ev)[0] == "The 5 people on the board go back to Not placed."
+    assert consequences.consequence("release", reg, ev) == ["The seat comes off the board.", "Nothing is sent before the lock."]
     lock_with_board(reg, rs, ev, names)
     for m in reg.test_members()[:5]:
         reg.add_placement_ask(m.discord_id, ev.team, m.display_name, "t")
     cancel = consequences.consequence("cancel", reg, ev)
-    assert cancel[0] == "The sheet closes; 5 rostered seats are released, 5 open confirmation asks close." and cancel[1].startswith("Nobody is DMed")
-    assert consequences.consequence("clear", reg, ev)[0].startswith("Every seat is released: 5 rostered see it on their confirmation card")
-    assert consequences.consequence("release", reg, ev, name="Jonny")[0].startswith("Jonny sees the seat was released")
-    assert consequences.consequence("release", reg, ev)[0].startswith("The seat is released: they see it")
-    assert consequences.consequence("lock", reg, ev) == ["Already locked."]
+    assert cancel[0] == "The sheet closes, the 5 rostered lose their seats and 5 open asks close." and cancel[1].startswith("Nobody gets a DM")
+    assert consequences.consequence("clear", reg, ev)[:2] == ["All 5 seats are released.", "The 5 rostered see it on their Confirm card and their Me page."]
+    assert consequences.consequence("release", reg, ev, name="Jonny")[:2] == ["Jonny's seat is released.", "They see it on their card and their Me page."]
+    assert consequences.consequence("release", reg, ev)[0] == "The seat is released."
+    assert consequences.consequence("lock", reg, ev) == ["This run is already locked."]
     assert consequences.consequence("nonsense", reg, ev) == []
     assert set(consequences.consequences_json(reg, ev)) == set(consequences.VERBS) | {"release_named"}
 
@@ -96,7 +99,8 @@ def test_release_named_is_the_per_member_sentence_with_a_token_the_board_fills_i
     names = [m.display_name for m in reg.test_members()[:5]]
     join(reg, rs, ev, reg.test_members()[:5])
     before = consequences.consequences_json(reg, ev)
-    assert before["release_named"] == before["release"] == "Nothing is sent before lock — the seat only comes off the board."
+    assert before["release"] == "The seat comes off the board. Nothing is sent before the lock."
+    assert before["release_named"] == f"{consequences.NAME_TOKEN} comes off the board. Nothing is sent before the lock."
     lock_with_board(reg, rs, ev, names)
     after = consequences.consequences_json(reg, ev)
     assert consequences.NAME_TOKEN in after["release_named"] and consequences.NAME_TOKEN not in after["release"]
@@ -112,7 +116,7 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
     start = (reg.now_local() + timedelta(days=2, hours=3)).replace(second=0, microsecond=0)
     adhoc = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=rc.ADHOC_SCHEDULE)
     d = c.get(f"/api/run/{adhoc.key}", headers=bearer()).json()
-    assert d["consequences"]["lock"] == "The board becomes the roster. No confirmations — Join is the commitment."
+    assert d["consequences"]["lock"] == "The board becomes the roster. On an ad hoc run Join is the commitment, so nobody is asked to confirm."
     assert "DM" not in d["consequences"]["lock"], "the old SheetCard text promised confirmation DMs on ad hoc runs (§4 item 5)"
     assert set(d["consequences"]) == set(consequences.VERBS) | {"release_named"}
     from pathlib import Path
@@ -128,13 +132,13 @@ def test_news_consequence_and_decision_refusal(reg):
     add_news(reg)
     ps = news.ProposalStore(reg.store, reg.key)
     p = ps.create(reg, proposal_data())
-    line = news.consequence(p, reg, "approved")[0]
-    assert line.startswith("Approved: the apply job carries it out at its next run") and "no restart: " in line and "aim healer: the default aim → " in line, line
-    assert news.consequence(p, reg, "dismissed")[0].startswith("Dismissed: nothing changes")
+    assert news.consequence(p, reg, "approved") == ["The apply job makes this change at its next run, within 15 minutes.", "The bot doesn't restart for it."]
+    assert "aim healer: the default aim → " in news.edit_words(reg, p), "the exact edit is the decide screen's context line (flows_news)"
+    assert news.consequence(p, reg, "dismissed")[0].startswith("Nothing changes")
     assert news.decision_refusal(reg.store, reg, p.id, "approved", 5) is None
     assert "no proposal" in news.decision_refusal(reg.store, reg, "000000-dead", "approved", 5)
     ps.move(p.id, "approved", "Kessa", officer=True, job=False, by_id=5)
-    assert news.decision_refusal(reg.store, reg, p.id, "approved", 5).startswith("already approved by Kessa"), "a repeat names the first decider (§3.4 X2)"
+    assert news.decision_refusal(reg.store, reg, p.id, "approved", 5).startswith("Kessa already approved it"), "a repeat names the first decider (§3.4 X2)"
     q = ps.get(p.id)
     assert news.consequence(q, reg, "dismissed")[0] == "This withdraws the approval before the job picks it up."
     dev = ps.create(reg, proposal_data(kind="needs_developer"))
@@ -346,7 +350,7 @@ def test_lock_card_button_locks_on_the_press_and_reports_a_bug_with_the_generic_
     async def go():
         state["fail"] = True
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
-        assert "3 rostered get a confirmation DM" in h.text
+        assert "The 3 rostered get the Confirm or Can't make it DM" in h.text
         await h.press("Lock now")
         assert configops.GENERIC_ERROR in h.text and "solver exploded" not in h.text
         assert any(lvl == "error" and "solver exploded" in text for lvl, text in bot.ops.lines)
@@ -377,7 +381,7 @@ def test_test_clear_is_the_decide_screen(reg, rs, monkeypatch):
 
     async def go():
         await FLOWS["test_clear"](h.command(), reg)
-        assert "Cancels 1 test run, deletes 16 puppets, analytics cards resume." in h.text and h.buttons() == ["Clear the test bench", "Back"]
+        assert "1 test run is cancelled, 16 puppets are deleted and the analytics cards resume." in h.text and h.buttons() == ["Clear the test bench", "Back"]
         assert calls == []
         await h.press("Clear the test bench")
         assert calls == [("Officer", h.user.id)] and "16 test member(s) removed" in h.text and bot.ops.lines[-1][0] == "warn"
@@ -386,7 +390,7 @@ def test_test_clear_is_the_decide_screen(reg, rs, monkeypatch):
         ev.state = "cancelled"
         rs.save(ev, "x")
         await FLOWS["test_clear"](h.command(), reg)
-        assert h.text == "Nothing to clear — no test members and no test runs."
+        assert h.text == "The test bench is already empty."
 
     run(go())
 
