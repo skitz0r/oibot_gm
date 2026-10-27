@@ -162,8 +162,9 @@ function SheetRow({ s, me, meta, ask, onDone }: { s: MySheet; me: Me; meta: Meta
   return (
     <Stack gap={4} py={4} style={{ borderBottom: "1px solid var(--mantine-color-slate-6)" }}>
       <Group justify="space-between" wrap="nowrap">
-        <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}{s.kind === "adhoc" ? " · ad hoc" : ""}</Text><Text size="xs" c="dimmed">{s.when}{s.character ? ` · ${s.character}` : ""}{s.regular && !s.status ? " · you're a regular: answer it" : ""}</Text></Box>
-        <Badge variant="light" color={s.rostered ? "teal" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.rostered ? `rostered${s.roster && s.roster > 1 ? ` · roster ${s.roster}` : ""}` : s.label || "not answered"}</Badge>
+        <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}{s.kind === "adhoc" ? " · ad hoc" : ""}</Text><Text size="xs" c="dimmed">{s.when}{s.state_word ? ` · ${s.state_word}` : ""}{s.character ? ` · ${s.character}` : ""}{s.regular && !s.status ? " · you're a regular: answer it" : ""}</Text></Box>
+        {/* the badge's words are the server's (rc.answer_word): "not rostered" for a joiner the lock left out, never "Join" on a locked run */}
+        <Badge variant="light" tt="none" color={s.rostered ? "teal" : s.state !== "open" && s.status === "in" ? "gray" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.badge || s.label || "not answered"}</Badge>
       </Group>
       {s.may_answer && (
         <Group gap={6} wrap="wrap">

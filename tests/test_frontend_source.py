@@ -185,3 +185,61 @@ def test_rosters_page_reads_by_its_shape():
             assert "DD" not in fmt and "HH" not in fmt, f"{f.name}: {fmt}"
     for f in (page, card, board, (SRC / "components" / "board" / "FillModal.tsx").read_text(), (SRC / "components" / "board" / "shared.tsx").read_text()):
         assert not re.search(r'(?:color|c)=\{?"yellow', f), "amber marks a value changed from the default; Rosters has none"
+
+
+def _code_only(text: str) -> str:
+    """The file without its comments (// … and /* … */, JSX {/* … */} included) — a comment may name a word, code may not."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return "\n".join(re.sub(r"(?<![:\"'`])//.*$", "", line) for line in text.splitlines())
+
+
+def test_the_run_vocabulary_has_no_copy_in_the_frontend():
+    """Design §5.56 phase 2: every state word, confirmation mark, ask kind, answer word and run verb's label is defined
+    ONCE in Python (constants / raidcycle / raid_buttons.RUN_WORDS) and reaches the site through /api/meta or the run's
+    JSON — the pages print meta.run_states / run_labels / marks / ask_kinds / ask_answers / run_words, never a literal."""
+    import sys
+
+    sys.path.insert(0, str(SRC.parents[1] / "src"))
+    from oibot_gm import raidcycle as rc
+    from oibot_gm.constants import MARK, MARK_WORDS
+    from oibot_gm.raid_buttons import RUN_WORDS
+
+    files = [SRC / "pages" / "Rosters.tsx", SRC / "pages" / "Me.tsx", SRC / "components" / "RaidCard.tsx", *sorted((SRC / "components" / "board").glob("*.tsx"))]
+    words = ([w for k, w in RUN_WORDS.items() if k not in ("ask", "loot", "lock", "locked", "reopen")]  # short verbs other screens share
+             + [w for w in rc.RUN_STATE_WORDS.values() if " " in w] + ["finished"]
+             + [w for w in rc.ASK_HOW.values() if " " in w] + [w for k, w in rc.ASK_ANSWER_WORDS.items() if k in ("yes", "no", "expired")]
+             + list(rc.BANK_WORDS.values()) + [rc.NO_CONFIRMATIONS, rc.FIRST_COME, rc.LEFTOVERS, "Join is the commitment", "autofill paused"]
+             + [MARK_WORDS[k] for k in ("yes", "expired")])
+    marks = [m for m in MARK.values()] + ["✓", "✗"]
+    hits = []
+    for f in files:
+        code = _code_only(f.read_text())
+        for w in words:
+            if re.search(r"[\"'`>]\s*" + re.escape(w) + r"\s*[\"'`<]", code):
+                hits.append(f"{f.name}: {w!r}")
+        for m in marks:
+            if m in code:
+                hits.append(f"{f.name}: mark {m!r}")
+    assert not hits, "a copy of the server's words in the page:\n" + "\n".join(hits)
+    card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
+    for field in ("meta.run_states", "markOf(meta", "run_labels", "run_words", "ask_kinds", "ask_answers"):
+        assert field in card or field in (SRC / "components" / "board" / "shared.tsx").read_text(), field
+    assert "s.badge" in (SRC / "pages" / "Me.tsx").read_text(), "Me's badge is the server's words (rc.answer_word)"
+    assert "<LevelChip" in (SRC / "pages" / "Rosters.tsx").read_text() and "<LevelChip" in (SRC / "pages" / "Readiness.tsx").read_text()
+
+
+def test_the_board_draws_no_text_beside_icons():
+    """Design §5.56 phase 2 (the Iconography rule): no "totems: Earth SoE" line under a group, no "3 tanks (max 2)" beside
+    the count, no "synergy 41" / "gap 3" numbers, no "pinned" / "bench" badge (a pin icon with its tooltip), and the
+    still-short line is role icons + numbers from the plan's data — never the plain-text sentence."""
+    board = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    preview = _code_only((SRC / "components" / "board" / "BoardPreview.tsx").read_text())
+    fill = _code_only((SRC / "components" / "board" / "FillModal.tsx").read_text())
+    shared = _code_only((SRC / "components" / "board" / "shared.tsx").read_text())
+    split = _code_only((SRC / "components" / "board" / "SplitModal.tsx").read_text())
+    card = _code_only((SRC / "components" / "board" / "SheetCard.tsx").read_text())
+    assert "totems:" not in board + preview and "picks.join" not in board + preview
+    assert "(max ${" not in board and "synergy" not in shared + split and "gap {" not in split
+    assert "plan.still_short" not in fill and "short_after" in fill and "const KIND" not in fill
+    assert '"pinned" : "bench"' not in card and "<PinMark" in card and "<PinMark" in board
+    assert "Cancel run</Button>" not in card and "Post a line in the signup channel" not in card and "Tell the channel — a fixed line, no reason" in card

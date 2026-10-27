@@ -154,7 +154,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
             e.add_field(name=f"No thanks ({len(declined)})", value=" · ".join(sg.display_name + OUT_MARK.get(sg.source, "") for sg in declined)[:EMBED_FIELD_MAX], inline=False)
 
     if state == "cancelled":
-        e.title, e.description = f"{tag}Cancelled · {name}", f"<t:{unix}:F>"
+        e.title, e.description = f"{tag}{rc.RUN_STATE_WORDS['cancelled'].capitalize()} · {name}", f"<t:{unix}:F>"
         return e, None
     if state == "open":
         counts = {r: sum(1 for s in ins if s.role == r) for r in ROLES}
@@ -177,8 +177,8 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         adhoc = rc.run_kind(reg, ev) == "adhoc"  # first come, first rostered; Join is the commitment when confirmations are off
         failed = (f"Lock failed {reg.local12(ev.lock_tried_at, '%a %I:%M %p')} — the sheet stays open, retrying · " if ev.lock_error and ev.lock_tried_at
                   else "Lock failed — the sheet stays open, retrying · " if ev.lock_error else "")
-        pins = rc.pin_counts(ev)  # numbers only (who is officer data): 'Pinned: 2 · Bench-pinned: 1'
-        e.set_footer(text=failed + ("test run · " if test else "") + ("First come, first rostered · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me"
+        pins = rc.pin_counts(ev)  # numbers only (who is officer data): 'Pinned: 2 · Kept off: 1'
+        e.set_footer(text=failed + ("test run · " if test else "") + (rc.FIRST_COME.capitalize() + " · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me"
                      + (f" · {pins}" if pins else ""))
         return e, sheet_view(reg, ev.key)
     # locked | done: the roster(s) as the board shows them, a group per column
@@ -187,7 +187,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     marks = {n: MARK.get(a) for n, a in conf.items()} if state == "locked" else {}
     tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
     if state == "done":
-        e.title, e.description = f"{tag}Finished · {name}", f"<t:{unix}:F>" + (f"\n**{len(ev.seated())}** rostered" if rosters else "")
+        e.title, e.description = f"{tag}{rc.RUN_STATE_WORDS['done'].capitalize()} · {name}", f"<t:{unix}:F>" + (f"\n**{len(ev.seated())}** rostered" if rosters else "")
     else:
         _soft, _hard, confirm = run_times(reg, ev, team)
         confirms = rc.run_confirms(reg, ev)
@@ -285,7 +285,7 @@ def ask_line(reg: Registry, ico, ask) -> str:
     return f"asked {ask.display_name} to come as {what}{tail}{when}"
 
 
-KIND_WORD = {"sub": "bench", "regular": "regular, no answer", "unanswered": "no answer", "other": "not a regular", "flex": "flex", "offspec": "offspec", "alt": "alt"}
+KIND_WORD = rc.ASK_HOW  # one map for how an ask reaches someone, every surface (design §5.56 phase 2)
 SUGGEST_LINES = 3  # a card names this many seats; Suggest… lists them all with their alternates
 
 
@@ -442,7 +442,7 @@ def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
         items.append(ui.Button(label="Open the board", style=discord.ButtonStyle.link, url=url))
     # one order in every state — Open · Lock · Fill · Loot · Cancel — so nothing moves when the run locks; what does not
     # apply is disabled in place (fill and the loot council only run on a locked roster)
-    items.append(RunButton(reg.key, ev.key, "lock", disabled=locked, label="Locked" if locked else None))
+    items.append(RunButton(reg.key, ev.key, "lock", disabled=locked, label=RUN_WORDS["locked"] if locked else None))
     items.append(RunButton(reg.key, ev.key, "fill", disabled=not locked))
     items.append(RunButton(reg.key, ev.key, "loot", disabled=not locked))  # the raid-night hub reaches the loot council (§3.1 L09)
     items.append(RunButton(reg.key, ev.key, "cancel"))
@@ -450,16 +450,16 @@ def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
 
 
 def night_actions_row(reg: Registry, ev: rc.RaidEvent):
-    """The lock card's second row — the raid-night levers (design B2/B4/B7): Remind the unconfirmed (greyed when
-    rc.remind_refusal says it can't go now, e.g. within the hour), Pause / Resume autofill (D18), End the run now
+    """The lock card's second row — the raid-night levers (design B2/B4/B7): Remind the unanswered (greyed when
+    rc.remind_refusal says it can't go now, e.g. within the hour), Pause / Resume automatic asks (D18), End the run
     (after the scheduled start; LootMixin.end_run). One order always; what does not apply is disabled in place."""
     ui = discord.ui
     started = datetime.now(ev.start.tzinfo) >= ev.start
-    remind_no = rc.remind_refusal(reg, ev) if rc.run_confirms(reg, ev) else "no confirmations"
+    remind_no = rc.remind_refusal(reg, ev) if rc.run_confirms(reg, ev) else rc.NO_CONFIRMATIONS
     down = bool((boss_progress(reg, ev) or {}).get("all_down"))  # the last boss is down: End is the next thing to press (L12)
     return ui.ActionRow(RunButton(reg.key, ev.key, "remind", disabled=bool(remind_no)),
-                        RunButton(reg.key, ev.key, "pause", label="Resume autofill" if ev.autofill_paused else None),
-                        RunButton(reg.key, ev.key, "end", disabled=not (started or down), label="End the run" if down else None))
+                        RunButton(reg.key, ev.key, "pause", label=RUN_WORDS["resume"] if ev.autofill_paused else None),
+                        RunButton(reg.key, ev.key, "end", disabled=not (started or down)))
 
 
 def boss_progress(reg: Registry, ev: rc.RaidEvent) -> dict | None:
@@ -551,7 +551,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
     waiting = rc.not_answered(reg, ev) if officer else []  # the regulars who haven't answered (every main while the series has none); ad hoc: nobody
     if waiting:
         whose = {"regulars": "regulars", "everyone": "no regulars set: everyone", "test": "test bench"}.get(h.get("expected_from"), "")
-        lines = [f"**No answer** {len(waiting)}" + (f" · {whose}" if whose else "") + (" · nudged" if ev.nudged else "")]
+        lines = [f"**Haven't answered** {len(waiting)}" + (f" · {whose}" if whose else "") + (" · reminded" if ev.nudged else "")]
         lines += [f"{ico('spec', f'{c.cls}:{c.spec}')} {c.label}" for _m, c in waiting[:NO_ANSWER_LINES]]  # one member per line
         if len(waiting) > NO_ANSWER_LINES:
             lines.append(f"-# +{len(waiting) - NO_ANSWER_LINES} more on the board")
@@ -566,7 +566,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
     sug = suggested_block(reg, ico, plan) if plan else ""
     if sug:
         parts += [ui.TextDisplay(sug), suggest_row(reg, ev, plan), ui.Separator()]
-    parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else " · first come, no confirmations")))
+    parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else f" · {rc.NO_CONFIRMATIONS}")))
     if officer:
         parts.append(run_actions_row(reg, ev, locked=False))
     worst = "red" if short or (plan and plan.short["roles"]) else "amber" if missing or waiting else "green"
@@ -595,7 +595,7 @@ def leftover_block(reg: Registry, ev: rc.RaidEvent, ico) -> str:
     left = rc.leftovers(reg, ev, ev.all_rosters)
     if not left:
         return ""
-    lines = [f"**Leftovers ({len(left)})**"] + [f"{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}" for p in left[:LEFTOVER_LINES]]
+    lines = [f"**{rc.LEFTOVERS} ({len(left)})**"] + [f"{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}" for p in left[:LEFTOVER_LINES]]
     if len(left) > LEFTOVER_LINES:
         lines.append(f"-# +{len(left) - LEFTOVER_LINES} more on the board")
     reason = rc.run_split_reason(reg, ev)
@@ -644,7 +644,7 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
     tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
     rd = reg.raid_def(ev.instance)
     head = _header(reg, ev, f"🔒 {rd.get('name', ev.instance)}" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else ""),
-                   [f"**{len(r.selected)}** rostered" + (f" · synergy {r.synergy_value}" if r.synergy_value else "") + "   " + _role_counts(ico, r.selected), tally if confirms else "-# first come — no confirmations: Join is the commitment"])
+                   [f"**{len(r.selected)}** rostered" + "   " + _role_counts(ico, r.selected), tally if confirms else f"-# {rc.NO_CONFIRMATIONS}"])
     summaries = _group_summaries(reg, r)
     parts = [head, ui.Separator()]
     for gi in range(len(r.groups)):
@@ -675,7 +675,7 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
     tail += boss_lines(reg, ev, i)
     if i == 0 and ev.state == "locked":
         site = rc.asks_on_site(reg, ev)
-        tail.append(f"-# fill: {rc.fill_state_text(reg, ev)}" + (f" · {site} ask{'s' if site != 1 else ''} wait on the site" if site else "")
+        tail.append(f"-# {rc.fill_state_text(reg, ev)}" + (f" · {site} ask{'s' if site != 1 else ''} wait on the site" if site else "")
                     + (f" · reminded {reg.local12(ev.reminded_at, '%I:%M %p')}" if ev.reminded_at else ""))
     parts += [ui.Separator(), ui.TextDisplay("\n".join(tail)), run_actions_row(reg, ev, locked=True)]
     if i == 0 and ev.state == "locked":
@@ -787,7 +787,7 @@ def closed_layout(reg: Registry, ev: rc.RaidEvent, ico) -> discord.ui.LayoutView
     """What a run's officer cards become once it is cancelled or finished: the header and the last log line. A run
     ENDED less than an hour ago keeps one button, Reopen (design B6 — an end by mistake; never a cancelled run, D19)."""
     ui = discord.ui
-    title = ("Cancelled" if ev.state == "cancelled" else "Finished") + f" · {raid_name(reg, ev)}"
+    title = rc.RUN_STATE_WORDS["cancelled" if ev.state == "cancelled" else "done"].capitalize() + f" · {raid_name(reg, ev)}"
     view = ui.LayoutView(timeout=None)
     parts = [_header(reg, ev, title, [f"-# {ev.log[-1]}"] if ev.log else [])]
     if ev.state == "done" and rc.reopen_refusal(reg, ev) is None:
@@ -804,7 +804,7 @@ def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool) -> 
     nd = rc.needs(reg, ev)
     rows = rc.confirmations(reg, ev) if rc.run_confirms(reg, ev) else []
     tally = (f"✅ {sum(1 for c in rows if c['answer'] == 'yes')} · ⏳ {sum(1 for c in rows if c['answer'] is None)} · ❌ {sum(1 for c in rows if c['answer'] in ('no', 'expired'))}"
-             if rows else "first come — no confirmations")
+             if rows else rc.NO_CONFIRMATIONS)
     lines = [f"**{len(ev.seated())}** rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + "   " + _role_counts(ico, ev.seated()), tally]
     short = bool(nd["headcount"] or nd["roles"])
     lines.append(f"**Short** {gaps_text(ico, nd)}" if short else "**Full**")
@@ -812,7 +812,7 @@ def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool) -> 
         waiting = [c["display_name"] + (" (site)" if c["channel"] == "web" else "") for c in rows if c["answer"] is None]
         if waiting:
             lines.append("**Waiting on** " + ", ".join(waiting[:15]) + (f" +{len(waiting) - 15}" if len(waiting) > 15 else ""))
-        lines.append(f"-# fill: {rc.fill_state_text(reg, ev)}")
+        lines.append(f"-# {rc.fill_state_text(reg, ev)}")
     parts = [_header(reg, ev, f"🔒 Roster health · {raid_name(reg, ev)}", lines)]
     if officer:
         parts += [run_actions_row(reg, ev, locked=True), night_actions_row(reg, ev)]
@@ -1176,4 +1176,4 @@ def why_not_text(p, who: str) -> str:
 
 # the buttons the layouts place; imported last so `raid_buttons` (which imports this module's helpers at its own
 # bottom) always finds every name above bound, whichever module is imported first
-from .raid_buttons import FillButton, LootButton, LootPick, PlaceButton, RunButton, SignupButton, sheet_view  # noqa: E402
+from .raid_buttons import RUN_WORDS, FillButton, LootButton, LootPick, PlaceButton, RunButton, SignupButton, sheet_view  # noqa: E402

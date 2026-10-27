@@ -105,9 +105,6 @@ function weekSentence(r: WeekRule): { text: string; changed: boolean }[] {
 /** What WhenItRuns reads: the Raids card's raid, or the Rosters page's (both carry the same server fields). */
 export type RunsOf = { live_runs?: LiveRun[]; next_run?: NextRun | null; first_open_words?: string; opened: boolean; schedules?: unknown[] };
 
-/** A live run's state in the block's words (design §5.54) — the Rosters card's chip says the same. */
-export const RUN_STATE_WORDS: Record<string, string> = { open: "sheet open for signup", locked: "locked — the roster stands" };
-
 /** When the raid runs, from the runs themselves (design §5.54): the sheets open or locked right now, then the next run
  *  its schedules will open, then — before the first sheet ever opens — when that is. A raid with none of these says so
  *  and how to change it. The Rosters page (design §5.56) passes `here` (a live run's time jumps to its card on this
@@ -122,7 +119,7 @@ export function WhenItRuns({ r, owner, here = false, upcoming, nothing: nothingT
         <li key={e.key} className={css.run}>
           <span className={[css.runDot, e.state === "locked" ? css.runLocked : css.runOpen].join(" ")} />
           {here ? <a href={`#run-${e.key}`} className={css.runWhen}>{e.when}</a> : <Link to={`/rosters#run-${e.key}`} className={css.runWhen}>{e.when}</Link>}
-          <span className={css.runWhat}>{RUN_STATE_WORDS[e.state] || RUN_STATE_WORDS.locked} · {e.schedule}</span>
+          <span className={css.runWhat}>{e.state_word || e.state} · {e.schedule}</span>{/* the server's state words (rc.RUN_STATE_WORDS) — the Rosters card's chip says the same */}
         </li>
       ))}
       {upcoming ?? (r.next_run && (

@@ -230,7 +230,7 @@ async def pin_member(bot, reg: Registry, rs, ev, m: Member, pin: str | None, *, 
     """Pin someone to the roster / keep them on the bench for the lock / clear it — the one path behind the SetWizard,
     the site's row menu (POST /api/admin/action), POST /api/run/{key}/pin (MCP `pin`) and plain text's `pin` op:
     pin_write, the audit line (`audit=False` when the caller writes it: configops.apply_async audits what it returns),
-    then the Discord sheet re-rendered so its footer's 'Pinned: N · Bench-pinned: N' is current. Nobody is told."""
+    then the Discord sheet re-rendered so its footer's 'Pinned: N · Kept off: N' is current. Nobody is told."""
     line = pin_write(reg, rs, ev, m, pin, by)
     if audit and getattr(bot, "ops", None) is not None:
         await ops_mod.audited(bot.ops, reg, by, f"{ev.key} {line.replace(': ', ' ', 1)}", via=via, by_id=by_id)  # 'bd-… Kestrel pinned in'

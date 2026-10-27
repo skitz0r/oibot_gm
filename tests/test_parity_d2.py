@@ -81,11 +81,35 @@ def test_advisories_are_officer_only(reg, rs):
     ev = open_test_run(reg, rs)
     join(reg, rs, ev, ms[:10])
     lock_with_board(reg, rs, ev, [m.display_name for m in ms[:10]])
-    ev.rosters[0].advisories = ["Bench instead · Carol +4, Dan -12"]
+    ev.rosters[0].advisories = ["🟢 Closest to a seat · Carol, Dan"]
     rs.save(ev, "advice")
-    assert "Bench instead" in "\n".join(help_mod.run_lines(reg, rs, ev, True))
-    assert "Bench instead" not in "\n".join(help_mod.run_lines(reg, rs, ev, False))
-    assert "Bench instead" not in state(reg, rs, ms[0].discord_id, False, "why am I benched tonight?")
+    assert "Closest to a seat" in "\n".join(help_mod.run_lines(reg, rs, ev, True))
+    assert "Closest to a seat" not in "\n".join(help_mod.run_lines(reg, rs, ev, False))
+    assert "Closest to a seat" not in state(reg, rs, ms[0].discord_id, False, "why am I benched tonight?")
+
+
+def test_discord_cards_say_the_run_in_the_shared_words(reg, rs):
+    """Design §5.56 phase 2: the closed card's title is the state word the site shows (rc.RUN_STATE_WORDS), the lock card
+    carries no group-building number, and the solver's advisory lines read as words — no signed numbers ("Carol +4")."""
+    import inspect
+
+    from oibot_gm import raid_views as views
+    from oibot_gm.roster import explain
+
+    ms = reg.test_members()
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, ms[:10])
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms[:10]])
+    ico = lambda kind, ident: ""  # noqa: E731
+    card = views.lock_layout(reg, ev, rc.run_team(reg, ev), ico, 0)
+    text = "\n".join(c.content for c in card.walk_children() if isinstance(getattr(c, "content", None), str))
+    assert "synergy" not in text and "fill:" not in text and rc.fill_state_text(reg, ev) in text
+    rc.end_run(reg, rs, ev, "t")
+    closed = views.closed_layout(reg, ev, ico)
+    head = "\n".join(c.content for c in closed.walk_children() if isinstance(getattr(c, "content", None), str))
+    assert f"{rc.RUN_STATE_WORDS['done'].capitalize()} · " in head
+    src = inspect.getsource(explain.annotate)
+    assert "{d:+d}" not in src and "Bench instead" not in src and "Unregistered ×" not in src
 
 
 def test_readiness_gives_the_desired_comp_and_the_over_cap_reason(reg, rs):

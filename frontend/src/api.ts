@@ -78,6 +78,17 @@ export interface Meta {
   discord?: { ready: boolean; stale: boolean };
   /** §5.55: the game version has the leveling-guide tool's tables (profiles/<version>/guides.yaml) — the Me page shows its Leveling guide tab */
   guides?: boolean;
+  /** The run's vocabulary, defined once in Python (design §5.56 phase 2) — a page never keeps its own copy: the state words
+   *  (open · locked · done · cancelled), the run verbs' labels (raid_buttons.RUN_WORDS — the Discord buttons' own), the
+   *  confirmation marks with their words (constants.MARK / MARK_WORDS; "waiting" = no answer yet), how an ask reaches
+   *  someone (rc.ASK_HOW) and its answers, the coverage levels' words, and the run's sentences. */
+  run_states: Record<string, string>;
+  run_labels: Record<string, string>;
+  marks: Record<string, { mark: string; words: string }>;
+  ask_kinds: Record<string, string>;
+  ask_answers: Record<string, string>;
+  level_words: Record<string, string>;
+  run_words: { no_confirmations: string; first_come: string; bank: Record<string, string>; not_answered: Record<string, string>; auto_asks_paused: string; pins: Record<string, string>; leftovers: string };
 }
 /** The Me page's Leveling guide tab (GET /api/me/guide, design §5.55): what the member has built from their own RestedXP
  *  import string. `files` = the downloads in order with their words; `groups` = one row per guide group; `built_when` is
@@ -93,7 +104,7 @@ export interface Absence { start: string; end: string; reason: string | null; sp
 /** One live sheet on the Me page (web/api_me.py sheet_row_extras): `may_answer` = Join / Bench / No thanks apply now (open);
  *  `may_cant` = Can't make it… (with a note) applies (locked, rostered or joined); `queue_note` = ad hoc and joined — a change
  *  away from Join asks this once; `receipt` = the state in words (rc.answer_receipt). The row renders from these only. */
-export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean; may_answer?: boolean; may_cant?: boolean; queue_note?: string | null; receipt?: string | null }
+export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; badge?: string; state_word?: string; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean; may_answer?: boolean; may_cant?: boolean; queue_note?: string | null; receipt?: string | null }
 /** One recurring schedule the viewer is a regular of (the Me page's My regular raids). */
 export interface MyRegular { series: string; label: string; character: string; cls: string; spec: string; role: string }
 /** One seat of the group an ask would put you in (spec icon alone on the card; `me` = you). */
@@ -117,20 +128,20 @@ export interface Aura { abbr: string; colour: string; art: string | null; name: 
 export interface GroupSummary {
   roles: Record<string, number>; synergy: number | null; unmet: string[]; assumptions: string[];
   raid: { abbr: string; colour: string; art?: string | null; name: string; ok: string; n: number; detail: string; status: string }[];
-  groups: { n: number; members: { name: string; member: string; cls: string; spec: string; role: string }[]; present: Aura[]; missing: Aura[]; picks: string[]; value: number }[];
+  groups: { n: number; members: { name: string; member: string; cls: string; spec: string; role: string }[]; present: Aura[]; missing: Aura[]; picks: { element: string; id: string; abbr: string; name: string }[]; value: number }[];
 }
 export interface Signup { uid: string; display_name: string; character: string; cls: string; spec: string; offspec: string | null; role: string; status: string; label: string; source: string; note: string | null; pin: "in" | "out" | null }
 export interface Seat { display_name: string; character: string; cls: string; spec: string; role: string; uid?: string | null; answer?: string | null; signed_at?: string | null }
 export interface BoardRoster { n: number; rostered: number; synergy: number | null; advisories: string[]; groups: Seat[][]; summary: GroupSummary }
 /** `leftovers` = joiners the full roster(s) left out (names, also in `bank`); `another` = one line when leftovers + bench + pool could make another run. */
-export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[]; leftovers?: string[]; another?: string | null }
+export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[]; leftovers?: string[]; another?: string | null; balance?: string | null }
 /** Why the joiners make fewer runs than the headcount allows: run `run` is short these tank/healer counts (roles_allow 0 = not even one). */
 export interface SplitReason { bodies_allow: number; roles_allow: number; run: number; short: Record<string, number> }
 export interface Confirmation { uid: string | null; display_name: string; character: string; cls: string; spec: string; role: string; roster: number; answer: string | null; asked_at: string | null }
 /** A regular of the run's series and what they answered (status null = no answer). */
 export interface RegularAnswer { uid: string; display_name: string; character: string; cls: string; spec: string; role: string; status: string | null; source: string | null; signed_as: string | null }
 export interface Sheet {
-  key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; live: boolean; fill_state: string;
+  key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; state_word?: string; live: boolean; fill_state: string;
   counts: Record<string, number>; rostered: number; n_rosters: number;
   /** recurring (has a series and regulars) or ad hoc (first come); `confirms` false = Join is the commitment */
   kind?: "recurring" | "adhoc"; series?: string | null; series_name?: string | null; confirms?: boolean; test?: boolean;
@@ -154,7 +165,7 @@ export interface Sheet {
     bosses?: { done: number; total: number | null; all_down: boolean; text: string } | null };
 }
 /** A raid's run open or locked now (never a test run), in words — the "When it runs" block on Raids and Rosters. */
-export interface LiveRun { key: string; when: string; state: string; schedule: string }
+export interface LiveRun { key: string; when: string; state: string; state_word?: string; schedule: string }
 /** The next run an active schedule opens that has no sheet yet; `opens` = when its sheet opens on its own. */
 export interface NextRun { when: string; schedule: string; opens?: string }
 /** One upcoming run of an active schedule (web/api.py rosters_data → rc.upcoming_rows): `can_open` false comes with `why`, the server's sentence. */
@@ -208,7 +219,7 @@ export interface RaidRule {
   rev?: string;
 }
 export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[]; schedule_kinds: string[]; schedule_cadence: string[]; max_rosters: number }
-export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number; reason?: SplitReason | null; reason_text?: string | null }
+export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number; balance?: string | null; reason?: SplitReason | null; reason_text?: string | null }
 export interface FillAskRow { uid?: string; display_name: string; kind: string; character: string; spec: string; cls: string | null; role: string; reason: string; why?: string | null; pair: string | number | null; vacates?: string | null }
 /** One seat the planner covers: `options[0]` the suggestion, then alternates; an option is one ask or a tied swap + backfill. role "" = a plain seat after lock. */
 export interface PlanSeat { role: string; options: FillAskRow[][] }

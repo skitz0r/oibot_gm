@@ -409,7 +409,7 @@ Members never fill in standing availability. The unit of work is a **run**: one 
 
 - **Raid config** (`raids.yaml` defaults, guild overrides via `/gm config raid`, the Raids page, or plain text `raid_set`): `slots` (recurring times, e.g. `Tue 19:30`), `signup_lead_hours` (sheet opens this long before the slot; default 120, Barrow Deeps 48), `nudge` (on) and `nudge_hours_before` (default halfway between open and lock: `lock + (lead − lock) / 2`), `lock_hours_before` (24), `confirm_hours_before` (6), `fill_ask_hours` (4: silence on a fill DM counts as no), `autofill` (on: the bot fills released seats by DM after lock), `open_dm` (off: DM every main when the sheet opens), `split_policy`, `weights` (seat-selection bonuses: `rank`, `main`, `sat_out`, `signup_order`). `autofill`/`open_dm` replaced the standing-roster `cutoff_*` / `open_days_before` settings (2026-09-17); `/gm config roster` and the `team_*` plain-text ops are gone. Slots before `first_open` never open.
 - **Sheet** (`RaidEvent`, key `<abbr>-<MMDD>-<HHMM>`, an ephemeral roster of the same key; run states `open | locked | done | cancelled`): an open sheet has **Join / Bench / No thanks** (statuses `in` / `sub` / `out`; `tentative` is gone — confirmation covers "probably"); a locked sheet shows the roster(s) group by group, a **Not rostered** row (joiners left off), the Bench and No thanks rows and one **Can't make it** button; cancelled and finished sheets say so. "Sign as…" picks an alt or offspec. Absences pre-fill Out. One nudge by DM to non-responders at `nudge_hours_before`. The member-facing word is **rostered** (never "seated").
-- **Pins** (Rosters page, per run): *Pin to roster* / *Keep on bench* on a joiner's menu (`Signup.pin` = `in` / `out`); the solver honours them as hard constraints at lock, on Auto-fill and in split previews.
+- **Pins** (Rosters page, per run): *Pin to roster* / *Keep off the roster* on a joiner's menu (`Signup.pin` = `in` / `out`); the solver honours them as hard constraints at lock, on Auto-fill and in split previews.
 - **Pre-lock, on the site** (Rosters page, 2026-09-17): signups by class (Raid-Helper style) with Bench / No thanks rows; the **board** = bank of Join answers + groups, drag and drop (`RaidEvent.layout`, `POST /api/run/{key}/layout`), per-group aura coverage and raid-wide icons recomputed server-side on every drop (`comp.groups_summary`, thresholds: any beneficiary); **Auto-fill** = `raidcycle.autofill` (solver with the officers' placements as hard pins, `force_out` for other rosters); the layout is what `propose()` seats at lock. Rule breaks (3 tanks in a group) are shown, not refused. After lock the board is the roster: group moves are free, bench→group is a substitution (`apply_layout_locked` → confirmation DM), group→bank frees the seat. A slot with more Join signups than the raid size becomes several rosters on one board.
 - **Lock** at `lock_hours_before` (or early by an officer): the last draft becomes the roster(s); the sheet is edited to show them; every rostered member gets a **Confirm / Can't make it** DM (`PlaceButton` on the run's roster key). The Me page mirrors the ask.
 - **Confirmation deadline** at `confirm_hours_before`: unanswered = out (seat freed, signup marked `no-confirm`). Declines and callouts free the seat immediately; the **fill engine** (only after lock, never on an open sheet) asks benched joiners and Bench first, then the rest of its order (§5.16), and a yes puts the person straight into the freed seat. Every fill ask states its deadline (`fill_ask_hours`); a swap (offspec/alt of a rostered player) goes out only when the vacated role stays covered or tied to a backfill ask, and a no from either withdraws the other. Whoever loses a seat — expiry, officer removal on the board, an absence — is DMed that it was released. `/raid out [note]` no longer posts the note publicly: it goes to the run's updates thread. Web: **Fill seats** (locked runs only) previews what is short, who is pending and who would be asked before sending; pages poll every 45 s; *Clear* asks for confirmation; *Cancel run* warns that rostered members are not told automatically; **Propose roster** (one run) / **Propose splits** (several); the bank sorts by signup / spec / role.
@@ -1905,7 +1905,7 @@ read-only copy that never touches `ev.channel_id/message_id`, kept in `RaidEvent
 **Smaller pieces.** `raid_buttons.character_picker`: ≤ `PICKER_BUTTONS = 4` characters → buttons, main first; more →
 one select (main preselected) + "<verb> as <main>"; Join, Bench and No thanks all ask. `OP_GROUP["pin"] = "runs"` (D16)
 with `PLAIN_GROUPS` example text, manual §8c and the PlainPermissions copy; the open sheet's footer adds
-`rc.pin_counts` ("Pinned: 2 · Bench-pinned: 1"). `/me dms on|off` → `Registry.set_dm` (the verb the Me page, the
+`rc.pin_counts` ("Pinned: 2 · Kept off: 1"). `/me dms on|off` → `Registry.set_dm` (the verb the Me page, the
 Members page, plain text `dm` and MCP `set_dm` share); `/me view` leads with the inbox (`inbox.inbox_lines`) and a
 **Mark notices read** button.
 
@@ -3428,6 +3428,59 @@ Left for phase 2 (one vocabulary across web, Discord, Me and the manual) and pha
 44 px targets): the card's action labels (*Fill*, *Lock now*, *Open loot council*, the ⋮ menu), the bank's name, the
 state words and confirmation marks from one map, a locked card's role counts from the roster — on purpose, so each
 phase changes one thing at a time.
+
+**Phase 2 — one vocabulary (built 2026-10-26).** The review found the same thing named three ways across the web card,
+the Discord cards and DMs, the Me page and the manual: *Fill* meant the board's auto-fill, the DM asks and the engine;
+*Bench* meant the answer, the board's unplaced list (*Bank*) and a pin; a finished run read *done*, *Finished* or *the
+run is over*; the confirmations-off sentence had four phrasings; marks, ask kinds and answer words each had a copy in
+the browser. The rule now: **every state word, mark, ask kind, answer word, button label and "short" sentence is
+defined once in Python and reaches the site through `/api/meta` or the run's JSON** — the frontend keeps no copy
+(`tests/test_frontend_source.py::test_the_run_vocabulary_has_no_copy_in_the_frontend` pins it).
+- **Where the words live.** `raidcycle`: `RUN_STATE_WORDS` (*open for signup* · *locked — the roster stands* ·
+  *finished* · *cancelled*), `NO_CONFIRMATIONS` (*no confirmations — Join is the commitment*, the one sentence on the
+  health card, the lock card, the closed brief, the lock's consequence, Remind's refusal and the open preview's rules),
+  `FIRST_COME`, `BANK_WORDS` (*Not placed* before the lock, *Not rostered* after), `LEFTOVERS`, `PIN_WORDS`,
+  `NOT_ANSWERED_WORDS`, `ASK_HOW` (how an ask reaches someone — the fill screens, `raid_views.KIND_WORD` is now this map,
+  the health card's *who could cover* hints: *from the bench: A · offspec: B*, never *+1 sub*), `ASK_ANSWER_WORDS`,
+  `AUTO_ASKS_PAUSED`, `answer_word` (the Me badge) and `balance_words`. `constants`: `MARK` + `MARK_WORDS`, `LEVEL_WORDS`.
+  `raid_buttons.RUN_WORDS`: every run verb's label — `RunButton.LABELS` is built from it, so the Discord buttons and the
+  site's are the same words: **Preview lock**, **Lock now**, **Suggest…** (before the lock), **Fill seats…** (after),
+  **Loot**, **Cancel run…**, **End the run**, **Reopen**, **Remind the unanswered**, **Pause / Resume automatic asks**,
+  **Place the rest** (the board's old *Auto-fill empty seats*). `/api/meta` carries `run_states`, `run_labels`, `marks`,
+  `ask_kinds`, `ask_answers`, `level_words`, `run_words`; a run carries `state_word` (and `live_runs` rows too), the Me
+  page's sheets `badge` + `state_word`, a board and a split preview `balance`.
+- **The site.** The run card's state badge, History's rows and drawer and *When it runs* print the server's state
+  words; the confirmation tally is the Discord card's marks with their words (*✅ 5 confirmed · ⏳ 2 waiting · ❌ 1
+  can't make it*, each with a tooltip; a member line's mark has its words as the tooltip); a locked card's role counts
+  are the roster's (the board's groups), not the joiners'. The buttons mirror the lock card: before the lock *Suggest…*
+  · *Preview lock* (opens the lock screen with the roster drawn) · *Lock now*; after it *Remind the unanswered* · *Pause
+  automatic asks* · *Fill seats…* · *Loot*, with *End the run* beside *Cancel run…* — the ⋮ menu keeps only *Re-post
+  sheet…*. The fill modal's title is the button's word, its kinds and the Detail's answers are `meta.ask_kinds` /
+  `ask_answers`, and *still short* is the plan's `short_after` as role icons + numbers (+ *— recruit*), never the
+  plain-text sentence. The fill state is a sentence (`fill_state_text`: *Asking for open seats — waiting for answers.*,
+  *Automatic asks paused by Jon. …*, *The run is finished.* — never *engine*, never a *fill:* prefix, on Discord too).
+  The not-answered box is titled from `NOT_ANSWERED_WORDS` and tallies the regulars as *Join 3 · Bench 1 · No thanks 2*
+  (no ✓ / ✗ glyphs beside a word). Cancel's checkbox reads *Tell the channel — a fixed line, no reason* (Discord's
+  words); Regulars' Add names the character (*Add Bramblewick*); the Regulars card wears the Readiness chip
+  (`components/LevelChip.tsx`: *ready* / *thin* / *short*, thin slate on both pages); Me's badge says *not rostered* for a
+  joiner the lock left out.
+- **The board.** Its list of joiners without a place is *Not placed* / *Not rostered*; *Leftovers* head it after the
+  lock; a pin is an icon (`PinMark`, the words in its tooltip and the ⓘ legend — *pinned* / *kept off*; the menu's
+  *Keep on bench* is now *Keep off the roster*, the sheet footer's *Bench-pinned* *Kept off*). Nothing is written beside
+  an icon any more: the group's *totems: Earth SoE* line is gone (`comp.groups_summary` sends `picks` as data), an
+  over-cap role is its icon + *3/2* (the cap in the tooltip), a roster header has no *synergy N*, and the split preview
+  and the plain-text proposal compare rosters in words (`rc.balance_words`: *the two rosters are close* / *roster 2 is
+  the weaker*); the numbers stay in the JSON for MCP. The Discord lock card lost its *synergy N* too.
+- **The solver's advisory lines** (officers only) read in the glossary's words: *Tanks 1/2 · could switch: …*, *Not
+  registered: 2 · …*, *Check the name matches · …*, *Playing an offspec to cover a role · …*, *In from the bench · A
+  (Holy, came 3 of 4)*, *Closest to a seat · A, B* (was *Bench instead · A +4, B −12* — objective deltas a person can't
+  read; `bench_whatif` keeps the numbers for code).
+- The manual's §1a gains *The board*, *Not placed / Not rostered*, *Leftovers*, *Suggest… / Fill seats…* and *A run's
+  state*, and *Rostered* names the marks and the confirmations-off sentence; §2a, §4 and §9 use the new labels.
+
+Left for phase 3: the confirm sentences the browser still writes (Remind, End's reopen hour, the board's swap and
+substitute, regulars remove — `consequences.py` verbs), *Move to…* in a chip's ⋮ menu, rev + progress on *Place the
+rest* and the orphan-regular clear, and the 44 px touch targets.
 
 ## 6. Architecture
 

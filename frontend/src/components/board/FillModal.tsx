@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
-import { Badge, Box, Button, Group, Modal, Radio, Stack, Text } from "@mantine/core";
+import { Badge, Box, Button, Group, Modal, Radio, Stack, Text, Tooltip } from "@mantine/core";
 import { ApiError, api, type FillAskRow, type FillPreview, type Meta, type Plan, type Sheet } from "../../api";
 import { GameIcon } from "../Icons";
 import { classColour } from "../../theme";
 import { Eyebrow, fail, ok } from "../Page";
 import { runName } from "./shared";
-
-const KIND: Record<string, string> = { sub: "from the bench", regular: "a regular, no answer", unanswered: "no answer", other: "not a regular", flex: "declared flex", offspec: "offspec", alt: "brings an alt" };
 
 /** One ask: the spec icon they'd play + the character (class colour), the member in dim text, then how and why. */
 function AskLine({ a, meta, why = false }: { a: FillAskRow; meta: Meta; why?: boolean }) {
@@ -16,7 +14,7 @@ function AskLine({ a, meta, why = false }: { a: FillAskRow; meta: Meta; why?: bo
         {a.cls ? <GameIcon meta={meta} kind="spec" id={`${a.cls}:${a.spec}`} size={18} title={`${a.cls} ${a.spec} · ${a.role}`} /> : <GameIcon meta={meta} kind="role" id={a.role} size={18} title={a.role} />}
         <Text size="sm" fw={600} c={a.cls ? classColour(meta, a.cls) : undefined} truncate>{a.character}</Text>
         <Text size="xs" c="dimmed" truncate>{a.display_name}</Text>
-        <Text size="xs" c="dimmed" style={{ flex: "none" }}>· {KIND[a.kind] || a.kind}</Text>
+        <Text size="xs" c="dimmed" style={{ flex: "none" }}>· {meta.ask_kinds[a.kind] || a.kind}</Text>
       </Group>
       {why && a.why && <Text size="xs" c="dimmed" ml={24}>{a.why}</Text>}
     </Box>
@@ -69,7 +67,7 @@ function Suggestions({ plan, meta, picks, setPick, short }: { plan: Plan; meta: 
       {plan.seats.map((st, i) => (
         <Box key={i} p="xs" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8 }}>
           <Group gap={6} mb={4}>{st.role ? <GameIcon meta={meta} kind="role" id={st.role} size={18} title={st.role} /> : <Text size="xs" c="dimmed">seat</Text>}</Group>
-          {st.options.length === 0 ? <Text size="sm" c="red">Nobody can cover it → recruit</Text> : (
+          {st.options.length === 0 ? <Text size="sm" c="red">Nobody can cover it — recruit</Text> : (
             <Radio.Group value={String(picks[i] || 0)} onChange={(v) => setPick(i, Number(v))}>
               <Stack gap={4}>
                 {st.options.map((opt, k) => (
@@ -95,12 +93,28 @@ function Suggestions({ plan, meta, picks, setPick, short }: { plan: Plan; meta: 
           {held > 0 && <Text size="xs" c="dimmed">{held} more wait — at most 3 asks out at once.</Text>}
         </Stack>
       )}
-      <Text size="sm">Still short if everyone says yes: <b>{plan.still_short}</b></Text>
+      <StillShort plan={plan} meta={meta} />
     </Stack>
   );
 }
 
-/** Fill seats (after lock) or Suggest (before lock): the planner's plan with alternates and the exact asks Send DMs.
+/** What stays short if everyone says yes — the plan's `short_after` as data: a bare number for plain seats, role icon +
+ *  number per role (icons stand alone), "recruit" after it; nothing short says so. Never the plain-text sentence. */
+function StillShort({ plan, meta }: { plan: Plan; meta: Meta }) {
+  const sa = plan.short_after || { headcount: 0, roles: {} };
+  const roles = Object.entries(sa.roles || {}).filter(([, k]) => k > 0);
+  if (!sa.headcount && !roles.length) return <Text size="sm">Nothing stays short if everyone says yes.</Text>;
+  return (
+    <Group gap="sm" align="center" wrap="wrap">
+      <Text size="sm">Still short if everyone says yes:</Text>
+      {sa.headcount > 0 && <Tooltip label={`${sa.headcount} open seat${sa.headcount === 1 ? "" : "s"}`}><Text size="sm" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{sa.headcount}</Text></Tooltip>}
+      {roles.map(([role, k]) => <Group key={role} gap={3} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={16} title={role} /><Text size="sm" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{k}</Text></Group>)}
+      <Text size="sm" c="red">— recruit</Text>
+    </Group>
+  );
+}
+
+/** Fill seats… (after lock) or Suggest… (before lock) — the card's buttons and these titles are meta.run_labels, Discord's own: the planner's plan with alternates and the exact asks Send DMs.
  *  Nothing is sent before Send, and Send sends only what is shown (the plan's rev rides with it). */
 export function FillModal({ e, meta, opened, onClose, onSent }: { e: Sheet; meta: Meta; opened: boolean; onClose: () => void; onSent: () => Promise<void> }) {
   const [p, setP] = useState<FillPreview | null>(null);
@@ -127,7 +141,7 @@ export function FillModal({ e, meta, opened, onClose, onSent }: { e: Sheet; meta
     } finally { setSending(false); }
   }
   return (
-    <Modal opened={opened} onClose={onClose} title={`${suggest ? "Suggestions" : "Fill seats"} · ${runName(e)}`} centered size="lg">
+    <Modal opened={opened} onClose={onClose} title={`${(suggest ? meta.run_labels.suggest : meta.run_labels.fill).replace(/…$/, "")} · ${runName(e)}`} centered size="lg">
       <Stack gap="md">
         {busy && <Text size="sm" c="dimmed">Working out who to ask…</Text>}
         {notice && <Text size="sm" c="dimmed">{notice}</Text>}

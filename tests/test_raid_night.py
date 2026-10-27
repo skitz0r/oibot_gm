@@ -407,8 +407,9 @@ def test_paused_autofill_sends_nothing_on_its_own_but_an_officers_send_goes(reg,
     assert run(bot.run_fill(reg, rs, ev, team))[0] == [], "the scheduler / a freed seat / an answer: nothing"
     sent, _ = run(bot.run_fill(reg, rs, ev, team, by="Jon", approved_by="Jon"))
     assert sent, "an officer's explicit send still works"
-    assert "paused" in rc.fill_state_text(reg, ev)
+    assert rc.fill_state_text(reg, ev).startswith("Automatic asks paused by Jon. "), "one name for the lever on every surface (design §5.56 phase 2)"
     assert "already paused" in run(bot.set_autofill_paused(reg, rs, ev, True, by="Jon"))
+    assert "autofill" not in " ".join(ev.log[-2:]).lower() and "automatic asks paused by Jon" in ev.log
 
 
 def test_a_failed_dm_is_a_channel_change_never_an_answer(reg, rs):
@@ -983,7 +984,7 @@ def test_raid_night_levers_from_plain_text_call_the_same_verbs(reg, rs):
         return run(configops.apply_async(reg, op, "Jon", True, bot=bot, by_id=owner, via="chat"))
     assert "remind the unconfirmed" in configops.describe(reg, ConfigOp(op="run_remind", target=ev.key))
     assert "Reminded 10 by DM" in apply(ConfigOp(op="run_remind", target=ev.key)) and ev.reminded_by == "Jon"
-    assert "pause autofill" in configops.describe(reg, ConfigOp(op="run_pause", target=ev.key, value="pause"))
+    assert "pause automatic asks" in configops.describe(reg, ConfigOp(op="run_pause", target=ev.key, value="pause"))
     apply(ConfigOp(op="run_pause", target=ev.key, value="pause"))
     assert ev.autofill_paused
     apply(ConfigOp(op="run_pause", target=ev.key, value="resume"))

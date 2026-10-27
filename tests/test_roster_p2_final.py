@@ -348,7 +348,7 @@ def test_an_absence_recorded_or_cleared_refreshes_the_health_card(reg, rs):
     assert "Thorn" in text_of(views.health_layout(reg, rs, ev, rc.run_team(reg, ev), ico))
     day = _away(reg, p["Thorn"], ev)
     run(bot.after_absence(reg, p["Thorn"], day, day, "Thorn"))
-    assert len(card.views) == 1 and "Thorn" not in text_of(card.views[-1]).split("**No answer**")[-1], "Thorn leaves the No answer list at once"
+    assert len(card.views) == 1 and "Thorn" not in text_of(card.views[-1]).split("**Haven't answered**")[-1], "Thorn leaves the No answer list at once"
     a = p["Thorn"].absences[0]
     p["Thorn"].absences = []
     reg.save(p["Thorn"], "back")

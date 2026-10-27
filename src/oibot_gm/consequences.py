@@ -60,7 +60,7 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     n = min(len(joined), seats)
     lines = ["The board becomes the roster."]
     if not rc.run_confirms(reg, ev):  # ad hoc (D5): Join is the commitment
-        lines.append("Joining was the commitment — nobody is asked to confirm.")
+        lines.append(rc.NO_CONFIRMATIONS[0].upper() + rc.NO_CONFIRMATIONS[1:] + ".")
     elif n == 0:
         lines.append("Nobody has joined yet — nobody is asked to confirm.")
     else:
@@ -95,7 +95,7 @@ def _clear(reg: Registry, ev: rc.RaidEvent) -> list[str]:
         placed = sum(len(g) for g in (ev.layout or []))
         if not placed:
             return ["The board is empty — nothing to clear."]
-        return [f"{_n(placed, 'placement')} go back to the bank." if placed > 1 else "1 placement goes back to the bank.", "Nobody is told — nothing has been sent before lock."]
+        return [f"{_n(placed, 'placement')} go back to not placed." if placed > 1 else "1 placement goes back to not placed.", "Nobody is told — nothing has been sent before lock."]
     rostered = len(ev.seated())
     if not rostered:
         return ["The roster is empty — nothing to clear."]

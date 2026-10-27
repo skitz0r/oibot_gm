@@ -24,6 +24,25 @@ log = logging.getLogger(__name__)
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 STATUSES = ("in", "sub", "out")  # Join / Bench / No thanks (legacy "tentative" is read as "in")
 LABELS = {"in": "Join", "sub": "Bench", "out": "No thanks"}
+# ---- the run's vocabulary, defined ONCE (design §5.56 phase 2): the Discord cards and DMs read these, the site gets
+# them through /api/meta (web/api.py meta_json) and never keeps a copy of its own
+# a run's state in words — the card's badge, History, the fill state, the Me page, the closed Discord cards
+RUN_STATE_WORDS = {"open": "open for signup", "locked": "locked — the roster stands", "done": "finished", "cancelled": "cancelled"}
+# the one sentence for a run whose rostered aren't asked to confirm (ad hoc by default, D5) — every surface
+NO_CONFIRMATIONS = "no confirmations — Join is the commitment"
+# how an ad hoc run seats people (D4)
+FIRST_COME = "first come, first rostered"
+# the board's list of joiners who hold no seat: before the lock nobody is placed yet, after it they aren't rostered
+BANK_WORDS = {"open": "Not placed", "locked": "Not rostered"}
+# who the bot waits on before the lock (rc.expected_from) — the officers' box on the site and the health card
+NOT_ANSWERED_WORDS = {"regulars": "Regulars who haven't answered", "everyone": "Haven't answered — no regulars set, everyone counts",
+                      "test": "Test bench, not answered"}
+# an answer to a fill / pre-lock ask (FillAsk.answer; None = still out)
+ASK_ANSWER_WORDS = {"yes": "said yes", "no": "said no", "expired": "no answer in time", "released": "closed", None: "waiting"}
+# an officer's pin on a joiner (Signup.pin; ACTION_LABELS pin_in / pin_out): the board's pin marks' tooltips and legend
+PIN_WORDS = {"in": "pinned: the lock keeps them where you put them", "out": "kept off: the lock leaves them off the roster"}
+# the joiners the full roster(s) left out (rc.leftovers) — the board's and the lock card's heading
+LEFTOVERS = "Leftovers"
 # a machine code, never shown: a run that sends no reminders (`reminders`), an ad hoc run that expects nobody (`expected_from`)
 OFF = "none"
 # a member's own Join / Bench after lock: the sheet's SignupButton and plain text (configops.authorize) refuse it in these words
@@ -1596,6 +1615,8 @@ def send_batch(plan: Plan, picks: dict | None = None, limit: int | None = None) 
     return keep, len(asks) - len(keep)
 
 
+# THE words for how an ask (or a would-be cover) reaches someone (FillAsk.kind): the fill screens on both surfaces, the
+# thread lines, the health hints and the site's fill modal and Detail (meta.ask_kinds) — design §5.56 phase 2
 ASK_HOW = {"sub": "from the bench", "regular": "a regular, no answer yet", "unanswered": "no answer yet", "other": "not a regular",
            "flex": "declared flex", "offspec": "offspec", "alt": "brings an alt"}
 
@@ -1891,10 +1912,11 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
             cover["sub"] = [sg.display_name for sg in subs if sg.role == r]
         coverable = sum(len(v) for v in cover.values())
         level = "green" if not n or have >= n else ("amber" if have + coverable >= n else "red")
-        hint = " · ".join(f"+{len(v)} {k}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
+        # who could cover, in the fill screens' words (ASK_HOW: "from the bench: A, B · offspec: C") — never a code key
+        hint = " · ".join(f"{ASK_HOW.get(k, k)}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
         if n and have < n and not coverable:
             off = [m.display_name for m, _c in run_pool(reg, ev) if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())]
-            hint = ("not on sheet: " + ", ".join(off[:3])) if off else "nobody can cover → recruit"
+            hint = ("not on the sheet: " + ", ".join(off[:3])) if off else "nobody can cover it — recruit"
         roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover})
     buffs = []
     for b in profile.party_buffs():
@@ -2724,7 +2746,7 @@ def remind_refusal(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> 
     if ev.state != "locked" or not ev.all_rosters:
         return "Remind is for a locked roster — the sheet is still open." if ev.state == "open" else f"That run is {ev.state}."
     if not run_confirms(reg, ev):
-        return "Nobody is asked to confirm on this run (Join is the commitment) — nothing to remind."
+        return f"Nothing to remind: {NO_CONFIRMATIONS}."
     t = at or datetime.now(ev.start.tzinfo)
     if ev.reminded_at and t - datetime.fromisoformat(ev.reminded_at) < REMIND_EVERY:
         nxt = datetime.fromisoformat(ev.reminded_at) + REMIND_EVERY
@@ -2843,7 +2865,7 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     sd = reg.schedule_def(instance, w["schedule"])
     lock_h = float(sd["lock_hours_before"])
     if w["kind"] == "adhoc":
-        rules = ("Ad hoc: first come, first rostered; no regulars, no reminder" + ("" if sd.get("confirm") else ", no confirmations (Join is the commitment)")
+        rules = (f"Ad hoc: {FIRST_COME}; no regulars, no reminder" + ("" if sd.get("confirm") else f"; {NO_CONFIRMATIONS}")
                  + f"; locks {lock_h:g} h before; a role swap waits for an officer.")
     else:
         rules = ("Scheduled: its regulars are expected" + ("; the rostered are asked to confirm" if sd.get("confirm", True) else "")
@@ -2901,7 +2923,7 @@ def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime |
 
 def short_why(reg: Registry, ev: RaidEvent) -> str | None:
     """Why a short run is short, as the clause after the role icons on the Rosters card ("short ⛨1 — 2 asks out, 1 on
-    the bench could step in"): after the lock the fill asks out and who could take a seat; before it the expected people
+    the bench could fill it"): after the lock the fill asks out and who could take a seat; before it the expected people
     who haven't answered. None when there is nothing to add (or the run is over)."""
     if ev.state in ("done", "cancelled"):
         return None
@@ -2910,7 +2932,7 @@ def short_why(reg: Registry, ev: RaidEvent) -> str | None:
         asked = {a.discord_id for a in asks}
         seated = {player_uid(ev, p) for p in ev.seated()}
         bench = [s for s in ev.signups.values() if s.status in ("in", "sub") and s.discord_id not in seated and s.discord_id not in asked]
-        parts = ([f"{len(asks)} ask{'' if len(asks) == 1 else 's'} out"] if asks else []) + ([f"{len(bench)} on the bench could step in"] if bench else [])
+        parts = ([f"{len(asks)} ask{'' if len(asks) == 1 else 's'} out"] if asks else []) + ([f"{len(bench)} on the bench could fill it"] if bench else [])
         return ", ".join(parts) or None
     waiting = not_answered(reg, ev)
     if not waiting:
@@ -2919,6 +2941,30 @@ def short_why(reg: Registry, ev: RaidEvent) -> str | None:
     k = len(waiting)
     noun = (f"{k} regular{'' if k == 1 else 's'}" if expected_from(reg, ev) == "regulars" else str(k))
     return f"{noun} {'hasn' if k == 1 else 'haven'}'t answered: {', '.join(names)}"
+
+
+def answer_word(ev: RaidEvent, status: str | None, roster: int | None) -> str:
+    """A member's own standing on a run in one word or two — the Me page's badge (design §5.56 phase 2): 'rostered'
+    ('rostered · roster 2' on a split), 'not rostered' for a joiner the lock left out (never 'Join' on a locked run),
+    else their answer's label, else 'not answered'. `roster` = their roster number (1-based) when they hold a seat."""
+    if roster:
+        return "rostered" + (f" · roster {roster}" if roster > 1 else "")
+    if status == "in" and ev.state != "open" and ev.all_rosters:
+        return "not rostered"
+    return LABELS.get(status, status) if status else "not answered"
+
+
+def balance_words(values: list[int | float]) -> str | None:
+    """How a split's rosters compare, in words instead of the group-building numbers (design §5.56 phase 2): 'the two
+    rosters are close' when the weakest is within a tenth of the strongest, else 'roster 2 is the weaker' ('… the
+    weakest' for three or more). None for one roster or when there is nothing to compare."""
+    vals = [float(v or 0) for v in values]
+    if len(vals) < 2 or max(vals) <= 0:
+        return None
+    hi, lo = max(vals), min(vals)
+    if hi - lo <= max(1.0, hi * 0.1):
+        return "the two rosters are close" if len(vals) == 2 else "the rosters are close"
+    return f"roster {vals.index(lo) + 1} is the {'weaker' if len(vals) == 2 else 'weakest'}"
 
 
 # ---------------------------------------------------------------- what the lock decided, as data (the site's locked SheetCard)
@@ -2954,25 +3000,27 @@ def regulars_not_rostered(reg: Registry, ev: RaidEvent) -> list[dict]:
     return out
 
 
-FILL_STATE_WORDS = {"idle": "nothing to fill yet", "asking": "asking — waiting for answers", "filled": "every seat filled",
-                    "exhausted": "nobody left to ask — recruit, or move someone in on the board",
-                    "suggested": "waiting for an officer: a role swap would cover it"}
+FILL_STATE_WORDS = {"idle": "No seat to fill yet.", "asking": "Asking for open seats — waiting for answers.", "filled": "Every seat is filled.",
+                    "exhausted": "Nobody left to ask — recruit, or move someone in on the board.",
+                    "suggested": "Waiting for an officer: a role swap would cover a seat."}
+# Pause automatic asks (D18): the paused state's words, before the fill state
+AUTO_ASKS_PAUSED = "Automatic asks paused"
 
 
 def fill_state_text(reg: Registry, ev: RaidEvent) -> str:
-    """The fill engine's state in words (the lock card, the SheetCard, MCP get_run) — never the bare code:
-    'waiting for an officer: a role swap would cover it', 'asking — waiting for answers (2 on the site)',
-    'autofill paused by Jon · …'."""
+    """How open seats are being filled, in sentences (the lock card, the SheetCard, MCP get_run) — never the bare code
+    and never "engine": 'Waiting for an officer: a role swap would cover a seat.', 'Asking for open seats — waiting for
+    answers (2 on the site).', 'Automatic asks paused by Jon. …'. A closed run says its state (RUN_STATE_WORDS)."""
     if ev.state == "open":
-        return "the fill engine starts after lock"
+        return "Open seats are asked for after the lock; before it, Suggest… shows who could cover a minimum."
     if ev.state in ("done", "cancelled"):
-        return f"the run is {'over' if ev.state == 'done' else 'cancelled'}"
+        return f"The run is {RUN_STATE_WORDS[ev.state]}."
     words = FILL_STATE_WORDS.get(ev.fill_state, ev.fill_state)
     site = sum(1 for a in ev.fill_asks if a.pending and a.channel == "web")
     if site:
-        words += f" ({site} on the site)"
+        words = words[:-1] + f" ({site} on the site)."
     if ev.autofill_paused:
-        words = "autofill paused" + (f" by {ev.autofill_paused_by}" if ev.autofill_paused_by else "") + " · " + words
+        words = AUTO_ASKS_PAUSED + (f" by {ev.autofill_paused_by}" if ev.autofill_paused_by else "") + ". " + words
     return words
 
 
@@ -2986,7 +3034,7 @@ def asks_on_site(reg: Registry, ev: RaidEvent) -> int:
 
 # a log line's officer-only marks: free text people wrote (a reason, a note) and planning a member never reads
 _OFFICER_LOG = ("cancelled by", "lock (", "fill", "suggestion", "pre-lock", "pin ", "pinned", "board", "proposed", "reminded",
-                "autofill", "callout", "early warning", "confirmation dms")
+                "autofill", "automatic asks", "callout", "early warning", "confirmation dms")
 
 
 def log_rows(reg: Registry, ev: RaidEvent) -> list[dict]:
@@ -3377,7 +3425,7 @@ def _answer_state(reg: Registry, ev: RaidEvent, m: Member) -> str:
             if run_kind(reg, ev) == "adhoc":
                 pos = next((i for i, x in enumerate(ins, 1) if x.discord_id == s.discord_id), len(ins))
                 if pos <= seats:
-                    return f"You're **joined** as {as_} for {run} — {_ordinal(pos)} of {seats} seats, in if nothing changes (first come, first rostered)."
+                    return f"You're **joined** as {as_} for {run} — {_ordinal(pos)} of {seats} seats, in if nothing changes ({FIRST_COME})."
                 return f"You're **joined** as {as_} for {run} — {_ordinal(pos)} for {seats} seats: a seat opens only if someone drops; {dm}."
             return (f"You're **joined** as {as_} for {run} · {len(ins)}/{seats} so far."
                     + (f" Join counts for 1 of {n} rosters — which one is decided at lock." if n > 1 else " The roster is decided at lock."))
@@ -3411,14 +3459,14 @@ def _answer_state(reg: Registry, ev: RaidEvent, m: Member) -> str:
 # first. `key` is what the wizard / the web send back; `needs` = "character" (a pick) | "note" (optional prose) | None.
 ACTION_LABELS = {"callout": "Record a callout…", "confirm_yes": "Confirm for them", "confirm_no": "Can't make it for them",
                  "fill_yes": "Confirm their fill", "fill_no": "No to their fill", "join": "Join", "bench": "Bench", "no_thanks": "No thanks",
-                 "pin_in": "Pin to roster", "pin_out": "Keep on bench", "unpin": "Unpin"}
+                 "pin_in": "Pin to roster", "pin_out": "Keep off the roster", "unpin": "Unpin"}
 
 
 def member_actions(reg: Registry, ev: RaidEvent, m: Member) -> list[dict]:
     """What an officer can record for `m` on `ev` right now — ONLY the verbs that apply (the SetWizard's buttons and the
     site's row ⋮ menu read this one list): Confirm / Can't make it for their open Confirm ask · Confirm / No to their
     open fill ask · Record a callout (with an optional note; before lock it is No thanks + the callout) · Join (as
-    <alt>) · Bench · No thanks (an answer change: no callout record) · Pin to roster / Keep on bench / Unpin (open
+    <alt>) · Bench · No thanks (an answer change: no callout record) · Pin to roster / Keep off the roster / Unpin (open
     sheet, on it). Each: {key, label, needs, characters?: [labels]}."""
     if ev.state not in ("open", "locked"):
         return []
@@ -3481,8 +3529,8 @@ def member_change_words(reg: Registry, ev: RaidEvent, m: Member) -> str:
 
 
 def pin_counts(ev: RaidEvent) -> str:
-    """The sheet footer's pin line (B5, numbers only — who is officer data): 'Pinned: 2 · Bench-pinned: 1', or ''."""
+    """The sheet footer's pin line (B5, numbers only — who is officer data): 'Pinned: 2 · Kept off: 1', or ''."""
     on = {str(sg.discord_id) for sg in ev.signups.values()}
     ins = sum(1 for u, v in ev.pins.items() if v == "in" and u in on)
     outs = sum(1 for u, v in ev.pins.items() if v == "out" and u in on)
-    return " · ".join(p for p in ((f"Pinned: {ins}" if ins else ""), (f"Bench-pinned: {outs}" if outs else "")) if p)
+    return " · ".join(p for p in ((f"Pinned: {ins}" if ins else ""), (f"Kept off: {outs}" if outs else "")) if p)

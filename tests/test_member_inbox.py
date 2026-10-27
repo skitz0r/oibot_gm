@@ -385,7 +385,7 @@ def test_pin_op_is_in_the_runs_group_and_the_copy_says_so(reg, rs):
     rc.set_pin(ev, ms[0].display_name, "in")
     rc.set_pin(ev, ms[1].display_name, "in")
     rc.set_pin(ev, ms[2].display_name, "out")
-    assert rc.pin_counts(ev) == "Pinned: 2 · Bench-pinned: 1"
+    assert rc.pin_counts(ev) == "Pinned: 2 · Kept off: 1"
 
 
 def _sheet_refreshes(bot, monkeypatch) -> list:
@@ -411,7 +411,7 @@ def test_every_pin_path_is_one_write_and_refreshes_the_sheet_footer(reg, rs, mon
     op = configops.ConfigOp(op="pin", target=ev.key, member=ms[1].display_name, value="out")
     line = run(configops.apply_async(reg, op, "Jon", False, bot=bot, by_id=1, via="chat"))
     assert line == f"{ev.team}: keep {ms[1].display_name} on bench"
-    assert got[-1] == (ev.key, "Pinned: 1 · Bench-pinned: 1"), "plain text's pin re-renders the sheet too"
+    assert got[-1] == (ev.key, "Pinned: 1 · Kept off: 1"), "plain text's pin re-renders the sheet too"
     assert ev.pins.get(str(ms[1].discord_id)) == "out"
     with pytest.raises(RegistryError, match="isn't on this sheet"):
         run(inbox.pin_member(bot, reg, rs, ev, reg.test_members()[5], "in", by="Jon"))

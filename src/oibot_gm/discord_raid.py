@@ -1420,19 +1420,19 @@ class RaidMixin:
         if ev.state in ("done", "cancelled"):
             raise RegistryError(f"{run_title(reg, ev)} is {ev.state}.")
         if bool(ev.autofill_paused) == bool(paused):
-            return f"Autofill is already {'paused' if paused else 'on'} for {run_title(reg, ev)}."
+            return f"Automatic asks are already {'paused' if paused else 'on'} for {run_title(reg, ev)}."
         ev.autofill_paused, ev.autofill_paused_by = bool(paused), (by if paused else None)
-        ev.log.append(f"autofill {'paused' if paused else 'resumed'} by {by}")
+        ev.log.append(f"automatic asks {'paused' if paused else 'resumed'} by {by}")
         rs.save(ev, f"autofill {'paused' if paused else 'resumed'} by {by}")
-        await self.post_run_update(reg, ev, f"{'⏸️' if paused else '▶️'} autofill {'paused' if paused else 'resumed'} by {by}")
+        await self.post_run_update(reg, ev, f"{'⏸️' if paused else '▶️'} automatic asks {'paused' if paused else 'resumed'} by {by}")
         await self.refresh_cards(reg, ev)
-        await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} autofill on {ev.key}", via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} automatic asks on {ev.key}", via=via, by_id=by_id)
         if not paused and ev.state == "locked" and rc.team_setting(rc.run_team(reg, ev), "autofill"):
             sent, _nd = await self.run_fill(reg, rs, ev, rc.run_team(reg, ev), by=f"resumed by {by}")
             if sent:
                 await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
-        return (f"Autofill paused for {run_title(reg, ev)} — nothing goes out on its own; your Ask / Fill still sends." if paused
-                else f"Autofill on again for {run_title(reg, ev)}.")
+        return (f"Automatic asks paused for {run_title(reg, ev)} — nothing goes out on its own; your Ask / Fill seats… still sends." if paused
+                else f"Automatic asks on again for {run_title(reg, ev)}.")
 
     # ---- absences ripple into sheets
     async def after_absence_cleared(self, reg, m, a) -> list[str]:

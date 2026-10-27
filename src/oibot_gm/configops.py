@@ -1564,7 +1564,7 @@ def split_seen(bot) -> dict:
 
 
 def propose_text(reg: Registry, ev, strategy: str, layout: list[list[str]], rosters, shown: int) -> str:
-    """A proposal as the chat reply: groups, synergy (total, gap between rosters), joiners left out, why there aren't
+    """A proposal as the chat reply: groups, how a split's rosters compare (rc.balance_words), joiners left out, why there aren't
     more rosters, and whether another run could be made — the same facts the board's Propose modal shows."""
     from . import raidcycle as rc
 
@@ -1577,7 +1577,7 @@ def propose_text(reg: Registry, ev, strategy: str, layout: list[list[str]], rost
     another = rc.another_run_hint(reg, ev, rosters, reason) if left else None
     bench = [p.signup_name for p in (rosters[0].benched if rosters else []) if p.signup_name not in {x.signup_name for x in left}]
     return (f"{ev.key}: {strategy} proposal{f' #{shown}' if shown > 1 else ''} — {groups}"
-            + f" · synergy {' + '.join(map(str, syn))}" + (f" = {sum(syn)}, gap {max(syn) - min(syn)}" if len(syn) > 1 else "")
+            + (f" · {balance}" if (balance := rc.balance_words(syn)) else "")
             + (f" · left out: {', '.join(p.signup_name for p in left)}" if left else "") + (f" · bench: {', '.join(bench)}" if bench else "")
             + (f" · {rc.split_reason_text(reason)}" if reason else "") + (f" · {another}" if another else "")
             + " · nothing is saved: say “use it” to put it on the board or “another” for a different one (remembered until the bot restarts)")
@@ -2243,8 +2243,8 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         if ev.state not in ("open", "locked"):
             raise RegistryError(f"{ev.key} is {ev.state}")
         if bool(ev.autofill_paused) == paused:
-            return f"{label}: autofill is already {'paused' if paused else 'on'} — nothing changes"
-        return f"{label}: {'pause autofill — nothing goes out on its own; an officer’s fill send still goes' if paused else 'resume autofill — the fill engine asks again on its next pass'}"
+            return f"{label}: automatic asks are already {'paused' if paused else 'on'} — nothing changes"
+        return f"{label}: {'pause automatic asks — nothing goes out on its own; an officer’s Fill seats… still sends' if paused else 'resume automatic asks — open seats are asked for again on the next pass'}"
     if op.op == "run_withdraw":
         m = _need_member(reg, op.member)
         ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.pending), None)

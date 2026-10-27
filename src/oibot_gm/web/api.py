@@ -34,7 +34,8 @@ from .app import GUILD_COOKIE, NotMember, login_href, owner_name, set_guild_cook
 HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
 STARTED = time.time()  # fallback when the bot has no start stamp
-from ..constants import ROLES  # noqa: E402 — the order role counts are shown in
+from ..constants import LEVEL_WORDS, MARK, MARK_WORDS, ROLES  # noqa: E402 — the order role counts are shown in; the run vocabulary (meta)
+from ..raid_buttons import RUN_WORDS  # noqa: E402 — the run verbs' labels, the Discord buttons' own
 from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE  # noqa: E402
 
 ASK_MAX = 1500  # help.answer reads this much of a question
@@ -475,6 +476,17 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "raids": [{"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "lockout_days": int(reg.raid_def(rid).get("lockout_days", 7))} for rid, rd in reg.profile.raids.items()],
             "viewer": {"uid": str(v.uid), "name": v.name, "officer": v.officer, "owner": v.owner},
             "labels": dict(rc.LABELS),
+            # the run's vocabulary, defined once in Python (design §5.56 phase 2) — the page keeps no copy of its own: state
+            # words, the run verbs' labels (raid_buttons.RUN_WORDS — the Discord buttons'), the confirmation marks with their
+            # words (constants.MARK / MARK_WORDS — "waiting" = no answer yet), how an ask reaches someone and its answers, the
+            # coverage levels' words, and the run's sentences
+            "run_states": dict(rc.RUN_STATE_WORDS), "run_labels": dict(RUN_WORDS),
+            "marks": {("waiting" if k is None else k): {"mark": MARK[k], "words": MARK_WORDS[k]} for k in MARK},
+            "ask_kinds": dict(rc.ASK_HOW), "ask_answers": {("waiting" if k is None else k): w for k, w in rc.ASK_ANSWER_WORDS.items()},
+            "level_words": dict(LEVEL_WORDS),
+            "run_words": {"no_confirmations": rc.NO_CONFIRMATIONS, "first_come": rc.FIRST_COME, "bank": dict(rc.BANK_WORDS),
+                          "not_answered": dict(rc.NOT_ANSWERED_WORDS), "auto_asks_paused": rc.AUTO_ASKS_PAUSED,
+                          "pins": dict(rc.PIN_WORDS), "leftovers": rc.LEFTOVERS},
             # the vocabulary the pages used to hard-code (C3): answer statuses in order, split philosophies, role order,
             # per-group role caps from the profile, class colours from render.py (tuned for dark surfaces)
             "statuses": list(rc.STATUSES), "split_policies": list(SPLIT_POLICIES), "roles": list(ROLES),
@@ -611,6 +623,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             sheets.append({"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "state": ev.state,
                            "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
                            "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None, "kind": rc.run_kind(reg, ev),
+                           # the badge in words ("not rostered" for a joiner the lock left out — never "Join" on a locked run) and the run's state
+                           "badge": rc.answer_word(ev, s.status if s else None, (seat[0] + 1) if seat else None), "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state),
                            "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
                            "confirms": rc.run_confirms(reg, ev), **sheet_row_extras(reg, ev, m)})
         primary, flex = reg.roles_of(m) if m else (None, [])
@@ -827,6 +841,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         another = rc.another_run_hint(reg, ev, rosters, rc.run_split_reason(reg, ev)) if left else None
         return {"n_groups": rc.groups_per_roster(reg, size), "group_size": int(reg.profile.comp_rules["group_size"]), "size": size,
                 "bank": [seat_json(p, conf, uids, signed) for p in bench], "rosters": boards,
+                "balance": rc.balance_words([r.synergy_value for r in rosters]),  # a split's rosters compared in words (never the numbers)
                 "leftovers": [p.signup_name for p in left], "another": another}
 
     def split_json(reg, ev) -> dict:
@@ -862,7 +877,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "rel": rel(reg, ev.start), "state": ev.state, "live": live, "fill_state": ev.fill_state,
                 "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters), "schedule": ev.schedule, "rosters_expected": rc.run_rosters(reg, ev),
                 "kind": rc.run_kind(reg, ev), "series": rc.run_series(reg, ev), "series_name": reg.series_label(rc.run_series(reg, ev)) if rc.run_series(reg, ev) else None,
-                "confirms": rc.run_confirms(reg, ev), "test": rc.is_test_run(reg, ev)}
+                "confirms": rc.run_confirms(reg, ev), "test": rc.is_test_run(reg, ev),
+                "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state)}  # the state in words (meta.run_states), History and the drawer print it
         if not full:
             return base
         from ..raid_views import run_times
@@ -1320,8 +1336,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(v.reg, ev), "by": v.name, "by_id": v.uid, "at": rc.now(), "kind": "split"}
         await asyncio.to_thread(rs.save, ev, f"split preview ({strategy}) by {v.name}")  # plain text's "use it" finds it after a restart
         sp = split_json(v.reg, ev)  # why there aren't more rosters, when the roles are what holds it back
+        # the numbers stay data (MCP); a person reads `balance` — how the rosters compare, in words (rc.balance_words)
         return {"strategy": strategy, "layout": layout, "board": board_json(v.reg, ev, rosters, []), "synergy": syn, "total": sum(syn), "gap": (max(syn) - min(syn)) if syn else 0,
-                "reason": sp["reason"], "reason_text": sp["reason_text"]}
+                "balance": rc.balance_words(syn), "reason": sp["reason"], "reason_text": sp["reason_text"]}
 
     @app.post("/api/run/{key}/strategy")
     async def run_strategy(request: Request, key: str):
@@ -1867,13 +1884,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     def live_runs_of(reg, rs, rid: str) -> list[dict]:
         """The raid's runs open or locked right now, soonest first, in words for the Raids card's "When it runs" block
-        (a test run never: it has its own tab on Rosters): {key, when, state, schedule} — `schedule` = the schedule's name,
+        (a test run never: it has its own tab on Rosters): {key, when, state, state_word, schedule} — `schedule` = the schedule's name,
         "ad hoc" for a one-off or a pickup."""
         out = []
         for ev in sorted((e for e in rs.live() if e.instance == rid and not e.test), key=lambda e: e.starts_at):
             sched = next((s for s in reg.schedules(rid) if s["id"] == (ev.schedule or "default")), None)
             name = "ad hoc" if rc.run_kind(reg, ev) == "adhoc" else (sched.get("name") or sched["id"]) if sched else "its schedule"
-            out.append({"key": ev.key, "when": t12(reg, ev.starts_at), "state": ev.state, "schedule": name})
+            out.append({"key": ev.key, "when": t12(reg, ev.starts_at), "state": ev.state, "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state), "schedule": name})
         return out
 
     def next_run_of(reg, rs, rid: str) -> dict | None:

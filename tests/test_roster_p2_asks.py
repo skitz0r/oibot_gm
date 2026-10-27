@@ -188,7 +188,7 @@ def test_health_card_has_the_suggested_block_with_ask_and_suggest(reg, rs):
     assert "**Suggested** · expected <role:tank> 1/2   <role:healer> 1/2 (joined + 10 regulars yet to answer) · every seat taken: swaps first" in body
     lines = body.split("\n")
     assert "<spec:Warrior:Protection> **Kael** · offspec" in lines and "alternates: Gorm" in body
-    assert "<spec:Paladin:Holy> **Ana** · flex" in lines and "alternates: Wren · Pip" in body
+    assert "<spec:Paladin:Holy> **Ana** · declared flex" in lines and "alternates: Wren · Pip" in body
     assert not any("<role:" in ln and "<spec:" in ln for ln in lines), "a spec icon alone on a member line — never a role icon beside it"
     assert "Still short if everyone says yes: nothing" in body
     ids = [b.custom_id for b in buttons(view)]

@@ -15,6 +15,7 @@ import { TestFeed } from "../components/TestFeed";
 import type { NightSheet, OpenPreview, RunsPage } from "../components/board/types";
 import { WhenItRuns, raidCardCss } from "../components/RaidCard";
 import { RoleCounts, runName, type Act, type OnBoard } from "../components/board/shared";
+import { LevelChip } from "../components/LevelChip";
 import { usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
 
@@ -48,7 +49,7 @@ export function RostersPage({ meta }: { meta: Meta }) {
       <PageTitle title="Rosters" intro={`Each raid's runs, soonest first: answer for someone, shape the board, lock, fill. Times in ${zone}.`} />
       {data.raids.map((r) => <RaidCard key={r.id} r={r} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
       {data.orphans.length > 0 && (
-        <Card><Box p="md"><Eyebrow plain>Sheets not tied to a raid</Eyebrow>{data.orphans.map((e) => <Text key={e.key} size="sm">{runName(e)} · {e.state}</Text>)}</Box></Card>
+        <Card><Box p="md"><Eyebrow plain>Sheets not tied to a raid</Eyebrow>{data.orphans.map((e) => <Text key={e.key} size="sm">{runName(e)} · {e.state_word || meta.run_states[e.state] || e.state}</Text>)}</Box></Card>
       )}
     </Stack>
   );
@@ -213,7 +214,7 @@ function History({ r, meta }: { r: RaidRuns; meta: Meta }) {
       {rows.map((e) => (
         <UnstyledButton key={e.key} aria-label={`open the run of ${e.when}`} onClick={() => { setOpenKey(e.key); window.history.replaceState(null, "", `#run-${e.key}`); }}
           style={{ borderRadius: 6, padding: "2px 4px", width: "fit-content", maxWidth: "100%" }}>
-          <Text size="sm" component="span"><Badge size="xs" variant="outline" color={e.state === "done" ? "teal" : "gray"} tt="none" mr={6}>{e.state}</Badge>{e.when} · {e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}</Text>
+          <Text size="sm" component="span"><Badge size="xs" variant="outline" color={e.state === "done" ? "teal" : "gray"} tt="none" mr={6}>{e.state_word || meta.run_states[e.state] || e.state}</Badge>{e.when} · {e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}</Text>
         </UnstyledButton>
       ))}
       {rows.length < total && <Button size="compact-xs" variant="subtle" loading={busy} onClick={loadMore} w="fit-content">Show older runs ({total - rows.length} more)</Button>}
@@ -240,12 +241,12 @@ function RunDrawer({ runKey, meta, onClose }: { runKey: string | null; meta: Met
     <Drawer opened={!!runKey} onClose={onClose} position="right" size="xl" title={e ? `${e.raid} · ${e.when}` : "Loading…"}>
       {e && (
         <Stack gap="sm">
-          <Group gap="sm"><Badge variant="outline" color={e.state === "done" ? "teal" : "gray"} tt="none">{e.state}</Badge>{e.closed_at && <Text size="xs" c="dimmed">closed {e.closed_at}</Text>}</Group>
+          <Group gap="sm"><Badge variant="outline" color={e.state === "done" ? "teal" : "gray"} tt="none">{e.state_word || meta.run_states[e.state] || e.state}</Badge>{e.closed_at && <Text size="xs" c="dimmed">closed {e.closed_at}</Text>}</Group>
           <Text size="sm">{e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}</Text>
           {e.board && e.rostered > 0 && <BoardPreview meta={meta} board={e.board} />}
-          {e.may_reopen && <Button size="xs" variant="light" loading={busy} onClick={reopen} w="fit-content">Reopen — ended by mistake</Button>}
+          {e.may_reopen && <Tooltip label="ended by mistake: the run goes back to locked, as it was"><Button size="xs" variant="light" loading={busy} onClick={reopen} w="fit-content">{meta.run_labels.reopen}</Button></Tooltip>}
           {!e.may_reopen && e.reopen_note && e.state === "done" && <Text size="xs" c="dimmed">{e.reopen_note}</Text>}
-          <Detail e={e} readOnly />
+          <Detail e={e} meta={meta} readOnly />
         </Stack>
       )}
     </Drawer>
@@ -262,7 +263,6 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
   const person = people.find((p) => p.uid === who);
   const on = new Set(s.regulars.map((x) => x.uid));
   const level = s.level || (Object.entries(s.need).some(([role, n]) => (s.counts[role] || 0) < n) ? "red" : "green");
-  const levelColour = { green: "teal", amber: "slate", red: "red" }[level];  // never amber on this page: amber marks a value changed from the default
   const spare = s.no_spare || [];
   const levelWords = { green: "regular mains cover the tank and healer minimums, with a spare", amber: spare.length ? `no spare ${spare.join(" or ")} among regular mains — one absence leaves it short` : "covered only with offspecs, flex roles or alts", red: "regulars can't field the minimum" }[level];
   async function remove(uid: string, name: string, character: string) {
@@ -281,9 +281,8 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
           <Text fw={700} size="sm">{s.name}{!s.active && <Badge ml={6} size="xs" color="gray" variant="light" tt="none">paused</Badge>}</Text>
           <Text size="xs" c="dimmed">{s.label} · {s.regulars.length} regular{s.regulars.length === 1 ? "" : "s"} for {s.seats} seats</Text>
         </Box>
-        <Tooltip label={levelWords}>
-          <Box style={{ borderBottom: `2px solid var(--mantine-color-${levelColour}-5)` }}><RoleCounts meta={meta} counts={s.counts} need={s.need} size={16} /></Box>
-        </Tooltip>
+        {/* the same ready / thin / short chip as Readiness (the word from meta.level_words), why in its tooltip */}
+        <Group gap="sm" wrap="nowrap"><RoleCounts meta={meta} counts={s.counts} need={s.need} size={16} /><LevelChip meta={meta} level={level} why={levelWords} size="sm" /></Group>
       </Group>
       {s.regulars.length > 0 && level === "amber" && (s.cover || []).length > 0 && <Text size="xs" c="dimmed" mt={4}>could cover: {(s.cover || []).join(", ")}</Text>}
       {s.regulars.length > 0 && level === "red" && <Text size="xs" c="red" mt={4}>recruit{(s.recruit || []).length ? `: ${(s.recruit || []).join(", ")}` : " — nobody in the guild plays the missing role"}</Text>}
@@ -305,7 +304,7 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
           <Select size="xs" w={160} allowDeselect={false} value={char || person.characters[0].label} onChange={setChar} aria-label="which character"
             data={person.characters.map((c) => ({ value: c.label, label: c.label + (c.is_main ? " (main)" : "") }))} />
         )}
-        <Button size="xs" variant="default" leftSection={<IconUserPlus size={13} />} disabled={!person} loading={busy === `reg${s.key}add`} onClick={add}>Add</Button>
+        <Button size="xs" variant="default" leftSection={<IconUserPlus size={13} />} disabled={!person} loading={busy === `reg${s.key}add`} onClick={add}>{person ? `Add ${char || person.characters[0]?.label || person.display_name}` : "Add"}</Button>
       </Group>
       {dialog}
     </Box>
@@ -325,7 +324,7 @@ function Forecast({ s, meta }: { s: Series; meta: Meta }) {
           <Tooltip key={f.start} label={f.away.length ? `away: ${f.away.join(", ")}` : `${f.expected} regulars expected`} withinPortal>
             <Group gap={8} wrap="nowrap" style={{ lineHeight: 1.7 }}>
               <Text size="xs" w={78} style={{ fontVariantNumeric: "tabular-nums" }}>{f.day}</Text>
-              {Object.keys(f.short).length === 0 ? <Text size="xs" c="teal">✓</Text> : Object.entries(f.short).map(([role, k]) => (
+              {Object.keys(f.short).length === 0 ? <Text size="xs" c="teal">covered</Text> : Object.entries(f.short).map(([role, k]) => (
                 <Group key={role} gap={2} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={14} title={role} /><Text size="xs" c="red" style={{ fontVariantNumeric: "tabular-nums" }}>−{k}</Text></Group>
               ))}
               {f.away.length > 0 && <Text size="xs" c="dimmed">{f.away.length} away</Text>}

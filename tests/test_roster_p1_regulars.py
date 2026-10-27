@@ -168,12 +168,12 @@ def test_health_card_names_the_regulars_who_havent_answered(reg, rs):
     ev = next_run(reg, rs)
     rc.set_signup(reg, rs, ev, ms[0], None, "in")
     body = text_of(views.health_layout(reg, rs, ev, rc.run_team(reg, ev), ico))
-    assert "**No answer** 2 · regulars" in body
+    assert "**Haven't answered** 2 · regulars" in body
     lines = body.splitlines()
     for m in ms[1:]:
         c = m.main
         assert f"<spec:{c.cls}:{c.spec}> {c.label}" in lines, "one member per line, spec icon + character"
-    no_answer = body.split("**No answer**", 1)[1].split("**Suggested**", 1)[0]  # Phase 2 adds the Suggested block below
+    no_answer = body.split("**Haven't answered**", 1)[1].split("**Suggested**", 1)[0]  # Phase 2 adds the Suggested block below
     assert reg.test_members()[0].main.label not in no_answer, "non-regulars aren't chased"
 
 

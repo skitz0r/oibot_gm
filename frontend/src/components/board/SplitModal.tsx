@@ -7,7 +7,8 @@ import { fail } from "../Page";
 import { BoardPreview } from "./BoardPreview";
 import { runName } from "./shared";
 
-/** Propose: for one roster a fresh layout from the solver; for a split, pick a philosophy first. One preview in the builder's own layout, then seed the board. */
+/** Propose: for one roster a fresh layout; for a split, pick a philosophy first. One preview in the board's own layout, then put it on the board.
+ *  How a split's rosters compare is the server's words (`balance`: "the two rosters are close" / "roster 2 is the weaker") — never the numbers. */
 export function SplitModal({ e, meta, multi, opened, onClose, onUse }: { e: Sheet; meta: Meta; multi: boolean; opened: boolean; onClose: () => void; onUse: (layout: string[][], strategy: string) => Promise<void> }) {
   const [strategy, setStrategy] = useState(e.split?.strategy || meta.split_policies[0] || "balanced");
   const [preview, setPreview] = useState<SplitPreview | null>(null);
@@ -31,7 +32,7 @@ export function SplitModal({ e, meta, multi, opened, onClose, onUse }: { e: Shee
           ))}
         </Group>}
         <Group justify="space-between" wrap="wrap">
-          <Text size="xs" c="dimmed">{busy ? "building…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy] || preview.strategy}</b> · total synergy {preview.total} · gap {preview.gap} · your own placements on the board are kept</> : <>The bot's pick · synergy {preview.total} · your own placements on the board are kept</>) : ""}</Text>
+          <Text size="xs" c="dimmed">{busy ? "building…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy] || preview.strategy}</b>{preview.balance ? ` · ${preview.balance}` : ""} · your own placements on the board are kept</> : <>The bot's pick · your own placements on the board are kept</>) : ""}</Text>
           {preview && !busy && <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={12} />} onClick={() => run(strategy, seen)}>{multi ? "another split like this" : "another layout"}</Button>}
         </Group>
         {preview && !busy && <BoardPreview meta={meta} board={preview.board} reason={preview.reason} />}

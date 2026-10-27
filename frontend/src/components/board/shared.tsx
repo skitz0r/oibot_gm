@@ -1,4 +1,5 @@
 import { Box, Group, Text, Tooltip } from "@mantine/core";
+import { IconPin, IconPinnedOff } from "@tabler/icons-react";
 import type { Board, BoardRoster, Meta, Seat, Sheet, Signup, SplitReason } from "../../api";
 import { GameIcon } from "../Icons";
 import { classColour } from "../../theme";
@@ -8,14 +9,18 @@ export type OnBoard = (key: string, board: Board, needs?: Sheet["needs"], rev?: 
 /** Shared between the board and the page: a refresh must not re-render the board under a drag in progress. */
 export const live = { dragging: false };
 
-export const ANSWER: Record<string, { mark: string; colour: string; label: string }> = { yes: { mark: "✓", colour: "var(--mantine-color-teal-4)", label: "confirmed" }, no: { mark: "✗", colour: "var(--mantine-color-red-5)", label: "can't make it" }, expired: { mark: "⌛", colour: "var(--mantine-color-slate-3)", label: "no answer" } };
+/** A confirmation's mark and its words — the Discord card's own (constants.MARK / MARK_WORDS through /api/meta.marks):
+ *  `answer` null = still waiting. The words are the tooltip; the page never draws a mark of its own. */
+export function markOf(meta: Meta, answer: string | null | undefined) {
+  return meta.marks[answer || "waiting"] || meta.marks.waiting;
+}
 
 /** One member line: spec icon (role + spec) + character + display name; an optional confirmation mark on the left. */
 export function SeatLine({ meta, s, right, mark }: { meta: Meta; s: Seat | Signup; right?: React.ReactNode; mark?: string | null }) {
-  const a = mark !== undefined && mark !== null ? ANSWER[mark] : null;
+  const m = mark !== undefined ? markOf(meta, mark) : null;
   return (
     <Group gap={6} wrap="nowrap" style={{ lineHeight: 1.8, minWidth: 0 }}>
-      {mark !== undefined && <Tooltip label={a ? a.label : "waiting for confirmation"}><Text span size="xs" style={{ width: 14, textAlign: "center", color: a ? a.colour : "var(--mantine-color-slate-3)" }}>{a ? a.mark : "⏳"}</Text></Tooltip>}
+      {m && <Tooltip label={m.words}><Text span size="xs" style={{ width: 18, textAlign: "center" }} aria-label={m.words}>{m.mark}</Text></Tooltip>}
       <GameIcon meta={meta} kind="spec" id={`${s.cls}:${s.spec}`} size={18} title={`${s.cls} ${s.spec} · ${s.role}`} />
       <Text size="sm" fw={600} c={classColour(meta, s.cls)} truncate>{s.character}</Text>
       <Text size="xs" c="dimmed" truncate>{s.display_name}</Text>
@@ -24,13 +29,21 @@ export function SeatLine({ meta, s, right, mark }: { meta: Meta; s: Seat | Signu
   );
 }
 
+/** An officer's pin on a joiner, as an icon alone (the server's words in its tooltip, meta.run_words.pins): pinned (the
+ *  lock keeps them where they were put) or kept off (the lock leaves them off the roster). Never a "bench" badge. */
+export function PinMark({ meta, pin }: { meta: Meta; pin: "in" | "out" | null | undefined }) {
+  if (!pin) return null;
+  const words = meta.run_words.pins[pin];
+  return <Tooltip label={words}><Box component="span" aria-label={words} style={{ display: "inline-flex", color: pin === "in" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-red-5)" }}>{pin === "in" ? <IconPin size={14} /> : <IconPinnedOff size={14} />}</Box></Tooltip>;
+}
+
 /** Role counts for a roster: role icon + number, nothing else. */
 export function RosterHeader({ meta, r, title }: { meta: Meta; r: BoardRoster; title?: string }) {
   const counts = Object.fromEntries(meta.roles.map((role) => [role, 0])) as Record<string, number>;
   r.groups.flat().forEach((s) => { counts[s.role] = (counts[s.role] || 0) + 1; });
   return (
     <Group justify="space-between" mb={4} wrap="wrap">
-      <Group gap="sm"><Text size="sm" fw={700}>{title || `Roster ${r.n}`}</Text>{r.synergy !== null && r.synergy !== undefined && <Text size="xs" c="dimmed">synergy {r.synergy}</Text>}</Group>
+      <Text size="sm" fw={700}>{title || `Roster ${r.n}`}</Text>
       <RoleCounts meta={meta} counts={counts} size={16} />
     </Group>
   );

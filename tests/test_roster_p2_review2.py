@@ -124,5 +124,5 @@ def test_member_help_cover_line_counts_without_names(reg, rs):
     member_view = "\n".join(help_mod.run_lines(reg, rs, ev, is_officer=False, detail=True, viewer_id=p["Jex"].discord_id))
     mcover = next(ln for ln in member_view.splitlines() if "cover for short roles" in ln)
     assert "Kael" not in mcover and "Ana" not in mcover
-    assert "+1 offspec" in mcover and "+1 flex" in mcover, "the counts stay"
+    assert "1 offspec" in mcover and "1 declared flex" in mcover, "the counts stay, in the fill screens' words"
 

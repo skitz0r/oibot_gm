@@ -226,9 +226,9 @@ def test_lock_card_remind_pause_end_and_reopen(reg, rs, monkeypatch):
         assert "hasn't started yet" in h.text, "End is for after the start"
         monkeypatch.setattr(rc, "end_refusal", lambda ev_, at=None: None)
         await RunButton(reg.key, ev.key, "end").callback(h.card_press())
-        assert "no loot council is open" in h.text and h.buttons() == ["End the run now", "Back"]
+        assert "no loot council is open" in h.text and h.buttons() == ["End the run", "Back"]
         assert h.screen["view"].children[0].style == discord.ButtonStyle.danger
-        await h.press("End the run now")
+        await h.press("End the run")
         assert ev.state == "done" and "Reopen works for an hour" in h.text
         await RunButton(reg.key, ev.key, "reopen").callback(h.card_press())
         assert ev.state == "locked" and "Reopened" in h.text
@@ -260,4 +260,4 @@ def test_raid_health_on_a_locked_run_is_the_brief(reg, rs, officer, channel):  #
     run(FLOWS["raid_health"](h.command(), reg))
     view = h.screen["view"]
     text = "\n".join(str(c.content) for c in view.walk_children() if hasattr(c, "content"))
-    assert "Roster health" in text and "rostered" in text and "**Waiting on**" in text and "fill:" in text
+    assert "Roster health" in text and "rostered" in text and "**Waiting on**" in text and rc.fill_state_text(reg, ev) in text and "fill:" not in text

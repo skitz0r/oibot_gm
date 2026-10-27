@@ -6,13 +6,16 @@ import { SPLIT_LABEL } from "../../pages/Raids";
 import { RaidWide } from "../GroupsBlock";
 import { Eyebrow, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
-import { Aura, RosterHeader, SeatLine, SplitReasonLine, chunk, sortBank, splitBank, live, type Act, type BankSort, type OnBoard } from "./shared";
+import { GameIcon } from "../Icons";
+import { Aura, PinMark, RosterHeader, SeatLine, SplitReasonLine, chunk, markOf, sortBank, splitBank, live, type Act, type BankSort, type OnBoard } from "./shared";
 import { SplitModal } from "./SplitModal";
 import css from "../../pages/rosters.module.css";
 
 type Drag = { name: string; from: { r: number; g: number } | null };
 
-/** The board: bank + groups, drag and drop. Before lock it is the layout the lock will use; after lock it is the roster.
+/** The board: the joiners not placed yet (before the lock — "Not placed") or not rostered (after it — "Not rostered"), the
+ *  groups, drag and drop. Every word comes from the server (meta.run_words / run_labels / marks): the list's name, the pin
+ *  marks' tooltips, Place the rest. Before lock it is the layout the lock will use; after lock it is the roster.
  *  One ⓘ legend says what the marks mean and how dragging works (never repeated under every card); an open seat is a
  *  dashed slot with no word. After the lock only the groups with someone in them show, plus one empty group to drop
  *  into. `onHide`: before the lock the card collapses it back to one line. */
@@ -34,6 +37,8 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
   const reason = e.split?.reason || null;
   const caps = meta.group_caps || {};
   const placed = board.rosters.reduce((n, r) => n + r.groups.reduce((m, g) => m + g.length, 0), 0);
+  const pins = Object.fromEntries((e.signups || []).map((s) => [s.display_name, s.pin]));  // officers' pins: an icon on the chip
+  const words = meta.run_words;
 
   const layout = () => board.rosters.map((r) => r.groups.map((g) => g.map((s) => s.display_name)));
 
@@ -58,7 +63,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
   const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to, state: e.state === "open" ? "open" : "locked" });
 
   async function clear() {
-    if (placed > 0 && !(await ask({ title: "Clear the board?", message: e.consequences?.clear || `${placed} placement${placed === 1 ? "" : "s"} go back to the bank.`, confirmLabel: "Clear", color: "red" }))) return;  // the sentence comes from the server (consequences.py)
+    if (placed > 0 && !(await ask({ title: "Clear the board?", message: e.consequences?.clear || `${placed} placement${placed === 1 ? "" : "s"} go back to not placed.`, confirmLabel: "Clear", color: "red" }))) return;  // the sentence comes from the server (consequences.py)
     commit(board.rosters.map((r) => r.groups.map(() => [])));
   }
 
@@ -99,7 +104,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
   });
   const chip = (s: Seat, from: Drag["from"], mark?: string | null) => (
     <Box key={s.display_name} draggable onDragStart={onDragStart(s.display_name, from)} style={{ cursor: "grab", padding: "2px 6px", borderRadius: 6, background: from ? "transparent" : "var(--mantine-color-slate-6)", border: from ? "1px solid transparent" : "1px solid var(--mantine-color-slate-5)" }}>
-      <SeatLine meta={meta} s={s} mark={locked ? (mark ?? null) : undefined} />
+      <SeatLine meta={meta} s={s} mark={locked ? (mark ?? null) : undefined} right={<PinMark meta={meta} pin={pins[s.display_name]} />} />
     </Box>
   );
   const groupSummary = (sm: GroupSummary, gi: number) => sm.groups[gi];
@@ -109,14 +114,14 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
       <Group justify="space-between" wrap="wrap" mb="xs">
         <Group gap="sm" wrap="wrap">
           <Text fw={700}>Board</Text>
-          <Legend locked={locked} />
-          {canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}
+          <Legend meta={meta} locked={locked} />
+          {canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}{board.balance ? ` · ${board.balance}` : ""}</Text>}
           {canSplit && reason && <SplitReasonLine meta={meta} r={reason} />}
           {saving && <Text size="xs" c="dimmed">saving…</Text>}
         </Group>
         {!locked && (
           <Group gap="xs" wrap="wrap">
-            <Button size="xs" variant="default" leftSection={<IconUsers size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>Auto-fill empty seats</Button>
+            <Button size="xs" variant="default" leftSection={<IconUsers size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>{meta.run_labels.place_rest}</Button>
             {canSplit && <Button size="xs" variant="default" leftSection={<IconScale size={13} />} onClick={() => setSplitOpen(true)}>{multi ? "Propose splits" : "Propose roster"}</Button>}
             <Button size="xs" variant="subtle" color="red" leftSection={<IconRefresh size={13} />} disabled={saving} onClick={clear}>Clear</Button>
             {onHide && <Button size="xs" variant="subtle" color="gray" onClick={onHide}>Hide the board</Button>}
@@ -126,12 +131,12 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
       <Box className={css.board}>
         <Box>
           <Group justify="space-between" gap="xs" wrap="wrap">
-            <Eyebrow plain>Bank · {board.bank.length} unplaced</Eyebrow>
+            <Eyebrow plain>{words.bank[locked ? "locked" : "open"]} · {board.bank.length}</Eyebrow>
             <SegmentedControl size="xs" value={bankSort} onChange={pickSort} data={[{ value: "signup", label: "signup" }, { value: "spec", label: "spec" }, { value: "role", label: "role" }]} />
           </Group>
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
-            {board.bank.length === 0 && <Text size="xs" c="dimmed">{placed ? "Everyone who joined is placed." : "Nobody joined this run."}</Text>}
-            {left.length > 0 && <Text size="xs" fw={700}>Leftovers ({left.length})</Text>}
+            {board.bank.length === 0 && <Text size="xs" c="dimmed">{!placed ? "Nobody has joined yet — the sheet is in Discord." : locked ? "Everyone who joined is rostered. A name dragged here frees their seat." : "Everyone who joined is placed. A name dragged here goes back to not placed — still joined, the lock seats them."}</Text>}
+            {left.length > 0 && <Text size="xs" fw={700}>{words.leftovers} ({left.length})</Text>}
             {left.map((s) => chip(s, null))}
             {left.length > 0 && locked && reason && <SplitReasonLine meta={meta} r={reason} />}
             {left.length > 0 && board.another && <Text size="xs" c="dimmed">{board.another}</Text>}
@@ -148,10 +153,19 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
                   // after the lock: the groups with someone in them, plus the first empty one to drop into
                   if (locked && g.length === 0 && r.groups.findIndex((x) => x.length === 0) !== gi) return null;
                   const sm = groupSummary(r.summary, gi);
-                  const overCap = Object.entries(caps).filter(([role, cap]) => g.filter((s) => s.role === role).length > cap).map(([role]) => role);
+                  const overCap = Object.entries(caps).filter(([role, cap]) => g.filter((s) => s.role === role).length > cap).map(([role]) => role);  // icon + count/cap, the cap in the tooltip
                   return (
                     <Box key={gi} p="sm" style={{ background: "var(--mantine-color-slate-6)", border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8, minWidth: 0 }}>
-                      <Group justify="space-between" mb={4}><Text size="sm" fw={700}>Group {gi + 1}</Text><Text size="xs" c={overCap.length ? "red" : "dimmed"}>{g.length}/{board.group_size}{overCap.map((role) => ` · ${g.filter((s) => s.role === role).length} ${role}s (max ${caps[role]})`).join("")}</Text></Group>
+                      <Group justify="space-between" mb={4}><Text size="sm" fw={700}>Group {gi + 1}</Text>
+                        <Group gap={8} wrap="nowrap">
+                          {overCap.map((role) => (
+                            <Tooltip key={role} label={`at most ${caps[role]} per group`}>
+                              <Group gap={3} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={14} title={role} /><Text size="xs" c="red" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{g.filter((s) => s.role === role).length}/{caps[role]}</Text></Group>
+                            </Tooltip>
+                          ))}
+                          <Text size="xs" c="dimmed">{g.length}/{board.group_size}</Text>
+                        </Group>
+                      </Group>
                       {Array.from({ length: board.group_size }, (_, i) => {
                         const id = `${ri}:${gi}:${i}`;
                         const s = g[i];
@@ -162,13 +176,10 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
                         );
                       })}
                       {sm && (
-                        <>
-                          <Group gap={4} mt={8} style={{ minHeight: 30 }}>
-                            {sm.present.map((a) => <Aura key={a.abbr} a={a} who={a.who} />)}
-                            {sm.missing.map((a) => <Aura key={`m${a.abbr}`} a={a} missing />)}
-                          </Group>
-                          {sm.picks.length > 0 && <Text size="xs" c="dimmed" mt={4}>totems: {sm.picks.join(" · ")}</Text>}
-                        </>
+                        <Group gap={4} mt={8} style={{ minHeight: 30 }}>
+                          {sm.present.map((a) => <Aura key={a.abbr} a={a} who={a.who} />)}
+                          {sm.missing.map((a) => <Aura key={`m${a.abbr}`} a={a} missing />)}
+                        </Group>
                       )}
                     </Box>
                   );
@@ -187,7 +198,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
 }
 
 /** The board's one legend (ⓘ): what its marks mean and how a drag works — said once, not under every card. */
-function Legend({ locked }: { locked: boolean }) {
+function Legend({ meta, locked }: { meta: Meta; locked: boolean }) {
   const row = (mark: React.ReactNode, words: string) => <Group gap={8} wrap="nowrap" align="center"><Box style={{ width: 34, flex: "none", display: "flex", justifyContent: "center" }}>{mark}</Box><Text size="xs">{words}</Text></Group>;
   const sq = (style: React.CSSProperties) => <Box style={{ width: 20, height: 20, borderRadius: 5, ...style }} />;
   return (
@@ -203,10 +214,14 @@ function Legend({ locked }: { locked: boolean }) {
           {row(sq({ border: "2px solid var(--mantine-color-red-5)", opacity: 0.6 }), "greyed with a red edge: wanted in this group, and the one who brings it is in another")}
           {row(sq({ border: "2px solid var(--mantine-color-slate-5)", opacity: 0.6 }), "plain grey: nobody in the run brings it (hover for its name)")}
           {row(sq({ border: "2px solid var(--mantine-color-teal-4)", opacity: 0.8 }), "teal edge: covered by a raid-wide buff of the same family")}
+          {row(<PinMark meta={meta} pin="in" />, meta.run_words.pins.in)}
+          {row(<PinMark meta={meta} pin="out" />, meta.run_words.pins.out)}
+          {locked && row(<Group gap={4} wrap="nowrap">{["yes", "waiting", "no"].map((k) => <Text key={k} span size="xs">{markOf(meta, k === "waiting" ? null : k).mark}</Text>)}</Group>,
+            ["yes", "waiting", "no", "expired"].map((k) => `${meta.marks[k].mark} ${meta.marks[k].words}`).join(" · ") + " — the Discord card's marks")}
           <Text size="xs" c="dimmed">Totems count one per element.</Text>
           <Text size="xs" c="dimmed">{locked
-            ? "The board is the roster: moving someone between groups is free, dragging someone in from the bank asks them to confirm, dragging someone out frees their seat."
-            : "Drag a name into a group, or back to the bank to take it out again; dropping on someone swaps the two."}</Text>
+            ? "The board is the roster: moving someone between groups is free, dragging someone in from not rostered asks them to confirm, dragging someone out frees their seat."
+            : "Drag a name into a group, or back to not placed to take it out again; dropping on someone swaps the two."}</Text>
         </Stack>
       </Popover.Dropdown>
     </Popover>

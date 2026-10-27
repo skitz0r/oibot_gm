@@ -15,6 +15,7 @@ import discord
 from . import configops
 from . import raidcycle as rc
 from . import wizard_opts as wo
+from .raid_buttons import RUN_WORDS
 from .raid_views import health_layout, health_locked_brief, raid_name, run_label, run_title, sheet_state
 from .registry import ADHOC_SCHEDULE, ADHOC_SCHEDULE_NAME, Registry, RegistryError, schedule_class
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, week_opts, when_fields, when_note
@@ -178,7 +179,7 @@ class OpenWizard(Wizard):
         if len(ups) > 1:
             items.append(self.button("Another upcoming run…", self.another))
         items += [self.button("Ad hoc run…", self.adhoc), self.button("Cancel", self.cancel)]
-        await self.show(interaction, f"**{self.name()}** — which run?\n-# Ad hoc = a pickup or a one-off at a time you pick: first come, no regulars, no reminder.", *items)
+        await self.show(interaction, f"**{self.name()}** — which run?\n-# Ad hoc = a pickup or a one-off at a time you pick: {rc.FIRST_COME}, no regulars, no reminder.", *items)
 
     async def another(self, interaction: discord.Interaction) -> None:
         """The other upcoming runs of every recurring schedule (the value names the schedule unless it is the raid's own).
@@ -219,7 +220,7 @@ class OpenWizard(Wizard):
         if not self.templates():
             await self.open_when(interaction)
             return
-        await self.show(interaction, f"**{self.name()}** · an ad hoc run — first come, no regulars, no reminder. From a template, or a one-off?",
+        await self.show(interaction, f"**{self.name()}** · an ad hoc run — {rc.FIRST_COME}, no regulars, no reminder. From a template, or a one-off?",
                         *self.template_buttons(), self.button("One-off — pick a day and time", self.open_when),
                         self.button("Back", self.shortlist), self.button("Cancel", self.cancel))
 
@@ -310,7 +311,7 @@ class OpenWizard(Wizard):
                          + (" and the rostered are asked to confirm." if self.reg.schedule_def(self.rid, sid).get("confirm", True) else "."))
         if self.is_adhoc(sid):
             sd = self.reg.schedule_def(self.rid, sid)
-            lines.append("-# Ad hoc: first come, first rostered; no regulars, no reminder" + ("" if sd.get("confirm") else ", no confirmations (Join is the commitment)")
+            lines.append(f"-# Ad hoc: {rc.FIRST_COME}; no regulars, no reminder" + ("" if sd.get("confirm") else f"; {rc.NO_CONFIRMATIONS}")
                          + f"; locks {sd['lock_hours_before']:g} h before.")
         if sid:
             sd = self.reg.schedule_def(self.rid, sid)
@@ -726,7 +727,9 @@ async def open_raid_suggest(interaction: discord.Interaction, reg: Registry, *, 
         return
     rs = interaction.client.raids.store(reg)
     if key:
-        wiz = Wizard(reg, interaction.user.id, title="Suggestions", guard=officer_guard(reg))
+        ev0 = rs.events.get(key)  # the screen is named as the button that opened it: Suggest… before the lock, Fill seats… after
+        title = RUN_WORDS["fill" if ev0 is not None and ev0.state != "open" else "suggest"].rstrip("…")
+        wiz = Wizard(reg, interaction.user.id, title=title, guard=officer_guard(reg))
         await show_suggestions(interaction, wiz, rs, key)
         return
 
@@ -735,7 +738,7 @@ async def open_raid_suggest(interaction: discord.Interaction, reg: Registry, *, 
             await wiz.finish(i, "No live run.")
             return
         await show_suggestions(i, wiz, rs, ev.key)
-    await with_run(interaction, reg, title="Suggestions", then=body, officer=True)
+    await with_run(interaction, reg, title=RUN_WORDS["suggest"].rstrip("…"), then=body, officer=True)
 
 
 @flow("raid_fill")
@@ -754,7 +757,7 @@ async def open_raid_fill(interaction: discord.Interaction, reg: Registry, *, pre
         # rev this screen was drawn with — a stale plan is refused and re-shown); nothing goes out before Send.
         # `preview`: the same screen without Send.
         await show_suggestions(i, wiz, rs, ev.key, show_only=preview)
-    await with_run(interaction, reg, title="Fill seats", then=body, officer=True)
+    await with_run(interaction, reg, title=RUN_WORDS["fill"].rstrip("…"), then=body, officer=True)
 
 
 __all__ = ["with_run", "OpenWizard", "officer_guard", "officer_only", "run_team"]

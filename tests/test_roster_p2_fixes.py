@@ -71,11 +71,11 @@ def test_member_health_card_leaves_out_the_officer_parts(reg, rs):
     ev, p = worked_example(reg, rs)
     team = rc.run_team(reg, ev)
     full = views.health_layout(reg, rs, ev, team, ico)
-    assert "**Suggested**" in text_of(full) and "**No answer**" in text_of(full) and any(i.startswith("runact.") for i in ids(full))
+    assert "**Suggested**" in text_of(full) and "**Haven't answered**" in text_of(full) and any(i.startswith("runact.") for i in ids(full))
     member = views.health_layout(reg, rs, ev, team, ico, officer=False)
     body = text_of(member)
     assert "**Short**" in body and "locks <t:" in body, "the counts and what is short stay"
-    for hidden in ("**Suggested**", "**No answer**", "Kael", "Ana", "Brannoc", "a regular, hasn't answered", "declared flex"):
+    for hidden in ("**Suggested**", "**Haven't answered**", "Kael", "Ana", "Brannoc", "a regular, hasn't answered", "declared flex"):
         assert hidden not in body, hidden
     assert not ids(member), "no officer buttons on a member's card"
 
@@ -86,7 +86,7 @@ def test_raid_health_for_a_member_is_the_redacted_card(reg, rs, channel):  # noq
     h = Harness(reg, rs, client=bot)  # not an officer (discord_registry.is_officer is real here)
     run(FLOWS["raid_health"](h.command(), reg))
     body = text_of(h.screen["view"])
-    assert "**Short**" in body and "**Suggested**" not in body and "**No answer**" not in body and "Kael" not in body
+    assert "**Short**" in body and "**Suggested**" not in body and "**Haven't answered**" not in body and "Kael" not in body
 
 
 def test_raid_health_for_an_officer_is_the_full_card(reg, rs, officer, channel):  # noqa: F811
@@ -94,7 +94,7 @@ def test_raid_health_for_an_officer_is_the_full_card(reg, rs, officer, channel):
     h = Harness(reg, rs, client=FlowBot(rs))
     run(FLOWS["raid_health"](h.command(), reg))
     body = text_of(h.screen["view"])
-    assert "**Suggested**" in body and "**No answer**" in body
+    assert "**Suggested**" in body and "**Haven't answered**" in body
 
 
 # ---------------------------------------------------------------- D3: "suggested" doesn't stop same-role fill

@@ -24,17 +24,25 @@ from .registry import RegistryError
 log = logging.getLogger(__name__)
 
 
+# THE label of every run verb (design §5.56 phase 2): the Discord cards' buttons (RunButton.LABELS below) and the site's
+# buttons alike — /api/meta.run_labels carries this map, the web keeps no copy. The keys past the RunButton actions are the
+# render-time variants (Locked, Resume…) and the verbs only the site's board and lock screen have (Place the rest, Preview lock).
+RUN_WORDS = {"fill": "Fill seats…", "lock": "Lock now", "locked": "Locked", "preview_lock": "Preview lock", "cancel": "Cancel run…",
+             "loot": "Loot", "ask": "Ask", "suggest": "Suggest…", "remind": "Remind the unanswered", "pause": "Pause automatic asks",
+             "resume": "Resume automatic asks", "end": "End the run", "reopen": "Reopen", "place_rest": "Place the rest"}
+
+
 class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot|remind|pause|end|reopen)(?::(?P<rev>[0-9a-f]{6,16}))?"):
     """Officer buttons on the health and lock cards: Fill seats (the suggestions screen: the batch, then Send), Lock now, Cancel run, and
     the Suggested block's Ask (sends what the card shows; the plan fingerprint it was drawn with rides in the id, so a
     stale card is refused and redrawn) and Suggest… (every seat with its alternates: pick, then send). The lock card's
-    raid-night row (dual interfaces phase 2): Remind the unconfirmed (once an hour), Pause / Resume autofill, End the
+    raid-night row (dual interfaces phase 2): Remind the unanswered (once an hour), Pause / Resume automatic asks, End the
     run now (after the start; the decide screen); the closed card's Reopen (an end by mistake, within the hour)."""
-    LABELS = {"fill": ("Fill seats", discord.ButtonStyle.secondary), "lock": ("Lock now", discord.ButtonStyle.secondary), "cancel": ("Cancel run", discord.ButtonStyle.danger),
-              "loot": ("Loot", discord.ButtonStyle.secondary),
-              "ask": ("Ask", discord.ButtonStyle.success), "suggest": ("Suggest…", discord.ButtonStyle.secondary),
-              "remind": ("Remind the unconfirmed", discord.ButtonStyle.secondary), "pause": ("Pause autofill", discord.ButtonStyle.secondary),
-              "end": ("End the run now", discord.ButtonStyle.danger), "reopen": ("Reopen", discord.ButtonStyle.secondary)}
+    LABELS = {k: (RUN_WORDS[k], style) for k, style in (
+        ("fill", discord.ButtonStyle.secondary), ("lock", discord.ButtonStyle.secondary), ("cancel", discord.ButtonStyle.danger),
+        ("loot", discord.ButtonStyle.secondary), ("ask", discord.ButtonStyle.success), ("suggest", discord.ButtonStyle.secondary),
+        ("remind", discord.ButtonStyle.secondary), ("pause", discord.ButtonStyle.secondary), ("end", discord.ButtonStyle.danger),
+        ("reopen", discord.ButtonStyle.secondary))}
 
     def __init__(self, gk: str | None, key: str, action: str, disabled: bool = False, label: str | None = None, rev: str | None = None):
         """`gk`: the guild key the id carries (None = the old format, from a match only). `disabled`/`label` are
@@ -218,7 +226,7 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
                        embed=lock_preview_embed(reg, cur, rosters, bot.ico))
 
     await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("lock", reg, ev)), do=do, do_label="Lock now",
-                     extra=[wiz.button("Preview lock", preview)])
+                     extra=[wiz.button(RUN_WORDS["preview_lock"], preview)])
 
 
 async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
@@ -276,7 +284,7 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
 
 
 async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
-    """End the run now (the lock card, after the scheduled start): the decide screen, then LootMixin.end_run — the verb
+    """End the run (the lock card, after the scheduled start): the decide screen, then LootMixin.end_run — the verb
     /raid end, the site, MCP and the scheduler share (its loot council is archived with its summary). Reopen stays
     possible for an hour (an end by mistake)."""
     why = rc.end_refusal(ev)
@@ -300,7 +308,7 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None
 
     told = bot.end_consequence(reg, rs, ev) if hasattr(bot, "end_consequence") else f"End {run_title(reg, ev)}."
     text = (f"{run_label(reg, ev)}\n{told}\nThe sheet and the lock card close; no more fill asks go out. Reopen works for an hour after.")
-    await wiz.decide(interaction, text, do=do, do_label="End the run now", danger=True)
+    await wiz.decide(interaction, text, do=do, do_label=RUN_WORDS["end"], danger=True)
 
 
 async def reopen_press(interaction: discord.Interaction, bot, reg, rs, ev) -> None:

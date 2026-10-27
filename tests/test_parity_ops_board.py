@@ -175,8 +175,8 @@ def test_run_propose_previews_remembers_and_uses(reg, rs, monkeypatch):
     with pytest.raises(RegistryError, match="no proposal to use yet"):
         apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, field="use"))
     out = apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, value="first"))
-    assert out.startswith(f"{ev.key}: first proposal — g1 {', '.join(names[:3])} | g2 {', '.join(names[3:])} · synergy 0")
-    assert "nothing is saved" in out and "remembered until the bot restarts" in out and ev.layout is None
+    assert out.startswith(f"{ev.key}: first proposal — g1 {', '.join(names[:3])} | g2 {', '.join(names[3:])} · "), "one roster: no numbers, no comparison (rc.balance_words)"
+    assert "nothing is saved" in out and "remembered until the bot restarts" in out and ev.layout is None and "synergy" not in out
     again = apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, field="another"))
     assert calls[-1] == ("first", [[names[:3], names[3:]]]), "another keeps the strategy and avoids what was shown"
     assert "first proposal #2" in again

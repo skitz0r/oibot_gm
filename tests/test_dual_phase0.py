@@ -60,7 +60,7 @@ def test_lock_consequence_on_an_ad_hoc_run_promises_no_dms(reg, rs):
     join(reg, rs, ev, reg.test_members()[:4])
     assert rc.run_kind(reg, ev) == "adhoc" and not rc.run_confirms(reg, ev)
     text = " ".join(consequences.consequence("lock", reg, ev))
-    assert "Joining was the commitment — nobody is asked to confirm." in text and "confirmation DM" not in text
+    assert "No confirmations — Join is the commitment." in text and "confirmation DM" not in text
 
 
 def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
@@ -71,7 +71,7 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     assert consequences.consequence("cancel", reg, ev)[1].startswith("Nobody is DMed")  # the DM rule (phase 2)
     assert consequences.consequence("clear", reg, ev) == ["The board is empty — nothing to clear."]
     ev.layout = [names[:3], names[3:]]
-    assert consequences.consequence("clear", reg, ev)[0] == "5 placements go back to the bank."
+    assert consequences.consequence("clear", reg, ev)[0] == "5 placements go back to not placed."
     assert consequences.consequence("release", reg, ev) == ["Nothing is sent before lock — the seat only comes off the board."]
     lock_with_board(reg, rs, ev, names)
     for m in reg.test_members()[:5]:
@@ -112,7 +112,7 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
     start = (reg.now_local() + timedelta(days=2, hours=3)).replace(second=0, microsecond=0)
     adhoc = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=rc.ADHOC_SCHEDULE)
     d = c.get(f"/api/run/{adhoc.key}", headers=bearer()).json()
-    assert d["consequences"]["lock"] == "The board becomes the roster. Joining was the commitment — nobody is asked to confirm."
+    assert d["consequences"]["lock"] == "The board becomes the roster. No confirmations — Join is the commitment."
     assert "DM" not in d["consequences"]["lock"], "the old SheetCard text promised confirmation DMs on ad hoc runs (§4 item 5)"
     assert set(d["consequences"]) == {"lock", "cancel", "clear", "release", "release_named"}
     from pathlib import Path

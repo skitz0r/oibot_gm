@@ -893,7 +893,7 @@ async def open_roster_absences(interaction: discord.Interaction, reg: Registry, 
 
 SET_WHAT = {"join": "Join", "bench": "Bench", "no_thanks": "No thanks", "callout": "Can't make it (a callout)", "confirm_yes": "Confirm for them",
             "confirm_no": "Can't make it for them (their Confirm ask)", "fill_yes": "Confirm their fill", "fill_no": "No to their fill",
-            "pin_in": "Pin to roster", "pin_out": "Keep on bench", "unpin": "Unpin"}
+            "pin_in": "Pin to roster", "pin_out": "Keep off the roster", "unpin": "Unpin"}
 STATUS_WHAT = {"in": "join", "sub": "bench", "out": "no_thanks"}  # the old `status` seed (Join / Bench / No thanks)
 
 

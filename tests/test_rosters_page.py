@@ -100,7 +100,7 @@ def test_the_short_line_says_why_after_the_lock(reg, rs, c):
     rc.free_seat(reg, rs, ev, seated[-1].discord_id, "no-confirm")
     j = c.get(f"/api/run/{ev.key}", headers=bearer()).json()
     assert j["needs"]["headcount"] >= 1
-    assert "on the bench could step in" in (j["short_why"] or "")
+    assert "on the bench could fill it" in (j["short_why"] or "")
 
 
 def test_the_short_line_names_the_regulars_who_havent_answered(reg, rs, c):
@@ -120,3 +120,97 @@ def test_the_short_line_names_the_regulars_who_havent_answered(reg, rs, c):
     card = next(e for e in r["open"] if e["key"] == ev.key)
     assert card["short_why"] == rc.short_why(reg, ev) and card["week"][0]["step"] == "signup_lead_hours"
 
+
+
+# ---------------------------------------------------------------- phase 2: one vocabulary (design §5.56 "Phase 2 — one vocabulary")
+
+def test_the_run_vocabulary_reaches_the_site_from_python(c):
+    """Every state word, mark, ask kind, answer word and run verb's label is defined once in Python and reaches the site
+    through /api/meta — the Discord buttons and the web's are the same words (RunButton.LABELS is built from RUN_WORDS)."""
+    from oibot_gm.constants import MARK, MARK_WORDS
+    from oibot_gm.raid_buttons import RUN_WORDS, RunButton
+
+    m = c.get("/api/meta", headers=bearer()).json()
+    assert m["run_states"] == rc.RUN_STATE_WORDS and set(m["run_states"]) == {"open", "locked", "done", "cancelled"}
+    assert m["run_states"]["done"] == "finished" and m["run_states"]["open"] == "open for signup"
+    assert m["run_labels"] == RUN_WORDS
+    assert all(RunButton.LABELS[k][0] == RUN_WORDS[k] for k in RunButton.LABELS)
+    for k in ("preview_lock", "lock", "fill", "suggest", "loot", "end", "reopen", "remind", "pause", "place_rest"):
+        assert m["run_labels"][k], k
+    assert (m["run_labels"]["fill"], m["run_labels"]["remind"], m["run_labels"]["pause"], m["run_labels"]["end"]) == (
+        "Fill seats…", "Remind the unanswered", "Pause automatic asks", "End the run")
+    assert m["marks"]["yes"] == {"mark": MARK["yes"], "words": MARK_WORDS["yes"]} and m["marks"]["waiting"]["mark"] == MARK[None]
+    assert m["ask_kinds"] == rc.ASK_HOW and m["ask_answers"]["waiting"] == rc.ASK_ANSWER_WORDS[None]
+    assert m["level_words"] == {"green": "ready", "amber": "thin", "red": "short"}
+    w = m["run_words"]
+    assert w["no_confirmations"] == rc.NO_CONFIRMATIONS and w["bank"] == {"open": "Not placed", "locked": "Not rostered"}
+    assert w["leftovers"] == "Leftovers" and set(w["pins"]) == {"in", "out"} and "bench" not in " ".join(w["pins"].values()).lower()
+
+
+def test_a_run_and_its_live_line_carry_their_state_in_words(reg, rs, c):
+    weekly(reg)
+    first = [t for _s, t in rc.upcoming(reg, RID, reg.now_local(), 24 * 21)][0]
+    ev = rc.open_run(reg, rs, RID, first, by="t")
+    r = raid(c)
+    assert next(x for x in r["live_runs"] if x["key"] == ev.key)["state_word"] == "open for signup"
+    assert next(e for e in r["open"] if e["key"] == ev.key)["state_word"] == "open for signup"
+    rc.end_run(reg, rs, ev, "t")
+    assert c.get(f"/api/run/{ev.key}", headers=bearer()).json()["state_word"] == "finished"
+
+
+def test_the_fill_state_reads_in_sentences(reg, rs):
+    """Never "engine", never a bare code, never "autofill": how open seats are filled, as a sentence."""
+    ev = open_test_run(reg, rs)
+    assert "engine" not in rc.fill_state_text(reg, ev) and rc.fill_state_text(reg, ev).endswith(".")
+    ev, _seated = locked_ten(reg, rs)
+    for state in ("idle", "asking", "filled", "exhausted", "suggested"):
+        ev.fill_state = state
+        text = rc.fill_state_text(reg, ev)
+        assert text[0].isupper() and text.endswith(".") and "engine" not in text and "fill:" not in text, text
+    ev.autofill_paused, ev.autofill_paused_by = True, "Jon"
+    assert rc.fill_state_text(reg, ev).startswith("Automatic asks paused by Jon. ") and "autofill" not in rc.fill_state_text(reg, ev).lower()
+    rc.end_run(reg, rs, ev, "t")
+    assert rc.fill_state_text(reg, ev) == "The run is finished."
+
+
+def test_the_me_badge_says_not_rostered_for_a_joiner_the_lock_left_out(reg, rs):
+    ev, seated = locked_ten(reg, rs)
+    left = next(m for m in reg.test_members() if m not in seated and ev.signups[str(m.discord_id)].status == "in")
+    assert rc.answer_word(ev, "in", None) == "not rostered" and left
+    assert rc.answer_word(ev, "in", 1) == "rostered" and rc.answer_word(ev, "in", 2) == "rostered · roster 2"
+    assert rc.answer_word(ev, "sub", None) == "Bench" and rc.answer_word(ev, None, None) == "not answered"
+    fresh = open_test_run(reg, rs, days=5)
+    assert rc.answer_word(fresh, "in", None) == "Join", "before the lock a joiner is just joined"
+
+
+def test_split_rosters_compare_in_words_never_numbers():
+    assert rc.balance_words([42]) is None and rc.balance_words([0, 0]) is None
+    assert rc.balance_words([40, 38]) == "the two rosters are close"
+    assert rc.balance_words([40, 20]) == "roster 2 is the weaker" and rc.balance_words([10, 40, 39]) == "roster 1 is the weakest"
+
+
+def test_the_health_hints_use_the_fill_screens_words(reg, rs):
+    """Who could cover a short role reads as the fill modal does ("from the bench: A"), never "+1 sub"."""
+    from conftest import by_role
+
+    ev = open_test_run(reg, rs)
+    roles = by_role(reg)
+    join(reg, rs, ev, roles["tank"][:2] + roles["melee"] + roles["ranged"])
+    join(reg, rs, ev, roles["healer"][:1], status="sub")
+    healer = next(r for r in rc.health_data(reg, ev, rc.run_team(reg, ev))["roles"] if r["role"] == "healer")
+    assert healer["need"] and healer["hint"].startswith(f"{rc.ASK_HOW['sub']}: ") and "+" not in healer["hint"], healer["hint"]
+
+
+def test_the_confirmations_off_sentence_is_one_constant_on_every_discord_card(reg, rs, monkeypatch):
+    """One sentence for a run whose rostered aren't asked to confirm (rc.NO_CONFIRMATIONS): the lock card, the lock's
+    consequence — and no group-building number on the lock card."""
+    from oibot_gm import consequences, raid_views as views
+
+    ev, _seated = locked_ten(reg, rs)
+    fresh = open_test_run(reg, rs, days=5)
+    monkeypatch.setattr(rc, "run_confirms", lambda reg, ev: False)  # an ad hoc run's default (D5)
+    card = views.lock_layout(reg, ev, rc.run_team(reg, ev), lambda kind, ident: "", 0)
+    text = "\n".join(i.content for i in card.walk_children() if isinstance(getattr(i, "content", None), str))
+    assert rc.NO_CONFIRMATIONS in text and "synergy" not in text and "first come —" not in text
+    lock = " ".join(consequences.consequence("lock", reg, fresh))
+    assert rc.NO_CONFIRMATIONS[1:] in lock and "Joining was" not in lock

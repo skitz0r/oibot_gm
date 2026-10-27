@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { IconBell, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
@@ -12,8 +12,8 @@ import { BoardPreview } from "./BoardPreview";
 import { BoardView } from "./BoardView";
 import { FillModal } from "./FillModal";
 import { TellTheBot } from "../TellTheBot";
-import { ANSWER, RoleCounts, SeatLine, runName, type Act, type OnBoard } from "./shared";
-import { RUN_STATE_WORDS, RunStrip } from "../RaidCard";
+import { PinMark, RoleCounts, SeatLine, markOf, runName, type Act, type OnBoard } from "./shared";
+import { RunStrip } from "../RaidCard";
 import type { LockPreview, NightSheet } from "./types";
 
 /** One live run's card (design §5.56), in the order a raid leader reads it: the time, its state and kind; the run's week
@@ -29,11 +29,14 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const n = e.needs;
   const signups = e.signups || [];
   const joined = signups.filter((s) => s.status === "in");
+  // the role counts: who joined before the lock; after it the roster itself — the board's groups, counted once
   const roles = Object.fromEntries(meta.roles.map((r) => [r, 0])) as Record<string, number>;
-  joined.forEach((s) => { roles[s.role] = (roles[s.role] || 0) + 1; });
+  (locked && e.board ? e.board.rosters.flatMap((r) => r.groups.flat()) : joined).forEach((s) => { roles[s.role] = (roles[s.role] || 0) + 1; });
   const byClass = Object.entries(joined.reduce((m, s) => { (m[s.cls] ||= []).push(s); return m; }, {} as Record<string, Signup[]>)).sort((a, b) => b[1].length - a[1].length);
   const conf = e.confirmations || [];
-  const counts = { yes: conf.filter((c) => c.answer === "yes").length, pending: conf.filter((c) => c.answer === null).length, no: conf.filter((c) => c.answer === "no" || c.answer === "expired").length };
+  // the Discord card's tally (✅ · ⏳ · ❌, no answer in time counted with can't): the marks and their words from meta.marks
+  const counts = { yes: conf.filter((c) => c.answer === "yes").length, waiting: conf.filter((c) => c.answer === null).length, no: conf.filter((c) => c.answer === "no" || c.answer === "expired").length };
+  const L = meta.run_labels, W = meta.run_words;
   const shortRoles = n ? Object.entries(n.roles).filter(([, k]) => k > 0) : [];
   // after the lock a freed seat the roles don't account for is a bare number (seats); before it the headcount is the "N / size joined" itself
   const extraSeats = locked && n ? Math.max(0, n.headcount - shortRoles.reduce((x, [, k]) => x + k, 0)) : 0;
@@ -42,6 +45,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const [ask, confirmDialog] = useConfirm();
   const [fillOpen, setFillOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
+  const [lockPreview, setLockPreview] = useState(false);  // Preview lock opens the lock screen with the roster drawn
   const [cancelOpen, setCancelOpen] = useState(false);
   const [boardOpen, setBoardOpenState] = useState<boolean>(() => { try { return localStorage.getItem(`oibot.board.${e.key}`) === "1"; } catch { return false; } });
   const setBoardOpen = (v: boolean) => { setBoardOpenState(v); try { localStorage.setItem(`oibot.board.${e.key}`, v ? "1" : "0"); } catch { /* per-viewer convenience only */ } };
@@ -59,21 +63,22 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const [tellOpen, setTellOpen] = useState(false);  // the officers' Tell the bot box, about this run (design §3.4 OFF-20)
 
   async function remind() {
-    if (!(await ask({ title: `Remind the unconfirmed on ${name}?`, message: `Everyone rostered who hasn't answered gets their Confirm / Can't DM again — the same card, the same deadline. Once an hour per run.`, confirmLabel: "Remind" }))) return;
+    if (!(await ask({ title: `${L.remind} on ${name}?`, message: `Everyone rostered who hasn't answered gets their Confirm / Can't DM again — the same card, the same deadline. Once an hour per run.`, confirmLabel: L.remind }))) return;
     await onAct(`remind${e.key}`, `/api/run/${e.key}/remind`);
   }
   async function endNow() {
     let preview = "";
     try { preview = (await api.post<{ preview: string }>(`/api/loot/${e.key}/end`, { preview: true })).preview; } catch (err) { fail(err); return; }
-    if (!(await ask({ title: `End ${name} now?`, message: `${preview}\nThe sheet and the lock card close; no more fill asks go out. Reopen works for an hour after.`, confirmLabel: "End the run now", color: "red" }))) return;
+    if (!(await ask({ title: `End ${name}?`, message: `${preview}\nThe sheet and the lock card close; no more fill asks go out. Reopen works for an hour after.`, confirmLabel: L.end, color: "red" }))) return;
     await onAct(`end${e.key}`, `/api/loot/${e.key}/end`);
   }
   const pause = (paused: boolean) => onAct(`pause${e.key}`, `/api/run/${e.key}/pause`, { paused });
-  // one Fill button in every state (design B7): before lock the planner's suggestions, after lock the seats to fill
+  // one button in every state (design B7), named as on Discord: Suggest… before the lock (the planner's suggestions),
+  // Fill seats… after it (the seats to fill)
   const fillTip = !locked
     ? (seatsN ? `${seatsN} seat${seatsN === 1 ? "" : "s"} short of the tank/healer minimums — ${asksN} suggestion${asksN === 1 ? "" : "s"}; nothing is sent until you press Send` : "the tank/healer minimums are covered by who joined and the regulars yet to answer")
     : (isShort ? `${(n?.headcount || 0)} short — ${asksN} suggestion${asksN === 1 ? "" : "s"}` : "every seat is taken");
-  const facts = [e.kind === "adhoc" ? "first come, first rostered" : e.series_name, locked ? e.rel : e.timeline ? `locks ${e.timeline.lock}` : null].filter(Boolean).join(" · ");
+  const facts = [e.kind === "adhoc" ? W.first_come : e.series_name, e.confirms === false ? W.no_confirmations : null, locked ? e.rel : e.timeline ? `locks ${e.timeline.lock}` : null].filter(Boolean).join(" · ");
 
   return (
     <Box id={`run-${e.key}`} p="md" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 10, scrollMarginTop: 16, background: "var(--mantine-color-slate-8)" }}>
@@ -81,18 +86,16 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
         <Group gap="sm" wrap="wrap" align="center" style={{ minWidth: 0 }}>
           <Text size="lg" fw={800}>{e.when}</Text>
           {badge}
-          {locked
-            ? <Badge variant="light" color="gray" tt="none" leftSection={<IconLock size={12} />}>{RUN_STATE_WORDS.locked}</Badge>
-            : <Badge variant="light" color="teal" tt="none">open for signup</Badge>}
+          <Badge variant="light" color={locked ? "gray" : "teal"} tt="none" leftSection={locked ? <IconLock size={12} /> : undefined}>{meta.run_states[e.state] || e.state}</Badge>
           {e.kind === "adhoc" && <Badge variant="light" color="gray" tt="none">ad hoc</Badge>}
           {e.early_warning && <Tooltip label="the regulars can't cover a tank or healer minimum — see the suggestions"><Badge variant="light" color="red" tt="none">early warning</Badge></Tooltip>}
-          {e.autofill_paused && <Tooltip label={`autofill paused${e.autofill_paused_by ? ` by ${e.autofill_paused_by}` : ""} — your Fill still sends`}><Badge variant="light" color="gray" tt="none">autofill paused</Badge></Tooltip>}
+          {e.autofill_paused && <Tooltip label={`${W.auto_asks_paused}${e.autofill_paused_by ? ` by ${e.autofill_paused_by}` : ""} — your ${L.fill} still sends`}><Badge variant="light" color="gray" tt="none">{W.auto_asks_paused.toLowerCase()}</Badge></Tooltip>}
           {facts && <Text size="sm" c="dimmed">{facts}</Text>}
         </Group>
         <Group gap={8} wrap="wrap">
           <RunLinks e={e} />
           {e.live && <Button size="compact-xs" variant="subtle" color="gray" leftSection={<IconMessageCircle size={12} />} onClick={() => setTellOpen((x) => !x)}>Tell the bot about this run</Button>}
-          <RunMenu e={e} busy={busy} onRemind={remind} onPause={pause} onEnd={endNow} onRepost={() => setRepostOpen(true)} />
+          <RunMenu e={e} busy={busy} onRepost={() => setRepostOpen(true)} />
         </Group>
       </Group>
 
@@ -127,10 +130,12 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
         {e.live && people && <SomeoneElse run={e.key} people={people} onDone={onReload} />}
       </Group>
       {locked && e.confirms !== false && conf.length > 0 && (
-        <Group gap="md" mt={6}>
-          <Text size="sm" c="teal.4">{ANSWER.yes.mark} {counts.yes} confirmed</Text>
-          <Text size="sm" c="dimmed">⏳ {counts.pending} waiting</Text>
-          <Text size="sm" c="red.5">{ANSWER.no.mark} {counts.no} can't make it</Text>
+        <Group gap="md" mt={6} align="center">
+          {(["yes", "waiting", "no"] as const).map((k) => {
+            const m = markOf(meta, k === "waiting" ? null : k);
+            return <Tooltip key={k} label={k === "no" ? `${m.words}, or ${meta.marks.expired.words}` : m.words}><Text size="sm">{m.mark} {counts[k]} {m.words}</Text></Tooltip>;
+          })}
+          <Text size="xs" c="dimmed">the same marks as the Discord card</Text>
         </Group>
       )}
       {/* who could cover a short role (officers): the server's words, one line per short role, under the counts */}
@@ -147,12 +152,12 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           {byClass.map(([cls, ss]) => (
             <Box key={cls} style={{ minWidth: 0 }}>
               <Group gap={6} mb={2}><GameIcon meta={meta} kind="class" id={cls} size={20} title={cls} /><Text size="sm" fw={600} style={{ fontVariantNumeric: "tabular-nums" }}>{ss.length}</Text></Group>
-              {ss.map((s) => <SeatLine key={s.uid} meta={meta} s={s} right={<>{s.pin && <Badge size="xs" variant="light" tt="none" color={s.pin === "in" ? "teal" : "red"}>{s.pin === "in" ? "pinned" : "bench"}</Badge>}{menu(s)}</>} />)}
+              {ss.map((s) => <SeatLine key={s.uid} meta={meta} s={s} right={<><PinMark meta={meta} pin={s.pin} />{menu(s)}</>} />)}
             </Box>
           ))}
         </Group>
       )}
-      {/* the other answers in one line, a part only when someone is in it (after the lock the Bench answers sit in the board's bank) */}
+      {/* the other answers in one line, a part only when someone is in it (after the lock the Bench answers sit in the board's Not rostered list) */}
       <OthersLine label={meta.labels.sub} items={locked ? [] : bench} menu={menu} outs={outs} outLabel={meta.labels.out} away={away} />
 
       {e.board && locked && <BoardView e={e as unknown as Sheet} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} />}
@@ -166,25 +171,34 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       {/* Run actions live here in every state, under the board they act on: destructive far left, the step that
           commits the work last on the right. What does not apply yet is disabled with the reason in its label. */}
       <Group justify="space-between" wrap="wrap" gap="sm" mt="md" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
-        <Button size="xs" variant="subtle" color="red" loading={busy === `cancel${e.key}`} onClick={() => setCancelOpen(true)}>Cancel run</Button>
         <Group gap="xs" wrap="wrap">
+          <Button size="xs" variant="subtle" color="red" loading={busy === `cancel${e.key}`} onClick={() => setCancelOpen(true)}>{L.cancel}</Button>
+          {/* after the lock, the raid-night levers the Discord lock card's second row has — the same labels (meta.run_labels) */}
+          {locked && e.live && <Tooltip label={e.end_note || ""} disabled={!e.end_note}><span><Button size="xs" variant="subtle" color="red" leftSection={<IconFlagCheck size={13} />} disabled={!e.may_end} loading={busy === `end${e.key}`} onClick={endNow}>{L.end}</Button></span></Tooltip>}
+        </Group>
+        <Group gap="xs" wrap="wrap">
+          {locked && e.live && <Tooltip label={e.remind_note || ""} disabled={!e.remind_note}><span><Button size="xs" variant="default" leftSection={<IconBell size={13} />} disabled={!e.may_remind} loading={busy === `remind${e.key}`} onClick={remind}>{L.remind}</Button></span></Tooltip>}
+          {locked && e.live && (e.autofill_paused
+            ? <Button size="xs" variant="default" leftSection={<IconPlayerPlay size={13} />} loading={busy === `pause${e.key}`} onClick={() => pause(false)}>{L.resume}</Button>
+            : <Button size="xs" variant="default" leftSection={<IconPlayerPause size={13} />} loading={busy === `pause${e.key}`} onClick={() => pause(true)}>{L.pause}</Button>)}
           <Tooltip label={fillTip}>
-            <Button size="xs" variant={asksN ? "light" : "default"} color={asksN ? "teal" : undefined} leftSection={<IconUsersPlus size={13} />} onClick={() => setFillOpen(true)}>Fill</Button>
+            <Button size="xs" variant={asksN ? "light" : "default"} color={asksN ? "teal" : undefined} leftSection={<IconUsersPlus size={13} />} onClick={() => setFillOpen(true)}>{locked ? L.fill : L.suggest}</Button>
           </Tooltip>
-          <Button size="xs" leftSection={<IconLock size={13} />} disabled={locked} loading={busy === `lock${e.key}`} onClick={() => setLockOpen(true)}>{locked ? `Locked${e.timeline?.locked_at ? ` ${e.timeline.locked_at}` : ""}` : "Lock now"}</Button>
+          {!locked && <Button size="xs" variant="default" onClick={() => { setLockPreview(true); setLockOpen(true); }}>{L.preview_lock}</Button>}
+          <Button size="xs" leftSection={<IconLock size={13} />} disabled={locked} loading={busy === `lock${e.key}`} onClick={() => { setLockPreview(false); setLockOpen(true); }}>{locked ? `${L.locked}${e.timeline?.locked_at ? ` ${e.timeline.locked_at}` : ""}` : L.lock}</Button>
           {/* after lock, the next step is the loot council (design §3.1): open it here (the same route as Loot › Tonight), or go to it */}
           {e.loot?.may_open && (
             <Tooltip label={`opens the council: a thread in the officer channel${(e.n_rosters || 1) > 1 ? ` — one per roster (${e.n_rosters})` : ""}`}>
-              <Button size="xs" variant="light" leftSection={<IconDiamond size={13} />} loading={busy === `loot${e.key}`} onClick={() => onAct(`loot${e.key}`, `/api/loot/${e.key}/open`)}>Open loot council</Button>
+              <Button size="xs" variant="light" leftSection={<IconDiamond size={13} />} loading={busy === `loot${e.key}`} onClick={() => onAct(`loot${e.key}`, `/api/loot/${e.key}/open`)}>{L.loot}</Button>
             </Tooltip>
           )}
           {e.loot?.open && e.loot.bosses && <Text size="xs" c={e.loot.bosses.all_down ? "teal" : "dimmed"}>{e.loot.bosses.text}</Text>}
-          {e.loot?.open && <Button size="xs" variant="light" leftSection={<IconDiamond size={13} />} component={Link} to="/loot">Loot council</Button>}
+          {e.loot?.open && <Button size="xs" variant="light" leftSection={<IconDiamond size={13} />} component={Link} to="/loot">{L.loot}</Button>}
         </Group>
       </Group>
-      <Detail e={e} onAct={onAct} busy={busy} />
+      <Detail e={e} meta={meta} onAct={onAct} busy={busy} />
       <FillModal e={e as unknown as Sheet} meta={meta} opened={fillOpen} onClose={() => setFillOpen(false)} onSent={onReload} />
-      <LockModal e={e} meta={meta} opened={lockOpen} onClose={() => setLockOpen(false)} onLock={() => onAct(`lock${e.key}`, `/api/run/${e.key}/lock`)} />
+      <LockModal e={e} meta={meta} opened={lockOpen} preview={lockPreview} onClose={() => setLockOpen(false)} onLock={() => onAct(`lock${e.key}`, `/api/run/${e.key}/lock`)} />
       <RepostSheetModal run={e.key} opened={repostOpen} onClose={() => setRepostOpen(false)} onDone={onReload} />
       <CancelModal e={e} opened={cancelOpen} onClose={() => setCancelOpen(false)} onCancel={(reason, notify) => onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`, { reason, notify })} />
       {confirmDialog}
@@ -212,26 +226,15 @@ function RunLinks({ e }: { e: NightSheet }) {
   );
 }
 
-/** The header menu: the raid-night levers that aren't the board's — Remind the unconfirmed (once an hour), pause or resume
- *  autofill (D18), End the run now (after the start). Disabled items carry the server's reason. */
-function RunMenu({ e, busy, onRemind, onPause, onEnd, onRepost }: { e: NightSheet; busy: string | null; onRemind: () => void; onPause: (paused: boolean) => void; onEnd: () => void; onRepost: () => void }) {
+/** The header menu: what isn't a raid-night lever — Re-post sheet… (Remind the unanswered, Pause automatic asks and End
+ *  the run are buttons on a locked card, as on the Discord lock card's second row). */
+function RunMenu({ e, busy, onRepost }: { e: NightSheet; busy: string | null; onRepost: () => void }) {
   if (!e.live) return null;
-  const locked = e.state !== "open";
   return (
     <Menu shadow="md" width={260} position="bottom-end">
-      <Menu.Target><ActionIcon variant="subtle" color="gray" aria-label={`run actions for ${e.when}`} loading={busy === `remind${e.key}` || busy === `pause${e.key}` || busy === `end${e.key}`}><IconDotsVertical size={16} /></ActionIcon></Menu.Target>
+      <Menu.Target><ActionIcon variant="subtle" color="gray" aria-label={`run actions for ${e.when}`} loading={busy === `repost${e.key}`}><IconDotsVertical size={16} /></ActionIcon></Menu.Target>
       <Menu.Dropdown>
-        <Tooltip label={e.remind_note || ""} disabled={!e.remind_note} position="left" withinPortal>
-          <div><Menu.Item leftSection={<IconBell size={14} />} disabled={!e.may_remind} onClick={onRemind}>Remind the unconfirmed</Menu.Item></div>
-        </Tooltip>
-        {e.autofill_paused
-          ? <Menu.Item leftSection={<IconPlayerPlay size={14} />} onClick={() => onPause(false)}>Resume autofill</Menu.Item>
-          : <Menu.Item leftSection={<IconPlayerPause size={14} />} disabled={!locked} onClick={() => onPause(true)}>Pause autofill</Menu.Item>}
         <Menu.Item leftSection={<IconSend size={14} />} onClick={onRepost}>Re-post sheet…</Menu.Item>
-        <Menu.Divider />
-        <Tooltip label={e.end_note || ""} disabled={!e.end_note} position="left" withinPortal>
-          <div><Menu.Item leftSection={<IconFlagCheck size={14} />} color="red" disabled={!e.may_end} onClick={onEnd}>End the run now</Menu.Item></div>
-        </Tooltip>
       </Menu.Dropdown>
     </Menu>
   );
@@ -248,11 +251,11 @@ function NightBlock({ e, meta, onFill }: { e: NightSheet; meta: Meta; onFill: ()
         <Alert color="teal" variant="light" p="xs">
           <Group justify="space-between" wrap="wrap" gap="xs">
             <Text size="sm">Waiting on you: {e.plan?.lines?.[0] || "a role swap would cover a short seat"}</Text>
-            <Button size="compact-sm" variant="light" color="teal" onClick={onFill}>Fill</Button>
+            <Button size="compact-sm" variant="light" color="teal" onClick={onFill}>{meta.run_labels.fill}</Button>
           </Group>
         </Alert>
       )}
-      <Text size="xs" c="dimmed">fill: {e.fill_state_text || e.fill_state}{e.asks_on_site ? ` · ${e.asks_on_site} ask${e.asks_on_site === 1 ? "" : "s"} wait on the site` : ""}{e.reminded_at ? ` · reminded ${e.reminded_at}${e.reminded_by ? ` by ${e.reminded_by}` : ""}` : ""}</Text>
+      <Text size="xs" c="dimmed">{e.fill_state_text || e.fill_state}{e.asks_on_site ? ` · ${e.asks_on_site} ask${e.asks_on_site === 1 ? "" : "s"} wait on the site` : ""}{e.reminded_at ? ` · reminded ${e.reminded_at}${e.reminded_by ? ` by ${e.reminded_by}` : ""}` : ""}</Text>
       {e.confirmations_pending && <Text size="xs" c="dimmed">Confirmations not yet sent — the bot resumes them within a minute.</Text>}
       {(switches.length > 0 || left.length > 0) && (
         <Group gap="xl" align="flex-start" wrap="wrap">
@@ -286,24 +289,25 @@ function NightBlock({ e, meta, onFill }: { e: NightSheet; meta: Meta; onFill: ()
 
 /** Lock now: the server's consequence sentence, and a Preview of the roster(s) the lock would build now
  *  (POST /api/run/{key}/lock/preview — nothing saved); Lock now sends the lock. */
-function LockModal({ e, meta, opened, onClose, onLock }: { e: NightSheet; meta: Meta; opened: boolean; onClose: () => void; onLock: () => Promise<void> }) {
+function LockModal({ e, meta, opened, preview: startWithPreview = false, onClose, onLock }: { e: NightSheet; meta: Meta; opened: boolean; preview?: boolean; onClose: () => void; onLock: () => Promise<void> }) {
   const [p, setP] = useState<LockPreview | null>(null);
   const [busy, setBusy] = useState(false);
   async function preview() {
     setBusy(true);
     try { setP(await api.post<LockPreview>(`/api/run/${e.key}/lock/preview`, {})); } catch (err) { fail(err); } finally { setBusy(false); }
   }
+  useEffect(() => { if (opened && startWithPreview) preview(); }, [opened]);  // eslint-disable-line react-hooks/exhaustive-deps
   const close = () => { setP(null); onClose(); };
   return (
     <Modal opened={opened} onClose={close} title={`Lock ${runName(e as unknown as Sheet)} now?`} centered size={p ? "xl" : "md"}>
       <Stack gap="md">
         <Text size="sm" style={{ whiteSpace: "pre-line" }}>{p?.consequence || e.consequences?.lock || "The board becomes the roster."}</Text>
         {p && <BoardPreview meta={meta} board={p.board} />}
-        {p && <Text size="xs" c="dimmed">Nothing is saved — Lock now builds the roster again from the sheet as it is then.</Text>}
+        {p && <Text size="xs" c="dimmed">Nothing is saved — {meta.run_labels.lock} builds the roster again from the sheet as it is then.</Text>}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={close}>Back</Button>
-          <Button variant="light" size="sm" loading={busy} onClick={preview}>{p ? "Preview again" : "Preview"}</Button>
-          <Button size="sm" onClick={async () => { close(); await onLock(); }}>Lock now</Button>
+          <Button variant="light" size="sm" loading={busy} onClick={preview}>{p ? "Preview again" : meta.run_labels.preview_lock}</Button>
+          <Button size="sm" onClick={async () => { close(); await onLock(); }}>{meta.run_labels.lock}</Button>
         </Group>
       </Stack>
     </Modal>
@@ -321,7 +325,7 @@ function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: 
       <Stack gap="md">
         <Text size="sm" style={{ whiteSpace: "pre-line" }}>{e.consequences?.cancel || "The sheet closes."}</Text>
         <Textarea label="Why? (optional)" description={`officers only: the run's thread and the ops feed — never the signup channel · ${reason.length}/300`} value={reason} maxLength={300} autosize minRows={2} onChange={(ev) => setReason(ev.currentTarget.value)} />
-        <Checkbox label="Post a line in the signup channel (fixed text, no reason)" checked={notify} onChange={(ev) => setNotify(ev.currentTarget.checked)} />
+        <Checkbox label="Tell the channel — a fixed line, no reason" checked={notify} onChange={(ev) => setNotify(ev.currentTarget.checked)} />
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={close}>Back</Button>
           <Button color="red" size="sm" onClick={async () => { const r = reason.trim(), nf = notify; close(); await onCancel(r, nf); }}>Cancel the run</Button>
@@ -339,17 +343,15 @@ function NotAnswered({ e, meta, onDone }: { e: NightSheet; meta: Meta; onDone: (
   if (!e.expected_from || e.expected_from === "none" || waiting.length === 0) return null;  // nobody to wait on: no box
   const regs = e.regulars || [];
   const tally = (st: string) => regs.filter((r) => r.status === st).length;
-  const title = e.expected_from === "regulars" ? `Regulars who haven't answered (${waiting.length} of ${regs.length})`
-    : e.expected_from === "test" ? `Test bench, not answered (${waiting.length})` : `Not answered (${waiting.length}) — no regulars set, everyone counts`;
+  // the title is the server's words for who the bot waits on (meta.run_words.not_answered); the counts are numbers
+  const title = `${meta.run_words.not_answered[e.expected_from] || meta.run_words.not_answered.everyone} · ${waiting.length}${e.expected_from === "regulars" ? ` of ${regs.length}` : ""}`;
   return (
     <Box mt="sm" p="sm" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8 }}>
       <Group justify="space-between" wrap="wrap" gap="xs">
         <Eyebrow plain>{title}</Eyebrow>
         {e.expected_from === "regulars" && (
-          <Group gap="sm">
-            <Tooltip label={meta.labels.in}><Badge variant="light" color="teal" tt="none">✓ {tally("in")}</Badge></Tooltip>
-            <Tooltip label={meta.labels.sub}><Badge variant="light" color="gray" tt="none">{meta.labels.sub} {tally("sub")}</Badge></Tooltip>
-            <Tooltip label={meta.labels.out}><Badge variant="light" color="red" tt="none">✗ {tally("out")}</Badge></Tooltip>
+          <Group gap="sm">{/* how the other regulars answered: the sheet's own answer words + a number, no glyphs */}
+            {meta.statuses.map((st) => <Badge key={st} variant="light" color={st === "in" ? "teal" : st === "out" ? "red" : "gray"} tt="none">{meta.labels[st]} {tally(st)}</Badge>)}
           </Group>
         )}
       </Group>
@@ -390,7 +392,7 @@ function OthersLine({ label, items, outLabel, outs, away, menu }: { label: strin
 /** The detail accordion, "What happened · N lines": fill asks (an ask still out can be withdrawn), callouts with their
  *  notes, and the log — each line with its stamp in words, officer-only lines marked. Nothing to show = no accordion.
  *  `readOnly`: the history drawer. */
-export function Detail({ e, onAct, busy, readOnly = false }: { e: NightSheet; onAct?: Act; busy?: string | null; readOnly?: boolean }) {
+export function Detail({ e, meta, onAct, busy, readOnly = false }: { e: NightSheet; meta?: Meta; onAct?: Act; busy?: string | null; readOnly?: boolean }) {
   const fa = e.fill_asks || [], co = e.callouts || [], rows = e.log_rows || (e.log || []).map((t) => ({ at: "", when: "", text: t, officer: false }));
   const lines = fa.length + co.length + rows.length;
   if (!lines) return null;
@@ -403,7 +405,7 @@ export function Detail({ e, onAct, busy, readOnly = false }: { e: NightSheet; on
             <Stack gap={2} mb="sm">
               {fa.map((a, i) => (
                 <Group key={i} gap={6} wrap="wrap">
-                  <Text size="xs">{a.display_name} · {a.kind}{a.phase === "prelock" ? " (before lock)" : ""} · {a.character} ({a.spec}, {a.role}) · {a.reason}{a.approved_by ? ` · by ${a.approved_by}` : ""}{a.channel === "web" ? " · on the site" : ""}{a.deadline && a.answer === null ? ` · by ${a.deadline}` : ""} · <Text span c={a.answer === "yes" ? "teal" : a.answer === "no" ? "red" : "dimmed"}>{a.answer || "waiting"}{a.answered_by ? ` (${a.answered_by})` : ""}</Text></Text>
+                  <Text size="xs">{a.display_name} · {meta?.ask_kinds[a.kind] || a.kind}{a.phase === "prelock" ? " (before lock)" : ""} · {a.character} ({a.spec}) · {a.reason}{a.approved_by ? ` · by ${a.approved_by}` : ""}{a.channel === "web" ? " · on the site" : ""}{a.deadline && a.answer === null ? ` · by ${a.deadline}` : ""} · <Text span c={a.answer === "yes" ? "teal" : a.answer === "no" ? "red" : "dimmed"}>{meta?.ask_answers[a.answer || "waiting"] || a.answer || "waiting"}{a.answered_by ? ` (${a.answered_by})` : ""}</Text></Text>
                   {!readOnly && onAct && a.pending && a.uid && (
                     <Button size="compact-xs" variant="subtle" color="gray" loading={busy === `withdraw${e.key}${a.uid}`} onClick={() => onAct(`withdraw${e.key}${a.uid}`, `/api/run/${e.key}/withdraw`, { uid: a.uid })}>Withdraw</Button>
                   )}

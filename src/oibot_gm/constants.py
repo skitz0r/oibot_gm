@@ -8,6 +8,13 @@ RANK_ORDER = {"core": 0, "raider": 1, "trial": 2, "social": 3, "alt": 4}  # lowe
 
 # confirmation / fill-ask answer marks (None = still waiting)
 MARK = {"yes": "✅", "no": "❌", "expired": "⌛", None: "⏳"}
+# what each mark means, in the glossary's words — the site's tooltips and the confirmation tally (design §5.56 phase 2);
+# /api/meta carries both maps ("waiting" = the None key), so the site draws the Discord card's marks, never its own
+MARK_WORDS = {"yes": "confirmed", "no": "can't make it", "expired": "no answer in time", None: "waiting"}
+
+# a raid's (or a schedule's regulars') coverage level as a word about the guild, never a colour alone: the Readiness and
+# Rosters chips (meta.level_words)
+LEVEL_WORDS = {"green": "ready", "amber": "thin", "red": "short"}
 
 # health levels → embed / container accent colours and the dot used in text
 LEVEL_COLOUR = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}

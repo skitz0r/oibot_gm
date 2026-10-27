@@ -165,7 +165,9 @@ def groups_summary(reg: Registry, players: list[Player], result: RosterResult | 
             "present": [{"id": b, "abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present]
                        + [{"id": b, "abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": f"covered by {all_buffs[c].short}" if c in all_buffs else "covered", "covered": True} for b, c in g.covered.items() if g.wanted.get(b, 0) > 0],
             "missing": [{"id": b, "abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "in_run": b in in_run} for b in missing],
-            "picks": [f"{slot.split('_')[1].title()} {buffs[bid].abbr}" for slot, bid in sorted(g.picks.items()) if not slot.endswith("_cd") and g.wanted.get(bid, 0) > 0],
+            # the totem picked per element, as data (the board draws icons alone — its present auras; design §5.56 phase 2)
+            "picks": [{"element": slot.split("_")[1], "id": bid, "abbr": buffs[bid].abbr, "name": buffs[bid].short} for slot, bid in sorted(g.picks.items())
+                      if not slot.endswith("_cd") and g.wanted.get(bid, 0) > 0],
             "value": result.group_reports[gi].value if gi < len(result.group_reports) else 0,
         })
     return out

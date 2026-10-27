@@ -124,7 +124,7 @@ def test_the_lock_card_shows_bosses_and_the_end_prompt(council, bosses):
     c = council
     card = views.lock_layout(c.reg, c.ev, rc.run_team(c.reg, c.ev), ico, 0, c.rs)
     assert "☠ Bosses 0 / 2" in text_of(card) and "All bosses down" not in text_of(card)
-    assert end_button(card).label == "End the run now"
+    assert end_button(card).label == "End the run"
     kill(c, "Gatekeeper")
     assert "☠ Bosses 1 / 2" in text_of(views.lock_layout(c.reg, c.ev, rc.run_team(c.reg, c.ev), ico, 0, c.rs))
     kill(c, "Warden of Tests")
@@ -176,8 +176,8 @@ def test_the_end_prompt_press_goes_through_the_decide_screen_to_end_run(reg, rs,
 
     async def go():
         await RunButton(reg.key, ev.key, "end").callback(h.card_press())
-        assert h.buttons() == ["End the run now", "Back"] and "End " in h.text
-        await h.press("End the run now")
+        assert h.buttons() == ["End the run", "Back"] and "End " in h.text
+        await h.press("End the run")
     run(go())
     assert rs.events[ev.key].state == "done"
     assert (GUILD, ev.key) not in bot.events, "the council ended with the run (one verb)"

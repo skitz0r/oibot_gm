@@ -383,7 +383,7 @@ def roster_aura_lines(reg: Registry, i: int, r, is_officer: bool = False) -> lis
         gs = None
     if gs:
         raid = [f"{b['name']} ×{b['n']}" if b["n"] else f"{b['name']} none" for b in gs["raid"]]
-        per_group = [f"g{g['n']} missing {', '.join(b['name'] for b in g['missing'][:4]) or 'nothing'}" + (f" (totems {', '.join(g['picks'])})" if g["picks"] else "") for g in gs["groups"]]
+        per_group = [f"g{g['n']} missing {', '.join(b['name'] for b in g['missing'][:4]) or 'nothing'}" + (f" (totems {', '.join(p['element'].title() + ' ' + p['abbr'] for p in g['picks'])})" if g["picks"] else "") for g in gs["groups"]]
         out.append(f"  roster {i + 1} auras: raid-wide {' · '.join(raid) or 'none'}" + (" · " + " · ".join(per_group) if per_group else "")
                    + (f" · synergy {gs['synergy']}" if gs.get("synergy") is not None else ""))
     if is_officer and getattr(r, "advisories", None):
@@ -484,9 +484,9 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
         def hint(r: dict) -> str:
             if is_officer:
                 return r["hint"]
-            if r["hint"].startswith("not on sheet"):
+            if r["hint"].startswith("not on the sheet"):
                 return "members not on the sheet could cover"
-            return " · ".join(f"+{len(v)} {k}" for k, v in r["cover"].items() if v) or r["hint"]
+            return " · ".join(f"{len(v)} {rc.ASK_HOW.get(k, k)}" for k, v in r["cover"].items() if v) or r["hint"]
         covers = [f"{r['role']} {r['have']}/{r['need']} ({hint(r)})" for r in hd["roles"] if r["need"] and r["have"] < r["need"] and r["hint"]]
         if covers:
             out.append("  cover for short roles: " + " · ".join(covers))
