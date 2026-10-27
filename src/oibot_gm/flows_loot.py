@@ -1036,7 +1036,7 @@ async def end_decide(interaction: discord.Interaction, bot, reg: Registry, rs, e
             return
         await wiz.finish(i, text[:1800])
 
-    text = bot.end_consequence(reg, rs, ev) + "\n-# The summary posts in the thread (what was never confirmed stays in it); the run is marked done."
+    text = bot.end_consequence(reg, rs, ev)  # THE End sentence (council + run, consequences.consequence("end")), as the lock card's End
     await wiz.decide(interaction, text, do=do, do_label="End", danger=True, back_label="Not yet")
 
 

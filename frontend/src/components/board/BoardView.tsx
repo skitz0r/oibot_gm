@@ -7,11 +7,17 @@ import { RaidWide } from "../GroupsBlock";
 import { Eyebrow, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
 import { GameIcon } from "../Icons";
-import { Aura, PinMark, RosterHeader, SeatLine, SplitReasonLine, chunk, markOf, sortBank, splitBank, live, type Act, type BankSort, type OnBoard } from "./shared";
+import { Aura, PinMark, RosterHeader, SeatLine, SplitReasonLine, chunk, fillNames, markOf, sortBank, splitBank, live, type BankSort, type OnBoard } from "./shared";
 import { SplitModal } from "./SplitModal";
+import { MemberMenu, type MoveTarget } from "./MemberMenu";
 import css from "../../pages/rosters.module.css";
 
-type Drag = { name: string; from: { r: number; g: number } | null };
+type From = { r: number; g: number } | null;
+type Drag = { name: string; from: From };
+/** Where a move goes: a seat (roster, group, position) or null = back to Not placed / Not rostered. */
+type Target = { r: number; g: number; i: number } | null;
+/** The board's moves, each with its sentence in ev_json.consequences (consequences.py): move / roster / swap / substitute / release. */
+type Verb = "move" | "roster" | "swap" | "substitute" | "release";
 
 /** The board: the joiners not placed yet (before the lock — "Not placed") or not rostered (after it — "Not rostered"), the
  *  groups, drag and drop. Every word comes from the server (meta.run_words / run_labels / marks): the list's name, the pin
@@ -19,13 +25,14 @@ type Drag = { name: string; from: { r: number; g: number } | null };
  *  One ⓘ legend says what the marks mean and how dragging works (never repeated under every card); an open seat is a
  *  dashed slot with no word. After the lock only the groups with someone in them show, plus one empty group to drop
  *  into. `onHide`: before the lock the card collapses it back to one line. */
-export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onHide?: () => void }) {
+export function BoardView({ e, meta, onBoard, onHide, onReload }: { e: Sheet; meta: Meta; onBoard: OnBoard; onHide?: () => void; onReload?: () => Promise<void> | void }) {
   const board = e.board!;
   const locked = e.state !== "open";
   const conf = Object.fromEntries((e.confirmations || []).map((c) => [c.display_name, c.answer]));
   const drag = useRef<Drag | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [placing, setPlacing] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [ask, confirmDialog] = useConfirm();
   const multi = (e.split?.runs || 1) > 1;
@@ -63,38 +70,70 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
   const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to, state: e.state === "open" ? "open" : "locked" });
 
   async function clear() {
-    if (placed > 0 && !(await ask({ title: "Clear the board?", message: e.consequences?.clear || `${placed} placement${placed === 1 ? "" : "s"} go back to not placed.`, confirmLabel: "Clear", color: "red" }))) return;  // the sentence comes from the server (consequences.py)
+    // the sentence comes from the server (consequences.py "clear"); the browser prints it, never composes one
+    if (placed > 0 && !(await ask({ title: "Clear the board?", message: e.consequences?.clear, confirmLabel: "Clear", cancelLabel: "Back", color: "red" }))) return;
     commit(board.rosters.map((r) => r.groups.map(() => [])));
   }
+  /** Place the rest: the solver places everyone the officers left unplaced, around their placements. Carries the board's
+   *  rev (a board that changed meanwhile is refused with the current one) and shows its progress while it solves. */
+  async function placeRest() {
+    setPlacing(true);
+    try { await send("autofill", { rev: e.rev }); } finally { setPlacing(false); }
+  }
 
+  const groupName = (r: number, g: number) => (board.rosters.length > 1 ? `Roster ${r + 1} · Group ${g + 1}` : `Group ${g + 1}`);
+  const bankWord = words.bank[locked ? "locked" : "open"];
+  /** The confirm before a move: a title naming the people, and ONLY the server's sentence for the verb
+   *  (ev_json.consequences, with the names put where the server left {name} / {other} / {to}) — Back / the verb. */
+  function confirmMove(verb: Verb, name: string, n: { other?: string; to?: string }) {
+    const c = e.consequences || ({} as NonNullable<Sheet["consequences"]>);
+    const sentence = verb === "release" ? (c.release_named || c.release) : c[verb];
+    const title = { move: `Move ${name} to ${n.to}?`, roster: `Move ${name} to ${n.to}?`, swap: `Swap ${name} and ${n.other}?`,
+      substitute: `Put ${name} in ${n.other}'s seat?`, release: locked ? `Take ${name} off the roster?` : `Move ${name} to ${bankWord.toLowerCase()}?` }[verb];
+    const label = { move: "Move", roster: "Move", swap: "Swap", substitute: "Put them in", release: locked ? "Release the seat" : "Move" }[verb];
+    return ask({ title, message: fillNames(sentence, { name, ...n }), confirmLabel: label, cancelLabel: "Back", color: verb === "release" || verb === "substitute" ? "red" : undefined });
+  }
+  /** ONE path for every move — a drag and the ⋮ menu's Move to… — so both send the same POST /move body. After the lock
+   *  every move edits the roster and asks first; before it a drag is free (it only shapes the layout the lock uses) and
+   *  Move to… still shows where it goes (a tap is easy to misplace). */
+  async function place(name: string, from: From, target: Target, via: "drag" | "menu") {
+    const L = layout();
+    if (from) L[from.r][from.g] = L[from.r][from.g].filter((x) => x !== name);
+    const asks = locked || via === "menu";
+    if (target === null) {
+      if (!from) return;
+      if (asks && !(await confirmMove("release", name, {}))) return;
+      move(name, null); return;
+    }
+    const g = L[target.r][target.g];
+    const to = groupName(target.r, target.g);
+    const sameGroup = !!from && from.r === target.r && from.g === target.g;
+    const other = sameGroup ? undefined : g[target.i];
+    let verb: Verb;
+    if (other && other !== name) verb = from ? "swap" : "substitute";
+    else if (g.length >= board.group_size) { fail(new Error(`${to} is full`)); return; }
+    else verb = from ? "move" : "roster";
+    if (asks && !sameGroup && !(await confirmMove(verb, name, { other, to }))) return;
+    move(name, target);
+  }
   async function drop(target: { r: number; g: number; i: number } | "bank") {
     const d = drag.current; drag.current = null; setOver(null);
     if (!d) return;
-    const L = layout();
-    if (d.from) L[d.from.r][d.from.g] = L[d.from.r][d.from.g].filter((n) => n !== d.name);
-    if (target === "bank") {
-      if (!d.from) return;
-      // the sentence comes from the server (consequences.py); the browser only puts the member's name where the server left the {name} token
-      const released = e.consequences?.release_named ? e.consequences.release_named.replace("{name}", d.name) : e.consequences?.release;
-      if (locked && !(await ask({ title: `Take ${d.name} off the roster?`, message: released || `${d.name} is told their seat was released and the bench is asked to fill it.`, confirmLabel: "Release the seat", color: "red" }))) return;
-      move(d.name, null); return;
-    }
-    const g = L[target.r][target.g];
-    const displaced = g[target.i];
-    if (displaced && displaced !== d.name) {
-      g.splice(target.i, 1, d.name);
-      if (d.from) L[d.from.r][d.from.g].push(displaced); // swap
-      else if (!locked) { /* from bank: displaced goes back to bank */ }
-      else if (!(await ask({ title: `Swap ${displaced} out for ${d.name}?`, message: `${displaced} is told their seat was released and the bench is asked; ${d.name} gets a confirmation DM.`, confirmLabel: "Swap" }))) return;
-    } else if (g.length >= board.group_size) {
-      fail(new Error(`Group ${target.g + 1} is full`));
-      return;
-    } else {
-      g.splice(Math.min(target.i, g.length), 0, d.name);
-      if (locked && !d.from && !(await ask({ title: `Roster ${d.name}?`, message: `${d.name} gets a confirmation DM; the seat is theirs once they say yes.`, confirmLabel: "Ask them" }))) return;
-    }
-    move(d.name, target);
+    await place(d.name, d.from, target === "bank" ? null : target, "drag");
   }
+  /** Move to…: every group with room (its first open seat — the same {r, g, i} a drop on that seat sends) and the list
+   *  of joiners without a place. A tap, a keyboard, a phone: no drag needed. */
+  const movesFor = (name: string, from: From): MoveTarget[] => {
+    const out: MoveTarget[] = [];
+    board.rosters.forEach((r, ri) => r.groups.forEach((g, gi) => {
+      if (from && from.r === ri && from.g === gi) return;
+      if (locked && g.length === 0 && r.groups.findIndex((x) => x.length === 0) !== gi) return;  // as drawn: one empty group to move into
+      const full = g.length >= board.group_size;
+      out.push({ key: `${ri}:${gi}`, label: groupName(ri, gi), disabled: full, hint: `${g.length}/${board.group_size}`, onPick: () => place(name, from, { r: ri, g: gi, i: g.length }, "menu") });
+    }));
+    if (from) out.push({ key: "bank", label: bankWord, onPick: () => place(name, from, null, "menu") });
+    return out;
+  };
   const onDragStart = (name: string, from: Drag["from"]) => (ev: React.DragEvent) => { drag.current = { name, from }; ev.dataTransfer.effectAllowed = "move"; live.dragging = true; };
   useEffect(() => { const end = () => { live.dragging = false; }; window.addEventListener("dragend", end); window.addEventListener("drop", end); return () => { window.removeEventListener("dragend", end); window.removeEventListener("drop", end); }; }, []);
   const zone = (id: string, onDrop: () => void) => ({
@@ -104,7 +143,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
   });
   const chip = (s: Seat, from: Drag["from"], mark?: string | null) => (
     <Box key={s.display_name} draggable onDragStart={onDragStart(s.display_name, from)} style={{ cursor: "grab", padding: "2px 6px", borderRadius: 6, background: from ? "transparent" : "var(--mantine-color-slate-6)", border: from ? "1px solid transparent" : "1px solid var(--mantine-color-slate-5)" }}>
-      <SeatLine meta={meta} s={s} mark={locked ? (mark ?? null) : undefined} right={<PinMark meta={meta} pin={pins[s.display_name]} />} />
+      <SeatLine meta={meta} s={s} mark={locked ? (mark ?? null) : undefined} right={<><PinMark meta={meta} pin={pins[s.display_name]} /><Box ml="auto" onClick={(ev) => ev.stopPropagation()}><MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload || (() => undefined)} moves={movesFor(s.display_name, from)} /></Box></>} />
     </Box>
   );
   const groupSummary = (sm: GroupSummary, gi: number) => sm.groups[gi];
@@ -117,11 +156,11 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
           <Legend meta={meta} locked={locked} />
           {canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}{board.balance ? ` · ${board.balance}` : ""}</Text>}
           {canSplit && reason && <SplitReasonLine meta={meta} r={reason} />}
-          {saving && <Text size="xs" c="dimmed">saving…</Text>}
+          {placing ? <Text size="xs" c="dimmed">placing the rest…</Text> : saving && <Text size="xs" c="dimmed">saving…</Text>}
         </Group>
         {!locked && (
           <Group gap="xs" wrap="wrap">
-            <Button size="xs" variant="default" leftSection={<IconUsers size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>{meta.run_labels.place_rest}</Button>
+            <Button size="xs" variant="default" leftSection={<IconUsers size={13} />} loading={placing} disabled={saving && !placing} onClick={placeRest}>{meta.run_labels.place_rest}</Button>
             {canSplit && <Button size="xs" variant="default" leftSection={<IconScale size={13} />} onClick={() => setSplitOpen(true)}>{multi ? "Propose splits" : "Propose roster"}</Button>}
             <Button size="xs" variant="subtle" color="red" leftSection={<IconRefresh size={13} />} disabled={saving} onClick={clear}>Clear</Button>
             {onHide && <Button size="xs" variant="subtle" color="gray" onClick={onHide}>Hide the board</Button>}
@@ -131,7 +170,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet;
       <Box className={css.board}>
         <Box>
           <Group justify="space-between" gap="xs" wrap="wrap">
-            <Eyebrow plain>{words.bank[locked ? "locked" : "open"]} · {board.bank.length}</Eyebrow>
+            <Eyebrow plain>{bankWord} · {board.bank.length}</Eyebrow>
             <SegmentedControl size="xs" value={bankSort} onChange={pickSort} data={[{ value: "signup", label: "signup" }, { value: "spec", label: "spec" }, { value: "role", label: "role" }]} />
           </Group>
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
@@ -220,8 +259,8 @@ function Legend({ meta, locked }: { meta: Meta; locked: boolean }) {
             ["yes", "waiting", "no", "expired"].map((k) => `${meta.marks[k].mark} ${meta.marks[k].words}`).join(" · ") + " — the Discord card's marks")}
           <Text size="xs" c="dimmed">Totems count one per element.</Text>
           <Text size="xs" c="dimmed">{locked
-            ? "The board is the roster: moving someone between groups is free, dragging someone in from not rostered asks them to confirm, dragging someone out frees their seat."
-            : "Drag a name into a group, or back to not placed to take it out again; dropping on someone swaps the two."}</Text>
+            ? "The board is the roster. Drag a name, or use its ⋮ menu's Move to… — the same move either way, and the confirm says what it does for the person."
+            : "Drag a name into a group, or use its ⋮ menu's Move to…; back to not placed takes it out again, and dropping on someone swaps the two."}</Text>
         </Stack>
       </Popover.Dropdown>
     </Popover>

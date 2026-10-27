@@ -214,3 +214,125 @@ def test_the_confirmations_off_sentence_is_one_constant_on_every_discord_card(re
     assert rc.NO_CONFIRMATIONS in text and "synergy" not in text and "first come —" not in text
     lock = " ".join(consequences.consequence("lock", reg, fresh))
     assert rc.NO_CONFIRMATIONS[1:] in lock and "Joining was" not in lock
+
+
+# ---------------------------------------------------------------- phase 3: behaviour (design §5.56 "Phase 3 — behaviour")
+
+from oibot_gm import consequences as cq  # noqa: E402
+from conftest import lock_with_board  # noqa: E402
+
+
+def adhoc_run(reg, rs, n: int = 6):
+    start = (reg.now_local() + timedelta(days=2, hours=3)).replace(second=0, microsecond=0)
+    ev = rc.open_run(reg, rs, RID, start, by="t", schedule=rc.ADHOC_SCHEDULE)
+    join(reg, rs, ev, reg.test_members()[:n])
+    assert rc.run_kind(reg, ev) == "adhoc" and not rc.run_confirms(reg, ev)
+    return ev
+
+
+def said(verb, reg, ev, **names) -> str:
+    return " ".join(cq.consequence(verb, reg, ev, **({"name": "Nettle", "other": "Ivy", "to": "Group 2"} | names)))
+
+
+@pytest.mark.parametrize("kind", ["adhoc", "recurring"])
+def test_board_moves_before_the_lock_tell_nobody_on_either_kind_of_run(reg, rs, kind):
+    ev = adhoc_run(reg, rs) if kind == "adhoc" else open_test_run(reg, rs)
+    if kind == "recurring":
+        join(reg, rs, ev, reg.test_members()[:6])
+        assert rc.run_confirms(reg, ev)
+    for verb in cq.BOARD_VERBS:
+        text = said(verb, reg, ev)
+        assert text.endswith(cq.BEFORE_LOCK) and "DM" not in text and "bench is asked" not in text, (verb, text)
+    assert said("move", reg, ev).startswith("Nettle takes an open seat in Group 2.")  # the Board mockup's confirm
+    assert said("substitute", reg, ev).startswith("Nettle takes Ivy's place in Group 2; Ivy goes back to not placed.")
+    assert said("remind", reg, ev) == "Remind is for a locked roster — the sheet is still open."
+    assert "Reopen works for an hour after." in said("end", reg, ev)
+
+
+def test_board_moves_after_the_lock_on_a_run_with_confirmations(reg, rs):
+    ev, seated = locked_ten(reg, rs, asks=True)
+    assert said("move", reg, ev) == "Nettle moves to Group 2 and stays rostered — nobody is told."
+    assert said("swap", reg, ev) == "Nettle and Ivy trade places and both stay rostered — nobody is told."
+    roster = said("roster", reg, ev)
+    assert roster.startswith("Nettle takes an open seat in Group 2.") and "Nettle gets a confirmation DM (on the site if their DMs are off)" in roster
+    sub = said("substitute", reg, ev)
+    assert sub.startswith("Ivy's seat goes to Nettle: Ivy sees it was released — on their confirmation card and the site, no DM.")
+    assert "Nettle gets a confirmation DM" in sub
+    assert "bench is asked" not in sub and "Ivy is told" not in sub, "the substitute takes the seat: nobody else is asked, Ivy is never DMed"
+    assert "the bench is asked to fill it" in said("release", reg, ev)
+    ev.autofill_paused = True
+    assert "automatic asks are paused, so the seat waits for Fill seats…" in said("release", reg, ev)
+    # Remind: who gets the card again, who waits on the site
+    seated[0].dm_opt_out = True
+    reg.save(seated[0], "dms off")
+    assert said("remind", reg, ev) == ("9 rostered members who haven't answered get the Confirm / Can't DM again — the same card, the same deadline. "
+                                       "1 more waits on the site with DMs off — no DM. Once an hour per run.")
+
+
+def test_board_moves_after_the_lock_on_an_ad_hoc_run_promise_no_dm(reg, rs):
+    ev = adhoc_run(reg, rs, 10)
+    lock_with_board(reg, rs, ev, [m.display_name for m in reg.test_members()[:8]])
+    roster, sub = said("roster", reg, ev), said("substitute", reg, ev)
+    for text in (roster, sub):
+        assert "No confirmations — Join is the commitment: the seat is Nettle's now, with no DM." in text and "confirmation DM" not in text
+    assert "Ivy sees it was released — on the site, no DM." in sub and "confirmation card" not in sub
+    assert said("remind", reg, ev) == f"Nothing to remind: {rc.NO_CONFIRMATIONS}."
+    assert "confirmation card" not in said("release", reg, ev)
+
+
+def test_end_reads_the_reopen_window_from_code(reg, rs, monkeypatch):
+    ev, _ = locked_ten(reg, rs)
+    assert said("end", reg, ev) == ("The run is marked finished: the sheet and the lock card close and no more fill asks go out. "
+                                    "Pressed by mistake? Reopen works for an hour after.")
+    monkeypatch.setattr(rc, "REOPEN_GRACE_HOURS", 2)
+    assert said("end", reg, ev).endswith("Reopen works for 2 hours after.")
+    rc.end_run(reg, rs, ev, "t")
+    assert said("end", reg, ev) == "This run is already finished."
+
+
+def test_ev_json_carries_every_board_sentence_with_tokens_for_the_names(reg, rs, c):
+    ev, _ = locked_ten(reg, rs, asks=True)
+    j = c.get(f"/api/run/{ev.key}", headers=bearer()).json()["consequences"]
+    assert set(j) == set(cq.VERBS) | {"release_named"}
+    for verb in cq.BOARD_VERBS:
+        assert cq.NAME_TOKEN in j[verb] and j[verb] == " ".join(cq.consequence(verb, reg, ev, name=cq.NAME_TOKEN, other=cq.OTHER_TOKEN, to=cq.TO_TOKEN))
+    assert cq.TO_TOKEN in j["move"] and cq.OTHER_TOKEN in j["substitute"]
+    assert j["remind"] == " ".join(cq.consequence("remind", reg, ev)) and "Reopen works for an hour" in j["end"]
+
+
+def test_a_regulars_remove_and_an_orphan_clear_carry_the_servers_sentence_and_a_rev(reg, rs, c):
+    weekly(reg)
+    reg.add_character(REAL, "P0", "Bramble", "Priest", "Holy", None, True)
+    reg.regular_add(REAL, f"{RID}:default", "t")
+    m = reg.members[REAL]
+    row = next(x for s in raid(c)["series"] for x in s["regulars"] if x["uid"] == str(REAL))
+    assert row["remove"] == " ".join(cq.regular_remove(reg, m, f"{RID}:default"))
+    assert row["remove"].startswith("Bramble stops being a regular of ") and "nobody is told" in row["remove"] and "seat weight" in row["remove"]
+    post = lambda body: c.post("/api/admin/raid/regulars", json=body, headers={**bearer(), "X-Requested-With": "oibot"})  # noqa: E731
+    stale = post({"raid": RID, "schedule": "default", "uid": str(REAL), "on": False, "rev": "0" * 12})
+    assert stale.status_code == 409 and "changed since you loaded them" in stale.json()["error"]
+    assert f"{RID}:default" in m.main.rosters, "a stale remove writes nothing"
+    # a removed schedule's leftover: listed with its own sentence and rev
+    m.main.rosters.append(f"{RID}:gone")
+    reg.save(m, "t")
+    o = next(x for x in raid(c)["orphan_regulars"] if x["key"] == f"{RID}:gone")
+    assert "no longer runs" in o["clear"] and o["rev"] == reg.characters_rev(m)
+    ok = post({"raid": RID, "schedule": "gone", "uid": str(REAL), "on": False, "rev": o["rev"]})
+    assert ok.status_code == 200 and f"{RID}:gone" not in m.main.rosters
+
+
+def test_place_the_rest_refuses_a_board_that_changed_since_it_was_drawn(reg, rs, c):
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:6])
+    r = c.post(f"/api/run/{ev.key}/autofill", json={"rev": "stale"}, headers={**bearer(), "X-Requested-With": "oibot"})
+    assert r.status_code == 409 and "board" in r.json() and r.json()["rev"] == rc.board_rev(reg, ev)
+    assert ev.layout is None, "nothing solved, nothing written"
+
+
+def test_who_could_cover_says_not_on_the_sheet_once_for_every_role_it_covers():
+    roles = [{"role": "tank", "have": 0, "need": 2, "hint": "not on the sheet: A, B"},
+             {"role": "healer", "have": 1, "need": 3, "hint": "not on the sheet: B, C"},
+             {"role": "melee", "have": 0, "need": 1, "hint": "from the bench: D"},
+             {"role": "ranged", "have": 3, "need": 2, "hint": ""}]
+    assert rc.cover_hints(roles) == [{"roles": ["melee"], "hint": "from the bench: D"},
+                                     {"roles": ["tank", "healer"], "hint": "not on the sheet: A, B, C"}]

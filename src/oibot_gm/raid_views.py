@@ -542,7 +542,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
     short = [r for r in h["roles"] if r["need"] and r["have"] < r["need"]]
     if short:
         body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] - r['have']}" for r in short))
-        hints = [r["hint"] for r in short if r["hint"]] if officer else []  # names of who could cover: officers only
+        hints = [x["hint"] for x in rc.cover_hints(short)] if officer else []  # names of who could cover: officers only; "not on the sheet" once
         if hints:
             body.append("-# " + " · ".join(hints))  # `-#` only renders at the start of a line
     missing = [b for b in h["buffs"] if not b["providers"]]

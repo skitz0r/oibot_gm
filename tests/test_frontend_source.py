@@ -243,3 +243,43 @@ def test_the_board_draws_no_text_beside_icons():
     assert "plan.still_short" not in fill and "short_after" in fill and "const KIND" not in fill
     assert '"pinned" : "bench"' not in card and "<PinMark" in card and "<PinMark" in board
     assert "Cancel run</Button>" not in card and "Post a line in the signup channel" not in card and "Tell the channel — a fixed line, no reason" in card
+
+
+def test_the_rosters_confirms_print_only_the_servers_sentence():
+    """Design §5.56 phase 3 (findings 32–34): every confirm on the Rosters page prints the server's sentence
+    (ev_json.consequences, a regular's `remove`, an orphan's `clear`, End's preview) — no template literal or string
+    literal composes a consequence in BoardView / SheetCard / Rosters, and no literal stands in when the server's is
+    missing. The board's sentences only get the names put in (shared.fillNames)."""
+    files = {n: _code_only((SRC / p).read_text()) for n, p in (("BoardView", "components/board/BoardView.tsx"), ("SheetCard", "components/board/SheetCard.tsx"), ("Rosters", "pages/Rosters.tsx"))}
+    for name, code in files.items():
+        assert not re.search(r"message:\s*[`\"']", code), f"{name}: a confirm message written in the browser"
+        assert not re.search(r"consequences?\??\.\w+\s*\|\|\s*[`\"']", code), f"{name}: a browser sentence standing in for the server's"
+    assert "e.consequences?.remind" in files["SheetCard"] and "message: preview," in files["SheetCard"]
+    assert "Reopen works for an hour" not in files["SheetCard"] and "gets a confirmation DM" not in files["BoardView"]
+    assert "message: x.remove" in files["Rosters"] and "message: o.clear" in files["Rosters"] and "rev: o.rev" in files["Rosters"] and "rev: x.rev" in files["Rosters"]
+    shared = _code_only((SRC / "components" / "board" / "shared.tsx").read_text())
+    assert 'split("{name}").join(names.name)' in shared
+
+
+def test_move_to_posts_the_same_move_a_drag_does():
+    """Finding 38: each board chip's ⋮ menu has Move to… (every group with room, and Not placed / Not rostered) — a tap or a
+    keyboard, no drag needed. Both go through ONE function (`place`) and one `send("move", …)`, so Move to… posts the very
+    body a drag does ({member, to: {r, g, i}, state}), with the same rev / state handling."""
+    board = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
+    assert board.count('send("move"') == 1, "one move body for both paths"
+    assert 'place(d.name, d.from, target === "bank" ? null : target, "drag")' in board
+    assert 'place(name, from, { r: ri, g: gi, i: g.length }, "menu")' in board and 'place(name, from, null, "menu")' in board
+    assert "moves={movesFor(s.display_name, from)}" in board and "moves?: MoveTarget[]" in menu and "onClick={m.onPick}" in menu
+    assert 'send("autofill", { rev: e.rev })' in board, "Place the rest carries the board's rev"
+
+
+def test_rosters_controls_are_44px_on_a_phone():
+    """Finding 40: one phone-only rule makes every control on the page at least 44 px (the ⋮ buttons, compact buttons,
+    the sort control, the tabs), and the menus (portals) take .menuItem — never per-element sizes."""
+    css = (SRC / "pages" / "rosters.module.css").read_text()
+    rule = css[css.index("@media (max-width: 48em)"):]
+    assert "min-height: 44px; min-width: 44px" in rule and ".mantine-ActionIcon-root" in rule and ".mantine-SegmentedControl-label" in rule and ".menuItem" in rule
+    assert "className={rosterCss.touch}" in (SRC / "pages" / "Rosters.tsx").read_text()
+    for f in ("components/board/MemberMenu.tsx", "components/board/SheetCard.tsx"):
+        assert "classNames={{ item: css.menuItem }}" in (SRC / f).read_text(), f

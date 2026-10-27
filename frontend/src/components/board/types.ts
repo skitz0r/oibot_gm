@@ -24,7 +24,7 @@ export interface NightFields {
   closed_at?: string | null;
   log_rows?: { at: string; when: string; text: string; officer: boolean }[];
   links?: { sheet: string | null; card?: string | null; thread?: string | null; updates: string | null; loot: string | null };
-  health?: { roles: { role: string; have: number; need: number; level: string; hint: string }[]; no_provider: string[]; no_provider_buffs?: { id: string; abbr: string; colour: string; name: string; art: string | null }[] } | null;
+  health?: { roles: { role: string; have: number; need: number; level: string; hint: string }[]; hints?: { roles: string[]; hint: string }[]; no_provider: string[]; no_provider_buffs?: { id: string; abbr: string; colour: string; name: string; art: string | null }[] } | null;
   fill_asks?: { uid?: string; display_name: string; kind: string; character: string; spec: string; role: string; reason: string; why?: string | null; answer: string | null;
     phase?: "prelock" | "fill"; approved_by?: string | null; answered_by?: string | null; channel?: "dm" | "web"; pending?: boolean; deadline?: string | null }[];
   callouts?: { display_name: string; hours_before: number; late: boolean; note?: string | null }[];
@@ -45,6 +45,8 @@ export interface LockPreview { board: Board; consequence: string; leftovers: str
 export interface OpenPreview {
   kind: "scheduled" | "adhoc"; schedule: string | null; schedule_name: string; key: string; start: string; label: string; when_note: string;
   exists: string | null; channel: number | null; channel_name?: string | null; rules: string; past: boolean;
+  /** where the sheet goes, one sentence from the server */
+  posts?: string;
   closed?: "done" | "cancelled" | null; refusal?: string | null;  // that time's run is closed: Open is refused (rc.closed_run_refusal)
 }
 

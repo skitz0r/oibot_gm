@@ -18,6 +18,7 @@ import { RoleCounts, runName, type Act, type OnBoard } from "../components/board
 import { LevelChip } from "../components/LevelChip";
 import { usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
+import rosterCss from "./rosters.module.css";
 
 export function RostersPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<Rosters | null>(null);
@@ -45,7 +46,7 @@ export function RostersPage({ meta }: { meta: Meta }) {
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const zone = meta.timezones?.flatMap((g) => g.items).find((i) => i.value === data.tz)?.label || data.tz;  // the zone in words, as on Raids
   return (
-    <Stack gap="lg">
+    <Stack gap="lg" className={rosterCss.touch}>  {/* phone: every control 44 px (rosters.module.css) */}
       <PageTitle title="Rosters" intro={`Each raid's runs, soonest first: answer for someone, shape the board, lock, fill. Times in ${zone}.`} />
       {data.raids.map((r) => <RaidCard key={r.id} r={r} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
       {data.orphans.length > 0 && (
@@ -138,7 +139,7 @@ function StartAdhoc({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAc
               <Text size="sm" c="dimmed">{p.rules}</Text>
               {p.when_note && <Text size="sm" c="dimmed">{p.when_note}</Text>}
               {p.exists && <Text size="sm" c="dimmed">A run for that time already exists ({p.exists}); Open points you at it instead of making a second.</Text>}
-              <Text size="sm" c="dimmed">{p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."}</Text>
+              <Text size="sm" c="dimmed">{p.posts}</Text>
             </Stack>
           )}
           <Group justify="flex-end" gap="sm">
@@ -163,7 +164,7 @@ function UpcomingRows({ r, busy, onAct }: { r: RaidRuns; busy: string | null; on
     let p: OpenPreview;
     try { p = await api.post<OpenPreview>(`/api/raid/${r.id}/open/preview`, { start: u.start_iso, schedule: u.schedule }); } catch (err) { fail(err); return; }
     if (p.refusal) { fail(new Error(p.refusal)); return; }
-    const message = [`${p.label} guild time · ${yourClock(p.start)} your time`, p.rules, p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."].join("\n");
+    const message = [`${p.label} guild time · ${yourClock(p.start)} your time`, p.rules, p.posts].join("\n");  // the server's words; the browser adds only the reader's own clock
     if (!(await ask({ title: `Open ${r.name} · ${u.start} now?`, message, confirmLabel: "Open now" }))) return;
     await onAct(`up${u.key}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: u.schedule, key: p.key });
   }
@@ -265,9 +266,10 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
   const level = s.level || (Object.entries(s.need).some(([role, n]) => (s.counts[role] || 0) < n) ? "red" : "green");
   const spare = s.no_spare || [];
   const levelWords = { green: "regular mains cover the tank and healer minimums, with a spare", amber: spare.length ? `no spare ${spare.join(" or ")} among regular mains — one absence leaves it short` : "covered only with offspecs, flex roles or alts", red: "regulars can't field the minimum" }[level];
-  async function remove(uid: string, name: string, character: string) {
-    if (!(await ask({ title: `Take ${name} off the regulars?`, message: `${character} stops being expected on ${r.name} · ${s.name}. They can still Join any sheet.`, confirmLabel: "Remove", color: "red" }))) return;
-    await onAct(`reg${s.key}${uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: s.id, uid, on: false });
+  // the sentence is the server's (consequences.regular_remove), the write carries the member record's rev (stale → 409)
+  async function remove(x: Series["regulars"][number]) {
+    if (!(await ask({ title: `Take ${x.display_name} off the regulars?`, message: x.remove, confirmLabel: "Remove", cancelLabel: "Back", color: "red" }))) return;
+    await onAct(`reg${s.key}${x.uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: s.id, uid: x.uid, on: false, rev: x.rev });
   }
   async function add() {
     if (!person) return;
@@ -293,7 +295,7 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
           <Group key={x.uid} gap={6} wrap="nowrap" style={{ lineHeight: 1.8 }}>
             <GameIcon meta={meta} kind="spec" id={`${x.cls}:${x.spec}`} size={18} title={`${x.spec} · ${x.role}`} />
             <Tooltip label={x.display_name}><Text size="sm" fw={600} c={classColour(meta, x.cls)} truncate style={{ flex: 1 }}>{x.character}</Text></Tooltip>
-            <ActionIcon size="sm" variant="subtle" color="gray" aria-label={`remove ${x.character}`} loading={busy === `reg${s.key}${x.uid}`} onClick={() => remove(x.uid, x.display_name, x.character)}><IconX size={13} /></ActionIcon>
+            <ActionIcon size="sm" variant="subtle" color="gray" aria-label={`remove ${x.character}`} loading={busy === `reg${s.key}${x.uid}`} onClick={() => remove(x)}><IconX size={13} /></ActionIcon>
           </Group>
         ))}
       </Stack>
@@ -339,6 +341,13 @@ function Forecast({ s, meta }: { s: Series; meta: Meta }) {
 function Regulars({ r, meta, people, onAct, busy }: { r: RaidRuns; meta: Meta; people: Person[]; onAct: Act; busy: string | null }) {
   const series = r.series || [];
   const orphans = r.orphan_regulars || [];
+  const [ask, dialog] = useConfirm();
+  /** Clear a removed schedule's regular: asks first with the server's sentence, carries the member record's rev, and the
+   *  row's button spins while it writes. */
+  async function clear(o: NonNullable<RaidRuns["orphan_regulars"]>[number]) {
+    if (!(await ask({ title: `Clear ${o.character} from ${o.label}?`, message: o.clear, confirmLabel: "Clear", cancelLabel: "Back", color: "red" }))) return;
+    await onAct(`orph${o.key}${o.uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: o.key.split(":")[1], uid: o.uid, on: false, rev: o.rev });
+  }
   if (!series.length && !orphans.length) return <Text size="sm" c="dimmed">No recurring schedule yet — add weekly run times on the Raids page; ad hoc runs have no regulars.</Text>;
   return (
     <Stack gap="sm">
@@ -351,11 +360,12 @@ function Regulars({ r, meta, people, onAct, busy }: { r: RaidRuns; meta: Meta; p
               <GameIcon meta={meta} kind="spec" id={`${o.cls}:${o.spec}`} size={16} title={o.spec} />
               <Tooltip label={o.display_name}><Text size="sm">{o.character}</Text></Tooltip>
               <Text size="xs" c="dimmed">{o.label}</Text>
-              <ActionIcon size="sm" variant="subtle" color="gray" aria-label={`clear ${o.character}`} onClick={() => onAct(`orph${o.key}${o.uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: o.key.split(":")[1], uid: o.uid, on: false })}><IconX size={13} /></ActionIcon>
+              <ActionIcon size="sm" variant="subtle" color="gray" aria-label={`clear ${o.character}`} loading={busy === `orph${o.key}${o.uid}`} disabled={!!busy?.startsWith("orph")} onClick={() => clear(o)}><IconX size={13} /></ActionIcon>
             </Group>
           ))}
         </Box>
       )}
+      {dialog}
     </Stack>
   );
 }

@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
-from ..consequences import consequence as consequence_lines, consequences_json
+from ..consequences import consequence as consequence_lines, consequences_json, regular_remove as regular_remove_lines
 from ..presets import DURATIONS, PRESETS
 from ..registry import ABSENCE_REASON_MAX, DECISION_NOTE_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged, is_superuser
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
@@ -726,8 +726,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     @app.post("/api/admin/raid/regulars")
     async def admin_regulars(request: Request):
         """Officers add or remove a regular of a recurring schedule: {raid, schedule (default "default"), member | uid,
-        character (default their main), on (true = add, false = remove)}. The one path for the Rosters page, Discord's
-        /roster add|remove wizards (same verbs), plain text's op=regular and MCP set_regular."""
+        character (default their main), on (true = add, false = remove), rev?}. The one path for the Rosters page, Discord's
+        /roster add|remove wizards (same verbs), plain text's op=regular and MCP set_regular. `rev` = the member record's
+        characters_rev the page drew (the regulars' rows carry it): when their record changed since, nothing is written
+        and the answer is 409 (the page reloads and asks again)."""
         def go(v, d):
             reg = v.reg
             rid = str(d.get("raid") or "").strip()
@@ -740,12 +742,23 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             sid = str(d.get("schedule") or "default").strip().lower()
             key = series_key(rid, sid)
             m = resolve_member(reg, member_ref(d))
+            if d.get("rev") and str(d["rev"]) != reg.characters_rev(m):
+                raise CharactersChanged(m)
             if d.get("on", True) in (False, "false", "off", "remove", 0):
                 reg.regular_remove(m.discord_id, key, v.name)
                 return f"{m.display_name} is no longer a regular of {reg.series_label(key)}"
             mm, c, warn = reg.regular_add(m.discord_id, key, v.name, str(d.get("character") or "").strip() or None)
             return f"{mm.display_name} ({c.label}) is a regular of {reg.series_label(key)}" + "".join(f" — warning: {w}" for w in warn)
-        return await run(request, go, officer=True)
+        changed: list[str] = []
+
+        def checked(v, d):
+            try:
+                return go(v, d)
+            except CharactersChanged as e:
+                changed.append(str(e))
+                raise
+        r = await run(request, checked, officer=True)
+        return JSONResponse({"error": changed[0]}, status_code=409) if changed else r  # a stale rev: 409, as every stale write
 
     @app.post("/api/me/dm")
     async def me_dm(request: Request):
@@ -1009,6 +1022,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         n, size, _legacy, subs = h["headcount"]
         return {"headcount": {"in": n, "seats": size, "bench": subs, "level": h["headcount_level"]},
                 "roles": [{k: r[k] for k in ("role", "have", "need", "level", "hint")} for r in h["roles"]],
+                "hints": rc.cover_hints(h["roles"]),  # who could cover the short roles, one line each ("not on the sheet" said once)
                 "no_provider": [b["name"] for b in h["buffs"] if not b["providers"]],
                 # the page draws these as icon-only chips (the iconography rule: the name is the tooltip, never a label)
                 "no_provider_buffs": [{"id": b["id"], "abbr": b["abbr"], "colour": b["colour"], "name": b["name"], "art": arts.get(b["id"])} for b in h["buffs"] if not b["providers"]],
@@ -1033,10 +1047,17 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             # `needs_channel` once its sheet is due and no signup channel can take it — the scheduler opens nothing then
             upcoming = rc.upcoming_rows(reg, rs, rid, now)
             series = rc.series_outlook(reg, rid)  # one card per recurring series: its regulars (one member per line on the page) against the minimums, level, forecast
+            for se in series:  # each regular's remove: THE sentence from code (consequences.regular_remove) and their record's rev
+                for x in se.get("regulars") or []:
+                    m = reg.members.get(int(x["uid"]))
+                    if m is not None:
+                        x["remove"], x["rev"] = " ".join(regular_remove_lines(reg, m, se["key"])), reg.characters_rev(m)
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "slot_labels": [reg.slot_label(x) for x in rd["slots"]], "lockout_days": int(rd["lockout_days"]),
                         "schedules": [{"id": s["id"], "name": s["name"], "kind": s["kind"], "class": schedule_class(s["kind"]), "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True))} for s in scheds],
                         "series": series,
-                        "orphan_regulars": [{"key": k, "label": reg.series_label(k), "uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec}
+                        # a removed schedule's regulars: the clear's sentence from code and the member record's rev (a stale clear is a 409)
+                        "orphan_regulars": [{"key": k, "label": reg.series_label(k), "uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec,
+                                             "clear": " ".join(regular_remove_lines(reg, m, k)), "rev": reg.characters_rev(m)}
                                             for k, m, c in reg.orphan_regulars() if k.partition(":")[0] == rid],
                         "opened": bool(fo and fo <= now), "first_open": reg.local12(fo) if fo else None, "first_open_words": reg.local12(fo) if fo else "",
                         # the Raids card's "When it runs" block, from the same fields (design §5.54 / §5.56)
@@ -1355,10 +1376,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/autofill")
     async def run_autofill(request: Request, key: str):
-        v, _ = await body(request, officer=True)
+        """Place the rest: the solver places every joiner the officers left unplaced around their placements (fixed).
+        `rev` = the board the officer pressed it on (the site sends it, as a whole-board write does): a board that changed
+        since is a 409 with the current board and nothing is solved; a drag made DURING the solve wins the same way."""
+        v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
             return JSONResponse({"error": "already locked — move people on the board instead"}, status_code=400)
+        if d.get("rev") and str(d["rev"]) != rc.board_rev(v.reg, ev):
+            return stale(v, ev)
         async with solving(v.reg, ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
             rev = rc.board_rev(v.reg, ev)  # the board the solve fills around: a drag during the solve wins (409), never lost
             try:
@@ -1590,6 +1616,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": str(e)}, status_code=400)
         ch = bot.get_channel(int(p["channel"])) if p.get("channel") else None
         p["channel_name"] = getattr(ch, "name", None)
+        # where the sheet goes, in one sentence from code (the confirm prints it; the page composes none)
+        p["posts"] = (f"The sheet posts in #{p['channel_name'] or 'the signup channel'}." if p.get("channel")
+                      else "No signup channel is set: the sheet isn't posted until one is (/raid sheet).")
         return p
 
     @app.post("/api/raid/{rid}/open")

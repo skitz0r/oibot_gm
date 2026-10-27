@@ -46,7 +46,10 @@ profiles/forever/      guides.yaml = the leveling-guide tool's tables (zone ids,
 fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg, gitignored): REAL (BisCouncil ledger, WCL attendance/roster) + MOCK (tiers, wishlists, policy, ranks)
 src/oibot_gm/
   constants.py         ROLES / MARK (+ MARK_WORDS) / LEVEL_COLOUR / LEVEL_WORDS / TEAL shared by Discord, web and render (no per-module copies); CLOCK12 + fmt12 = the one 12-hour formatter behind every clock that is not Registry.local12
-  consequences.py      consequence(verb, reg, ev) for lock / cancel / clear / release: the ONE confirm sentence from code (design §5.33); ev_json.consequences carries it to the site, wizard.decide shows it in Discord
+  consequences.py      consequence(verb, reg, ev) for lock / cancel / clear / release, the board's move / roster / swap / substitute ({name} / {other} /
+                       {to} tokens the board fills — shared.fillNames), remind and end (Reopen's window from rc.REOPEN_GRACE_HOURS; LootMixin.end_consequence
+                       puts the council's part in front), regular_remove(reg, m, key): the ONE confirm sentence from code (design §5.33, §5.56 phase 3);
+                       ev_json.consequences carries it to the site (a regular's `remove` / an orphan's `clear` on /api/rosters), wizard.decide shows it in Discord
   inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =

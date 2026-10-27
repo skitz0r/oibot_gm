@@ -156,9 +156,10 @@ export interface Sheet {
   /** the planner's suggestions (computed on view, never stored): what an officer's Suggest / Ask would send */
   plan?: Plan | null;
   callouts?: { display_name: string; hours_before: number; late: boolean }[]; log?: string[];
-  /** the confirm sentences for lock / cancel / clear / release, from the server (consequences.py) — the browser prints them, never composes its own;
-   *  `release_named` is the release sentence about one member with `{name}` where the name goes (the board substitutes the dragged member) */
-  consequences?: { lock: string; cancel: string; clear: string; release: string; release_named?: string };
+  /** the confirm sentences, from the server (consequences.py) — the browser prints them, never composes its own;
+   *  `release_named` and the board's moves (move / roster / swap / substitute) carry `{name}` / `{other}` / `{to}` where the
+   *  names go (the board only substitutes them — shared.tsx fillNames); remind / end are whole sentences */
+  consequences?: { lock: string; cancel: string; clear: string; release: string; release_named?: string; move?: string; roster?: string; swap?: string; substitute?: string; remind?: string; end?: string };
   /** the run's loot council at a glance (web/api.py loot_json): `may_open` = locked with no council yet */
   loot?: { open: boolean; councils: number; thread: string | null; awards: number; pending: number; reasons: number; may_open: boolean;
     /** "Bosses 3 / 6" (design §3.5 L12): the slowest council's kills against the raid's bosses (total null while unlisted) */
@@ -179,9 +180,11 @@ export interface RaidRuns {
   /** one entry per recurring schedule: its regulars (one member per line on the page) against the role minimums */
   series?: Series[];
   /** regulars of a schedule that was removed (or became ad hoc): listed, never stripped silently */
-  orphan_regulars?: { key: string; label: string; uid: string; display_name: string; character: string; cls: string; spec: string }[];
+  /** a removed schedule's regulars; `clear` = the clear's sentence from code, `rev` = the member record's (a stale clear is a 409) */
+  orphan_regulars?: { key: string; label: string; uid: string; display_name: string; character: string; cls: string; spec: string; clear?: string; rev?: string }[];
 }
-export interface Regular { uid: string; display_name: string; character: string; cls: string; spec: string; role: string }
+/** `remove` = the remove confirm's sentence from code (consequences.regular_remove), `rev` = the member record's (a stale remove is a 409) */
+export interface Regular { uid: string; display_name: string; character: string; cls: string; spec: string; role: string; remove?: string; rev?: string }
 /** One upcoming start of a recurring series: its regulars minus recorded absences, against the minimums. */
 /** `open_key`: the run already open (or locked) at that start — the Readiness page shows it instead of "Open this run early" (GET /api/readiness only). */
 export interface ForecastRow { start: string; day: string; when: string; expected: number; seats: number; short: Record<string, number>; away: string[]; open_key?: string | null }

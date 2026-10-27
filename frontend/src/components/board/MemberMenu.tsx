@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { ActionIcon, Button, Group, Loader, Menu, Modal, Select, Stack, Text } from "@mantine/core";
-import { IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, IconUserPlus } from "@tabler/icons-react";
+import { IconArrowsMove, IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, IconUserPlus } from "@tabler/icons-react";
 import { api, type MemberAction, type MemberActions, type Person } from "../../api";
 import { fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
+import css from "../../pages/rosters.module.css";
 
 /** Officers record anything a member can do on a run, for them (design B5) — the SAME filtered list the Discord SetWizard
  *  shows (GET /api/admin/actions → rc.member_actions): their open Confirm ask, their fill ask, Record a callout… (with a note),
@@ -42,21 +43,35 @@ function useRecord(run: string, onDone: () => Promise<void> | void) {
   return [record, dialog] as const;
 }
 
-/** The row ⋮ menu on a sheet (joined, Bench, No thanks chips and the not-answered rows): fetched when opened, so it is
- *  always the member's state now. */
-export function MemberMenu({ run, uid, name, onDone }: { run: string; uid: string; name: string; onDone: () => Promise<void> | void }) {
+/** One "Move to…" destination in a board chip's menu (BoardView): a group, or Not placed / Not rostered. `onPick` is the
+ *  board's own move — the same POST /api/run/{key}/move a drag sends, after the server's confirm sentence. */
+export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?: string; onPick: () => void };
+
+/** The row ⋮ menu on a sheet (joined, Bench, No thanks chips and the not-answered rows) and on a board chip: fetched when
+ *  opened, so it is always the member's state now. `moves` (the board's chips): "Move to…" first — every group with room
+ *  and Not placed / Not rostered — the board's tap-and-keyboard path (a drag needs a mouse; design §5.56 phase 3). */
+export function MemberMenu({ run, uid, name, onDone, moves }: { run: string; uid: string | null | undefined; name: string; onDone: () => Promise<void> | void; moves?: MoveTarget[] }) {
   const [list, setList] = useState<MemberActions | null>(null);
   const [record, dialog] = useRecord(run, onDone);
-  const load = () => { setList(null); api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`).then(setList).catch(fail); };
+  const load = () => { setList(null); if (uid) api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`).then(setList).catch(fail); };
   return (
     <>
-      <Menu shadow="md" width={240} position="bottom-end" onOpen={load}>
+      <Menu shadow="md" width={240} position="bottom-end" onOpen={load} classNames={{ item: css.menuItem }}>
         <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`actions for ${name}`}><IconDotsVertical size={14} /></ActionIcon></Menu.Target>
         <Menu.Dropdown>
-          <Menu.Label>{name}{list ? ` · ${list.now}` : ""}</Menu.Label>
-          {!list && <Group justify="center" p="xs"><Loader size="xs" /></Group>}
-          {list && list.actions.length === 0 && <Menu.Item disabled>Nothing applies on this run</Menu.Item>}
-          {list && items(list.actions).map((it) => (
+          {moves && moves.length > 0 && (
+            <>
+              <Menu.Label>Move {name} to…</Menu.Label>
+              {moves.map((m) => (
+                <Menu.Item key={m.key} leftSection={<IconArrowsMove size={14} />} disabled={m.disabled} rightSection={m.hint ? <Text size="xs" c="dimmed">{m.hint}</Text> : undefined} onClick={m.onPick}>{m.label}</Menu.Item>
+              ))}
+              {uid && <Menu.Divider />}
+            </>
+          )}
+          {uid && <Menu.Label>{name}{list ? ` · ${list.now}` : ""}</Menu.Label>}
+          {uid && !list && <Group justify="center" p="xs"><Loader size="xs" /></Group>}
+          {uid && list && list.actions.length === 0 && <Menu.Item disabled>Nothing applies on this run</Menu.Item>}
+          {uid && list && items(list.actions).map((it) => (
             <Menu.Item key={`${it.a.key}:${it.character || ""}`} leftSection={ICON[it.a.key]} color={DANGER.has(it.a.key) ? "red" : undefined}
               onClick={() => record(uid, name, list, it)}>{it.label}</Menu.Item>
           ))}

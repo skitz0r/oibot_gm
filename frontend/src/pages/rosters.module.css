@@ -2,3 +2,16 @@
 @media (min-width: 62em) { .board { grid-template-columns: minmax(200px, 230px) minmax(0, 1fr); } }
 .groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 @media (max-width: 30em) { .groups { grid-template-columns: minmax(0, 1fr); } }
+/* Phone: every control on the Rosters page is at least 44 px tall and wide (design §5.56 phase 3) — the ⋮ menus, the
+   compact buttons, the bank's sort control, the tabs — one rule here, never per-element sizes. Menus render in a portal,
+   so their items take .menuItem (MemberMenu). */
+@media (max-width: 48em) {
+  .touch :global(.mantine-ActionIcon-root),
+  .touch :global(.mantine-Button-root),
+  .touch :global(.mantine-CloseButton-root) { min-height: 44px; min-width: 44px; }
+  .touch :global(.mantine-SegmentedControl-label) { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+  .touch :global(.mantine-Tabs-tab),
+  .touch :global(.mantine-Accordion-control),
+  .touch :global(.mantine-Input-input) { min-height: 44px; }
+  .menuItem { min-height: 44px; }
+}

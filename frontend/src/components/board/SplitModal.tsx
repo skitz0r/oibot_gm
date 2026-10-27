@@ -32,7 +32,7 @@ export function SplitModal({ e, meta, multi, opened, onClose, onUse }: { e: Shee
           ))}
         </Group>}
         <Group justify="space-between" wrap="wrap">
-          <Text size="xs" c="dimmed">{busy ? "building…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy] || preview.strategy}</b>{preview.balance ? ` · ${preview.balance}` : ""} · your own placements on the board are kept</> : <>The bot's pick · your own placements on the board are kept</>) : ""}</Text>
+          <Text size="xs" c="dimmed">{busy ? "building…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy] || preview.strategy}</b>{preview.balance ? ` · ${preview.balance}` : ""} · your own placements and pins on the board are kept</> : <>The bot's pick · your own placements and pins on the board are kept</>) : ""}</Text>
           {preview && !busy && <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={12} />} onClick={() => run(strategy, seen)}>{multi ? "another split like this" : "another layout"}</Button>}
         </Group>
         {preview && !busy && <BoardPreview meta={meta} board={preview.board} reason={preview.reason} />}

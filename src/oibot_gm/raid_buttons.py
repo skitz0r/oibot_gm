@@ -18,6 +18,7 @@ import re
 import discord
 
 from . import raidcycle as rc
+from .consequences import consequence
 from .guild_routing import resolve_button
 from .registry import RegistryError
 
@@ -130,13 +131,8 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
         if self.action == "cancel":
             await cancel_decide(interaction, bot, reg, rs, ev)
             return
-        if self.action == "remind":  # reversible, low ceremony: the press is the send (once an hour per run)
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            try:
-                line = await bot.remind(reg, rs, ev, by=by, by_id=interaction.user.id)
-            except RegistryError as e:
-                line = str(e)
-            await interaction.followup.send(line, ephemeral=True)
+        if self.action == "remind":  # a DM to everyone unanswered: the decide screen first, the site's confirm's words
+            await remind_decide(interaction, bot, reg, rs, ev)
             return
         if self.action == "pause":
             await interaction.response.defer(ephemeral=True, thinking=True)
@@ -180,7 +176,6 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
     per line with the spec icon, and offers Lock now / Back from there. The lock itself is RaidMixin.lock_run, after the
     screen has acknowledged the press."""
     from .configops import report_error
-    from .consequences import consequence
 
     wiz = wiz or officer_wizard(bot, reg, interaction, f"Lock {raid_name(reg, ev)}")
     key = ev.key
@@ -235,7 +230,6 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
     one Form: the optional reason (officers only: the run's thread and the ops feed — never the public channel) and
     "Tell the channel?" (post a fixed line in the signup channel — the default — or not). Nobody is DMed (the DM rule).
     Submit cancels (RaidMixin.cancel_run)."""
-    from .consequences import consequence
     from .wizard import Field, Form, Opt
 
     wiz = wiz or officer_wizard(bot, reg, interaction, f"Cancel {raid_name(reg, ev)}")
@@ -304,11 +298,38 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None
         except RegistryError as e:
             await wiz.finish(i, str(e))
             return
-        await wiz.finish(i, f"Ended {run_title(reg, cur)}. Pressed by mistake? The closed card's Reopen works for an hour.")
+        await wiz.finish(i, f"Ended {run_title(reg, cur)}. Pressed by mistake? The closed card's Reopen works for {rc.reopen_window()}.")
 
-    told = bot.end_consequence(reg, rs, ev) if hasattr(bot, "end_consequence") else f"End {run_title(reg, ev)}."
-    text = (f"{run_label(reg, ev)}\n{told}\nThe sheet and the lock card close; no more fill asks go out. Reopen works for an hour after.")
-    await wiz.decide(interaction, text, do=do, do_label=RUN_WORDS["end"], danger=True)
+    # THE End sentence (LootMixin.end_consequence: the council's part + consequences.consequence("end")) — the site's
+    # End the run and Loot › Tonight's End print the same words
+    told = bot.end_consequence(reg, rs, ev) if hasattr(bot, "end_consequence") else " ".join(consequence("end", reg, ev))
+    await wiz.decide(interaction, f"{run_label(reg, ev)}\n{told}", do=do, do_label=RUN_WORDS["end"], danger=True)
+
+
+async def remind_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
+    """Remind the unanswered (the lock card's button): the decide screen with consequences.consequence("remind") — how
+    many get their Confirm / Can't DM again, how many wait on the site — the same sentence the site's confirm prints,
+    then RaidMixin.remind. It DMs people, so it asks first on both surfaces (design §5.56 phase 3). A refusal
+    (rc.remind_refusal: within the hour, nobody to remind, an ad hoc run) is said at once."""
+    why = rc.remind_refusal(reg, ev)
+    if why:
+        await interaction.response.send_message(why, ephemeral=True)
+        return
+    wiz = officer_wizard(bot, reg, interaction, f"Remind · {raid_name(reg, ev)}")
+    key = ev.key
+
+    async def do(i: discord.Interaction, _note: str | None) -> None:
+        cur = rs.events.get(key)
+        if not cur or cur.state != "locked":
+            await wiz.finish(i, "That run is no longer locked — nothing was sent.")
+            return
+        try:
+            line = await bot.remind(reg, rs, cur, by=i.user.display_name, by_id=i.user.id)
+        except RegistryError as e:
+            line = str(e)
+        await wiz.finish(i, line)
+
+    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("remind", reg, ev)), do=do, do_label=RUN_WORDS["remind"])
 
 
 async def reopen_press(interaction: discord.Interaction, bot, reg, rs, ev) -> None:

@@ -1916,7 +1916,7 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
         hint = " · ".join(f"{ASK_HOW.get(k, k)}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
         if n and have < n and not coverable:
             off = [m.display_name for m, _c in run_pool(reg, ev) if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())]
-            hint = ("not on the sheet: " + ", ".join(off[:3])) if off else "nobody can cover it — recruit"
+            hint = (NOT_ON_SHEET + ", ".join(off[:3])) if off else "nobody can cover it — recruit"
         roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover})
     buffs = []
     for b in profile.party_buffs():
@@ -1927,6 +1927,27 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
     # headcount is a 4-tuple (in, size, 0 [was tentative], sub): the cards and the pool data share the shape
     return {"headcount": (len(ins), size, 0, len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp, "rosters": n_rosters,
             "expected_from": expected_from(reg, ev), "kind": run_kind(reg, ev)}
+
+
+NOT_ON_SHEET = "not on the sheet: "
+
+
+def cover_hints(roles: list[dict]) -> list[dict]:
+    """The short roles' "who could cover" lines (health_data's per-role `hint`), with the roles that only members NOT on
+    the sheet could cover said once: [{roles: [role, …], hint}] — "not on the sheet: A, B, C" listed under each short role
+    read as the same line twice on the health card and the site. Code builds it; the surfaces print it."""
+    out, off_roles, off_names = [], [], []
+    for r in roles:
+        if not (r.get("need") and r["have"] < r["need"] and r.get("hint")):
+            continue
+        if r["hint"].startswith(NOT_ON_SHEET):
+            off_roles.append(r["role"])
+            off_names += [n for n in r["hint"][len(NOT_ON_SHEET):].split(", ") if n not in off_names]
+        else:
+            out.append({"roles": [r["role"]], "hint": r["hint"]})
+    if off_roles:
+        out.append({"roles": off_roles, "hint": NOT_ON_SHEET + ", ".join(off_names[:5])})
+    return out
 
 
 def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
@@ -2596,6 +2617,13 @@ def end_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> bool:
 
 
 REOPEN_GRACE_HOURS = 1.0  # a run ended / closed by mistake can be reopened this long after (never a cancelled one, D19)
+
+
+def reopen_window() -> str:
+    """REOPEN_GRACE_HOURS in words ('an hour', '2 hours'): End's confirm (consequences.consequence("end")) and its done
+    line say how long Reopen works from this one number."""
+    h = REOPEN_GRACE_HOURS
+    return "an hour" if h == 1 else f"{h:g} hours"
 
 
 def closed_recently(ev: RaidEvent, hours: float = REOPEN_GRACE_HOURS, at: datetime | None = None) -> bool:

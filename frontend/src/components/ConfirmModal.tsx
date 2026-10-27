@@ -3,7 +3,7 @@ import { Button, Group, Modal, Stack, Text, Textarea } from "@mantine/core";
 
 /** `note`: the dialog also takes an optional note (a cancel reason, a note to an applicant) — prose, never parsed.
  *  With `note` set the promise resolves to `{ note }` (note may be ""), without it to `true`; `false` is always Cancel. */
-export type ConfirmOpts = { title?: string; message: React.ReactNode; confirmLabel?: string; color?: string; note?: { label: string; maxLength: number; placeholder?: string } };
+export type ConfirmOpts = { title?: string; message: React.ReactNode; confirmLabel?: string; cancelLabel?: string; color?: string; note?: { label: string; maxLength: number; placeholder?: string } };
 export type ConfirmResult = false | true | { note: string };
 type Pending = ConfirmOpts & { resolve: (r: ConfirmResult) => void };
 
@@ -23,7 +23,7 @@ export function useConfirm(): [(o: ConfirmOpts) => Promise<ConfirmResult>, React
             onChange={(e) => setNote(e.currentTarget.value)} description={`${note.length}/${pending.note.maxLength}`} />
         )}
         <Group justify="flex-end" gap="sm">
-          <Button variant="default" size="sm" onClick={() => close(false)}>Cancel</Button>
+          <Button variant="default" size="sm" onClick={() => close(false)}>{pending?.cancelLabel || "Cancel"}</Button>
           <Button size="sm" color={pending?.color} onClick={() => close(true)}>{pending?.confirmLabel || "Confirm"}</Button>
         </Group>
       </Stack>

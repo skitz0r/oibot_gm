@@ -214,12 +214,19 @@ def test_suggestions_screen_withdraws_a_sent_ask(reg, rs, officer, channel):  # 
 # ---------------------------------------------------------------- the lock card's raid-night row and the closed card
 
 def test_lock_card_remind_pause_end_and_reopen(reg, rs, monkeypatch):
-    ev, _seated = locked_ten(reg, rs)
+    ev, seated = locked_ten(reg, rs)
+    for m in seated:
+        reg.add_placement_ask(m.discord_id, ev.team, m.main.label, "lock")
     h, bot = night(reg, rs, user=officer_user())
 
     async def go():
+        # Remind DMs people: the decide screen first, with the site's confirm's sentence (consequences "remind")
         await RunButton(reg.key, ev.key, "remind").callback(h.card_press())
-        assert "Reminded 3 by DM." in h.text
+        from oibot_gm.consequences import consequence
+        assert consequence("remind", reg, ev)[0] in h.text and h.buttons() == ["Remind the unanswered", "Back"]
+        assert ("remind", ev.key, "Tester") not in bot.calls, "nothing is sent before the press"
+        await h.press("Remind the unanswered")
+        assert "Reminded 3 by DM." in h.text and ("remind", ev.key, "Tester") in bot.calls
         await RunButton(reg.key, ev.key, "pause").callback(h.card_press())
         assert ev.autofill_paused and ("pause", ev.key, True, "Tester") in bot.calls
         await RunButton(reg.key, ev.key, "end").callback(h.card_press())

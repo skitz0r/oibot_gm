@@ -50,3 +50,18 @@ def test_split_preview_two_rosters(reg, rs):
     assert len(set(seated)) == 20, "nobody sits in two rosters"
     for r in rosters:
         assert r.role_counts["tank"] == 2 and 2 <= r.role_counts["healer"] <= 3
+
+
+def test_split_preview_keeps_the_officers_own_placements(reg, rs):
+    """Design §5.56 phase 3 (finding 35): the split modal promises "your own placements on the board are kept". True:
+    _solve_run passes the board's layout as hard pins (each placed name in its group) and the officers' pins in / out."""
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:12])
+    tank = next(s.display_name for s in ev.by_status("in") if s.role == "tank")
+    healer = next(s.display_name for s in ev.by_status("in") if s.role == "healer")
+    ev.layout = [[], [tank, healer]]  # the officer put two people in group 2
+    out = next(s.display_name for s in ev.by_status("in") if s.role == "healer" and s.display_name != healer)  # a spare healer (the pool has 5 for 3 seats)
+    ev.pins = {next(u for u, s in ev.signups.items() if s.display_name == out): "out"}  # pins are keyed by Discord id
+    layout, rosters = rc.split_preview(reg, rs, ev, "balanced")
+    assert tank in layout[1] and healer in layout[1], "placed names stay in the group they were put in"
+    assert out not in {p.signup_name for r in rosters for p in r.selected}, "kept off the roster stays off"

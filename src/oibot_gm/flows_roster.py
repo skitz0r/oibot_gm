@@ -742,6 +742,8 @@ class RegularRemoveWizard(RegularsWizard):
         await self.after_member(interaction)
 
     async def after_member(self, interaction: discord.Interaction) -> None:
+        from .consequences import regular_remove as regular_remove_lines
+
         m = self.member()
         key = self.draft["series"]
         c = next((x for x in (m.characters if m else []) if key in x.rosters), None)
@@ -749,7 +751,7 @@ class RegularRemoveWizard(RegularsWizard):
         who = "you" if self.self_service else m.display_name if m else "they"
         text = (f"Step down from the regulars of **{self.label()}**" + (f" ({c.label})" if c else "") + "?\n-# You can still Join any sheet; you just won't be expected (or reminded) any more. To come back, ask an officer."
                 if self.self_service else
-                f"Take **{who}**" + (f" ({c.label})" if c else "") + f" off the regulars of **{self.label()}**?\n-# They can still Join any sheet; they're just not expected (or reminded) any more.")
+                f"Take **{who}**" + (f" ({c.label})" if c else "") + f" off the regulars of **{self.label()}**?\n-# " + (" ".join(regular_remove_lines(self.reg, m, key)) if m else "They can still Join any sheet."))  # the site's sentence (consequences.regular_remove)
         await self.show(interaction, text, self.button("Step down" if self.self_service else "Confirm", self.save, discord.ButtonStyle.danger),
                         *([self.button("Back", back)] if back else []), self.button("Cancel", self.cancel))
 

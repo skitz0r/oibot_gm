@@ -3482,6 +3482,54 @@ Left for phase 3: the confirm sentences the browser still writes (Remind, End's 
 substitute, regulars remove — `consequences.py` verbs), *Move to…* in a chip's ⋮ menu, rev + progress on *Place the
 rest* and the orphan-regular clear, and the 44 px touch targets.
 
+**Phase 3 — behaviour (built 2026-10-26).** The review's last findings were behaviour, not words: the board's confirms
+composed their sentence in the browser and were wrong on an ad hoc run (*"{name} gets a confirmation DM"* where nobody is
+asked) and wrong after the lock (*"{displaced} is told their seat was released and the bench is asked"* — a substitute
+takes the seat, so the bench is not asked, and nobody is ever DMed a release); End hard-coded the reopen hour; Remind and
+the regulars' remove wrote their own promises; *Place the rest* and the orphan-regular clear wrote with no rev, no
+progress and (the clear) no confirm; the board could not be used on a phone (HTML5 drag never fires on touch, no keyboard
+path); controls were under 44 px.
+- **Every confirm prints only the server's sentence.** `consequences.py` gains the board's moves — `move` (between groups),
+  `roster` (Not rostered → an open seat), `swap` (two placed members trade), `substitute` (Not rostered → someone's seat)
+  — plus `remind`, `end` and `regular_remove(reg, m, key)`. Each is true to the run's kind and state: before the lock
+  nobody is told (*BEFORE_LOCK*); after it a move or swap tells nobody, someone brought in gets `confirm_one`'s DM (on the
+  site with DMs off) or, on an ad hoc run, `NO_CONFIRMATIONS` with no DM; a released member sees it on their confirmation
+  card and the site (ad hoc: the site) — never a DM — and the bench is asked only when the run's automatic asks are on and
+  not paused (`_refill`, as `after_board_change` / `drop_seated` → `run_fill`), else the seat waits for *Fill seats…*;
+  a substitute's seat is taken, so nobody else is asked. Remind counts who gets the card again and who waits on the site
+  (or is `rc.remind_refusal`'s sentence); End is the run's part (*the sheet and the lock card close … Reopen works for
+  `rc.reopen_window()` after*, read from `REOPEN_GRACE_HOURS`) and `LootMixin.end_consequence` puts the council's part in
+  front — the lock card's End, `/raid end`, the site's *End the run* and Loot › Tonight print that one string. A regular's
+  removal names the character, says the sheets stop expecting them and the lock stops weighting them as a regular, and
+  that nobody is told (a removed schedule's: nothing else changes). `ev_json.consequences` carries every verb; the board
+  verbs with `{name}` / `{other}` / `{to}` tokens that `shared.fillNames` fills — the page never composes a word, and no
+  literal stands in when a sentence is missing (`tests/test_frontend_source.py` pins it for BoardView, SheetCard and
+  Rosters; the open preview's *The sheet posts in #…* moved to the server as `posts` for the same reason). `/api/rosters`
+  gives each regular `remove` + `rev` and each orphan `clear` + `rev`; Discord's `/roster remove` shows the same sentence.
+- **Remind asks first on both surfaces.** It DMs everyone unanswered, so the lock card's Remind is now a decide screen
+  (`raid_buttons.remind_decide`: the sentence, *Remind the unanswered* · Back), the same words as the site's confirm.
+- **The board's moves have one path.** A drag and the chip's new **⋮ → Move to…** both call `place(name, from, target,
+  via)` → one `send("move", …)` — the same `POST /api/run/{key}/move` body (`{member, to: {r, g, i}, state}`) and the same
+  409 handling. Move to… lists every group with room (its first open seat; full groups greyed with *5/5*) and *Not placed*
+  / *Not rostered*, under the server's on-behalf actions (`MemberMenu` takes `moves`); it works by tap and keyboard.
+  Confirms: after the lock every move asks (the board IS the roster, and the sentence says who is told); before it a drag
+  is free and Move to… still asks (a tap is easy to misplace) — the Board mockup's shape, *Move Nettle to Group 2?*, the
+  sentence, **Back** / **Move** (`useConfirm` gained `cancelLabel`).
+- **Writes carry the version they were made on, with progress.** *Place the rest* sends the board's `rev`
+  (`POST /api/run/{key}/autofill` answers 409 + the current board when it moved, before solving) through the board's own
+  writer, so the board patches in place and the button spins with *placing the rest…*; the regulars route takes the
+  member record's `characters_rev` (`rev`; stale → 409 *…changed since you loaded them*), and the orphan clear asks first
+  with the server's `clear` sentence and spins per row.
+- **The split keeps the officer's placements — verified.** `_solve_run` passes the board's layout as hard group pins
+  (`SolveOptions.pins`, `force_in`) and the pins in / out, so the modal's promise stands and now names pins too
+  (`tests/test_split.py::test_split_preview_keeps_the_officers_own_placements`).
+- **44 px on a phone.** One rule in `rosters.module.css` (`max-width: 48em`): inside the page's `.touch` wrapper every
+  ActionIcon, Button and CloseButton, the sort control's labels, the tabs, accordion controls and inputs are at least
+  44 px; the menus (portals) take `.menuItem`. No per-element sizes.
+- **Who could cover** (the health card and the site): roles that only members *not on the sheet* could cover are one
+  line — the role icons, then *not on the sheet: A, B, C* — instead of the same line under each short role
+  (`rc.cover_hints`, `health_json.hints`).
+
 ## 6. Architecture
 
 ```mermaid

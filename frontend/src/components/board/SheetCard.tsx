@@ -15,6 +15,7 @@ import { TellTheBot } from "../TellTheBot";
 import { PinMark, RoleCounts, SeatLine, markOf, runName, type Act, type OnBoard } from "./shared";
 import { RunStrip } from "../RaidCard";
 import type { LockPreview, NightSheet } from "./types";
+import css from "../../pages/rosters.module.css";
 
 /** One live run's card (design §5.56), in the order a raid leader reads it: the time, its state and kind; the run's week
  *  as a strip with a now mark; one headcount with its owner (joined before the lock, rostered after) and the role counts;
@@ -52,7 +53,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const seatsN = (e.plan?.seats || []).length;  // seats the planner works on (before lock: the tank/healer minimums)
   const asksN = (e.plan?.seats || []).filter((st) => st.options.length).length;
   const name = runName(e as unknown as Sheet);
-  const hints = (e.health?.roles || []).filter((r) => r.need && r.have < r.need && r.hint);
+  const hints = e.health?.hints || [];  // who could cover the short roles: the server's lines ("not on the sheet" said once, with every role it covers)
   const placed = (e.board?.rosters || []).reduce((k, r) => k + r.groups.reduce((m, g) => m + g.length, 0), 0);
   const missing = e.health?.no_provider_buffs || [];
   const bench = signups.filter((s) => s.status === "sub"), outs = signups.filter((s) => s.status === "out"), away = e.absences || [];
@@ -62,14 +63,16 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const [repostOpen, setRepostOpen] = useState(false);
   const [tellOpen, setTellOpen] = useState(false);  // the officers' Tell the bot box, about this run (design §3.4 OFF-20)
 
+  // Remind and End print ONLY the server's sentence (consequences.py "remind"; End = LootMixin.end_consequence, the
+  // council's part + consequences "end" with Reopen's window from code) — the Discord decide screens show the same words
   async function remind() {
-    if (!(await ask({ title: `${L.remind} on ${name}?`, message: `Everyone rostered who hasn't answered gets their Confirm / Can't DM again — the same card, the same deadline. Once an hour per run.`, confirmLabel: L.remind }))) return;
+    if (!(await ask({ title: `${L.remind} on ${name}?`, message: e.consequences?.remind, confirmLabel: L.remind, cancelLabel: "Back" }))) return;
     await onAct(`remind${e.key}`, `/api/run/${e.key}/remind`);
   }
   async function endNow() {
     let preview = "";
     try { preview = (await api.post<{ preview: string }>(`/api/loot/${e.key}/end`, { preview: true })).preview; } catch (err) { fail(err); return; }
-    if (!(await ask({ title: `End ${name}?`, message: `${preview}\nThe sheet and the lock card close; no more fill asks go out. Reopen works for an hour after.`, confirmLabel: L.end, color: "red" }))) return;
+    if (!(await ask({ title: `End ${name}?`, message: preview, confirmLabel: L.end, cancelLabel: "Back", color: "red" }))) return;
     await onAct(`end${e.key}`, `/api/loot/${e.key}/end`);
   }
   const pause = (paused: boolean) => onAct(`pause${e.key}`, `/api/run/${e.key}/pause`, { paused });
@@ -140,7 +143,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       )}
       {/* who could cover a short role (officers): the server's words, one line per short role, under the counts */}
       {!locked && hints.length > 0 && (
-        <Stack gap={0} mt={4}>{hints.map((r) => <Group key={r.role} gap={6} wrap="nowrap"><GameIcon meta={meta} kind="role" id={r.role} size={14} title={r.role} /><Text size="xs" c="dimmed">{r.hint}</Text></Group>)}</Stack>
+        <Stack gap={0} mt={4}>{hints.map((h) => <Group key={h.roles.join()} gap={6} wrap="nowrap">{h.roles.map((role) => <GameIcon key={role} meta={meta} kind="role" id={role} size={14} title={role} />)}<Text size="xs" c="dimmed">{h.hint}</Text></Group>)}</Stack>
       )}
 
       {locked && <NightBlock e={e} meta={meta} onFill={() => setFillOpen(true)} />}
@@ -160,14 +163,14 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       {/* the other answers in one line, a part only when someone is in it (after the lock the Bench answers sit in the board's Not rostered list) */}
       <OthersLine label={meta.labels.sub} items={locked ? [] : bench} menu={menu} outs={outs} outLabel={meta.labels.out} away={away} />
 
-      {e.board && locked && <BoardView e={e as unknown as Sheet} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} />}
+      {e.board && locked && <BoardView e={e as unknown as Sheet} meta={meta} onBoard={onBoard} onReload={onReload} />}
       {e.board && !locked && joined.length > 0 && !boardOpen && (
         <Group mt="md" gap="sm" wrap="wrap" justify="space-between" p="sm" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 10 }}>
           <Text size="sm"><b>Board</b> <Text span c="dimmed">— {joined.length} joined, {placed} placed: shape it before the lock, or let the lock place everyone</Text></Text>
           <Button size="xs" variant="default" onClick={() => setBoardOpen(true)}>Open the board</Button>
         </Group>
       )}
-      {e.board && !locked && joined.length > 0 && boardOpen && <BoardView e={e as unknown as Sheet} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onHide={() => setBoardOpen(false)} />}
+      {e.board && !locked && joined.length > 0 && boardOpen && <BoardView e={e as unknown as Sheet} meta={meta} onBoard={onBoard} onReload={onReload} onHide={() => setBoardOpen(false)} />}
       {/* Run actions live here in every state, under the board they act on: destructive far left, the step that
           commits the work last on the right. What does not apply yet is disabled with the reason in its label. */}
       <Group justify="space-between" wrap="wrap" gap="sm" mt="md" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
@@ -231,7 +234,7 @@ function RunLinks({ e }: { e: NightSheet }) {
 function RunMenu({ e, busy, onRepost }: { e: NightSheet; busy: string | null; onRepost: () => void }) {
   if (!e.live) return null;
   return (
-    <Menu shadow="md" width={260} position="bottom-end">
+    <Menu shadow="md" width={260} position="bottom-end" classNames={{ item: css.menuItem }}>
       <Menu.Target><ActionIcon variant="subtle" color="gray" aria-label={`run actions for ${e.when}`} loading={busy === `repost${e.key}`}><IconDotsVertical size={16} /></ActionIcon></Menu.Target>
       <Menu.Dropdown>
         <Menu.Item leftSection={<IconSend size={14} />} onClick={onRepost}>Re-post sheet…</Menu.Item>
@@ -301,7 +304,7 @@ function LockModal({ e, meta, opened, preview: startWithPreview = false, onClose
   return (
     <Modal opened={opened} onClose={close} title={`Lock ${runName(e as unknown as Sheet)} now?`} centered size={p ? "xl" : "md"}>
       <Stack gap="md">
-        <Text size="sm" style={{ whiteSpace: "pre-line" }}>{p?.consequence || e.consequences?.lock || "The board becomes the roster."}</Text>
+        <Text size="sm" style={{ whiteSpace: "pre-line" }}>{p?.consequence || e.consequences?.lock}</Text>
         {p && <BoardPreview meta={meta} board={p.board} />}
         {p && <Text size="xs" c="dimmed">Nothing is saved — {meta.run_labels.lock} builds the roster again from the sheet as it is then.</Text>}
         <Group justify="flex-end" gap="sm">
@@ -323,7 +326,7 @@ function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: 
   return (
     <Modal opened={opened} onClose={close} title={`Cancel ${runName(e as unknown as Sheet)}?`} centered>
       <Stack gap="md">
-        <Text size="sm" style={{ whiteSpace: "pre-line" }}>{e.consequences?.cancel || "The sheet closes."}</Text>
+        <Text size="sm" style={{ whiteSpace: "pre-line" }}>{e.consequences?.cancel}</Text>
         <Textarea label="Why? (optional)" description={`officers only: the run's thread and the ops feed — never the signup channel · ${reason.length}/300`} value={reason} maxLength={300} autosize minRows={2} onChange={(ev) => setReason(ev.currentTarget.value)} />
         <Checkbox label="Tell the channel — a fixed line, no reason" checked={notify} onChange={(ev) => setNotify(ev.currentTarget.checked)} />
         <Group justify="flex-end" gap="sm">

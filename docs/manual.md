@@ -452,7 +452,11 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   Ana a Tuesday Barrow Deeps regular with Anabelle") or MCP `set_regular`. One character per member per schedule; the
   same character on two schedules of one raid is allowed with a warning (one lockout). A test puppet is never a
   regular — a test run treats every puppet as one. Removing a schedule never strips its regulars silently: the Rosters
-  page lists them to clear.
+  page lists them to clear. Removing a regular (× on the site, `/roster remove`) and clearing a removed schedule's one
+  both ask first with the same sentence — *"Bramble stops being a regular of Barrow Deeps · Raid nights: its sheets no
+  longer expect them or list them as not answered, and at the lock they no longer get a regular's seat weight. They can
+  still Join any sheet; nobody is told."* — and if the member's record changed since the page loaded, nothing is written
+  and the page asks you to reload.
 - The **Members** page shows each character's **Rank** (it weighs on seating) and **Regular on** (the schedules it is a
   regular of); officers change regulars on the Rosters page and ranks with `/roster rank`.
 - **Members** see *My regular raids* on the Me page and *Regular on* in `/me view`; **Step down** (either place)
@@ -558,7 +562,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    thanks, Away that day — each only when someone is in it), and the **board**, one line (*Board — 7 joined, 2 placed:
    shape it before the lock, or let the lock place everyone*) until you press **Open the board** — **Not placed** (everyone
    who joined and isn't in a group yet) and the groups of the run; its ⓘ says what the marks mean. Drag names from Not placed into groups, between groups, or back to Not placed; dropping on
-   someone swaps them. Every group shows its auras as you go (coloured = present, greyed with a red edge =
+   someone swaps them. On a phone, or without a mouse, each name's **⋮** menu has **Move to…**: every group with room
+   (*Group 2 · 3/5*) and *Not placed* — tap one, and the confirm says where they go (*"Move Nettle to Group 2? Nettle
+   takes an open seat in Group 2. Before the lock nobody is told — the roster is decided at the lock."* · **Back** ·
+   **Move**). It is the same move a drag makes. On a phone every button and menu row on the page is at least 44 px. Every group shows its auras as you go (coloured = present, greyed with a red edge =
    someone in the group wants it and nobody brings it, one totem per element) and the raid-wide buffs
    update too. The board is **shared**: every officer sees the same one, a change anywhere (another officer, a
    new Join in Discord, the scheduler) reaches open pages within a second, and two officers can drag at the same
@@ -571,7 +578,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    works too: "pin Xanthe to roster", "keep Jon off the roster", "clear the pin for Xanthe"). **Propose
    roster** shows the groups the bot would build for the run (your placements and pins kept), with *another layout*
    for a different one, and *Use this layout on the board* puts it on the board; **Place the rest** lets
-   the bot place whoever is still not placed around what you placed (nothing is sent); **Clear** empties the board after a
+   the bot place whoever is still not placed around what you placed (nothing is sent; the button spins while it works,
+   and if someone changed the board since you looked it is refused and the board reloads); **Clear** empties the board after a
    confirmation. Whatever is on the board when the sheet locks is the roster, with the bot filling any
    empty seats. An answer or pin that changes while the lock is building the roster (someone presses *No thanks*,
    you keep someone on the bench) makes the lock build it again from the sheet as it now is, so nobody is rostered
@@ -629,10 +637,16 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    Discord outage), the lock card says *confirmations not yet sent* and within a minute the bot asks exactly the
    rostered who weren't asked — nobody twice. If a lock fails (the bot couldn't find a roster in time), the sheet's footer says
    *Lock failed <time> — the sheet stays open, retrying* and so does the site. With confirmations off (the ad hoc default) nobody is asked and
-   no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable: moving people
-   between groups changes nothing else; dragging someone in from *Not rostered* is a substitution (they get the
-   confirmation DM); dragging someone out releases the seat (their confirmation card says so — no new DM) and the bench
-   is asked — the confirm names them and says exactly what the bot will do, in the same words as the Discord card. A
+   no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable,
+   and every change — a drag or **Move to…** — asks first with one sentence from the bot: moving people between groups
+   (*"Nettle moves to Group 2 and stays rostered — nobody is told."*) or swapping two changes nothing else; bringing
+   someone in from *Not rostered* to an open seat asks them to confirm (*"Nettle gets a confirmation DM (on the site if
+   their DMs are off); the seat is theirs once they say yes."* — on an ad hoc run *"No confirmations — Join is the
+   commitment: the seat is Nettle's now, with no DM."*); dropping them on someone is a **substitution** — *"Ivy's seat
+   goes to Nettle: Ivy sees it was released — on their confirmation card and the site, no DM."* plus Nettle's line (the
+   bench isn't asked: the seat is taken); dragging someone out releases the seat — they see it on their confirmation
+   card and the site, never a DM — and the bench is asked to fill it when automatic asks are on (paused or off, the
+   sentence says the seat waits for **Fill seats…**). A
    drag started on the open board and dropped after the run locked is refused ("The run locked while you were
    dragging") and the board shows the roster — it is never applied as a change to the locked roster.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
@@ -640,7 +654,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for
    "no answer". **Remind the unanswered** (the lock card's second row, the same button on the site's locked run card) sends the Confirm / Can't
    DM again to everyone still unanswered — the same ask, the same deadline — at most once an hour per run; the ones
-   waiting on the site aren't DMed. The older Confirm card loses its buttons and reads *Reminded — see the newer message
+   waiting on the site aren't DMed. It asks first, on both surfaces, with the same sentence: *"3 rostered members who
+   haven't answered get the Confirm / Can't DM again — the same card, the same deadline. 1 more waits on the site with
+   DMs off — no DM. Once an hour per run."* The older Confirm card loses its buttons and reads *Reminded — see the newer message
    below*, so only the newest card answers. Two officers pressing it at once send one round; the second is told who reminded.
 6. **Fill seats…** — the bot asks people on its own (*automatic asks*) only after lock (before lock an officer sends suggestions, see
    *Suggestions* above). Whenever a seat frees (decline, callout, absence, missed
@@ -681,7 +697,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    ("Asking for open seats — waiting for answers (1 on the site)."; a closed run's is "The run is finished.").
 7. **Raid** — `/raid loot` (or the lock card's **Loot**, or Loot › Tonight on the site) opens the loot council;
    `/raid end` ends the run and its council (§9) — so does **End the run** on the lock card's second row and on the
-   site's locked run card, both after the scheduled start and both through one confirm screen. Ended by mistake? The closed
+   site's locked run card, both after the scheduled start and both through one confirm screen with the same sentence
+   (*"End Barrow Deeps Tue 15 Dec 4:00 AM: 6 award(s), 1 override(s). The summary posts in the council's thread … The run
+   is marked finished: the sheet and the lock card close and no more fill asks go out. Pressed by mistake? Reopen works
+   for an hour after."*). Ended by mistake? The closed
    officer card keeps a **Reopen** button (and the run's page in History a *Reopen*) for an hour: the run goes back to
    locked with its roster and asks as they were (the loot council stays archived — open it again with /raid loot).
    Never a cancelled run, and not after its scheduled close.

@@ -83,7 +83,7 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     assert consequences.consequence("release", reg, ev)[0].startswith("The seat is released: they see it")
     assert consequences.consequence("lock", reg, ev) == ["Already locked."]
     assert consequences.consequence("nonsense", reg, ev) == []
-    assert set(consequences.consequences_json(reg, ev)) == {"lock", "cancel", "clear", "release", "release_named"}
+    assert set(consequences.consequences_json(reg, ev)) == set(consequences.VERBS) | {"release_named"}
 
 
 def test_release_named_is_the_per_member_sentence_with_a_token_the_board_fills_in(reg, rs):
@@ -102,7 +102,7 @@ def test_release_named_is_the_per_member_sentence_with_a_token_the_board_fills_i
     assert consequences.NAME_TOKEN in after["release_named"] and consequences.NAME_TOKEN not in after["release"]
     assert after["release_named"].replace(consequences.NAME_TOKEN, "Jonny") == " ".join(consequences.consequence("release", reg, ev, name="Jonny"))
     board = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "board" / "BoardView.tsx").read_text()
-    assert "e.consequences.release_named.replace(\"{name}\", d.name)" in board, "BoardView fills the token, nothing more"
+    assert "fillNames(sentence, { name, ...n })" in board and "c.release_named || c.release" in board, "BoardView fills the token, nothing more"
 
 
 def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg, rs, monkeypatch):
@@ -114,7 +114,7 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
     d = c.get(f"/api/run/{adhoc.key}", headers=bearer()).json()
     assert d["consequences"]["lock"] == "The board becomes the roster. No confirmations — Join is the commitment."
     assert "DM" not in d["consequences"]["lock"], "the old SheetCard text promised confirmation DMs on ad hoc runs (§4 item 5)"
-    assert set(d["consequences"]) == {"lock", "cancel", "clear", "release", "release_named"}
+    assert set(d["consequences"]) == set(consequences.VERBS) | {"release_named"}
     from pathlib import Path
 
     sheet = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "board" / "SheetCard.tsx"

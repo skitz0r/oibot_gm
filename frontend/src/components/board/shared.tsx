@@ -9,6 +9,12 @@ export type OnBoard = (key: string, board: Board, needs?: Sheet["needs"], rev?: 
 /** Shared between the board and the page: a refresh must not re-render the board under a drag in progress. */
 export const live = { dragging: false };
 
+/** A sentence from the server (ev_json.consequences: the board's move / roster / swap / substitute / release_named) with
+ *  the names put where the server left its tokens — the ONLY thing the page does to it: it never composes a word. */
+export function fillNames(sentence: string | undefined, names: { name: string; other?: string; to?: string }): string {
+  return (sentence || "").split("{name}").join(names.name).split("{other}").join(names.other ?? "").split("{to}").join(names.to ?? "");
+}
+
 /** A confirmation's mark and its words — the Discord card's own (constants.MARK / MARK_WORDS through /api/meta.marks):
  *  `answer` null = still waiting. The words are the tooltip; the page never draws a mark of its own. */
 export function markOf(meta: Meta, answer: string | null | undefined) {
