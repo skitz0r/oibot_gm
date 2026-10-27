@@ -3393,8 +3393,8 @@ picker and both confirms showed *Wed 04 Nov*; chips and eyebrows shouted in capi
   next-run line is replaced by **each active schedule's next three runs whatever the horizon** (`rc.upcoming_rows`,
   `UPCOMING_PER_SCHEDULE`): the soonest shown, the rest behind *Show the next N runs*; a row that can open has **Open
   now** (the preview confirm as before), one that can't says why in the server's words (`rc.open_row_refusal`: a
-  closed run at that time — `closed_run_refusal` — or more than `OPEN_HORIZON_DAYS` out: *Too far ahead to open now:
-  Open works from …, three weeks before the run; its sheet opens on its own …*, the same limit the no-time open paths
+  closed run at that time — `closed_run_refusal` — or more than `OPEN_HORIZON_DAYS` out: *This run is too far ahead to open now.
+  Open works from …, three weeks before the run. Its sheet opens on its own …*, the same limit the no-time open paths
   keep). Open next run opens the first row that can open and writes the first row's reason under itself when none can.
   The locked dot is light grey on both pages (amber marks a changed value only).
 - **The run's week** is a strip (`RaidCard.RunStrip`) from `ev_json.week` — `[{step, when, at, done}]`: sheet opened

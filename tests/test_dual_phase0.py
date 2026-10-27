@@ -54,7 +54,7 @@ def test_lock_consequence_counts_dms_and_names_the_deadline_in_words(reg, rs):
     ms[1].dm_opt_out = True
     rc.run_team(reg, ev)["test"] = False  # a real run: the DMs-off count is said
     ev.test = False
-    assert "The 6 rostered get the Confirm or Can't make it DM, 2 of them on the site instead." in consequences.consequence("lock", reg, ev)
+    assert "4 of the 6 rostered get the Confirm or Can't make it DM and 2 see it on the site." in consequences.consequence("lock", reg, ev)
 
 
 def test_lock_consequence_on_an_ad_hoc_run_promises_no_dms(reg, rs):

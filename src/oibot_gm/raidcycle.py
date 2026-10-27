@@ -2910,7 +2910,7 @@ def open_row_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datet
     now = now or reg.now_local()
     if start > now + timedelta(days=OPEN_HORIZON_DAYS):
         early = start - timedelta(days=OPEN_HORIZON_DAYS)
-        return (f"Too far ahead to open now. Open works from {reg.local12(early)}, three weeks before the run."
+        return (f"This run is too far ahead to open now. Open works from {reg.local12(early)}, three weeks before the run."
                 + (f" Its sheet opens on its own {reg.local12(opens)}." if opens > early else ""))
     return None
 

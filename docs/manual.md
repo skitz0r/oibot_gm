@@ -784,7 +784,7 @@ Fill seats… · Loot · Cancel run… (the *Suggested* block has its own row: *
 a second row: **Remind the unanswered** · **Pause automatic asks** · **End the run**. **One confirm screen, the same
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
 a news proposal, the bot shows one sentence computed from the run as it stands — for a lock: *"The board becomes the
-roster. The 18 rostered get the Confirm or Can't make it DM, 2 of them on the site instead. They have until Tue 9 Dec
+roster. 16 of the 18 rostered get the Confirm or Can't make it DM and 2 see it on the site. They have until Tue 9 Dec
 6:30 PM to answer."*; on an ad hoc run: *"On an ad hoc run Join is the commitment, so nobody is asked to confirm."* — then **Do it** (named for the verb: *Lock now*,
 *Cancel the run*, *Approve*…), **… with a note…** where a note makes sense, and **Back**. The site's dialogs print the
 very same sentence (it comes from the bot, the page never writes its own), so no surface promises a DM the bot would

@@ -51,7 +51,7 @@ def test_a_raid_that_opens_later_lists_its_first_runs_and_says_why_they_cant_ope
     rows = r["upcoming"]
     assert len(rows) == 3, "no 'No upcoming runs before the raid opens': the first runs are listed"
     assert not any(u["can_open"] for u in rows)
-    assert all(u["why"].startswith("Too far ahead to open now. Open works from ") and "three weeks before the run" in u["why"] for u in rows)
+    assert all(u["why"].startswith("This run is too far ahead to open now. Open works from ") and "three weeks before the run" in u["why"] for u in rows)
     assert r["next_run"] == {"when": rows[0]["start"], "schedule": rows[0]["schedule_name"], "opens": rows[0]["opens"]}
     assert r["live_runs"] == [] and r["opened"] is False and r["first_open_words"]
     # the row's reason matches what Open next run says on every surface

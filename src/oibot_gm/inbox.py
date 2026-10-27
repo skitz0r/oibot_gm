@@ -189,9 +189,9 @@ def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | 
             f"The seat waits for {rc.fill_button_words()}."
         return say(f"{name} says no to the open seat for {run}.", nxt)
     if key == "pin_in":
-        return f"{name} is pinned to the roster for the lock of {run}. Only officers see pins."
+        return f"{name} is pinned in for {run}, so the lock keeps them on the roster. Only officers see pins."
     if key == "pin_out":
-        return f"{name} is kept off the roster at the lock of {run}. Only officers see pins."
+        return f"{name} is kept off the roster when {run} locks. Only officers see pins."
     if key == "unpin":
         return f"{name}'s pin comes off, so the lock places them like anyone else. Only officers see pins."
     raise RegistryError(f"unknown action {key}")

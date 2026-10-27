@@ -103,8 +103,9 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     elif off and off >= n:
         lines.append(("The one person rostered sees" if n == 1 else f"The {n} rostered see") + " a Confirm or Can't make it ask on the site, with DMs off.")
     else:
-        lines.append(f"{who} {CONFIRM_DM}" + ("" if not off else ", one of them on the site instead." if off == 1 else f", {off} of them on the site instead.")
-                     + ("" if off else "."))
+        k = n - off
+        lines.append(f"{who} {CONFIRM_DM}." if not off else
+                     f"{k} of the {n} rostered {'gets' if k == 1 else 'get'} {CONFIRM_DM} and {off} {'sees' if off == 1 else 'see'} it on the site.")
     lines.append(f"They have until {reg.local12(confirm)} to answer.")
     return lines
 
