@@ -60,14 +60,14 @@ export function RostersPage({ meta }: { meta: Meta }) {
 const yourClock = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
 
 /** Open the next run of a recurring schedule: one press (a schedule select when the raid has several) — the first
- *  upcoming run the server says can open. When none can, the reason is written under the button (a disabled button's
- *  tooltip never shows). */
+ *  upcoming run the server says can open. When none can, there is no button: the "When it runs" rows below carry each
+ *  run's Open now or the server's reason, so a greyed button here would only repeat it. */
 function OpenNext({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct: Act }) {
   const [sched, setSched] = useState<string>("");  // "" = the next run of any recurring schedule
   const recurring = (r.schedules || []).filter((s) => s.active && s.class !== "adhoc" && s.kind !== "pickup");
   const rows = r.upcoming.filter((u) => !sched || u.schedule === sched);
   const next = rows.find((u) => u.can_open);
-  const why = next ? null : rows[0]?.why || "Nothing to open: this schedule has no run coming — check it on the Raids page.";
+  if (!next && !r.upcoming.some((u) => u.can_open)) return null;
   return (
     <Stack gap={4} align="flex-end" style={{ maxWidth: 340 }}>
       <Group gap="xs" align="center" wrap="wrap" justify="flex-end">
@@ -80,7 +80,7 @@ function OpenNext({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct:
             onClick={() => next && onAct(`open${r.id}`, `/api/raid/${r.id}/open`, { start: next.start_iso, schedule: next.schedule })}>Open next run</Button>
         </Tooltip>
       </Group>
-      {why && <Text size="xs" c="dimmed" ta="right">{why}</Text>}
+      {!next && <Text size="xs" c="dimmed" ta="right">Nothing to open on this schedule yet — pick another, or see When it runs below.</Text>}
     </Stack>
   );
 }
