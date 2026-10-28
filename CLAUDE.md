@@ -97,6 +97,9 @@ src/oibot_gm/
                        policy sentences from the ACTIVE precedents (route distil, refs validated, nothing written — policy.append_rule is the write;
                        the <policy>/<rules>/<precedents> blocks go through llm.provider.unfence)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap; unfence = THE fence neutraliser for text inside a prompt's data block
+  llm/decisions.py     listening's decision service (design §5.59): DecisionProvider.noul(state, instructions, criteria) → p | None (TypeSafe Jev over httpx,
+                       TYPESAFE_API_KEY in .env; never raises, never writes text); usage rows in Claude's ledger (workload listen, PRICES jev, SHARES 0.2);
+                       DECISIONS = the bot's instance (None without the key)
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
                        on_guild_join (re-attach a parked guild, else ONE DM to host_ids: "I was added to X … Missing permissions: …"), on_guild_remove
@@ -107,6 +110,11 @@ src/oibot_gm/
                        a new one is taken; MEMBERSHIP_LISTENERS fire on a changed roster → the web's `member` topic);
                        bot.events[(gk, session id)]; GuildContext = the start directory's key, profile and the LLM provider (rehearse loot with a
                        test run — its council is session.test, D11)
+                       ListenMixin (design §5.59): listen_message = the gate run LAST in on_message for an untagged message in a listened channel
+                       (PlainPolicy.listen) → decisions.noul on listen_state (LISTEN_BOT_WORDS + raids + glossary + 2 recent + the message, data only)
+                       with LISTEN_QUESTION; ≥ LISTEN_SURE (0.8): reply → plain_text as an @mention, watch → recorded; ≥ LISTEN_MAYBE (0.5): reply →
+                       👀 and the AUTHOR's 👀 click (on_raw_reaction_add, 10 min) → plain_text; LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
+                       50 verdicts (memory, text ≤120) and out/listen.jsonl rows WITHOUT text; no key → one ops warn per guild per hour. Never a DM
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
                        (+ remove_candidate · set_scores_only · keep_open), each (reg, session, …, by, by_id, via) under loot_lock; loot_ctx / loot_roster
                        (live from the run) / loot_live (run locked); open_council (one session per roster of a split run, <run>-r<N>); auto-distribute;
@@ -147,7 +155,9 @@ src/oibot_gm/
                        schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule/remove_schedule = one set_raid_overrides write, _check_schedules);
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
                        applies in Discord before registering: every first-character path checks it — Discord, plain text, the Me page);
-                       PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check
+                       PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check;
+                       PlainPolicy.listen {channel id: watch|reply} (LISTEN_MODES / LISTEN_WORDS, §5.59; merge listen / set_listen, refused in an ignore
+                       channel), listen_mode(channel) / listen_channels()
                        Owner rights = Registry.is_owner_id(uid): the guild's owner OR a host superuser (OIBOT_SUPERUSERS, every guild) — never compare
                        owner_discord_id directly; a server claim defaults the owner to the Discord server's owner.
                        Dual interfaces phase 0 (design §5.33): `config_lock` (RLock) held by save_config and every config verb (`_config_verb`);

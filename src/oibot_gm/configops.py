@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from pathlib import Path
 from collections.abc import Callable
@@ -91,7 +92,9 @@ Recruitment (owner, op=recruit): the Discord application. field=open, value=true
 Plain-text permissions (owner only, never opened to anyone else): plain: target=<a capability group: self|members|runs|comp|raids|setup|test>,
     value=<who, comma list: everyone, registered, officers, owner, @Role; "default" = the group's default> — who may ask the bot to do that;
   or target=<channel mention> | dm | default (every channel not listed), value=act|self|answer|ignore (what plain text may do there;
-    "clear" = a listed channel goes back to the default) — "only officers can run runs by chat" = target=runs, value=officers.
+    "clear" = a listed channel goes back to the default) — "only officers can run runs by chat" = target=runs, value=officers;
+  or target=listen <channel mention>, value=watch|reply|off (listening: the bot reads that channel without being tagged and
+    answers what is clearly for it; watch = only notes what it would have answered) — "listen in #signups" = value=reply.
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character> (character="all pending" = every
   character in the unconfirmed list: "confirm everyone pending"); set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
@@ -213,9 +216,9 @@ class ConfigOp(BaseModel):
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain), item name or id (tier)")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> (plain), item name or id (tier)")
     field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none; loot_weights: a number or default)")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off; set <channel>: a mention or none; loot_weights: a number or default)")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
@@ -380,6 +383,7 @@ def plain_text_policy(reg: Registry) -> str:
     chans = {**{str(c): "act (default for this channel)" for c in (reg.config.ops_channel_id, reg.config.analytics_channel_id) if c}, **p.channels}
     lines += [f"- channel <#{c}>: {m}" for c, m in chans.items()]
     lines += [f"- DMs: {p.dm}", f"- every other channel: {p.default}"]
+    lines += [f"- listening in <#{c}>: {m}" for c, m in p.listen.items()] or ["- listening: off in every channel"]
     return "\n".join(lines)
 
 
@@ -1624,6 +1628,9 @@ def _plain_patch(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
     from .registry import PLAIN_GROUPS, PLAIN_MODES
 
     t, v = (op.target or "").strip(), (op.value or "").strip()
+    listen_cid = _listen_target(t)
+    if listen_cid is not None:
+        return _listen_patch(reg, listen_cid, v)
     group = _plain_group(t)
     if group:
         who = list(PLAIN_GROUPS[group][1]) if v.lower() in PLAIN_CLEAR else _plain_who(reg, v)
@@ -1653,6 +1660,46 @@ def _plain_patch(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
     sh = reg.shadow()
     sh.config.plain = PlainPolicy.model_validate(sh.merge_plain_policy({"set_channels": {str(cid): new}}))
     return {"set_channels": {str(cid): new}}, f"plain text in <#{cid}>: {cur} → {sh.plain_mode(cid)}" + (" (back to the default)" if new is None else "")
+
+
+LISTEN_OFF = ("off", "stop", "clear", "none", "no", "false", "")
+_LISTEN_PREFIX = re.compile(r"^(?:listen(?:ing)?(?:\s+in)?|stop\s+listening(?:\s+in)?)\s+", re.I)
+
+
+def _listen_target(target: str) -> int | None:
+    """'listen <#id>' · 'listening in <#id>' · 'listen in <#id>' → the channel id; anything else None."""
+    m = _LISTEN_PREFIX.match(target or "")
+    return _channel_id(target[m.end():]) if m else None
+
+
+def listen_word(mode: str | None) -> str:
+    """off | watches | replies — a channel's listening as a diff and a summary read it."""
+    from .registry import LISTEN_WORDS
+
+    return LISTEN_WORDS[mode].lower() if mode in LISTEN_WORDS else "off"
+
+
+def _listen_patch(reg: Registry, cid: int, value: str) -> tuple[dict, str]:
+    """The plain op's listening form: patch {"set_listen": {id: mode | None}} and 'listening in <#id>: off → watches'."""
+    from .registry import LISTEN_MODES
+
+    mode = (value or "").strip().lower()
+    mode = {"watches": "watch", "replies": "reply", "answer": "reply", "on": "reply"}.get(mode, mode)
+    if mode not in LISTEN_OFF and mode not in LISTEN_MODES:
+        raise RegistryError("listening is watch, reply or off")
+    new = None if mode in LISTEN_OFF else mode
+    line = f"listening in <#{cid}>: {listen_word(reg.listen_mode(cid))} → {listen_word(new)}"
+    if new is not None:
+        from .llm import decisions
+
+        if not (decisions.DECISIONS is not None or os.environ.get(decisions.KEY_ENV)):
+            line += " — the host hasn't set the TypeSafe key, so nothing happens yet"
+    return {"set_listen": {str(cid): new}}, line
+
+
+def listen_reply_sentence(cid) -> str:
+    """The one sentence a diff carries when a channel starts replying (the Confirm rule: one idea, a full sentence)."""
+    return f"The bot answers messages in <#{cid}> that are clearly for it, without being tagged."
 
 
 def _plain_warning(reg: Registry, patch: dict, channel) -> str:
@@ -3241,6 +3288,7 @@ def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[S
     out.append(SummarySection(key="recruitment", title="Recruitment", lines=rec_lines))
     out.append(SummarySection(key="plain", title="Plain text", lines=[
         f"In DMs: {reg.plain_mode(None)} · elsewhere: {cfg.plain.default} by default" + (f" · {len(cfg.plain.channels)} channel(s) set" if cfg.plain.channels else ""),
+        listen_summary(reg),
         "The whole policy is on the site's Ops page (Plain-text permissions)."]))
     puppets = reg.test_members()
     if puppets:
@@ -3255,6 +3303,14 @@ def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[S
     else:
         out.append(SummarySection(key="host", title="Host", lines=["Host facts: owner only."]))
     return out
+
+
+def listen_summary(reg: Registry) -> str:
+    """'Listening: <#1> replies, <#2> watches' or how to turn it on (§5.59)."""
+    chans = reg.listen_channels()
+    if not chans:
+        return "Listening: off in every channel — the owner turns it on per channel on the Ops page."
+    return "Listening: " + ", ".join(f"<#{c}> {listen_word(m)}" for c, m in chans.items())
 
 
 def host_facts(reg: Registry, bot=None) -> list[str]:
@@ -3378,6 +3434,8 @@ def _plain_merged(reg: Registry, parts: list[ConfigOp]) -> dict:
             patch.setdefault("groups", {}).update(one["groups"])
         if "set_channels" in one:
             patch.setdefault("set_channels", {}).update(one["set_channels"])
+        if "set_listen" in one:
+            patch.setdefault("set_listen", {}).update(one["set_listen"])
         for k in ("dm", "default"):
             if k in one:
                 patch[k] = one[k]
@@ -3552,9 +3610,19 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
         for key in ("dm", "default"):
             if fields.get(key):
                 ops.append(ConfigOp(op="plain", target=key, value=str(fields[key])))
-        bad = [f for f in fields if f not in ("groups", "channels", "set_channels", "dm", "default")]
+        if "listen" in fields:  # the WHOLE listening map (§5.59): what changed against the stored one
+            want = {str(c).strip("<#>"): m for c, m in (fields.get("listen") or {}).items() if m not in (None, "", "off")}
+            for cid, mode in want.items():
+                if cur.listen.get(cid) != mode:
+                    ops.append(ConfigOp(op="plain", target=f"listen <#{cid}>", value=str(mode)))
+            for cid in cur.listen:
+                if cid not in want:
+                    ops.append(ConfigOp(op="plain", target=f"listen <#{cid}>", value="off"))
+        for cid, mode in (fields.get("set_listen") or {}).items():
+            ops.append(ConfigOp(op="plain", target=f"listen <#{str(cid).strip('<#>')}>", value=str(mode) if mode not in (None, "") else "off"))
+        bad = [f for f in fields if f not in ("groups", "channels", "set_channels", "dm", "default", "listen", "set_listen")]
         if bad:
-            raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default)")
+            raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default, listen, set_listen)")
         return ops
     if k == "comp":  # officers' comp targets: target = a raid id (or a run key); fields = {slot: {min, max, note} | null}
         key = (target or "").strip()
@@ -3887,6 +3955,11 @@ def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None =
                 out.append("Sheets will have nowhere to post until a signup channel is set.")
             else:
                 out.append(f"The bot stops posting this in <#{getattr(reg.config, f'{op.path}_id')}>, and what is already there stays.")
+        elif op.op == "plain" and _listen_target(op.target or "") is not None:
+            patch, _ = _plain_patch(reg, op)
+            for cid, mode in patch["set_listen"].items():
+                if mode == "reply" and reg.listen_mode(cid) != "reply":
+                    out.append(listen_reply_sentence(cid))
         elif op.op == "plain" and _warn_plain(reg, op):
             patch, _ = _plain_patch(reg, op)
             sh = reg.shadow()

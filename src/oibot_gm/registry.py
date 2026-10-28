@@ -277,6 +277,10 @@ PLAIN_WHO = ("everyone", "registered", "officers", "owner")  # plus "role:<disco
 # answer = questions only · ignore = the bot doesn't answer @mentions there at all
 PLAIN_MODES = ("act", "self", "answer", "ignore")
 PLAIN_WEB = "web"  # POST /api/ops/change (MCP plain_change): not a Discord channel, always "act"
+# Listening (design §5.59): channels the bot reads without being tagged; a decision service says whether a message is for it.
+# watch = it only notes what it would have answered · reply = a message that is clearly for it is handled like an @mention
+LISTEN_MODES = ("watch", "reply")
+LISTEN_WORDS = {"watch": "Watches", "reply": "Replies"}
 
 
 class PlainPolicy(BaseModel):
@@ -286,6 +290,7 @@ class PlainPolicy(BaseModel):
     channels: dict[str, str] = Field(default_factory=dict)  # channel id (as a string) -> mode
     dm: str = "self"
     default: str = "self"
+    listen: dict[str, str] = Field(default_factory=dict)  # channel id (as a string) -> watch | reply (§5.59); absent = not listening
 
 
 SUPERUSERS_ENV = "OIBOT_SUPERUSERS"  # .env: Discord user ids (comma/space separated) with owner rights in EVERY guild the bot serves
@@ -3933,6 +3938,16 @@ class Registry:
                 ids.append(str(cid))
         return ids
 
+    def listen_mode(self, channel) -> str | None:
+        """watch | reply for a channel the bot listens in (design §5.59), None = not listening (DMs never are)."""
+        if channel is None or channel == PLAIN_WEB:
+            return None
+        return self.config.plain.listen.get(str(channel)) or None
+
+    def listen_channels(self) -> dict[str, str]:
+        """Every listening channel: channel id (string) → watch | reply."""
+        return dict(self.config.plain.listen)
+
     def plain_allows(self, group: str, author_id: int, officer: bool, role_ids=()) -> bool:
         if self.is_owner_id(author_id):
             return True  # the owner can always do everything
@@ -3974,7 +3989,8 @@ class Registry:
         """The whole policy with `patch` laid over the current one — what set_plain_policy takes. Patch keys:
         `groups` {group: [who...]} (only the groups named change), `channels` (the WHOLE per-channel map, as the Ops page
         sends it), `set_channels` {channel id: mode | None} (merged into the current map; None = back to the default),
-        `dm`, `default`. Anything left out keeps its value. Shared by the web route, MCP and plain text."""
+        `dm`, `default`, `listen` (the WHOLE listening map, §5.59) and `set_listen` {channel id: watch | reply | None}
+        (None / "off" = stop listening there). Anything left out keeps its value. Shared by the web route, MCP and plain text."""
         cur = self.config.plain
         patch = patch or {}
         groups = {**{g: self.plain_who(g) for g in cur.groups}, **(patch.get("groups") or {})} if "groups" in patch else dict(cur.groups)
@@ -3985,7 +4001,15 @@ class Registry:
                 channels.pop(key, None)
             else:
                 channels[key] = mode
-        return {"groups": groups, "channels": channels, "dm": patch.get("dm") or cur.dm, "default": patch.get("default") or cur.default}
+        listen = {str(c).strip("<#>"): m for c, m in patch["listen"].items()} if "listen" in patch else dict(cur.listen)
+        for cid, mode in (patch.get("set_listen") or {}).items():
+            key = str(cid).strip("<#>")
+            if mode in (None, "", "off", "stop", "clear"):
+                listen.pop(key, None)
+            else:
+                listen[key] = mode
+        return {"groups": groups, "channels": channels, "dm": patch.get("dm") or cur.dm, "default": patch.get("default") or cur.default,
+                "listen": listen}
 
     @_config_verb("plain")
     def set_plain_policy(self, policy: dict, by: str) -> str:
@@ -4005,6 +4029,16 @@ class Registry:
             raise RegistryError(f"channel mode is one of {', '.join(PLAIN_MODES)}, not {', '.join(wrong)}")
         if any(not c.isdigit() for c in p.channels):
             raise RegistryError("channels are keyed by channel id")
+        if any(not str(c).isdigit() for c in p.listen):
+            raise RegistryError("listening is set per channel, by channel id — DMs aren't a channel")
+        wrong = [f"<#{c}>={m}" for c, m in p.listen.items() if m not in LISTEN_MODES]
+        if wrong:
+            raise RegistryError(f"listening is {' or '.join(LISTEN_MODES)}, not {', '.join(wrong)}")
+        for c in p.listen:
+            listed = p.channels.get(c)
+            mode = listed or ("act" if c in (str(self.config.ops_channel_id), str(self.config.analytics_channel_id)) else p.default)
+            if mode == "ignore":
+                raise RegistryError(f"<#{c}> ignores plain text, so the bot can't listen there — set its plain-text mode first")
         # a group left at its default is not stored, so a changed default later reaches it
         p.groups = {g: w for g, w in p.groups.items() if w != PLAIN_GROUPS[g][1]}
         before = self.config.plain
@@ -4013,7 +4047,8 @@ class Registry:
         chans = sorted(set(p.channels.items()) ^ set(before.channels.items()))
         line = "plain-text permissions: " + ("; ".join(f"{PLAIN_GROUPS[g][0]} → {self.plain_who_text(g)}" for g in changed) or "groups unchanged") \
             + (f"; channels {len({c for c, _ in chans})} changed" if chans else "") + (f"; DMs {before.dm} → {p.dm}" if before.dm != p.dm else "") \
-            + (f"; other channels {before.default} → {p.default}" if before.default != p.default else "")
+            + (f"; other channels {before.default} → {p.default}" if before.default != p.default else "") \
+            + (f"; listening {len({c for c, _ in set(p.listen.items()) ^ set(before.listen.items())})} changed" if p.listen != before.listen else "")
         self.save_config(f"{line} (by {by})")
         return line
 

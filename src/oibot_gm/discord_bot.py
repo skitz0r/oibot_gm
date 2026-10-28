@@ -5,10 +5,13 @@ directory's key, profile and the LLM provider; no guild's loot reads the demo fi
 from __future__ import annotations
 
 import asyncio
+import collections
+import json
 import logging
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import discord
@@ -33,7 +36,8 @@ from .raid_scheduler import RaidSchedulerMixin
 from .discord_registry import ApplicationButton, Guilds, RegisterButton, register_commands
 from .importers import signup as signup_mod
 from .ops import Ops
-from .llm.provider import Provider, get_provider
+from .llm import decisions
+from .llm.provider import Provider, for_guild, get_provider
 from .loot import session as loot_session
 from .loot.session import LootSession
 from .profiles import GameProfile
@@ -113,7 +117,182 @@ def wowhead(item, profile: GameProfile | None = None) -> str | None:
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
+# ---------------------------------------------------------------- listening (design §5.59)
+
+# What the bot does, in ~80 words: the decision service's only picture of it (no per-message prompt, no model text).
+LISTEN_BOT_WORDS = ("This is the guild's Discord bot for World of Warcraft raids. It runs raid signups and rosters: when a raid "
+                    "runs, who joined, who is rostered, who is on the bench, when the roster locks and who must confirm. It records "
+                    "absences, characters, mains and alts, specs and extra roles. It runs the loot council and members' wishlists, "
+                    "and explains the guild's loot and roster rules. It answers questions about itself and how to use it. It never "
+                    "joins chat between people, game talk or jokes.")
+LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or act on `message.text`? Yes when it asks something "
+                   "the bot knows (when a raid runs, who is rostered, a loot or roster rule, how the bot works) or tells the bot "
+                   "something it records (an absence, a signup answer, a character or spec change), even without naming the bot. "
+                   "No when it is conversation between people, game talk, a joke, a link, or a reply to another person. "
+                   "`bot` says what the bot does; `recent` is the chat just before, for context only.")
+LISTEN_CRITERIA = {"true": "The message asks the bot something it knows or tells it something it records.",
+                   "false": "The message is people talking to each other, game talk, a joke, a link or a reply to someone else."}
+# the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things
+LISTEN_GLOSSARY = ["sheet", "signup", "join", "bench", "no thanks", "roster", "rostered", "regular", "lock", "confirm",
+                   "can't make it", "absence", "away", "main", "alt", "spec", "offspec", "loot council", "wishlist", "award",
+                   "attendance", "raid schedule"]
+LISTEN_SURE = 0.8  # at or above: a reply channel answers it as an @mention would
+LISTEN_MAYBE = 0.5  # from here to SURE: unsure — a reply channel adds 👀 and the writer may click it to ask
+LISTEN_PER_HOUR = 600  # decisions per guild per hour; over it the rest are skipped (the monthly budget cap applies too)
+LISTEN_RING = 50  # verdicts kept in memory per guild (listen_recent, the Ops page in phase 2)
+LISTEN_ASK_S = 600  # how long a 👀 waits for its writer's click
+LISTEN_RECENT = 3  # earlier messages kept per listened channel (context for the next decision; no REST call)
+LISTEN_EYES = "👀"
+LISTEN_WARN_S = 3600  # "listening is on but there is no key": one ops warn per guild per hour
+LISTEN_LOG = OUT / "listen.jsonl"  # one row per verdict, NO text: {at, guild, channel, author_id, p, mode, did}
+
+
+def listen_sure() -> float:
+    """LISTEN_SURE, or the host's OIBOT_LISTEN_SURE (kept above LISTEN_MAYBE and at most 1)."""
+    try:
+        v = float(os.environ.get("OIBOT_LISTEN_SURE", "") or LISTEN_SURE)
+    except ValueError:
+        return LISTEN_SURE
+    return min(1.0, max(LISTEN_MAYBE + 0.01, v))
+
+
+class ListenMixin:
+    """Listening (design §5.59): in a channel the owner chose (PlainPolicy.listen), a message nobody tagged the bot in is
+    judged by the decision service — "is this for the bot?" as a probability — and code decides: a sure one in a *reply*
+    channel goes to plain_text exactly as an @mention would, an unsure one gets 👀 for its writer to click, a *watch*
+    channel only records what would have happened. The service never acts or writes; never a DM from here."""
+
+    def _listen(self) -> dict:
+        st = self.__dict__.get("_listen_state")
+        if st is None:
+            st = self.__dict__["_listen_state"] = {"log": {}, "recent": {}, "asks": {}, "hour": {}, "warned": {}}
+        return st
+
+    def listen_recent(self, reg) -> list[dict]:
+        """The guild's last verdicts, newest first: {at, channel, author, text (≤120, memory only), p, mode, did}."""
+        return list(reversed(self._listen()["log"].get(reg.key, ())))
+
+    def _listen_record(self, reg, message, text: str, p: float | None, mode: str, did: str) -> None:
+        at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        ring = self._listen()["log"].setdefault(reg.key, collections.deque(maxlen=LISTEN_RING))
+        ring.append({"at": at, "channel": message.channel.id, "author": getattr(message.author, "display_name", "") or "",
+                     "text": (text or "")[:120], "p": None if p is None else round(p, 3), "mode": mode, "did": did})
+        row = {"at": at, "guild": reg.key, "channel": message.channel.id, "author_id": message.author.id,
+               "p": None if p is None else round(p, 3), "mode": mode, "did": did}
+        try:
+            LISTEN_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with LISTEN_LOG.open("a") as f:
+                f.write(json.dumps(row) + "\n")
+        except OSError as e:
+            log.warning("listen log not written (%s)", type(e).__name__)
+
+    def listen_state(self, reg, message, text: str) -> dict:
+        """The decision's state: what the bot does, the guild's raids and words, the channel, the chat just before and the
+        message — member text as data, never as instructions."""
+        cfg = reg.config
+        raids = list(dict.fromkeys([*reg.profile.raids, *(cfg.raids or {})]))
+        purpose = {cfg.signup_channel_id: "the signup channel", cfg.ops_channel_id: "the officers' channel",
+                   cfg.roster_channel_id: "the officers' roster channel", cfg.loot_channel_id: "the loot channel",
+                   cfg.absences_channel_id: "the absences channel"}
+        ch = message.channel
+        ref = message.reference.resolved if getattr(message, "reference", None) else None
+        me = getattr(self, "user", None)
+        return {"bot": LISTEN_BOT_WORDS,
+                "guild": {"raids": [str(reg.raid_def(r).get("name", r)) for r in raids], "words": LISTEN_GLOSSARY},
+                "channel": {"name": f"#{getattr(ch, 'name', '') or ''}", "purpose": purpose.get(ch.id, "") if ch.id else ""},
+                "recent": list(self._listen()["recent"].get(ch.id, ()))[-(LISTEN_RECENT - 1):],
+                "message": {"author": getattr(message.author, "display_name", "") or "", "text": text[:600],
+                            "reply_to_bot": bool(me is not None and getattr(getattr(ref, "author", None), "id", None) == getattr(me, "id", -1))}}
+
+    def _listen_hour_ok(self, reg) -> bool:
+        hour = int(time.time() // 3600)
+        h, n = self._listen()["hour"].get(reg.key, (hour, 0))
+        if h != hour:
+            h, n = hour, 0
+        if n >= LISTEN_PER_HOUR:
+            self._listen()["hour"][reg.key] = (h, n)
+            return False
+        self._listen()["hour"][reg.key] = (h, n + 1)
+        return True
+
+    def _listen_purge(self) -> None:
+        now = time.monotonic()
+        asks = self._listen()["asks"]
+        for mid in [m for m, a in asks.items() if a["expires"] <= now]:
+            asks.pop(mid, None)
+
+    async def listen_message(self, message, reg) -> str | None:
+        """Decide one message in a listened channel; returns what the bot did (the `did` word) or None when it never
+        asked (not listening, an ignored channel, empty text, no key)."""
+        cid = message.channel.id
+        mode = reg.listen_mode(cid)
+        if mode is None or getattr(message.author, "bot", False):
+            return None
+        if reg.plain_mode(cid) == "ignore":
+            return None
+        text = (message.content or "").strip()
+        if not text:
+            return None
+        dec = decisions.DECISIONS
+        if dec is None or not getattr(dec, "available", True):
+            warned = self._listen()["warned"]
+            if time.monotonic() - warned.get(reg.key, -1e9) >= LISTEN_WARN_S:
+                warned[reg.key] = time.monotonic()
+                ops = getattr(self, "ops", None)
+                if ops is not None:
+                    await ops.emit(reg.config, "warn", f"Listening is on in <#{cid}>, but the host hasn't set the TypeSafe key "
+                                                       "(TYPESAFE_API_KEY), so the bot reads nothing there yet.")
+            return None
+        self._listen_purge()
+        state = self.listen_state(reg, message, text)
+        recent = self._listen()["recent"].setdefault(cid, collections.deque(maxlen=LISTEN_RECENT))
+        recent.append({"author": state["message"]["author"], "text": text[:200]})
+        if not self._listen_hour_ok(reg):
+            self._listen_record(reg, message, text, None, mode, "skipped")
+            return "skipped"
+        with for_guild(reg.key):
+            p = await dec.noul(state, LISTEN_QUESTION, LISTEN_CRITERIA, workload="listen")
+        if p is None:
+            self._listen_record(reg, message, text, None, mode, "skipped")
+            return "skipped"
+        if p >= listen_sure():
+            did = "replied" if mode == "reply" else "would reply"
+        elif p >= LISTEN_MAYBE:
+            did = "asked" if mode == "reply" else "would ask"
+        else:
+            did = "quiet"
+        if did == "asked":
+            try:
+                await message.add_reaction(LISTEN_EYES)
+            except Exception as e:  # noqa: BLE001 — no Add Reactions there: stay quiet, never a reply instead
+                log.warning("listen: 👀 not added in %s (%s)", cid, type(e).__name__)
+                did = "quiet"
+            else:
+                self._listen()["asks"][message.id] = {"guild": reg.key, "channel": cid, "author": message.author.id, "text": text,
+                                                      "message": message, "expires": time.monotonic() + LISTEN_ASK_S}
+        self._listen_record(reg, message, text, p, mode, did)
+        if did == "replied":
+            await self.plain_text(message, reg, text, cid)
+        return did
+
+    async def on_raw_reaction_add(self, payload) -> None:
+        """The writer clicked the bot's 👀 within its window: their message goes to plain_text as an @mention would.
+        Anyone else's reaction does nothing."""
+        if str(payload.emoji) != LISTEN_EYES:
+            return
+        self._listen_purge()
+        asks = self._listen()["asks"]
+        ask = asks.get(payload.message_id)
+        if ask is None or payload.user_id != ask["author"]:
+            return
+        asks.pop(payload.message_id, None)
+        reg = self.registries.by_key.get(ask["guild"])
+        if reg is None or reg.listen_mode(ask["channel"]) != "reply":
+            return  # listening was turned off (or to watch) since the 👀
+        await self.plain_text(ask["message"], reg, ask["text"], ask["channel"])
+
+
+class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
     ico = staticmethod(ico)
 
     async def post_application(self, reg, a) -> str:
@@ -859,6 +1038,10 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
             parent = getattr(message.channel, "parent_id", None) or ev.cards.get("channel")
             if text and reg.plain_mode(parent) != "ignore":
                 await self.loot_chat(message, ev, text)
+            return
+        # listening (design §5.59): a message nobody tagged the bot in, in a channel the owner chose — decided, never twice
+        if reg is not None and reg.listen_mode(message.channel.id) and not self._addressed(message):
+            await self.listen_message(message, reg)
 
     def sync_servers(self) -> list[int]:
         """The servers a guild-scoped sync covers: the test server and every configured server, each once."""
@@ -950,5 +1133,7 @@ def run(guild_dir: Path, signup_file: str) -> None:
     loot_session.STORE = STORE  # sessions created in this process save through it
     GUILD_KEY = guild_dir.name
     ctx = GuildContext(guild_dir, signup_file)
+    # listening's decision service (design §5.59): None without TYPESAFE_API_KEY; its usage shares Claude's ledger and cap
+    decisions.DECISIONS = decisions.get_decisions(ledger=ctx.provider if hasattr(ctx.provider, "_record") else None)
     # logging is configured by cli.setup_logging (rotating out/oibot.log); discord.py's own handler is off
     OibotGM(ctx, test_guild).run(token, log_handler=None)

@@ -3715,6 +3715,77 @@ uses the same snapshot (`max_age=0`), one request for the server instead of twen
 cold 0.3 s (the one list request), warm 0.03 s. Tests: tests/test_setup.py `test_one_list_request_feeds_every_member_lookup`,
 `test_hourly_sweep_lists_the_server_once`; tests/test_people_web.py `test_members_page_reads_one_server_snapshot`.
 
+### 5.59 Listening: chosen channels, a decision model says what is for the bot (built 2026-10-28)
+
+**Why.** The bot read a message only when it was @mentioned, DMed, or (in a loot thread) tagged, led by "?" or a reply
+to its card. People asked it things in #signups without tagging it and got silence. The owner now keeps a list of
+channels the bot *listens* in; there a cheap, non-generative decision model judges each untagged message "is this for
+the bot?", and the sure ones take the SAME path an @mention takes (`OibotGM.plain_text`, so the plain-text policy still
+decides what a reply may do). Phase 1 (this section) is the backend, the plain op and the gate; the Ops page column, the
+recent verdicts, the `/gm config plain` line, the MCP arguments and the Host card's key line are phase 2.
+
+**Jev, not Haiku (decided with the user).** TypeSafe's decisions API answers a yes/no question as a probability (a
+*noul*): it can be thresholded, it writes no text (so it can't be talked into saying anything), and it costs input tokens
+only. Expected: about 400 input tokens a decision (the static paragraph, the question, the message and two before it).
+
+| | a decision | why not |
+|---|---|---|
+| Jev (`jev-latest`, $0.042 / M input, output free) | ~$0.00002 | — |
+| Claude Haiku as a classifier ($1 / M in, $5 / M out) | ~$0.0005 | 25× the cost, a text answer to parse, can be steered by the message |
+
+**The API.** `POST https://api.typesafe.ai/v1/systemone`, `Authorization: Bearer $TYPESAFE_API_KEY`, body
+`{"model": "jev-latest", "state": <object>, "questions": {"decision": {"type": "noul", "instructions": …, "criteria":
+{"true": …, "false": …}}}}` → `{"model": "jev-1.13.0", "answers": {"decision": {"type": "noul", "noul": 0.87}}, "usage":
+{"input_tokens": N, "output_tokens": 0}}`; 400 / 422 carry `detail`. `llm/decisions.py` `DecisionProvider.noul(state,
+instructions, criteria, workload="listen")` does one request with httpx (no SDK, 4 s timeout) and returns the probability
+or **None** — no key, a timeout, a 4xx / 5xx, bad JSON, or the cap — never raising; each failure reason is logged at most
+once per 10 minutes. The key lives in `.env` only, never in a log or an ops line. `decisions.DECISIONS` is set in
+`discord_bot.run` (None without the key).
+
+**One ledger, one cap (D45).** Its usage rows go into Claude's ledger (`out/llm_usage.jsonl`, through the running
+`AnthropicProvider._record`) with `workload: listen`, the guild from `for_guild(reg.key)`, priced by
+`PRICES["jev-latest"] = (0.042, 0, 0, 0)` (`"jev"` the family fallback, so `jev-1.13.0` prices too). `SHARES["listen"] =
+0.2`: listening may spend a fifth of the month's budget; the month's cap or the share used up = None before a request.
+Without an Anthropic key there is no ledger: decisions run unrecorded, held only by the per-hour cap.
+
+**The list.** `PlainPolicy.listen` {channel id: `watch` | `reply`} (`registry.LISTEN_MODES`, `LISTEN_WORDS` = *Watches* /
+*Replies*), inside the `plain` config section (so `config_rev("plain")` covers it). `merge_plain_policy` takes `listen`
+(the whole map) and `set_listen` ({id: mode | None}); `set_plain_policy` refuses a key that isn't a channel id (DMs are
+not a channel), a mode outside the two, and listening in a channel whose plain-text mode is *ignore*; its audit line adds
+"listening N changed". `Registry.listen_mode(channel)` (None = not listening) and `listen_channels()`.
+**watch** = the bot decides and records what it would have done and says nothing — the mode to start in, to read the
+verdicts before anything is said; **reply** = a sure message is handled like an @mention.
+
+**The op.** The `plain` op (owner only, `HARD_OWNER_OPS`) learns a target `listen <#channel>` ("listening in", "listen
+in", "stop listening in") with `watch` | `reply` | `off`; the structured kind `plain` takes `listen` / `set_listen`; both
+coalesce into the one `set_plain_policy` write. Its line reads "listening in #signups: off → replies"; with no key set it
+adds "the host hasn't set the TypeSafe key, so nothing happens yet" (an operator fact, one clause). Turning a channel to
+reply carries one consequence sentence (`configops.listen_reply_sentence`): "The bot answers messages in #signups that are
+clearly for it, without being tagged." The parser is told the listening channels (`plain_text_policy`); the config
+summary's Plain text section says "Listening: #signups replies, #general watches" or how to turn it on.
+
+**The gate (`discord_bot.ListenMixin.listen_message`).** `on_message` runs it last: after the news webhook, the bot
+filter, DMs, an @mention (which never reaches it — no message is decided twice) and a council thread's chat. Skipped: a
+bot author, empty text, an *ignore* channel, and no key (one ops *warn* per guild per hour, no DM). The **state** is a
+JSON object, member text as data: `bot` (`LISTEN_BOT_WORDS`, ~80 words on what the bot does), `guild` (its raids' names
+from `raid_def`, the glossary's words), `channel` (name, and "the signup channel" etc. when it is one of the bot's), `recent`
+(the two messages before it, from a per-channel ring of the last three the gate saw — no REST call), `message` (author,
+≤600 chars, `reply_to_bot`). The **question** (`LISTEN_QUESTION`): would a reader expect the bot to answer or act on
+`message.text` — yes for something it knows or records, even without its name; no for people talking, game talk, a joke,
+a link, a reply to someone else. Thresholds: `LISTEN_SURE = 0.8` (the host's `OIBOT_LISTEN_SURE` may raise it),
+`LISTEN_MAYBE = 0.5`. Sure → *reply*: `plain_text` as an @mention; *watch*: "would reply". Unsure → *reply*: the bot adds
+👀 and remembers the message for 10 minutes; `on_raw_reaction_add` by the message's AUTHOR with 👀 routes it to
+`plain_text` (once); anyone else's reaction does nothing; *watch*: "would ask". Below → quiet. At most `LISTEN_PER_HOUR =
+600` decisions per guild per hour (over it: "skipped", quiet).
+
+**The record.** Every verdict: a ring per guild of the last 50 in memory (`listen_recent(reg)`: at, channel, author,
+text ≤120 chars, p, mode, did ∈ replied · asked · quiet · would reply · would ask · skipped) for the Ops page (phase 2), and
+one row per verdict in `out/listen.jsonl` with NO text (at, guild, channel, author_id, p, mode, did).
+
+**Not done.** No per-member learning or feedback loop; no DM anywhere (a reply is `plain_text`'s own, so nothing new is
+said); no change to the @mention, DM or loot-thread paths; threads of a listened channel are not listened in. Tests:
+tests/test_decisions.py (the provider on a fake transport), tests/test_listen.py (policy, op, words, the gate).
+
 ## 6. Architecture
 
 ```mermaid

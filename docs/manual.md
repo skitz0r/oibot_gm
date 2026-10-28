@@ -71,6 +71,9 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
 - **Regulars** — the people expected every week on a recurring schedule, each on one character. Officers keep the list
   (the Rosters page's *Regulars* tab or `/roster add`); nothing is answered for them, they press Join like everyone else,
   and being one counts at lock.
+- **Listening** (owner) — a channel the bot reads without being tagged: it answers what is clearly for it there.
+  *Watches* means it only notes what it would have answered; *Replies* means it answers. The owner chooses the channels
+  (§8c *Listening*).
 - **Who could play** — every member's main: the headcount the Readiness page and the analytics cards measure against
   the raid's size, limits and aims. Alts and offspecs don't add to the headcount; they show as who could cover a role.
 - **Your record** — your characters (name, spec, offspec, extra roles, which is your main) and your absences. You keep
@@ -1400,7 +1403,7 @@ really called All or Pending is confirmed alone); "Mira is away
 Who may change what through plain text, and where, is one policy on the **Ops** page of the site (card
 *Plain-text permissions*; the owner presses **Edit permissions**, changes the table and presses one **Save**;
 officers see it read-only; MCP has `plain_permissions` / `set_plain_permissions`; the owner can also say it: "only
-officers can change runs by chat", "make #raid-chat answers only", "put #general back to the default"). It covers every
+officers can change runs by chat", "make #raid-chat answers only", "put #general back to the default", "listen in #signups"). It covers every
 plain-text path: @mentions, DMs, `/gm change`, and MCP `plain_change` (which counts as a place where plain text acts;
 the site has no plain-text box). When the owner's own change would stop plain text acting in the channel it is made
 in, or make the bot ignore @mentions there, the diff says so before Apply.
@@ -1414,6 +1417,21 @@ Acts (not configurable)". It is read-only: the table is edited on the site. Ever
 "`/gm config plain` shows the whole policy". On the site the table shows the site/MCP row greyed (it always acts; what
 it may do is the person's own rights), and saving a table that would ignore plain text in the ops channel or in DMs
 asks first.
+
+**Listening.** The owner can choose channels the bot *listens* in, such as #signups: there it reads every message,
+tagged or not, and answers what is clearly for it — "when does Barrow Deeps run this week?", "I can't make Thursday" —
+exactly as if you had @mentioned it, under the same rules for that channel. A decision service judges each message
+"is this for the bot?"; it only answers yes or no and never writes anything, and chat between people, game talk, jokes
+and links are left alone. Each listening channel is one of two:
+- **Watches** — the bot only notes what it would have answered and says nothing. Start here, read what it would have
+  done, then switch to *Replies*.
+- **Replies** — the bot answers. When it is unsure a message is for it, it adds 👀 instead; the writer clicks the 👀
+  within ten minutes to ask, and anyone else's click does nothing.
+
+The owner turns it on in plain text ("listen in #signups", "only watch #general", "stop listening in #signups"), and the
+change shows what it does before Apply. A channel the bot ignores can't be listened in. Listening never sends a DM. It
+needs the host's TypeSafe key; until the host sets it, a listening channel stays silent and the ops channel says so once
+an hour. The bot keeps its last 50 decisions per server in memory, and a log of them without the messages' text.
 
 **DMs with several servers (D41).** When the bot looks after more than one server, a plain DM asks which server it is
 for, listing every server you belong to; one whose policy ignores DMs is marked "(plain text off here)" and picking it
@@ -1621,7 +1639,7 @@ news post says can make the review read or write another server.
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
 | `policy_get` · `policy_edit` · `policy_append` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full, with what is applied and the waiting draft · replace its text (a draft, the persona too) · add one rule to the loot or comp policy as a draft (refused while another officer's draft waits) · the bot's reading of it (the persona: its text), nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
 | `plain_change` | text → the config ops it means, with current → new, and a `token`; `apply=true` with that token (within ten minutes, once) applies exactly those ops — never a new reading of the text — and refuses a board someone changed since the preview; like Discord's Apply, an op that fails is listed in `refused` with why and the rest still apply (`applied` is what landed, `error` the first failure) (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
-| `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles) · change it (owner: groups, per-channel modes, DMs, default) |
+| `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles) · change it (owner: groups, per-channel modes, DMs, default; the channels the bot listens in, `listen` — today through `plain_change`, "listen in #signups") |
 | `raid_readiness` | each raid's readiness (§6): who could play against its size, roles with who could cover, buffs nobody brings, the aims with their reasons, short / over cap, mains by role — one raid or all |
 | `set_comp_target` · `list_regulars` · `config_summary` | an officers' aim for a raid (slot = role, class or Class:Spec; `min`, `max`, `note`; `clear=true` drops it; `preview=true` writes nothing — a role aim outside the owner's limits is refused) · a raid's recurring schedules with their regulars, coverage and forecast (`schedule` = one) · the effective configuration in words by section, Host included (what `/gm config show` and the Config page's Overview print) |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with the guild's changes marked |

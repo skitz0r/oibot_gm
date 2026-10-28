@@ -449,6 +449,8 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     reg.config.ops_channel_id = 12
     for path in ("signup_channel", "ops_channel"):
         dump.add("op_consequences(set clear)", path, configops.op_consequences(reg, Op(op="set", path=path, value="none")))
+    dump.add("listen_reply_sentence", "a channel starts replying", configops.listen_reply_sentence(11))
+    dump.add("op_consequences(plain listen)", "reply", configops.op_consequences(reg, Op(op="plain", target="listen <#11>", value="reply")))
     dump.add("_timezone_consequences", "move", configops._timezone_consequences(reg, Op(op="set", path="timezone", value="America/New_York", field="move")))
     d = configops.describe_ops(reg, [Op(op="schedule_remove", target=RID, field="alt")])
     dump.add("describe_ops consequences", "schedule remove", d.consequences)
