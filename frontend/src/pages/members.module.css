@@ -1,0 +1,49 @@
+/* The Members page (design §5.58): one row per member — name · characters · rank · standing (only when some row has
+   one) · ⋮ — on a grid whose columns come from --cols; below the sm breakpoint every member is a card (name and ⋮ on
+   the first line, the standing under it, then the characters), nothing scrolls sideways. */
+.list { display: flex; flex-direction: column; }
+.head, .row { display: grid; grid-template-columns: var(--cols); gap: 6px 16px; align-items: start; padding: 10px 16px; min-width: 0; }
+.head { padding-top: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--mantine-color-slate-5); }
+.row { border-bottom: 1px solid var(--mantine-color-slate-6); }
+.row > * { min-width: 0; }
+.charLine { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 30px; flex-wrap: wrap; }
+.charName { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flexIcon { border: 1px dashed var(--mantine-color-slate-3); border-radius: 4px; padding: 1px; display: inline-flex; }
+.unconfirmed { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--mantine-color-slate-2); flex-shrink: 0; }
+.rankInline { display: none; }
+.fold { display: flex; align-items: center; gap: 8px; padding: 12px 16px; width: 100%; flex-wrap: wrap; border-bottom: 1px solid var(--mantine-color-slate-6); }
+.edit { grid-column: 1 / -1; }
+.editGrid { display: grid; grid-template-columns: minmax(150px, 1.4fr) minmax(110px, 1fr) minmax(110px, 1fr) minmax(130px, 1.2fr) 64px 44px; gap: 8px 12px; align-items: center; }
+.phoneLabel { display: none; }
+.retired { opacity: 0.5; text-decoration: line-through; }
+
+@media (max-width: 48em) {
+  .head { display: none; }
+  .row { grid-template-columns: minmax(0, 1fr) 44px; grid-template-areas: "name menu" "standing standing" "chars chars"; margin: 0 0 10px;
+         border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; padding: 10px 12px; }
+  .name { grid-area: name; }
+  .menu { grid-area: menu; }
+  .standing { grid-area: standing; }
+  .chars { grid-area: chars; }
+  .rank { display: none; }
+  .rankInline { display: inline; }
+  .edit { grid-column: 1 / -1; grid-row: auto; }
+  .editGrid { grid-template-columns: minmax(0, 1fr); }
+  .editHead { display: none; }
+  .phoneLabel { display: block; }
+  .editRow { border-top: 1px solid var(--mantine-color-slate-5); padding-top: 8px; }
+}
+
+/* Phone: every control on the page is at least 44 px tall and wide (as on Rosters, design §5.56) — the ⋮ menus, the
+   buttons, the count chips, the tabs, the inputs — one rule here, never per-element sizes. Menus render in a portal,
+   so their items take .menuItem. */
+@media (max-width: 48em) {
+  .touch :global(.mantine-ActionIcon-root),
+  .touch :global(.mantine-Button-root),
+  .touch :global(.mantine-CloseButton-root) { min-height: 44px; min-width: 44px; }
+  .touch :global(.mantine-Tabs-tab),
+  .touch :global(.mantine-Input-input),
+  .touch :global(.mantine-Anchor-root),
+  .fold { min-height: 44px; }
+  .menuItem { min-height: 44px; }
+}

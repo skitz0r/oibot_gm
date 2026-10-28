@@ -141,11 +141,12 @@ def test_one_host_card_and_no_raw_key_value_dump():
 
 def test_character_status_is_one_badge_in_full_words():
     """UI audit: the Status badges read 'CONFIRM…' / 'UNCONFI…' / 'PLAN…' — upper case in a column too narrow. One
-    StatusBadge (Cells.tsx) for Me › Characters and Members: lower case, the word never clipped, a fixed-width column."""
+    StatusBadge (Cells.tsx) for Me › Characters: lower case, the word never clipped, a fixed-width column. (Members marks
+    an unconfirmed character with a quiet outline instead — test_members_page_reads_by_its_shape.)"""
     cells = (SRC / "components" / "Cells.tsx").read_text()
     badge = cells[cells.index("export function StatusBadge"):]
     assert 'tt="none"' in badge and 'textOverflow: "clip"' in badge and "flexShrink: 0" in badge
-    for f in ("components/CharacterTable.tsx", "pages/Members.tsx"):
+    for f in ("components/CharacterTable.tsx",):
         text = (SRC / f).read_text()
         assert "<StatusBadge " in text and ">unconfirmed</Badge>" not in text and ">planned</Badge>" not in text, f
     assert '<Table.Th w={120}>Status</Table.Th>' in (SRC / "components" / "CharacterTable.tsx").read_text()
@@ -283,3 +284,66 @@ def test_rosters_controls_are_44px_on_a_phone():
     assert "className={rosterCss.touch}" in (SRC / "pages" / "Rosters.tsx").read_text()
     for f in ("components/board/MemberMenu.tsx", "components/board/SheetCard.tsx"):
         assert "classNames={{ item: css.menuItem }}" in (SRC / f).read_text(), f
+
+
+def _members_files() -> dict[str, str]:
+    return {n: _code_only((SRC / p).read_text()) for n, p in (("Members", "pages/Members.tsx"), ("MemberEdit", "components/members/MemberEdit.tsx"),
+                                                                ("PeopleDialogs", "components/members/PeopleDialogs.tsx"))}
+
+
+def test_members_page_reads_by_its_shape():
+    """Design §5.58 phase 2: one row per member (no table with a row per character, no sticky member cell, no sideways
+    scroll container, no guild-wide edit grid, no live rank select), tabs Members · Absences · Test bench with the
+    #test-bench anchor kept, count chips that filter, a search box, Confirm characters… as a walk, the folds for who is
+    not in the server / has no character yet, LeftServer gone (its content is the fold). Lower case badges, no amber."""
+    f = _members_files()
+    page = f["Members"]
+    tabs = re.findall(r'<Tabs\.Tab value="(\w+)"', page)
+    assert tabs == ["members", "absences", "test"], tabs
+    assert '"#test-bench"' in page and "<TestBench " in page and "<AbsencesTable " in page
+    assert "<Table" not in page and "STICKY" not in page and "position: \"sticky\"" not in page and "ScrollContainer" not in page and "minWidth={1" not in page
+    assert "/api/members/save" not in page, "the page never posts the whole guild; one member is edited in place (MemberEdit)"
+    assert "<Select" not in page, "no live select in a row: Rank… is a dialog from the member's ⋮"
+    assert not (SRC / "components" / "LeftServer.tsx").exists() and "/api/admin/left" not in page and "/api/members/attendance/all" not in page
+    assert "Not in the Discord server" in page and "No character yet" in page and "r.left_line" in page and "r.remove_consequence" in page
+    assert 'aria-label="Find a member or a character"' in page and "Confirm characters…" in page and "<ConfirmWalk " in page
+    for f_ in ("away", "confirm", "left", "bare"):
+        assert f'chip("{f_}"' in page, f_
+    assert 'tt="none"' in page and 'tt="uppercase"' not in page
+    for name, code in f.items():
+        assert not re.search(r'(?:color|c)=\{?"(?:yellow|orange)', code), f"{name}: amber marks a changed value; Members has none"
+    assert "yellow-5" not in page
+    assert "useDirty(" in f["MemberEdit"] and "useDirty(" in page
+
+
+def test_members_confirms_print_only_the_servers_sentences():
+    """Design §5.58 (findings 2, 3): every press on the Members page previews through the server (POST /api/members/set,
+    /api/members/dm, /api/members/save with `preview`) and the confirm prints ONLY its `sentences` (or Remove record's
+    `remove_consequence`); no literal message, no browser-composed promise of what the bot will do, no rank list kept in
+    the browser (the payload's rank_choices) and the own-record reasons are the server's (`own`)."""
+    f = _members_files()
+    for name, code in f.items():
+        assert not re.search(r"message:\s*[`\"'\[]", code), f"{name}: a confirm message written in the browser"
+        assert "It leaves sheets and rosters" not in code and "alts always read alt" not in code and "The rank (" not in code
+    page = f["Members"]
+    assert 'message: p.sentences.join("\\n")' in page and "preview: true" in page and "message: r.remove_consequence" in page
+    assert '"/api/members/dm"' in page and '"/api/members/set"' in page
+    assert "rank_choices" in page and '"alt"' not in page and "own.rank" in page and "own.confirm" in page
+    edit = f["MemberEdit"]
+    assert 'message: said.join("\\n")' in edit and "body(true)" in edit and "rev: r.characters_rev" in edit
+    dialogs = f["PeopleDialogs"]
+    assert dialogs.count("preview: true") == 2 and "said.sentences.map" in dialogs and "rev: said.rev" in dialogs
+    assert "r.attendance" in page and "att " not in page
+
+
+def test_members_controls_are_44px_on_a_phone_and_cards_below_sm():
+    """Findings 4, 19, 21: below the sm breakpoint every member is a card (grid areas name · menu / standing / characters),
+    nothing scrolls sideways, and one phone-only rule makes every control 44 px — the ⋮ buttons, buttons, tabs, inputs,
+    the folds and the portal menus' items (.menuItem)."""
+    css = (SRC / "pages" / "members.module.css").read_text()
+    phone = css[css.index("@media (max-width: 48em)"):]
+    assert 'grid-template-areas: "name menu" "standing standing" "chars chars"' in phone and ".head { display: none; }" in phone
+    assert "min-height: 44px; min-width: 44px" in phone and ".mantine-ActionIcon-root" in phone and ".mantine-Tabs-tab" in phone and ".menuItem { min-height: 44px; }" in phone
+    page = (SRC / "pages" / "Members.tsx").read_text()
+    assert "className={css.touch}" in page and page.count("classNames={{ item: css.menuItem }}") == 2
+    assert "overflow-x" not in css and "min-width: 0" in css

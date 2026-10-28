@@ -232,16 +232,29 @@ export interface Plan { phase: "prelock" | "fill"; short: { headcount: number; r
   /** after lock: how many more asks may go out now (at most 3 out at once); null before lock */ room?: number | null; batch_lines?: string[] }
 /** What Fill seats would send: the shortfall, who is still being waited on, the plan, and `batch` = exactly what a send with the plan's rev (no picks) DMs now. */
 export interface FillPreview { short: { headcount: number; roles: Record<string, number>; size?: number }; waiting: string[]; batch: FillAskRow[]; plan?: Plan }
-export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; absences: Absence[]; asks: { roster: string; answer: string | null; raid: string; when: string; key: string | null }[];
+/** An open Confirm ask on a LIVE run (GET /api/members, design §5.58): `words` = "<raid> on <day>" (the link's text, to
+ *  /rosters#run-<key>), `line` = the standing line ("… waits for their Confirm"), `how_words` = how it reaches them. */
+export interface MemberAsk { roster: string; answer: string | null; raid: string; when: string; key: string | null; words: string; line: string; how: "dm" | "web"; how_words: string }
+/** One member on the Members page. `left` = the day the bot noticed they are not in the Discord server (words; null
+ *  while they are), `left_line` its line, `remove_consequence` Remove record's sentence (only when left); `away` = the
+ *  standing line of their current or next absence, `away_now`; `attendance` = the server's sentence once a run counts. */
+export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; absences: Absence[]; asks: MemberAsk[];
   /** the member's rank (D25: on the main), DMs on, the character table's base rev (a stale save is refused, 409) */
-  rank?: string | null; dm?: boolean; characters_rev?: string }
+  rank?: string | null; dm?: boolean; characters_rev?: string;
+  test?: boolean; attendance?: string | null; left?: string | null; left_line?: string | null; remove_consequence?: string | null; away?: string | null; away_now?: boolean }
 /** A character-table save (THE character verb): what changed, the ripple into sheets and seats, the new base rev; `refused` per member on the Members page. */
-export interface TableSaved { message: string; lines: string[]; ripple: string[]; preview?: boolean; characters_rev?: string | null; refused?: { uid: string; display_name: string; error: string; stale: boolean }[] }
+export interface TableSaved { message: string; lines: string[]; ripple: string[]; preview?: boolean; characters_rev?: string | null; refused?: { uid: string; display_name: string; error: string; stale: boolean }[];
+  /** a preview's confirm words (consequences.save_consequence): per member on Members, flat on Me; [] = save on the first press */
+  sentences?: { uid: string; display_name: string; sentences: string[] }[] | string[] }
+/** POST /api/members/set (and /api/members/dm) with `preview`: THE confirm words and the record's rev to write with. */
+export interface PeoplePreview { sentences: string[]; rev?: string; message?: string }
 /** GET /api/absences: officers' table (puppets only for their tester). */
 export interface AbsenceRow { uid: string; display_name: string; start: string; end: string; span: string; reason: string | null; by: string; current: boolean; test?: boolean }
 /** An absence or I'm back preview: the span and what it does to each live sheet, in words; nothing written. */
-export interface AbsencePreview { preview: true; message: string; lines: string[]; span: string; start?: string; end?: string }
-export interface Members { rows: MemberRow[]; members: number; tz: string }
+export interface AbsencePreview { preview: true; message: string; lines: string[]; span: string; start?: string; end?: string; sentences?: string[] }
+/** GET /api/members: `rank_choices` = the ranks an officer gives (never alt); `pending` = characters waiting for an officer's
+ *  confirm; `own` = the refusals on the viewer's own record ({} for the owner). */
+export interface Members { rows: MemberRow[]; members: number; tz: string; rank_choices?: string[]; pending?: number; own?: { rank?: string; confirm?: string } }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
 export interface AbsenceCleared { message: string; lines: string[] }
 /** `scope: "bot"` (several guilds only): head, push, llm and uptime are the whole bot's, the rest is this guild's. */

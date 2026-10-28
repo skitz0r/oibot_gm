@@ -154,14 +154,33 @@ def test_members_rows_say_left_test_attendance_and_the_rank_choices(w):
     m, gone = member(w, 0), member(w, 1, cls="Mage", spec="Fire")
     w.reg.member_left(gone.discord_id)
     d = w.c.get("/api/members", headers=as_user(w, OFFICER)).json()
-    assert d["rank_choices"] == ["trial", "raider", "core", "social"] and d["pending"] >= 2
+    assert d["rank_choices"] == ["trial", "raider", "core", "social"]
     rows = {r["uid"]: r for r in d["rows"]}
+    waiting = sum(1 for r in d["rows"] if not r["test"] and not r["left"] for c in r["characters"] if c["status"] == "active" and c["name"] and not c["confirmed"])
+    assert d["pending"] == waiting >= 1, "people in the server only: never a puppet's or a left member's character"
     here, left = rows[str(m.discord_id)], rows[str(gone.discord_id)]
     assert here["left"] is None and here["left_line"] is None and here["remove_consequence"] is None and here["test"] is False
     assert left["left"] == w.reg.local12(w.reg.members[gone.discord_id].left_at, "%a %d %b") and left["left_line"] == f"not in the server · noticed {left['left']}"
     assert left["remove_consequence"] == remove_record_consequence(w.reg, w.reg.members[gone.discord_id])
-    assert here["attendance"] == w.reg.attendance_text(w.reg.members[m.discord_id])
+    assert here["attendance"] is None, "nothing counted yet: no line (the sentence comes once a finished run counts)"
     assert any(r["test"] for r in d["rows"]) and all(r["attendance"] is None for r in d["rows"] if r["test"])
+    assert d["own"] == {"rank": "Another officer sets your rank.", "confirm": "Another officer confirms your characters."}
+    w.c.cookies.clear()
+    assert w.c.get("/api/members", headers=H).json()["own"] == {}, "the owner (here the MCP bearer) may rank and confirm their own"
+
+
+def test_members_rows_carry_the_away_line(w):
+    """Design §5.58 phase 2: the standing column's absence line comes from the server — the current absence as "away
+    until <day>" (away_now), else the next one as "away <day> to <day>"; nothing when none is upcoming."""
+    m, later, here = member(w, 0), member(w, 1, cls="Mage", spec="Fire"), member(w, 2, cls="Priest", spec="Holy")
+    today = w.reg.now_local().date()
+    w.reg.add_absence(m.discord_id, today.isoformat(), (today + timedelta(days=3)).isoformat(), None, "x")
+    w.reg.add_absence(later.discord_id, (today + timedelta(days=5)).isoformat(), (today + timedelta(days=7)).isoformat(), None, "x")
+    rows = {r["uid"]: r for r in w.c.get("/api/members", headers=as_user(w, OFFICER)).json()["rows"]}
+    day = lambda n: w.reg.day_label((today + timedelta(days=n)).isoformat())  # noqa: E731
+    assert rows[str(m.discord_id)]["away"] == f"away until {day(3)}" and rows[str(m.discord_id)]["away_now"] is True
+    assert rows[str(later.discord_id)]["away"] == f"away {day(5)} to {day(7)}" and rows[str(later.discord_id)]["away_now"] is False
+    assert rows[str(here.discord_id)]["away"] is None and rows[str(here.discord_id)]["away_now"] is False
 
 
 def test_members_set_previews_the_generators_sentences_and_takes_a_rev(w):

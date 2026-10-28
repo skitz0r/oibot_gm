@@ -18,7 +18,7 @@ export function useImBack(onDone: () => void): [(a: Absence, who?: { uid: string
     setBusy(`${who?.uid ?? "me"}${a.start}`);
     try {
       const p = await api.post<AbsencePreview>(path, { ...body, preview: true });
-      const message = [`${who ? who.display_name + "'s" : "Your"} absence ${p.span} is cleared.`, ...(p.lines.length ? p.lines : ["No sheet changes — no live sheet had been answered for it."])].join("\n");
+      const message = (p.sentences || []).join("\n");  // THE I'm back confirm (consequences.back_consequence), never the browser's words
       if (!(await ask({ title: who ? `${who.display_name} is back?` : "Back after all?", message, confirmLabel: "I'm back" }))) return;
       const x = await api.post<AbsenceCleared>(path, body);
       ok(<Stack gap={2}><Text size="sm" fw={600}>{x.message.split("\n")[0]}</Text>{x.lines.map((l, i) => <Text key={i} size="sm">{l}</Text>)}</Stack>);

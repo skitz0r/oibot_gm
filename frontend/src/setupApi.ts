@@ -38,4 +38,3 @@ export interface Application {
 export interface ApplicationsData { open: Application[]; decided: Application[]; recruiting: boolean; note_max: number }
 /** The viewer's own application (GET /api/me → application): `text` is the whole sentence. */
 export interface MyApplicationState { state: "open" | "accepted" | "declined" | "withdrawn"; label: string; sent: string; when: string | null; note: string | null; text: string }
-export interface LeftMember { uid: string; name: string; left: string; characters: string[]; consequence: string }

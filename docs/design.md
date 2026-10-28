@@ -3612,6 +3612,51 @@ decide screens print the same words; the members rows carry a `left` field.
 - *Words.* Manual §1a gains **rank**, **confirm a character** (an officer's check, not a run's Confirm), **retire /
   delete** and **not in the server**; §3 and §7 say them.
 
+**Phase 2 — the page's shape (findings 2, 4, 6–10, 13–16, 18–21, 27, 28).**
+- *Header.* One intro line; count chips that are also filters (*in the server* clears the filter, *away now*,
+  *characters wait for a confirm* = the payload's `pending`, *not in the server*, *no character yet*; a chip shows only
+  when its count is not zero); a search over member and character names (client side); **Confirm characters…** opens
+  `ConfirmWalk` (components/members/PeopleDialogs.tsx): one character at a time, Skip · Confirm · Done for now, each card
+  the server's `confirm_consequence` (POST `/api/members/set` {confirm, preview}) and each Confirm one write with the rev
+  that preview returned; the viewer's own characters are left out of the queue with `own.confirm`. Tabs **Members** ·
+  **Absences** (AbsencesTable) · **Test bench** (TestBench, unchanged this phase; `#test-bench` opens the tab).
+- *One row per member* on a CSS grid (pages/members.module.css, `--cols`): the name, a badge only for owner / officer /
+  puppet (lower case), the attendance sentence (`attended …`, the row's `attendance`, null until a finished run counts
+  for them — the "att 5/6" route `/api/members/attendance/all` is gone); characters as icon lines (class icon, name in
+  its class colour, a grey crown on the main, spec, offspec dimmed, extra roles in a dashed frame, a hollow outline mark +
+  *waits for a confirm* while unconfirmed, *planned, no name yet*, *regular of …* linking to Rosters); rank as a word;
+  the Standing column only when some row has a line: `away` ("away until Fri 6 Nov" / "away Tue 20 Oct to Fri 30 Oct",
+  new on the rows with `away_now`), each live ask (`words` linking to `/rosters#run-<key>`, then the rest of `line`,
+  `how_words` in its tooltip), *DMs off, so asks wait on their Me page*, a puppet's *answers through the test bench*.
+  No amber anywhere: unconfirmed is an outline, the ask an hourglass, away a grey word.
+- *The ⋮ menus.* Member: Rank… · Record an absence… · Turn DMs on / off for <name>… · Edit characters · Remove record….
+  Character: Spec… · Extra roles… · Make main · Confirm · Retire… · Delete…. An item that doesn't apply is greyed with
+  its reason under the label ("already the main"; on your own record the payload's `own` = {rank, confirm} —
+  `consequences.OWN_RANK` / `OWN_CONFIRM`, the same words the route refuses with; `{}` for the owner). Make main,
+  Confirm, Retire and Delete preview through `/api/members/set` and print only `sentences` in useConfirm; DMs through
+  `/api/members/dm` preview; Remove record prints the row's `remove_consequence`. Rank…, Spec… and Extra roles… open
+  `PickModal`: the pick, then the server's preview under it on every change (or its one-sentence refusal), then the
+  write with the preview's rev.
+- *Edit one member in place* (`MemberEdit`, replacing the guild-wide grid): the row becomes Character · Spec · Offspec ·
+  Extra roles · Main · Retire (a new character: class select and First / Last), Cancel and **Save <name>'s
+  characters** beside them; Save sends only the changed rows (a retire as {label, retire}) with the member's rev to
+  POST `/api/members/save` with `preview` first — `sentences` non-empty → the confirm, `[]` → the first press saves; a
+  409 keeps the draft. useDirty registers it; live reloads wait while it is open. Rank is never in the grid.
+- *Folds at the foot*: **Not in the Discord server · N** (each row's `left_line` and Remove record… under the name;
+  LeftServer.tsx is gone — MCP `left_members` still reads GET `/api/admin/left`), **No character yet · N** (the row says
+  "No character yet. Add one with Edit characters, or they register with /register."), **Test bench puppets · N**.
+  A filter or a search shows one flat list instead, with an empty state that says how to see everyone.
+- *Phone*: below the sm breakpoint (48em) every member is a card — grid areas name · ⋮ / standing / characters, the
+  rank beside the name — nothing scrolls sideways, and one rule makes every control 44 px (the ⋮, buttons, chips,
+  tabs, inputs, folds, and `.menuItem` for the portal menus). I'm back (AbsencesCard.useImBack) now prints the
+  server's `sentences` too.
+- *Tests*: tests/test_frontend_source.py `test_members_page_reads_by_its_shape`,
+  `test_members_confirms_print_only_the_servers_sentences`, `test_members_controls_are_44px_on_a_phone_and_cards_below_sm`;
+  tests/test_people_web.py the `away` line and `own`.
+- *Left for phase 3*: the Test bench tab's own layout (one raid picker, the tempo as the run's week, why lines under
+  disabled buttons), the Absences table on a phone and its empty state, the absence modal's words, the Me page
+  (CharacterTable's Retire / Delete / Save still compose their own confirm text) and a sort by rank or role (finding 32).
+
 ## 6. Architecture
 
 ```mermaid

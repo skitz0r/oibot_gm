@@ -2030,8 +2030,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rev. Test puppets only for the officers who may change them (the live rehearsal's tester, the owner).
         Design §5.58: `left` = when the bot noticed they are not in the Discord server (Member.left_at, in words; null
         while they are) with `left_line` and `remove_consequence` (Remove record's sentence); `test` (a puppet); `asks` =
-        open Confirm asks on live runs only (live_asks); `attendance` = Registry.attendance_text; the payload's
-        `rank_choices` = the ranks an officer gives (never alt) and `pending` = characters waiting for an officer's confirm."""
+        open Confirm asks on live runs only (live_asks); `attendance` = Registry.attendance_text once a finished run counts
+        for them (null before: nothing to say); `away` = the standing line of their current or next absence ("away until
+        Fri 6 Nov" / "away Tue 20 Oct to Fri 30 Oct") and `away_now`; the payload's `rank_choices` = the ranks an officer
+        gives (never alt), `pending` = characters waiting for an officer's confirm (people in the server, never puppets)
+        and `own` = the refusals on the viewer's own record (consequences.OWN_RANK / OWN_CONFIRM; {} for the owner)."""
         from ..discord_registry import remove_record_consequence
 
         v = await who(request, officer=True)
@@ -2040,18 +2043,28 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         privs = await asyncio.gather(*(privilege(reg, m.discord_id) if not m.test else asyncio.sleep(0, "test") for m in ms))
         today = reg.now_local().date().isoformat()
         rs = bot.raids.store(reg)
+        days = reg.attendance_window()
+        tracked = reg.attendance_tracked(days)["first"] is not None
         rows = []
         for m, p in zip(ms, privs):
             chars = sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))
             left = reg.local12(m.left_at, "%a %d %b") if m.left_at and not m.test else None
+            upcoming = m.upcoming_absences(today)
+            away_now = next((a for a in upcoming if a.start <= today), None)
+            nxt = away_now or (min(upcoming, key=lambda a: a.start) if upcoming else None)
+            away = None if nxt is None else (f"away until {reg.day_label(nxt.end)}" if nxt is away_now
+                                             else f"away {reg.day_label(nxt.start)}" + (f" to {reg.day_label(nxt.end)}" if nxt.end != nxt.start else ""))
+            counted = tracked and not m.test and reg.attendance(m, days, bench=True)[1] > 0
             rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else p,
                          "rank": m.rank, "dm": not m.dm_opt_out, "characters_rev": reg.characters_rev(m), "test": bool(m.test),
-                         "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in chars], "absences": [absence_json(reg, a) for a in m.upcoming_absences(today)],
-                         "asks": live_asks(reg, rs, m), "attendance": reg.attendance_text(m) if not m.test else None,
+                         "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in chars], "absences": [absence_json(reg, a) for a in upcoming],
+                         "away": away, "away_now": away_now is not None,
+                         "asks": live_asks(reg, rs, m), "attendance": reg.attendance_text(m) if counted else None,
                          "left": left, "left_line": f"not in the server · noticed {left}" if left else None,
                          "remove_consequence": remove_record_consequence(reg, m) if left else None})
-        pending = sum(1 for r in rows for c in r["characters"] if c["status"] == "active" and c["name"] and not c["confirmed"])
-        return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone, "rank_choices": list(cq.RANK_CHOICES), "pending": pending}
+        pending = sum(1 for r in rows if not r["test"] and not r["left"] for c in r["characters"] if c["status"] == "active" and c["name"] and not c["confirmed"])
+        own = {} if v.owner else {"rank": cq.OWN_RANK, "confirm": cq.OWN_CONFIRM}
+        return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone, "rank_choices": list(cq.RANK_CHOICES), "pending": pending, "own": own}
 
     @app.post("/api/members/save")
     async def members_save(request: Request):

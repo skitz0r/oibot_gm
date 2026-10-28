@@ -639,19 +639,18 @@ def test_the_web_run_card_shows_bosses(w, bosses):
     assert "e.loot.bosses.text" in sheet, "the card prints the server's words"
 
 
-def test_members_attendance_column_route(w):
-    """Design §3.5 M43: the Members page's 'att 5/6' — officers only; the view's count (bench counts) and the loot
-    factor's once the window is tracked."""
+def test_members_rows_carry_the_attendance_sentence(w):
+    """Design §5.58 (finding 28): the Members page prints the server's attendance sentence ("3 of 3 in the last 30
+    days"), carried on each GET /api/members row — the old "att 5/6" route is gone. Nothing counted: null, nothing
+    to say."""
     from test_attendance import done_run
 
     m = w.ms[0]
     for i in range(3):
         done_run(w.reg, w.rs, [m], [m], 3 + i, confirm=[(m, "yes")], n=60 + i)
-    r = w.c.get("/api/members/attendance/all", headers=H)
-    assert r.status_code == 200, r.text
-    row = r.json()["rows"][str(m.discord_id)]
-    assert row["text"] == "att 3/3" and row["loot"] == "loot 3/3" and row["attended"] == 3
-    assert r.json()["rows"][str(w.ms[5].discord_id)]["text"] is None, "nothing counted: no column text"
-    assert w.c.get("/api/members/attendance/all", headers=as_user(w.c, w.ms[1].discord_id)).status_code == 403
+    m.test = False  # the fixture's members are puppets, and a puppet carries no attendance line
+    rows = {r["uid"]: r for r in w.c.get("/api/members", headers=H).json()["rows"]}
+    assert rows[str(m.discord_id)]["attendance"] == w.reg.attendance_text(m) and rows[str(m.discord_id)]["attendance"].startswith("3 of 3")
+    assert rows[str(w.ms[5].discord_id)]["attendance"] is None, "nothing counted: no line"
     page = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "Members.tsx").read_text()
-    assert "/api/members/attendance/all" in page and "meta.viewer.officer" in page
+    assert "/api/members/attendance/all" not in page and "r.attendance" in page

@@ -406,11 +406,17 @@ def flex_consequence(reg: Registry, rs, m, label: str, roles: list[str], *, by_i
     return [f"{v.Whose} character {c.label} plays only what its spec and offspec give.", "Fill seats stops asking it to cover other roles."]
 
 
+OWN_RANK = "Another officer sets your rank."
+OWN_CONFIRM = "Another officer confirms your characters."
+"""The refusals on your own record (the owner aside): the Members page greys Rank… and Confirm with these words
+(GET /api/members `own`), and the confirm walk skips your own characters with OWN_CONFIRM."""
+
+
 def rank_consequence(reg: Registry, m, rank: str, *, by_id: int | None = None) -> list[str]:
     """The member's rank (D25: on the main; officers only, never your own — the owner aside — and never alt)."""
     v = _Voice(reg, m, by_id)
     if v.own and not v.owner:
-        raise RegistryError("Another officer sets your rank.")
+        raise RegistryError(OWN_RANK)
     rank = str(rank or "").strip().lower()
     if rank not in RANK_CHOICES:
         raise RegistryError(f"A rank is {', '.join(RANK_CHOICES[:-1])} or {RANK_CHOICES[-1]}.")
@@ -427,7 +433,7 @@ def confirm_consequence(reg: Registry, m, label: str, *, by_id: int | None = Non
     v = _Voice(reg, m, by_id)
     c = _char(reg, m, label, v)
     if v.own and not v.owner:
-        raise RegistryError("Another officer confirms your characters.")
+        raise RegistryError(OWN_CONFIRM)
     if c.status != "active" or not c.name:
         raise RegistryError("A planned character is confirmed once it has a name.")
     if c.confirmed_by:
@@ -500,7 +506,7 @@ def people_consequence(reg: Registry, rs, m, verb: str, *, by_id: int | None = N
     raise ValueError(f"unknown people verb {verb}")
 
 
-__all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "OTHER_TOKEN", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
+__all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
            "VERBS", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
            "flex_consequence", "main_consequence", "people_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
