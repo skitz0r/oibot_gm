@@ -1572,3 +1572,83 @@ def test_setup_route_lets_the_owner_change_the_error_alerts(wc, web_bot, reg):
     assert r.get("applied"), r
     assert reg.config.error_dm_ids == [m.discord_id]
     assert wc.get("/api/admin/setup", headers=h).json()["errors"]["ids"] == [str(m.discord_id)]
+
+
+# ---------------------------------------------------------------- one list request for the whole server (design §5.58, performance)
+def _snapshot_bot(reg, listed: dict):
+    """_left_bot plus the real refresh_members, with `list_members` answering from `listed` ({uid: member}) — the gateway
+    cache stays empty, so every answer after a snapshot comes from the member cache, never from fetch_member."""
+    from oibot_gm.discord_bot import OibotGM
+
+    bot = _left_bot(reg)
+    bot.refresh_members = types.MethodType(OibotGM.refresh_members, bot)
+    bot._snapshot_members = types.MethodType(OibotGM._snapshot_members, bot)
+    bot.calls = 0
+
+    async def list_members(guild):
+        bot.calls += 1
+        if bot.__dict__.get("list_fails"):
+            raise RuntimeError("discord 503")
+        return list(listed.values())
+
+    async def never(uid):
+        raise AssertionError("a per-member fetch after a snapshot")
+
+    bot.list_members = list_members
+    bot.guild.fetch_member = never
+    return bot
+
+
+def test_one_list_request_feeds_every_member_lookup(reg, monkeypatch):
+    """The Members page used to cost one REST fetch per member per minute (6 s cold for 28 members). Now one list request
+    per server stamps everyone into the member cache: lookups within the snapshot's age never fetch; a registered member
+    the list leaves out is "not in the server" (left_at) without a 404 of their own; a fresh snapshot is reused; `wait`
+    False answers from the old snapshot while a new one is taken; a list Discord didn't answer changes nothing; the
+    listeners fire only when the registered members' presence or roles changed."""
+    from oibot_gm import discord_bot
+
+    here, gone = real_member(reg, uid=9401, name="Stays"), real_member(reg, uid=9402, name="Gone")
+    listed = {here.discord_id: types.SimpleNamespace(id=here.discord_id, display_name="Stays", roles=[])}
+    bot = _snapshot_bot(reg, listed)
+    fired: list[str] = []
+    monkeypatch.setattr(discord_bot, "MEMBERSHIP_LISTENERS", [fired.append])
+
+    async def go():
+        assert await bot.refresh_members(bot.guild) is True and bot.calls == 1
+        await _settled(bot)
+        assert (await bot.cached_member(bot.guild, here.discord_id, max_age=3600)) is listed[here.discord_id]
+        assert (await bot.cached_member(bot.guild, gone.discord_id, max_age=3600)) is None
+        assert (bot.guild.id, gone.discord_id) in bot._member_gone and (bot.guild.id, here.discord_id) in bot._member_last_yes
+        assert reg.members[gone.discord_id].left_at and reg.members[here.discord_id].left_at is None
+        assert await bot.refresh_members(bot.guild) is True and bot.calls == 1, "a fresh snapshot is reused"
+        assert await bot.refresh_members(bot.guild, max_age=0) is True and bot.calls == 2 and fired == [], "nothing changed: no reload"
+        listed[here.discord_id].roles = [types.SimpleNamespace(id=OFFICER_ROLE)]
+        bot._members_listed[bot.guild.id] = 0.0  # stale
+        assert await bot.refresh_members(bot.guild, wait=False) is True and bot.calls == 2, "answered from the old snapshot"
+        await bot._members_inflight[bot.guild.id]
+        assert bot.calls == 3 and fired == [reg.key], "the background refresh saw the role change once"
+        bot.list_fails = True
+        before = dict(bot._member_cache)
+        assert await bot.refresh_members(bot.guild, max_age=0) is False and bot._member_cache == before, "no answer changes nothing"
+        bot.__dict__.pop("_members_listed")
+        assert await bot.refresh_members(bot.guild, wait=False) is False, "no snapshot yet and none to be had"
+
+    run(go())
+
+
+def test_hourly_sweep_lists_the_server_once(reg):
+    here, gone = real_member(reg, uid=9401, name="Stays"), real_member(reg, uid=9402, name="Gone")
+    bot = _snapshot_bot(reg, {here.discord_id: types.SimpleNamespace(id=here.discord_id, display_name="Stays", roles=[])})
+
+    async def sweep():
+        n = await bot.sweep_left(reg)
+        await _settled(bot)
+        return n
+
+    assert run(sweep()) == len([m for m in reg.members.values() if not m.test]) and bot.calls == 1
+    assert reg.members[gone.discord_id].left_at and reg.members[here.discord_id].left_at is None
+    assert run(sweep()) and bot.calls == 2, "hourly: a new list each time"
+    bot.list_fails = True
+    bot.__dict__.pop("_members_listed")
+    bot.guild.fetch_member = FakeGuild.fetch_member.__get__(bot.guild)
+    assert run(sweep()) == len([m for m in reg.members.values() if not m.test and not m.left_at]), "no list: the per-member way"

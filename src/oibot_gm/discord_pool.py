@@ -388,7 +388,7 @@ REQUIRED_KINDS = ("ops", "signup")  # without these the bot can't tell anyone an
 CARD_KINDS = ("registration", "absences", "analytics")  # a card the bot posts there (set_channel posts first, then drops the old one)
 NEWS_WEBHOOK_NAME = "oibot news"  # D39: the webhook the bot creates in the news channel
 PERM_CHECK_S = 3600  # the hourly permission check (design §3.4 X3)
-LEFT_SWEEP_N = 20  # members looked up per guild per hourly sweep (Member.left_at without the members intent)
+LEFT_SWEEP_N = 20  # the fallback sweep (no list request): members looked up per guild per hour (Member.left_at without the members intent)
 LEFT_SWEEP_AGE_S = 6 * 3600  # … each at most one REST fetch per 6 h (cached_member's max_age)
 INVITE_CHECK_S = 86400  # Registry invite validity, checked daily (design §3.3 R-06)
 UNREACHABLE = "Discord is unreachable right now — try again in a minute; nothing was changed."
@@ -743,13 +743,23 @@ class SetupMixin:
         t.add_done_callback(tasks.discard)
 
     async def sweep_left(self, reg: Registry, limit: int = LEFT_SWEEP_N) -> int:
-        """The hourly sweep: up to `limit` registered members not marked as left, longest unchecked first, looked up through
-        `cached_member` (at most one REST fetch each per LEFT_SWEEP_AGE_S) — its 404s mark `left_at` (note_membership). A
-        guild of a few hundred is covered every few hours without the members intent. Returns how many were looked up."""
+        """The hourly sweep: ONE list request for the whole server (OibotGM.refresh_members, §5.58) — every registered
+        member the list leaves out is marked `left_at` (note_membership), everyone in it is stamped into the member cache.
+        When the list can't be had (no HTTP session, Discord didn't answer and no snapshot exists), the older way: up to
+        `limit` registered members not marked as left, longest unchecked first, each through `cached_member` (at most one
+        REST fetch per LEFT_SWEEP_AGE_S), its 404s marking `left_at`. Returns how many members were covered."""
         look = getattr(self, "cached_member", None)
         guild = self.get_guild(reg.config.discord_guild_id) if getattr(self, "get_guild", None) else None
         if look is None or guild is None or getattr(guild, "unavailable", False):
             return 0
+        refresh = getattr(self, "refresh_members", None)
+        if refresh is not None:
+            try:
+                listed = await refresh(guild, max_age=0)
+            except Exception:  # noqa: BLE001 — no answer is no answer; the per-member way below
+                listed = False
+            if listed:
+                return len([m for m in reg.members.values() if not m.test])
         seen: dict = self.__dict__.setdefault("_left_swept", {})
         todo = sorted((m for m in reg.members.values() if not m.test and not m.left_at), key=lambda m: seen.get((reg.key, m.discord_id), 0.0))[:limit]
         for m in todo:

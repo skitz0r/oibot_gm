@@ -625,3 +625,29 @@ def test_members_import_is_the_officers_previews_and_needs_the_actor_for_a_rank(
     assert w.c.post("/api/members/import", json={"rows": ranked, "preview": True}, headers=H).status_code == 200, "a preview needs no actor"
     r = w.c.post("/api/members/import", json={"rows": ranked}, headers=H | {"X-Oibot-Actor": str(OFFICER)})
     assert r.status_code == 200 and w.reg.members[imp + 1].rank == "raider"
+
+
+def test_members_page_reads_one_server_snapshot(w, monkeypatch):
+    """Design §5.58 (performance): GET /api/members takes the server's snapshot once (bot.refresh_members, never waiting on a
+    stale one) and reads each badge from the member cache within the stale window, instead of one REST fetch per member."""
+    from oibot_gm import guild_routing
+
+    calls: list[tuple] = []
+    ages: set[float] = set()
+
+    async def refresh_members(guild, max_age=300.0, *, wait=True):
+        calls.append((guild.id, wait))
+        return True
+
+    inner = w.bot.cached_member
+
+    async def cached_member(guild, uid, max_age=300):
+        ages.add(max_age)
+        return await inner(guild, uid, max_age)
+
+    w.bot.refresh_members = refresh_members
+    w.bot.cached_member = cached_member
+    w.reg.add_character(9100, "User9100", "Realname", "Mage", "Frost", None, True)  # a real member: puppets carry no badge lookup
+    rows = w.c.get("/api/members", headers=as_user(w, OFFICER)).json()["rows"]
+    assert any(r["uid"] == "9100" for r in rows) and calls == [(w.reg.config.discord_guild_id, False)]
+    assert guild_routing.STALE_YES_S in ages, "the badges read the snapshot, not a per-minute fetch"

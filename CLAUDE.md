@@ -102,6 +102,9 @@ src/oibot_gm/
                        on_guild_join (re-attach a parked guild, else ONE DM to host_ids: "I was added to X … Missing permissions: …"), on_guild_remove
                        (Guilds.detach unless guild.unavailable; one ops error), on_guild_available (re-attach), on_member_remove/join (Member.left_at);
                        claim_guild adds an ops line to every other guild (D44: no owner DM); cached_member keeps _member_last_yes (the web's 6 h "stale" read);
+                       list_members / refresh_members(guild, max_age=MEMBERS_LIST_AGE_S 5 min, wait=) = ONE REST list of the server that feeds cached_member for
+                       everyone (§5.58 performance: GET /api/members and the hourly sweep_left never fetch per member; wait=False reads the old snapshot while
+                       a new one is taken; MEMBERSHIP_LISTENERS fire on a changed roster → the web's `member` topic);
                        bot.events[(gk, session id)]; GuildContext = the start directory's key, profile and the LLM provider (rehearse loot with a
                        test run — its council is session.test, D11)
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
@@ -272,7 +275,8 @@ src/oibot_gm/
                        write none; the eight shortcuts AND /gm config loot-channel open flows_config.ChannelSetWizard), channel_consequences (+ configops CONSEQUENCE_HOOKS entry), CHANNEL_LABELS,
                        news_webhook (D39), role_refusal, invite_status, discord_links, channel_problems / check_channel_perms (an error for ops/signup,
                        else a warn) / setup_tick (hourly, from raid_scheduler.scheduler_tick), note_membership + sweep_left (Member.left_at from Discord's
-                       own 404s and sightings — the bot has no members intent, so on_member_remove never arrives), setup_checklist (the Setup card / /gm status), guild_channels/roles, test_bench_clear,
+                       own answers — the bot has no members intent, so on_member_remove never arrives; the sweep is one refresh_members list per hour, the
+                       per-member fetches only its fallback), setup_checklist (the Setup card / /gm status), guild_channels/roles, test_bench_clear,
                        plain_table (the plain-text policy in words; plain_read_text / plain_why render /gm config plain).
                        Companion tokens (§5.50): issue_companion(reg, label, by, by_id, via, deliver_to=) = THE issue (deliver_to → the token DMed ONCE
                        via companion_dm_text — a credential the raid leader must install, an act under the DM rule — and never returned; a refused DM

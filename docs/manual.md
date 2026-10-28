@@ -929,8 +929,9 @@ edits that new family and leaves the one it shared alone.
   Decline… buttons on the review card, the Applications page, or plain text ("accept Nyx", "decline nyxie: full on
   healers") (§3a).
 - Someone **not in the Discord server** (§1a): their record stays. The bot notes the day it noticed as soon as Discord
-  tells it so — when it looks them up (a page, a DM, a sheet) or in its hourly check of the registered members (about
-  twenty per hour) — and clears the mark if they come back. Someone imported from a signup list who never joined reads
+  tells it so — when it looks them up (a page, a DM, a sheet), when an officer opens the Members page (the bot reads the
+  server's member list once, then again every few minutes while the page is open) or in its hourly check of the whole
+  server — and clears the mark if they come back. Someone imported from a signup list who never joined reads
   the same way: the bot knows they are not in the server, not that they left. The
   Members page lists them with *not in the server · noticed Sun 25 Oct* and **Remove record…** (one confirm saying what
   goes and what stays: *"Orrin's record goes, with Wrenna, their absences, wishlists and notices. Loot already awarded

@@ -23,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from .. import consequences as cq
+from .. import guild_routing
 from ..consequences import consequence as consequence_lines, consequences_json, regular_remove as regular_remove_lines
 from ..presets import DURATIONS, PRESETS
 from ..registry import ABSENCE_REASON_MAX, DECISION_NOTE_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged, is_superuser
@@ -1316,10 +1317,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def test_event(guild_key: str, run_key: str) -> None:
         publish(f"test:{run_key}", guild_key, officers=True)  # the test feed (testfeed.FEED): the Test bench card and the Rosters Test tab reload
 
-    from .. import testfeed
+    from .. import discord_bot as discord_bot_mod, testfeed
+
+    def membership_changed(guild_key: str) -> None:
+        publish("member", guild_key)  # a server snapshot found someone joined, left or changed roles: the Members page reloads
 
     for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
-                      (loot_session_mod.LOOT_LISTENERS, loot_saved), (testfeed.LISTENERS, test_event)):
+                      (loot_session_mod.LOOT_LISTENERS, loot_saved), (testfeed.LISTENERS, test_event), (discord_bot_mod.MEMBERSHIP_LISTENERS, membership_changed)):
         hooks[:] = [f for f in hooks if getattr(f, "__name__", "") != fn.__name__] + [fn]  # one per process, the newest app wins
 
     def test_lookup(guild_key: str, run_key: str):
@@ -2061,7 +2065,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         v = await who(request, officer=True)
         reg = v.reg
         ms = sorted((m for m in reg.members.values() if visible(v, m)), key=lambda m: m.display_name.lower())
-        privs = await asyncio.gather(*(privilege(reg, m.discord_id) if not m.test else asyncio.sleep(0, "test") for m in ms))
+        # The badges (owner / officer) read ONE snapshot of the server (bot.refresh_members: a list request per server per
+        # MEMBERS_LIST_AGE_S, refreshed in the background once stale, awaited only the first time) instead of one REST fetch
+        # per member per minute, so a cold visit renders at once; the snapshot's age is bounded like every other read (§2.9).
+        guild = bot.get_guild(reg.config.discord_guild_id) if hasattr(bot, "get_guild") and reg.config.discord_guild_id else None
+        refresh = getattr(bot, "refresh_members", None)
+        if refresh is not None and guild is not None:
+            await refresh(guild, wait=False)
+        privs = await asyncio.gather(*(privilege(reg, m.discord_id, guild_routing.STALE_YES_S) if not m.test else asyncio.sleep(0, "test") for m in ms))
         today = reg.now_local().date().isoformat()
         rs = bot.raids.store(reg)
         days = reg.attendance_window()

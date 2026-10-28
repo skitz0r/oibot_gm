@@ -2720,8 +2720,10 @@ applicant` opens the same decide screen as the card (`application_decide(…, no
 intent, so `on_member_remove` / `on_member_join` stay dormant; Discord's own answers keep it true instead:
 `SetupMixin.note_membership(guild_id, uid, present)` — called by `cached_member` on Discord's 404 (never on a lookup it
 didn't answer) and on every sighting (the gateway cache, a fetch, `saw_member`) — sets or clears it for a registered,
-non-test member (a git commit off the loop), and the hourly `sweep_left(reg)` looks up `LEFT_SWEEP_N` (20) members per guild,
-longest unchecked first, each at most one REST fetch per `LEFT_SWEEP_AGE_S` (6 h). `Registry.remove_record(uid, by, seats=)` deletes the member file (git keeps it) only for
+non-test member (a git commit off the loop), and the hourly `sweep_left(reg)` lists the whole server in ONE request
+(`OibotGM.refresh_members`, §5.58 performance: every registered member the list leaves out is marked; the older per-member
+way — `LEFT_SWEEP_N` (20) members per guild, longest unchecked first, each at most one REST fetch per `LEFT_SWEEP_AGE_S`
+(6 h) — remains the fallback when the list can't be had). `Registry.remove_record(uid, by, seats=)` deletes the member file (git keeps it) only for
 someone who left and holds no live seat; `discord_registry.remove_record` (seats from the run files, one audit line) behind
 `/roster remove-record member:` (decide screen), `POST /api/admin/member/remove` (officers) + `GET /api/admin/left`
 (`components/LeftServer.tsx` on Members) and MCP `remove_record` / `left_members`. No route lets a member delete their own
@@ -3693,6 +3695,25 @@ decide screens print the same words; the members rows carry a `left` field.
 - *Not taken*: a sort by rank or role (finding 32, optional) — the count chips and the search answer "who is this"
   first, and a role grouping belongs with Readiness' "who could play". The Discord absence wizard keeps its own confirm
   screen (it already prints `absence_lines`). With phase 3 the rebuild is closed.
+
+**Performance (2026-10-28).** The page rendered in 6.4 s cold and 0.03 s warm: `GET /api/members` resolved every member's
+owner / officer badge through `privilege` (PRIV_WEB, a minute), and without the members intent the gateway cache holds
+almost nobody, so each badge was one REST `fetch_member` — 28 of them serialised by Discord's rate limit, the 11 "not in
+the server" rows paying a 404 each, and all of it again after a minute of quiet. The browser was idle throughout (first
+paint 0.2 s, no long tasks). Two changes, both server-side: (1) `OibotGM.list_members(guild)` is Discord's list-members
+endpoint (REST, paginated; it needs no privileged intent — only the library's `fetch_members` wrapper insists on one), and
+`refresh_members(guild, max_age=MEMBERS_LIST_AGE_S (5 min), wait=)` takes ONE snapshot of the server that stamps every
+member into `_member_cache` / `_member_last_yes` and marks every registered member the list left out as Discord's own
+"not in the server" (`note_membership` → `left_at`, for everyone at once); concurrent callers share one request; a list
+Discord didn't answer changes nothing. (2) The route never waits on a refresh: `refresh_members(…, wait=False)` awaits
+only a server's very first snapshot, refreshes a stale one in the background and lets the read go on from the one it has
+(§2.9), and the badges are read with `max_age=STALE_YES_S` (6 h), so a cold visit is one request at most and a warm one
+none. `MEMBERSHIP_LISTENERS` (fn(guild key)) fire when a snapshot finds the registered members' presence or roles changed
+since the last one; `web/api.py` publishes the `member` topic on it, so an open Members page reloads only when something
+moved. The viewer's own rights (`who`) and every write keep their windows (PRIV_WEB / PRIV_LIVE). The hourly `sweep_left`
+uses the same snapshot (`max_age=0`), one request for the server instead of twenty fetches per hour. Measured after:
+cold 0.3 s (the one list request), warm 0.03 s. Tests: tests/test_setup.py `test_one_list_request_feeds_every_member_lookup`,
+`test_hourly_sweep_lists_the_server_once`; tests/test_people_web.py `test_members_page_reads_one_server_snapshot`.
 
 ## 6. Architecture
 

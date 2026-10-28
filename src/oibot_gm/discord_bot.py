@@ -55,6 +55,8 @@ def _store() -> GitStore:
 
 CLASS_COLOURS = {"Warrior": 0xC79C6E, "Paladin": 0xF58CBA, "Hunter": 0xABD473, "Rogue": 0xFFF569, "Priest": 0xFFFFFF, "Shaman": 0x0070DE, "Mage": 0x69CCF0, "Warlock": 0x9482C9, "Druid": 0xFF7D0A}
 MEMBER_BLIP_RETRY_S = 15  # cached_member: a transient fetch failure is retried after this, never cached as a miss
+MEMBERS_LIST_AGE_S = 300  # refresh_members: one list request per server per this many seconds feeds every member lookup (§5.58)
+MEMBERSHIP_LISTENERS: list = []  # fn(guild key): a snapshot found the registered members' presence or roles changed — the web's `member` topic
 ROLE_ICON = {"tank": "🛡", "healer": "✚", "melee": "⚔", "ranged": "🏹"}
 # Filled at startup with application emojis (class_<name>, role_<name>); falls back to text.
 EMOJI: dict[str, str] = {}
@@ -352,6 +354,95 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         else:
             last.pop(key, None)  # Discord said no: not a member any more
         return m
+
+    async def list_members(self, guild) -> list | None:
+        """Every member of `guild` from Discord's list-members endpoint — REST, paginated by id. The endpoint itself needs
+        no privileged intent (only the library's `fetch_members` wrapper insists on one), so a server of a few hundred is
+        one request. None when this client has no HTTP session (a bare test client)."""
+        http, state = getattr(self, "http", None), getattr(self, "_connection", None)
+        if http is None or state is None:
+            return None
+        out, after = [], None
+        while True:
+            page = await http.get_members(guild.id, 1000, after)
+            out.extend(discord.Member(data=d, guild=guild, state=state) for d in page)
+            if len(page) < 1000:
+                return out
+            after = int(page[-1]["user"]["id"])
+
+    async def refresh_members(self, guild, max_age: float = MEMBERS_LIST_AGE_S, *, wait: bool = True) -> bool:
+        """One snapshot of the whole server feeds `cached_member` for everyone (design §5.58, performance): the list
+        request stamps every member into the cache and the last-known "yes", and every registered member the list left
+        out is Discord's own "not in the server" (note_membership marks left_at) — so a page that shows all members costs
+        one request instead of one per member, and the hourly sweep covers the server in one go. A snapshot fresher than
+        `max_age` stands as it is. `wait` False: a stale snapshot is refreshed in the background while the caller reads the
+        one it has (§2.9: reads go on) — only a server's very first snapshot is awaited. Concurrent callers share one
+        request. Returns whether a snapshot stands; False = Discord didn't answer and there is none yet (the caller's
+        per-member lookups then do what they always did). MEMBERSHIP_LISTENERS fire when the registered members' presence
+        or roles differ from the previous snapshot."""
+        if guild is None or getattr(self, "list_members", None) is None:
+            return False
+        stamps: dict[int, float] = self.__dict__.setdefault("_members_listed", {})
+        if guild.id in stamps and time.time() - stamps[guild.id] < max_age:
+            return True
+        inflight: dict[int, asyncio.Future] = self.__dict__.setdefault("_members_inflight", {})
+        task = inflight.get(guild.id)
+        if task is None or task.done():
+            task = asyncio.ensure_future(self._snapshot_members(guild))
+            inflight[guild.id] = task
+        if not wait and guild.id in stamps:
+            return True
+        return await asyncio.shield(task)
+
+    async def _snapshot_members(self, guild) -> bool:
+        """The list request and what it feeds (refresh_members). Never raises: a list Discord didn't answer changes nothing."""
+        try:
+            members = await self.list_members(guild)
+        except Exception as e:  # noqa: BLE001 — rate limit, 5xx, network: not an answer
+            log.warning("members list for server %s: %s", guild.id, e)
+            return False
+        if members is None:
+            return False
+        now = time.time()
+        cache = self.__dict__.setdefault("_member_cache", {})
+        gone: set = self.__dict__.setdefault("_member_gone", set())
+        last = self.__dict__.setdefault("_member_last_yes", {})
+        blips = self.__dict__.setdefault("_member_blip", {})
+        note = getattr(self, "note_membership", None)
+        present = {}
+        for m in members:
+            key = (guild.id, m.id)
+            cache[key] = last[key] = (now, m)
+            gone.discard(key)
+            blips.pop(key, None)
+            present[m.id] = m
+        regs = getattr(self, "registries", None)
+        reg = regs.for_guild(guild.id) if regs is not None else None
+        shape: dict[int, tuple | None] = {}
+        for mem in (reg.members.values() if reg is not None else ()):
+            if mem.test:
+                continue
+            uid = mem.discord_id
+            m = present.get(uid)
+            if m is None:  # registered, not in the list: Discord's own "not in the server", as a 404 would be
+                key = (guild.id, uid)
+                cache[key] = (now, None)
+                gone.add(key)
+                last.pop(key, None)
+                blips.pop(key, None)
+            if note is not None:
+                note(guild.id, uid, m is not None)
+            shape[uid] = tuple(sorted(r.id for r in getattr(m, "roles", None) or [])) if m is not None else None
+        self.__dict__.setdefault("_members_listed", {})[guild.id] = now
+        shapes = self.__dict__.setdefault("_members_shape", {})
+        if reg is not None and shapes.get(guild.id) is not None and shapes[guild.id] != shape:
+            for fn in list(MEMBERSHIP_LISTENERS):
+                try:
+                    fn(reg.key)
+                except Exception:  # noqa: BLE001 — a listener never breaks the snapshot
+                    log.exception("membership listener failed")
+        shapes[guild.id] = shape
+        return True
 
     def saw_member(self, guild_id: int | None, member) -> None:
         """Evidence beats the cache: a message or an interaction someone made inside a server proves they are in it now,
