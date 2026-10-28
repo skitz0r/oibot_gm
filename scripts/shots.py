@@ -7,6 +7,7 @@ idle, so pages are awaited on `load` plus a pause rather than `networkidle`.
 Several guilds (design §5.32): `--guild` names the one to shoot (the bearer acts as its owner; sent as the
 X-Oibot-Guild header and ?g= on every page). Without it a bot serving several guilds answers 400 "Which guild?"."""
 import argparse
+import re
 import os
 import sys
 from pathlib import Path
@@ -31,6 +32,7 @@ if args.guild:
 QUERY = f"?g={args.guild}" if args.guild else ""
 # the tabbed views a plain page load doesn't show: (page, tab text) → <view>-<page>-<tab>.png, the tab clicked by its text
 TABS = {"/app/me": ["Leveling guide"],
+        "/app/members": ["Absences", "Test bench"],
         "/app/loot": ["History", "Precedents", "Items", "Wishlists", "Appeals", "Companions"],
         "/app/config": ["Settings", "Channels", "Recruitment and more", "Companions"]}
 
@@ -63,7 +65,7 @@ with sync_playwright() as p:
             page.screenshot(path=str(fn), full_page=True)
             print(fn.name, "scrollW", page.evaluate("document.documentElement.scrollWidth"), "of", w)
             for tab in TABS.get(path, []):
-                t = page.get_by_role("tab", name=tab, exact=True)
+                t = page.get_by_role("tab", name=re.compile(rf"^{re.escape(tab)}(\s|$)"))  # "Absences · 2" carries a count
                 if not t.count():  # an owner-only tab (Config › Companions) the viewer doesn't get
                     print(f"{name} {path}: no tab {tab!r}")
                     continue

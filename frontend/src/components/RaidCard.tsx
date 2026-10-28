@@ -167,7 +167,7 @@ export function RunStrip({ steps, still = false }: { steps: WeekStep[]; still?: 
         const label = raid ? "raid" : (s.done ? DONE_WORDS[s.step] : HOUR_WORDS[s.step]) || s.step;
         return (
           <Tooltip key={s.step} label={raid || !HOUR_HINT[s.step] ? s.when : `${s.when} · ${HOUR_HINT[s.step]}`}>
-            <span className={[css.step, i === 0 ? css.stepFirst : "", i === n - 1 ? css.stepLast : "", s.done ? "" : css.todo].join(" ")} style={{ left: `${(i / (n - 1)) * 100}%` }}>
+            <span className={[css.step, i === 0 ? css.stepFirst : "", i === n - 1 ? css.stepLast : "", i % 2 ? css.stepAlt : "", s.done ? "" : css.todo].join(" ")} style={{ left: `${(i / (n - 1)) * 100}%` }}>
               <span className={raid ? css.stepEnd : css.stepDot} />
               <span className={css.stepLabel}>{label}</span>
               <span className={css.stepWhen}>{s.when}</span>
