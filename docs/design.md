@@ -3657,6 +3657,43 @@ decide screens print the same words; the members rows carry a `left` field.
   disabled buttons), the Absences table on a phone and its empty state, the absence modal's words, the Me page
   (CharacterTable's Retire / Delete / Save still compose their own confirm text) and a sort by rank or role (finding 32).
 
+**Phase 3 — the Test bench tab, Absences, the Me page (findings 17's Me half, 22–26, 29–31, 33).**
+- *Test bench* (components/TestBench.tsx, per the approved Bench mockup): a header and one hint; **Puppets · N of up to
+  80** (the cap in a tooltip too) with each role's icon and count; **Seed** as the server's words — `/api/test` `seed`
+  labels, the whole bench from `flows_misc.seed_all_words` ("the guild's 30 from the signup list" when the guild's
+  `test_roster.yaml` exists, else "all 30 in the built-in mix"; Discord's seed choice carries the same words); the
+  composition (spec icon · − / count / +, one Save) with Class → Spec → **Add one puppet**; **Clear the test bench** with
+  the server's `clear_consequence`. ONE **Rehearse with** raid picker for Try a comp and the test run alike, defaulting
+  to `meta.raids[0]` and remembered per browser and guild in localStorage (a convenience; never a browser pick like "the
+  20-player raid"). The tempo is drawn as the run's week: `RunStrip steps={tempo.week} still` — `/api/test` tempos'
+  `week` is now a preview (`tempo_week(…, opened=False)`: no step done, so the strip reads "sheet opens · now"), and
+  `still` keeps the now mark on the first step; POST `/api/test/run`'s `week` stays the opened run's. A why line sits
+  under every greyed button: the server's `open_refusal` first, else "Add puppets first.", else where the run's card
+  will live; "Save or cancel the change to the puppets first." while a composition is drafted; Answer as puppets says
+  what to pick. Sentence case throughout (plain eyebrows, the run state from `meta.run_states`). The feed
+  (TestFeed.tsx) names a run by the event's `title`, never its key, and wraps on a phone (no fixed time column).
+- *Absences*: AbsencesTable is a grid (members.module.css `.absRow`), on a phone a card per absence with When and
+  Reason stacked under the name and **I'm back** a full-size button; the empty state "Nobody is away. Record an
+  absence from a member's ⋮ when someone will miss a raid."; *away now* a grey word. AbsencesModal reads **Record an
+  absence for <name>** (own: **Record an absence**) and **Add the absence**, with only the server's `sentences` above
+  the button — the new generator `consequences.absence_consequence(reg, rs, m, start, end, by_id=)`: what is recorded,
+  one sentence per live sheet it answers (`discord_people.absence_lines`) or `NO_SHEET_IN_DAYS`, then "Press I'm back
+  if your plans change." — returned by both absence previews (`/api/me/absence`, `/api/members/absence`) and linted in
+  the harness. The Me page's Absences card says "No absences on file. Add one if you'll miss a raid."
+- *The Me page*: one intro line (where you stand on your next raid, else what the page is for — no dot chain).
+  CharacterTable prints ONLY the server's sentences: a row's Retire / Delete / Make main preview through
+  `/api/me/characters`, which now answers a one-row verb (`{label, retire | delete | main: true}`, `one_verb`) with
+  `people_consequence` in "your" voice — never `[]`, so a delete always asks; Save previews the edited table first
+  (`save_consequence`; `[]` = the first press saves). Its hints read as the Members page's ("A new character waits for
+  an officer's confirm."), the crown is grey and an alt carries no mark.
+- *Tests*: tests/test_frontend_source.py `test_test_bench_reads_by_its_shape`,
+  `test_absences_and_the_me_page_read_the_servers_words`; tests/test_people_web.py the Me row verbs' and the absence
+  previews' sentences, the tempo week as a preview and the seed words; tests/test_confirm_readability.py
+  `absence_consequence`.
+- *Not taken*: a sort by rank or role (finding 32, optional) — the count chips and the search answer "who is this"
+  first, and a role grouping belongs with Readiness' "who could play". The Discord absence wizard keeps its own confirm
+  screen (it already prints `absence_lines`). With phase 3 the rebuild is closed.
+
 ## 6. Architecture
 
 ```mermaid

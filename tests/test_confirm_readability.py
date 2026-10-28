@@ -604,6 +604,14 @@ def people_cases(reg, rs, runs, ms, dump):
                  fates=discord_people.absence_clear_lines(reg, rs, m, a))
         dump.add("back_consequence", f"no sheet touched, {who}", _said(cq.back_consequence, reg, rs, m, far, by_id=by))
     dump.add("back_consequence", "no such absence", _said(cq.back_consequence, reg, rs, m, "2020-01-01", by_id=OFFICER_ID))
+    # Add the absence: one over a live sheet, one over no sheet, for an officer and the member's own record
+    other = ms[1]
+    for who, by in (("an officer", OFFICER_ID), ("own record", other.discord_id)):
+        out = cq.absence_consequence(reg, rs, other, day, day, by_id=by)
+        dump.add("absence_consequence", f"over a live sheet, {who}", out, fates=discord_people.absence_lines(reg, rs, other, day, day))
+        dump.add("absence_consequence", f"no sheet in those days, {who}", cq.absence_consequence(reg, rs, other, far, far, by_id=by))
+    span = cq.absence_consequence(reg, rs, other, far, (reg.now_local().date() + timedelta(days=62)).isoformat(), by_id=OFFICER_ID)
+    dump.add("absence_consequence", "several days, an officer", span)
     rc.set_signup(reg, rs, ev, m, None, "in", source="member")
     # a Save of edited rows: one sentence per fate (the ripple), nothing else
     rows = [{"label": tank.main.label, "cls": "Warrior", "spec": "Arms"}]

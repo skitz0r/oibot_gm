@@ -282,6 +282,31 @@ def test_save_previews_answer_the_sentences(w):
     assert p["sentences"] == []
 
 
+def test_me_row_verbs_preview_the_people_sentences(w):
+    """Design §5.58 phase 3: the Me page's row ⋮ (Retire · Delete · Make main) previews through /api/me/characters and
+    prints THE people confirm in "your" voice (consequences.people_consequence, what /me char prints) — never [] for a
+    delete, so it always asks first; an edit keeps the ripple-only sentences."""
+    m = member(w)
+    w.reg.add_character(m.discord_id, m.display_name, "Secundus", "Mage", "Fire", None, False)
+    h = as_user(w, m.discord_id)
+    alt = next(c.label for c in w.reg.members[m.discord_id].active() if not c.is_main)
+    for verb, first in (("retire", f"Your character {alt} retires"), ("delete", f"Your character {alt} is deleted"), ("main", f"{alt} becomes your main")):
+        p = w.c.post("/api/me/characters", json={"rows": [{"label": alt, verb: True}], "preview": True}, headers=h).json()
+        assert p["sentences"] and p["sentences"][0].startswith(first), (verb, p)
+    assert len(w.reg.members[m.discord_id].active()) == 2, "a preview writes nothing"
+
+
+def test_absence_preview_answers_the_sentences(w):
+    """Add the absence prints the server's sentences (consequences.absence_consequence): "your" on the Me page, the
+    member's name on Members; each live sheet it answers, or that none falls in those days."""
+    m = member(w)
+    day = (w.reg.now_local().date() + timedelta(days=40)).isoformat()
+    p = w.c.post("/api/me/absence", json={"start": day, "days": 1, "preview": True}, headers=as_user(w, m.discord_id)).json()
+    assert p["sentences"] == [f"Your absence on {w.reg.day_label(day)} is recorded.", "No live sheet falls in those days.", "Press I'm back if your plans change."]
+    p = w.c.post("/api/members/absence", json={"uid": str(m.discord_id), "start": day, "days": 1, "preview": True}, headers=as_user(w, OFFICER)).json()
+    assert p["sentences"][0] == f"{m.display_name}'s absence on {w.reg.day_label(day)} is recorded." and not m.absences
+
+
 def test_test_bench_tempos_are_the_runs_week_and_the_feed_names_its_run(w):
     """Findings 23 and 31: each tempo carries the run's week in the Rosters strip's shape (opens now, the reminder, the
     lock, confirm by, the raid — in words), and the feed's events carry the run's title, never its key."""
@@ -291,7 +316,10 @@ def test_test_bench_tempos_are_the_runs_week_and_the_feed_names_its_run(w):
     d = w.c.get("/api/test", headers=h).json()
     std = next(t for t in d["tempos"] if t["id"] == "standard")
     assert [s["step"] for s in std["week"]] == ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "raid"]
-    assert [s["when"] for s in std["week"]] == ["now", "in 8 min", "in 15 min", "in 25 min", "in 40 min"] and std["week"][0]["done"]
+    assert [s["when"] for s in std["week"]] == ["now", "in 8 min", "in 15 min", "in 25 min", "in 40 min"]
+    assert not any(s["done"] for s in std["week"]), "a tempo is a preview of a run not opened yet: the strip reads 'sheet opens · now'"
+    n = len(w.reg.test_roster())
+    assert d["seed"][-1] == {"count": 0, "label": f"all {n} in the built-in mix"}, "the whole bench in words, never 'all 30'"
     ev = open_test_run(w.reg, w.rs)
     testfeed.FEED.record(w.reg.key, ev.key, "step", "Opened")
     feed = w.c.get("/api/test/feed", headers=h).json()

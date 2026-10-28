@@ -4,7 +4,8 @@ import { api, ApiError } from "../api";
 import { useLive } from "../hooks/useLive";
 import { Eyebrow } from "./Page";
 
-export interface FeedEvent { seq: number; at: string; at_label: string; kind: "card" | "dm" | "step" | "answer"; text: string; actor: string | null; run: string }
+/** `title` = the run in words from the server ('<raid> · <start>'), never its key. */
+export interface FeedEvent { seq: number; at: string; at_label: string; kind: "card" | "dm" | "step" | "answer"; text: string; actor: string | null; run: string; title?: string }
 
 const KIND: Record<FeedEvent["kind"], { label: string; color: string }> = {
   card: { label: "card", color: "blue" },
@@ -30,17 +31,20 @@ export function TestFeed({ run, height = 320 }: { run?: string; height?: number 
   if (hidden) return null;
   return (
     <Box>
-      <Eyebrow>Test feed</Eyebrow>
+      <Eyebrow plain>Test feed</Eyebrow>
       {error && events === null ? <Text size="sm" c="red">Couldn't load the feed: {error}</Text> : events === null ? <Text size="sm" c="dimmed">Loading…</Text> : rows.length === 0 ? (
         <Text size="sm" c="dimmed">Nothing yet. Open a test run: its cards, the puppets' DMs and every step show up here as they happen.</Text>
       ) : (
         <ScrollArea.Autosize mah={height} type="auto" mt={4}>
           <Stack gap={4}>
             {rows.map((e) => (
-              <Group key={e.seq} gap={8} wrap="nowrap" align="flex-start">
-                <Text size="xs" c="dimmed" w={150} style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{e.at_label}</Text>
-                <Badge size="xs" variant="light" color={KIND[e.kind]?.color || "gray"} w={78} style={{ flexShrink: 0 }}>{KIND[e.kind]?.label || e.kind}</Badge>
-                <Text size="sm" style={{ whiteSpace: "pre-line", minWidth: 0 }}>{many && <Text span c="dimmed" size="xs">{e.run} · </Text>}{e.text}</Text>
+              // wraps on a phone: the time and the kind on one line, the text under them when the row is narrow
+              <Group key={e.seq} gap="4px 8px" wrap="wrap" align="flex-start">
+                <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
+                  <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{e.at_label}</Text>
+                  <Badge size="xs" variant="light" tt="none" color={KIND[e.kind]?.color || "gray"}>{KIND[e.kind]?.label || e.kind}</Badge>
+                </Group>
+                <Text size="sm" style={{ whiteSpace: "pre-line", minWidth: 0, flex: "1 1 16rem" }}>{many && e.title && <Text span c="dimmed" size="xs">{e.title} · </Text>}{e.text}</Text>
               </Group>
             ))}
           </Stack>

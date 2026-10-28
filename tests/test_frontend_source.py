@@ -347,3 +347,47 @@ def test_members_controls_are_44px_on_a_phone_and_cards_below_sm():
     page = (SRC / "pages" / "Members.tsx").read_text()
     assert "className={css.touch}" in page and page.count("classNames={{ item: css.menuItem }}") == 2
     assert "overflow-x" not in css and "min-width: 0" in css
+
+
+def test_test_bench_reads_by_its_shape():
+    """Design §5.58 phase 3 (findings 22–26, 31): ONE Rehearse with raid picker for Try a comp and the test run alike,
+    defaulting to the server's first raid (remembered per browser), never a browser pick like "the 20-player raid"; the
+    seed labels and the tempo's week are the server's (RunStrip over `tempos[].week`, no line assembled here); a why line
+    under greyed buttons; sentence case; the feed names each run by its title, never its key, and wraps on a phone."""
+    bench = _code_only((SRC / "components" / "TestBench.tsx").read_text())
+    assert bench.count('aria-label="Rehearse with"') == 1 and bench.count("meta.raids.map(") == 1, "one raid picker"
+    assert "size === 20" not in bench and "meta.raids[0]" in bench and "localStorage" in bench
+    assert "<RunStrip steps={t.week} still />" in bench and "Starts in" not in bench and "nudge " not in bench
+    assert "{s.label}" in bench and "all ${" not in bench and "of up to {MAX}" in bench
+    assert "<Why>" in bench and "state.open_refusal ? <Why>{state.open_refusal}</Why>" in bench
+    assert "<Eyebrow>" not in bench and "<Eyebrow plain>" in bench and not re.search(r"message:\s*[`\"'\[]", bench)
+    assert "meta.run_states[" in bench
+    feed = _code_only((SRC / "components" / "TestFeed.tsx").read_text())
+    assert "{e.run} ·" not in feed and "e.title" in feed and "w={150}" not in feed and 'wrap="wrap"' in feed and "<Eyebrow plain>" in feed
+    strip = (SRC / "components" / "RaidCard.tsx").read_text()
+    assert "still = false" in strip
+
+
+def test_absences_and_the_me_page_read_the_servers_words():
+    """Findings 29, 30, 33 and 17's Me half: the absences tab stacks on a phone (no table scrolling sideways), its empty
+    state says how to fill it, I'm back is a real button and "away now" a grey word; the absence modal is "Record an
+    absence for <name>" with "Add the absence" and only the server's sentences above it; the Me page's Retire, Delete,
+    Make main and Save print ONLY the server's sentences (CharacterTable composes none); one intro line on Me."""
+    table = _code_only((SRC / "components" / "AbsencesTable.tsx").read_text())
+    assert "<Table" not in table and "minWidth" not in table and "css.absRow" in table and "className={css.touch}" in table
+    assert "Nobody is away. " in table and "Record an absence from a member's ⋮" in table and 'color="yellow"' not in table
+    assert '<Button size="sm" variant="light"' in table and ">away now</Text>" in table
+    css = (SRC / "pages" / "members.module.css").read_text()
+    assert 'grid-template-areas: "who back" "when when" "reason reason" "by by"' in css[css.index(".absHead"):]
+    modal = _code_only((SRC / "components" / "AbsencesModal.tsx").read_text())
+    assert "Record an absence for ${who.display_name}" in modal and "Add the absence" in modal and "touches" not in modal
+    assert "preview.sentences" in modal and "No live sheet falls" not in modal and "preview.lines" not in modal
+    chars = _code_only((SRC / "components" / "CharacterTable.tsx").read_text())
+    assert not re.search(r"message:\s*[`\"'\[]", chars) and chars.count("preview: true") == 2 and chars.count("sentencesOf(p)") == 2
+    for said in ("It leaves sheets and rosters", "Deleting removes it outright", "Nothing else changes", "your next character becomes main", "p.ripple"):
+        assert said not in chars, said
+    assert 'tt="uppercase"' not in chars and "yellow" not in chars
+    card = (SRC / "components" / "AbsencesCard.tsx").read_text()
+    assert "None upcoming" not in card and "No absences on file. Add one if you'll miss a raid." in card
+    me = _code_only((SRC / "pages" / "Me.tsx").read_text())
+    assert '.join(" · ")' not in me[me.index("const summary"):me.index("if (!me) return <Text")]

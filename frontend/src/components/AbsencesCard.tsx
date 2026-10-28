@@ -36,7 +36,7 @@ export function AbsencesCard({ meta, absences, onChanged }: { meta: Meta; absenc
     <Card>
       <CardHeader title="Absences" action={<Button size="xs" variant="default" leftSection={<IconPlus size={13} />} onClick={() => setOpen(true)}>Add</Button>} />
       <Stack p="md" gap="xs">
-        {absences.length === 0 && <Text c="dimmed" size="sm">None upcoming.</Text>}
+        {absences.length === 0 && <Text c="dimmed" size="sm">No absences on file. Add one if you'll miss a raid.</Text>}
         {absences.map((a) => (
           // a narrow card (the Me page's side column): the days wrap, the reason chip shrinks (its full text on hover)
           // and the actions drop under the days rather than run past the card's edge; I'm back is never squeezed

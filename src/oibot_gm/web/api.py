@@ -392,7 +392,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 s, e = await asyncio.to_thread(reg.check_absence, m, d.get("start") or "", end, d.get("reason") or None)
                 rs0 = bot.raids.store(reg)
                 lines = discord_people.absence_lines(reg, rs0, m, s, e)
-                return {"preview": True, "span": reg.span_label(s, e), "start": s, "end": e, "lines": lines,
+                # `sentences` = THE confirm words above Add the absence (consequences.absence_consequence: "your" on the Me page)
+                said = cq.absence_consequence(reg, rs0, m, s, e, by_id=v.uid) if m is not None else lines
+                return {"preview": True, "span": reg.span_label(s, e), "start": s, "end": e, "lines": lines, "sentences": said,
                         "sheets": [{"key": ev.key, "effect": what} for ev, what in rc.absence_effects(reg, rs0, m, s, e)],
                         "message": f"preview — nothing saved: {m.display_name if m else v.name} away {reg.span_label(s, e)}" + ("".join(f"\n{ln}" for ln in lines) or " · no live sheet on those days")}
             mm, a, touched = await discord_people.record_absence(bot, reg, m.discord_id if m else v.uid, d.get("start") or "", end, d.get("reason") or None, v.name,
@@ -675,7 +677,24 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             rows = table_rows(d.get("rows"))
         except HTTPException as e:
             return JSONResponse({"error": e.detail}, status_code=400)
-        return await save_table(request, v, v.uid, rows, officer=False, rev=d.get("rev"), preview=bool(d.get("preview")))
+        res = await save_table(request, v, v.uid, rows, officer=False, rev=d.get("rev"), preview=bool(d.get("preview")))
+        verb = one_verb(d.get("rows"))  # the rows as sent (table_rows adds main / slot to every row)
+        if d.get("preview") and verb and isinstance(res, dict):
+            # a row's Retire / Delete / Make main on the Me page: THE people confirm in "your" voice (the same words
+            # /me char prints), never [] — a delete always asks first
+            m = v.reg.members.get(v.uid)
+            try:
+                res["sentences"] = cq.people_consequence(v.reg, bot.raids.store(v.reg), m, verb, by_id=v.uid, label=rows[0]["label"])
+            except RegistryError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+        return res
+
+    def one_verb(rows) -> str | None:
+        """The one-row verbs the Me page's row ⋮ sends ({label, retire | delete | main: true}), else None (an edit)."""
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict) or not rows[0].get("label"):
+            return None
+        hits = [k for k in ("retire", "delete", "main") if rows[0].get(k) is True]
+        return hits[0] if len(hits) == 1 and set(rows[0]) <= {"label", hits[0]} else None
 
     @app.post("/api/me/main")
     async def me_main(request: Request):
@@ -1837,13 +1856,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def in_minutes(n: int) -> str:
         return "now" if n <= 0 else f"in {n} min"
 
-    def tempo_week(start_in: int, nudge_in: int, lock_in: int, confirm_in: int) -> list[dict]:
+    def tempo_week(start_in: int, nudge_in: int, lock_in: int, confirm_in: int, opened: bool = True) -> list[dict]:
         """A test tempo as the run's week (the RunStrip's steps, week_json's keys): the sheet opens now, the reminder, the
-        lock and the confirm-by time counted from now, then the raid — `when` in words ('in 8 min')."""
+        lock and the confirm-by time counted from now, then the raid — `when` in words ('in 8 min'). `opened=False` = the
+        bench's preview of a run not opened yet: no step is done (the strip reads "sheet opens · now")."""
         now = datetime.now().astimezone()
         marks = [("signup_lead_hours", 0), ("nudge_hours_before", start_in - nudge_in), ("lock_hours_before", start_in - lock_in),
                  ("confirm_hours_before", start_in - confirm_in), ("raid", start_in)]
-        return [{"step": k, "when": in_minutes(n), "at": (now + timedelta(minutes=n)).isoformat(), "done": n <= 0} for k, n in marks]
+        return [{"step": k, "when": in_minutes(n), "at": (now + timedelta(minutes=n)).isoformat(), "done": opened and n <= 0} for k, n in marks]
 
     def test_title(reg, rs, key: str) -> str:
         """A test run's title for the feed: '<raid> · <12-hour start>' (test_run_row's), or words for one already gone."""
@@ -1854,7 +1874,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def test_state(request: Request):
         """The bench as the site's Test bench card shows it: puppets, live test runs, whether a test run can open from
         the site (the signup channel, named), the tempos, the seed presets and the clear consequence (from code)."""
-        from ..flows_misc import SEED_COUNTS, test_clear_consequence
+        from ..flows_misc import SEED_COUNTS, seed_all_words, test_clear_consequence
         from ..presets import DEFAULT_TEMPO, TEMPOS
 
         v = await who(request, officer=True)
@@ -1866,13 +1886,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         ch = get_channel(int(sid)) if sid else None
         n = len(reg.test_roster())
         return {"members": len(reg.test_members()), "max": reg.TEST_MAX, "roster": n,
-                "seed": [{"count": c, "label": str(c)} for c in SEED_COUNTS if c < n] + [{"count": 0, "label": f"all {n}"}],
+                # the presets and the whole bench in words ("the guild's 30 from the signup list"): the browser keeps no count
+                "seed": [{"count": c, "label": str(c)} for c in SEED_COUNTS if c < n] + [{"count": 0, "label": seed_all_words(reg)}],
                 "runs": [test_run_row(reg, e) for e in test_runs(reg, rs)],
                 "signup_channel": {"set": bool(sid), "name": getattr(ch, "name", None)},
                 "open_refusal": bench_channel_refusal(reg, get_channel),  # the same words open_test_run refuses with
                 # each tempo's week in the Rosters strip's shape (RunStrip: {step, when, at, done}, week_json) — the bench draws the
                 # run's week in the server's words, never a line the browser assembles
-                "tempos": [{"id": k, "label": t[0], "start_in": t[1], "nudge_in": t[2], "lock_in": t[3], "confirm_in": t[4], "week": tempo_week(*t[1:])}
+                "tempos": [{"id": k, "label": t[0], "start_in": t[1], "nudge_in": t[2], "lock_in": t[3], "confirm_in": t[4], "week": tempo_week(*t[1:], opened=False)}
                            for k, t in TEMPOS.items()],
                 "default_tempo": DEFAULT_TEMPO, "clear_consequence": test_clear_consequence(reg, rs)}
 

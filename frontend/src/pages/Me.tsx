@@ -38,11 +38,12 @@ export function MePage({ meta }: { meta: Meta }) {
     try { const x = await api.post<{ message: string }>("/api/me/regular/remove", { series: r.series }); ok(x.message); load(); } catch (e) { fail(e); }
   }
   async function setDm(on: boolean) { try { await api.post("/api/me/dm", { on }); ok(on ? "DMs on" : "DMs off"); load(); } catch (e) { fail(e); } }
+  // one line: where you stand on your next raid, else what the page is for (finding 33: no dot chain of counts)
   const summary = useMemo(() => {
     if (!me) return "";
-    const n = me.characters.length;
     const sheet = me.sheets.find((s) => s.rostered) || me.sheets.find((s) => s.status === "in");
-    return [`${n} character${n === 1 ? "" : "s"}`, me.roles.primary || null, sheet ? `${sheet.raid} · ${sheet.when} — ${sheet.rostered ? "you're rostered" : "joined"}` : null].filter(Boolean).join(" · ");
+    if (sheet) return `${sheet.rostered ? "You're rostered for" : "You joined"} ${sheet.raid} on ${sheet.when}.`;
+    return "Your characters, your raids and anything waiting for your answer.";
   }, [me]);
 
   if (!me) return <Text c="dimmed">Loading…</Text>;

@@ -467,6 +467,20 @@ def back_consequence(reg: Registry, rs, m, start: str, *, by_id: int | None = No
     return [f"{v.Whose} absence {when} is cleared.", *(lines or [NO_SHEET_CHANGES]), f"Record it again if {v.theyre} still away."]
 
 
+NO_SHEET_IN_DAYS = "No live sheet falls in those days."
+
+
+def absence_consequence(reg: Registry, rs, m, start: str, end: str, *, by_id: int | None = None) -> list[str]:
+    """An absence before it is recorded (the Me page's and the Members page's Add the absence, design §5.58 phase 3):
+    what is recorded, one sentence per live sheet it answers (discord_people.absence_lines) and how to undo it."""
+    from . import discord_people
+
+    v = _Voice(reg, m, by_id)
+    when = f"on {reg.day_label(start)}" if end == start else f"from {reg.day_label(start)} to {reg.day_label(end)}"
+    lines = discord_people.absence_lines(reg, rs, m, start, end)
+    return [f"{v.Whose} absence {when} is recorded.", *(lines or [NO_SHEET_IN_DAYS]), f"Press I'm back if {v.their} plans change."]
+
+
 def save_consequence(reg: Registry, rs, m, rows: list[dict]) -> list[str]:
     """A member's edited rows saved in one go (the Members page's Save <name>'s characters, the Me page's Save): one
     sentence per fate in the live runs (rc.character_preview); [] = nothing beyond the record changes, and the first
@@ -506,8 +520,8 @@ def people_consequence(reg: Registry, rs, m, verb: str, *, by_id: int | None = N
     raise ValueError(f"unknown people verb {verb}")
 
 
-__all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
-           "VERBS", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
+__all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
+           "VERBS", "absence_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
            "flex_consequence", "main_consequence", "people_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 

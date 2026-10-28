@@ -265,6 +265,7 @@ def test_seed_takes_its_ceiling_from_a_private_roster(reg, rs, officer):
     (reg.store.root / reg.key / "test_roster.yaml").write_text(yaml.safe_dump(rows))
     opts = fm.seed_opts(reg)
     assert [o.value for o in opts] == ["5", "7"]
+    assert fm.seed_all_words(reg) == "the guild's 7 from the signup list" and opts[-1].description.startswith("the guild's 7")
     client, _ = make_client(reg, rs)
     h = Harness(reg, rs, client=client)
 

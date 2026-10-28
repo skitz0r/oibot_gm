@@ -146,12 +146,13 @@ export const DONE_WORDS: Record<string, string> = { signup_lead_hours: "sheet op
 
 /** One run's week as a strip (the Rosters card, design §5.56): the steps it takes in time order, evenly spaced, done in
  *  teal and the rest grey, the raid a square at the end, and a "now" mark between the steps it falls between. Every
- *  date comes in words from the server (ev_json `week`); the browser only places the mark. */
-export function RunStrip({ steps }: { steps: WeekStep[] }) {
+ *  date comes in words from the server (ev_json `week`); the browser only places the mark. `still` = a week that hasn't
+ *  started (the test bench's tempo, /api/test `tempos[].week`): the mark stays on the first step, nothing drawn as done. */
+export function RunStrip({ steps, still = false }: { steps: WeekStep[]; still?: boolean }) {
   if (steps.length < 2) return null;
   const n = steps.length;
   const at = steps.map((s) => Date.parse(s.at));
-  const t = Date.now();
+  const t = still ? at[0] - 1 : Date.now();
   let now: number | null = null;
   if (t < at[0]) now = 0;
   else for (let i = 0; i < n - 1; i++) {

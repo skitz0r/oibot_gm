@@ -23,11 +23,18 @@ export function FlexIcons({ meta, flex }: { meta: Meta; flex?: string[] }) {
   return <Group gap={4} wrap="nowrap">{flex.map((r) => <GameIcon key={r} meta={meta} kind="role" id={r} size={20} title={`could also play ${r}`} />)}</Group>;
 }
 
-/** The Me page's characters card (design §3.3 cluster A): view with a row ⋮ menu (Make main · Retire · Delete) and a Flex
- *  column; Edit for the whole table. Every write is POST /api/me/characters — THE character verb, one HTTP face — with
- *  the table's base `rev` (a change made elsewhere meanwhile is refused, 409, and the draft is kept). A row action asks
- *  the server first (`preview`): its ripple sentences (a seat handed back, an answer cleared) are what the confirm says;
- *  with no ripple it just saves. `onEditing` tells the page not to reload under an edit. */
+/** The server's confirm words from a /api/me/characters preview (flat on the Me page). */
+function sentencesOf(p: TableSaved): string[] {
+  return (p.sentences || []).filter((x): x is string => typeof x === "string");
+}
+
+/** The Me page's characters card (design §3.3 cluster A, §5.58 phase 3): view with a row ⋮ menu (Make main · Retire ·
+ *  Delete) and a Flex column; Edit for the whole table. Every write is POST /api/me/characters — THE character verb, one
+ *  HTTP face — with the table's base `rev` (a change made elsewhere meanwhile is refused, 409, and the draft is kept).
+ *  Every press asks the server first (`preview`) and the confirm prints ONLY its `sentences`: a row verb's are the
+ *  people confirm in "your" voice (consequences.people_consequence, never empty), a Save's the ripple into the runs
+ *  (save_consequence) — `[]` = nothing beyond the record changes, and the first press saves. `onEditing` tells the page
+ *  not to reload under an edit. */
 export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta; me: Me; onChanged: () => void; onEditing?: (editing: boolean) => void }) {
   const [editing, setEditing] = useState(false);
   useDirty("characters", editing);
@@ -46,33 +53,35 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
     if (e instanceof ApiError && e.status === 409) { fail(new Error(`${e.message} Your edit is kept — Cancel to see the latest.`)); return true; }
     return false;
   }
+  /** Save the edited table: the server's preview first — its sentences (the ripple into the runs) → the confirm; [] → save. */
   async function save() {
     setBusy("save");
     try {
+      const p = await api.post<TableSaved>("/api/me/characters", { rows: drafts, rev: me.characters_rev, preview: true });
+      const said = sentencesOf(p);
+      if (said.length && !(await ask({ title: "Save your characters?", message: said.join("\n"), confirmLabel: "Save changes" }))) return;
       const r = await api.post<TableSaved>("/api/me/characters", { rows: drafts, rev: me.characters_rev });
       ok(r.message); setEditing(false); onChanged();
     } catch (e) { if (!stale(e)) fail(e); } finally { setBusy(null); }
   }
-  /** One row through the verb: preview → confirm when it ripples (always for a delete) → save. */
-  async function act(c: Character, row: Record<string, unknown>, title: string, confirmLabel: string, color?: string, always = false, intro = "") {
+  /** One row through the verb: the server's preview → its sentences in the confirm → save. */
+  async function act(c: Character, row: Record<string, unknown>, title: string, confirmLabel: string, color?: string) {
     setBusy(c.label);
     try {
       const p = await api.post<TableSaved>("/api/me/characters", { rows: [row], rev: me.characters_rev, preview: true });
-      if (always || p.ripple.length) {
-        const message = [intro, ...p.ripple].filter(Boolean).join("\n") || "Nothing else changes.";
-        if (!(await ask({ title, message, confirmLabel, color }))) return;
-      }
+      const said = sentencesOf(p);
+      if (said.length && !(await ask({ title, message: said.join("\n"), confirmLabel, color }))) return;
       const r = await api.post<TableSaved>("/api/me/characters", { rows: [row], rev: me.characters_rev });
       ok(r.message); onChanged();
     } catch (e) { if (stale(e)) onChanged(); else fail(e); } finally { setBusy(null); }
   }
-  const makeMain = (c: Character) => act(c, { label: c.label, main: true }, `Make ${c.label} your main?`, "Make it my main", undefined, false);
-  const retire = (c: Character) => act(c, { label: c.label, retire: true }, `Retire ${c.label}?`, "Retire", "orange", true, `${c.cls} ${c.spec}${c.is_main ? " — your main; your next character becomes main" : ""}. It leaves sheets and rosters; its history is kept.`);
-  const del = (c: Character) => act(c, { label: c.label, delete: true }, `Delete ${c.label}?`, "Delete", "red", true, `${c.cls} ${c.spec}${c.is_main ? " — your main" : ""}. Deleting removes it outright; prefer Retire if you may come back to it.`);
+  const makeMain = (c: Character) => act(c, { label: c.label, main: true }, `Make ${c.label} your main?`, "Make it my main");
+  const retire = (c: Character) => act(c, { label: c.label, retire: true }, `Retire ${c.label}?`, "Retire", "orange");
+  const del = (c: Character) => act(c, { label: c.label, delete: true }, `Delete ${c.label}?`, "Delete", "red");
 
   return (
     <Card>
-      <CardHeader title="Characters" hint={`${meta.game} names are first + last · the crown marks your main${me.rank ? ` · rank ${me.rank}` : ""}`}
+      <CardHeader title="Characters" hint={me.rank ? `your rank is ${me.rank}` : undefined}
         action={!editing && !me.must_apply ? <Button size="xs" variant="default" leftSection={<IconPencil size={13} />} onClick={startEdit}>Edit</Button> : undefined} />
       <Table.ScrollContainer minWidth={680}>
         <Table style={{ tableLayout: "fixed" }}>
@@ -80,7 +89,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
           <Table.Tbody>
             {!editing && me.characters.map((c) => (
               <Table.Tr key={c.label}>
-                <Table.Td>{c.is_main ? <Tooltip label="your main"><IconCrown size={18} color="var(--mantine-color-yellow-5)" /></Tooltip> : <Text size="xs" c="dimmed" tt="uppercase" style={{ letterSpacing: ".06em" }}>alt</Text>}</Table.Td>
+                <Table.Td>{c.is_main && <Tooltip label="your main"><IconCrown size={18} color="var(--mantine-color-slate-2)" /></Tooltip>}</Table.Td>
                 <Table.Td><CharacterCell meta={meta} cls={c.cls} label={c.label} size={34} /></Table.Td>
                 <Table.Td><SpecCell meta={meta} cls={c.cls} spec={c.spec} role={c.role} /></Table.Td>
                 <Table.Td>{c.offspec ? <SpecCell meta={meta} cls={c.cls} spec={c.offspec} role={c.off_role || ""} /> : <Text c="dimmed">—</Text>}</Table.Td>
@@ -100,7 +109,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
             ))}
             {editing && drafts.map((d, i) => (
               <Table.Tr key={d.label ?? `new${i}`} style={{ background: "var(--mantine-color-slate-6)" }}>
-                <Table.Td>{d.isNew ? <Select size="xs" w={68} value={d.slot} data={[{ value: "main", label: "main" }, { value: "alt", label: "alt" }]} onChange={(v) => upd(i, { slot: (v as "main" | "alt") || "alt" })} /> : d.slot === "main" ? <IconCrown size={18} color="var(--mantine-color-yellow-5)" /> : null}</Table.Td>
+                <Table.Td>{d.isNew ? <Select size="xs" w={68} value={d.slot} data={[{ value: "main", label: "main" }, { value: "alt", label: "alt" }]} onChange={(v) => upd(i, { slot: (v as "main" | "alt") || "alt" })} /> : d.slot === "main" ? <IconCrown size={18} color="var(--mantine-color-slate-2)" /> : null}</Table.Td>
                 <Table.Td>
                   <Stack gap={6}>
                     {d.isNew
@@ -109,7 +118,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
                     {(d.isNew || !me.characters.find((c) => c.label === d.label)?.name) && (
                       <Group gap={6} wrap="nowrap" grow><TextInput size="sm" placeholder="First" maxLength={12} value={d.name} onChange={(e) => upd(i, { name: e.currentTarget.value })} /><TextInput size="sm" placeholder="Last" maxLength={12} value={d.surname} onChange={(e) => upd(i, { surname: e.currentTarget.value })} /></Group>
                     )}
-                    {d.isNew && <Text size="xs" c="dimmed">{d.name ? "an officer confirms it after save" : "No name yet = planned. Name it before the first raid so an officer can confirm it."}</Text>}
+                    {d.isNew && <Text size="xs" c="dimmed">{d.name ? "A new character waits for an officer's confirm." : "Without a name it stays planned. Name it before the first raid so an officer can confirm it."}</Text>}
                   </Stack>
                 </Table.Td>
                 <Table.Td><Select size="sm" data={specsOf(d.cls)} value={d.spec || null} onChange={(v) => upd(i, { spec: v || d.spec })} disabled={!d.cls} /></Table.Td>
@@ -121,13 +130,13 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
             {editing && (
               <Table.Tr><Table.Td /><Table.Td colSpan={5}><Button size="xs" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => setDrafts([...drafts, { label: null, cls: "", spec: "", offspec: null, name: "", surname: "", slot: me.characters.length ? "alt" : "main", flex: [], isNew: true }])}>Add a character</Button></Table.Td></Table.Tr>
             )}
-            {!editing && me.characters.length === 0 && <Table.Tr><Table.Td colSpan={7}><Text c="dimmed">No characters yet — press <b>Edit</b> and add your main.</Text></Table.Td></Table.Tr>}
+            {!editing && me.characters.length === 0 && <Table.Tr><Table.Td colSpan={7}><Text c="dimmed">No character yet. Press <b>Edit</b> and add your main.</Text></Table.Td></Table.Tr>}
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
       {editing && (
         <Group p="sm" px="md" justify="flex-end" gap="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)", background: "var(--mantine-color-slate-6)" }}>
-          <Text size="sm" c="dimmed" mr="auto">Edits apply on save · adding with names blank keeps the character planned</Text>
+          <Text size="sm" c="dimmed" mr="auto">Nothing changes until you save, and the bot says first what it does to your runs.</Text>
           <Button variant="default" size="sm" onClick={() => { setEditing(false); onChanged(); }}>Cancel</Button>
           <Button size="sm" loading={busy === "save"} onClick={save}>Save changes</Button>
         </Group>

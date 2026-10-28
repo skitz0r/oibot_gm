@@ -3,12 +3,14 @@ import { Alert, Button, Group, Modal, Select, Stack, Text, TextInput } from "@ma
 import { DatePickerInput } from "@mantine/dates";
 import { api, type AbsencePreview, type Meta } from "../api";
 import { fail, ok } from "./Page";
+import css from "../pages/members.module.css";
 
 const FALLBACK = [1, 2, 3, 4, 5, 6, 7, 10, 14, 21, 30].map((d) => ({ days: d, label: d === 1 ? "1 day" : d === 7 ? "a week" : `${d} days` }));
 
 /** An absence, the Discord way (design §3.3 cluster B): **From** (a day picked on a calendar — the clock rule: never typed) + **For how long** (the wizard's own list, from
  *  /api/meta `durations`) + an optional reason — so an end before the start, or past the cap, can't be entered. Under the
- *  pickers the server's preview (`{preview: true}`): the days in words and what it does to each live sheet, or the verb's
+ *  pickers, above Add the absence, the server's preview (`{preview: true}`) as its `sentences` only
+ *  (consequences.absence_consequence: what is recorded, each live sheet it answers, how to undo it), or the verb's
  *  refusal (an overlap with an absence on file, the reason cap) before anything is pressed. `who` null = your own (the
  *  Me page); a member = an officer recording it for them (the Members page). */
 export function AbsencesModal({ meta, opened, who, onClose, onSaved }: { meta: Meta; opened: boolean; who: { uid: string; display_name: string } | null; onClose: () => void; onSaved: () => void }) {
@@ -39,10 +41,9 @@ export function AbsencesModal({ meta, opened, who, onClose, onSaved }: { meta: M
     setBusy(true);
     try { const r = await api.post<{ message: string }>(path, body); ok(r.message); reset(); onSaved(); } catch (e) { fail(e); } finally { setBusy(false); }
   }
-  const n = preview?.lines.length ?? 0;
   return (
-    <Modal opened={opened} onClose={() => { reset(); onClose(); }} title={who ? `${who.display_name} is away` : "I'll be away"} centered>
-      <Stack>
+    <Modal opened={opened} onClose={() => { reset(); onClose(); }} title={who ? `Record an absence for ${who.display_name}` : "Record an absence"} centered>
+      <Stack className={css.touch}>
         <Group grow align="flex-start">
           <DatePickerInput label="From" value={start} onChange={(v) => setStart(v ? String(v).slice(0, 10) : null)} required valueFormat="ddd D MMM YYYY"
             placeholder="pick a day" popoverProps={{ withinPortal: false }} />
@@ -51,16 +52,11 @@ export function AbsencesModal({ meta, opened, who, onClose, onSaved }: { meta: M
         </Group>
         <TextInput label="Reason (optional)" description={`only ${who ? "they" : "you"} and the officers see it · ${reason.length}/${max}`} value={reason} maxLength={max}
           onChange={(e) => setReason(e.currentTarget.value)} />
-        {preview && (
-          <Stack gap={2}>
-            <Text size="sm" fw={600}>{preview.span}</Text>
-            {preview.lines.length ? preview.lines.map((l, i) => <Text key={i} size="xs">{l}</Text>) : <Text size="xs" c="dimmed">No live sheet falls in those days.</Text>}
-          </Stack>
-        )}
+        {preview && <Stack gap={4}>{(preview.sentences || []).map((l, i) => <Text key={i} size="sm">{l}</Text>)}</Stack>}
         {refusal && <Alert color="red" variant="light" p="xs"><Text size="sm">{refusal}</Text></Alert>}
         <Group justify="flex-end">
           <Button variant="default" onClick={() => { reset(); onClose(); }}>Cancel</Button>
-          <Button disabled={!start || !!refusal} loading={busy} onClick={add}>{n ? `Add — touches ${n} sheet${n === 1 ? "" : "s"}` : "Add"}</Button>
+          <Button disabled={!start || !!refusal} loading={busy} onClick={add}>Add the absence</Button>
         </Group>
       </Stack>
     </Modal>

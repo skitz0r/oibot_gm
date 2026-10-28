@@ -302,12 +302,20 @@ async def open_test_answer(interaction: discord.Interaction, reg: Registry, **se
 
 # ---------------------------------------------------------------- /gm test seed
 
+def seed_all_words(reg: Registry) -> str:
+    """The whole bench in words, for the Seed choice: "the guild's 30 from the signup list" when the host put the guild's
+    own test_roster.yaml in its data folder, else "all 30 in the built-in mix". N is the bench's real size."""
+    n = len(reg.test_roster())
+    own = (reg.store.root / reg.key / "test_roster.yaml").exists()
+    return f"the guild's {n} from the signup list" if own else f"all {n} in the built-in mix"
+
+
 def seed_opts(reg: Registry) -> list[Opt]:
     """5 / 10 / 20 / all N — N is the bench's real size (a guild's own test_roster.yaml may set it), never a constant."""
     n = len(reg.test_roster())
     have = len(reg.test_members())
     out = [Opt(str(c), f"{c} test members", "already seeded" if c <= have else None) for c in SEED_COUNTS if c < n]
-    out.append(Opt(str(n), f"All {n}", "the whole bench" + (" · already seeded" if n <= have else "")))
+    out.append(Opt(str(n), f"All {n}", seed_all_words(reg) + (" · already seeded" if n <= have else "")))
     return out
 
 
