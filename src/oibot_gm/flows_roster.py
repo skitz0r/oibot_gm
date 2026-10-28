@@ -14,7 +14,8 @@ from collections.abc import Awaitable, Callable, Sequence
 import discord
 
 from .constants import ROLES
-from .registry import RANKS, Member, RegisteredCharacter, Registry, RegistryError
+from .consequences import RANK_CHOICES
+from .registry import Member, RegisteredCharacter, Registry, RegistryError
 from .wizard import MAX_OPTIONS, Opt, Wizard, flow
 
 log = logging.getLogger(__name__)
@@ -135,11 +136,6 @@ class MemberWizard(OfficerWizard):
             raise RegistryError(f"{label} was retired meanwhile.")
         return m, c
 
-    def ripple(self, interaction: discord.Interaction, rows: list[dict]) -> list[str]:
-        from .discord_people import character_preview
-
-        return character_preview(interaction.client, self.reg, self.member_id, rows)
-
     async def save_rows(self, interaction: discord.Interaction, rows: list[dict], done: str, retry=None) -> None:
         """Write `rows` through THE character verb, then the outcome (with the ripple lines) — or the refusal, draft kept."""
         from . import discord_people
@@ -158,7 +154,6 @@ class MemberWizard(OfficerWizard):
 CHAR_ACTIONS = {"spec": "Spec", "main": "Main", "flex": "Flex", "retire": "Retire", "delete": "Delete", "name": "Name", "rank": "Rank"}
 SELF_ACTIONS = ("spec", "main", "flex", "retire", "delete", "name")
 OFFICER_ACTIONS = ("spec", "main", "flex", "rank", "retire", "delete")
-DELETE_WORDS = "Deleting removes it outright, and only the ops lines keep a trace. Prefer Retire if you may come back to it."
 
 
 class CharWizard(MemberWizard):
@@ -285,7 +280,7 @@ class CharWizard(MemberWizard):
         self.draft.update(idx=m.characters.index(m.main), label=m.main.label, old=m.main.rank)
         await self.show(interaction, f"**{self.member_name}** is **{m.main.rank}** (main: {m.main.label}). New rank?\n"
                         "-# Rank belongs to the player and lives on the main — alts always read alt, and a new main takes the rank with it.",
-                        self.select("Pick the rank", [Opt(r, r, "current" if r == m.main.rank else None, default=r == m.main.rank) for r in RANKS], self.rank_picked),
+                        self.select("Pick the rank", [Opt(r, r, "current" if r == m.main.rank else None, default=r == m.main.rank) for r in RANK_CHOICES], self.rank_picked),
                         self.button("Back", self.hub), self.button("Cancel", self.cancel))
 
     async def rank_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
@@ -309,22 +304,24 @@ class CharWizard(MemberWizard):
             return [{"label": d["label"], "rank": d["rank"]}]
         return [{"label": d["label"], action: True}]  # retire | delete
 
-    def summary(self) -> tuple[str, str, bool]:
-        """(what changes, the button's words, danger?) for the decide screen."""
-        d, action, m = self.draft, self.draft["action"], self.member()
-        whose = "your" if self.self_mode else f"{self.member_name}'s"
-        if action == "spec":
-            return f"**{d['label']}**: {d['cls']} **{d['spec']}{'/' + d['offspec'] if d['offspec'] else ''}**.", "Save the spec", False
-        if action == "flex":
-            return f"**{d['label']}** could also play: **{', '.join(d['flex']) or 'nothing extra'}**.", "Save", False
-        if action == "main":
-            old = m.main.label if m and m.main else None
-            return f"**{d['label']}** becomes {whose} main" + (f" instead of **{old}**." if old else "."), "Make it the main", False
-        if action == "rank":
-            return f"**{self.member_name}**: **{d['old']}** → **{d['rank']}**.", "Set the rank", False
-        if action == "retire":
-            return f"Retire **{d['label']}**. It leaves sheets and rosters, and its history is kept.", f"Retire {d['label']}", True
-        return f"Delete **{d['label']}**. {DELETE_WORDS}", f"Delete {d['label']}", True
+    def do_button(self) -> tuple[str, bool]:
+        """(the button's words, danger?) for the decide screen."""
+        d, action = self.draft, self.draft["action"]
+        return {"spec": ("Save the spec", False), "flex": ("Save", False), "main": ("Make it the main", False), "rank": ("Set the rank", False),
+                "retire": (f"Retire {d['label']}", True), "delete": (f"Delete {d['label']}", True)}[action]
+
+    def sentences(self, interaction: discord.Interaction) -> list[str]:
+        """THE people confirm for the action (consequences.people_consequence — the Members and Me pages print the same
+        words): what changes, the ripple into runs one sentence per fate, who is told and what can be undone. Raises
+        RegistryError with one sentence when it can't go."""
+        from . import consequences as cq
+        from . import discord_people
+
+        d, action = self.draft, self.draft["action"]
+        kw = {"spec": {"spec": d.get("spec"), "offspec": d.get("offspec")}, "flex": {"roles": list(d.get("flex") or [])},
+              "rank": {"rank": d.get("rank")}}.get(action, {})
+        return cq.people_consequence(self.reg, discord_people._rs(interaction.client, self.reg), self.member(), action, by_id=interaction.user.id,
+                                     label=d["label"], **kw)
 
     async def review(self, interaction: discord.Interaction) -> None:
         try:
@@ -336,9 +333,12 @@ class CharWizard(MemberWizard):
             await self.show(interaction, f"**{c.label}** is already {c.spec}{'/' + c.offspec if c.offspec else ''} — pick a different spec.",
                             self.button("Change", self.spec_screen, discord.ButtonStyle.primary), self.button("Cancel", self.cancel))
             return
-        what, label, danger = self.summary()
-        effects = self.ripple(interaction, self.rows())
-        text = "\n".join([what, *[f"• {e}" for e in effects]]) if effects else what + "\n-# Nothing else changes, because no sheet or seat holds it."
+        try:
+            text = "\n".join(self.sentences(interaction))
+        except RegistryError as e:
+            await self.refuse(interaction, str(e), self.start, "Start over")
+            return
+        label, danger = self.do_button()
         await self.decide(interaction, text, do=self.save, do_label=label, danger=danger)
 
     async def save(self, interaction: discord.Interaction, _note: str | None) -> None:
@@ -431,9 +431,15 @@ class ConfirmWizard(OfficerWizard):
         m, c = hit
         self.draft = {"label": label, "member_id": m.discord_id}
         others = [x.label for x in m.active() if x is not c]
-        lines = [f"Confirm **{c.label}** · {c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''} · {'main' if c.is_main else 'alt'}, registered by **{m.display_name}**?",
-                 f"-# Their other characters: {', '.join(others)}" if others else "-# Their only character.",
-                 "-# They see it on their Me page (no DM)."]
+        from .consequences import confirm_consequence
+
+        try:  # THE confirm sentence (the Members page's Confirm characters… walk prints the same)
+            said = confirm_consequence(self.reg, m, c.label, by_id=interaction.user.id)
+        except RegistryError as e:
+            await self.listing(interaction, f"❌ {e}")
+            return
+        head = f"**{c.label}** · {c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''} · {m.display_name}'s {'main' if c.is_main else 'alt'}"
+        lines = [head, *said, f"-# Their other characters · {', '.join(others)}" if others else "-# Their only character"]
         await self.show(interaction, "\n".join(lines),
                         self.button("Confirm", self.save, discord.ButtonStyle.success),
                         self.button("Back", self.back),

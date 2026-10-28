@@ -3567,6 +3567,51 @@ lints each sentence (capital or digit or a name to start; . ! or ? to end; ≤ 2
 "no new DM"; ≤ 3 sentences a confirm) and writes them all to `out/confirm_sentences.txt` (and `$OIBOT_CONFIRM_SENTENCES`)
 to be read. A sentence that fails is rewritten in its generator — there is no allow list.
 
+### 5.58 The Members page reads by its shape (built 2026-10-27)
+
+**Why.** A review of the Members page (the same kind as §5.54 and §5.56) found a dead ask shown as live (an unanswered
+Confirm on a run that had ended), Save without a preview on Members and Me, every confirm sentence written by the
+browser (so the §5.57 lint never saw them, and Discord said the same actions in other words), a table unusable on a
+phone, and "Left the server" claiming what the data doesn't know (an imported member who never joined read as having
+left; the same people showed twice, as *outside* and in the Left card).
+
+**Decisions with the user (not reopened).** Per-member in-place editing replaces the guild-wide edit grid (the
+signup-list import covers the bulk case); a rank changes only through the member's ⋮ (trial · raider · core · social,
+never alt), never a live select in the row; Remove record appears only on a member who is not in the server; the Test
+bench is a tab of the Members page; every confirm sentence comes from Python, one generator per verb, and Discord's
+decide screens print the same words; the members rows carry a `left` field.
+
+**Phase 1 — the words and the routes.**
+- *One generator per people verb* in `consequences.py` (the confirm-sentence module): `retire_consequence`,
+  `delete_consequence`, `main_consequence`, `spec_consequence` (+ offspec), `flex_consequence`, `rank_consequence`,
+  `confirm_consequence`, `dm_consequence`, `back_consequence` (I'm back), `save_consequence` (a member's edited rows:
+  one sentence per fate from `rc.character_effects`), behind one dispatcher `people_consequence(reg, rs, m, verb,
+  by_id=…)`. `by_id` decides the voice: the member's own record reads "your", anyone else's names the member once and
+  then says "they". A change that can't go raises `RegistryError` with one sentence ("Another officer sets your rank.",
+  "Another officer confirms your characters.", "Thornwick is already Protection."). `RANK_CHOICES` = the ranks an
+  officer gives. Remove record keeps `discord_registry.remove_record_consequence`, rewritten to the rule.
+- *Discord prints them*: `flows_roster.CharWizard.review` (/me char, /roster char · rank · set-main) shows the title and
+  exactly `people_consequence`'s lines on THE decide screen (buttons unchanged); `/roster confirm`'s walk prints
+  `confirm_consequence` under a context line; `remove_record_decide` prints `remove_record_consequence`.
+- *The harness* registers every generator across its cases (an officer and the member's own record; a rostered main
+  with an alt, an alt, a lone main; a role flip on a recurring and an ad hoc run; the refusals). A ripple is one sentence
+  per fate (§5.57): `Dump.add(fates=…)` lints each fate as a confirm of its own and the rest — what changes · who is told
+  · what can be undone — as one confirm of at most three sentences; the file shows them together, as the screen does.
+- *Routes.* GET `/api/members` rows gain `left` (the day the bot noticed they are not in the server, in words; null
+  while they are), `left_line` ("not in the server · noticed Sun 25 Oct"), `remove_consequence`, `test`, `attendance`
+  (`Registry.attendance_text`), and `asks` only on LIVE runs — {roster, key, raid, when, words (`rc.run_on`), line
+  ("<raid> on <day> waits for their Confirm"), how (dm | web), how_words}; the payload adds `rank_choices` and `pending`
+  (characters waiting for a confirm). POST `/api/members/set` is THE one-member route: `main` · `rank` · `confirm` ·
+  `retire` · `delete` · `spec` (+ `offspec`) · `flex` (each with `character`, default the main; retire / delete / main
+  also take the label as their value), `preview` → {sentences, rev}, `rev` on the write (409 when the record changed).
+  POST `/api/members/dm` `preview` → {sentences}; the I'm back previews (`/api/members/absence/clear`,
+  `/api/me/absence/clear`) add `sentences`; `/api/members/save` previews add `sentences` = [{uid, display_name,
+  sentences}] and `/api/me/characters` `sentences` (flat). `/api/test` tempos carry `week` — the run's week in the
+  Rosters strip's shape (`RunStrip` steps, `when` in words: "now", "in 8 min") — and the feed's events a `title`
+  ('<raid> · <start>', never the key), with `titles` per run.
+- *Words.* Manual §1a gains **rank**, **confirm a character** (an officer's check, not a run's Confirm), **retire /
+  delete** and **not in the server**; §3 and §7 say them.
+
 ## 6. Architecture
 
 ```mermaid

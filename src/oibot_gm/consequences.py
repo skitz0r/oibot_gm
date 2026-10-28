@@ -10,12 +10,14 @@ substitute — design §5.56 phase 3: the browser used to promise "{name} gets a
 bench is asked" where a substitute takes the seat), remind and end; `regular_remove(reg, m, key)` for a regular taken off
 a schedule. `consequences_json(reg, ev)` → the strings `ev_json` carries. Numbers come from the run as it stands now (who
 joined, who has DMs off, the layout), so a preview drawn after the sheet moved says so by its numbers, not by a stale
-cached line. A board sentence is about one member and a group: the server writes it with NAME_TOKEN / OTHER_TOKEN /
+cached line. The people verbs (design §5.58) live here too: `people_consequence(reg, rs, m, verb, by_id=…)` → one
+generator per verb (retire, delete, main, spec, flex, rank, confirm, dm, back, save), for the Members and Me pages and
+the Discord character, confirm and I'm back screens alike. A board sentence is about one member and a group: the server writes it with NAME_TOKEN / OTHER_TOKEN /
 TO_TOKEN where those go and the board only puts the names in (it never composes a word of it)."""
 from __future__ import annotations
 
 from . import raidcycle as rc
-from .registry import Registry
+from .registry import RANKS, Registry, RegistryError
 
 VERBS = ("lock", "cancel", "clear", "release", "move", "roster", "swap", "substitute", "remind", "end")
 BOARD_VERBS = ("move", "roster", "swap", "substitute")  # the board's moves: sentences about {name} / {other} / {to}
@@ -256,6 +258,250 @@ def regular_remove(reg: Registry, m, key: str) -> list[str]:
             "They can still join any sheet, and nobody is told."]
 
 
-__all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "OTHER_TOKEN", "TO_TOKEN", "VERBS", "consequence", "consequences_json", "ended_line",
-           "regular_remove", "reopen_sentence", "series_words"]
+# ---------------------------------------------------------------- people (design §5.58): one generator per people verb
+# The Members page's ⋮ menus, its per-member Save and its Confirm characters… walk, the Me page, and Discord's /me char ·
+# /roster char · /roster rank · /roster set-main · /roster confirm · /roster back decide screens print exactly these
+# (the browser and the wizards never compose one). `by_id` decides the voice: the member's own record reads "your"
+# ("Your character Ashgrove retires."), anyone else's names the member once ("Bramble's character Ashgrove retires.")
+# and then says "they". A ripple into runs is one sentence per fate (rc.character_effects), printed after the first
+# sentence and before the closing ones. A change that can't go raises RegistryError with one sentence (the route answers
+# 400 with it, the wizard shows it as its refusal).
+
+PEOPLE_VERBS = ("retire", "delete", "main", "spec", "flex", "rank", "confirm", "dm", "back", "save")
+RANK_CHOICES = tuple(r for r in RANKS if r != "alt")
+"""The ranks an officer gives a member (the Members page's Rank…, /roster rank): the player ranks and social — never
+'alt', which only an alt reads (D25)."""
+NOBODY_DM = "Nobody gets a DM."
+NO_SHEET_CHANGES = "No sheet had been answered for it, so no sheet changes."
+
+
+class _Voice:
+    """Who a people sentence is about, from who presses: their own record ("your") or someone else's ("<name>'s", then
+    "they")."""
+
+    def __init__(self, reg: Registry, m, by_id: int | None):
+        self.own = by_id is not None and m is not None and int(by_id) == int(m.discord_id)
+        self.owner = by_id is not None and reg.is_owner_id(int(by_id))
+        self.Whose = "Your" if self.own else f"{m.display_name}'s"
+        self.whose = "your" if self.own else f"{m.display_name}'s"
+        self.their = "your" if self.own else "their"
+        self.they = "you" if self.own else "they"
+        self.theyre = "you're" if self.own else "they're"
+
+
+def _a(word: str) -> str:
+    return ("an " if word[:1].lower() in "aeiou" else "a ") + word
+
+
+def _char(reg: Registry, m, label: str | None, v: _Voice):
+    c = next((x for x in m.active() if x.label == label), None) if m is not None and label else None
+    if c is None:
+        raise RegistryError(f"{label or 'That character'} is no longer one of {v.whose} characters.")
+    return c
+
+
+def _effects(reg: Registry, rs, m, changes: list[dict]) -> list[dict]:
+    """rc.character_effects of every change, each sentence once."""
+    if rs is None or m is None:
+        return []
+    out, seen = [], set()
+    for ch in changes:
+        for e in rc.character_effects(reg, rs, m, ch):
+            if e["text"] not in seen:
+                seen.add(e["text"])
+                out.append(e)
+    return out
+
+
+def _freed(fx: list[dict]) -> bool:
+    return any(e["kind"] == "seat" and e["action"] == "free" for e in fx)
+
+
+def _seat_told(v: _Voice, fx: list[dict]) -> list[str]:
+    """Someone else's change that hands a seat back reaches the member as a notice on their Me page (rc.free_seat),
+    never a DM; their own change writes them nothing."""
+    if v.own:
+        return []
+    return ["They see the released seat on their Me page."] if _freed(fx) else [NOBODY_DM]
+
+
+def _main_tail(reg: Registry, m, c, v: _Voice) -> str:
+    """How a retire or delete ends its first sentence: who becomes the main when it was the main (the registry picks the
+    next active character and moves the rank to it — settle_ranks)."""
+    if not c.is_main:
+        return "."
+    nxt = next((x for x in m.active() if x is not c), None)
+    if nxt is None:
+        return f", and {v.they} have no main until {v.they} add a character."
+    return f", and {nxt.label} becomes {v.their} main with rank {m.rank}."
+
+
+def retire_consequence(reg: Registry, rs, m, label: str, *, by_id: int | None = None) -> list[str]:
+    """Retire one character (a table row {retire: true}): it leaves sheets, seats and regulars and stays on the record
+    as retired."""
+    v = _Voice(reg, m, by_id)
+    c = _char(reg, m, label, v)
+    fx = _effects(reg, rs, m, [{"kind": "retire", "label": c.label}])
+    return [f"{v.Whose} character {c.label} retires{_main_tail(reg, m, c, v)}", *[e["text"] for e in fx], *_seat_told(v, fx),
+            "It stays on the record as retired, so its history is kept."]
+
+
+def delete_consequence(reg: Registry, rs, m, label: str, *, by_id: int | None = None) -> list[str]:
+    """Delete one character (a table row {delete: true}): the same ripple as a retire, and it leaves the record."""
+    v = _Voice(reg, m, by_id)
+    c = _char(reg, m, label, v)
+    fx = _effects(reg, rs, m, [{"kind": "delete", "label": c.label}])
+    return [f"{v.Whose} character {c.label} is deleted{_main_tail(reg, m, c, v)}", *[e["text"] for e in fx], *_seat_told(v, fx),
+            "This can't be undone, so retire it to keep it on the record."]
+
+
+def main_consequence(reg: Registry, rs, m, label: str, *, by_id: int | None = None) -> list[str]:
+    """Make one character the main: the rank moves with it (D25), the old main reads alt."""
+    v = _Voice(reg, m, by_id)
+    c = _char(reg, m, label, v)
+    if c.is_main:
+        raise RegistryError(f"{c.label} is already {v.whose} main.")
+    old = m.main
+    fx = _effects(reg, rs, m, [{"kind": "main", "label": c.label}])
+    return [f"{c.label} becomes {v.whose} main" + (f" instead of {old.label}." if old else "."), *[e["text"] for e in fx],
+            *([f"Make {old.label} the main again to undo it."] if old else [])]
+
+
+def spec_consequence(reg: Registry, rs, m, label: str, spec: str, offspec: str | None = None, *, by_id: int | None = None) -> list[str]:
+    """A new spec and / or offspec for one character: sheet answers follow it, a seat in the same role follows it, a role
+    flip keeps a recurring run's seat for the officers to decide and hands an ad hoc run's back (rc.character_effects)."""
+    v = _Voice(reg, m, by_id)
+    c = _char(reg, m, label, v)
+    try:
+        new = reg.profile.spec(c.cls, spec).spec
+        off = reg.profile.spec(c.cls, offspec).spec if offspec else None
+    except KeyError:
+        raise RegistryError(f"{c.cls} has no spec called {offspec if spec in reg.profile.classes.get(c.cls, {}) else spec}.") from None
+    if (new, off) == (c.spec, c.offspec):
+        raise RegistryError(f"{c.label} is already {new}" + (f" with {off} as offspec." if off else "."))
+    tail = f", with {off} as offspec." if off else ", with no offspec."
+    head = f"{v.Whose} character {c.label} " + (f"switches to {new}" if new != c.spec else f"keeps {new}") + tail
+    fx = _effects(reg, rs, m, rc.character_changes(reg, m, [{"label": c.label, "cls": c.cls, "spec": new, "offspec": off}]))
+    lines = [head, *[e["text"] for e in fx], *(_seat_told(v, fx) if _freed(fx) else [])]
+    if _freed(fx):
+        lines.append(f"A released seat stays released if {v.they} switch back.")
+    return lines
+
+
+def flex_consequence(reg: Registry, rs, m, label: str, roles: list[str], *, by_id: int | None = None) -> list[str]:
+    """The roles a character could also play if asked (Registry.set_flex drops the ones its spec and offspec already
+    give); the planner's Suggest… and Fill seats… ask a character to cover them."""
+    from .constants import ROLES
+    from .registry import join_words
+
+    v = _Voice(reg, m, by_id)
+    c = _char(reg, m, label, v)
+    own = {reg.profile.spec(c.cls, c.spec).role} | ({reg.profile.spec(c.cls, c.offspec).role} if c.offspec else set())
+    extra = [r for r in ROLES if r in {str(x).strip().lower() for x in roles or []} and r not in own]
+    if set(extra) == set(c.flex):
+        raise RegistryError(f"{c.label} can already play {join_words(extra)} when asked." if extra else f"{c.label} already plays only what its spec and offspec give.")
+    if extra:
+        return [f"{v.Whose} character {c.label} could also play {join_words(extra)} when asked.",
+                "Fill seats can ask it to cover those roles when a run is short."]
+    return [f"{v.Whose} character {c.label} plays only what its spec and offspec give.", "Fill seats stops asking it to cover other roles."]
+
+
+def rank_consequence(reg: Registry, m, rank: str, *, by_id: int | None = None) -> list[str]:
+    """The member's rank (D25: on the main; officers only, never your own — the owner aside — and never alt)."""
+    v = _Voice(reg, m, by_id)
+    if v.own and not v.owner:
+        raise RegistryError("Another officer sets your rank.")
+    rank = str(rank or "").strip().lower()
+    if rank not in RANK_CHOICES:
+        raise RegistryError(f"A rank is {', '.join(RANK_CHOICES[:-1])} or {RANK_CHOICES[-1]}.")
+    if m is None or m.main is None:
+        raise RegistryError(f"{m.display_name if m else 'They'} has no main yet, and rank lives on the main.")
+    if m.rank == rank:
+        raise RegistryError(f"{v.Whose} rank is already {rank}.")
+    return [f"{v.Whose} rank goes from {m.rank} to {rank}.", f"It lives on {v.their} main and counts for who gets a seat from the next lock."]
+
+
+def confirm_consequence(reg: Registry, m, label: str, *, by_id: int | None = None) -> list[str]:
+    """An officer's check that a character is real and theirs (Registry.confirm): never your own (the owner aside);
+    the member hears it on their Me page (a notice — never a DM)."""
+    v = _Voice(reg, m, by_id)
+    c = _char(reg, m, label, v)
+    if v.own and not v.owner:
+        raise RegistryError("Another officer confirms your characters.")
+    if c.status != "active" or not c.name:
+        raise RegistryError("A planned character is confirmed once it has a name.")
+    if c.confirmed_by:
+        raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
+    return [f"{v.Whose} character {c.label} is confirmed as {_a(c.spec)} {c.cls}.", *([] if v.own else ["They see it on their Me page."])]
+
+
+def dm_consequence(reg: Registry, m, on: bool, *, by_id: int | None = None) -> list[str]:
+    """DMs on or off (Registry.set_dm) — the Members page's Turn DMs on / off for <name>…."""
+    v = _Voice(reg, m, by_id)
+    if bool(on) == (not m.dm_opt_out):
+        raise RegistryError(f"{v.Whose} DMs are already {'on' if on else 'off'}.")
+    if on:
+        return [f"{v.Whose} Confirm and fill asks arrive as a DM with two buttons.", f"They also show on {v.their} Me page.",
+                "DMs can be turned off again at any time."]
+    return [f"{v.Whose} Confirm and fill asks wait on {v.their} Me page and the sheet.", f"The bot sends {'you' if v.own else 'them'} no DM.",
+            "DMs can be turned on again at any time."]
+
+
+def back_consequence(reg: Registry, rs, m, start: str, *, by_id: int | None = None) -> list[str]:
+    """I'm back (discord_people.im_back): the absence goes, an open sheet it had answered No thanks opens again, a seat
+    it released stays released (discord_people.absence_clear_lines — one sentence per run)."""
+    from . import discord_people
+
+    v = _Voice(reg, m, by_id)
+    a = next((x for x in (m.absences if m else []) if x.start == str(start).strip()), None)
+    if a is None:
+        raise RegistryError(f"No absence starting {reg.day_label(str(start).strip())}.")
+    when = f"on {reg.day_label(a.start)}" if a.end == a.start else f"from {reg.day_label(a.start)} to {reg.day_label(a.end)}"
+    lines = discord_people.absence_clear_lines(reg, rs, m, a)
+    return [f"{v.Whose} absence {when} is cleared.", *(lines or [NO_SHEET_CHANGES]), f"Record it again if {v.theyre} still away."]
+
+
+def save_consequence(reg: Registry, rs, m, rows: list[dict]) -> list[str]:
+    """A member's edited rows saved in one go (the Members page's Save <name>'s characters, the Me page's Save): one
+    sentence per fate in the live runs (rc.character_preview); [] = nothing beyond the record changes, and the first
+    press saves."""
+    if rs is None or m is None:
+        return []
+    return rc.character_preview(reg, rs, m, rc.character_changes(reg, m, rows))
+
+
+def people_consequence(reg: Registry, rs, m, verb: str, *, by_id: int | None = None, label: str | None = None, spec: str | None = None,
+                       offspec: str | None = None, roles: list[str] | None = None, rank: str | None = None, on: bool | None = None,
+                       start: str | None = None, rows: list[dict] | None = None) -> list[str]:
+    """THE people confirm: the generator of `verb` (PEOPLE_VERBS) with its arguments. Raises RegistryError (one sentence)
+    when the change can't go."""
+    if m is None:
+        raise RegistryError("They have nothing on file.")
+    if verb == "retire":
+        return retire_consequence(reg, rs, m, label, by_id=by_id)
+    if verb == "delete":
+        return delete_consequence(reg, rs, m, label, by_id=by_id)
+    if verb == "main":
+        return main_consequence(reg, rs, m, label, by_id=by_id)
+    if verb == "spec":
+        return spec_consequence(reg, rs, m, label, spec, offspec, by_id=by_id)
+    if verb == "flex":
+        return flex_consequence(reg, rs, m, label, roles or [], by_id=by_id)
+    if verb == "rank":
+        return rank_consequence(reg, m, rank, by_id=by_id)
+    if verb == "confirm":
+        return confirm_consequence(reg, m, label, by_id=by_id)
+    if verb == "dm":
+        return dm_consequence(reg, m, bool(on), by_id=by_id)
+    if verb == "back":
+        return back_consequence(reg, rs, m, start, by_id=by_id)
+    if verb == "save":
+        return save_consequence(reg, rs, m, rows or [])
+    raise ValueError(f"unknown people verb {verb}")
+
+
+__all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "OTHER_TOKEN", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
+           "VERBS", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
+           "flex_consequence", "main_consequence", "people_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
+           "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 

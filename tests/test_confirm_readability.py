@@ -128,13 +128,22 @@ class Dump:
     def __init__(self, names: set[str]):
         self.names, self.blocks, self.problems = names, [], []
 
-    def add(self, generator: str, case: str, lines, extra_names: set[str] = frozenset()):
+    def add(self, generator: str, case: str, lines, extra_names: set[str] = frozenset(), fates=()):
+        """`fates`: the lines that are a ripple into runs, one sentence per fate (rc.character_effects, an absence's
+        sheets — design §5.57 "one sentence per fate"): each is linted as a confirm of its own, and the rest of the
+        lines (what changes · who is told · what can be undone) as one confirm of at most three sentences. The file
+        shows them together, as the screen does."""
         if isinstance(lines, str):
             lines = [lines]
         lines = [str(x) for x in (lines or [])]
         self.blocks.append(f"## {generator} · {case}\n" + ("\n".join(lines) if lines else "(nothing)"))
-        for p in lint(lines, self.names | set(extra_names)):
+        fates = [f for f in fates if f in lines]
+        names = self.names | set(extra_names)
+        for p in lint([x for x in lines if x not in fates], names):
             self.problems.append(f"{generator} · {case}: {p}")
+        for f in fates:
+            for p in lint([f], names):
+                self.problems.append(f"{generator} · {case} · a fate: {p}")
 
     def write(self):
         text = "\n\n".join(self.blocks) + "\n"
@@ -349,6 +358,9 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     for e in rc.character_effects(reg, rs, opener, {"kind": "main", "label": "Spareling"}):
         dump.add("character_effects(main)", "a new main", e["text"])
 
+    # ---- people (design §5.58): one generator per people verb, by an officer and on the member's own record
+    people_cases(reg, rs, runs, ms, dump)
+
     # ---- the loot council's End and the done line
     from oibot_gm.discord_loot import LootMixin
 
@@ -522,6 +534,86 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
 
     dump.write()
     assert not dump.problems, f"{len(dump.problems)} confirm sentences break the Confirm rule:\n" + "\n".join(dump.problems)
+
+
+def _said(fn, *a, **kw) -> list[str]:
+    """A people generator's sentences, or its refusal (RegistryError: one sentence) — both are read before a press."""
+    from oibot_gm.registry import RegistryError
+
+    try:
+        return fn(*a, **kw)
+    except RegistryError as e:
+        return [str(e)]
+
+
+def people_cases(reg, rs, runs, ms, dump):
+    """Every people generator (consequences.people_consequence) across its cases: an officer on someone, and the member
+    on their own record ("your"); a rostered main with an alt, an alt, a lone main; a role flip on a recurring and an
+    ad hoc run; the refusals."""
+    tank = ms[1]  # rostered on the locked runs
+    reg.add_character(tank.discord_id, tank.display_name, "Briarvane", "Warrior", "Arms", None, False)
+    tank = reg.members[tank.discord_id]
+    solo, _c = reg.add_character(REAL + 60, "Solo", "Soloist", "Mage", "Fire", None, True)
+    fates = lambda m, changes: rc.character_preview(reg, rs, m, changes)  # noqa: E731
+    for who, by in (("an officer", OFFICER_ID), ("own record", tank.discord_id)):
+        main, alt = tank.main.label, "Briarvane"
+        for verb in ("retire", "delete"):
+            for which, label in (("a rostered main with an alt", main), ("an alt", alt)):
+                dump.add(f"{verb}_consequence", f"{which}, {who}", _said(cq.people_consequence, reg, rs, tank, verb, by_id=by, label=label),
+                         fates=fates(tank, [{"kind": verb, "label": label}]))
+            dump.add(f"{verb}_consequence", f"a lone main, {who}", _said(cq.people_consequence, reg, rs, solo, verb, by_id=solo.discord_id if who == "own record" else by,
+                                                                        label=solo.main.label), {"Solo", "Soloist"})
+        dump.add("main_consequence", f"an alt becomes the main, {who}", _said(cq.main_consequence, reg, rs, tank, alt, by_id=by),
+                 fates=fates(tank, [{"kind": "main", "label": alt}]))
+        dump.add("main_consequence", f"already the main, {who}", _said(cq.main_consequence, reg, rs, tank, main, by_id=by))
+        dump.add("spec_consequence", f"a role flip on a recurring and an ad hoc run, {who}", _said(cq.spec_consequence, reg, rs, tank, main, "Arms", None, by_id=by),
+                 fates=fates(tank, rc.character_changes(reg, tank, [{"label": main, "cls": "Warrior", "spec": "Arms"}])))
+        dump.add("spec_consequence", f"an offspec only, {who}", _said(cq.spec_consequence, reg, rs, tank, main, "Protection", "Arms", by_id=by))
+        dump.add("spec_consequence", f"nothing changes, {who}", _said(cq.spec_consequence, reg, rs, tank, main, "Protection", None, by_id=by))
+        dump.add("flex_consequence", f"two extra roles, {who}", _said(cq.flex_consequence, reg, rs, tank, main, ["healer", "ranged"], by_id=by))
+        tank.main.flex = ["healer"]
+        dump.add("flex_consequence", f"cleared, {who}", _said(cq.flex_consequence, reg, rs, tank, main, [], by_id=by))
+        dump.add("flex_consequence", f"the same roles, {who}", _said(cq.flex_consequence, reg, rs, tank, main, ["healer"], by_id=by))
+        tank.main.flex = []
+        dump.add("rank_consequence", f"trial to core, {who}", _said(cq.rank_consequence, reg, tank, "core", by_id=by))
+        dump.add("rank_consequence", f"the same rank, {who}", _said(cq.rank_consequence, reg, tank, tank.rank, by_id=by))
+        dump.add("rank_consequence", f"alt, {who}", _said(cq.rank_consequence, reg, tank, "alt", by_id=by))
+        dump.add("confirm_consequence", f"a named character, {who}", _said(cq.confirm_consequence, reg, tank, alt, by_id=by))
+        for on in (False, True):
+            dump.add("dm_consequence", f"turn {'on' if on else 'off'}, {who}", _said(cq.dm_consequence, reg, tank, on, by_id=by))
+            tank.dm_opt_out = not on
+    tank.dm_opt_out = False
+    c = next(x for x in tank.active() if x.label == "Briarvane")
+    c.confirmed_by = "Officer"
+    dump.add("confirm_consequence", "already confirmed, an officer", _said(cq.confirm_consequence, reg, tank, "Briarvane", by_id=OFFICER_ID))
+    reg.set_plan(REAL + 61, "Planner", "Priest", "Holy", None, "main")
+    dump.add("confirm_consequence", "a planned character, an officer", _said(cq.confirm_consequence, reg, reg.members[REAL + 61], "Priest (Holy)", by_id=OFFICER_ID), {"Priest"})
+    nomain = SimpleNamespace(discord_id=REAL + 62, display_name="Nomain", main=None, rank=None, dm_opt_out=False)
+    dump.add("rank_consequence", "no main yet, an officer", _said(cq.rank_consequence, reg, nomain, "core", by_id=OFFICER_ID), {"Nomain"})
+    # I'm back: an absence over the open sheet it answered No thanks, and one that touched no sheet
+    ev = runs["open recurring"]
+    m = ms[0]
+    day = rc.run_day(reg, ev)
+    reg.add_absence(m.discord_id, day, day, None, "t")
+    rc.set_signup(reg, rs, ev, m, None, "out", source="absence")
+    far = (reg.now_local().date() + timedelta(days=60)).isoformat()
+    reg.add_absence(m.discord_id, far, (reg.now_local().date() + timedelta(days=62)).isoformat(), None, "t")
+    for who, by in (("an officer", OFFICER_ID), ("own record", m.discord_id)):
+        a = next(x for x in m.absences if x.start == day)
+        dump.add("back_consequence", f"an open sheet answered for it, {who}", _said(cq.back_consequence, reg, rs, m, day, by_id=by),
+                 fates=discord_people.absence_clear_lines(reg, rs, m, a))
+        dump.add("back_consequence", f"no sheet touched, {who}", _said(cq.back_consequence, reg, rs, m, far, by_id=by))
+    dump.add("back_consequence", "no such absence", _said(cq.back_consequence, reg, rs, m, "2020-01-01", by_id=OFFICER_ID))
+    rc.set_signup(reg, rs, ev, m, None, "in", source="member")
+    # a Save of edited rows: one sentence per fate (the ripple), nothing else
+    rows = [{"label": tank.main.label, "cls": "Warrior", "spec": "Arms"}]
+    out = cq.save_consequence(reg, rs, tank, rows)
+    dump.add("save_consequence", "a respec on two locked runs", out, fates=out)
+    # Remove record with one, two and many characters
+    from oibot_gm import discord_registry
+
+    dump.add("remove_record_consequence", "two characters", discord_registry.remove_record_consequence(reg, tank))
+    dump.add("remove_record_consequence", "no characters", discord_registry.remove_record_consequence(reg, SimpleNamespace(display_name="Pell", characters=[])), {"Pell"})
 
 
 def test_the_lint_catches_the_two_blobs():

@@ -781,7 +781,7 @@ def import_members(rows: list[dict], preview: bool = False, guild: Guild = None)
 
 @mcp.tool()
 def set_member(member: str, character: str | None = None, rank: str | None = None, confirm: bool | None = None, main: str | None = None, guild: Guild = None) -> str:
-    """Officer edits of one member's record: `rank` (trial|raider|core|alt|social — the MEMBER's rank, stored on their main;
+    """Officer edits of one member's record: `rank` (trial|raider|core|social, never alt — the MEMBER's rank, stored on their main;
     naming an alt as `character` is refused), `confirm=true` (verify `character`, default the main), `main` (character
     name that becomes their main — the rank moves with it). Any subset. A rank or a confirm is a decision about a person
     (D8): it is sent as OIBOT_MCP_ACTOR (X-Oibot-Actor) and refused without it; `main` alone is the owner's token."""

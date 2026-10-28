@@ -77,6 +77,17 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   it on the Me page or with `/me char` and `/me absent`; officers can edit it for you, and they set your rank.
 - **Main / alt** — your main is the character you raid on by default (one per member; your rank is on it); alts are
   your other characters.
+- **Rank** — the member's standing: *trial*, *raider*, *core* or *social*. It lives on the main and counts for who gets a
+  seat; every alt reads *alt*, which is never a rank an officer gives. Only another officer sets yours.
+- **Confirm a character** — an officer's check that a newly registered character is real and is the member's; until
+  then it *waits for a confirm*. It is not a run's **Confirm** (the rostered saying they will come). Another officer
+  confirms yours; the member sees it on their Me page. Officers walk the waiting ones with **Confirm characters…** on
+  the Members page or `/roster confirm`.
+- **Retire / delete** — **retire** takes a character off sheets, rosters and the regulars and keeps it on the record as
+  retired, with its history; **delete** removes it from the record for good. Either way a seat it holds is released.
+  Prefer retire.
+- **Not in the server** — the bot noticed this member is not in the guild's Discord server (they left, or were imported
+  from a signup list and never joined). Their record stays until an officer uses **Remove record…**.
 - **Puppets** — pretend members the **test bench** creates for rehearsals (`/gm test seed`, or the Test bench card on
   the Members page). They only ever take part in test runs.
 - **The council** — the loot council for a run: code scores each candidate, the bot explains the pick against the
@@ -241,7 +252,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
 - **Your characters: `/me char`** — one command. Alone it lists your characters and asks what to change; with
   `action:` (Spec · Main · Flex · Retire · Delete · Name a planned character · Add an alt) it goes straight there. You
   pick the character from your own list (spec choices are always that character's class), then one confirm screen
-  says what changes — and what it does beyond your record, worked out by the bot: *"Larkspur's healer seat for Barrow
+  says what changes (*"Your character Larkspur retires, and Wrenna becomes your main with rank core."*) — and what it
+  does beyond your record, worked out by the bot: *"Larkspur's healer seat for Barrow
   Deeps on Tue 9 Dec is released. The bench is asked to fill it."*, *"The Join answer for … now reads Shadow."*,
   *"Larkspur stops being a regular of Barrow Deeps Raid nights, because retired characters aren't regulars."*. The Me page's characters card and telling
   the bot do exactly the same (one verb behind all three).
@@ -262,8 +274,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     answer now names Stormcall"*); answers and seats it holds take the new name.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
-  it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page's rank select) — never
-  your own (the owner aside), and never on an alt.
+  it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
+  owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.
 - **Extra roles**: your role follows your spec and your offspec counts as flex; `/me char action:Flex` (or the Me
   page's *Flex* column in Edit) picks roles a character could also play — only the roles its spec and offspec don't
   already give — and telling the bot does too ("I can also tank on Xanthe", "no extra roles on Jonny").
@@ -883,7 +895,9 @@ edits that new family and leaves the one it shared alone.
   (Discord's own picker) and a fixed choice; the character, rank or schedule is picked from a list and confirmed before anything saves.
   `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete), with the
   same ripple on the confirm screen; `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the
-  member's (on the main): no character to pick. `/roster confirm` alone walks the unconfirmed characters — never your
+  member's (on the main): no character to pick, and the choices are trial, raider, core and social. Every confirm names
+  the member once (*"Kestrel's character Kestrelle retires, and …"*) and prints the same sentences as the Members page.
+  `/roster confirm` alone walks the characters waiting for a confirm (§1a) — never your
   own (self-confirm defeats the badge; the owner aside); the member sees it on their Me page, no DM. Rank, confirm
   and every character change go through the one character save, whichever surface you use (Discord, the Members page,
   plain text, MCP), so two officers at once never half-apply each other's change.
@@ -906,11 +920,13 @@ edits that new family and leaves the one it shared alone.
   `/roster applicant member: decision: [note:]` (the same one confirm screen as the card's buttons), the Accept /
   Decline… buttons on the review card, the Applications page, or plain text ("accept Nyx", "decline nyxie: full on
   healers") (§3a).
-- Someone who **left the Discord server**: their record stays. The bot marks when they left as soon as Discord tells it
-  so — when it looks them up (a page, a DM, a sheet) or in its hourly check of the registered members (about twenty per
-  hour) — and clears the mark if they come back. The
-  Members page lists them under **Left the server** with **Remove record…** (one confirm saying what goes and what stays;
-  loot already awarded stays in the ledger); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
+- Someone **not in the Discord server** (§1a): their record stays. The bot notes the day it noticed as soon as Discord
+  tells it so — when it looks them up (a page, a DM, a sheet) or in its hourly check of the registered members (about
+  twenty per hour) — and clears the mark if they come back. Someone imported from a signup list who never joined reads
+  the same way: the bot knows they are not in the server, not that they left. The
+  Members page lists them with *not in the server · noticed Sun 25 Oct* and **Remove record…** (one confirm saying what
+  goes and what stays: *"Orrin's record goes, with Wrenna, their absences, wishlists and notices. Loot already awarded
+  stays in the ledger, and nobody gets a DM. …"*); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
   while they're still in the server or hold a seat on a live run. Members can't delete their own record.
 - Runs: `/raid open|sheet|health|fill|lock|set|cancel|list|loot|distribute|end` (officers) and `/raid out` (anyone).
   They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member

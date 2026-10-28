@@ -87,16 +87,19 @@ async def save_characters(bot, reg: Registry, uid: int, rows: list[dict], by: st
     characters_rev the editor loaded; `officer` False refuses rank and confirm) in a worker thread, then the ripple on the
     loop — sheet answers rewritten or cleared, a seat on a retired / deleted / respecced character handed back and the
     bench asked (RaidMixin.drop_seated), a role flip on a locked recurring run kept and told to the officers — and one
-    audit line. `preview` writes nothing: the same refusals, and the ripple sentences.
-    Returns {"lines": what changed on the record, "ripple": the sentences, "message": one line for a reply}."""
+    audit line. `preview` writes nothing: the same refusals, and the ripple sentences (consequences.save_consequence —
+    also as `sentences`, the confirm's words). Returns {"lines": what changed on the record, "ripple": the sentences,
+    "message": one line for a reply}."""
     m = reg.members.get(uid)
     who = m.display_name if m else by
     rs = _rs(bot, reg)
     if preview:
-        changes = rc.character_changes(reg, m, rows)
-        ripple = rc.character_preview(reg, rs, m, changes) if rs is not None and m is not None else []
+        from .consequences import save_consequence
+
+        ripple = save_consequence(reg, rs, m, rows)  # THE Save confirm: one sentence per fate in the live runs (design §5.58)
         await asyncio.to_thread(reg.check_character_table, uid, rows, by, officer=officer, by_id=by_id, rev=rev)
-        return {"lines": [], "ripple": ripple, "message": f"preview — nothing saved: {who}" + (": " + "; ".join(ripple) if ripple else ": nothing else changes")}
+        return {"lines": [], "ripple": ripple, "sentences": list(ripple),
+                "message": f"preview — nothing saved: {who}" + (": " + "; ".join(ripple) if ripple else ": nothing else changes")}
 
     def locked_save():
         # the changes are read from the record the save applies to — under the same config_lock, so a save that lands

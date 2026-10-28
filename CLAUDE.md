@@ -60,7 +60,10 @@ src/oibot_gm/
                        puts the council's part in front), regular_remove(reg, m, key): the ONE confirm sentence from code (design §5.33, §5.56 phase 3);
                        ev_json.consequences carries it to the site (a regular's `remove` / an orphan's `clear` on /api/rosters), wizard.decide shows it in Discord
                        — under the Confirm rule (design §5.57): CONFIRM_DM, reopen_sentence, ended_line, series_words; rc.run_on / rc.refill_sentence /
-                       rc.no_confirm_sentence / rc.open_rules are the shared words; tests/test_confirm_readability.py renders and lints every generator
+                       rc.no_confirm_sentence / rc.open_rules are the shared words; tests/test_confirm_readability.py renders and lints every generator.
+                       People (design §5.58): people_consequence(reg, rs, m, verb, by_id=) → retire / delete / main / spec / flex / rank / confirm / dm /
+                       back / save _consequence ("your" on your own record, "<name>'s" then "they" for an officer; a refusal = RegistryError, one sentence);
+                       RANK_CHOICES (never alt); CharWizard, /roster confirm and the Members routes' `preview` print exactly these
   inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =

@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
+from .. import consequences as cq
 from ..consequences import consequence as consequence_lines, consequences_json, regular_remove as regular_remove_lines
 from ..presets import DURATIONS, PRESETS
 from ..registry import ABSENCE_REASON_MAX, DECISION_NOTE_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged, is_superuser
@@ -403,7 +404,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     async def clear_absence(request: Request, v, uid: int, start: str, preview: bool = False):
         """I'm back (discord_people.im_back): the absence goes, the sheets it had answered for them re-open; the lines
-        say what changed. `preview`: those lines, nothing written."""
+        say what changed. `preview`: those lines and `sentences` (the confirm's words), nothing written."""
         from .. import discord_people
 
         reg = v.reg
@@ -415,7 +416,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             if a is None:
                 return JSONResponse({"error": f"No absence starting {reg.day_label(str(start).strip())}."}, status_code=400)
             lines = discord_people.absence_clear_lines(reg, bot.raids.store(reg), m, a)
+            # `sentences` = THE I'm back confirm (consequences.back_consequence: "your" on the Me page, the name on Members)
             return {"preview": True, "lines": lines, "span": reg.span_label(a.start, a.end),
+                    "sentences": cq.back_consequence(reg, bot.raids.store(reg), m, a.start, by_id=v.uid),
                     "message": f"preview — nothing saved: {m.display_name} back, {reg.span_label(a.start, a.end)} cleared" + "".join(f"\n{ln}" for ln in lines)}
         try:
             a, lines = await discord_people.im_back(bot, reg, uid, start, v.name, by_id=v.uid, via=v.via)
@@ -1789,8 +1792,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                                                   dm=bool(d.get("dm_open") or d.get("dm")), by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"test run {ev.key} open: starts {t12(reg, ev.starts_at)}, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before",
-                "key": ev.key}
+        return {"message": f"The test run {test_run_row(reg, ev)['title']} is open. It locks in {start_in - lock_in} min and starts in {start_in} min.",
+                "key": ev.key, "week": tempo_week(start_in, nudge_in, lock_in, confirm_in)}
 
     async def test_answer_do(v, d) -> dict:
         reg, rs = v.reg, bot.raids.store(v.reg)
@@ -1831,6 +1834,22 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     TEST_ACTIONS = {"seed": test_seed_do, "run": test_run_do, "answer": test_answer_do, "clear": test_clear_do, "compose": test_compose_do, "comp": test_comp_do}
 
+    def in_minutes(n: int) -> str:
+        return "now" if n <= 0 else f"in {n} min"
+
+    def tempo_week(start_in: int, nudge_in: int, lock_in: int, confirm_in: int) -> list[dict]:
+        """A test tempo as the run's week (the RunStrip's steps, week_json's keys): the sheet opens now, the reminder, the
+        lock and the confirm-by time counted from now, then the raid — `when` in words ('in 8 min')."""
+        now = datetime.now().astimezone()
+        marks = [("signup_lead_hours", 0), ("nudge_hours_before", start_in - nudge_in), ("lock_hours_before", start_in - lock_in),
+                 ("confirm_hours_before", start_in - confirm_in), ("raid", start_in)]
+        return [{"step": k, "when": in_minutes(n), "at": (now + timedelta(minutes=n)).isoformat(), "done": n <= 0} for k, n in marks]
+
+    def test_title(reg, rs, key: str) -> str:
+        """A test run's title for the feed: '<raid> · <12-hour start>' (test_run_row's), or words for one already gone."""
+        ev = rs.events.get(key) if rs is not None else None
+        return test_run_row(reg, ev)["title"] if ev is not None and ev.instance else "a test run that has ended"
+
     @app.get("/api/test")
     async def test_state(request: Request):
         """The bench as the site's Test bench card shows it: puppets, live test runs, whether a test run can open from
@@ -1851,17 +1870,25 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "runs": [test_run_row(reg, e) for e in test_runs(reg, rs)],
                 "signup_channel": {"set": bool(sid), "name": getattr(ch, "name", None)},
                 "open_refusal": bench_channel_refusal(reg, get_channel),  # the same words open_test_run refuses with
-                "tempos": [{"id": k, "label": t[0], "start_in": t[1], "nudge_in": t[2], "lock_in": t[3], "confirm_in": t[4]} for k, t in TEMPOS.items()],
+                # each tempo's week in the Rosters strip's shape (RunStrip: {step, when, at, done}, week_json) — the bench draws the
+                # run's week in the server's words, never a line the browser assembles
+                "tempos": [{"id": k, "label": t[0], "start_in": t[1], "nudge_in": t[2], "lock_in": t[3], "confirm_in": t[4], "week": tempo_week(*t[1:])}
+                           for k, t in TEMPOS.items()],
                 "default_tempo": DEFAULT_TEMPO, "clear_consequence": test_clear_consequence(reg, rs)}
 
     @app.get("/api/test/feed")
     async def test_feed(request: Request, run: str | None = None, after: int = 0):
         """The test feed: every card, puppet DM, scheduler step and answer of the guild's test runs, oldest first
-        (`run` = one run's; `after` = only events newer than that seq). In this process only — nothing is stored."""
+        (`run` = one run's; `after` = only events newer than that seq), each with its run's `title` ('<raid> · <start>',
+        never the key); `titles` = run key → title. In this process only — nothing is stored."""
         from .. import testfeed
 
         v = await who(request, officer=True)
-        return {"events": testfeed.FEED.events(v.reg.key, run or None, after=int(after or 0)), "runs": testfeed.FEED.runs(v.reg.key)}
+        rs = bot.raids.store(v.reg)
+        runs = testfeed.FEED.runs(v.reg.key)
+        titles = {k: test_title(v.reg, rs, k) for k in runs}
+        events = [{**e, "title": titles.get(e["run"]) or test_title(v.reg, rs, e["run"])} for e in testfeed.FEED.events(v.reg.key, run or None, after=int(after or 0))]
+        return {"events": events, "runs": runs, "titles": titles}
 
     @app.post("/api/test/seed")
     async def test_seed(request: Request):
@@ -1976,11 +2003,37 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "rev": reg.config_rev("buffs"), "reset_sentence": reg.aura_reset_sentence()}  # rev: an edit-mode Save sends it back as revs["config:buffs"]
 
     # ---- members: every member's characters and absences; officers edit them like their own Me page
+    ASK_CHANNEL = {"dm": "asked by DM", "web": "waits on their Me page"}  # how an open Confirm ask reaches them (the ask's channel)
+
+    def live_asks(reg, rs, m) -> list[dict]:
+        """A member's open Confirm asks on LIVE runs only (an ask on a run that ended or went is not something to chase):
+        {roster, answer, raid, when, key (the run's, to link to it), words (rc.run_on — '<raid> on <day>'), line (the
+        standing line: '<raid> on <day> waits for their Confirm'), how (dm | web), how_words}."""
+        out = []
+        for a in m.placement_asks:
+            if a.get("answer") is not None:
+                continue
+            ev = next((e for e in sorted(rs.live(), key=lambda e: e.starts_at) if e.team == a["roster"]), None)
+            if ev is None:
+                continue
+            how = "web" if a.get("channel") == "web" or m.dm_opt_out else "dm"
+            words = rc.run_on(reg, ev)
+            out.append({"roster": a["roster"], "answer": None, "raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "a run",
+                        "when": t12(reg, ev.starts_at), "key": ev.key, "words": words, "line": f"{words} waits for their Confirm",
+                        "how": how, "how_words": ASK_CHANNEL[how]})
+        return out
+
     @app.get("/api/members")
     async def members(request: Request):
         """Every member (characterless ones too — an officer may still record an absence, switch DMs or see a pending
         ask), their characters, rank (D25: the member's, on the main), DM setting, upcoming absences and the table's base
-        rev. Test puppets only for the officers who may change them (the live rehearsal's tester, the owner)."""
+        rev. Test puppets only for the officers who may change them (the live rehearsal's tester, the owner).
+        Design §5.58: `left` = when the bot noticed they are not in the Discord server (Member.left_at, in words; null
+        while they are) with `left_line` and `remove_consequence` (Remove record's sentence); `test` (a puppet); `asks` =
+        open Confirm asks on live runs only (live_asks); `attendance` = Registry.attendance_text; the payload's
+        `rank_choices` = the ranks an officer gives (never alt) and `pending` = characters waiting for an officer's confirm."""
+        from ..discord_registry import remove_record_consequence
+
         v = await who(request, officer=True)
         reg = v.reg
         ms = sorted((m for m in reg.members.values() if visible(v, m)), key=lambda m: m.display_name.lower())
@@ -1990,19 +2043,24 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rows = []
         for m, p in zip(ms, privs):
             chars = sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))
+            left = reg.local12(m.left_at, "%a %d %b") if m.left_at and not m.test else None
             rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else p,
-                         "rank": m.rank, "dm": not m.dm_opt_out, "characters_rev": reg.characters_rev(m),
+                         "rank": m.rank, "dm": not m.dm_opt_out, "characters_rev": reg.characters_rev(m), "test": bool(m.test),
                          "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in chars], "absences": [absence_json(reg, a) for a in m.upcoming_absences(today)],
-                         "asks": [{"roster": a["roster"], "answer": a.get("answer"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-3:] if a.get("answer") is None]})
-        return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone}
+                         "asks": live_asks(reg, rs, m), "attendance": reg.attendance_text(m) if not m.test else None,
+                         "left": left, "left_line": f"not in the server · noticed {left}" if left else None,
+                         "remove_consequence": remove_record_consequence(reg, m) if left else None})
+        pending = sum(1 for r in rows for c in r["characters"] if c["status"] == "active" and c["name"] and not c["confirmed"])
+        return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone, "rank_choices": list(cq.RANK_CHOICES), "pending": pending}
 
     @app.post("/api/members/save")
     async def members_save(request: Request):
         """One save for the whole table: per member {uid | member, characters, deletes, rev} through THE character verb
         (officer: rank on the main and confirm allowed; your own rank refused). Members whose `rev` moved are refused and
-        listed in `refused` (their rows stay drafted on the page); the others apply. `preview`: the ripple per member."""
+        listed in `refused` (their rows stay drafted on the page); the others apply. `preview`: the ripple per member, and
+        `sentences` = [{uid, display_name, sentences}] — the confirm's words (consequences.save_consequence)."""
         v, d = await body(request, officer=True)
-        reg, done, ripple, refused_rows = v.reg, [], [], []
+        reg, done, ripple, refused_rows, said = v.reg, [], [], [], []
         preview = bool(d.get("preview"))
         people_actor(v, [c for row in d.get("rows") or [] if isinstance(row, dict) for c in (row.get("characters") or [])], preview)  # before any member saves
         for row in d.get("rows") or []:
@@ -2024,11 +2082,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 continue
             done.extend(f"{line} ({m.display_name})" for line in out["lines"])
             ripple.extend(f"{m.display_name}: {r}" for r in out["ripple"])
+            if preview:  # THE Save confirm per member (consequences.save_consequence): one sentence per fate, [] = the first press saves
+                said.append({"uid": str(m.discord_id), "display_name": m.display_name, "sentences": list(out.get("sentences") or [])})
         head = ("preview — nothing saved" if preview else "; ".join(done) or "no changes")
         if refused_rows and not done and not ripple and not preview:
             return JSONResponse({"error": "; ".join(f"{r['display_name']}: {r['error']}" for r in refused_rows), "refused": refused_rows}, status_code=409 if all(r["stale"] for r in refused_rows) else 400)
         return {"message": head + "".join(f"\n{r}" for r in ripple) + "".join(f"\n⛔ {r['display_name']}: {r['error']}" for r in refused_rows),
-                "lines": done, "ripple": ripple, "refused": refused_rows, "preview": preview}
+                "lines": done, "ripple": ripple, "refused": refused_rows, "preview": preview, **({"sentences": said} if preview else {})}
 
     @app.post("/api/members/import")
     async def members_import(request: Request):
@@ -2083,20 +2143,30 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 for m in reg.members.values() if visible(v, m) for a in (m.absences if all else m.upcoming_absences(today))]
         return {"rows": sorted(rows, key=lambda r: (r["start"], r["display_name"])), "today": today, "tz": reg.config.timezone}
 
+    SET_VERBS = ("main", "rank", "confirm", "retire", "delete", "spec", "flex")  # the order one request applies them in
+
     @app.post("/api/members/set")
     async def members_set(request: Request):
-        """Officer edits of one member the way the Discord commands do: `rank` (D25: the member's, on the main — a
-        `character` that is an alt is refused), `confirm` (true: `character`, default the main, is verified), `main` (a
-        character becomes the main; the rank moves with it). Any subset, as ONE character-table save through THE character
-        verb (discord_people.save_characters: under the registry's lock, validated on a copy, one audit line) — main first,
-        then rank, then confirm. A `character` that isn't one of theirs is refused, never read as the main; your own rank
-        and your own characters' confirm are refused (the owner aside)."""
+        """THE one-member route (design §5.58) — every press of the Members page's ⋮ menus and its Confirm characters…
+        walk, MCP set_member — as ONE character-table save through THE character verb (discord_people.save_characters:
+        under the registry's lock, validated on a copy, the ripple into runs, one audit line). Body {uid | member,
+        character?, rev?, preview?} plus any of: `main` (a label, or true with `character`; the rank moves with it), `rank`
+        (D25: the member's, on the main; trial · raider · core · social, never alt), `confirm` (true: `character`, default
+        the main), `retire` / `delete` (a label, or true with `character`), `spec` (+ `offspec`; "" clears it, absent keeps
+        it; `character` default the main), `flex` (a list of roles; `character` default the main). Applied main, rank,
+        confirm, retire, delete, spec, flex. `preview` writes nothing and answers {sentences, rev}: THE confirm words
+        (consequences.people_consequence — Discord's /roster char decide screen prints the same) after the save's own
+        refusals; a refusal is a 400 with one sentence. `rev` (the characters_rev the page loaded) makes a write refuse
+        with 409 when the record changed meanwhile. A `character` that isn't one of theirs is refused, never read as the
+        main; your own rank and your own characters' confirm are refused (the owner aside)."""
         v, d = await body(request, officer=True)
         reg = v.reg
         try:
             m = resolve_member(reg, member_ref(d))
         except HTTPException as e:
             return JSONResponse({"error": e.detail}, status_code=e.status_code)
+        preview = bool(d.get("preview"))
+        rs = bot.raids.store(reg)
 
         def own(ref: str):
             c = next((x for x in m.active() if x.label == ref), None) or next((x for x in m.active() if x.matches(ref)), None)
@@ -2104,18 +2174,27 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 raise RegistryError(f"{m.display_name} has no active character named {ref or '?'} (theirs: {', '.join(x.label for x in m.active()) or 'none'}).")
             return c
 
+        def picked(key: str, named, main):
+            """The character a verb acts on: its own label (a string value), else `character`, else the main."""
+            val = d.get(key)
+            c = own(val.strip()) if isinstance(val, str) and key in ("main", "retire", "delete") and val.strip() else (named or main)
+            if c is None:
+                raise RegistryError(f"{m.display_name} has no main yet, so name the character.")
+            return c
+
         rows: list[dict] = []
         notes: list[str] = []
+        said: list[str] = []
         try:
             ref = str(d.get("character") or "").strip()
             named = own(ref) if ref else None
             main = m.main
             if d.get("main"):
-                c = own(str(d["main"]).strip()) if isinstance(d["main"], str) else (named or main)
-                if c is None:
-                    raise RegistryError(f"{m.display_name} has no main yet — name the character that becomes it.")
+                c = picked("main", named, main)
                 if not c.is_main:
                     rows.append({"label": c.label, "main": True})
+                    if preview:
+                        said += cq.main_consequence(reg, rs, m, c.label, by_id=v.uid)
                 main, named = c, named or c
             if d.get("rank"):
                 c = named or main
@@ -2123,29 +2202,77 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                     raise RegistryError(f"{m.display_name} has no main yet — rank lives on the main.")
                 if c is not main:
                     raise RegistryError(f"{c.label} is an alt — rank lives on the main ({main.label if main else 'none yet'}).")
-                rows.append({"label": c.label, "rank": str(d["rank"]).strip().lower()})
+                rank = str(d["rank"]).strip().lower()
+                if rank not in cq.RANK_CHOICES:
+                    raise RegistryError(f"A rank is {', '.join(cq.RANK_CHOICES[:-1])} or {cq.RANK_CHOICES[-1]}.")
+                rows.append({"label": c.label, "rank": rank})
+                if preview and not d.get("main"):  # a rank riding on a new main: the main's sentence already says it moves
+                    said += cq.rank_consequence(reg, m, rank, by_id=v.uid)
             if d.get("confirm"):
                 c = named or main
                 if c is None:
                     raise RegistryError(f"{m.display_name} has no main yet — name the character to confirm.")
                 if c.confirmed_by:  # a "set" is declarative: already confirmed is already done
                     notes.append(f"{c.label} already confirmed by {c.confirmed_by}")
+                    if preview:
+                        raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
                 else:
                     rows.append({"label": c.label, "confirm": True})
+                    if preview:
+                        said += cq.confirm_consequence(reg, m, c.label, by_id=v.uid)
+            for verb in ("retire", "delete"):
+                if d.get(verb):
+                    c = picked(verb, named, main)
+                    rows.append({"label": c.label, verb: True})
+                    if preview:
+                        said += cq.people_consequence(reg, rs, m, verb, by_id=v.uid, label=c.label)
+            if d.get("spec"):
+                c = named or main
+                if c is None:
+                    raise RegistryError(f"{m.display_name} has no main yet, so name the character.")
+                off = (str(d.get("offspec") or "").strip() or None) if "offspec" in d else c.offspec
+                rows.append({"label": c.label, "cls": c.cls, "spec": str(d["spec"]).strip(), "offspec": off})
+                if preview:
+                    said += cq.spec_consequence(reg, rs, m, c.label, str(d["spec"]).strip(), off, by_id=v.uid)
+            if d.get("flex") is not None and "flex" in d:
+                c = named or main
+                if c is None:
+                    raise RegistryError(f"{m.display_name} has no main yet, so name the character.")
+                if not isinstance(d["flex"], list):
+                    raise RegistryError("Extra roles are a list of roles.")
+                roles = [str(r).strip().lower() for r in d["flex"] if str(r).strip()]
+                rows.append({"label": c.label, "flex": roles})
+                if preview:
+                    said += cq.flex_consequence(reg, rs, m, c.label, roles, by_id=v.uid)
         except Exception as e:  # noqa: BLE001
             return await refused(v, request, e)
         if not rows:
+            if preview:
+                return JSONResponse({"error": f"Nothing to change on {m.display_name}'s record."}, status_code=400)
             return {"message": "; ".join(notes) or f"{m.display_name}: no changes"}
-        out = await save_table(request, v, m.discord_id, rows, officer=True, rev=None, preview=False)
+        out = await save_table(request, v, m.discord_id, rows, officer=True, rev=d.get("rev"), preview=preview)
         if isinstance(out, JSONResponse):
             return out
+        if preview:
+            return {**out, "sentences": said, "rev": reg.characters_rev(m), "message": "preview — nothing saved: " + " ".join(said)}
         return {**out, "message": "; ".join([out["message"], *notes])}
 
     @app.post("/api/members/dm")
     async def members_dm(request: Request):
-        """Officer switches someone's DMs on/off (the Me page's toggle, for them): Registry.set_dm."""
-        def go(v, d):
+        """Officer switches someone's DMs on/off (the Me page's toggle, for them): Registry.set_dm. `preview` → {sentences}
+        (consequences.dm_consequence; a switch already in that state is a 400 with its sentence)."""
+        v, d = await body(request, officer=True)
+        try:
             m = resolve_member(v.reg, member_ref(d))
+        except HTTPException as e:
+            return JSONResponse({"error": e.detail}, status_code=e.status_code)
+        if d.get("preview"):
+            try:
+                return {"preview": True, "sentences": cq.dm_consequence(v.reg, m, bool(d.get("on")), by_id=v.uid)}
+            except RegistryError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+
+        def go(v, d):
             return v.reg.set_dm(m.discord_id, bool(d.get("on")), v.name)
         return await run(request, go, officer=True)
 

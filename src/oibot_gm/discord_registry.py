@@ -596,11 +596,11 @@ async def assign_member_role(client, reg: Registry, discord_id: int) -> str | No
 
 
 def remove_record_consequence(reg: Registry, m) -> str:
-    """THE sentence of an officer's Remove record (the decide screen, the Members page's confirm)."""
-    from .registry import join_words
-
-    chars = ", ".join(c.label for c in m.characters)
-    return (f"{m.display_name}'s record goes, along with " + (f"{chars}, " if chars else "") + "absences, wishlists and notices. "
+    """THE sentence of an officer's Remove record (the decide screen, the Members page's confirm, /api/admin/left) — under
+    the Confirm rule (design §5.57): what goes, what stays and who is told, then what a return means."""
+    chars = [c.label for c in m.characters]
+    what = (f"{chars[0]}, " if len(chars) == 1 else f"{chars[0]} and {chars[1]}, " if len(chars) == 2 else f"their {len(chars)} characters, " if chars else "")
+    return (f"{m.display_name}'s record goes, with {what}their absences, wishlists and notices. "
             "Loot already awarded stays in the ledger, and nobody gets a DM. If they come back, they register again from scratch.")
 
 

@@ -84,12 +84,12 @@ def test_confirm_walks_two_pending_in_a_row(reg, rs, officer):
         opt = h._items()[0].options
         assert any("Altone · Mage Fire · " + a.display_name == o.label for o in opt)
         await h.pick(h.selects()[0], pick_value(h, "Altone"))
-        assert "Confirm **Altone**" in h.text and a.display_name in h.text
-        assert "Me page (no DM)" in h.text and "get a DM" not in h.text, "the confirm screen says what the save does"
+        assert f"{a.display_name}'s character Altone is confirmed as a Fire Mage." in h.text  # consequences.confirm_consequence
+        assert "They see it on their Me page." in h.text and "get a DM" not in h.text, "the confirm screen says what the save does"
         await h.press("Confirm")
         assert "✅ Confirmed **Altone**" in h.text and "1 character waiting" in h.text
         await h.press("Confirm next")
-        assert "Confirm **Alttwo**" in h.text
+        assert "character Alttwo is confirmed as" in h.text
         await h.press("Confirm")
         assert "Nothing left to confirm" in h.text and h.screen["view"] is None
     run(go())
@@ -171,8 +171,9 @@ def test_rank_is_the_members_on_the_main(reg, rs, officer):
         await FLOWS["roster_rank"](h.command(), reg, member=user(m))
         assert h.selects() == ["Pick the rank"] and "lives on the main" in h.text  # straight to the rank: it is the member's
         assert [o.value for o in h._items()[0].options if o.default] == [before]
+        assert "alt" not in [o.value for o in h._items()[0].options]  # never a rank an officer gives (RANK_CHOICES)
         await h.pick("Pick the rank", "core")
-        assert f"**{before}** → **core**" in h.text and "Set the rank" in h.buttons()
+        assert f"{m.display_name}'s rank goes from {before} to core." in h.text and "Set the rank" in h.buttons()
         await h.press("Set the rank")
         assert "is now **core**" in h.text
     run(go())
@@ -204,8 +205,7 @@ def test_rank_of_yourself_is_refused(reg, rs, officer):
     async def go():
         await FLOWS["roster_rank"](h.command(), reg, member=user(me))
         await h.pick("Pick the rank", "core")
-        await h.press("Set the rank")
-        assert "your own rank" in h.text
+        assert "Another officer sets your rank." in h.text and "Set the rank" not in h.buttons()  # refused before the decide screen
     run(go())
     assert reg.members[me.discord_id].main.rank != "core"
 
@@ -220,7 +220,7 @@ def test_set_main(reg, rs, officer):
 
     async def go():
         await FLOWS["roster_set_main"](h.command(), reg, member=user(m))  # one other character: straight to the decide screen
-        assert "**Newmain** becomes" in h.text and "Rank core moves to Newmain" in h.text
+        assert f"Newmain becomes {m.display_name}'s main instead of {old}." in h.text and "Rank core moves to Newmain" in h.text
         await h.press("Make it the main")
         assert "Newmain is the main now" in h.text
     run(go())

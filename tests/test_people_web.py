@@ -121,23 +121,164 @@ def test_members_lists_characterless_members_and_hides_others_puppets(w):
     assert not any(r.get("test") for r in w.c.get("/api/absences", headers=h).json()["rows"])
 
 
-def test_members_ask_badge_never_reads_the_run_key(w):
-    """UI audit: an unanswered confirm ask whose run had ended showed on the Members page as "confirm BD-0917-1919?" —
-    the run key, its tail the 24-hour start. An ended run reads as its raid and 12-hour start; a key with no run file
-    left reads in words."""
-    import re
-
-    m = real(w.reg, 7)
-    ev = real_run(w.reg, w.rs)
-    ev.state = "done"
-    w.rs.save(ev, "test: ended")
-    m.placement_asks = [{"roster": ev.team, "character": m.characters[0].label, "asked_at": "2026-09-17T19:19:00+00:00", "answer": None},
-                        {"roster": "BD-0917-1919", "character": m.characters[0].label, "asked_at": "2026-09-17T19:19:00+00:00", "answer": None}]
+def test_members_asks_are_live_runs_only_in_words(w):
+    """Finding 1 (design §5.58): an unanswered Confirm ask whose run had ended still showed as live ("confirm Barrow Deeps
+    · Thu 17 Sep?"). Only an ask on a live run is listed, with the run's key (the link), '<raid> on <day>' and how it
+    reaches them; an ended run's ask and a key with no run file are gone. Never the run key as words."""
+    ms = [real(w.reg, i, cls="Mage", spec="Fire") for i in range(5)]
+    for m in ms:
+        w.bot.admit(m)
+    done = real_run(w.reg, w.rs, days=2)
+    done.state = "done"
+    w.rs.save(done, "test: ended")
+    ev = real_run(w.reg, w.rs, days=4)
+    join(w.reg, w.rs, ev, ms)
+    lock_with_board(w.reg, w.rs, ev, [m.display_name for m in ms])
+    m = ms[2]
+    w.reg.add_placement_ask(m.discord_id, ev.team, m.main.label, "lock", channel="web")
+    m.placement_asks = [{"roster": done.team, "character": m.main.label, "asked_at": "2026-09-17T19:19:00+00:00", "answer": None},
+                        {"roster": "BD-0917-1919", "character": m.main.label, "asked_at": "2026-09-17T19:19:00+00:00", "answer": None},
+                        *m.placement_asks]
     rows = w.c.get("/api/members", headers=as_user(w, OFFICER)).json()["rows"]
-    asks = next(r for r in rows if r["uid"] == str(m.discord_id))["asks"]
-    assert [a["key"] for a in asks] == [None, None]
-    assert asks[0]["raid"] == w.reg.raid_def(ev.instance).get("name", ev.instance) and re.search(r"\d{1,2}:\d{2} [AP]M", asks[0]["when"])
-    assert asks[1]["raid"] == "a run that has ended" and not any("1919" in a["raid"] or ev.team == a["raid"] for a in asks)
+    (a,) = next(r for r in rows if r["uid"] == str(m.discord_id))["asks"]
+    assert a["key"] == ev.key and a["words"] == rc.run_on(w.reg, ev) and a["line"] == f"{rc.run_on(w.reg, ev)} waits for their Confirm"
+    assert a["how"] == "web" and a["how_words"] and ev.team not in a["line"] and "1919" not in a["line"]
+
+
+def test_members_rows_say_left_test_attendance_and_the_rank_choices(w):
+    """Design §5.58: `left` = when the bot noticed someone is not in the Discord server (in words, null while they are)
+    with its line and Remove record's sentence; `test`; `attendance` = the attendance sentence; `rank_choices` never alt;
+    `pending` = characters waiting for an officer's confirm."""
+    from oibot_gm.discord_registry import remove_record_consequence
+
+    m, gone = member(w, 0), member(w, 1, cls="Mage", spec="Fire")
+    w.reg.member_left(gone.discord_id)
+    d = w.c.get("/api/members", headers=as_user(w, OFFICER)).json()
+    assert d["rank_choices"] == ["trial", "raider", "core", "social"] and d["pending"] >= 2
+    rows = {r["uid"]: r for r in d["rows"]}
+    here, left = rows[str(m.discord_id)], rows[str(gone.discord_id)]
+    assert here["left"] is None and here["left_line"] is None and here["remove_consequence"] is None and here["test"] is False
+    assert left["left"] == w.reg.local12(w.reg.members[gone.discord_id].left_at, "%a %d %b") and left["left_line"] == f"not in the server · noticed {left['left']}"
+    assert left["remove_consequence"] == remove_record_consequence(w.reg, w.reg.members[gone.discord_id])
+    assert here["attendance"] == w.reg.attendance_text(w.reg.members[m.discord_id])
+    assert any(r["test"] for r in d["rows"]) and all(r["attendance"] is None for r in d["rows"] if r["test"])
+
+
+def test_members_set_previews_the_generators_sentences_and_takes_a_rev(w):
+    """THE one-member route (design §5.58): `preview` answers {sentences, rev} — exactly consequences.people_consequence,
+    the words Discord's /roster char decide screen prints — and nothing is written; a write with a stale `rev` is a 409;
+    retire, delete, spec (+ offspec) and flex go through the same one-row save."""
+    from oibot_gm import consequences as cq
+
+    ms = [member(w, i, cls="Mage", spec="Fire") for i in range(5)]
+    ev = real_run(w.reg, w.rs)
+    join(w.reg, w.rs, ev, ms)
+    lock_with_board(w.reg, w.rs, ev, [m.display_name for m in ms])
+    m = ms[1]
+    w.reg.add_character(m.discord_id, m.display_name, "Reserva", "Rogue", "Combat", None, False)
+    label = w.reg.members[m.discord_id].main.label
+    h = as_user(w, OFFICER)
+    p = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "retire": label, "preview": True}, headers=h)
+    assert p.status_code == 200, p.text
+    p = p.json()
+    assert p["sentences"] == cq.retire_consequence(w.reg, w.rs, w.reg.members[m.discord_id], label, by_id=OFFICER)
+    assert p["rev"] == w.reg.characters_rev(w.reg.members[m.discord_id]) and ev.seat_of(m)
+    assert any("is released" in x for x in p["sentences"]) and p["sentences"][-1] == "It stays on the record as retired, so its history is kept."
+    w.reg.save_character_table(m.discord_id, [{"label": "Reserva", "flex": ["tank"]}], "someone")  # changed meanwhile
+    stale = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "retire": label, "rev": p["rev"]}, headers=h)
+    assert stale.status_code == 409 and ev.seat_of(m)
+    rev = w.reg.characters_rev(w.reg.members[m.discord_id])
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "retire": label, "rev": rev}, headers=h)
+    assert r.status_code == 200, r.text
+    assert ev.seat_of(m) is None and w.reg.members[m.discord_id].main.label == "Reserva"
+    # spec + offspec, flex and delete, each previewed then written
+    n = ms[2]
+    lbl = w.reg.members[n.discord_id].main.label
+    p = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "spec": "Frost", "offspec": "Arcane", "preview": True}, headers=h).json()
+    assert p["sentences"][0] == f"{n.display_name}'s character {lbl} switches to Frost, with Arcane as offspec."
+    assert w.c.post("/api/members/set", json={"uid": str(n.discord_id), "spec": "Frost", "offspec": "Arcane"}, headers=h).status_code == 200
+    assert (w.reg.members[n.discord_id].main.spec, w.reg.members[n.discord_id].main.offspec) == ("Frost", "Arcane")
+    p = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "flex": ["tank"], "preview": True}, headers=h).json()
+    assert p["sentences"] == cq.flex_consequence(w.reg, w.rs, w.reg.members[n.discord_id], lbl, ["tank"], by_id=OFFICER)
+    assert w.c.post("/api/members/set", json={"uid": str(n.discord_id), "flex": ["tank"]}, headers=h).status_code == 200
+    assert w.reg.members[n.discord_id].main.flex == ["tank"]
+    w.reg.add_character(n.discord_id, n.display_name, "Spareling", "Mage", "Fire", None, False)
+    p = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "delete": "Spareling", "preview": True}, headers=h).json()
+    assert p["sentences"][0] == f"{n.display_name}'s character Spareling is deleted."
+    assert w.c.post("/api/members/set", json={"uid": str(n.discord_id), "delete": "Spareling"}, headers=h).status_code == 200
+    assert "Spareling" not in [c.label for c in w.reg.members[n.discord_id].characters]
+    # a rank preview, the same rank refused in one sentence, never alt
+    p = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "rank": "core", "preview": True}, headers=h).json()
+    assert p["sentences"] == [f"{n.display_name}'s rank goes from trial to core.", "It lives on their main and counts for who gets a seat from the next lock."]
+    r = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "rank": "trial", "preview": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == f"{n.display_name}'s rank is already trial."
+    r = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "rank": "alt"}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == "A rank is trial, raider, core or social." and w.reg.members[n.discord_id].rank == "trial"
+
+
+def test_members_set_your_own_rank_and_confirm_say_another_officer_does_it(w):
+    me = OFFICER
+    w.reg.add_character(me, "Officer", "Kingsley", "Mage", "Fire", None, True)
+    h = as_user(w, me)
+    r = w.c.post("/api/members/set", json={"uid": str(me), "rank": "core", "preview": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == "Another officer sets your rank."
+    r = w.c.post("/api/members/set", json={"uid": str(me), "confirm": True, "preview": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == "Another officer confirms your characters."
+    p = w.c.post("/api/members/set", json={"uid": str(me), "spec": "Frost", "preview": True}, headers=h).json()
+    assert p["sentences"][0] == "Your character Kingsley switches to Frost, with no offspec."  # your own record reads "your"
+
+
+def test_members_dm_and_im_back_preview_the_sentences(w):
+    from oibot_gm import consequences as cq
+
+    m = member(w)
+    h = as_user(w, OFFICER)
+    p = w.c.post("/api/members/dm", json={"uid": str(m.discord_id), "on": False, "preview": True}, headers=h).json()
+    assert p["sentences"] == cq.dm_consequence(w.reg, m, False, by_id=OFFICER) and not w.reg.members[m.discord_id].dm_opt_out
+    assert p["sentences"][0] == f"{m.display_name}'s Confirm and fill asks wait on their Me page and the sheet."
+    r = w.c.post("/api/members/dm", json={"uid": str(m.discord_id), "on": True, "preview": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == f"{m.display_name}'s DMs are already on."
+    day = (w.reg.now_local().date() + timedelta(days=40)).isoformat()
+    w.reg.add_absence(m.discord_id, day, None, None, "Officer")
+    p = w.c.post("/api/members/absence/clear", json={"uid": str(m.discord_id), "start": day, "preview": True}, headers=h).json()
+    assert p["sentences"] == [f"{m.display_name}'s absence on {w.reg.day_label(day)} is cleared.", cq.NO_SHEET_CHANGES, "Record it again if they're still away."]
+    p = w.c.post("/api/me/absence/clear", json={"start": day, "preview": True}, headers=as_user(w, m.discord_id)).json()
+    assert p["sentences"][0] == f"Your absence on {w.reg.day_label(day)} is cleared." and p["lines"] == []
+
+
+def test_save_previews_answer_the_sentences(w):
+    """POST /api/members/save and /api/me/characters previews carry `sentences` — the ripple as the confirm prints it
+    (consequences.save_consequence) — per member on Members, flat on Me; [] when nothing beyond the record changes."""
+    m = member(w)
+    ev = real_run(w.reg, w.rs)
+    join(w.reg, w.rs, ev, [m])
+    label = m.main.label
+    rows = [{"label": label, "cls": "Priest", "spec": "Shadow"}]
+    p = w.c.post("/api/members/save", json={"preview": True, "rows": [{"uid": str(m.discord_id), "characters": rows}]}, headers=as_user(w, OFFICER)).json()
+    (one,) = p["sentences"]
+    assert one["uid"] == str(m.discord_id) and any("now reads Shadow" in x for x in one["sentences"])
+    p = w.c.post("/api/me/characters", json={"rows": rows, "preview": True}, headers=as_user(w, m.discord_id)).json()
+    assert p["sentences"] == one["sentences"]
+    p = w.c.post("/api/me/characters", json={"rows": [{"label": label, "flex": ["tank"]}], "preview": True}, headers=as_user(w, m.discord_id)).json()
+    assert p["sentences"] == []
+
+
+def test_test_bench_tempos_are_the_runs_week_and_the_feed_names_its_run(w):
+    """Findings 23 and 31: each tempo carries the run's week in the Rosters strip's shape (opens now, the reminder, the
+    lock, confirm by, the raid — in words), and the feed's events carry the run's title, never its key."""
+    from oibot_gm import testfeed
+
+    h = as_user(w, OFFICER)
+    d = w.c.get("/api/test", headers=h).json()
+    std = next(t for t in d["tempos"] if t["id"] == "standard")
+    assert [s["step"] for s in std["week"]] == ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "raid"]
+    assert [s["when"] for s in std["week"]] == ["now", "in 8 min", "in 15 min", "in 25 min", "in 40 min"] and std["week"][0]["done"]
+    ev = open_test_run(w.reg, w.rs)
+    testfeed.FEED.record(w.reg.key, ev.key, "step", "Opened")
+    feed = w.c.get("/api/test/feed", headers=h).json()
+    e = next(x for x in feed["events"] if x["run"] == ev.key)
+    assert e["title"] == f"{w.reg.raid_def(ev.instance).get('name', ev.instance)} · {w.reg.local12(ev.starts_at)}" and ev.key not in e["title"]
+    assert feed["titles"][ev.key] == e["title"]
 
 
 def test_members_save_refuses_only_the_stale_member(w):

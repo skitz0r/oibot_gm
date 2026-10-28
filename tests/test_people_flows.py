@@ -69,7 +69,7 @@ def test_me_char_flex_picks_only_the_roles_the_spec_doesnt_give(reg, rs):
         opts = [o.value for o in h._items()[0].options]
         assert "healer" not in opts and "tank" in opts and "none" in opts
         await h.pick("Extra roles", "tank", "melee")
-        assert "could also play: **tank, melee**" in h.text
+        assert "Your character Anabelle could also play tank and melee when asked." in h.text  # consequences.flex_consequence
         await h.press("Save")
     run(go())
     assert reg.members[m.discord_id].main.flex == ["melee", "tank"]
@@ -92,6 +92,37 @@ def test_me_char_delete_of_a_seated_character_says_the_seat_goes(reg, rs):
         assert "✅ Deleted" in h.text
     run(go())
     assert ev.seat_of(m) is None and reg.members[m.discord_id].main.label == "Keeper"
+
+
+def test_the_decide_screens_print_the_web_previews_sentences(reg, rs, officer):
+    """Design §5.58: one generator per people verb — /roster char's decide screen prints exactly what the Members
+    page's preview (POST /api/members/set) answers, and /me char exactly what the Me page would read ("your")."""
+    from oibot_gm import consequences as cq
+
+    ms = [real(reg, i, "Mage", "Fire") for i in range(5)]
+    ev = real_run(reg, rs)
+    join(reg, rs, ev, ms)
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms])
+    m = ms[1]
+    reg.add_character(m.discord_id, m.display_name, "Keeper", "Warrior", "Protection", None, False)
+    label = reg.members[m.discord_id].main.label
+    h = Harness(reg, rs)  # an officer (the fixture), not the member
+    want = cq.retire_consequence(reg, rs, reg.members[m.discord_id], label, by_id=h.user.id)
+    assert want[0].startswith(f"{m.display_name}'s character {label} retires") and any("is released" in x for x in want)
+
+    async def go():
+        await FLOWS["member_char"](h.command(), reg, member=user(m), action="retire")
+        await h.pick("Pick the character", next(o.value for o in h._items()[0].options if o.label == label))
+        assert h.text.split("\n")[1:] == want, h.text  # the title, then exactly the generator's sentences
+    run(go())
+    own = cq.retire_consequence(reg, rs, reg.members[m.discord_id], label, by_id=m.discord_id)
+    h2 = as_member(Harness(reg, rs), m)
+
+    async def go2():
+        await FLOWS["member_char"](h2.command(), reg, action="retire")
+        await h2.pick("Pick the character", next(o.value for o in h2._items()[0].options if o.label == label))
+        assert own[0].startswith("Your character") and h2.text.split("\n")[1:] == own, h2.text
+    run(go2())
 
 
 def test_me_char_add_opens_the_registration(reg, rs):
