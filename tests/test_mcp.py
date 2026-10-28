@@ -324,3 +324,36 @@ def test_list_members_reads_the_apis_count():
         assert out["members"] == 2 and out["shown"] == 1 and out["rows"][0]["display_name"] == "Korrin"
     finally:
         ms.use(None)
+
+
+def test_plain_permissions_tools_carry_listening():
+    """MCP (design §5.59): set_plain_permissions sends `listen` / `set_listen` in the plain change; plain_permissions
+    returns the map and the recent decisions."""
+    import json as _json
+
+    import httpx
+
+    from oibot_gm import mcp_server as ms
+
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path, request.read()))
+        if request.method == "GET":
+            return httpx.Response(200, json={"groups": [], "channels": [], "listed": {}, "dm": "self", "default": "self", "guild_roles": [],
+                                             "listen": {"7": "reply"}, "listen_ready": True,
+                                             "listen_recent": [{"when": "Wed 28 Oct 3:05 PM", "channel": "7", "channel_name": "signups", "author": "Ana",
+                                                                "text": "when?", "p": 0.9, "mode": "reply", "did": "replied", "at": "x"}]})
+        return httpx.Response(200, json={"applied": ["listening in #signups: off → watches"], "refused": []})
+
+    ms.use(ms.Api(url="http://bot", token="a" * 64, transport=httpx.MockTransport(handler)))
+    try:
+        d = ms.plain_permissions()
+        assert d["listen"] == {"7": "reply"} and d["listen_ready"] is True
+        assert d["listen_recent"][0]["when"] == "Wed 28 Oct 3:05 PM" and "at" not in d["listen_recent"][0]
+        ms.set_plain_permissions(listen={"7": "watch"})
+        ms.set_plain_permissions(set_listen={"7": None})
+    finally:
+        ms.use(None)
+    assert _json.loads(calls[1][2])["changes"] == [{"kind": "plain", "fields": {"listen": {"7": "watch"}}}]
+    assert _json.loads(calls[2][2])["changes"] == [{"kind": "plain", "fields": {"set_listen": {"7": None}}}]

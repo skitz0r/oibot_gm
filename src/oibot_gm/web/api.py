@@ -1286,7 +1286,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     subscribers: dict[asyncio.Queue, tuple[str, bool]] = {}  # queue -> (guild key, the page's viewer is an officer)
 
     def publish(topic: str, guild: str | None = None, *, officers: bool = False) -> None:
-        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy`. `guild` None = every
+        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy` | `listen`. `guild` None = every
         page (process-wide news: the agents' job status); otherwise only that guild's pages. `officers`: only pages an
         officer opened (the test feed: what it names is officers' business). Safe from worker threads."""
         def fan_out():
@@ -1322,8 +1322,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def membership_changed(guild_key: str) -> None:
         publish("member", guild_key)  # a server snapshot found someone joined, left or changed roles: the Members page reloads
 
+    def listen_verdict(guild_key: str) -> None:
+        publish("listen", guild_key, officers=True)  # a listening verdict was recorded (§5.59): the Ops page's Recent decisions reload
+
     for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
-                      (loot_session_mod.LOOT_LISTENERS, loot_saved), (testfeed.LISTENERS, test_event), (discord_bot_mod.MEMBERSHIP_LISTENERS, membership_changed)):
+                      (loot_session_mod.LOOT_LISTENERS, loot_saved), (testfeed.LISTENERS, test_event), (discord_bot_mod.MEMBERSHIP_LISTENERS, membership_changed),
+                      (discord_bot_mod.LISTEN_LISTENERS, listen_verdict)):
         hooks[:] = [f for f in hooks if getattr(f, "__name__", "") != fn.__name__] + [fn]  # one per process, the newest app wins
 
     def test_lookup(guild_key: str, run_key: str):
@@ -2414,7 +2418,31 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "channels": [{"id": c["id"], "name": c["name"], "category": c.get("category"), "mode": reg.plain_mode(c["id"]), "listed": c["id"] in cfg.plain.channels,
                               "role": "ops" if str(cfg.ops_channel_id) == c["id"] else "analytics" if str(cfg.analytics_channel_id) == c["id"] else None} for c in chans],
                 "listed": cfg.plain.channels, "dm": cfg.plain.dm, "default": cfg.plain.default,
-                "tiers": list(PLAIN_WHO), "modes": list(PLAIN_MODES), "guild_roles": roles, "owner": False}
+                "tiers": list(PLAIN_WHO), "modes": list(PLAIN_MODES), "guild_roles": roles, "owner": False,
+                **listen_json(reg, chans)}
+
+    def listen_json(reg, chans) -> dict:
+        """Listening (design §5.59): the map, its words, whether the host's key is set (never the value) and the guild's
+        recent verdicts — `when` in Registry.local12 words (the Clock rule) and the channel's name resolved."""
+        from ..llm import decisions
+        from ..registry import LISTEN_MODES, LISTEN_WORDS
+
+        names = {str(c["id"]): c["name"] for c in chans}
+        recent = bot.listen_recent(reg) if hasattr(bot, "listen_recent") else []
+        rows = []
+        for r in recent:
+            cid = str(r.get("channel") or "")
+            try:
+                when = reg.local12(r["at"])
+            except (KeyError, TypeError, ValueError):
+                when = ""
+            rows.append({**r, "channel": cid, "channel_name": names.get(cid) or channel_label(cid), "when": when})
+        return {"listen": reg.listen_channels(), "listen_modes": list(LISTEN_MODES), "listen_words": dict(LISTEN_WORDS),
+                "listen_ready": decisions.key_set(), "listen_recent": rows}
+
+    def channel_label(cid: str) -> str:
+        ch = bot.get_channel(int(cid)) if cid.isdigit() and hasattr(bot, "get_channel") else None
+        return getattr(ch, "name", None) or ""  # "" = the page says "a channel the bot can't see"
 
     @app.get("/api/plain-permissions")
     async def plain_get(request: Request):

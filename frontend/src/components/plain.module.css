@@ -1,0 +1,22 @@
+/* The Ops page's Recent decisions (design §5.59): one row per listening verdict — when · channel · who wrote · message ·
+   how likely it was for the bot · what the bot did — on a grid; below the sm breakpoint every verdict is a card (when,
+   channel and who on the first line, the message under it, then the bar and what the bot did), nothing scrolls sideways. */
+.head, .row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 2fr) 120px minmax(0, 1fr);
+              gap: 4px 16px; align-items: start; padding: 8px 16px; min-width: 0; }
+.head { border-bottom: 1px solid var(--mantine-color-slate-5); }
+.row { border-bottom: 1px solid var(--mantine-color-slate-6); }
+.row > * { min-width: 0; }
+.text { overflow-wrap: anywhere; }
+.bar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar > :first-child { flex: 1; min-width: 40px; }
+.meta { display: contents; }
+
+@media (max-width: 48em) {
+  .head { display: none; }
+  .row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "meta meta" "text text" "bar did";
+         margin: 0 12px 10px; border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; padding: 10px 12px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 2px 10px; grid-area: meta; }
+  .text { grid-area: text; }
+  .bar { grid-area: bar; }
+  .did { grid-area: did; }
+}

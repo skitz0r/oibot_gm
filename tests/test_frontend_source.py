@@ -391,3 +391,27 @@ def test_absences_and_the_me_page_read_the_servers_words():
     assert "None upcoming" not in card and "No absences on file. Add one if you'll miss a raid." in card
     me = _code_only((SRC / "pages" / "Me.tsx").read_text())
     assert '.join(" · ")' not in me[me.index("const summary"):me.index("if (!me) return <Text")]
+
+
+def test_ops_page_listening_column_and_recent_decisions():
+    """Listening on the Ops page (design §5.59 phase 2): a Listening column (a Watches / Replies badge, a Select Off ·
+    Watches · Replies in edit mode) sent as `listen` in the one plain change; the hint and the no-key line in the
+    glossary's voice; Recent decisions with the did-words, reloading on the `listen` topic; a card per verdict below sm."""
+    src = (SRC / "components" / "PlainPermissions.tsx").read_text()
+    assert "<Table.Th w={140}>Listening</Table.Th>" in src
+    assert '{ value: "off", label: "Off" }' in src and "listen_words" in src
+    assert "listen: d.listen" in src, "listening rides the same plain change as the rest of the table"
+    assert ("Listening: the bot reads these channels and answers what is clearly for it, without a tag. "
+            "Watches only notes what it would have answered.") in src
+    assert "Listening needs the host's TypeSafe key." in src and "listen_ready === false" in src
+    assert "Recent decisions" in src and 'useLive(() => {' in src and '["listen"]' in src
+    for word in ('"Replied"', '"Asked with 👀"', '"Stayed quiet"', '"Would have replied"', '"Would have asked"', '"Skipped"'):
+        assert word in src, word
+    assert "<Progress" in src and "% likely for the bot" in src
+    assert 'import css from "./plain.module.css"' in src
+    for bad in ("classifier", "threshold", "shadow", "Jev", "model"):
+        assert bad not in src.split("// ---- shapes", 1)[1].replace("PlainPermissionsData", ""), bad
+    css = (SRC / "components" / "plain.module.css").read_text()
+    phone = css.split("@media (max-width: 48em)", 1)[1]
+    assert ".head { display: none; }" in phone and "grid-template-areas" in phone and "border-radius: 8px" in phone
+    assert "overflow-x" not in css and "minmax(0," in css, "nothing scrolls sideways"

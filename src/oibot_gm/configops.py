@@ -1692,7 +1692,7 @@ def _listen_patch(reg: Registry, cid: int, value: str) -> tuple[dict, str]:
     if new is not None:
         from .llm import decisions
 
-        if not (decisions.DECISIONS is not None or os.environ.get(decisions.KEY_ENV)):
+        if not decisions.key_set():
             line += " — the host hasn't set the TypeSafe key, so nothing happens yet"
     return {"set_listen": {str(cid): new}}, line
 
@@ -3327,6 +3327,9 @@ def host_facts(reg: Registry, bot=None) -> list[str]:
     provider = getattr(getattr(bot, "ctx", None), "provider", None) if bot is not None else None
     lines.append(f"Claude: {provider.summary()} (one cap shared by every guild on this host)" if provider is not None else "Claude: off (no API key on the host)")
     lines.append(mcp_words(reg))
+    from .llm import decisions
+
+    lines.append("TypeSafe key: set" if decisions.key_set() else "TypeSafe key: not set (Listening stays quiet)")  # names only, never the value (§5.59)
     if reg.config.detached_at:
         lines.append(f"Parked since {reg.local12(reg.config.detached_at)}: the bot is no longer in this server — invite it back")
     started = float(getattr(bot, "started_at", 0) or 0) if bot is not None else 0.0

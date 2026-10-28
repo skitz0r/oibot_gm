@@ -1428,10 +1428,18 @@ and links are left alone. Each listening channel is one of two:
 - **Replies** — the bot answers. When it is unsure a message is for it, it adds 👀 instead; the writer clicks the 👀
   within ten minutes to ask, and anyone else's click does nothing.
 
-The owner turns it on in plain text ("listen in #signups", "only watch #general", "stop listening in #signups"), and the
-change shows what it does before Apply. A channel the bot ignores can't be listened in. Listening never sends a DM. It
-needs the host's TypeSafe key; until the host sets it, a listening channel stays silent and the ops channel says so once
-an hour. The bot keeps its last 50 decisions per server in memory, and a log of them without the messages' text.
+The owner turns it on in plain text ("listen in #signups", "only watch #general", "stop listening in #signups"), or on
+the Ops page: the plain-text table has a **Listening** column, a *Watches* or *Replies* badge on each listening channel,
+and in **Edit permissions** each channel's Listening is Off, Watches or Replies, saved with the rest by the one **Save**
+(MCP: `set_plain_permissions` with `listen`). Either way the change shows what it does before Apply. A channel the bot
+ignores can't be listened in. Listening never sends a DM. It needs the host's TypeSafe key; until the host sets it, a
+listening channel stays silent, the Ops page says "Listening needs the host's TypeSafe key", the owner's Host card says
+"TypeSafe key: not set" and the ops channel says so once an hour. The bot keeps its last 50 decisions per server in
+memory, and a log of them without the messages' text. Officers read them on the Ops page under **Recent decisions**: when,
+the channel, who wrote, what they wrote, how likely it was for the bot (a bar and a percent) and what the bot did —
+replied, asked with 👀, stayed quiet, would have replied, would have asked, or skipped (over the hourly limit). The list
+updates as messages come in. `/gm config plain` lists the listening channels too ("• #signups: Replies — listening"), and
+its first line ends "— listening (Replies)" when the channel you are in listens.
 
 **DMs with several servers (D41).** When the bot looks after more than one server, a plain DM asks which server it is
 for, listing every server you belong to; one whose policy ignores DMs is marked "(plain text off here)" and picking it
@@ -1639,7 +1647,7 @@ news post says can make the review read or write another server.
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
 | `policy_get` · `policy_edit` · `policy_append` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full, with what is applied and the waiting draft · replace its text (a draft, the persona too) · add one rule to the loot or comp policy as a draft (refused while another officer's draft waits) · the bot's reading of it (the persona: its text), nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
 | `plain_change` | text → the config ops it means, with current → new, and a `token`; `apply=true` with that token (within ten minutes, once) applies exactly those ops — never a new reading of the text — and refuses a board someone changed since the preview; like Discord's Apply, an op that fails is listed in `refused` with why and the rest still apply (`applied` is what landed, `error` the first failure) (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
-| `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles) · change it (owner: groups, per-channel modes, DMs, default; the channels the bot listens in, `listen` — today through `plain_change`, "listen in #signups") |
+| `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles; the channels the bot listens in and its recent decisions there, `listen` · `listen_recent`) · change it (owner: groups, per-channel modes, DMs, default; listening with `listen`, the whole map {channel: watch or reply}, or `set_listen` for some channels, null = off) |
 | `raid_readiness` | each raid's readiness (§6): who could play against its size, roles with who could cover, buffs nobody brings, the aims with their reasons, short / over cap, mains by role — one raid or all |
 | `set_comp_target` · `list_regulars` · `config_summary` | an officers' aim for a raid (slot = role, class or Class:Spec; `min`, `max`, `note`; `clear=true` drops it; `preview=true` writes nothing — a role aim outside the owner's limits is refused) · a raid's recurring schedules with their regulars, coverage and forecast (`schedule` = one) · the effective configuration in words by section, Host included (what `/gm config show` and the Config page's Overview print) |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with the guild's changes marked |

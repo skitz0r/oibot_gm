@@ -444,15 +444,16 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
 
     @app.post("/api/admin/plain-permissions")
     async def plain_set(request: Request):
-        """Owner: the whole policy — {groups: {group: [who…]}, channels: {channel id: mode}, dm, default}; or
-        `set_channels` {channel id: mode | null} to change some channels and keep the rest. Groups or fields left out
+        """Owner: the whole policy — {groups: {group: [who…]}, channels: {channel id: mode}, dm, default, listen: {channel id:
+        watch | reply}}; or `set_channels` / `set_listen` {channel id: mode | null} to change some channels and keep the rest
+        (§5.59: listening rides the same `plain` change). Groups or fields left out
         keep their current value. One set_plain_policy write (the plain ops coalesce)."""
         v, d = await body(request, officer=True)
         need_owner(v)
         guild = bot.get_guild(v.reg.config.discord_guild_id)
         if guild is not None:
             v.reg.cache_roles(guild)
-        fields = {k: d[k] for k in ("groups", "channels", "set_channels", "dm", "default") if k in d}
+        fields = {k: d[k] for k in ("groups", "channels", "set_channels", "dm", "default", "listen", "set_listen") if k in d}
         res = await translate(v, [{"kind": "plain", "fields": fields}], d)
         if isinstance(res, JSONResponse):
             return res

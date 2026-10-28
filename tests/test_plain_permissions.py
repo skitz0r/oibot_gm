@@ -547,3 +547,83 @@ def test_handle_change_and_apply(g):
         assert log == [("followup", "⛔ Only the owner can change raids & auras.\n-# `/gm config plain` shows the whole policy.", {"ephemeral": True})]
 
     asyncio.run(go())
+
+
+# ---- listening on the surfaces (design §5.59 phase 2)
+
+def test_api_listening_reads_and_writes(web_client, g, monkeypatch):
+    """GET carries the map, its words, whether the key is set (never the value) and the recent decisions with `when` in
+    12-hour words (the Clock rule) and the channel's name; the POST translator takes `listen` into the same plain change."""
+    import re
+
+    from oibot_gm.llm import decisions
+
+    w = web_client
+    monkeypatch.setattr(decisions, "DECISIONS", None)
+    monkeypatch.delenv(decisions.KEY_ENV, raising=False)
+    w.bot.listen_recent = lambda reg: [{"at": "2026-10-28T22:05:00+00:00", "channel": GENERAL_CH, "author": "Ana", "text": "when do we raid?",
+                                        "p": 0.91, "mode": "reply", "did": "replied"}]
+    d = w.c.get("/api/plain-permissions", headers=w.as_(w.officer)).json()
+    assert d["listen"] == {} and d["listen_modes"] == ["watch", "reply"] and d["listen_words"] == {"watch": "Watches", "reply": "Replies"}
+    assert d["listen_ready"] is False
+    row = d["listen_recent"][0]
+    assert row["channel"] == str(GENERAL_CH) and row["channel_name"] == "general" and row["did"] == "replied" and row["p"] == 0.91
+    assert re.fullmatch(r"\w{3} \d{1,2} \w{3} \d{1,2}:\d{2} (AM|PM)", row["when"]), row["when"]
+    assert not re.search(r"\b(1[3-9]|2[0-3]):\d{2}\b", row["when"]), "never military time where a person reads"
+    owner = {"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"}
+    r = post_confirmed(w.c, "/api/admin/plain-permissions", {"listen": {str(GENERAL_CH): "watch"}}, headers=owner)
+    assert r.status_code == 200, r.text
+    assert g.reg.listen_mode(GENERAL_CH) == "watch" and r.json()["listen"] == {str(GENERAL_CH): "watch"}
+    r = post_confirmed(w.c, "/api/admin/plain-permissions", {"set_listen": {str(GENERAL_CH): None}}, headers=owner)
+    assert r.status_code == 200, r.text
+    assert g.reg.listen_mode(GENERAL_CH) is None
+    monkeypatch.setenv(decisions.KEY_ENV, "x")
+    assert w.c.get("/api/plain-permissions", headers=w.as_(w.officer)).json()["listen_ready"] is True
+
+
+def test_a_verdict_publishes_the_listen_topic(web_client, g, tmp_path, monkeypatch):
+    """_listen_record fires LISTEN_LISTENERS; the web wires them to the officers-only `listen` topic."""
+    from oibot_gm import discord_bot as db
+
+    assert any(getattr(f, "__name__", "") == "listen_verdict" for f in db.LISTEN_LISTENERS)
+    seen = []
+    monkeypatch.setattr(db, "LISTEN_LISTENERS", [seen.append])
+    monkeypatch.setattr(db, "LISTEN_LOG", tmp_path / "listen.jsonl")
+
+    class B(db.ListenMixin):
+        pass
+
+    msg = types.SimpleNamespace(channel=types.SimpleNamespace(id=GENERAL_CH), author=types.SimpleNamespace(id=5, display_name="Ana"))
+    B()._listen_record(g.reg, msg, "hello", 0.4, "watch", "quiet")
+    assert seen == [g.reg.key]
+
+
+def test_gm_config_plain_lists_the_listening_channels(g):
+    from oibot_gm.discord_pool import SetupMixin, plain_read_text
+
+    g.reg.config.plain.listen = {str(GENERAL_CH): "reply"}
+
+    class C(SetupMixin):
+        def get_guild(self, gid):
+            return None
+
+        def guild_channels(self, r):
+            return [{"id": str(OPS_CH), "name": "ops"}, {"id": str(GENERAL_CH), "name": "signups"}]
+    table = C().plain_table(g.reg)
+    assert table["listen"] == [{"id": str(GENERAL_CH), "name": "signups", "mode": "reply"}]
+    text = plain_read_text(g.reg, table, OPS_CH)
+    assert "• #signups: Replies — listening" in text
+    assert text.index("The site and MCP") < text.index("• #signups: Replies — listening")
+    assert plain_read_text(g.reg, table, GENERAL_CH).split("\n", 1)[0].endswith("— listening (Replies)")
+    assert "listening (" not in plain_read_text(g.reg, table, OPS_CH).split("\n", 1)[0]
+
+
+def test_host_facts_name_the_typesafe_key_never_its_value(g, monkeypatch):
+    from oibot_gm.llm import decisions
+
+    monkeypatch.setattr(decisions, "DECISIONS", None)
+    monkeypatch.delenv(decisions.KEY_ENV, raising=False)
+    assert "TypeSafe key: not set (Listening stays quiet)" in configops.host_facts(g.reg)
+    monkeypatch.setenv(decisions.KEY_ENV, "sk-secret-value")
+    facts = configops.host_facts(g.reg)
+    assert "TypeSafe key: set" in facts and not any("sk-secret-value" in f for f in facts)

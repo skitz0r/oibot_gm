@@ -130,3 +130,9 @@ def get_decisions(ledger: Any = None) -> DecisionProvider | None:
     if not os.environ.get(KEY_ENV):
         return None
     return DecisionProvider(ledger=ledger)
+
+
+def key_set() -> bool:
+    """Whether the host set TYPESAFE_API_KEY (the running provider or the environment) — a yes or no, never the value.
+    The Ops page's `listen_ready`, the Host card's TypeSafe line and the plain op's diff read it."""
+    return bool((DECISIONS is not None and getattr(DECISIONS, "available", True)) or os.environ.get(KEY_ENV))

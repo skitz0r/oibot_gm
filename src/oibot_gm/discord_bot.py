@@ -61,6 +61,7 @@ CLASS_COLOURS = {"Warrior": 0xC79C6E, "Paladin": 0xF58CBA, "Hunter": 0xABD473, "
 MEMBER_BLIP_RETRY_S = 15  # cached_member: a transient fetch failure is retried after this, never cached as a miss
 MEMBERS_LIST_AGE_S = 300  # refresh_members: one list request per server per this many seconds feeds every member lookup (§5.58)
 MEMBERSHIP_LISTENERS: list = []  # fn(guild key): a snapshot found the registered members' presence or roles changed — the web's `member` topic
+LISTEN_LISTENERS: list = []  # fn(guild key): a listening verdict was recorded — the web's officers-only `listen` topic (the Ops page's Recent decisions)
 ROLE_ICON = {"tank": "🛡", "healer": "✚", "melee": "⚔", "ranged": "🏹"}
 # Filled at startup with application emojis (class_<name>, role_<name>); falls back to text.
 EMOJI: dict[str, str] = {}
@@ -185,6 +186,11 @@ class ListenMixin:
                 f.write(json.dumps(row) + "\n")
         except OSError as e:
             log.warning("listen log not written (%s)", type(e).__name__)
+        for fn in list(LISTEN_LISTENERS):
+            try:
+                fn(reg.key)
+            except Exception:  # noqa: BLE001 — a listener never breaks the gate
+                log.exception("listen listener failed")
 
     def listen_state(self, reg, message, text: str) -> dict:
         """The decision's state: what the bot does, the guild's raids and words, the channel, the chat just before and the

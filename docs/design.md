@@ -3721,8 +3721,8 @@ cold 0.3 s (the one list request), warm 0.03 s. Tests: tests/test_setup.py `test
 to its card. People asked it things in #signups without tagging it and got silence. The owner now keeps a list of
 channels the bot *listens* in; there a cheap, non-generative decision model judges each untagged message "is this for
 the bot?", and the sure ones take the SAME path an @mention takes (`OibotGM.plain_text`, so the plain-text policy still
-decides what a reply may do). Phase 1 (this section) is the backend, the plain op and the gate; the Ops page column, the
-recent verdicts, the `/gm config plain` line, the MCP arguments and the Host card's key line are phase 2.
+decides what a reply may do). Phase 1 is the backend, the plain op and the gate; phase 2 (*Surfaces*, below) is the Ops
+page column, the recent verdicts, the `/gm config plain` line, the MCP arguments and the Host card's key line.
 
 **Jev, not Haiku (decided with the user).** TypeSafe's decisions API answers a yes/no question as a probability (a
 *noul*): it can be thresholded, it writes no text (so it can't be talked into saying anything), and it costs input tokens
@@ -3781,6 +3781,28 @@ a link, a reply to someone else. Thresholds: `LISTEN_SURE = 0.8` (the host's `OI
 **The record.** Every verdict: a ring per guild of the last 50 in memory (`listen_recent(reg)`: at, channel, author,
 text ≤120 chars, p, mode, did ∈ replied · asked · quiet · would reply · would ask · skipped) for the Ops page (phase 2), and
 one row per verdict in `out/listen.jsonl` with NO text (at, guild, channel, author_id, p, mode, did).
+
+**Surfaces (phase 2, built 2026-10-28).** `GET /api/plain-permissions` (officers; `plain_json` → `listen_json`) adds
+`listen` (the map), `listen_modes`, `listen_words`, `listen_ready` (`decisions.key_set()`: the running provider or the
+environment has `TYPESAFE_API_KEY` — a yes or no, never the value) and `listen_recent` (`bot.listen_recent`, each row
+with `when` in `Registry.local12` words — the Clock rule — and `channel_name` resolved; "a channel the bot can't see"
+otherwise). `POST /api/admin/plain-permissions` whitelists `listen` and `set_listen`: a translator into the same `plain`
+change. `ListenMixin._listen_record` fires `discord_bot.LISTEN_LISTENERS` (fn(guild key)); `install_api` wires them to
+`publish("listen", key, officers=True)`. The Ops page (`PlainPermissions.tsx`) has a **Listening** column on the channel
+rows — read: a *Watches* / *Replies* badge, nothing when off; the owner's edit mode: a Select Off · Watches · Replies,
+disabled on a channel whose plain-text mode is Ignored (setting a channel to Ignored drops its listening in the draft) —
+sent as `listen` (the whole map) in the one plain change the Save already sends; the hint "Listening: the bot reads these
+channels and answers what is clearly for it, without a tag. Watches only notes what it would have answered." and, when
+something listens without the key, a dimmed "Listening needs the host's TypeSafe key." Below, **Recent decisions**
+(hidden when nothing listens and the list is empty): one row per verdict — when · #channel · who wrote · the message ·
+a bar with its percent · what the bot did (Replied · Asked with 👀 · Stayed quiet · Would have replied · Would have asked
+· Skipped, its tooltip "over the hourly limit…") — a card per verdict below sm (`plain.module.css`), reloading on the
+`listen` topic without touching an open draft. `/gm config plain`: `plain_table` carries `listen`, `plain_read_text`
+adds "• #signups: Replies — listening" after the Where block and "— listening (Replies)" on the Here line. MCP:
+`set_plain_permissions(listen=, set_listen=)`, `plain_permissions` returns `listen`, `listen_ready`, `listen_recent`.
+The Host card (`configops.host_facts`) says "TypeSafe key: set" or "TypeSafe key: not set (Listening stays quiet)".
+Tests: tests/test_plain_permissions.py (the GET shape, 12-hour `when`, the POST translator, the topic, the read view,
+the Host line), tests/test_mcp.py, tests/test_frontend_source.py.
 
 **Not done.** No per-member learning or feedback loop; no DM anywhere (a reply is `plain_text`'s own, so nothing new is
 said); no change to the @mention, DM or loot-thread paths; threads of a listened channel are not listened in. Tests:
