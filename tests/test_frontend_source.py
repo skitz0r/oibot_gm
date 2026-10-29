@@ -404,13 +404,18 @@ def test_ops_page_listening_column_and_recent_decisions():
     assert ("Listening: the bot reads these channels and answers what is clearly for it, without a tag. "
             "Watches only notes what it would have answered.") in src
     assert "Listening needs the host's TypeSafe key." in src and "listen_ready === false" in src
-    assert "Recent decisions" in src and 'useLive(() => {' in src and '["listen"]' in src
-    for word in ('"Replied"', '"Asked with 👀"', '"Stayed quiet"', '"Would have replied"', '"Would have asked"', '"Skipped"'):
-        assert word in src, word
-    assert "<Progress" in src and "% likely for the bot" in src
-    assert 'import css from "./plain.module.css"' in src
+    tab = (SRC / "components" / "ListenDecisions.tsx").read_text()
+    ops = (SRC / "pages" / "Ops.tsx").read_text()
+    assert "Recent decisions" in tab and '["listen", "config"]' in tab and "Recent decisions" not in src, "the decisions live on the Listening tab"
+    assert 'value="listening">Listening' in ops and 'value="permissions">Plain-text permissions' in ops and 'value="actions">Recent actions' in ops
+    assert '"#listening"' in ops, "the tab is linkable"
+    for word in ("Replied", "Asked with 👀", "Stayed quiet", "Would have replied", "Would have asked", "Skipped"):
+        assert word in tab
+    assert "<Progress" in tab and "% likely for the bot" in tab and "not judged" in tab, "a skipped message says so, never a bare dash"
+    assert 'import css from "./plain.module.css"' in tab
     for bad in ("classifier", "threshold", "shadow", "Jev", "model"):
         assert bad not in src.split("// ---- shapes", 1)[1].replace("PlainPermissionsData", ""), bad
+        assert bad not in tab.replace("PlainPermissionsData", ""), bad
     css = (SRC / "components" / "plain.module.css").read_text()
     phone = css.split("@media (max-width: 48em)", 1)[1]
     assert ".head { display: none; }" in phone and "grid-template-areas" in phone and "border-radius: 8px" in phone

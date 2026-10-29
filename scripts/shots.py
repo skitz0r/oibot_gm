@@ -31,7 +31,7 @@ if args.guild:
     HEADERS["X-Oibot-Guild"] = args.guild
 QUERY = f"?g={args.guild}" if args.guild else ""
 # the tabbed views a plain page load doesn't show: (page, tab text) → <view>-<page>-<tab>.png, the tab clicked by its text
-TABS = {"/app/me": ["Leveling guide"],
+TABS = {"/app/me": ["Leveling guide"], "/app/ops": ["Plain-text permissions", "Listening"],
         "/app/members": ["Absences", "Test bench"],
         "/app/loot": ["History", "Precedents", "Items", "Wishlists", "Appeals", "Companions"],
         "/app/config": ["Settings", "Channels", "Recruitment and more", "Companions"]}

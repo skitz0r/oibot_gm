@@ -1432,13 +1432,13 @@ channel) and the channel's topic and category in Discord — so give a listening
 game", "Raid signups and questions") and the bot reads it in that light.
 
 The owner turns it on in plain text ("listen in #signups", "only watch #general", "stop listening in #signups"), or on
-the Ops page: the plain-text table has a **Listening** column, a *Watches* or *Replies* badge on each listening channel,
+the Ops page's **Plain-text permissions** tab: the table has a **Listening** column, a *Watches* or *Replies* badge on each listening channel,
 and in **Edit permissions** each channel's Listening is Off, Watches or Replies, saved with the rest by the one **Save**
 (MCP: `set_plain_permissions` with `listen`). Either way the change shows what it does before Apply. A channel the bot
 ignores can't be listened in. Listening never sends a DM. It needs the host's TypeSafe key; until the host sets it, a
 listening channel stays silent, the Ops page says "Listening needs the host's TypeSafe key", the owner's Host card says
 "TypeSafe key: not set" and the ops channel says so once an hour. The bot keeps its last 50 decisions per server in
-memory, and a log of them without the messages' text. Officers read them on the Ops page under **Recent decisions**: when,
+memory, and a log of them without the messages' text. Officers read them on the Ops page's **Listening** tab, under **Recent decisions** (the tab also names the channels the bot listens in): when,
 the channel, who wrote, what they wrote, how likely it was for the bot (a bar and a percent) and what the bot did —
 replied, asked with 👀, stayed quiet, would have replied, would have asked, or skipped (over the hourly limit). The list
 updates as messages come in. `/gm config plain` lists the listening channels too ("• #signups: Replies — listening"), and

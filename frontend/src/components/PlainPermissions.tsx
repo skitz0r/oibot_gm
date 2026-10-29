@@ -1,18 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useDirty } from "../hooks/useDirty";
 import { useLive } from "../hooks/useLive";
-import { Badge, Box, Button, Card, Group, MultiSelect, Progress, Select, Table, Text, Tooltip } from "@mantine/core";
+import { Badge, Box, Button, Card, Group, MultiSelect, Select, Table, Text } from "@mantine/core";
 import { IconPencil } from "@tabler/icons-react";
 import { api, type RoleRef } from "../api";
 import { CardHeader, fail } from "./Page";
 import { useOpsSave } from "./ReviewModal";
-import css from "./plain.module.css";
 
 // ---- shapes (mirror plain_json in src/oibot_gm/web/api.py)
 interface PlainGroup { id: string; label: string; example: string; who: string[]; default: string[]; who_text: string; ops: string[] }
 interface PlainChannel { id: string; name: string; category: string | null; mode: string; listed: boolean; role: "ops" | "analytics" | null }
 /** One listening verdict (bot.listen_recent, design §5.59): `when` is already 12-hour words from the server. */
-interface ListenRow { when: string; channel: string; channel_name: string; author: string; text: string; p: number | null; mode: string; did: string }
+export interface ListenRow { when: string; channel: string; channel_name: string; author: string; text: string; p: number | null; mode: string; did: string }
 export interface PlainPermissionsData {
   groups: PlainGroup[]; channels: PlainChannel[]; listed: Record<string, string>; dm: string; default: string;
   tiers: string[]; modes: string[]; guild_roles: RoleRef[]; owner: boolean; rev?: string;
@@ -26,12 +25,6 @@ const MODE_HINT = "Acts: anything the person's groups allow · Own record only: 
 
 const LISTEN_HINT = "Listening: the bot reads these channels and answers what is clearly for it, without a tag. Watches only notes what it would have answered.";
 const LISTEN_COLOUR: Record<string, string> = { watch: "gray", reply: "teal" };
-/** What the bot did with a message it read, in words (discord_bot.ListenMixin's `did`). */
-const DID: Record<string, string> = {
-  replied: "Replied", asked: "Asked with 👀", quiet: "Stayed quiet",
-  "would reply": "Would have replied", "would ask": "Would have asked", skipped: "Skipped",
-};
-const DID_WHY: Record<string, string> = { skipped: "over the hourly limit of decisions for this server" };
 
 type Draft = { who: Record<string, string[]>; listed: Record<string, string>; dm: string; default: string; listen: Record<string, string> };
 
@@ -47,11 +40,6 @@ export function PlainPermissions() {
   const editingRef = useRef(false);
   editingRef.current = d !== null;
   useLive(() => { if (!editingRef.current) load(); }, ["config"]);  // a change made elsewhere shows — never under the grid's edit mode
-  // a new listening verdict: only Recent decisions refresh, so an open edit keeps its draft
-  useLive(() => {
-    api.get<PlainPermissionsData>("/api/plain-permissions")
-      .then((n) => setData((o) => (o ? { ...o, listen_recent: n.listen_recent, listen_ready: n.listen_ready } : n))).catch(fail);
-  }, ["listen"]);
   if (!data) return null;
   const editing = d !== null;
   const roleName = (id: string) => data.guild_roles.find((r) => r.id === id)?.name;
@@ -100,7 +88,6 @@ export function PlainPermissions() {
     );
   };
   const anyListening = Object.keys(editing ? d!.listen : listenMap).length > 0;
-  const recent = data.listen_recent || [];
 
   return (
     <Card id="plain">
@@ -178,43 +165,6 @@ export function PlainPermissions() {
           </Group>
         )}
       </Box>
-      {(anyListening || recent.length > 0) && (
-        <Box pb="md">
-          <Text fw={600} size="sm" px="md" pt="sm">Recent decisions</Text>
-          <Text size="xs" c="dimmed" px="md" mb="xs">The last messages the bot read in a listening channel, newest first, and what it did with each.</Text>
-          {recent.length === 0 ? (
-            <Text size="sm" c="dimmed" px="md">No messages read yet. Each untagged message in a listening channel shows here with what the bot did.</Text>
-          ) : (
-            <div>
-              <div className={css.head}>
-                <Text size="xs" c="dimmed">When</Text><Text size="xs" c="dimmed">Channel</Text><Text size="xs" c="dimmed">Who wrote</Text>
-                <Text size="xs" c="dimmed">Message</Text><Text size="xs" c="dimmed">Likely for the bot</Text><Text size="xs" c="dimmed">What the bot did</Text>
-              </div>
-              {recent.map((r, i) => (
-                <div key={`${r.when}-${i}`} className={css.row}>
-                  <div className={css.meta}>
-                    <Text size="xs" c="dimmed">{r.when}</Text>
-                    <Text size="xs">{r.channel_name ? `#${r.channel_name}` : "a channel the bot can't see"}</Text>
-                    <Text size="xs" fw={600}>{r.author}</Text>
-                  </div>
-                  <Text size="sm" className={css.text}>{r.text}</Text>
-                  <div className={css.bar}>
-                    {r.p === null ? <Text size="xs" c="dimmed">—</Text> : <>
-                      <Progress value={Math.round(r.p * 100)} size="sm" color={r.p >= 0.8 ? "teal" : r.p >= 0.5 ? "blue" : "gray"} aria-label={`${Math.round(r.p * 100)}% likely for the bot`} />
-                      <Text size="xs" w={34} ta="right">{Math.round(r.p * 100)}%</Text>
-                    </>}
-                  </div>
-                  <div className={css.did}>
-                    {DID_WHY[r.did]
-                      ? <Tooltip label={DID_WHY[r.did]}><Text size="sm" span>{DID[r.did] || r.did}</Text></Tooltip>
-                      : <Text size="sm">{DID[r.did] || r.did}</Text>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Box>
-      )}
     </Card>
   );
 }

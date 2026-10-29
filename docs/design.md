@@ -3782,7 +3782,7 @@ a link, a reply to someone else. Thresholds: `LISTEN_SURE = 0.8` (the host's `OI
 text ≤120 chars, p, mode, did ∈ replied · asked · quiet · would reply · would ask · skipped) for the Ops page (phase 2), and
 one row per verdict in `out/listen.jsonl` with NO text (at, guild, channel, author_id, p, mode, did).
 
-**Surfaces (phase 2, built 2026-10-28).** `GET /api/plain-permissions` (officers; `plain_json` → `listen_json`) adds
+**Surfaces (phase 2, built 2026-10-28).** (Later the same day the Ops page became three tabs — Recent actions · Plain-text permissions · Listening, `#plain` / `#listening` open one — and Recent decisions moved from the foot of the permissions card to the Listening tab, `components/ListenDecisions.tsx`, which also names the listening channels: the list was lost under forty channel rows.) `GET /api/plain-permissions` (officers; `plain_json` → `listen_json`) adds
 `listen` (the map), `listen_modes`, `listen_words`, `listen_ready` (`decisions.key_set()`: the running provider or the
 environment has `TYPESAFE_API_KEY` — a yes or no, never the value) and `listen_recent` (`bot.listen_recent`, each row
 with `when` in `Registry.local12` words — the Clock rule — and `channel_name` resolved; "a channel the bot can't see"
