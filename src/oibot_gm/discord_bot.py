@@ -123,14 +123,17 @@ def wowhead(item, profile: GameProfile | None = None) -> str | None:
 # What the bot does, in ~80 words: the decision service's only picture of it (no per-message prompt, no model text).
 LISTEN_BOT_WORDS = ("This is the guild's Discord bot for World of Warcraft raids. It runs raid signups and rosters: when a raid "
                     "runs, who joined, who is rostered, who is on the bench, when the roster locks and who must confirm. It records "
-                    "absences, characters, mains and alts, specs and extra roles. It runs the loot council and members' wishlists, "
+                    "absences, and it knows every member's characters: who plays which class and spec, their main and alts, their "
+                    "rank and attendance. It runs the loot council and members' wishlists, "
                     "and explains the guild's loot and roster rules. It answers questions about itself and how to use it. It never "
                     "joins chat between people, game talk or jokes.")
 LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or act on `message.text`? Yes when it asks something "
-                   "the bot knows (when a raid runs, who is rostered, a loot or roster rule, how the bot works) or tells the bot "
-                   "something it records (an absence, a signup answer, a character or spec change), even without naming the bot. "
+                   "the bot knows (when a raid runs, who is rostered, what class or spec someone plays, a member's characters, rank or "
+                   "attendance, a loot or roster rule, how the bot works) or tells the bot something it records (an absence, a "
+                   "signup answer, a character or spec change), even without naming the bot. "
                    "No when it is conversation between people, game talk, a joke, a link, or a reply to another person. "
-                   "`bot` says what the bot does; `recent` is the chat just before, for context only.")
+                   "`bot` says what the bot does; `channel` says where it was written (the bot's job there, the channel's own "
+                   "topic and its category); `recent` is the chat just before, for context only.")
 LISTEN_CRITERIA = {"true": "The message asks the bot something it knows or tells it something it records.",
                    "false": "The message is people talking to each other, game talk, a joke, a link or a reply to someone else."}
 # the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things
@@ -203,9 +206,13 @@ class ListenMixin:
         ch = message.channel
         ref = message.reference.resolved if getattr(message, "reference", None) else None
         me = getattr(self, "user", None)
+        category = getattr(ch, "category", None)
         return {"bot": LISTEN_BOT_WORDS,
                 "guild": {"raids": [str(reg.raid_def(r).get("name", r)) for r in raids], "words": LISTEN_GLOSSARY},
-                "channel": {"name": f"#{getattr(ch, 'name', '') or ''}", "purpose": purpose.get(ch.id, "") if ch.id else ""},
+                # where it was written: the bot's own job for the channel, and what Discord knows — its topic (the owner's
+                # description) and its category — so a listening channel without a bot job still says what kind of room it is
+                "channel": {"name": f"#{getattr(ch, 'name', '') or ''}", "purpose": purpose.get(ch.id, "") if ch.id else "",
+                            "topic": str(getattr(ch, "topic", None) or "")[:200], "category": str(getattr(category, "name", None) or "")},
                 "recent": list(self._listen()["recent"].get(ch.id, ()))[-(LISTEN_RECENT - 1):],
                 "message": {"author": getattr(message.author, "display_name", "") or "", "text": text[:600],
                             "reply_to_bot": bool(me is not None and getattr(getattr(ref, "author", None), "id", None) == getattr(me, "id", -1))}}

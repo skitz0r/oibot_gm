@@ -204,7 +204,8 @@ def message(author, channel=SIGNUP_CH, text="when does Barrow Deeps run this wee
         reacts.append(emoji)
 
     return types.SimpleNamespace(id=next(_next_id), content=text, author=types.SimpleNamespace(id=author, display_name=f"user{author}", bot=bot),
-                                 channel=types.SimpleNamespace(id=channel, name="signups"), guild=types.SimpleNamespace(id=1, me=None),
+                                 channel=types.SimpleNamespace(id=channel, name="signups", topic="Sign up for raids here", category=types.SimpleNamespace(name="Raiding")),
+                                 guild=types.SimpleNamespace(id=1, me=None),
                                  mentions=list(mentions), role_mentions=[], reference=None, add_reaction=add_reaction, reacts=reacts)
 
 
@@ -235,6 +236,8 @@ def test_sure_in_a_reply_channel_goes_to_plain_text(gate):
     assert dec.calls == 1 and gate.bot.handled == [(msg.id, msg.content, SIGNUP_CH)]
     st = dec.states[0]
     assert st["bot"] == db.LISTEN_BOT_WORDS and st["message"]["text"] == msg.content and st["channel"]["purpose"] == "the signup channel"
+    assert st["channel"]["topic"] == "Sign up for raids here" and st["channel"]["category"] == "Raiding", "what Discord knows about the room rides along"
+    assert "who plays which class" in st["bot"] and "what class or spec someone plays" in db.LISTEN_QUESTION
     assert "Barrow Deeps" in st["guild"]["raids"] and "rostered" in st["guild"]["words"]
     assert gate.bot.listen_recent(gate.g.reg)[0]["did"] == "replied"
 
@@ -342,3 +345,10 @@ def test_the_host_may_raise_sure(gate, monkeypatch):
     assert gate.bot.handled == [] and msg.reacts == ["👀"]
     monkeypatch.setenv("OIBOT_LISTEN_SURE", "0.1")
     assert db.listen_sure() > db.LISTEN_MAYBE
+
+
+def test_a_channel_without_a_topic_or_category_sends_empty_strings(gate):
+    msg = message(gate.g.me.discord_id)
+    msg.channel = types.SimpleNamespace(id=777_001, name="general", topic=None, category=None)  # no job of the bot's
+    dec = gate.run(0.1, msg)
+    assert dec.states[0]["channel"] == {"name": "#general", "purpose": "", "topic": "", "category": ""}

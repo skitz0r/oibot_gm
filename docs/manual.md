@@ -1427,6 +1427,9 @@ and links are left alone. Each listening channel is one of two:
   done, then switch to *Replies*.
 - **Replies** — the bot answers. When it is unsure a message is for it, it adds 👀 instead; the writer clicks the 👀
   within ten minutes to ask, and anyone else's click does nothing.
+The bot judges a message with what it knows about the room: its own job there (the signup channel, the officers'
+channel) and the channel's topic and category in Discord — so give a listening channel a topic ("General chat about the
+game", "Raid signups and questions") and the bot reads it in that light.
 
 The owner turns it on in plain text ("listen in #signups", "only watch #general", "stop listening in #signups"), or on
 the Ops page: the plain-text table has a **Listening** column, a *Watches* or *Replies* badge on each listening channel,

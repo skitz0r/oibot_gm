@@ -3768,7 +3768,7 @@ summary's Plain text section says "Listening: #signups replies, #general watches
 filter, DMs, an @mention (which never reaches it — no message is decided twice) and a council thread's chat. Skipped: a
 bot author, empty text, an *ignore* channel, and no key (one ops *warn* per guild per hour, no DM). The **state** is a
 JSON object, member text as data: `bot` (`LISTEN_BOT_WORDS`, ~80 words on what the bot does), `guild` (its raids' names
-from `raid_def`, the glossary's words), `channel` (name, and "the signup channel" etc. when it is one of the bot's), `recent`
+from `raid_def`, the glossary's words), `channel` (name; "the signup channel" etc. when it is one of the bot's; and what Discord knows about the room — its `topic`, the owner's description, ≤200 chars, and its `category` — so a listening channel with no bot job still says what kind of room it is: added 2026-10-28 after "what class is X playing?" scored 32% in #wow-chat and 55% in the officers' channel, the purpose line alone moving it; the same change put "who plays which class and spec, their main and alts, their rank and attendance" into the paragraph and "what class or spec someone plays, a member's characters, rank or attendance" into the question's yes-list, probed: 17% → 82% on that question, banter unchanged at 2%), `recent`
 (the two messages before it, from a per-channel ring of the last three the gate saw — no REST call), `message` (author,
 ≤600 chars, `reply_to_bot`). The **question** (`LISTEN_QUESTION`): would a reader expect the bot to answer or act on
 `message.text` — yes for something it knows or records, even without its name; no for people talking, game talk, a joke,
