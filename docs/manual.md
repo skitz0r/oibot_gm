@@ -2121,6 +2121,15 @@ the next sheet opens. And your own record — characters, roles, DMs, upcoming a
 confirmations and fill asks waiting on you, your answer and seat on each live run — or, if you applied, your
 application's status and the note sent to you (never which officer decided).
 
+**Who plays what** is open to every member, anywhere the bot answers — a public channel included: ask "who's playing
+tank?", "what does Monix play?" or "is @Monix playing healer?" and the answer reads every member's characters (spec,
+class, role, which one is the main) and rank, the same facts the site and the sheets already show. A member the question
+names — by name, by character or by @mention — comes first in that list. It never carries anyone's absences or their
+reasons, applications, the loot council's scores and reasons, someone else's attendance numbers, unconfirmed marks, who
+is an officer, or the bot's own running (spend, errors, setup): those stay with officers, in a DM or an officer channel.
+An @mention in a question reads as that person's name, for every way you ask (an @mention of the bot, a DM, a channel
+the bot listens in).
+
 Officers get more, only when the question is about it (a few keywords decide; "status", "overview" or "what's going
 on" brings the main ones): **status** (data repo and push, LLM spend, the loot feed, uptime, the last ops lines, the
 last ten registry change lines — the analytics change log's from → to — and the last data commits), **applications** (open ones oldest first with the schedules they can make, the last five

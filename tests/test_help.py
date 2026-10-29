@@ -249,6 +249,53 @@ def test_members_never_get_officer_data(reg, rs):
     assert "secret council reason" in loot.split('<member-text source="precedents">')[1]
 
 
+# ---------------------------------------------------------------- who plays what: every member, anywhere (owner decision 2026-10-29)
+
+def _who_block(s):
+    return s.split("### Who plays what")[1].split("\n### ")[0].split("\n## ")[0]
+
+
+def who_guild(reg):
+    tank = real_member(reg, 600_000_000_000_000_001, "Tankard", "Warrior", "Protection")
+    heal = real_member(reg, 600_000_000_000_000_002, "Mendy", "Priest", "Holy")
+    reg.add_character(heal.discord_id, "Mendalt", "Mendalt", "Druid", "Feral", None, False)
+    return tank, heal
+
+
+def test_a_member_asking_who_plays_tank_reads_who_plays_what(reg, rs):
+    tank, heal = who_guild(reg)
+    asker = reg.test_members()[0].discord_id
+    s = state(reg, rs, asker, False, "whos playing tank", extras_full())
+    assert "### Who plays what" in s and "### Members and characters" not in s
+    block = _who_block(s)
+    assert "- Tankard: Tankard Protection Warrior tank* " in block and "- Mendy: Mendy Holy Priest heal" in block
+    assert "Mendalt Feral Druid" in block and "Mendalt Feral Druid tank*" not in block, "an alt has no main mark"
+    for officer_mark in ("[owner]", "[officer]", "?", "officers seen", "unconfirmed (", "test puppet"):
+        assert officer_mark not in block, officer_mark
+    assert reg.test_members()[0].display_name not in block, "puppets are not who plays what"
+
+
+def test_an_officer_in_public_reads_who_and_in_private_reads_bank(reg, rs):
+    who_guild(reg)
+    public = help_mod.guild_state(reg, rs, OWNER, True, "who plays healer?", extras_full(), public=True)
+    assert "### Who plays what" in public and "### Members and characters" not in public
+    private = state(reg, rs, OWNER, True, "who plays healer?", extras_full())
+    assert "### Members and characters" in private and "### Who plays what" not in private, "bank is the who list and more"
+
+
+def test_a_question_naming_a_member_puts_them_first_without_their_record(reg, rs):
+    tank, heal = who_guild(reg)
+    for i in range(3):
+        real_member(reg, 600_000_000_000_000_010 + i, f"Aaron{chr(97 + i)}", "Mage", "Frost")
+    reg.add_absence(tank.discord_id, (reg.now_local().date() + timedelta(days=2)).isoformat(), None, "root canal", "t")
+    asker = reg.test_members()[0].discord_id
+    s = state(reg, rs, asker, False, "is Tankard playing healer?")
+    block = _who_block(s)
+    assert block.split("\n")[1].startswith("- Tankard:"), "the person asked about comes first"
+    assert "root canal" not in s and "## Member named in the question" not in s and "DMs on" not in s.split("## Asker")[0]
+    assert s.count(" · DMs on") == 1, "only the asker's own record carries a DMs line"
+
+
 def test_news_policy_loot_sections(reg, rs):
     NewsStore(reg.store, reg.key).add({"title": "Hotfixes " + INJECT, "url": "https://news.example/1"}, ["forever"], posted_at=reg.now_local().isoformat())
     p = Proposal(id=new_id(), title="Fort stacks with Blood Pact", affects="guild setting", kind="needs_developer", change="x")

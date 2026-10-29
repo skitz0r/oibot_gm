@@ -352,3 +352,34 @@ def test_a_channel_without_a_topic_or_category_sends_empty_strings(gate):
     msg.channel = types.SimpleNamespace(id=777_001, name="general", topic=None, category=None)  # no job of the bot's
     dec = gate.run(0.1, msg)
     assert dec.states[0]["channel"] == {"name": "#general", "purpose": "", "topic": "", "category": ""}
+
+
+# ---- mentions become names (every plain-text path: the @mention path, DMs, listening)
+
+def _guild(roles=None, members=None, me_roles=()):
+    roles, members = roles or {}, members or {}
+    return types.SimpleNamespace(id=1, me=types.SimpleNamespace(roles=[types.SimpleNamespace(id=r) for r in me_roles]),
+                                 get_role=roles.get, get_member=members.get)
+
+
+def test_mention_names(g):
+    reg, bot_user = g.reg, types.SimpleNamespace(id=BOT_ID)
+    other = g.other
+    stranger = types.SimpleNamespace(id=4242, display_name="Wanderer")
+    guild = _guild(roles={88: types.SimpleNamespace(name="Raiders")}, members={4343: types.SimpleNamespace(display_name="Lurker", name="lurk")}, me_roles=(99,))
+    msg = message(g.me.discord_id, text=f"<@{BOT_ID}> is <@!{other.discord_id}> playing healer?  <@4242> <@4343> <@5151> <@&88> <@&99> <@&12> in <#{SIGNUP_CH}>",
+                  mentions=[bot_user, stranger])
+    msg.guild = guild
+    assert db.mention_names(msg, reg, bot_user) == f"is {other.display_name} playing healer? Wanderer Lurker @someone @Raiders @role in <#{SIGNUP_CH}>"
+    dm = message(g.me.discord_id, text=f"what does <@{other.discord_id}> play?")
+    dm.guild = None
+    assert db.mention_names(dm, reg, bot_user) == f"what does {other.display_name} play?", "a DM still names a registered member"
+
+
+def test_a_listened_message_reads_the_name_everywhere(gate):
+    other = gate.g.other
+    msg = message(gate.g.me.discord_id, text=f"is <@{other.discord_id}> playing healer?")
+    dec = gate.run(0.93, msg)
+    want = f"is {other.display_name} playing healer?"
+    assert dec.states[0]["message"]["text"] == want and gate.bot.listen_recent(gate.g.reg)[0]["text"] == want
+    assert gate.bot.handled == [(msg.id, want, SIGNUP_CH)]

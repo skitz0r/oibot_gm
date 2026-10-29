@@ -4,7 +4,7 @@ No state is changed here — answers point at commands; officers' change request
 configops.
 
 The live snapshot (`guild_state`) is built in code and bounded (MAX_STATE_CHARS). It has fixed parts (settings, raids,
-live runs, the asker) and keyword-gated SECTIONS (status, loot — a member gets their own awards only —, bank, absences,
+live runs, the asker) and keyword-gated SECTIONS (status, loot — a member gets their own awards only —, who plays what (every member), bank, absences,
 auras, readiness, news, policy, applications, test bench), each with its own character cap. Officer data (other people's absence reasons,
 applications, ops, precedents, proposals, privilege) only ever reaches an officer's snapshot. Text people typed that
 is shown at length (news titles, applicants' answers, absence reasons, precedent reasons, commit subjects) sits inside
@@ -753,6 +753,27 @@ def _bank(ask: Ask) -> list[str]:
     return out
 
 
+def _who(ask: Ask) -> list[str]:
+    """Who plays what, for every member (design §5.25, owner decision 2026-10-29): the site and the sheets already show
+    every member's characters, mains, alts and ranks, so any member may read them anywhere the bot answers. Public-safe:
+    no privilege tag, no unconfirmed mark, no planned characters, no officer list. Members the question names come first,
+    so a clipped list never cuts the person asked about."""
+    reg = ask.reg
+    named = [m for m in mentioned_members(reg, ask.question) if not m.test]
+    first = {m.discord_id for m in named}
+    rest = sorted((m for m in reg.members.values() if not m.test and m.discord_id not in first), key=lambda m: m.display_name.lower())
+    out = ["### Who plays what (every member may read this): name: characters as Label Spec Class role (* main) · rank"]
+    for m in named + rest:
+        chars = [c for c in m.active() if c.status != "planned"]
+        if not chars:
+            continue
+        cs = "; ".join(f"{_char(reg, c)}{'*' if c.is_main else ''} {c.rank}" for c in chars)
+        out.append(_safe(f"- {m.display_name}: {cs}"))
+    if len(out) == 1:
+        out.append("  no member has a character yet (members add one with /register or on the Me page)")
+    return out
+
+
 def _absences(ask: Ask) -> list[str]:
     reg = ask.reg
     today = reg.now_local().date()
@@ -947,6 +968,7 @@ SECTIONS: dict[str, tuple[re.Pattern, Callable[[Ask], list[str]], int, bool]] = 
     "readiness": (re.compile(r"\b(ready|readiness|short|comp|composition|missing|over ?cap|overview|analytics|pool|need more|shortfall|desired)\b"), _readiness, 4_000, True),
     "news": (re.compile(r"\b(news|proposals?|jobs?|review|agents?|patch(es)?|hotfix\w*|blue ?posts?|go(ne)? through|went through|revert\w*|(was|were|been|got|it) applied)\b"), _news, 2_500, True),
     "loot": (re.compile(r"\b(loot|precedents?|ledger|award(ed|s)?|got|drops?|items?|council|gear|overrid\w*|overrode|overruled?)\b"), _loot, 2_500, False),  # members: their own
+    "who": (re.compile(r"\b(list|who|whos|plays?|playing|class(es)?|specs?|heal(er|ers|s|ing)?|tank(s|ing)?|melee|ranged|dps|roles?|offspec|alts?|mains?|members?|characters?|ranks?)\b"), _who, 4_000, False),  # members: public-safe
     "bank": (re.compile(r"\b(list|who|healers?|tanks?|melee|ranged|dps|unconfirmed|confirm\w*|officers?|alts?|mains?|members?|bank|characters?|ranks?|privilege)\b"), _bank, 4_000, True),
     "policy": (re.compile(r"\b(polic(y|ies)|loot rules?|comp rules?|persona|standing instructions?)\b"), _policy, 3_000, True),
     "auras": (re.compile(r"\b(auras?|buffs?|stacks?|stacking|totems?|provides?|providers?|famil(y|ies)|blessings?)\b"), _auras, 4_000, False),
@@ -961,15 +983,17 @@ GENERIC_FILL = ("status", "applications", "absences", "readiness", "news", "test
 
 
 def _section_hit(ask: Ask, key: str) -> bool:
-    """A section's keywords, plus what only exists in data: class/spec names (bank), buff and family names (auras),
-    applicants' names (applications)."""
+    """A section's keywords, plus what only exists in data: class/spec names (bank, who), members' and characters' names
+    (who), buff and family names (auras), applicants' names (applications)."""
     pat = SECTIONS[key][0]
     q = ask.q
     if pat.search(q):
         return True
     reg = ask.reg
-    if key == "bank":
-        return _words(q, *reg.profile.classes, *(s for specs in reg.profile.classes.values() for s in specs))
+    if key in ("bank", "who") and _words(q, *reg.profile.classes, *(s for specs in reg.profile.classes.values() for s in specs)):
+        return True
+    if key == "who":  # a question naming a member or one of their characters is about them
+        return bool(mentioned_members(reg, ask.question))
     if key == "auras":
         return _words(q, *(t for b in reg.profile.buffs for t in (b.id, b.id.replace("_", " "), b.short)), *(t for fid, f in reg.profile.families.items() for t in (fid, f.name)))
     if key == "applications":
@@ -983,6 +1007,8 @@ def section_lines(ask: Ask) -> tuple[list[str], list[str], list[str]]:
     order while SECTION_BUDGET allows. Each section is clipped to its own cap."""
     generic = bool(GENERIC.search(ask.q))
     wanted = [k for k in SECTIONS if (ask.officer or not SECTIONS[k][3]) and _section_hit(ask, k)]
+    if "bank" in wanted and "who" in wanted:  # an officer in private: the bank list is the who list and more
+        wanted.remove("who")
     extra = [k for k in GENERIC_FILL if generic and k not in wanted and (ask.officer or not SECTIONS[k][3])]
     out, done, skipped = [], [], []
     used = 0
@@ -1097,7 +1123,7 @@ def officer_index(ask: Ask, included: list[str], skipped: list[str]) -> str:
                     waiting_conf += sum(1 for c in rc.confirmations(reg, ev) if c.get("answer") is None)
                 except Exception:  # noqa: BLE001
                     pass
-    left = [k for k in SECTIONS if k not in included]
+    left = [k for k in SECTIONS if k not in included and not (k == "who" and "bank" in included)]  # bank covers who
     return (f"officer index: open applications {len(reg.open_applicants())} · proposals to decide {waiting} · unconfirmed characters {len(reg.pending())} · "
             f"unanswered confirmations {waiting_conf} · fill asks open {fill_open} · away in the next 7 days {away}"
             + (f" · sections included: {', '.join(included)}" if included else "")
@@ -1107,7 +1133,8 @@ def officer_index(ask: Ask, included: list[str], skipped: list[str]) -> str:
 
 def people_lines(ask: Ask) -> list[str]:
     """The asker's own record (absence reasons included: it's theirs), an applicant's own status, and — for an
-    officer — anyone the question names."""
+    officer — anyone the question names. A member (or an officer in a public channel) reads a named member through the
+    who section instead (their characters and rank first there; never their absences, DMs, asks or pins)."""
     reg, rs = ask.reg, ask.rs
     lines = []
     m = reg.members.get(ask.user_id)

@@ -588,6 +588,26 @@ member-level snapshot, no officer index, a "Reply audience" line; `help_answer` 
 parse with `officer=False`, so neither the answer nor a clarifying question carries officer data. Interactions
 (`/ask`, `/gm change`) are ephemeral and keep the officer view.
 
+**Who plays what is public (owner decision 2026-10-29).** Read-only guild data that the site and the sheets already show
+every member may be answered to any member in any channel the bot may reply in: who plays what, mains and alts, ranks,
+wishlists, schedules, rosters and the written rules. `help.SECTIONS["who"]` (`_who`, not officer-only, cap 4 000) lists
+every member with an active, non-planned character, puppets excluded: `- <name>: Label Spec[/offspec] Class role[*] rank; …`
+— no privilege tag, no unconfirmed `?`, no officers-seen or pending line. Members the question names
+(`mentioned_members`) come first, so a clipped list never cuts them. It fires on the bank's people words plus
+play/playing/class/spec/heal/tank/role/offspec/main/alt, on a class or spec name, and on any question naming a member or
+character. An officer in private still gets `bank` (its superset) and `who` is dropped then. A member never gets a named
+member's record (`member_lines`: absences, DMs, asks, pins) — only their line in `who`. Still officer-only: other
+people's absence reasons, applications, the loot council's working (scores, reasons, appeal notes, who resolved), other
+members' attendance numbers, operator facts (spend, errors, host, superusers, channel setup, news review, test bench) and
+officer marks on people (unconfirmed, privilege, pins, DM on/off). Observed first in #wow-chat: "whos playing tank" and
+"is <@id> playing healer?" were answered from the live runs alone, the member list being officers-only.
+
+**Mentions become names.** `discord_bot.mention_names(message, reg, bot_user)` is the text every plain-text path hands
+on (the @mention path, DMs, listening): the bot's own mention and its own role's mention go; another user's `<@id>` /
+`<@!id>` becomes the registered display name, else Discord's, else "@someone"; another role's `<@&id>` becomes
+"@<role name>", else "@role"; `<#id>` stays raw (configops reads channel targets). The names are member text in the same
+data blocks as the rest of the message.
+
 **Surfaces.** Web: `GET /api/plain-permissions` (officers; groups with who, ops and example, the guild's channels with
 their effective mode, roles), `POST /api/admin/plain-permissions` (owner; `Registry.set_plain_policy` validates and
 commits one line); the Ops page's *Plain-text permissions* card (a who multi-select per group from the tiers and the
@@ -3780,7 +3800,9 @@ a link, a reply to someone else. Thresholds: `LISTEN_SURE = 0.8` (the host's `OI
 
 **The record.** Every verdict: a ring per guild of the last 50 in memory (`listen_recent(reg)`: at, channel, author,
 text ≤120 chars, p, mode, did ∈ replied · asked · quiet · would reply · would ask · skipped) for the Ops page (phase 2), and
-one row per verdict in `out/listen.jsonl` with NO text (at, guild, channel, author_id, p, mode, did).
+one row per verdict in `out/listen.jsonl` with NO text (at, guild, channel, author_id, p, mode, did). The text judged, recorded
+and handed to `plain_text` is `mention_names`' (added 2026-10-29): "is Monix playing healer?", never the raw `<@id>` — and
+the answer then reads the public who-plays-what section (§5.25).
 
 **Surfaces (phase 2, built 2026-10-28).** (Later the same day the Ops page became three tabs — Recent actions · Plain-text permissions · Listening, `#plain` / `#listening` open one — and Recent decisions moved from the foot of the permissions card to the Listening tab, `components/ListenDecisions.tsx`, which also names the listening channels: the list was lost under forty channel rows.) `GET /api/plain-permissions` (officers; `plain_json` → `listen_json`) adds
 `listen` (the map), `listen_modes`, `listen_words`, `listen_ready` (`decisions.key_set()`: the running provider or the

@@ -102,6 +102,8 @@ src/oibot_gm/
                        DECISIONS = the bot's instance (None without the key); key_set() = the key is set (a yes or no — listen_ready, the Host line)
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
+                       mention_names(message, reg, bot_user) = THE text of every plain-text path (@mention, DM, listening): the bot's own
+                       mention/role go, another user's <@id> → their registered name (else Discord's, else "@someone"), <@&id> → "@role name", <#id> kept;
                        on_guild_join (re-attach a parked guild, else ONE DM to host_ids: "I was added to X … Missing permissions: …"), on_guild_remove
                        (Guilds.detach unless guild.unavailable; one ops error), on_guild_available (re-attach), on_member_remove/join (Member.left_at);
                        claim_guild adds an ops line to every other guild (D44: no owner DM); cached_member keeps _member_last_yes (the web's 6 h "stale" read);
@@ -310,6 +312,8 @@ src/oibot_gm/
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
                        officers' `config` section = configops.summary_text(config_summary(audience)) (owner: Host too);
+                       `who` section (every member, any channel: who plays what + rank, named members first, no officer marks; an officer
+                       in private gets `bank` instead — owner decision 2026-10-29, design §5.25);
                        manual_sections (the manual by its own ## headings, mtime-cached, tiers tagged — the Help page), command_rows(tree, tier),
                        site_url(reg, path, anchor) = THE site link (?g= before the #anchor)
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:

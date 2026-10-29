@@ -160,6 +160,49 @@ def listen_sure() -> float:
     return min(1.0, max(LISTEN_MAYBE + 0.01, v))
 
 
+_ROLE_MENTION = re.compile(r"<@&(\d+)>")
+_USER_MENTION = re.compile(r"<@!?(\d+)>")
+
+
+def mention_names(message, reg, bot_user=None) -> str:
+    """A message's text as a person reads it, for every plain-text path (the @mention path, DMs, listening): the bot's own
+    mention and its own role's mention go (what _addressed matched); another user's <@id> becomes their registered display
+    name, else Discord's, else "@someone"; another role's <@&id> becomes "@<role name>", else "@role". Channel mentions
+    (<#id>) stay raw: configops reads them as targets ("listen in <#id>"). The names are member text, carried in the same
+    data blocks as the rest of the message."""
+    content = getattr(message, "content", None) or ""
+    guild = getattr(message, "guild", None)
+    me = getattr(guild, "me", None) if guild is not None else None
+    own_roles = {getattr(r, "id", None) for r in (getattr(me, "roles", None) or [])}
+    bot_id = getattr(bot_user, "id", None)
+    mentioned = {getattr(u, "id", None): u for u in (getattr(message, "mentions", None) or [])}
+
+    def role(m: re.Match) -> str:
+        rid = int(m.group(1))
+        if rid in own_roles:
+            return ""
+        get_role = getattr(guild, "get_role", None)
+        r = get_role(rid) if callable(get_role) else None
+        return f"@{r.name}" if r is not None and getattr(r, "name", None) else "@role"
+
+    def user(m: re.Match) -> str:
+        uid = int(m.group(1))
+        if bot_id is not None and uid == bot_id:
+            return ""
+        member = reg.members.get(uid) if reg is not None else None
+        if member is not None and member.display_name:
+            return member.display_name
+        u = mentioned.get(uid)
+        if u is None:
+            get_member = getattr(guild, "get_member", None)
+            u = get_member(uid) if callable(get_member) else None
+        name = (getattr(u, "display_name", None) or getattr(u, "name", None)) if u is not None else None
+        return name or "@someone"
+
+    text = _USER_MENTION.sub(user, _ROLE_MENTION.sub(role, content))
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
 class ListenMixin:
     """Listening (design §5.59): in a channel the owner chose (PlainPolicy.listen), a message nobody tagged the bot in is
     judged by the decision service — "is this for the bot?" as a probability — and code decides: a sure one in a *reply*
@@ -243,7 +286,7 @@ class ListenMixin:
             return None
         if reg.plain_mode(cid) == "ignore":
             return None
-        text = (message.content or "").strip()
+        text = mention_names(message, reg, getattr(self, "user", None))  # "is Monix playing healer?", never the raw <@id>
         if not text:
             return None
         dec = decisions.DECISIONS
@@ -1028,18 +1071,19 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         if message.guild:
             self.saw_member(message.guild.id, message.author)
         if not message.guild:  # a DM to the bot: a question, or a change to the sender's own record (plain-text policy "DMs")
-            text = message.content.strip()
-            if not text:
+            if not (message.content or "").strip():
                 return
             reg = await self.dm_guild(message)
             if reg is not None:
-                await self.plain_text(message, reg, text, None)
+                text = mention_names(message, reg, getattr(self, "user", None))
+                if text:
+                    await self.plain_text(message, reg, text, None)
             return
         reg = self.registries.for_guild(message.guild.id)
         # an @mention: routed by intent and by the channel's plain-text mode (the ops and analytics channels act by default;
         # a loot thread keeps its own chat below)
         if reg and self._addressed(message) and (message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) or not self.event_for(message.channel.id)):
-            text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
+            text = mention_names(message, reg, getattr(self, "user", None))  # the bot's own mention goes; anyone else's becomes their name
             if text:
                 await self.plain_text(message, reg, text, message.channel.id)
             return
