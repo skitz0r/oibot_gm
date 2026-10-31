@@ -498,6 +498,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "statuses": list(rc.STATUSES), "split_policies": list(SPLIT_POLICIES), "roles": list(ROLES),
             "group_caps": {"tank": int(grouping.get("tank_max_per_group", 2)), "healer": int(grouping.get("healer_max_per_group", 3))},
             "class_colours": dict(render.CLASS),
+            # professions (design §5.60): the version's list (empty when it has none), the skill cap and the trade slots
+            "professions": {"list": [{"id": d.id, "name": d.name, "group": d.group, "icon": d.icon} for d in reg.profile.professions.values()],
+                            "skill_cap": reg.profile.profession_rules["skill_cap"], "trade_slots": reg.profile.profession_rules["trade_slots"]},
             "started_at": float(getattr(bot, "started_at", STARTED)),
             # absences: the Discord wizard's For how long list (presets.DURATIONS) and the verb's caps, so the web modals can't drift
             "durations": [{"days": d, "label": label} for d, label in DURATIONS], "max_absence_days": MAX_ABSENCE_DAYS, "absence_reason_max": ABSENCE_REASON_MAX,
@@ -605,7 +608,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         off = reg.profile.spec(c.cls, c.offspec).role if c.offspec else None
         return {"label": c.label, "name": c.name, "surname": c.surname, "cls": c.cls, "spec": c.spec, "offspec": c.offspec, "is_main": c.is_main,
                 "status": c.status, "rank": c.rank, "rosters": list((runs or {}).get(c.label, [])), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off,
-                "flex": list(c.flex), "regular_on": [reg.series_label(k) for k in c.rosters if ":" in k]}
+                "flex": list(c.flex), "regular_on": [reg.series_label(k) for k in c.rosters if ":" in k],
+                "professions": [p.model_dump() for p in c.professions]}
 
     def regulars_json(reg, m) -> list[dict]:
         """A member's regular series: {series, label, character, cls, spec, role} (the Me page's My regular raids)."""
@@ -2192,7 +2196,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 for m in reg.members.values() if visible(v, m) for a in (m.absences if all else m.upcoming_absences(today))]
         return {"rows": sorted(rows, key=lambda r: (r["start"], r["display_name"])), "today": today, "tz": reg.config.timezone}
 
-    SET_VERBS = ("main", "rank", "confirm", "retire", "delete", "spec", "flex")  # the order one request applies them in
+    SET_VERBS = ("main", "rank", "confirm", "retire", "delete", "spec", "flex", "professions")  # the order one request applies them in
 
     @app.post("/api/members/set")
     async def members_set(request: Request):
@@ -2202,8 +2206,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         character?, rev?, preview?} plus any of: `main` (a label, or true with `character`; the rank moves with it), `rank`
         (D25: the member's, on the main; trial · raider · core · social, never alt), `confirm` (true: `character`, default
         the main), `retire` / `delete` (a label, or true with `character`), `spec` (+ `offspec`; "" clears it, absent keeps
-        it; `character` default the main), `flex` (a list of roles; `character` default the main). Applied main, rank,
-        confirm, retire, delete, spec, flex. `preview` writes nothing and answers {sentences, rev}: THE confirm words
+        it; `character` default the main), `flex` (a list of roles; `character` default the main), `professions` (the character's whole
+        list; [] clears; `character` default the main). Applied main, rank, confirm, retire, delete, spec, flex, professions. `preview` writes nothing and answers {sentences, rev}: THE confirm words
         (consequences.people_consequence — Discord's /roster char decide screen prints the same) after the save's own
         refusals; a refusal is a 400 with one sentence. `rev` (the characters_rev the page loaded) makes a write refuse
         with 409 when the record changed meanwhile. A `character` that isn't one of theirs is refused, never read as the
@@ -2293,6 +2297,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 rows.append({"label": c.label, "flex": roles})
                 if preview:
                     said += cq.flex_consequence(reg, rs, m, c.label, roles, by_id=v.uid)
+            if d.get("professions") is not None and "professions" in d:  # the whole list replaces; [] clears (design §5.60)
+                c = named or main
+                if c is None:
+                    raise RegistryError(f"{m.display_name} has no main yet, so name the character.")
+                if not isinstance(d["professions"], list):
+                    raise RegistryError("professions is a list")
+                rows.append({"label": c.label, "professions": d["professions"]})
+                if preview:
+                    said += cq.people_consequence(reg, rs, m, "professions", by_id=v.uid, label=c.label, professions=d["professions"])
         except Exception as e:  # noqa: BLE001
             return await refused(v, request, e)
         if not rows:
@@ -2528,6 +2541,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_me import install_me_api  # the member inbox (asks, notices, own answers) and the officers' on-behalf routes (design §5.40)
 
     install_me_api(app, bot, who=who, body=body, find_live=find_live, resolve_member=resolve_member)
+
+    from .api_professions import install_professions_api  # the Professions page: catalog, finder, rename / merge (design §5.60)
+
+    install_professions_api(app, bot, who=who, body=body)
 
     from .api_guides import install_guides_api  # the leveling-guide tool on the Me page (design §5.55)
 

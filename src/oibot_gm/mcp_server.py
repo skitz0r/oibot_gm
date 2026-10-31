@@ -790,6 +790,19 @@ def set_member(member: str, character: str | None = None, rank: str | None = Non
 
 
 @mcp.tool()
+def set_professions(member: str, character: str, professions: list[dict], guild: Guild = None) -> str:
+    """Replace one character's professions (design §5.60): professions = [{id: leatherworking, skill: 300, recipes: [{name: "Devilsaur Gauntlets"}]}, …]
+    — the whole list; [] clears. Two trade professions at most; a gathering one has no recipes. The owner's token writes it (no actor needed)."""
+    return msg(api(guild).post("/api/members/set", {"member": member, "character": character, "professions": professions}))
+
+
+@mcp.tool()
+def who_can_make(text: str, guild: Guild = None) -> str:
+    """Who can make a recipe: the registered recipes matching `text` with their crafters, highest skill first. Names only."""
+    return msg(api(guild).get("/api/professions/find", q=text))
+
+
+@mcp.tool()
 def set_dm(member: str, on: bool, guild: Guild = None) -> str:
     """Switch a member's DMs from the bot on or off (off = they answer asks on the site only)."""
     return msg(api(guild).post("/api/members/dm", {"member": member, "on": bool(on)}))
