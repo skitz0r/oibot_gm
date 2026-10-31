@@ -171,7 +171,7 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
   confirm_for: target, member, value=yes|no — on a LOCKED run, record someone's answer to their Confirm / Can't make it ask, or to a
     fill ask they were sent (they said so out of band: "Xanthe confirmed for tonight"; no = can't make it, the seat is freed and the fill
     engine looks for cover).
-Members (officer): character: member, character=<their character's name>, field=add|spec|offspec|name|rank|main|retire|delete|flex, value:
+Members (officer): character: member, character=<their character's name>, field=add|spec|offspec|name|rank|main|retire|delete|flex|profession|profession_remove|recipe_add|recipe_remove, value:
     add: character = the new name, value = "Class Spec [Offspec]", text = main|alt (optional; "as my main" = main);
       a PLANNED character (no name yet) is add with character EMPTY: "plan my main as a Holy Priest" → field=add,
       character empty, value="Priest Holy", text=main ("plan an alt: Mage Frost" → text=alt; re-planning a main replaces it);
@@ -180,6 +180,10 @@ Members (officer): character: member, character=<their character's name>, field=
       (roster placements go; "delete"/"remove" ≠ "retire", which keeps its history);
     flex: value = extra roles it can play beyond its spec/offspec, comma list of tank|healer|melee|ranged, or "none"
       ("I can also tank on Xanthe" → flex, value "tank"; the whole list is replaced). A class never changes: retire and add.
+    profession: value = "<profession> [skill]" ("Rhoz is a 300 leatherworker" → character=Rhoz, field=profession, value="leatherworking 300";
+      a profession already on record keeps its skill when none is said); profession_remove: value = the profession ("drop enchanting on Jonnie");
+    recipe_add / recipe_remove: value = the recipe's name exactly as written ("I can make Devilsaur Gauntlets on Rhoz", "I just learned …"),
+      text = the profession when the member names one ("… with cooking"); a recipe name is member text, never changed or guessed
   application: member=<the applicant: display name, mention or their character's name from the open applications list>,
     value=accept|decline, reason=<optional note sent to the applicant> — decide an open application (accept registers
     their character as main, rank trial; either way they get a DM and the review card updates).
@@ -1171,6 +1175,10 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
                 f"{who}: add {label} ({what}, {'main' if main else 'alt'})")
     if cur is None:
         raise RegistryError(f"{who} has no active character named {label or '?'} (theirs: {', '.join(c.label for c in m.active()) if m else 'none'})")
+    if f in ("profession", "profession_remove", "recipe_add", "recipe_remove"):
+        from . import professions
+
+        return professions.op_rows(reg, cur, f, value, (op.text or "").strip() or None)
     if f == "spec":
         return [{"label": cur.label, "cls": cur.cls, "spec": value, "offspec": cur.offspec}], f"{cur.label}: spec {cur.spec} → {value}"
     if f == "offspec":

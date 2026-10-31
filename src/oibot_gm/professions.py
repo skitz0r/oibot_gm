@@ -3,6 +3,7 @@ help section and the words. Member data lives on RegisteredCharacter.professions
 profile (professions.yaml). Nothing here pings, DMs or tracks a request; nothing reads a website."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .profiles import norm_recipe
@@ -130,3 +131,66 @@ def merge_recipe(reg: Registry, key: str, into_key: str, by: str, *, by_id: int 
     head = merge_sentences(reg, key, into_key)
     into = _entry(reg, into_key)
     return head + _rewrite(reg, _entry(reg, key).key, into.name, by, by_id, preview)
+
+
+def _find_profession(reg: Registry, text: str):
+    """A profession by name or id in free text ('leatherworking', 'Leather working 300'): (ProfessionDef, skill | None)."""
+    t = norm_recipe(text)
+    skill = None
+    m = re.search(r"\b(\d{1,3})\b", t)
+    if m:
+        skill = int(m.group(1))
+        t = (t[:m.start()] + t[m.end():]).strip()
+    key = t.replace(" ", "_")
+    for d in reg.profile.professions.values():
+        if key in (d.id, norm_recipe(d.name).replace(" ", "_")):
+            return d, skill
+    raise RegistryError(f"{t.title() or text.strip() or '?'} isn't a profession in this game version.")
+
+
+def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple[list[dict], str]:
+    """The plain-text `character` op's profession fields → one table row {label, professions} and the describe line.
+    profession: value 'Leatherworking 300' (skill optional: a new one starts at 1, an existing one keeps its skill);
+    profession_remove: value = the profession; recipe_add / recipe_remove: value = the recipe name, `hint` (op.text) =
+    the profession when the character has more than one that takes recipes."""
+    cur = [p.model_dump() for p in c.professions]
+    if field in ("profession", "profession_remove"):
+        d, skill = _find_profession(reg, value)
+        have = next((p for p in cur if p["id"] == d.id), None)
+        if field == "profession_remove":
+            if have is None:
+                raise RegistryError(f"{c.label} has no {d.name} on record.")
+            return [{"label": c.label, "professions": [p for p in cur if p["id"] != d.id]}], f"{c.label} · {d.name}: removed"
+        if have is None:
+            cur.append({"id": d.id, "skill": skill or 1, "recipes": []})
+            return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: {skill or 1}"
+        old = have["skill"]
+        have["skill"] = skill if skill is not None else old
+        return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: {old} → {have['skill']}"
+    if field in ("recipe_add", "recipe_remove"):
+        name = " ".join((value or "").split())
+        if not name:
+            raise RegistryError("A recipe needs a name.")
+        takes = [p for p in cur if reg.profile.profession(p["id"]).group != "gathering"]
+        if hint:
+            d, _ = _find_profession(reg, hint)
+            takes = [p for p in takes if p["id"] == d.id]
+        if not takes:
+            raise RegistryError(f"{c.label} has no profession that makes things on record — say which, like 'Leatherworking 300'.")
+        if len(takes) > 1:
+            names = [reg.profile.profession(p["id"]).name for p in takes]
+            raise RegistryError(f"Which profession makes {name} — {' or '.join(names)}?")
+        p = takes[0]
+        pname = reg.profile.profession(p["id"]).name
+        k = norm_recipe(name)
+        if field == "recipe_add":
+            if any(norm_recipe(r["name"]) == k for r in p["recipes"]):
+                raise RegistryError(f"{c.label} already has {name} on record.")
+            p["recipes"].append({"name": name, "id": None})
+            return [{"label": c.label, "professions": cur}], f"{c.label} · {pname} recipes: + {name}"
+        hit = next((r for r in p["recipes"] if norm_recipe(r["name"]) == k), None)
+        if hit is None:
+            raise RegistryError(f"{c.label} has no {name} on record.")
+        p["recipes"] = [r for r in p["recipes"] if r is not hit]
+        return [{"label": c.label, "professions": cur}], f"{c.label} · {pname} recipes: − {hit['name']}"
+    raise ValueError(field)
