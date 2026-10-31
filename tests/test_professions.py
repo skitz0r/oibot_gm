@@ -163,3 +163,12 @@ def test_profession_consequence_reads_aloud(reg):
     with pytest.raises(RegistryError, match="already as given"):
         cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": 300}, {"id": "enchanting", "skill": 100}], by_id=UID)
     assert cq.people_consequence(reg, None, m, "professions", by_id=UID, label=LABEL, professions=[]) == ["Your Leatherworking is removed from your record.", "Your Enchanting is removed from your record."]
+
+
+from oibot_gm.importers import professions as pimp
+
+
+def test_import_boundary_recognises_nothing_yet():
+    assert pimp.detect("anything") is None and pimp.FORMATS == {}
+    with pytest.raises(pimp.ImportError_, match="isn't a professions export the bot can read yet"):
+        pimp.parse("anything")
