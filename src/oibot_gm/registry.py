@@ -82,9 +82,10 @@ class Recipe(BaseModel):
 
 
 class Profession(BaseModel):
-    """One profession on a character (design §5.60): a profile profession id, a skill 1..cap, notable recipes (none for gathering)."""
+    """One profession on a character (design §5.60): a profile profession id, a skill 1..cap or None (not said yet: a
+    recipe recorded before its skill), notable recipes (none for gathering)."""
     id: str
-    skill: int
+    skill: Optional[int] = None
     recipes: list[Recipe] = Field(default_factory=list)
 
 
@@ -2142,12 +2143,16 @@ class Registry:
             if pid in seen:
                 raise RegistryError(f"{d.name} is listed twice.")
             seen.add(pid)
-            try:
-                skill = int(e.get("skill"))
-            except (TypeError, ValueError):
-                raise RegistryError(f"Skill is a number from 1 to {cap}.")
-            if not 1 <= skill <= cap:
-                raise RegistryError(f"Skill is a number from 1 to {cap}.")
+            raw = e.get("skill")
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                skill = None  # not said yet: the recipe came first ("I can make X" on a character with no profession)
+            else:
+                try:
+                    skill = int(raw)
+                except (TypeError, ValueError):
+                    raise RegistryError(f"Skill is a number from 1 to {cap}.")
+                if not 1 <= skill <= cap:
+                    raise RegistryError(f"Skill is a number from 1 to {cap}.")
             recipes: list[Recipe] = []
             keys: set[str] = set()
             for r in e.get("recipes") or []:
@@ -2190,10 +2195,10 @@ class Registry:
         return c
 
     def professions_summary(self, c: RegisteredCharacter) -> str:
-        """'Leatherworking 300 · Skinning 285', or the empty state in words."""
+        """'Leatherworking 300 · Skinning 285' ('Leatherworking' alone while its skill is not said), or the empty state in words."""
         if not c.professions:
             return "no professions on record"
-        return " · ".join(f"{self.profile.profession(p.id).name} {p.skill}" for p in c.professions)
+        return " · ".join(self.profile.profession(p.id).name + (f" {p.skill}" if p.skill is not None else "") for p in c.professions)
 
     @_member_write
     def set_roles(self, discord_id: int, display_name: str, primary: str, flex: list[str]) -> Member:

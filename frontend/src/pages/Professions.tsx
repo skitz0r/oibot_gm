@@ -22,6 +22,9 @@ function Who({ meta, c }: { meta: Meta; c: Crafter }) {
   );
 }
 
+/** Highest skill first; a skill not said yet last (the server's order too). */
+const bySkill = (a: Crafter, b: Crafter) => (b.skill ?? -1) - (a.skill ?? -1);
+
 /** The Professions page (design §5.60), for every member: the finder — a typed recipe name and who makes it, highest
  *  skill first — then a tab per profession listing its crafters with a skill bar and their notable recipes. Officers
  *  rename a misspelt recipe or merge two spellings; the server's sentences show before anything is written. */
@@ -83,12 +86,12 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
                   )}
                 </Group>
                 <Stack gap={4} mt={6}>
-                  {[...r.crafters].sort((a, b) => b.skill - a.skill).map((c) => (
+                  {[...r.crafters].sort(bySkill).map((c) => (
                     <Group key={c.uid + c.label} justify="space-between" wrap="nowrap" gap="sm" className={css.crafter}>
                       <Who meta={meta} c={c} />
                       <Group gap={5} wrap="nowrap">
                         <GameIcon meta={meta} kind="profession" id={c.profession} size={20} title={pname(c.profession)} />
-                        <Text fw={700} size="sm" c={c.skill >= cap ? "teal.3" : undefined}>{c.skill}</Text>
+                        {c.skill != null && <Text fw={700} size="sm" c={c.skill >= cap ? "teal.3" : undefined}>{c.skill}</Text>}
                       </Group>
                     </Group>
                   ))}
@@ -121,10 +124,12 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
                       return (
                         <div key={c.uid + c.label} className={css.craftRow}>
                           <Who meta={meta} c={c} />
-                          <Group gap={8} wrap="nowrap" className={css.skill}>
-                            <Progress value={Math.min(100, (c.skill / cap) * 100)} color={c.skill >= cap ? "teal" : "teal.7"} size="sm" style={{ flex: 1 }} aria-label={`${c.skill} of ${cap}`} />
-                            <Text fw={700} size="sm" c={c.skill >= cap ? "teal.3" : undefined} w={32} ta="right">{c.skill}</Text>
-                          </Group>
+                          {c.skill != null ? (
+                            <Group gap={8} wrap="nowrap" className={css.skill}>
+                              <Progress value={Math.min(100, (c.skill / cap) * 100)} color={c.skill >= cap ? "teal" : "teal.7"} size="sm" style={{ flex: 1 }} aria-label={`${c.skill} of ${cap}`} />
+                              <Text fw={700} size="sm" c={c.skill >= cap ? "teal.3" : undefined} w={32} ta="right">{c.skill}</Text>
+                            </Group>
+                          ) : <Text size="xs" c="dimmed" className={css.skill}>skill not said yet</Text>}
                           <div className={css.recipes}>
                             {mine.length
                               ? <Group gap={6} wrap="wrap">{mine.map((r) => <Badge key={r.key} variant="outline" color="gray" radius="xl" tt="none" fw={500}>{r.name}</Badge>)}</Group>

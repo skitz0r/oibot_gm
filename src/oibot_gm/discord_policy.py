@@ -369,6 +369,113 @@ class ConfigConfirmView(PendingView):
         await interaction.response.edit_message(content="Cancelled.", view=None, embed=None)
 
 
+def pick_question(recipe: str, character: str) -> str:
+    """The words above ProfessionPickView's select (the Confirm rule: what a pick does, and that nothing happens before it)."""
+    return f"Which profession makes {recipe}?\nPicking one records it on {character} and adds the recipe. Nothing changes until you pick."
+
+
+def pick_result(character: str, profession: str, recipe: str, *, added: bool) -> str:
+    """The picker's message once the pick is applied: the profession recorded with the recipe, or the recipe alone."""
+    return f"{character} now has {profession} on record and makes {recipe}." if added else f"{character}'s {profession} gains {recipe}."
+
+
+def pick_changed(character: str) -> str:
+    return f"{character}'s record changed since the question. Say it again."
+
+
+class ProfessionPickView(PendingView):
+    """The bot's clarification when a plain-text recipe names no profession it can tell (design §5.60 follow-up, owner
+    decision 2026-10-30: ask, never gatekeep): a select of the candidate professions bound to the asker — a component,
+    never a conversational turn. A pick sets the op's profession (op.text), authorizes it again for the presser now
+    (PRIV_LIVE) and applies it through the path Apply uses, then edits the message to what was recorded. Ten minutes,
+    then EXPIRED; mirrored in pending_views like the confirm view (a restart edits it to "The bot restarted; nothing was
+    changed."). Single-flight: the first pick claims it."""
+
+    def __init__(self, reg: Registry, op: configops.ConfigOp, need, ps: policy_mod.PolicyStore | None, ops: Ops, requester_id: int, requester: str, channel):
+        super().__init__(reg, timeout=600)
+        self.op, self.need, self.ps, self.ops = op, need, ps, ops
+        self.requester_id, self.requester, self.channel = requester_id, requester, channel
+        self.busy = False
+        try:
+            _, m = configops._character_member(reg, op)
+            self.rev = reg.characters_rev(m) if m is not None else None
+        except RegistryError:
+            self.rev = None
+        names = {d.id: d.name for d in reg.profile.professions.values()}
+        options = [discord.SelectOption(label=names[pid], value=pid) for pid in reg.profile.professions if pid in need.candidates][:25]
+        self.select = discord.ui.Select(placeholder="Pick the profession", options=options, min_values=1, max_values=1)
+        self.select.callback = self.picked
+        self.add_item(self.select)
+
+    @property
+    def text(self) -> str:
+        return pick_question(self.need.recipe, self.need.character)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requester_id:
+            await interaction.response.send_message(f"Only {self.requester} can pick this.", ephemeral=True)
+            return False
+        return True
+
+    async def picked(self, interaction: discord.Interaction, values: list[str] | None = None):
+        if interaction.user.id != self.requester_id:  # interaction_check runs first in Discord; a direct call (tests) checks here
+            await interaction.response.send_message(f"Only {self.requester} can pick this.", ephemeral=True)
+            return
+        if await left_server(interaction.client, self.reg, interaction.user):
+            await interaction.response.send_message(LEFT_SERVER, ephemeral=True)
+            return
+        if self.busy:
+            await interaction.response.send_message("Already picked — each change applies once.", ephemeral=True)
+            return
+        self.busy = True
+        self.stop()
+        from . import pending_views, professions
+
+        pending_views.untrack(f"pv:{self.token}")
+        pid = (values or self.select.values or [""])[0]
+        op = self.op.model_copy(update={"text": pid})
+        bot = interaction.client
+        officer, role_ids = await bot.plain_identity(self.reg, interaction.user, max_age=guild_routing.PRIV_LIVE)  # a write: decided now
+        raids = bot.raids.store(self.reg) if getattr(bot, "raids", None) is not None else None
+        allowed, refused = configops.authorize(self.reg, [op], interaction.user.id, officer=officer, role_ids=role_ids, channel=self.channel, raids=raids)
+
+        async def finish(text: str) -> None:
+            await interaction.response.edit_message(content=guild_prefix(self.reg) + text, view=None, embed=None)
+
+        if not allowed:
+            await finish(refused[0] if refused else "Nothing applied.")
+            return
+        try:
+            _, m = configops._character_member(self.reg, op)
+            if self.rev is not None and m is not None and self.reg.characters_rev(m) != self.rev:
+                raise RegistryError(pick_changed(self.need.character))
+            rows, _ = configops._character_rows(self.reg, m, op)
+            c = next(x for x in m.active() if x.label == rows[0]["label"])
+            added = professions.added_with_recipe(c, rows)
+            name = self.reg.profile.profession(pid).name
+        except RegistryError as e:
+            await finish(str(e))
+            return
+        await interaction.response.edit_message(content="⏳ Applying…", view=None, embed=None)
+        me = self.reg.members.get(interaction.user.id)
+        by = me.display_name if me else interaction.user.display_name
+        try:
+            line = await configops.apply_async(self.reg, op, by, True, self.ps, bot=bot, by_id=interaction.user.id, channel_id=self.channel, self_id=self.requester_id)
+        except Exception as e:  # noqa: BLE001 — the one sentence, as Apply prints a refusal
+            text = str(e) if isinstance(e, (RegistryError, ValueError)) else configops.GENERIC_ERROR
+            try:
+                await interaction.edit_original_response(content=guild_prefix(self.reg) + text, view=None, embed=None)
+            except discord.HTTPException:
+                pass
+            return
+        try:
+            await interaction.edit_original_response(content=guild_prefix(self.reg) + pick_result(c.label, name, self.need.recipe, added=bool(added)), view=None, embed=None)
+        except discord.HTTPException:  # the change is made either way; the ops line below still records it
+            pass
+        where = "DMs" if self.channel is None else f"<#{self.channel}>"
+        await self.ops.emit(self.reg.config, "info", f"{by} plain-text change in {where}: {line}")
+
+
 def _reply_private(bot, reg: Registry, message: discord.Message) -> bool:
     """HelpMixin.reply_private for a Message's channel (a DM is private); without the bot's check, only a DM is."""
     channel = message.channel if message.guild else None
@@ -444,14 +551,29 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)
     # a people or run action the registry already refuses (an unknown field, a character that isn't theirs) is a refusal,
     # never a proposed change with an Apply button under it
-    sound = []
+    from .professions import NeedsProfession
+
+    sound, pick = [], None
     for op in allowed:
         try:
-            configops.describe(reg, op, channel, strict=True)
+            configops.describe(reg, op, channel, strict=True, by_id=author.id)
             sound.append(op)
+        except NeedsProfession as e:  # the recipe's profession is unclear: ask with a picker (one per reply), never a refusal
+            if pick is None:
+                pick = (op, e)
+            else:
+                refused.append(str(e))
         except RegistryError as e:
             refused.append(str(e))
     allowed = sound
+
+    async def send_pick(first: bool) -> None:
+        if pick is None:
+            return
+        view = ProfessionPickView(reg, pick[0], pick[1], ps, ops, author.id, name, channel)
+        sent = await send(guild_prefix(reg) + view.text, view=view, ephemeral=True)
+        keep(sent, view.text)
+        view.bind(sent if is_msg or not first else getattr(interaction_or_message, "edit_original_response", None))
 
     def apply_button(base=None):  # a newcomer refused with APPLY_FIRST gets the Apply to join button right on the reply
         if configops.APPLY_FIRST not in refused:
@@ -461,12 +583,16 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         return apply_view(reg, author.id, officer=officer, role_ids=role_ids, base=base)
 
     if not allowed:
+        if pick is not None and not refused:
+            await send_pick(True)
+            return
         view = apply_button()
         keep(await send(configops.plain_footer(guild_prefix(reg) + "⛔ " + "\n⛔ ".join(refused))[:1990], ephemeral=True, **({"view": view} if view is not None else {})),
              "Refused: " + "; ".join(refused))
+        await send_pick(False)
         return
     req.ops = allowed
-    body = await diff_text(reg, allowed, refused, channel)
+    body = await diff_text(reg, allowed, refused, channel, by_id=author.id)
     if refused:
         body = configops.plain_footer(body[:3900])
     e = discord.Embed(title=f"{reg.config.name} · proposed changes" if reg.many_guilds else "Proposed changes", colour=TEAL, description=body[:4000])
@@ -479,26 +605,28 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     keep(sent, ((req.reply or "") + "\nProposed changes (shown with Apply; nothing written yet):\n" + body).strip())
     # how the view edits its own message when it expires (EXPIRED): the reply Message, or the interaction's original response
     confirm.bind(sent if is_msg else getattr(interaction_or_message, "edit_original_response", None))
+    await send_pick(False)
 
 
-async def diff_text(reg: Registry, allowed: list, refused: list[str], channel) -> str:
+async def diff_text(reg: Registry, allowed: list, refused: list[str], channel, *, by_id: int | None = None) -> str:
     """The plain-text diff's body. Setup writes (configops.PURE_OPS) are the STRUCTURE every surface shares —
     configops.describe_ops → Described.as_discord(): one bullet per write as apply_ops will make it (coalesced), current →
     new, the dry run's refusal, the consequence sentences; the site's review and MCP's preview print the same lines. Run,
-    people and loot actions keep their describe() line (preview_line: a run about to open carries its <t:…:f> stamp)."""
+    people and loot actions keep their describe() line (preview_line: a run about to open carries its <t:…:f> stamp); a
+    profession change prints its confirm sentences, "your" for the asker (`by_id`)."""
     setup = [op for op in allowed if op.op in configops.PURE_OPS]
-    lines = [f"• {preview_line(reg, op, channel)}" for op in allowed if op.op not in configops.PURE_OPS]
+    lines = [f"• {preview_line(reg, op, channel, by_id=by_id)}" for op in allowed if op.op not in configops.PURE_OPS]
     if setup:
         d = await asyncio.to_thread(configops.describe_ops, reg, setup, None, channel)
         lines.append(d.as_discord())
     return "\n".join(lines + [f"⛔ {r}" for r in refused])
 
 
-def preview_line(reg: Registry, op: configops.ConfigOp, channel=configops._UNSET) -> str:
+def preview_line(reg: Registry, op: configops.ConfigOp, channel=configops._UNSET, *, by_id: int | None = None) -> str:
     """describe() for the Discord diff. A run about to open also gets Discord's own <t:…:f> stamp, so each reader
     sees the start in their own locale (here only: the site and MCP reuse describe() and would show the raw tag).
     `channel`: where it was asked (the plain op warns when it takes plain text away from there)."""
-    line = configops.describe(reg, op, channel)
+    line = configops.describe(reg, op, channel, by_id=by_id)
     if op.op == "run_open":
         try:
             start, _ = configops._open_time(reg, op.target or "", op.value, op.field)

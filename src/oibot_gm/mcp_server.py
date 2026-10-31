@@ -792,7 +792,8 @@ def set_member(member: str, character: str | None = None, rank: str | None = Non
 @mcp.tool()
 def set_professions(member: str, character: str, professions: list[dict], guild: Guild = None) -> str:
     """Replace one character's professions (design §5.60): professions = [{id: leatherworking, skill: 300, recipes: [{name: "Devilsaur Gauntlets"}]}, …]
-    — the whole list; [] clears. Two trade professions at most; a gathering one has no recipes. The owner's token writes it (no actor needed)."""
+    — the whole list; [] clears; skill null = not said yet (recorded without a number). Two trade professions at most; a gathering one has no
+    recipes. The owner's token writes it (no actor needed)."""
     return msg(api(guild).post("/api/members/set", {"member": member, "character": character, "professions": professions}))
 
 

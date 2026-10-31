@@ -380,7 +380,10 @@ src/oibot_gm/
                        set_comp_target (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change, /gm config plain (the D37 READ view, registered here); handle_change for every
                        plain-text path (ConfigConfirmView re-authorizes the presser; diff_text = the diff's body: setup ops as configops.describe_ops(…).as_discord(),
-                       other ops their preview_line; refusals end with configops.plain_footer; guild name when many_guilds); policy_show_messages
+                       other ops their preview_line — a profession field its confirm sentences, by_id = the asker; refusals end with configops.plain_footer;
+                       guild name when many_guilds); ProfessionPickView = the clarification when a recipe's profession is unclear
+                       (professions.NeedsProfession): a select bound to the asker, 10 min, pending_views-mirrored, the pick applied as Apply
+                       does (§5.60); policy_show_messages
                        (≤3 text messages + one Compiled reading embed ≤15 rules); PolicyEditModal append-only past 4000
   news.py              news review (design §5.26): keyword filter of #news webhook embeds (profiles/<v>/news.yaml version_terms + raid names +
                        guild news_keywords) → <guild>/news.jsonl (dedupe by url); Proposal/ProposalStore (<guild>/proposals/<id>.yaml,

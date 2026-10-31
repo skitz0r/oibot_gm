@@ -9,10 +9,16 @@ import discord
 
 from . import consequences as cq
 from .flows_roster import MemberWizard, _ico, _stop_at_entry
+from .professions import SKILL_UNSAID
 from .registry import RECIPE_NAME_MAX, RegisteredCharacter, Registry, RegistryError
 from .wizard import Field, Form, Opt, flow
 
 NUMBER_WORDS = {1: "One", 2: "Two", 3: "Three", 4: "Four"}
+NOT_SAID = "unsaid"  # the skill select's first option: the skill is not said yet (recorded as None)
+
+
+def skill_hint(skill: int | None) -> str:
+    return f"skill {skill}" if skill is not None else SKILL_UNSAID
 
 
 def skill_steps(cap: int) -> list[int]:
@@ -88,8 +94,8 @@ class ProfessionsWizard(MemberWizard):
         self.draft.pop("pid", None)
         prof = self.reg.profile
         if c.professions:
-            lines = [f"**{c.label}**"] + [f"• **{self.name(p.id)} {p.skill}**" + (" · " + ", ".join(r.name for r in p.recipes) if p.recipes else "")
-                                          for p in c.professions]
+            lines = [f"**{c.label}**"] + [(f"• **{self.name(p.id)} {p.skill}**" if p.skill is not None else f"• **{self.name(p.id)}** · {SKILL_UNSAID}")
+                                          + (" · " + ", ".join(r.name for r in p.recipes) if p.recipes else "") for p in c.professions]
         else:
             lines = [f"**{c.label}** · {self.reg.professions_summary(c)}. Press Add profession to record the first one."]
         if self.trades_full(c):
@@ -122,7 +128,7 @@ class ProfessionsWizard(MemberWizard):
 
     async def change_skill(self, interaction: discord.Interaction) -> None:
         c = self.char()
-        opts = [Opt(p.id, self.name(p.id), f"skill {p.skill}") for p in c.professions]
+        opts = [Opt(p.id, self.name(p.id), skill_hint(p.skill)) for p in c.professions]
         await self.show(interaction, f"Which of **{c.label}**'s professions changed?", self.select("Pick the profession", opts, self.profession_picked),
                         self.button("Back", self.hub), self.button("Cancel", self.cancel))
 
@@ -133,18 +139,21 @@ class ProfessionsWizard(MemberWizard):
         steps = skill_steps(self.reg.profile.profession_rules["skill_cap"])
         if now is not None and now not in steps:
             steps = sorted({*steps, now})
-        opts = [Opt(str(s), str(s), "now" if s == now else None, default=s == now) for s in steps]
+        unsaid_now = now is None and values[0] in {p.id for p in c.professions}
+        opts = [Opt(NOT_SAID, "Not said yet", "now" if unsaid_now else "say it later", default=unsaid_now)]
+        opts += [Opt(str(s), str(s), "now" if s == now else None, default=s == now) for s in steps]
         await self.show(interaction, f"How far along is **{c.label}**'s {self.name(values[0])}?", self.select("Pick the skill", opts, self.skill_picked),
                         self.button("Back", self.hub), self.button("Cancel", self.cancel))
 
     async def skill_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         c, pid = self.char(), self.draft["pid"]
         entries = self.entries(c)
+        skill = None if values[0] == NOT_SAID else int(values[0])
         hit = next((e for e in entries if e["id"] == pid), None)
         if hit is None:
-            entries.append({"id": pid, "skill": int(values[0]), "recipes": []})
+            entries.append({"id": pid, "skill": skill, "recipes": []})
         else:
-            hit["skill"] = int(values[0])
+            hit["skill"] = skill
         await self.review(interaction, entries)
 
     # ---- add a recipe: (which profession makes it) → one prose field → decide
@@ -159,7 +168,7 @@ class ProfessionsWizard(MemberWizard):
             await self.recipe_form(interaction)
             return
         await self.show(interaction, "Which of the professions makes the recipe?",
-                        self.select("Which profession makes it?", [Opt(p.id, self.name(p.id), f"skill {p.skill}") for p in makers], self.recipe_profession),
+                        self.select("Which profession makes it?", [Opt(p.id, self.name(p.id), skill_hint(p.skill)) for p in makers], self.recipe_profession),
                         self.button("Back", self.hub), self.button("Cancel", self.cancel))
 
     async def recipe_profession(self, interaction: discord.Interaction, values: list[str]) -> None:

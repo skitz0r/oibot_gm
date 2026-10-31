@@ -288,13 +288,13 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         desc = []
         for op in req.ops:
             try:
-                desc.append(configops.describe(v.reg, op, PLAIN_WEB))
+                desc.append(configops.describe(v.reg, op, PLAIN_WEB, by_id=v.uid))
             except Exception as e:  # noqa: BLE001
                 desc.append(f"{op.op}: {e}")
         out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": [], "refused": refused}
         if req.kind == "change" and req.ops:
             try:
-                described = await asyncio.to_thread(configops.describe_ops, v.reg, req.ops, refused)
+                described = await asyncio.to_thread(lambda: configops.describe_ops(v.reg, req.ops, refused, by_id=v.uid))
                 out["described"] = described.json_for(v.reg, surface(v), channels_of(v.reg))
             except Exception:  # noqa: BLE001 — the text lines above still say it
                 log.exception("describe_ops failed for a plain-text preview")

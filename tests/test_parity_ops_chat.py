@@ -266,3 +266,89 @@ def test_a_character_op_without_a_field_is_refused_not_proposed(reg):
     kind, content, kw = log[-1]
     assert "⛔" in content and "Say what to change on the character" in content, content
     assert "view" not in kw or kw["view"] is None, "no Apply button on a refusal"
+
+
+# ---- a recipe whose profession the bot can't tell: a picker bound to the asker, then both recorded (design §5.60 follow-up)
+
+def _bare_crafter(reg):
+    from oibot_gm.registry import Registry
+
+    m = reg.members[Registry.TEST_BASE]
+    return m, m.main.label
+
+
+def test_a_recipe_with_no_profession_is_answered_with_a_picker_not_a_refusal(reg):
+    m, label = _bare_crafter(reg)
+    log = []
+    op = ConfigOp(op="character", member=f"<@{m.discord_id}>", character=label, field="recipe_add", value="Green Dragonscale Cloak")
+
+    async def go():
+        it = interaction(m.discord_id, log, officer=True)
+        req = ConfigRequest(kind="change", reply="", ops=[op])
+        await discord_policy.handle_change(it, reg, None, None, Feed(), "i can make a green dragonscale cloak", bot=it.client, channel=OPS_CH, req=req)
+    asyncio.run(go())
+    kind, content, kw = log[-1]
+    assert "⛔" not in content
+    assert content == (f"Which profession makes Green Dragonscale Cloak?\nPicking one records it on {label} and adds the recipe. "
+                       "Nothing changes until you pick.")
+    view = kw["view"]
+    assert isinstance(view, discord_policy.ProfessionPickView) and view.timeout == 600
+    assert [o.label for o in view.select.options] == ["Alchemy", "Blacksmithing", "Enchanting", "Engineering", "Leatherworking", "Tailoring", "Cooking", "First Aid"]
+
+
+def _pick_view(reg, m, label, feed):
+    from oibot_gm import professions
+
+    op = ConfigOp(op="character", member=f"<@{m.discord_id}>", character=label, field="recipe_add", value="Green Dragonscale Cloak")
+    try:
+        configops.describe(reg, op, OPS_CH, strict=True)
+    except professions.NeedsProfession as e:
+        need = e
+    return discord_policy.ProfessionPickView(reg, op, need, None, feed, m.discord_id, m.display_name, OPS_CH)
+
+
+def test_the_pick_records_both_and_says_so(reg):
+    m, label = _bare_crafter(reg)
+    feed, log = Feed(), []
+
+    async def go():
+        view = _pick_view(reg, m, label, feed)
+        await view.picked(interaction(m.discord_id, log), ["leatherworking"])
+    asyncio.run(go())
+    c = next(c for c in reg.members[m.discord_id].active() if c.label == label)
+    lw = next(p for p in c.professions if p.id == "leatherworking")
+    assert lw.skill is None and [r.name for r in lw.recipes] == ["Green Dragonscale Cloak"]
+    assert log[0][0] == "edit_message" and log[-1] == ("edit", f"{label} now has Leatherworking on record and makes Green Dragonscale Cloak.",
+                                                      {"view": None, "embed": None})
+    assert len(feed.lines) == 1 and "plain-text change" in feed.lines[0][1], "one ops line"
+
+
+def test_another_users_pick_is_refused_and_a_changed_record_is_said(reg):
+    m, label = _bare_crafter(reg)
+    other = reg.test_members()[1]
+    feed, log = Feed(), []
+
+    async def go():
+        view = _pick_view(reg, m, label, feed)
+        await view.picked(interaction(other.discord_id, log), ["leatherworking"])
+        assert log == [("send", f"Only {m.display_name} can pick this.", {"ephemeral": True})] and not view.busy
+        log.clear()
+        reg.save_character_table(m.discord_id, [{"label": label, "professions": [{"id": "cooking", "skill": 100}]}], "t", officer=True)
+        await view.picked(interaction(m.discord_id, log), ["leatherworking"])
+        assert log == [("edit_message", f"{label}'s record changed since the question. Say it again.", {"view": None, "embed": None})]
+    asyncio.run(go())
+
+
+def test_the_picker_expires_like_the_confirm(reg):
+    m, label = _bare_crafter(reg)
+    edits = []
+
+    async def editor(**kw):
+        edits.append(kw)
+
+    async def go():
+        view = _pick_view(reg, m, label, Feed())
+        view.bind(editor)
+        await view.on_timeout()
+    asyncio.run(go())
+    assert edits == [{"content": discord_policy.EXPIRED, "embed": None, "view": None}]

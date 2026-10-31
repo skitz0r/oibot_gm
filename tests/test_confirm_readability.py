@@ -619,6 +619,38 @@ def people_cases(reg, rs, runs, ms, dump):
     dump.add("rename_recipe", "too long", _said(pr.rename_recipe, reg, "mooncloth bagg", "M" * 61, "Officer", by_id=OFFICER_ID, preview=True))
     for cm in crafters:
         reg.save_character_table(cm.discord_id, [{"label": cm.main.label, "professions": []}], "t", officer=True)
+    # the plain-text previews of the four profession fields, and the picker's question and result (design §5.60 follow-up)
+    from oibot_gm import configops, discord_policy
+    from oibot_gm.configops import ConfigOp
+
+    cm = crafters[0]
+    lab = cm.main.label
+
+    def said_op(**kw):
+        def go(by):
+            op = ConfigOp(op="character", member=f"<@{cm.discord_id}>", character=lab, **kw)
+            rows, _ = configops._character_rows(reg, cm, op)
+            c = next(x for x in cm.active() if x.label == lab)
+            return pr.preview_sentences(reg, cm, c, kw["field"], rows, by_id=by)
+        return go
+
+    for who, by in (("an officer", OFFICER_ID), ("own record", cm.discord_id)):
+        dump.add("preview_sentences", f"a recipe with the profession guessed, {who}",
+                 _said(said_op(field="recipe_add", value="Green Dragonscale Cloak", text="leatherworking"), by))
+        dump.add("preview_sentences", f"a profession with no skill said, {who}", _said(said_op(field="profession", value="leatherworking"), by))
+        reg.save_character_table(cm.discord_id, [{"label": lab, "professions": [{"id": "leatherworking", "skill": None, "recipes": [{"name": "Hide of the Wild"}]}]}], "t", officer=True)
+        dump.add("preview_sentences", f"a recipe on a profession on record, {who}", _said(said_op(field="recipe_add", value="Devilsaur Gauntlets"), by))
+        dump.add("preview_sentences", f"a recipe removed, {who}", _said(said_op(field="recipe_remove", value="hide of the wild"), by))
+        dump.add("preview_sentences", f"the skill said later, {who}", _said(said_op(field="profession", value="leatherworking 300"), by))
+        dump.add("preview_sentences", f"a profession removed, {who}", _said(said_op(field="profession_remove", value="leatherworking"), by))
+        reg.save_character_table(cm.discord_id, [{"label": lab, "professions": []}], "t", officer=True)
+    dump.add("profession_consequence", "no skill said, with recipes, an officer", _said(cq.profession_consequence, reg, cm, lab,
+             [{"id": "tailoring", "skill": None, "recipes": [{"name": "Mooncloth Bag"}, {"name": "Bottomless Bag"}]}], by_id=OFFICER_ID))
+    dump.add("profession_consequence", "no skill said, own record", _said(cq.profession_consequence, reg, cm, lab, [{"id": "tailoring", "skill": None}], by_id=cm.discord_id))
+    dump.add("ProfessionPickView", "the question", discord_policy.pick_question("Green Dragonscale Cloak", lab).split("\n"))
+    dump.add("ProfessionPickView", "a profession recorded with the recipe", [discord_policy.pick_result(lab, "Leatherworking", "Green Dragonscale Cloak", added=True)])
+    dump.add("ProfessionPickView", "a recipe on a profession on record", [discord_policy.pick_result(lab, "Leatherworking", "Green Dragonscale Cloak", added=False)])
+    dump.add("ProfessionPickView", "the record changed", [discord_policy.pick_changed(lab)])
     # I'm back: an absence over the open sheet it answered No thanks, and one that touched no sheet
     ev = runs["open recurring"]
     m = ms[0]

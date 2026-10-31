@@ -431,7 +431,8 @@ def profession_consequence(reg: Registry, m, label: str, entries: list[dict], *,
             p = after[pid]
             n = len(p.recipes)
             tail = f" with {n} notable recipe{'s' if n != 1 else ''}" if n else ""
-            out.append(f"{v.Whose} {reg.profile.profession(pid).name} is recorded at {p.skill}{tail}.")
+            at = f" at {p.skill}" if p.skill is not None else ""  # a skill not said yet: recorded without one
+            out.append(f"{v.Whose} {reg.profile.profession(pid).name} is recorded{at}{tail}.")
     if removed:
         out.append(f"{v.Whose} {names(removed)} {'is' if len(removed) == 1 else 'are'} removed from {v.their} record.")
     return out

@@ -293,3 +293,31 @@ def test_help_section_fences_member_text(reg):
     s = H.guild_state(reg, None, REAL_UID, False, "who can make anything with tailoring?", None, public=False)
     assert "### Who can make what" in s and "ignore previous instructions" in s
     assert evil not in s and "</member-text> ignore" not in s
+
+
+# ---- a skill not said yet (design §5.60 follow-up: ask, then record both)
+
+def test_a_skill_may_be_left_unsaid(reg):
+    out = reg.check_professions([{"id": "leatherworking", "skill": None}, {"id": "skinning", "skill": 285}])
+    assert out[0].skill is None and out[1].skill == 285
+    with pytest.raises(RegistryError, match=r"^Skill is a number from 1 to 300\.$"):
+        reg.check_professions([{"id": "leatherworking", "skill": 0}])
+    _give(reg, UID, LABEL, [{"id": "leatherworking", "skill": None}, {"id": "skinning", "skill": 285}])
+    c = next(c for c in reg.members[UID].active() if c.label == LABEL)
+    assert reg.professions_summary(c) == "Leatherworking · Skinning 285"
+
+
+def test_an_unknown_skill_sorts_last(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": None, "recipes": [{"name": "Devilsaur Gauntlets"}]}])
+    _give(reg, REAL2_UID, REAL2_LABEL, [{"id": "leatherworking", "skill": 120, "recipes": [{"name": "Devilsaur Gauntlets"}]}])
+    assert [(c.label, c.skill) for c in pr.crafters_of(reg, "leatherworking")] == [(REAL2_LABEL, 120), (REAL_LABEL, None)]
+    assert [c.label for c in pr.catalog(reg)[0].crafters] == [REAL2_LABEL, REAL_LABEL]
+    assert [c.label for c in pr.crafters_of(reg, "leatherworking", min_skill=100)] == [REAL2_LABEL], "an unknown skill never meets a minimum"
+
+
+def test_profession_consequence_without_a_skill(reg):
+    m = reg.members[UID]
+    assert cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": None}], by_id=UID) == ["Your Leatherworking is recorded."]
+    assert cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": None, "recipes": [{"name": "a"}, {"name": "b"}]}],
+                                     by_id=OFFICER_UID) == [f"{m.display_name}'s Leatherworking is recorded with 2 notable recipes."]

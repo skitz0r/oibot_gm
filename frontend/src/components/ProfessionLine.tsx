@@ -3,7 +3,7 @@ import type { Meta, Profession } from "../api";
 import { GameIcon } from "./Icons";
 
 /** One character's professions (design §5.60): a profession icon with its skill beside it (an icon plus a number, like a
- *  role count — never a text label; the tooltip carries the name), green at the cap, the notable recipes as chips, or the
+ *  role count — never a text label; the tooltip carries the name), the icon alone while the skill is not said yet, green at the cap, the notable recipes as chips, or the
  *  empty state in words. `member` = the Members page's row (the empty state names who fills it); without it the line is
  *  the reader's own on Me. A game version without professions renders nothing. */
 export function ProfessionLine({ meta, professions, compact, member }: { meta: Meta; professions?: Profession[]; compact?: boolean; member?: string }) {
@@ -21,10 +21,10 @@ export function ProfessionLine({ meta, professions, compact, member }: { meta: M
   return (
     <Group gap={compact ? 8 : 14} wrap="wrap" align="center">
       {professions.map((p) => (
-        <Tooltip key={p.id} label={p.skill >= cap ? `${name(p.id)}, at the cap` : name(p.id)}>
+        <Tooltip key={p.id} label={p.skill == null ? `${name(p.id)} · skill not said yet` : p.skill >= cap ? `${name(p.id)}, at the cap` : name(p.id)}>
           <Group gap={5} wrap="nowrap">
             <GameIcon meta={meta} kind="profession" id={p.id} size={compact ? 20 : 24} title={name(p.id)} />
-            <Text fw={700} size={compact ? "sm" : "md"} c={p.skill >= cap ? "teal.3" : undefined}>{p.skill}</Text>
+            {p.skill != null && <Text fw={700} size={compact ? "sm" : "md"} c={p.skill >= cap ? "teal.3" : undefined}>{p.skill}</Text>}
           </Group>
         </Tooltip>
       ))}

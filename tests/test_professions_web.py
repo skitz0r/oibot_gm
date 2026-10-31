@@ -82,3 +82,34 @@ def test_me_characters_preview_carries_the_professions_sentences(w):
     assert w.reg.members[uid].main.professions[0].id == "alchemy"
     same = w.c.post("/api/me/characters", json={**body, "rev": r.json()["characters_rev"], "preview": True}, headers=h)
     assert same.status_code == 400 and same.json()["error"].endswith("professions are already as given.")
+
+
+def test_a_skill_not_said_round_trips_as_null(w):
+    """A profession recorded before its skill (a recipe said first, design §5.60 follow-up): null over HTTP, last among the
+    crafters, and the editor's empty box sends null."""
+    m = crafter(w, skill=None)
+    other = crafter(w, 1, skill=120)
+    h = as_user(w, OFFICER)
+    d = w.c.get("/api/professions", headers=h).json()
+    tailoring = next(p for p in d["professions"] if p["id"] == "tailoring")
+    assert [(c["label"], c["skill"]) for c in tailoring["crafters"]] == [(other.main.label, 120), (m.main.label, None)]
+    body = {"uid": str(m.discord_id), "character": m.main.label, "professions": [{"id": "alchemy", "skill": None}]}
+    p = w.c.post("/api/members/set", json={**body, "preview": True}, headers=h)
+    assert p.status_code == 200, p.text
+    assert p.json()["sentences"][0] == f"{m.display_name}'s Alchemy is recorded."
+    assert w.c.post("/api/members/set", json=body, headers=h).status_code == 200
+    row = next(r for r in w.c.get("/api/members", headers=h).json()["rows"] if r["uid"] == str(m.discord_id))
+    assert row["characters"][0]["professions"] == [{"id": "alchemy", "skill": None, "recipes": []}]
+
+
+def test_the_site_shows_a_skill_not_said_as_the_icon_alone():
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "frontend" / "src"
+    line = (src / "components" / "ProfessionLine.tsx").read_text()
+    assert "skill not said yet" in line and "p.skill != null &&" in line, "the icon alone, the tooltip says why"
+    ed = (src / "components" / "ProfessionsEditor.tsx").read_text()
+    assert "leave empty if you don't know" in ed and "skill: null" in ed, "an empty box is null, never 0"
+    page = (src / "pages" / "Professions.tsx").read_text()
+    assert "(b.skill ?? -1) - (a.skill ?? -1)" in page and "c.skill != null ?" in page, "no bar, sorted last"
+    assert "skill: number | null" in (src / "api.ts").read_text()

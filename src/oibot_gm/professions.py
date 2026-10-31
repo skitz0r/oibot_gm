@@ -24,7 +24,20 @@ class Crafter:
     member: str     # display name
     uid: int
     profession: str  # profile id
-    skill: int
+    skill: int | None  # None = not said yet (sorts last)
+
+
+SKILL_UNSAID = "skill not said yet"
+
+
+def skill_words(skill: int | None) -> str:
+    """A crafter's skill as a reader sees it: the number, or that it is not said yet."""
+    return str(skill) if skill is not None else SKILL_UNSAID
+
+
+def _by_skill(x) -> tuple:
+    """Highest skill first, a skill not said yet last, then by character."""
+    return (-(x.skill if x.skill is not None else -1), x.label.lower())
 
 
 @dataclass
@@ -62,7 +75,7 @@ def catalog(reg: Registry) -> list[CatalogEntry]:
                     e.id = r.id
     for e in by_key.values():
         e.name = sorted(spellings[e.key].items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
-        e.crafters.sort(key=lambda x: (-x.skill, x.label.lower()))
+        e.crafters.sort(key=_by_skill)
     return sorted(by_key.values(), key=lambda e: e.name.lower())
 
 
@@ -80,8 +93,9 @@ def who_can_make(reg: Registry, text: str) -> list[CatalogEntry]:
 
 
 def crafters_of(reg: Registry, pid: str, min_skill: int = 0) -> list[Crafter]:
-    out = [Crafter(c.label, m.display_name, m.discord_id, p.id, p.skill) for m, c in _rows(reg) for p in c.professions if p.id == pid and p.skill >= min_skill]
-    return sorted(out, key=lambda x: (-x.skill, x.label.lower()))
+    out = [Crafter(c.label, m.display_name, m.discord_id, p.id, p.skill) for m, c in _rows(reg) for p in c.professions
+           if p.id == pid and (not min_skill or (p.skill is not None and p.skill >= min_skill))]
+    return sorted(out, key=_by_skill)
 
 
 def _entry(reg: Registry, key: str) -> CatalogEntry:
@@ -210,11 +224,23 @@ def default_character(reg: Registry, m, field: str):
     raise RegistryError(f"Which character — {' or '.join(c.label for c in chars)}?")
 
 
+class NeedsProfession(RegistryError):
+    """A recipe whose profession the bot can't tell (design §5.60 follow-up): the character has no profession that makes
+    things and nobody named one, or it has several. The message is the question; `candidates` are the profile ids a
+    picker offers (profile order). Discord answers it with ProfessionPickView; the web and MCP print the sentence."""
+
+    def __init__(self, character: str, recipe: str, candidates: list[str], message: str):
+        super().__init__(message)
+        self.character, self.recipe, self.candidates = character, recipe, list(candidates)
+
+
 def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple[list[dict], str]:
     """The plain-text `character` op's profession fields → one table row {label, professions} and the describe line.
-    profession: value 'Leatherworking 300' (skill optional: a new one starts at 1, an existing one keeps its skill);
-    profession_remove: value = the profession; recipe_add / recipe_remove: value = the recipe name, `hint` (op.text) =
-    the profession when the character has more than one that takes recipes."""
+    profession: value 'Leatherworking 300' (skill optional: a new one is recorded with its skill not said, an existing
+    one keeps its skill); profession_remove: value = the profession; recipe_add / recipe_remove: value = the recipe name,
+    `hint` (op.text) = the profession when the character has more than one that takes recipes — or, on a character with
+    none that makes things, the profession to record WITH the recipe (the parser's guess or the picker's choice: shown
+    and confirmed, never applied silently). No hint there → NeedsProfession (the bot asks which)."""
     cur = [p.model_dump() for p in c.professions]
     if field in ("profession", "profession_remove"):
         d, skill = _find_profession(reg, value)
@@ -224,11 +250,11 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
                 raise RegistryError(f"{c.label} has no {d.name} on record.")
             return [{"label": c.label, "professions": [p for p in cur if p["id"] != d.id]}], f"{c.label} · {d.name}: removed"
         if have is None:
-            cur.append({"id": d.id, "skill": skill or 1, "recipes": []})
-            return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: {skill or 1}"
+            cur.append({"id": d.id, "skill": skill, "recipes": []})
+            return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: {skill if skill is not None else 'added'}"
         old = have["skill"]
         have["skill"] = skill if skill is not None else old
-        return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: {old} → {have['skill']}"
+        return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: {skill_words(old)} → {skill_words(have['skill'])}"
     if field in ("recipe_add", "recipe_remove"):
         name = " ".join((value or "").split())
         if not name:
@@ -237,19 +263,25 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
         takes = [p for p in cur if _makes(reg, p["id"])]
         if hint:
             d, _ = _find_profession(reg, hint)
-            if not any(p["id"] == d.id for p in cur):
-                raise RegistryError(f"{c.label} has no {d.name} on record.")
             if not d.makes:
                 raise RegistryError(f"{d.name} has no recipes.")
+            if not any(p["id"] == d.id for p in cur):
+                if field == "recipe_add" and not takes:  # nothing on record makes things: record the profession with the recipe
+                    cur.append({"id": d.id, "skill": None, "recipes": [{"name": name, "id": None}]})
+                    return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: added with {name}"
+                raise RegistryError(f"{c.label} has no {d.name} on record.")
             takes = [p for p in takes if p["id"] == d.id]
         if field == "recipe_remove":  # a remove names the profession that holds it; it asks which only when several do
             takes = [p for p in takes if any(norm_recipe(r["name"]) == k for r in p["recipes"])]
             if not takes:
                 raise RegistryError(f"{c.label} has no {name} on record.")
         if not takes:
-            raise RegistryError(f"{c.label} has no profession that makes things on record — say which, like 'Leatherworking 300'.")
+            makers = [d.id for d in reg.profile.professions.values() if d.makes]
+            raise NeedsProfession(c.label, name, makers, f"Which profession makes {name}?")
         if len(takes) > 1:
             names = [reg.profile.profession(p["id"]).name for p in takes]
+            if field == "recipe_add":
+                raise NeedsProfession(c.label, name, [p["id"] for p in takes], f"Which profession makes {name} — {' or '.join(names)}?")
             raise RegistryError(f"Which profession makes {name} — {' or '.join(names)}?")
         p = takes[0]
         pname = reg.profile.profession(p["id"]).name
@@ -264,6 +296,40 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
         p["recipes"] = [r for r in p["recipes"] if r is not hit]
         return [{"label": c.label, "professions": cur}], f"{c.label} · {pname} recipes: − {hit['name']}"
     raise ValueError(field)
+
+
+def added_with_recipe(c, rows: list[dict]) -> str | None:
+    """The profession a recipe_add recorded along with its recipe (a character that had none making things), else None."""
+    have = {p.id for p in c.professions}
+    return next((p["id"] for p in rows[0]["professions"] if p["id"] not in have and p.get("recipes")), None) if rows else None
+
+
+def preview_sentences(reg: Registry, m, c, field: str, rows: list[dict], *, by_id: int | None = None) -> list[str]:
+    """What a plain-text profession change will do, in the confirm's sentences (the Confirm rule): the Discord diff, the
+    site's text box and MCP previews print these instead of a describe bullet. `by_id` = the asker ("your" on their own
+    record). The profession fields reuse consequences.profession_consequence; a recipe names the character."""
+    from . import consequences as cq
+
+    v = cq._Voice(reg, m, by_id)
+    whose = "Your" if v.own else f"{c.label}'s"
+    if field in ("profession", "profession_remove"):
+        return cq.profession_consequence(reg, m, c.label, rows[0]["professions"], by_id=by_id)
+    before = {p.id: {norm_recipe(r.name): r.name for r in p.recipes} for p in c.professions}
+    after = {p["id"]: {norm_recipe(r["name"]): r["name"] for r in p.get("recipes") or []} for p in rows[0]["professions"]}
+    new_pid = added_with_recipe(c, rows) if field == "recipe_add" else None
+    if new_pid:
+        pname, recipe = reg.profile.profession(new_pid).name, next(iter(after[new_pid].values()))
+        return [f"{c.label} has no {pname} on record yet.",
+                f"Apply records {pname} on {c.label} and adds {recipe} to the recipes {c.label} makes.",
+                f'Say the skill when you know it, like "{c.label} is 300 {pname}".']
+    for pid, names in after.items():
+        old = before.get(pid, {})
+        pname = reg.profile.profession(pid).name
+        if field == "recipe_add" and (gained := [n for k, n in names.items() if k not in old]):
+            return [f"{whose} {pname} gains {gained[0]}."]
+        if field == "recipe_remove" and (lost := [n for k, n in old.items() if k not in names]):
+            return [f"{whose} {pname} no longer lists {lost[0]}."]
+    raise RegistryError(f"{c.label}'s professions are already as given.")
 
 
 HELP_WORDS = re.compile(r"\b(professions?|craft\w*|who can make|recipes?|enchant\w*|crafters?)\b")
@@ -295,9 +361,9 @@ def help_section(ask) -> list[str]:
 
     for d in reg.profile.professions.values():
         cs = crafters_of(reg, d.id)
-        out.append(f"{d.name}: " + (", ".join(f"{safe(c.label)} ({safe(c.member)}, {c.skill})" for c in cs[:12]) if cs else "nobody registered yet"))
+        out.append(f"{d.name}: " + (", ".join(f"{safe(c.label)} ({safe(c.member)}, {skill_words(c.skill)})" for c in cs[:12]) if cs else "nobody registered yet"))
     cat = catalog(reg)
     out.append(f"recipes registered ({len(cat)}):" if cat else "recipes registered: none yet")
     for e in cat[:80]:
-        out.append(f"- {safe(e.name)} [{reg.profile.profession(e.profession).name}]: " + ", ".join(f"{safe(c.label)} ({c.skill})" for c in e.crafters[:6]))
+        out.append(f"- {safe(e.name)} [{reg.profile.profession(e.profession).name}]: " + ", ".join(f"{safe(c.label)} ({skill_words(c.skill)})" for c in e.crafters[:6]))
     return out

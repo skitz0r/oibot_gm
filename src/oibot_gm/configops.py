@@ -183,7 +183,9 @@ Members (officers for anyone; a member for their OWN characters, member empty): 
     profession: value = "<profession> [skill]" ("Rhoz is a 300 leatherworker" → character=Rhoz, field=profession, value="leatherworking 300";
       a profession already on record keeps its skill when none is said); profession_remove: value = the profession ("drop enchanting on Jonnie");
     recipe_add / recipe_remove: value = the recipe's name exactly as written ("I can make Devilsaur Gauntlets on Rhoz", "I just learned …"),
-      text = the profession when the member names one ("… with cooking"); a recipe name is member text, never changed or guessed
+      text = the profession when the member names one ("… with cooking"); a recipe name is member text, never changed or guessed;
+      when the member's character has no profession on record that makes things, fill `text` with the profession you believe makes the
+      recipe (Leatherworking, Tailoring, …) — it is shown to them as a guess and recorded only on their Apply; never leave it out when you know
   application: member=<the applicant: display name, mention or their character's name from the open applications list>,
     value=accept|decline, reason=<optional note sent to the applicant> — decide an open application (accept registers
     their character as main, rank trial; either way they get a DM and the review card updates).
@@ -205,7 +207,9 @@ Resolving a run: "tonight's run" / "the Barrow Deeps run" = the live run of that
 A member is named by display name, mention or one of their characters. A request with several parts becomes several ops, in the order asked.
 The requester's own record ("I'll be away", "my main", "I can't make tonight", "I confirm", "I can make X", "I'm a 300 leatherworker"):
   leave member EMPTY — the bot fills in the requester itself. "i can make red leather boots" → ONE op: op=character,
-  field=recipe_add, value="red leather boots", member and character EMPTY (the bot picks their crafter); "I just hit 300
+  field=recipe_add, value="red leather boots", member and character EMPTY (the bot picks their crafter; when the member's character has
+  no profession on record that makes things, text = the profession you believe makes it, e.g. "leatherworking" — shown to them as a
+  guess and recorded only on their Apply; never leave it out when you know); "I just hit 300
   leatherworking" → op=character, field=profession, value="leatherworking 300"; "drop enchanting on Jonster" → op=character,
   character=Jonster, field=profession_remove, value="enchanting"; "I no longer make X" / "forget X on Jonster" → field=recipe_remove.
   field is NEVER empty on a character op: pick the one that matches, or ask. Who may do what, and where, is decided by the bot after you answer; write the ops as asked, never refuse or widen them.
@@ -339,7 +343,7 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
     overrides = cfg.pop("raids", None) or {}  # the stored overrides get their own section below, each value beside its words
     if roles and officer:  # role ids mean nothing to the parser (or the person it answers): the names from the role cache
         cfg["member_roles"] = [reg.role_names.get(int(r), f"role:{r}") for r in roles]
-    members = [f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]"
+    members = [f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank + (' (' + reg.professions_summary(c) + ')' if c.professions else '') for c in m.active())}]"
                + (f" away {', '.join(a.start + ('→' + a.end if a.end != a.start else '') + ' = ' + reg.span_label(a.start, a.end) for a in m.absences[-3:])}" if m.absences else "") for m in reg.members.values()]
 
     def cadence(k, v):  # the stored 'Tue 19:30' slots are raid_set values; the label beside them is how a person reads them
@@ -366,7 +370,7 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
                + data_block("News proposals waiting (id: title, kind, state)", proposals_text(reg))
                + data_block("Unconfirmed characters (confirm character=\"all pending\" confirms every one of these)", pending_text(reg)) if officer else "")
             + data_block("Regulars of each recurring schedule (raid:schedule = as a person reads it: name (character); op regular changes these)", regulars_text(reg))
-            + data_block("Members (name<@id> [characters*=main:rank] away dates = the same days in words)", members))
+            + data_block("Members (name<@id> [characters*=main:rank (professions on record)] away dates = the same days in words)", members))
 
 
 def regulars_text(reg: Registry) -> list[str]:
@@ -1159,6 +1163,7 @@ def _flex_roles(value: str) -> list[str]:
     return list(dict.fromkeys(ROLE_WORDS[w] for w in words))
 
 
+PROFESSION_FIELDS = ("profession", "profession_remove", "recipe_add", "recipe_remove")
 CHARACTER_FIELDS = ("Say what to change on the character: add | spec | offspec | name | rank | main | retire | delete | flex | profession | "
                     "profession_remove | recipe_add | recipe_remove.")
 
@@ -1999,11 +2004,13 @@ def _describe_new(reg: Registry, op: ConfigOp) -> str:
     return f"start the {agents.JOBS[job]['name']} job now (launchd runs it; the site's Agents page shows its steps)"
 
 
-def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = False) -> str:
+def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = False, by_id: int | None = None) -> str:
     """Human-readable 'current → new' for the diff, without applying. `channel`: where the request was made (a channel
     id, None = DMs, PLAIN_WEB), when known — the plain op warns when it takes plain text away from there.
     `strict`: a people / run action the registry refuses raises its RegistryError instead of returning the refusal as a
-    line, so a caller can list it as refused (no Apply) rather than as a proposed change."""
+    line, so a caller can list it as refused (no Apply) rather than as a proposed change. `by_id`: who asks — the four
+    profession fields read as the confirm's sentences, "your" on the asker's own record (professions.preview_sentences);
+    a recipe whose profession the bot can't tell prints the question alone (professions.NeedsProfession)."""
     cfg = reg.config
     if isinstance(op, MergedOp):
         return "; ".join(describe(reg, p, channel) for p in op.parts) + " (saved together)"
@@ -2160,10 +2167,14 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
         return f"{key} aim {slot}: {_target_words(cur)} → {_target_words(new)}" + (f" ({new['note']})" if new and new.get("note") else "")
     if op.op in RUN_OPS or op.op in ("character", "absence_clear", "dm", "regular", "test"):
         try:
-            return _describe_action(reg, op, channel)
+            return _describe_action(reg, op, channel, by_id=by_id)
         except RegistryError as e:
             if strict:
                 raise
+            from .professions import NeedsProfession
+
+            if isinstance(e, NeedsProfession):
+                return str(e)
             return f"{op.op} {op.target or op.member or op.value or ''}: {e}".strip()
     return str(op)
 
@@ -2204,7 +2215,7 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
     return f"{name} · {cur['name']}: {_schedule_words(reg, rid, {k: v for k, v in now.items() if v is not None}) or 'not set'} → {new}{after}"
 
 
-def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
+def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int | None = None) -> str:
     """One line per action op: what will happen (and the current state it acts on). Raises RegistryError when the
     op can't apply, so the diff shows the refusal before anyone presses Apply."""
     from . import raidcycle as rc
@@ -2267,6 +2278,12 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
 
         _, m = _character_member(reg, op)
         rows, line = _character_rows(reg, m, op)
+        f = (op.field or "").strip().lower()
+        if m is not None and f in PROFESSION_FIELDS:  # professions touch no seat: the confirm's sentences, nothing else
+            from . import professions
+
+            c = next(x for x in m.active() if x.label == rows[0]["label"])
+            return "\n".join(professions.preview_sentences(reg, m, c, f, rows, by_id=by_id))
         ripple = rc.character_preview(reg, rc.RaidStore(reg.store, reg.key), m, rc.character_changes(reg, m, rows)) if m is not None else []
         return line + "".join(f" · {r}" for r in ripple)
     if op.op == "absence_clear":
@@ -4147,7 +4164,7 @@ def _split_line(text: str) -> tuple[str, str | None, str | None, list[str]]:
     return label, before, after, [notes] if dash else []
 
 
-def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
+def _part(reg: Registry, op: ConfigOp, by_id: int | None = None) -> tuple[str, DescribedPart, list[str]]:
     """(the thing's label, its one part, notes) for one op — the setup ops structured explicitly, others from describe()."""
     try:
         if op.op == "aura_set":
@@ -4264,7 +4281,7 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
             return thing, DescribedPart(label=_cap(label.removeprefix("plain text · ")), before=before, after=after), notes
     except (RegistryError, ValueError, KeyError, AttributeError):
         pass  # the generic line below (describe() words the refusal)
-    text = describe(reg, op, PLAIN_WEB)
+    text = describe(reg, op, PLAIN_WEB, by_id=by_id)
     label, before, after, notes = _split_line(text)
     if after is None:
         return _cap(op.op.replace("_", " ")), DescribedPart(after=text), []
@@ -4292,10 +4309,10 @@ PURE_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "schedul
             "comp_target", "comp_target_clear", "loot_weights"}
 
 
-def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None = None, channel=PLAIN_WEB) -> Described:
+def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None = None, channel=PLAIN_WEB, *, by_id: int | None = None) -> Described:
     """The structured preview of a batch: ops coalesced exactly as apply_ops will write them (one line per write), each
     with its parts (current → new, in words), the refusal its apply would give (dry-run on a shadow copy), its warn flag
-    and consequences. Never mutates the live config."""
+    and consequences. Never mutates the live config. `by_id`: who asks (describe's profession sentences say "your")."""
     d = Described(refused=list(refused or []))
     with reg.config_lock:  # a consistent copy: the config verbs write under this lock (previews may run in a worker thread)
         sh = reg.shadow()
@@ -4305,12 +4322,12 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
         parts_ops = op.parts if isinstance(op, MergedOp) else [op]
         label, parts, notes = None, [], []
         for p in parts_ops:
-            lab, part, n = _part(reg, p)
+            lab, part, n = _part(reg, p, by_id)
             label = label or lab
             parts.append(part)
             notes += [x for x in n if x not in notes]
         try:
-            text = describe(reg, op, channel)
+            text = describe(reg, op, channel, by_id=by_id)
         except Exception as e:  # noqa: BLE001
             text = f"{op.op}: {e}"
         if op.op == "plain" and channel is not PLAIN_WEB and channel is not _UNSET:  # asked in Discord: taking plain text away from HERE is said

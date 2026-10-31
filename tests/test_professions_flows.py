@@ -267,11 +267,30 @@ def test_professions_who_escapes_member_text_and_survives_a_profession_left_out_
     asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="bold gloves"))
     text, _ = ix.response.sent[0]
     assert "Star\\*Man\\_" in text and "Bold \\*Gloves\\*" in text
-    gone = reg.profile.professions.pop("leatherworking")
+    saved = dict(reg.profile.professions)
+    reg.profile.professions.pop("leatherworking")
     try:
         ix = _ix(reg)
         asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="bold gloves"))
         text, _ = ix.response.sent[0]
         assert text.splitlines()[0] == "**Bold \\*Gloves\\***"
     finally:
-        reg.profile.professions["leatherworking"] = gone  # the profile may be shared by the session's fixtures
+        reg.profile.professions.clear()  # the profile may be shared by the session's fixtures: restored in its order
+        reg.profile.professions.update(saved)
+
+
+def test_a_skill_may_be_left_not_said_and_the_hub_says_so(reg):
+    h = _as(reg, UID)
+
+    async def go():
+        await FLOWS["me_professions"](h.command(), reg)
+        await h.press("Add profession…")
+        await h.pick("Pick the profession", "leatherworking")
+        assert _options(h, "Pick the skill")[0] == "unsaid", "Not said yet is the first choice"
+        await h.pick("Pick the skill", "unsaid")
+        assert "Your Leatherworking is recorded." in h.text
+        await h.press("Do it")
+        await FLOWS["me_professions"](h.command(), reg)
+        assert "Leatherworking** · skill not said yet" in h.text
+    asyncio.run(go())
+    assert _char(reg, UID, LABEL).professions[0].skill is None

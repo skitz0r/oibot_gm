@@ -79,7 +79,8 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
 - **Your record** — your characters (name, spec, offspec, extra roles, which is your main, their professions) and your
   absences. You keep it on the Me page or with `/me char` and `/me absent`; professions are set from the character's
   **Professions…** on the Me page or by telling the bot. Officers can edit it for you, and they set your rank.
-- **Profession / skill** — a character's trade (Alchemy, Leatherworking…) and how far along it is, a number from 1 to 300.
+- **Profession / skill** — a character's trade (Alchemy, Leatherworking…) and how far along it is, a number from 1 to 300
+  (or not said yet, when a recipe was recorded first).
 - **Notable recipes** — the ones worth telling the guild about, never a whole recipe book. A **crafter** is a character
   that has them.
 - **Who can make** — the finder: the crafters of a recipe, names only; nobody is pinged.
@@ -286,25 +287,34 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     there is only one), type first and last name, and the confirm screen says what follows (*"Answered Join on … — the
     answer now names Stormcall"*); answers and seats it holds take the new name.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
-- **Professions**: each character can carry its professions with their skill (1 to 300) and its **notable recipes** —
+- **Professions**: each character can carry its professions with their skill (1 to 300, or left unsaid until you know it) and its **notable recipes** —
   the ones worth telling the guild about, not the whole book. On the Me page each character shows them on one line
-  under it: the profession's icon with its skill beside it (green at 300), then the recipes. The character's ⋮ has
-  **Professions…**, which edits that character's professions in place: pick a profession, type its skill, add or remove
+  under it: the profession's icon with its skill beside it (green at 300; the icon alone while the skill is not said
+  yet), then the recipes. The character's ⋮ has
+  **Professions…**, which edits that character's professions in place: pick a profession, type its skill (leave the box
+  empty if you don't know it), add or remove
   notable recipes. **Save** first shows the bot's own sentences (*"Your Alchemy is recorded at 300."*), then writes.
   In Discord, `/me professions` does the same: pick the character (skipped when you have one), and it lists that
   character's professions with **Add profession…**, **Change skill…**, **Add recipe…** and **Remove…**. The profession
-  and the skill are picked from lists; only a recipe's name is typed. Each ends on one confirm screen with the same
+  and the skill are picked from lists (the skill list starts with **Not said yet**); only a recipe's name is typed. Each ends on one confirm screen with the same
   sentences (*"Your Leatherworking is recorded at 300 with 1 notable recipe."*), and nothing changes before **Do it**.
   When both trades are taken it says so (*"Two trades are taken. Cooking, First Aid and Fishing are open."*) and offers
   only those.
   Or tell the bot (a DM, an @mention, or a channel it listens in): "Rhoz is a 300 leatherworker", "Rhoz is a
-  leatherworker" (a new profession with no number starts at 1; saying it again with a number changes the skill), "I just
+  leatherworker" (a new profession with no number is recorded with its skill not said; saying it again with a number
+  sets the skill), "I just
   learned Devilsaur Gauntlets on Rhoz", "take Devilsaur Gauntlets off Rhoz", "remove enchanting from Jonnie". It shows the
   change and waits for your **Apply**, like any change to your record. You need not name the character: "I can make
   Witherbark Boots" goes to your one character that makes things, else to your main, and the bot asks which only when
-  two of your characters could hold it. When two of the character's professions make
-  things, the bot asks which one makes the recipe (*"Which profession makes Elixir of Fortitude — Alchemy or
-  Cooking?"*); say "… with alchemy" to skip the question. A character has at most two trade professions (Alchemy,
+  two of your characters could hold it. If the character has no profession that makes things yet, the bot asks which
+  one makes it, or offers its best guess, and records both when you confirm; say the skill later. Its guess shows as
+  *"Rhoz has no Leatherworking on record yet. Apply records Leatherworking on Rhoz and adds Green Dragonscale Cloak to
+  the recipes Rhoz makes."*; when it can't guess, it asks *"Which profession makes Green Dragonscale Cloak?"* with a list
+  of the professions to pick from — only you can pick, nothing changes until you do, and the list expires after ten
+  minutes. When two of the character's professions make
+  things, the bot asks which one makes the recipe the same way (*"Which profession makes Elixir of Fortitude — Alchemy or
+  Cooking?"*); say "… with alchemy" to skip the question. The change it shows before **Apply** is in sentences, like
+  the editor's (*"Your Leatherworking gains Devilsaur Gauntlets."*). A character has at most two trade professions (Alchemy,
   Blacksmithing, Enchanting, Engineering, Leatherworking, Tailoring, Herbalism, Mining and Skinning count); Cooking,
   First Aid and Fishing are free. Herbalism, Mining, Skinning and Fishing make nothing, so they take no recipes. A recipe
   name is up to 60 characters and is kept as you wrote it. Officers do the same for anyone: on the Members page the

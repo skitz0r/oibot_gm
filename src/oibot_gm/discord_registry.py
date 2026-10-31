@@ -1146,7 +1146,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         for e in hits:
             d = reg.profile.professions.get(e.profession)  # a recipe whose profession left the profile keeps no suffix
             blocks.append((f"**{esc(e.name)}**" + (f" · {d.name}" if d else ""),
-                           [f"• **{esc(c.label)}** — {esc(c.member)} · {c.skill}" for c in e.crafters]))
+                           [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" for c in e.crafters]))
         footer = "Names only — ask them. Crafters add theirs with /me professions."
         await interaction.response.send_message(fit_lines(blocks, footer), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
@@ -1165,7 +1165,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         esc = discord.utils.escape_markdown
         head = f"**{d.name}** · {len(cs)} crafter{'s' if len(cs) != 1 else ''}"
-        text = fit_lines([(head, [f"• **{esc(c.label)}** — {esc(c.member)} · {c.skill}" for c in cs])])
+        text = fit_lines([(head, [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" for c in cs])])
         await interaction.response.send_message(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     professions_list = app_commands.describe(profession="which profession")(professions_list)

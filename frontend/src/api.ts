@@ -103,11 +103,12 @@ export interface GuideStatus {
 }
 /** A notable recipe on a character's profession (design §5.60): `id` = the item id once known, else null. */
 export interface Recipe { name: string; id: number | null }
-/** One profession on a character: a profile profession id, its skill (1..meta.professions.skill_cap), notable recipes. */
-export interface Profession { id: string; skill: number; recipes: Recipe[] }
+/** One profession on a character: a profile profession id, its skill (1..meta.professions.skill_cap; null = not said yet),
+ *  notable recipes. */
+export interface Profession { id: string; skill: number | null; recipes: Recipe[] }
 /** The Professions page (GET /api/professions, design §5.60): one crafter = a character holding a profession; `cls` = its
  *  class (icon and colour), `member` = the display name (a name, never a ping). */
-export interface Crafter { label: string; member: string; uid: string; skill: number; profession: string; cls: string | null }
+export interface Crafter { label: string; member: string; uid: string; skill: number | null; profession: string; cls: string | null }
 /** A registered recipe and its makers (highest skill first); `key` = the normalised name rename / merge take. */
 export interface CatalogRecipe { key: string; name: string; profession: string; id: number | null; crafters: Crafter[] }
 /** Every profession with its crafters, every registered recipe, and `officer` = the reader may rename or merge. */

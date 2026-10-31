@@ -3875,13 +3875,40 @@ verb `professions`), linted by tests/test_confirm_readability.py. The import bou
 (`importers/professions.py`: `detect`, `parse`, `FORMATS`) recognises nothing yet; no paste box shows until it does.
 
 **Plain text.** No new op: the `character` op (own record, `bind_self`, already in the parity matrix) gains four fields —
-`profession` ("Rhoz is a 300 leatherworker"; a new profession without a number starts at 1, one on record keeps its skill),
+`profession` ("Rhoz is a 300 leatherworker"; a new profession without a number is recorded with its skill not said, one on record keeps its skill),
 `profession_remove` ("drop enchanting on Jonnie"), `recipe_add` / `recipe_remove` ("I just learned Devilsaur Gauntlets on
 Rhoz"; value = the name as written, member text, never interpreted; `text` = the profession when the member names one).
 `professions.op_rows` turns each into a table row and a describe line (`Rhoz · Leatherworking: 275 → 300`, `Rhoz ·
 Leatherworking recipes: + Devilsaur Gauntlets`). A recipe add asks "Which profession makes X — A or B?" only when two of
 the character's professions make things; a remove finds the profession that holds it; naming a profession the character
 lacks says so ("Rhoz has no Tailoring on record.").
+
+**Ask, then record both** (owner decision 2026-10-30: "We should try not to add gatekeeping friction and instead just ask
+for clarification and make the needed changes"). `Profession.skill` may be None (not said yet): `check_professions` takes
+it, `professions_summary` prints the name alone ("Leatherworking · Skinning 285"), the finders sort it last and never count
+it toward a minimum, `profession_consequence` says "Your Leatherworking is recorded." with no "at", the site shows the icon
+alone (tooltip "Leatherworking · skill not said yet"), the editor's empty box sends null and the Discord skill select
+starts with **Not said yet**. A `recipe_add` on a character with no profession that makes things: with `text` naming one
+(the parser's guess — the parse context now lists each character's professions on record, and the schema asks for the
+guess whenever it knows) → ONE row adding that profession with skill None and the recipe (`Rhoz · Leatherworking: added
+with Green Dragonscale Cloak`); without → `professions.NeedsProfession` (a RegistryError carrying `character`, `recipe`
+and the candidate ids: every profession that makes things, or the two the character has) whose message is the question
+("Which profession makes X?" / "… — A or B?"). The clarification is a COMPONENT bound to the asker, never a conversational
+turn (a bare text answer in a listened channel may not pass the Listening gate): `discord_policy.handle_change` answers a
+NeedsProfession op with `ProfessionPickView` — a select of the candidates in profile order, the text "Which profession makes
+X?\nPicking one records it on <Char> and adds the recipe. Nothing changes until you pick.", only the asker may pick, ten
+minutes then EXPIRED, mirrored in `pending_views` (a restart edits it to "The bot restarted; nothing was changed."). A
+pick sets `op.text`, re-authorizes the presser (PRIV_LIVE), refuses a record changed since the question ("<Char>'s record
+changed since the question. Say it again."), applies through `configops.apply_async` as Apply does (one ops line) and
+edits the message to "<Char> now has <Name> on record and makes <Recipe>." or "<Char>'s <Name> gains <Recipe>.". One
+picker per reply; the request's other ops are shown or refused as before. The web and MCP print the question
+(`describe` returns it alone). **Previews in sentences:** for the four profession fields `describe(..., by_id=)` returns
+`professions.preview_sentences` — "Your Leatherworking gains Devilsaur Gauntlets." / "<Char>'s Leatherworking no longer
+lists Hide of the Wild." / for a guess "<Char> has no Leatherworking on record yet." · "Apply records Leatherworking on
+<Char> and adds <Recipe> to the recipes <Char> makes." · 'Say the skill when you know it, like "<Char> is 300
+Leatherworking".' / `profession_consequence` for a profession set or removed — in the Discord diff, the site's text box
+and MCP's preview (`by_id` = the asker); every other character field keeps its describe bullet. The readability harness
+lints them all, with the picker's question and results.
 
 **The help answer.** `help.SECTIONS["professions"]` (members' view, cap 3 000, `professions.help_section`): each
 profession's crafters with skill, then every registered recipe with its makers. Gated by `professions.help_hit`: the question
