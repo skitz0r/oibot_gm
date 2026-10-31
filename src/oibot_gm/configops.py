@@ -1173,6 +1173,10 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
         main = slot == "main"
         return ([{"name": name, "surname": surname.strip() or None, "cls": cls, "spec": spec, "offspec": off, "main": main}],
                 f"{who}: add {label} ({what}, {'main' if main else 'alt'})")
+    if cur is None and not label and m is not None and f in ("profession", "profession_remove", "recipe_add", "recipe_remove"):
+        from . import professions
+
+        cur = professions.default_character(reg, m, f)  # "I can make X": the player's main, or their one crafter
     if cur is None:
         raise RegistryError(f"{who} has no active character named {label or '?'} (theirs: {', '.join(c.label for c in m.active()) if m else 'none'})")
     if f in ("profession", "profession_remove", "recipe_add", "recipe_remove"):

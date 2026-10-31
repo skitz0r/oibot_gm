@@ -91,3 +91,33 @@ def test_a_hint_naming_a_profession_that_makes_nothing_is_refused(reg):
     m = reg.members[UID]
     with pytest.raises(RegistryError, match="^Fishing has no recipes\\.$"):
         configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Big Fish", text="fishing"))
+
+
+def _real(reg, uid, name, cls="Hunter", spec="Survival", main=True):
+    reg.add_character(uid, name, name, cls, spec, None, main)
+    return name
+
+
+def test_a_recipe_with_no_character_named_goes_to_the_one_crafter(reg):
+    """"I can make Witherbark Boots" without a character: the player matters more than the character (design §5.60)."""
+    a = _real(reg, 9100, "Thornwick")
+    b = _real(reg, 9100, "Thornalt", cls="Priest", spec="Holy", main=False)
+    reg.save_character_table(9100, [{"label": b, "professions": [{"id": "leatherworking", "skill": 300}]}], "t", officer=True)
+    m = reg.members[9100]
+    rows, line = configops._character_rows(reg, m, _op(member=m.display_name, field="recipe_add", value="Witherbark Boots"))
+    assert rows[0]["label"] == b and line == f"{b} · Leatherworking recipes: + Witherbark Boots", "the alt is the only crafter"
+    rows, line = configops._character_rows(reg, m, _op(member=m.display_name, field="profession", value="skinning 150"))
+    assert rows[0]["label"] == a and line == f"{a} · Skinning: 150", "a profession with no character goes to the main"
+
+
+def test_a_recipe_with_two_crafters_and_no_main_among_them_asks_which(reg):
+    _real(reg, 9101, "Ravenmoor")
+    _real(reg, 9101, "Ravenalt", cls="Priest", spec="Holy", main=False)
+    _real(reg, 9101, "Raventwo", cls="Mage", spec="Frost", main=False)
+    reg.save_character_table(9101, [{"label": "Ravenalt", "professions": [{"id": "tailoring", "skill": 300}]},
+                                    {"label": "Raventwo", "professions": [{"id": "enchanting", "skill": 300}]}], "t", officer=True)
+    m = reg.members[9101]
+    with pytest.raises(RegistryError, match=r"^Which character — Ravenalt or Raventwo\?$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, field="recipe_add", value="Mooncloth Bag"))
+    rows, _ = configops._character_rows(reg, m, _op(member=m.display_name, field="recipe_add", value="Mooncloth Bag", character="Ravenalt"))
+    assert rows[0]["label"] == "Ravenalt"

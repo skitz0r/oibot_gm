@@ -184,6 +184,32 @@ def _makes(reg: Registry, pid: str) -> bool:
     return reg.profile.profession(pid).makes
 
 
+PROFESSION_FIELDS = ("profession", "profession_remove", "recipe_add", "recipe_remove")
+
+
+def default_character(reg: Registry, m, field: str):
+    """The character a profession request means when the member named none (design §5.60: the player matters more than
+    the character). A recipe field goes to the one character with a profession that makes things, else to the main when
+    it has one; a profession field goes to the main. Several candidates and no main among them → the bot asks which."""
+    chars = list(m.active())
+    if not chars:
+        raise RegistryError(f"{m.display_name} has no character on record yet.")
+    if len(chars) == 1:
+        return chars[0]
+    main = m.main
+    if field in ("recipe_add", "recipe_remove"):
+        cands = [c for c in chars if any(_makes(reg, p.id) for p in c.professions)]
+        if len(cands) == 1:
+            return cands[0]
+        if main is not None and (not cands or main in cands):
+            return main
+        names = [c.label for c in cands]
+        raise RegistryError(f"Which character — {' or '.join(names)}?")
+    if main is not None:
+        return main
+    raise RegistryError(f"Which character — {' or '.join(c.label for c in chars)}?")
+
+
 def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple[list[dict], str]:
     """The plain-text `character` op's profession fields → one table row {label, professions} and the describe line.
     profession: value 'Leatherworking 300' (skill optional: a new one starts at 1, an existing one keeps its skill);
