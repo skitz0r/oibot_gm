@@ -148,6 +148,11 @@ def _find_profession(reg: Registry, text: str):
     raise RegistryError(f"{t.title() or text.strip() or '?'} isn't a profession in this game version.")
 
 
+def _makes(reg: Registry, pid: str) -> bool:
+    """The profession holds recipes (ProfessionDef.makes: not gathering, not a `recipes: false` secondary like Fishing)."""
+    return reg.profile.profession(pid).makes
+
+
 def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple[list[dict], str]:
     """The plain-text `character` op's profession fields → one table row {label, professions} and the describe line.
     profession: value 'Leatherworking 300' (skill optional: a new one starts at 1, an existing one keeps its skill);
@@ -171,10 +176,16 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
         name = " ".join((value or "").split())
         if not name:
             raise RegistryError("A recipe needs a name.")
-        takes = [p for p in cur if reg.profile.profession(p["id"]).group != "gathering"]
+        k = norm_recipe(name)
+        takes = [p for p in cur if _makes(reg, p["id"])]
         if hint:
             d, _ = _find_profession(reg, hint)
+            if not any(p["id"] == d.id for p in cur):
+                raise RegistryError(f"{c.label} has no {d.name} on record.")
             takes = [p for p in takes if p["id"] == d.id]
+        if field == "recipe_remove":  # a remove names the profession that holds it; it asks which only when several do
+            holding = [p for p in takes if any(norm_recipe(r["name"]) == k for r in p["recipes"])]
+            takes = holding or takes
         if not takes:
             raise RegistryError(f"{c.label} has no profession that makes things on record — say which, like 'Leatherworking 300'.")
         if len(takes) > 1:
@@ -182,7 +193,6 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
             raise RegistryError(f"Which profession makes {name} — {' or '.join(names)}?")
         p = takes[0]
         pname = reg.profile.profession(p["id"]).name
-        k = norm_recipe(name)
         if field == "recipe_add":
             if any(norm_recipe(r["name"]) == k for r in p["recipes"]):
                 raise RegistryError(f"{c.label} already has {name} on record.")

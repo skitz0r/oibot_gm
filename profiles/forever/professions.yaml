@@ -14,6 +14,6 @@ professions:
   skinning:       {name: Skinning,       group: gathering, icon: inv_misc_pelt_wolf_01}
   cooking:        {name: Cooking,        group: secondary, icon: inv_misc_food_15}
   first_aid:      {name: First Aid,      group: secondary, icon: spell_holy_sealofsacrifice}
-  fishing:        {name: Fishing,        group: secondary, icon: trade_fishing}
+  fishing:        {name: Fishing,        group: secondary, icon: trade_fishing, recipes: false}   # makes nothing
 # later, an addon export or a wago.tools seed: [{id: <game recipe id>, name: Devilsaur Gauntlets, profession: leatherworking, skill: 300}]
 recipes: []

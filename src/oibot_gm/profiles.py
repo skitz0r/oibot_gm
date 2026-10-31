@@ -130,11 +130,18 @@ class Item:
 
 @dataclass
 class ProfessionDef:
-    """One profession of a game version (professions.yaml): crafting | gathering | secondary, and its CDN icon name."""
+    """One profession of a game version (professions.yaml): crafting | gathering | secondary, its CDN icon name, and
+    whether it has recipes (`recipes: false` for a secondary that makes nothing, like Fishing)."""
     id: str
     name: str
     group: str
     icon: str = ""
+    recipes: bool = True
+
+    @property
+    def makes(self) -> bool:
+        """THE rule for 'holds recipes': a gathering profession never does; a profession marked recipes: false doesn't."""
+        return self.recipes and self.group != "gathering"
 
 
 def norm_recipe(name: str) -> str:
@@ -204,7 +211,8 @@ class GameProfile:
             known.setdefault(it.id, it.name)
         meta = y("profile.yaml") if (root / "profile.yaml").exists() else {}
         pdoc = (y("professions.yaml") or {}) if (root / "professions.yaml").exists() else {}
-        professions = {pid: ProfessionDef(id=pid, name=str(d["name"]), group=str(d["group"]), icon=str(d.get("icon") or ""))
+        professions = {pid: ProfessionDef(id=pid, name=str(d["name"]), group=str(d["group"]), icon=str(d.get("icon") or ""),
+                                             recipes=bool(d.get("recipes", True)))
                        for pid, d in (pdoc.get("professions") or {}).items()}
         rules = {"skill_cap": int(pdoc.get("skill_cap", 300)), "trade_slots": int(pdoc.get("trade_slots", 2))}
         seed = {norm_recipe(r["name"]): {"id": int(r["id"]), "name": str(r["name"]), "profession": str(r["profession"]), "skill": int(r.get("skill", 0))}

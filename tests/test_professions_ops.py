@@ -47,3 +47,33 @@ def test_profession_remove_and_a_bad_profession(reg):
     assert rows[0]["professions"] == [] and line == f"{LABEL} · Enchanting: removed"
     with pytest.raises(RegistryError, match="Jewelcrafting isn't a profession in this game version."):
         configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="profession", value="jewelcrafting 50"))
+
+
+def test_a_fisher_is_not_asked_which_profession_makes_a_recipe(reg):
+    reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "leatherworking", "skill": 300}, {"id": "fishing", "skill": 150}]}], "t", officer=True)
+    m = reg.members[UID]
+    rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Devilsaur Gauntlets"))
+    assert rows[0]["professions"][0]["recipes"] == [{"name": "Devilsaur Gauntlets", "id": None}] and line == f"{LABEL} · Leatherworking recipes: + Devilsaur Gauntlets"
+
+
+def test_a_hint_naming_a_profession_the_character_lacks_is_refused(reg):
+    reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "leatherworking", "skill": 300}]}], "t", officer=True)
+    m = reg.members[UID]
+    with pytest.raises(RegistryError, match=f"^{LABEL} has no Tailoring on record\\.$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Mooncloth Bag", text="tailoring"))
+
+
+def test_recipe_remove_finds_the_profession_that_holds_it(reg):
+    reg.save_character_table(UID, [{"label": LABEL, "professions": [
+        {"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}]},
+        {"id": "cooking", "skill": 300, "recipes": [{"name": "Savory Deviate Delight"}]}]}], "t", officer=True)
+    m = reg.members[UID]
+    rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_remove", value="savory deviate delight"))
+    assert rows[0]["professions"][1]["recipes"] == [] and rows[0]["professions"][0]["recipes"] == [{"name": "Devilsaur Gauntlets", "id": None}]
+    assert line == f"{LABEL} · Cooking recipes: − Savory Deviate Delight"
+
+
+def test_an_unknown_character_field_lists_the_profession_fields(reg):
+    m = reg.members[UID]
+    with pytest.raises(RegistryError, match="flex \\| profession \\| profession_remove \\| recipe_add \\| recipe_remove$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="haircut", value="x"))

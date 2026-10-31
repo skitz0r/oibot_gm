@@ -45,6 +45,7 @@ def test_check_professions_normalises_and_dedupes_recipes(reg):
     ([{"id": "leatherworking", "skill": 301}], "Skill is a number from 1 to 300."),
     ([{"id": "jewelcrafting", "skill": 10}], "Jewelcrafting isn't a profession in this game version."),
     ([{"id": "skinning", "skill": 10, "recipes": [{"name": "Hide"}]}], "A gathering profession has no recipes."),
+    ([{"id": "fishing", "skill": 10, "recipes": [{"name": "Strong Fishing Pole"}]}], "Fishing has no recipes."),
     ([{"id": "alchemy", "skill": 10, "recipes": [{"name": "x" * 61}]}], "A recipe name is up to 60 characters."),
     ([{"id": "alchemy", "skill": 10}, {"id": "alchemy", "skill": 20}], "Alchemy is listed twice."),
     ([{"id": "alchemy", "skill": 10, "recipes": [{"name": "Flask", "id": "abc"}]}], "A recipe's id is a number."),

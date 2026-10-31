@@ -2122,7 +2122,7 @@ class Registry:
     def check_professions(self, entries: list[dict]) -> list[Profession]:
         """Validate and normalise a character's whole professions list (design §5.60) — one sentence per refusal:
         a profile profession, skill 1..cap, at most trade_slots crafting+gathering, each profession once, recipe names
-        non-empty, ≤ RECIPE_NAME_MAX, one per normalised name, none on a gathering profession."""
+        non-empty, ≤ RECIPE_NAME_MAX, one per normalised name, none on a profession that makes nothing (ProfessionDef.makes)."""
         from .profiles import norm_recipe
 
         prof = self.profile
@@ -2168,8 +2168,8 @@ class Registry:
                     raise RegistryError("A recipe's id is a number.")
                 seeded = prof.recipe_seed.get(k)
                 recipes.append(Recipe(name=name, id=rid if rid else (seeded["id"] if seeded else None)))
-            if recipes and d.group == "gathering":
-                raise RegistryError("A gathering profession has no recipes.")
+            if recipes and not d.makes:
+                raise RegistryError("A gathering profession has no recipes." if d.group == "gathering" else f"{d.name} has no recipes.")
             out.append(Profession(id=pid, skill=skill, recipes=recipes))
         if sum(1 for p in out if prof.profession(p.id).group in ("crafting", "gathering")) > slots:
             raise RegistryError("A character has two trade professions — drop one first.")

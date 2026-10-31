@@ -1212,7 +1212,7 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
                 + (f" ({', '.join(implied)} already comes from the spec)" if implied else ""))
     if f in ("cls", "class"):
         raise RegistryError(f"{cur.label}'s class is fixed — retire it and add the new character")
-    raise RegistryError("character field is add | spec | offspec | name | rank | main | retire | delete | flex")
+    raise RegistryError("character field is add | spec | offspec | name | rank | main | retire | delete | flex | profession | profession_remove | recipe_add | recipe_remove")
 
 
 def _absence_start(reg: Registry, m, start: str | None, today: str) -> str:
