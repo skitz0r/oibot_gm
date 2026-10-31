@@ -2137,7 +2137,7 @@ class Registry:
                 raise RegistryError("professions is a list of objects")
             pid = str(e.get("id") or "").strip().lower().replace(" ", "_")
             if pid not in prof.professions:
-                raise RegistryError(f"{(str(e.get('id') or '?')).strip().title()} isn't a profession in this game version.")
+                raise RegistryError(f"{(str(e.get('id') or '?')).strip().replace('_', ' ').title()} isn't a profession in this game version.")
             d = prof.profession(pid)
             if pid in seen:
                 raise RegistryError(f"{d.name} is listed twice.")
@@ -2162,8 +2162,12 @@ class Registry:
                     continue
                 keys.add(k)
                 rid = (r.get("id") if isinstance(r, dict) else None)
+                try:
+                    rid = int(rid) if rid else None
+                except (TypeError, ValueError):
+                    raise RegistryError("A recipe's id is a number.")
                 seeded = prof.recipe_seed.get(k)
-                recipes.append(Recipe(name=name, id=int(rid) if rid else (seeded["id"] if seeded else None)))
+                recipes.append(Recipe(name=name, id=rid if rid else (seeded["id"] if seeded else None)))
             if recipes and d.group == "gathering":
                 raise RegistryError("A gathering profession has no recipes.")
             out.append(Profession(id=pid, skill=skill, recipes=recipes))

@@ -267,7 +267,7 @@ def regular_remove(reg: Registry, m, key: str) -> list[str]:
 # sentence and before the closing ones. A change that can't go raises RegistryError with one sentence (the route answers
 # 400 with it, the wizard shows it as its refusal).
 
-PEOPLE_VERBS = ("retire", "delete", "main", "spec", "flex", "rank", "confirm", "dm", "back", "save")
+PEOPLE_VERBS = ("retire", "delete", "main", "spec", "flex", "professions", "rank", "confirm", "dm", "back", "save")
 RANK_CHOICES = tuple(r for r in RANKS if r != "alt")
 """The ranks an officer gives a member (the Members page's Rank…, /roster rank): the player ranks and social — never
 'alt', which only an alt reads (D25)."""
@@ -406,6 +406,30 @@ def flex_consequence(reg: Registry, rs, m, label: str, roles: list[str], *, by_i
     return [f"{v.Whose} character {c.label} plays only what its spec and offspec give.", "Fill seats stops asking it to cover other roles."]
 
 
+def profession_consequence(reg: Registry, m, label: str, entries: list[dict], *, by_id: int | None = None) -> list[str]:
+    """A character's professions as the save will leave them (design §5.60): one sentence per profession recorded or
+    removed. Nothing about runs: professions touch no seat. Unchanged → refused."""
+    v = _Voice(reg, m, by_id)
+    c = _char(reg, m, label, v)
+    after = {p.id: p for p in reg.check_professions(entries)}
+    before = {p.id: p for p in c.professions}
+    if {k: p.model_dump() for k, p in after.items()} == {k: p.model_dump() for k, p in before.items()}:
+        raise RegistryError(f"{c.label}'s professions are already as given.")
+    out = []
+    for pid, p in after.items():
+        old = before.get(pid)
+        if old is not None and old.model_dump() == p.model_dump():
+            continue
+        name = reg.profile.profession(pid).name
+        n = len(p.recipes)
+        tail = f" with {n} notable recipe{'s' if n != 1 else ''}" if n else ""
+        out.append(f"{v.Whose} {name} is recorded at {p.skill}{tail}.")
+    for pid in before:
+        if pid not in after:
+            out.append(f"{v.Whose} {reg.profile.profession(pid).name} is removed from {v.their} record.")
+    return out
+
+
 OWN_RANK = "Another officer sets your rank."
 OWN_CONFIRM = "Another officer confirms your characters."
 """The refusals on your own record (the owner aside): the Members page greys Rank… and Confirm with these words
@@ -492,7 +516,7 @@ def save_consequence(reg: Registry, rs, m, rows: list[dict]) -> list[str]:
 
 def people_consequence(reg: Registry, rs, m, verb: str, *, by_id: int | None = None, label: str | None = None, spec: str | None = None,
                        offspec: str | None = None, roles: list[str] | None = None, rank: str | None = None, on: bool | None = None,
-                       start: str | None = None, rows: list[dict] | None = None) -> list[str]:
+                       start: str | None = None, rows: list[dict] | None = None, professions: list[dict] | None = None) -> list[str]:
     """THE people confirm: the generator of `verb` (PEOPLE_VERBS) with its arguments. Raises RegistryError (one sentence)
     when the change can't go."""
     if m is None:
@@ -507,6 +531,8 @@ def people_consequence(reg: Registry, rs, m, verb: str, *, by_id: int | None = N
         return spec_consequence(reg, rs, m, label, spec, offspec, by_id=by_id)
     if verb == "flex":
         return flex_consequence(reg, rs, m, label, roles or [], by_id=by_id)
+    if verb == "professions":
+        return profession_consequence(reg, m, label, professions or [], by_id=by_id)
     if verb == "rank":
         return rank_consequence(reg, m, rank, by_id=by_id)
     if verb == "confirm":
@@ -522,6 +548,6 @@ def people_consequence(reg: Registry, rs, m, verb: str, *, by_id: int | None = N
 
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
            "VERBS", "absence_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
-           "flex_consequence", "main_consequence", "people_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
+           "flex_consequence", "main_consequence", "people_consequence", "profession_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 

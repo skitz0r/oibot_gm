@@ -47,6 +47,8 @@ def test_check_professions_normalises_and_dedupes_recipes(reg):
     ([{"id": "skinning", "skill": 10, "recipes": [{"name": "Hide"}]}], "A gathering profession has no recipes."),
     ([{"id": "alchemy", "skill": 10, "recipes": [{"name": "x" * 61}]}], "A recipe name is up to 60 characters."),
     ([{"id": "alchemy", "skill": 10}, {"id": "alchemy", "skill": 20}], "Alchemy is listed twice."),
+    ([{"id": "alchemy", "skill": 10, "recipes": [{"name": "Flask", "id": "abc"}]}], "A recipe's id is a number."),
+    ([{"id": "jewel_crafting", "skill": 10}], "Jewel Crafting isn't a profession in this game version."),
 ])
 def test_check_professions_refuses_in_one_sentence(reg, entries, why):
     with pytest.raises(RegistryError, match=why.replace("(", r"\(").replace(")", r"\)").replace(".", r"\.")):
@@ -77,3 +79,87 @@ def test_an_unchanged_professions_row_writes_no_line(reg):
     reg.save_character_table(UID, [{"label": LABEL, "professions": [LW]}], "t", officer=True)
     assert reg.save_character_table(UID, [{"label": LABEL, "professions": [LW]}], "t", officer=True) == []
     assert reg.professions_summary(next(c for c in reg.members[UID].active() if c.label == LABEL)) == "Leatherworking 300"
+
+
+from oibot_gm import professions as pr
+from oibot_gm import consequences as cq
+
+# The fixture's seeded members are test puppets, and the finders never name a puppet: the finder tests register two real
+# members first.
+REAL_UID, REAL_LABEL = 9100, "Thornwick"
+REAL2_UID, REAL2_LABEL = 9101, "Ravenmoor"
+
+
+def _real(reg):
+    reg.add_character(REAL_UID, "Kestrel", REAL_LABEL, "Hunter", "Survival", None, True)
+    reg.add_character(REAL2_UID, "Wren", REAL2_LABEL, "Hunter", "Marksmanship", None, True)
+
+
+def _give(reg, uid, label, entries):
+    reg.save_character_table(uid, [{"label": label, "professions": entries}], "t", officer=True)
+
+
+def test_catalog_folds_case_and_spaces(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}]}])
+    _give(reg, REAL2_UID, REAL2_LABEL, [{"id": "leatherworking", "skill": 275, "recipes": [{"name": "devilsaur  gauntlets"}]}])
+    cat = pr.catalog(reg)
+    assert [e.name for e in cat] == ["Devilsaur Gauntlets"], "one recipe, the spelling most crafters use"
+    assert [c.label for c in cat[0].crafters] == [REAL_LABEL, REAL2_LABEL], "highest skill first"
+
+
+def test_who_can_make_matches_exact_then_by_words(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bag"}, {"name": "Bottomless Bag"}]}])
+    assert [e.name for e in pr.who_can_make(reg, "mooncloth bag")] == ["Mooncloth Bag"]
+    assert [e.name for e in pr.who_can_make(reg, "anyone able to make a Mooncloth Bag? got the cloth")] == ["Mooncloth Bag"]
+    assert pr.who_can_make(reg, "who can make a Gnomish Death Ray") == []
+
+
+def test_crafters_of_lists_a_profession_highest_first(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "alchemy", "skill": 240}])
+    _give(reg, REAL2_UID, REAL2_LABEL, [{"id": "alchemy", "skill": 300}])
+    assert [(c.label, c.skill) for c in pr.crafters_of(reg, "alchemy")] == [(REAL2_LABEL, 300), (REAL_LABEL, 240)]
+    assert [c.label for c in pr.crafters_of(reg, "alchemy", min_skill=300)] == [REAL2_LABEL]
+
+
+def test_finders_skip_retired_puppets_and_departed(reg):
+    _real(reg)
+    flask = [{"id": "alchemy", "skill": 300, "recipes": [{"name": "Flask of the Titans"}]}]
+    _give(reg, REAL_UID, REAL_LABEL, flask)
+    reg.member_left(REAL_UID)  # Member.left_at: not in the server
+    assert pr.crafters_of(reg, "alchemy") == [] and pr.who_can_make(reg, "flask of the titans") == []
+    _give(reg, UID, LABEL, flask)  # a test puppet
+    reg.add_character(REAL2_UID, "Wren", "Hollowfen", "Hunter", "Survival", None, False)
+    _give(reg, REAL2_UID, "Hollowfen", flask)
+    assert [c.label for c in pr.crafters_of(reg, "alchemy")] == ["Hollowfen"], "the puppet is never named"
+    reg.retire(REAL2_UID, "Hollowfen")
+    assert pr.crafters_of(reg, "alchemy") == [] and pr.catalog(reg) == [] and pr.who_can_make(reg, "flask of the titans") == []
+
+
+def test_rename_and_merge_rewrite_the_records(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlet"}]}])
+    _give(reg, REAL2_UID, REAL2_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}]}])
+    said = pr.merge_recipe(reg, "devilsaur gauntlet", "devilsaur gauntlets", "Officer", by_id=OFFICER_UID, preview=True)
+    assert said == ["Devilsaur Gauntlet is merged into Devilsaur Gauntlets.", f"{reg.members[REAL_UID].display_name}'s record now reads Devilsaur Gauntlets."]
+    assert len(pr.catalog(reg)) == 2, "a preview writes nothing"
+    pr.merge_recipe(reg, "devilsaur gauntlet", "devilsaur gauntlets", "Officer", by_id=OFFICER_UID)
+    assert [e.name for e in pr.catalog(reg)] == ["Devilsaur Gauntlets"] and len(pr.catalog(reg)[0].crafters) == 2
+    pr.rename_recipe(reg, "devilsaur gauntlets", "Gauntlets of the Devilsaur", "Officer", by_id=OFFICER_UID)
+    assert [e.name for e in pr.catalog(reg)] == ["Gauntlets of the Devilsaur"]
+    with pytest.raises(RegistryError, match="Nobody has registered"):
+        pr.rename_recipe(reg, "nothing here", "X", "Officer", by_id=OFFICER_UID)
+
+
+def test_profession_consequence_reads_aloud(reg):
+    m = reg.members[UID]
+    own = cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "a"}, {"name": "b"}]}], by_id=UID)
+    assert own == ["Your Leatherworking is recorded at 300 with 2 notable recipes."]
+    _give(reg, UID, LABEL, [{"id": "leatherworking", "skill": 300}, {"id": "enchanting", "skill": 100}])
+    officer = cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": 300}], by_id=OFFICER_UID)
+    assert officer == [f"{m.display_name}'s Enchanting is removed from their record."]
+    with pytest.raises(RegistryError, match="already as given"):
+        cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": 300}, {"id": "enchanting", "skill": 100}], by_id=UID)
+    assert cq.people_consequence(reg, None, m, "professions", by_id=UID, label=LABEL, professions=[]) == ["Your Leatherworking is removed from your record.", "Your Enchanting is removed from your record."]

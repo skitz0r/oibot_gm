@@ -577,6 +577,12 @@ def people_cases(reg, rs, runs, ms, dump):
         dump.add("flex_consequence", f"cleared, {who}", _said(cq.flex_consequence, reg, rs, tank, main, [], by_id=by))
         dump.add("flex_consequence", f"the same roles, {who}", _said(cq.flex_consequence, reg, rs, tank, main, ["healer"], by_id=by))
         tank.main.flex = []
+        dump.add("profession_consequence", f"one recorded, {who}", _said(cq.profession_consequence, reg, tank, main, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}]}], by_id=by))
+        dump.add("profession_consequence", f"two recorded, {who}", _said(cq.profession_consequence, reg, tank, main, [{"id": "alchemy", "skill": 120}, {"id": "cooking", "skill": 300}], by_id=by))
+        tank.main.professions = reg.check_professions([{"id": "alchemy", "skill": 120}])
+        dump.add("profession_consequence", f"removed, {who}", _said(cq.profession_consequence, reg, tank, main, [], by_id=by))
+        dump.add("profession_consequence", f"the same professions, {who}", _said(cq.profession_consequence, reg, tank, main, [{"id": "alchemy", "skill": 120}], by_id=by))
+        tank.main.professions = []
         dump.add("rank_consequence", f"trial to core, {who}", _said(cq.rank_consequence, reg, tank, "core", by_id=by))
         dump.add("rank_consequence", f"the same rank, {who}", _said(cq.rank_consequence, reg, tank, tank.rank, by_id=by))
         dump.add("rank_consequence", f"alt, {who}", _said(cq.rank_consequence, reg, tank, "alt", by_id=by))
