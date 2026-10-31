@@ -78,6 +78,9 @@ export interface Meta {
   discord?: { ready: boolean; stale: boolean };
   /** §5.55: the game version has the leveling-guide tool's tables (profiles/<version>/guides.yaml) — the Me page shows its Leveling guide tab */
   guides?: boolean;
+  /** §5.60: the version's professions (empty list = none: render nothing), the skill cap and how many trades (crafting +
+   *  gathering) a character may hold */
+  professions?: { list: { id: string; name: string; group: string; icon: string }[]; skill_cap: number; trade_slots: number };
   /** The run's vocabulary, defined once in Python (design §5.56 phase 2) — a page never keeps its own copy: the state words
    *  (open · locked · done · cancelled), the run verbs' labels (raid_buttons.RUN_WORDS — the Discord buttons' own), the
    *  confirmation marks with their words (constants.MARK / MARK_WORDS; "waiting" = no answer yet), how an ask reaches
@@ -98,8 +101,12 @@ export interface GuideStatus {
   built_when?: string; guides?: number; steps?: number; starter?: number; range?: string; sizes?: Record<string, number>;
   groups?: { group: string; guides: number; steps: number; lo: number; hi: number; zones: string[]; dungeons: string[]; km: number; starter: boolean }[];
 }
+/** A notable recipe on a character's profession (design §5.60): `id` = the item id once known, else null. */
+export interface Recipe { name: string; id: number | null }
+/** One profession on a character: a profile profession id, its skill (1..meta.professions.skill_cap), notable recipes. */
+export interface Profession { id: string; skill: number; recipes: Recipe[] }
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
-export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[] }
+export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[]; professions?: Profession[] }
 export interface Absence { start: string; end: string; reason: string | null; span?: string }  // `span` = the days in words (the clock rule); start/end stay ISO for the clear call
 /** One live sheet on the Me page (web/api_me.py sheet_row_extras): `may_answer` = Join / Bench / No thanks apply now (open);
  *  `may_cant` = Can't make it… (with a note) applies (locked, rostered or joined), `cant_consequence` = its confirm's sentences; `queue_note` = ad hoc and joined — a change

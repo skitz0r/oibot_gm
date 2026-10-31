@@ -5,7 +5,7 @@ import { IconCalendarOff, IconChecks, IconChevronDown, IconChevronRight, IconCro
 import { useRefresh } from "../hooks/usePoll";
 import { useDirty } from "../hooks/useDirty";
 import { useLive } from "../hooks/useLive";
-import { api, type Character, type MemberRow, type Members as MembersData, type Meta, type PeoplePreview } from "../api";
+import { api, type Character, type MemberRow, type Members as MembersData, type Meta, type PeoplePreview, type Profession } from "../api";
 import { GameIcon } from "../components/Icons";
 import { PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
@@ -14,6 +14,8 @@ import { AbsencesModal } from "../components/AbsencesModal";
 import { AbsencesTable } from "../components/AbsencesTable";
 import { MemberEdit } from "../components/members/MemberEdit";
 import { ConfirmWalk, PickModal, type Pick, type WalkItem } from "../components/members/PeopleDialogs";
+import { ProfessionLine } from "../components/ProfessionLine";
+import { ProfessionsEditor } from "../components/ProfessionsEditor";
 import { classColour } from "../theme";
 import css from "./members.module.css";
 
@@ -48,8 +50,10 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   useDirty("members", editing !== null);
+  const [prof, setProf] = useState<{ r: MemberRow; c: Character } | null>(null);  // one character's professions edited in place (the editor registers its own useDirty)
+  const profRev = useRef<string | undefined>(undefined);  // the rev the professions preview returned: the write goes with it
   const editRef = useRef<string | null>(null);
-  editRef.current = editing;
+  editRef.current = editing ?? (prof ? `${prof.r.uid}:${prof.c.label}` : null);
   const [busy, setBusy] = useState<string | null>(null);
   const [absFor, setAbsFor] = useState<MemberRow | null>(null);
   const [absKey, setAbsKey] = useState(0);
@@ -64,6 +68,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const changed = () => { load(); setAbsKey((k) => k + 1); };
 
   const rows = data?.rows || [];
+  const hasProfs = !!meta.professions?.list.length;
   const me = meta.viewer.uid;
   const own = data?.own || {};
   const counts = useMemo(() => ({
@@ -111,10 +116,20 @@ export function MembersPage({ meta }: { meta: Meta }) {
     setWalk({ queue, skipped });
   }
 
+  /** The professions editor's save for one character: /api/members/set's preview (THE confirm words) then the write with
+   *  the rev that preview returned. */
+  const professionsSave = (r: MemberRow, c: Character) => async (entries: Profession[], { preview }: { preview: boolean }) => {
+    const rev = preview ? r.characters_rev : profRev.current || r.characters_rev;
+    const p = await api.post<PeoplePreview>("/api/members/set", { uid: r.uid, character: c.label, professions: entries, rev, preview });
+    if (preview) profRev.current = p.rev;
+    return p;
+  };
+
   if (!data) return <Text c="dimmed">Loading…</Text>;
 
   const needle = q.trim().toLowerCase();
-  const matches = (r: MemberRow) => !needle || r.display_name.toLowerCase().includes(needle) || r.characters.some((c) => c.label.toLowerCase().includes(needle));
+  const matches = (r: MemberRow) => !needle || r.display_name.toLowerCase().includes(needle) || r.characters.some((c) => c.label.toLowerCase().includes(needle)
+    || (c.professions || []).some((p) => p.recipes.some((x) => x.name.toLowerCase().includes(needle))));
   const pred: Record<Exclude<Filter, null>, (r: MemberRow) => boolean> = {
     away: (r) => !!r.away_now && !r.test,
     confirm: (r) => !r.left && !r.test && r.characters.some(waits),
@@ -154,6 +169,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
         <Menu.Label>{c.label}</Menu.Label>
         <Item label="Spec…" onClick={() => setPick({ kind: "spec", r, c })} />
         <Item label="Extra roles…" onClick={() => setPick({ kind: "flex", r, c })} />
+        {hasProfs && <Item label="Professions…" why={prof && (prof.r.uid !== r.uid || prof.c.label !== c.label) ? "save or cancel the professions you're editing first" : null} onClick={() => setProf({ r, c })} />}
         <Item label="Make main" why={c.is_main ? "already the main" : null} onClick={() => press(r, { character: c.label, main: true }, `Make ${c.label} ${r.display_name}'s main?`, "Make it the main")} />
         <Item label="Confirm" why={c.confirmed ? "already confirmed" : !c.name ? "a planned character is confirmed once it has a name" : r.uid === me && own.confirm ? own.confirm : null}
           onClick={() => press(r, { character: c.label, confirm: true }, `Confirm ${c.label}?`, "Confirm")} />
@@ -178,6 +194,10 @@ export function MembersPage({ meta }: { meta: Meta }) {
         {charMenu(r, c)}
       </div>
       {!!c.regular_on?.length && <Anchor component={Link} to="/rosters" size="xs" c="dimmed" ml={32}>regular of {c.regular_on.join(", ")}</Anchor>}
+      {hasProfs && (prof && prof.r.uid === r.uid && prof.c.label === c.label
+        ? <Box mt={4} mb={6}><ProfessionsEditor meta={meta} label={c.label} professions={c.professions} onCancel={() => setProf(null)}
+            onSaved={() => { setProf(null); load(); }} onSave={professionsSave(r, c)} /></Box>
+        : <Box ml={32} mt={2} mb={4}><ProfessionLine meta={meta} professions={c.professions} compact /></Box>)}
     </Box>
   );
 

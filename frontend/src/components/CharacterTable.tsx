@@ -3,6 +3,8 @@ import { useDirty } from "../hooks/useDirty";
 import { ActionIcon, Button, Card, Group, Menu, MultiSelect, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconCrown, IconDots, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { api, ApiError, type Character, type Me, type Meta, type TableSaved } from "../api";
+import { ProfessionLine } from "./ProfessionLine";
+import { ProfessionsEditor } from "./ProfessionsEditor";
 import { GameIcon } from "./Icons";
 import { CharacterCell, SpecCell, StatusBadge } from "./Cells";
 import { CardHeader, fail, ok } from "./Page";
@@ -41,7 +43,9 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [ask, dialog] = useConfirm();
-  useEffect(() => { onEditing?.(editing); }, [editing]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const [prof, setProf] = useState<Character | null>(null);  // the one character whose professions are edited in place (it registers its own useDirty)
+  const hasProfs = !!meta.professions?.list.length;
+  useEffect(() => { onEditing?.(editing || prof !== null); }, [editing, prof]);  // eslint-disable-line react-hooks/exhaustive-deps
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));
 
   function startEdit() {
@@ -82,13 +86,13 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
   return (
     <Card>
       <CardHeader title="Characters" hint={me.rank ? `your rank is ${me.rank}` : undefined}
-        action={!editing && !me.must_apply ? <Button size="xs" variant="default" leftSection={<IconPencil size={13} />} onClick={startEdit}>Edit</Button> : undefined} />
+        action={!editing && !me.must_apply ? <Button size="xs" variant="default" leftSection={<IconPencil size={13} />} disabled={prof !== null} onClick={startEdit}>Edit</Button> : undefined} />
       <Table.ScrollContainer minWidth={680}>
         <Table style={{ tableLayout: "fixed" }}>
           <Table.Thead><Table.Tr><Table.Th w={editing ? 84 : 44} /><Table.Th>Character</Table.Th><Table.Th w={editing ? "22%" : "14%"}>Spec</Table.Th><Table.Th w={editing ? "22%" : "14%"}>Offspec</Table.Th><Table.Th w={editing ? "20%" : "14%"}>Flex</Table.Th>{!editing && <Table.Th w={120}>Status</Table.Th>}<Table.Th w={48} /></Table.Tr></Table.Thead>
           <Table.Tbody>
-            {!editing && me.characters.map((c) => (
-              <Table.Tr key={c.label}>
+            {!editing && me.characters.map((c) => [
+              <Table.Tr key={c.label} style={hasProfs ? { borderBottom: "none" } : undefined}>
                 <Table.Td>{c.is_main && <Tooltip label="your main"><IconCrown size={18} color="var(--mantine-color-slate-2)" /></Tooltip>}</Table.Td>
                 <Table.Td><CharacterCell meta={meta} cls={c.cls} label={c.label} size={34} /></Table.Td>
                 <Table.Td><SpecCell meta={meta} cls={c.cls} spec={c.spec} role={c.role} /></Table.Td>
@@ -100,13 +104,26 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
                     <Menu.Target><ActionIcon variant="subtle" color="gray" loading={busy === c.label} aria-label={`${c.label} actions`}><IconDots size={17} /></ActionIcon></Menu.Target>
                     <Menu.Dropdown>
                       {!c.is_main && <Menu.Item leftSection={<IconCrown size={14} />} onClick={() => makeMain(c)}>Make main</Menu.Item>}
+                      {hasProfs && <Menu.Item disabled={prof !== null && prof.label !== c.label} onClick={() => setProf(c)}>Professions…</Menu.Item>}
                       <Menu.Item onClick={() => retire(c)}>Retire</Menu.Item>
                       <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => del(c)}>Delete</Menu.Item>
                     </Menu.Dropdown>
                   </Menu>
                 </Table.Td>
-              </Table.Tr>
-            ))}
+              </Table.Tr>,
+              hasProfs && (
+                <Table.Tr key={`${c.label}:professions`}>
+                  <Table.Td />
+                  <Table.Td colSpan={6} pt={0}>
+                    {prof?.label === c.label
+                      ? <ProfessionsEditor meta={meta} label={c.label} professions={c.professions} onCancel={() => setProf(null)}
+                          onSaved={() => { setProf(null); onChanged(); }}
+                          onSave={(entries, { preview }) => api.post<TableSaved>("/api/me/characters", { rows: [{ label: c.label, professions: entries }], rev: me.characters_rev, preview })} />
+                      : <ProfessionLine meta={meta} professions={c.professions} />}
+                  </Table.Td>
+                </Table.Tr>
+              ),
+            ])}
             {editing && drafts.map((d, i) => (
               <Table.Tr key={d.label ?? `new${i}`} style={{ background: "var(--mantine-color-slate-6)" }}>
                 <Table.Td>{d.isNew ? <Select size="xs" w={68} value={d.slot} data={[{ value: "main", label: "main" }, { value: "alt", label: "alt" }]} onChange={(v) => upd(i, { slot: (v as "main" | "alt") || "alt" })} /> : d.slot === "main" ? <IconCrown size={18} color="var(--mantine-color-slate-2)" /> : null}</Table.Td>

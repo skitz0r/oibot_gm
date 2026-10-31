@@ -420,3 +420,19 @@ def test_ops_page_listening_column_and_recent_decisions():
     phone = css.split("@media (max-width: 48em)", 1)[1]
     assert ".head { display: none; }" in phone and "grid-template-areas" in phone and "border-radius: 8px" in phone
     assert "overflow-x" not in css and "minmax(0," in css, "nothing scrolls sideways"
+
+
+def test_professions_line_and_editor_on_me_and_members():
+    """Professions (design §5.60): one line under each character — a profession icon with its skill beside it, the notable
+    recipes as chips, or the empty state in words; Professions… in the character ⋮ on Me and Members; the editor posts a
+    preview first and prints only the server's sentences; skill is a number input 1..skill_cap."""
+    line = (SRC / "components" / "ProfessionLine.tsx").read_text()
+    assert 'kind="profession"' in line and "No notable recipes yet" in line and "no professions on record" in line
+    ed = (SRC / "components" / "ProfessionsEditor.tsx").read_text()
+    assert "preview: true" in ed and "sentences" in ed and "NumberInput" in ed and "skill_cap" in ed and "trade_slots" in ed
+    assert "A gathering trade has no recipes." in ed
+    me = (SRC / "components" / "CharacterTable.tsx").read_text()
+    mem = (SRC / "pages" / "Members.tsx").read_text()
+    assert "<ProfessionLine" in me and "Professions…" in me and "<ProfessionLine" in mem and "Professions…" in mem
+    icons = (SRC / "components" / "Icons.tsx").read_text()
+    assert '"profession"' in icons
