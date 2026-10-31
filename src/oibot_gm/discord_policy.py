@@ -369,9 +369,11 @@ class ConfigConfirmView(PendingView):
         await interaction.response.edit_message(content="Cancelled.", view=None, embed=None)
 
 
-def pick_question(recipe: str, character: str) -> str:
-    """The words above ProfessionPickView's select (the Confirm rule: what a pick does, and that nothing happens before it)."""
-    return f"Which profession makes {recipe}?\nPicking one records it on {character} and adds the recipe. Nothing changes until you pick."
+def pick_question(recipe: str, character: str, *, on_record: bool = False) -> str:
+    """The words above ProfessionPickView's select (the Confirm rule: what a pick does, and that nothing happens before it).
+    `on_record`: every choice is already on the character, so a pick only adds the recipe."""
+    what = f"Picking one adds the recipe to that profession on {character}." if on_record else f"Picking one records it on {character} and adds the recipe."
+    return f"Which profession makes {recipe}?\n{what} Nothing changes until you pick."
 
 
 def pick_result(character: str, profession: str, recipe: str, *, added: bool) -> str:
@@ -396,9 +398,12 @@ class ProfessionPickView(PendingView):
         self.op, self.need, self.ps, self.ops = op, need, ps, ops
         self.requester_id, self.requester, self.channel = requester_id, requester, channel
         self.busy = False
+        self.on_record = False
         try:
             _, m = configops._character_member(reg, op)
             self.rev = reg.characters_rev(m) if m is not None else None
+            c = next((x for x in m.active() if x.label == need.character), None) if m is not None else None
+            self.on_record = c is not None and set(need.candidates) <= {p.id for p in c.professions}
         except RegistryError:
             self.rev = None
         names = {d.id: d.name for d in reg.profile.professions.values()}
@@ -409,7 +414,7 @@ class ProfessionPickView(PendingView):
 
     @property
     def text(self) -> str:
-        return pick_question(self.need.recipe, self.need.character)
+        return pick_question(self.need.recipe, self.need.character, on_record=self.on_record)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.requester_id:
@@ -439,8 +444,16 @@ class ProfessionPickView(PendingView):
         raids = bot.raids.store(self.reg) if getattr(bot, "raids", None) is not None else None
         allowed, refused = configops.authorize(self.reg, [op], interaction.user.id, officer=officer, role_ids=role_ids, channel=self.channel, raids=raids)
 
+        me = self.reg.members.get(interaction.user.id)
+        by = me.display_name if me else interaction.user.display_name
+        where = "DMs" if self.channel is None else f"<#{self.channel}>"
+
+        async def refused_line(text: str) -> None:  # as Apply's view: a refusal after the press is in the audit trail too
+            await self.ops.emit(self.reg.config, "warn", f"{by} plain-text change in {where}: - (refused: {text})")
+
         async def finish(text: str) -> None:
             await interaction.response.edit_message(content=guild_prefix(self.reg) + text, view=None, embed=None)
+            await refused_line(text)
 
         if not allowed:
             await finish(refused[0] if refused else "Nothing applied.")
@@ -457,8 +470,6 @@ class ProfessionPickView(PendingView):
             await finish(str(e))
             return
         await interaction.response.edit_message(content="⏳ Applying…", view=None, embed=None)
-        me = self.reg.members.get(interaction.user.id)
-        by = me.display_name if me else interaction.user.display_name
         try:
             line = await configops.apply_async(self.reg, op, by, True, self.ps, bot=bot, by_id=interaction.user.id, channel_id=self.channel, self_id=self.requester_id)
         except Exception as e:  # noqa: BLE001 — the one sentence, as Apply prints a refusal
@@ -467,12 +478,12 @@ class ProfessionPickView(PendingView):
                 await interaction.edit_original_response(content=guild_prefix(self.reg) + text, view=None, embed=None)
             except discord.HTTPException:
                 pass
+            await refused_line(text)
             return
         try:
             await interaction.edit_original_response(content=guild_prefix(self.reg) + pick_result(c.label, name, self.need.recipe, added=bool(added)), view=None, embed=None)
         except discord.HTTPException:  # the change is made either way; the ops line below still records it
             pass
-        where = "DMs" if self.channel is None else f"<#{self.channel}>"
         await self.ops.emit(self.reg.config, "info", f"{by} plain-text change in {where}: {line}")
 
 

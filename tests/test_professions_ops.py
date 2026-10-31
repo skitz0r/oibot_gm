@@ -171,3 +171,16 @@ def test_the_preview_says_the_confirm_sentences_for_profession_fields(reg):
     assert configops.describe(reg, prof, by_id=UID) == "Your Leatherworking is recorded at 275 with 1 notable recipe."
     drop = _op(member=m.display_name, character=LABEL, field="profession_remove", value="leatherworking")
     assert configops.describe(reg, drop, by_id=OWNER) == f"{m.display_name}'s Leatherworking is removed from their record."
+
+
+def test_only_professions_the_character_can_hold_are_offered(reg):
+    """Two gathering trades taken: only Cooking or First Aid can still hold a recipe — the question offers those, and a
+    Leatherworking guess becomes that question instead of a promise Apply would break."""
+    reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "herbalism", "skill": 200}, {"id": "mining", "skill": 200}]}], "t", officer=True)
+    m = reg.members[UID]
+    for text in (None, "leatherworking"):
+        with pytest.raises(professions.NeedsProfession, match=r"^Which profession makes Green Dragonscale Cloak\?$") as e:
+            configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Green Dragonscale Cloak", text=text))
+        assert e.value.candidates == ["cooking", "first_aid"]
+    rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Spiced Wolf Meat", text="cooking"))
+    assert line == f"{LABEL} · Cooking: added with Spiced Wolf Meat"

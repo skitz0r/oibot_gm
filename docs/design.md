@@ -3892,14 +3892,17 @@ starts with **Not said yet**. A `recipe_add` on a character with no profession t
 (the parser's guess — the parse context now lists each character's professions on record, and the schema asks for the
 guess whenever it knows) → ONE row adding that profession with skill None and the recipe (`Rhoz · Leatherworking: added
 with Green Dragonscale Cloak`); without → `professions.NeedsProfession` (a RegistryError carrying `character`, `recipe`
-and the candidate ids: every profession that makes things, or the two the character has) whose message is the question
-("Which profession makes X?" / "… — A or B?"). The clarification is a COMPONENT bound to the asker, never a conversational
+and the candidate ids: every profession that makes things the character can still hold — each tried on the whole table, so
+two trades taken leaves Cooking and First Aid —, or the two it has) whose message is the question ("Which profession makes
+X?" / "… — A or B?"); a guess the character can't hold becomes that question, never a promise Apply would break, and when
+nothing fits the slot sentence refuses. The clarification is a COMPONENT bound to the asker, never a conversational
 turn (a bare text answer in a listened channel may not pass the Listening gate): `discord_policy.handle_change` answers a
 NeedsProfession op with `ProfessionPickView` — a select of the candidates in profile order, the text "Which profession makes
-X?\nPicking one records it on <Char> and adds the recipe. Nothing changes until you pick.", only the asker may pick, ten
+X?\nPicking one records it on <Char> and adds the recipe. Nothing changes until you pick." (when every choice is already on
+the character: "Picking one adds the recipe to that profession on <Char>."), only the asker may pick, ten
 minutes then EXPIRED, mirrored in `pending_views` (a restart edits it to "The bot restarted; nothing was changed."). A
 pick sets `op.text`, re-authorizes the presser (PRIV_LIVE), refuses a record changed since the question ("<Char>'s record
-changed since the question. Say it again."), applies through `configops.apply_async` as Apply does (one ops line) and
+changed since the question. Say it again."), applies through `configops.apply_async` as Apply does (one ops line; a refusal after the pick writes Apply's warn line) and
 edits the message to "<Char> now has <Name> on record and makes <Recipe>." or "<Char>'s <Name> gains <Recipe>.". One
 picker per reply; the request's other ops are shown or refused as before. The web and MCP print the question
 (`describe` returns it alone). **Previews in sentences:** for the four profession fields `describe(..., by_id=)` returns

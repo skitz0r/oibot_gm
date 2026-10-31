@@ -352,3 +352,34 @@ def test_the_picker_expires_like_the_confirm(reg):
         await view.on_timeout()
     asyncio.run(go())
     assert edits == [{"content": discord_policy.EXPIRED, "embed": None, "view": None}]
+
+
+def test_the_picker_says_it_only_adds_the_recipe_when_both_choices_are_on_record(reg):
+    from oibot_gm import professions
+
+    m, label = _bare_crafter(reg)
+    reg.save_character_table(m.discord_id, [{"label": label, "professions": [{"id": "leatherworking", "skill": 300}, {"id": "cooking", "skill": 300}]}], "t", officer=True)
+    op = ConfigOp(op="character", member=f"<@{m.discord_id}>", character=label, field="recipe_add", value="Savory Deviate Delight")
+    with pytest.raises(professions.NeedsProfession) as e:
+        configops.describe(reg, op, OPS_CH, strict=True)
+    view = discord_policy.ProfessionPickView(reg, op, e.value, None, Feed(), m.discord_id, m.display_name, OPS_CH)
+    assert view.text == (f"Which profession makes Savory Deviate Delight?\nPicking one adds the recipe to that profession on {label}. "
+                         "Nothing changes until you pick.")
+    assert [o.label for o in view.select.options] == ["Leatherworking", "Cooking"]
+
+
+def test_a_failed_apply_after_a_pick_writes_the_warn_line(reg, monkeypatch):
+    m, label = _bare_crafter(reg)
+    feed, log = Feed(), []
+
+    async def refuse(*a, **k):
+        raise configops.RegistryError("A character has two trade professions — drop one first.")
+
+    monkeypatch.setattr(configops, "apply_async", refuse)
+
+    async def go():
+        view = _pick_view(reg, m, label, feed)
+        await view.picked(interaction(m.discord_id, log), ["leatherworking"])
+    asyncio.run(go())
+    assert log[-1][1] == "A character has two trade professions — drop one first."
+    assert feed.lines and feed.lines[-1][0] == "warn" and "refused: A character has two trade professions" in feed.lines[-1][1]

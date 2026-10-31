@@ -267,6 +267,8 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
                 raise RegistryError(f"{d.name} has no recipes.")
             if not any(p["id"] == d.id for p in cur):
                 if field == "recipe_add" and not takes:  # nothing on record makes things: record the profession with the recipe
+                    if d.id not in _fitting(reg, cur, name):  # a guess the character can't hold becomes the question, never a promise
+                        raise _needs(reg, c, cur, name)
                     cur.append({"id": d.id, "skill": None, "recipes": [{"name": name, "id": None}]})
                     return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: added with {name}"
                 raise RegistryError(f"{c.label} has no {d.name} on record.")
@@ -276,8 +278,7 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
             if not takes:
                 raise RegistryError(f"{c.label} has no {name} on record.")
         if not takes:
-            makers = [d.id for d in reg.profile.professions.values() if d.makes]
-            raise NeedsProfession(c.label, name, makers, f"Which profession makes {name}?")
+            raise _needs(reg, c, cur, name)
         if len(takes) > 1:
             names = [reg.profile.profession(p["id"]).name for p in takes]
             if field == "recipe_add":
@@ -296,6 +297,30 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
         p["recipes"] = [r for r in p["recipes"] if r is not hit]
         return [{"label": c.label, "professions": cur}], f"{c.label} · {pname} recipes: − {hit['name']}"
     raise ValueError(field)
+
+
+def _fitting(reg: Registry, cur: list[dict], recipe: str) -> list[str]:
+    """The professions that make things which this character could still take with the recipe (profile order): each
+    candidate tried on the whole table — a character whose two trades are taken can only add Cooking or First Aid."""
+    out = []
+    for d in reg.profile.professions.values():
+        if not d.makes or any(p["id"] == d.id for p in cur):
+            continue
+        try:
+            reg.check_professions(cur + [{"id": d.id, "skill": None, "recipes": [{"name": recipe, "id": None}]}])
+        except RegistryError:
+            continue
+        out.append(d.id)
+    return out
+
+
+def _needs(reg: Registry, c, cur: list[dict], recipe: str) -> RegistryError:
+    """The question for a recipe on a character with no profession that makes things, offering only what fits; when
+    nothing fits, the one refusal."""
+    fit = _fitting(reg, cur, recipe)
+    if not fit:
+        return RegistryError("A character has two trade professions — drop one first.")
+    return NeedsProfession(c.label, recipe, fit, f"Which profession makes {recipe}?")
 
 
 def added_with_recipe(c, rows: list[dict]) -> str | None:

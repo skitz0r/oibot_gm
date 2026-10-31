@@ -648,6 +648,7 @@ def people_cases(reg, rs, runs, ms, dump):
              [{"id": "tailoring", "skill": None, "recipes": [{"name": "Mooncloth Bag"}, {"name": "Bottomless Bag"}]}], by_id=OFFICER_ID))
     dump.add("profession_consequence", "no skill said, own record", _said(cq.profession_consequence, reg, cm, lab, [{"id": "tailoring", "skill": None}], by_id=cm.discord_id))
     dump.add("ProfessionPickView", "the question", discord_policy.pick_question("Green Dragonscale Cloak", lab).split("\n"))
+    dump.add("ProfessionPickView", "the question, both choices on record", discord_policy.pick_question("Savory Deviate Delight", lab, on_record=True).split("\n"))
     dump.add("ProfessionPickView", "a profession recorded with the recipe", [discord_policy.pick_result(lab, "Leatherworking", "Green Dragonscale Cloak", added=True)])
     dump.add("ProfessionPickView", "a recipe on a profession on record", [discord_policy.pick_result(lab, "Leatherworking", "Green Dragonscale Cloak", added=False)])
     dump.add("ProfessionPickView", "the record changed", [discord_policy.pick_changed(lab)])
