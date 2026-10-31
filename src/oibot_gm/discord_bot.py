@@ -133,11 +133,16 @@ LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or 
                    "attendance, who can make or craft something, which professions or recipes someone has, a loot or roster rule, "
                    "how the bot works) or tells the bot something it records (an absence, a signup answer, a character or spec "
                    "change, a profession, a skill level or a recipe learned), even without naming the bot. "
+                   "A message asking who has, can make or craft a pattern, recipe or item is a question the bot answers from its "
+                   "records, even when it is addressed to everyone. A message saying the writer got, learned or can now make a "
+                   "pattern or recipe, or reached a skill, is something the bot records. "
                    "No when it is conversation between people, game talk, a joke, a link, or a reply to another person. "
                    "`bot` says what the bot does; `channel` says where it was written (the bot's job there, the channel's own "
                    "topic and its category); `recent` is the chat just before, for context only.")
-LISTEN_CRITERIA = {"true": "The message asks the bot something it knows or tells it something it records.",
-                   "false": "The message is people talking to each other, game talk, a joke, a link or a reply to someone else."}
+LISTEN_CRITERIA = {"true": "The message asks who can make something or what the bot knows, or tells it a profession, skill, "
+                           "recipe or pattern the writer has, learned or got.",
+                   "false": "The message is people talking to each other about the game itself, a joke, a link or a reply to "
+                            "someone else."}
 # the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things; listen_state adds the game
 # version's profession names from the profile (game version is data)
 LISTEN_GLOSSARY = ["sheet", "signup", "join", "bench", "no thanks", "roster", "rostered", "regular", "lock", "confirm",
@@ -147,7 +152,7 @@ LISTEN_SURE = 0.8  # at or above: a reply channel answers it as an @mention woul
 LISTEN_MAYBE = 0.5  # from here to SURE: unsure — a reply channel adds 👀 and the writer may click it to ask
 LISTEN_PER_HOUR = 600  # decisions per guild per hour; over it the rest are skipped (the monthly budget cap applies too)
 LISTEN_RING = 50  # verdicts kept in memory per guild (listen_recent, the Ops page in phase 2)
-LISTEN_ASK_S = 600  # how long a 👀 waits for its writer's click
+LISTEN_ASK_S = 3600  # how long a 👀 waits for its writer's click; then the bot takes its 👀 off (a 👀 you can see still works)
 LISTEN_RECENT = 3  # earlier messages kept per listened channel (context for the next decision; no REST call)
 LISTEN_EYES = "👀"
 LISTEN_WARN_S = 3600  # "listening is on but there is no key": one ops warn per guild per hour
@@ -329,14 +334,29 @@ class ListenMixin:
             else:
                 self._listen()["asks"][message.id] = {"guild": reg.key, "channel": cid, "author": message.author.id, "text": text,
                                                       "message": message, "expires": time.monotonic() + LISTEN_ASK_S}
+                asyncio.get_running_loop().create_task(self._listen_expire(message.id))
         self._listen_record(reg, message, text, p, mode, did)
         if did == "replied":
             await self.plain_text(message, reg, text, cid)
         return did
 
+    async def _listen_expire(self, message_id: int, delay: float | None = None) -> None:
+        """The window closed with no click from the writer: forget the ask and take the bot's own 👀 off the message, so
+        a 👀 still on a message is one that still works. A click in time already popped the ask: nothing to do. A
+        restart forgets the asks it held; their 👀 stay (the writer's click then does nothing — the one gap)."""
+        await asyncio.sleep(LISTEN_ASK_S if delay is None else delay)
+        ask = self._listen()["asks"].pop(message_id, None)
+        me = getattr(self, "user", None)
+        if ask is None or me is None:
+            return
+        try:
+            await ask["message"].remove_reaction(LISTEN_EYES, me)
+        except Exception as e:  # noqa: BLE001 — the message is gone, or Discord is unreachable: nothing to take off
+            log.warning("listen: 👀 not removed in %s (%s)", ask["channel"], type(e).__name__)
+
     async def on_raw_reaction_add(self, payload) -> None:
         """The writer clicked the bot's 👀 within its window: their message goes to plain_text as an @mention would.
-        Anyone else's reaction does nothing."""
+        Anyone else's reaction does nothing. The bot's 👀 stays on an answered message as the mark of what it answered."""
         if str(payload.emoji) != LISTEN_EYES:
             return
         self._listen_purge()

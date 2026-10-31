@@ -203,10 +203,15 @@ def message(author, channel=SIGNUP_CH, text="when does Barrow Deeps run this wee
     async def add_reaction(emoji):
         reacts.append(emoji)
 
+    async def remove_reaction(emoji, member):
+        reacts.remove(emoji)
+        reacts.append(("removed", emoji, getattr(member, "id", member)))
+
     return types.SimpleNamespace(id=next(_next_id), content=text, author=types.SimpleNamespace(id=author, display_name=f"user{author}", bot=bot),
                                  channel=types.SimpleNamespace(id=channel, name="signups", topic="Sign up for raids here", category=types.SimpleNamespace(name="Raiding")),
                                  guild=types.SimpleNamespace(id=1, me=None),
-                                 mentions=list(mentions), role_mentions=[], reference=None, add_reaction=add_reaction, reacts=reacts)
+                                 mentions=list(mentions), role_mentions=[], reference=None, add_reaction=add_reaction,
+                                 remove_reaction=remove_reaction, reacts=reacts)
 
 
 @pytest.fixture
@@ -271,6 +276,38 @@ def test_an_unclicked_eyes_expires(gate, monkeypatch):
     monkeypatch.setattr(db.time, "monotonic", lambda: t0 + db.LISTEN_ASK_S + 1)
     react(gate.bot, msg, me)
     assert gate.bot.handled == [] and gate.bot._listen()["asks"] == {}
+
+
+def test_the_window_is_an_hour_and_the_eyes_come_off_when_it_closes(gate):
+    """A 👀 still on a message is one that still works: when the hour passes with no click, the bot takes its own 👀 off
+    (2026-10-30: a writer clicked a 40-minute-old 👀 and nothing happened, with no sign the ask was over)."""
+    assert db.LISTEN_ASK_S == 3600
+    me = gate.g.me.discord_id
+    msg = message(me)
+    gate.run(0.6, msg)
+    assert msg.reacts == ["👀"]
+    asyncio.run(gate.bot._listen_expire(msg.id, delay=0))
+    assert msg.reacts == [("removed", "👀", BOT_ID)] and gate.bot._listen()["asks"] == {}
+    react(gate.bot, msg, me)
+    assert gate.bot.handled == []
+
+
+def test_a_clicked_eyes_stays_as_the_mark_of_the_answer(gate):
+    me = gate.g.me.discord_id
+    msg = message(me)
+    gate.run(0.6, msg)
+    react(gate.bot, msg, me)
+    asyncio.run(gate.bot._listen_expire(msg.id, delay=0))  # the window closing later finds nothing to take off
+    assert msg.reacts == ["👀"] and len(gate.bot.handled) == 1
+
+
+def test_the_question_names_profession_asks_and_news():
+    """Retune 2026-10-30: "does anyone have the pattern X?" scored 56% and "i just got the leatherworking pattern X" 66%
+    in #professions — under the reply line. Probed with these sentences: 96–97% each, banter unchanged at ≤15%."""
+    q = db.LISTEN_QUESTION
+    assert "who has, can make or craft a pattern, recipe or item" in q and "even when it is addressed to everyone" in q
+    assert "got, learned or can now make a pattern or recipe" in q
+    assert "recipe or pattern the writer has, learned or got" in db.LISTEN_CRITERIA["true"]
 
 
 def test_unsure_in_a_watch_channel_and_below_are_quiet(gate):

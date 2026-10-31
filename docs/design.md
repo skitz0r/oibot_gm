@@ -3794,8 +3794,15 @@ from `raid_def`, the glossary's words), `channel` (name; "the signup channel" et
 `message.text` — yes for something it knows or records, even without its name; no for people talking, game talk, a joke,
 a link, a reply to someone else. Thresholds: `LISTEN_SURE = 0.8` (the host's `OIBOT_LISTEN_SURE` may raise it),
 `LISTEN_MAYBE = 0.5`. Sure → *reply*: `plain_text` as an @mention; *watch*: "would reply". Unsure → *reply*: the bot adds
-👀 and remembers the message for 10 minutes; `on_raw_reaction_add` by the message's AUTHOR with 👀 routes it to
-`plain_text` (once); anyone else's reaction does nothing; *watch*: "would ask". Below → quiet. At most `LISTEN_PER_HOUR =
+👀 and remembers the message for an hour (`LISTEN_ASK_S`); `on_raw_reaction_add` by the message's AUTHOR with 👀 routes
+it to `plain_text` (once); anyone else's reaction does nothing; when the hour passes unclicked, `_listen_expire` forgets
+the ask and takes the bot's own 👀 off the message, so a 👀 still showing is one that still works (2026-10-30: the window
+was 10 minutes and silent — a writer clicked a 40-minute-old 👀 and nothing happened; a restart still forgets its asks and
+leaves their 👀, the one gap); *watch*: "would ask". Below → quiet. Retune 2026-10-30: "does anyone have the pattern X?"
+scored 56% and "i just got the leatherworking pattern X" 66% in #professions, both under the reply line; two sentences
+added to the question (a who-has / who-can-make ask counts even when addressed to everyone; getting, learning or now
+making a pattern or recipe, or reaching a skill, is something the bot records) and the criteria rephrased to match,
+probed offline: 96–97% each, "who can make devilsaur gauntlets" 99%, banter ≤15% as before. At most `LISTEN_PER_HOUR =
 600` decisions per guild per hour (over it: "skipped", quiet).
 
 **The record.** Every verdict: a ring per guild of the last 50 in memory (`listen_recent(reg)`: at, channel, author,

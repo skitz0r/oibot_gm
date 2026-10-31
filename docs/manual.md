@@ -1481,7 +1481,8 @@ and links are left alone. Each listening channel is one of two:
 - **Watches** — the bot only notes what it would have answered and says nothing. Start here, read what it would have
   done, then switch to *Replies*.
 - **Replies** — the bot answers. When it is unsure a message is for it, it adds 👀 instead; the writer clicks the 👀
-  within ten minutes to ask, and anyone else's click does nothing.
+  within the hour to ask, and anyone else's click does nothing. When the hour passes with no click the bot takes its 👀
+  off again, so a 👀 you can still see is one that still works.
 The bot judges a message with what it knows about the room: its own job there (the signup channel, the officers'
 channel) and the channel's topic and category in Discord — so give a listening channel a topic ("General chat about the
 game", "Raid signups and questions") and the bot reads it in that light.
