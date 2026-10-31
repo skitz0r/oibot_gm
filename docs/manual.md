@@ -309,6 +309,10 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   text, naming the character, where their changes act (§8c). Professions belong to the character: they stay with it
   when you change your main, and a retired character is no longer named as a crafter. Reading an addon's export of your
   professions is planned; nothing is imported yet. Anyone in the guild can then ask who can make a thing (§10a).
+- **Who can make a thing, in Discord**: `/professions who` — start typing the recipe's name and pick it from the
+  guild's own list of recipes; the answer names its crafters, highest skill first, and only you see it. Nobody is
+  pinged: ask them yourself. A recipe nobody has added yet says so, and how a crafter adds theirs. `/professions list`
+  — pick a profession and see everyone who has it, highest skill first. The Professions page on the site shows the same.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
   owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.

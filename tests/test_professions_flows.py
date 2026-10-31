@@ -142,3 +142,98 @@ def test_roster_professions_refuses_a_non_officer(reg, monkeypatch):
         assert "Officers only" in h.text
     asyncio.run(go())
     assert not _char(reg, OTHER_UID, OTHER_LABEL).professions
+
+
+# ---- /professions who · /professions list (Task 13): read-only, ephemeral, names only, no model call
+
+def _offline_tree(reg):
+    """The command tree built offline exactly as scripts/check_commands.py builds it (no Discord connection)."""
+    from discord import app_commands
+
+    from oibot_gm.discord_help import register_help_commands
+    from oibot_gm.discord_policy import PolicyContext, register_policy_commands
+    from oibot_gm.discord_raid import register_raid_commands
+    from oibot_gm.discord_registry import Guilds, register_commands
+    from oibot_gm.ops import Ops
+
+    client = discord.Client(intents=discord.Intents.none())
+    tree = app_commands.CommandTree(client)
+    guilds = Guilds.of(reg.store, reg)
+
+    class Bot:
+        raids = type("R", (), {"store": lambda self, r: None})()
+
+    register_commands(tree, guilds, Ops(client), lambda k, v: "")
+    register_raid_commands(tree, guilds, Ops(client), Bot())
+    register_policy_commands(tree, guilds, Ops(client), Bot(), PolicyContext(guilds))
+    register_help_commands(tree, guilds, Ops(client), Bot())
+    return tree
+
+
+class _Resp:
+    def __init__(self):
+        self.sent = []
+
+    def is_done(self):
+        return bool(self.sent)
+
+    async def send_message(self, content=None, **kw):
+        self.sent.append((content, kw))
+
+
+def _ix(reg, **ns):
+    return types.SimpleNamespace(extras={"guild": reg.key}, guild_id=None, namespace=types.SimpleNamespace(**ns),
+                                 user=types.SimpleNamespace(id=UID, display_name="m"), response=_Resp(), client=None)
+
+
+def _crafter(reg):
+    reg.add_character(9100, "Thornwick", "Thornwick", "Hunter", "Survival", None, True)
+    reg.save_character_table(9100, [{"label": "Thornwick", "professions": [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}]}]}], "t", officer=True)
+
+
+def _cmd(tree, path):
+    group, name = path.split()
+    return tree.get_command(group).get_command(name)
+
+
+def test_professions_who_and_list_commands_exist_and_answer_from_the_catalog(reg):
+    tree = _offline_tree(reg)
+    paths = {c.qualified_name for c in tree.walk_commands()}
+    assert {"professions who", "professions list"} <= paths
+    choices = {c.value for c in _cmd(tree, "professions list")._params["profession"].choices}
+    assert {"leatherworking", "alchemy", "cooking"} <= choices and len(choices) <= 25
+    _crafter(reg)
+    auto = _cmd(tree, "professions who")._params["recipe"].autocomplete
+    got = asyncio.run(auto(_ix(reg), "devil"))
+    assert [c.value for c in got] == ["devilsaur gauntlets"] and got[0].name.startswith("Devilsaur Gauntlets")
+    assert asyncio.run(auto(_ix(reg), "xyz")) == []
+
+
+def test_professions_who_names_the_crafters_and_refuses_an_unknown_recipe(reg):
+    tree = _offline_tree(reg)
+    _crafter(reg)
+    who = _cmd(tree, "professions who")
+    ix = _ix(reg)
+    asyncio.run(who.callback(ix, recipe="devilsaur gauntlets"))
+    text, kw = ix.response.sent[0]
+    assert "Devilsaur Gauntlets" in text and "Thornwick" in text and "300" in text and "<@" not in text
+    assert kw["ephemeral"] and kw["allowed_mentions"].to_dict()["parse"] == []
+    ix = _ix(reg)
+    asyncio.run(who.callback(ix, recipe="Thunderfury"))
+    text, kw = ix.response.sent[0]
+    assert text == "Nobody has registered that recipe yet — crafters add theirs with /me professions." and kw["ephemeral"]
+
+
+def test_professions_list_shows_crafters_or_says_how_to_add_one(reg):
+    tree = _offline_tree(reg)
+    lst = _cmd(tree, "professions list")
+    ix = _ix(reg)
+    asyncio.run(lst.callback(ix, profession="leatherworking"))
+    text, kw = ix.response.sent[0]
+    assert text.startswith("Nobody has registered Leatherworking yet.") and kw["ephemeral"]
+    _crafter(reg)
+    ix = _ix(reg)
+    asyncio.run(lst.callback(ix, profession="leatherworking"))
+    text, kw = ix.response.sent[0]
+    assert "**Leatherworking** · 1 crafter" in text and "Thornwick" in text and kw["ephemeral"]
+    assert kw["allowed_mentions"].to_dict()["parse"] == []

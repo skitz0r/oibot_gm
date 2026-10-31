@@ -845,6 +845,23 @@ def tree_limit_problems(tree: app_commands.CommandTree) -> list[str]:
     return [too_many_subcommands(p, n) for p, n in group_sizes(tree).items() if n > DISCORD_MAX_CHILDREN]
 
 
+def profession_choices(guilds) -> list[app_commands.Choice[str]]:
+    """/professions list's Choices: the professions of every loaded guild's profile, unioned by id in profile order
+    (Discord caps a Choice list at 25). No guild loaded (a fresh bot, a bare test index): every profile on disk."""
+    seen: dict[str, str] = {}
+    ordered = getattr(guilds, "ordered", None)
+    for reg in (ordered() if ordered else []):
+        for d in reg.profile.professions.values():
+            seen.setdefault(d.id, d.name)
+    if not seen:
+        import yaml
+
+        for f in sorted((Path(__file__).resolve().parents[2] / "profiles").glob("*/professions.yaml")):
+            for pid, d in ((yaml.safe_load(f.read_text()) or {}).get("professions") or {}).items():
+                seen.setdefault(pid, str(d["name"]))
+    return [app_commands.Choice(name=n, value=v) for v, n in seen.items()][:25]
+
+
 def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_mod.Ops, ico) -> None:
     async def need(interaction: discord.Interaction) -> tuple[Registry | None, discord.Interaction]:
         """guild_routing.need over this tree's Guilds: (guild, interaction) — rebind both at every call site."""
@@ -869,6 +886,17 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not m:
             return []
         return [app_commands.Choice(name=f"{c.label} · {c.cls} {c.spec}"[:100], value=c.name or c.label) for c in m.active() if current.lower() in (c.name or c.label).lower()][:25]
+
+    async def recipe_autocomplete(interaction: discord.Interaction, current: str):
+        """The guild's registered recipes (professions.catalog), filtered as the person types: the finder never reads free
+        text it has to guess at."""
+        reg = guilds.for_interaction(interaction)
+        if reg is None:
+            return []
+        from . import professions as pr
+        cur = (current or "").lower()
+        return [app_commands.Choice(name=f"{e.name} · {len(e.crafters)} crafter{'s' if len(e.crafters) != 1 else ''}"[:100], value=e.key[:100])
+                for e in pr.catalog(reg) if cur in e.name.lower()][:25]
 
     async def instance_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
@@ -1064,6 +1092,51 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ {line}. " + (inbox.DM_ON_SENTENCE if on else inbox.DM_OFF_SENTENCE), ephemeral=True)
 
     tree.add_command(me)
+
+    # ---------------- /professions (members; design §5.60): read-only finders, ephemeral, names only, no model call
+    professions_group = app_commands.Group(name="professions", description="Who can make what")
+
+    @professions_group.command(name="who", description="Who can make a recipe (names only, nobody is pinged)")
+    @app_commands.describe(recipe="start typing the recipe's name")
+    @app_commands.autocomplete(recipe=recipe_autocomplete)
+    async def professions_who(interaction: discord.Interaction, recipe: str):
+        reg, interaction = await need(interaction)
+        if not reg:
+            return
+        from . import professions as pr
+        hits = pr.who_can_make(reg, recipe)
+        if not hits:
+            await interaction.response.send_message("Nobody has registered that recipe yet — crafters add theirs with /me professions.", ephemeral=True)
+            return
+        lines = []
+        for e in hits[:3]:
+            lines.append(f"**{e.name}** · {reg.profile.profession(e.profession).name}")
+            lines += [f"• **{c.label}** — {c.member} · {c.skill}" for c in e.crafters[:10]]
+        lines.append("Names only — ask them. Crafters add theirs with /me professions.")
+        await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    async def professions_list(interaction: discord.Interaction, profession: str):
+        reg, interaction = await need(interaction)
+        if not reg:
+            return
+        from . import professions as pr
+        d = reg.profile.professions.get(profession)
+        if d is None:
+            await interaction.response.send_message("That isn't a profession in this game version.", ephemeral=True)
+            return
+        cs = pr.crafters_of(reg, d.id)
+        if not cs:
+            await interaction.response.send_message(f"Nobody has registered {d.name} yet. A crafter adds it with /me professions or on the Me page.", ephemeral=True)
+            return
+        body = "\n".join(f"• **{c.label}** — {c.member} · {c.skill}" for c in cs[:25])
+        await interaction.response.send_message(f"**{d.name}** · {len(cs)} crafter{'s' if len(cs) != 1 else ''}\n{body}", ephemeral=True,
+                                                allowed_mentions=discord.AllowedMentions.none())
+
+    professions_list = app_commands.describe(profession="which profession")(professions_list)
+    if choices := profession_choices(guilds):  # a Choice list from the game data, never a typed name
+        professions_list = app_commands.choices(profession=choices)(professions_list)
+    professions_group.command(name="list", description="A profession's crafters, highest skill first")(professions_list)
+    tree.add_command(professions_group)
 
     # ---------------- /roster (officers)
     roster = app_commands.Group(name="roster", description="Officer: the guild's registered characters")

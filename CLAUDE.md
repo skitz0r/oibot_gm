@@ -202,10 +202,10 @@ src/oibot_gm/
                        and unique after norm_recipe, none where ProfessionDef.makes is false); set_professions = the one setter, called by
                        save_character_table's `professions` row key (the whole list replaces); professions_summary
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
-                       /me view|wishlist|loot-ask|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
+                       /me view|wishlist|loot-ask|plan main|alt|char [action]|professions|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me loot-ask = flows_appeal, a question about one of your own awards;
                        /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
-                       /roster overview (always ephemeral, per-schedule fields, officers' Post button)|add|remove|members|list|confirm|rank|set-main|char|
+                       /roster overview (always ephemeral, per-schedule fields, officers' Post button)|add|remove|members|list|confirm|rank|set-main|char|professions|
                        absences|absent|back|comp|applicants|applicant (officers; `comp` = flows_config.CompTargetsWizard, the desired comp's targets;
                        `poll` retired, PlanButton is a stub); /gm config show = config_show_embed (one field per configops.config_summary section);
                        Rosters (design §5.30, out of the roster redesign): a run's roster is ephemeral in config `rosters[]` (key/size/cutoffs per run) and WHO
@@ -217,7 +217,7 @@ src/oibot_gm/
                        /gm status|config …(owner: owner (first claim / transfer), the eight <kind>-channel shortcuts = CHANNEL_SHORTCUTS → ONE helper (channel: | clear:)
                        → FLOWS["channel_set"] (the one-screen confirm), channels (the hub), officers (the role hub), officer-role (apply_async), errors-to, loot-channel,
                        recruitment, raid, aura, timezone, ask-audience, about, companion (flows_config.CompanionsWizard, §5.50), show (config_summary sections), plain (the D37 READ view, discord_policy.py); no command
-                       writes reg.config — set_channel / Registry verbs do; no standing rosters)|change|policy …|rule loot|comp|precedents|test …; /raid … (discord_raid.py);
+                       writes reg.config — set_channel / Registry verbs do; no standing rosters)|change|policy …|rule loot|comp|precedents|test …; /raid … (discord_raid.py); /professions who|list (members: recipe autocomplete, ephemeral, names only);
                        /roster remove-record (decide screen → remove_record). Applications: settle_application(…, by_id, via) = THE verdict (one audit line,
                        assign_member_role D31, the DM they wait on), application_decide (card + /roster applicant), application_consequence, client_decide
                        `Guilds` = the one index of the process's guilds (design §5.32): by_discord (copy-on-write `add`, loop thread only; detach(key) /
