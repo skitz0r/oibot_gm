@@ -692,6 +692,19 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 res["sentences"] = cq.people_consequence(v.reg, bot.raids.store(v.reg), m, verb, by_id=v.uid, label=rows[0]["label"])
             except RegistryError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
+        elif d.get("preview") and isinstance(res, dict) and "sentences" in res:
+            # a row carrying professions (the Me page's Professions… editor, design §5.60): THE professions confirm in
+            # "your" voice after the ripple, so the editor never saves on an empty preview
+            m = v.reg.members.get(v.uid)
+            said = list(res.get("sentences") or [])
+            try:
+                for row in rows:
+                    if isinstance(row.get("professions"), list) and row.get("label"):
+                        said += cq.people_consequence(v.reg, bot.raids.store(v.reg), m, "professions", by_id=v.uid, label=row["label"],
+                                                      professions=row["professions"])
+            except RegistryError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            res["sentences"] = said
         return res
 
     def one_verb(rows) -> str | None:

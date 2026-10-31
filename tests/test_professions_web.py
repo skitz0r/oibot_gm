@@ -61,3 +61,22 @@ def test_members_set_takes_professions_with_the_confirm_sentences(w):
     assert row["characters"][0]["professions"][0]["id"] == "alchemy"
     meta = w.c.get("/api/meta", headers=h).json()["professions"]
     assert meta["skill_cap"] == 300 and meta["trade_slots"] == 2 and meta["list"][0] == {"id": "alchemy", "name": "Alchemy", "group": "crafting", "icon": "trade_alchemy"}
+
+
+def test_me_characters_preview_carries_the_professions_sentences(w):
+    """The Me page's Professions… editor previews through /api/me/characters: the confirm prints the professions
+    sentences in "your" voice (the Confirm rule — never an empty preview that saves on the first press); the write follows."""
+    m = member(w)
+    uid, label = m.discord_id, m.main.label
+    h = as_user(w, uid)
+    rev = w.c.get("/api/me", headers=h).json()["characters_rev"]
+    body = {"rows": [{"label": label, "professions": [{"id": "alchemy", "skill": 300}]}], "rev": rev}
+    p = w.c.post("/api/me/characters", json={**body, "preview": True}, headers=h)
+    assert p.status_code == 200, p.text
+    assert p.json()["sentences"] == ["Your Alchemy is recorded at 300."]
+    assert not w.reg.members[uid].main.professions, "a preview writes nothing"
+    r = w.c.post("/api/me/characters", json=body, headers=h)
+    assert r.status_code == 200, r.text
+    assert w.reg.members[uid].main.professions[0].id == "alchemy"
+    same = w.c.post("/api/me/characters", json={**body, "rev": r.json()["characters_rev"], "preview": True}, headers=h)
+    assert same.status_code == 400 and same.json()["error"].endswith("professions are already as given.")
