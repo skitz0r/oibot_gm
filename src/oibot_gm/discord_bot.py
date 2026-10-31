@@ -124,13 +124,15 @@ def wowhead(item, profile: GameProfile | None = None) -> str | None:
 LISTEN_BOT_WORDS = ("This is the guild's Discord bot for World of Warcraft raids. It runs raid signups and rosters: when a raid "
                     "runs, who joined, who is rostered, who is on the bench, when the roster locks and who must confirm. It records "
                     "absences, and it knows every member's characters: who plays which class and spec, their main and alts, their "
-                    "rank and attendance. It runs the loot council and members' wishlists, "
+                    "rank and attendance. It knows each character's professions, their skill and the notable recipes they make, "
+                    "and who can make a thing. It runs the loot council and members' wishlists, "
                     "and explains the guild's loot and roster rules. It answers questions about itself and how to use it. It never "
                     "joins chat between people, game talk or jokes.")
 LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or act on `message.text`? Yes when it asks something "
                    "the bot knows (when a raid runs, who is rostered, what class or spec someone plays, a member's characters, rank or "
-                   "attendance, a loot or roster rule, how the bot works) or tells the bot something it records (an absence, a "
-                   "signup answer, a character or spec change), even without naming the bot. "
+                   "attendance, who can make or craft something, which professions or recipes someone has, a loot or roster rule, "
+                   "how the bot works) or tells the bot something it records (an absence, a signup answer, a character or spec "
+                   "change, a profession, a skill level or a recipe learned), even without naming the bot. "
                    "No when it is conversation between people, game talk, a joke, a link, or a reply to another person. "
                    "`bot` says what the bot does; `channel` says where it was written (the bot's job there, the channel's own "
                    "topic and its category); `recent` is the chat just before, for context only.")
@@ -139,7 +141,8 @@ LISTEN_CRITERIA = {"true": "The message asks the bot something it knows or tells
 # the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things
 LISTEN_GLOSSARY = ["sheet", "signup", "join", "bench", "no thanks", "roster", "rostered", "regular", "lock", "confirm",
                    "can't make it", "absence", "away", "main", "alt", "spec", "offspec", "loot council", "wishlist", "award",
-                   "attendance", "raid schedule"]
+                   "attendance", "raid schedule", "profession", "skill", "recipe", "craft", "who can make", "enchant",
+                   "leatherworking", "alchemy", "tailoring", "engineering", "blacksmithing", "cooking"]
 LISTEN_SURE = 0.8  # at or above: a reply channel answers it as an @mention would
 LISTEN_MAYBE = 0.5  # from here to SURE: unsure — a reply channel adds 👀 and the writer may click it to ask
 LISTEN_PER_HOUR = 600  # decisions per guild per hour; over it the rest are skipped (the monthly budget cap applies too)

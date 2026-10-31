@@ -383,3 +383,10 @@ def test_a_listened_message_reads_the_name_everywhere(gate):
     want = f"is {other.display_name} playing healer?"
     assert dec.states[0]["message"]["text"] == want and gate.bot.listen_recent(gate.g.reg)[0]["text"] == want
     assert gate.bot.handled == [(msg.id, want, SIGNUP_CH)]
+
+
+def test_listening_words_cover_professions():
+    from oibot_gm import discord_bot as db
+    assert "professions" in db.LISTEN_BOT_WORDS and "notable recipes" in db.LISTEN_BOT_WORDS
+    assert "who can make" in db.LISTEN_QUESTION
+    assert {"recipe", "craft", "who can make", "profession", "skill"} <= set(db.LISTEN_GLOSSARY)
