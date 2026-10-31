@@ -115,12 +115,13 @@ shows no paste box until a format exists. The first real format is a parser and 
 
 ## Plain text (configops)
 
-A `profession` op in the own-record group (`OP_GROUP["profession"] = "self"`, `bind_self` scopes it): fields `target`
-= character label (optional when the member has one character with that profession or one character), `profession`,
-`skill`, `recipe_add`, `recipe_remove`, `remove: true`. "Rhoz is a 300 leatherworker", "I just learned Devilsaur
-Gauntlets on Rhoz", "drop enchanting on Jonnie" become ops, previewed and applied on the press. Recipe names are
-member text in the data block, validated for length, never interpreted. The describe line: `Rhoz · Leatherworking:
-275 → 300` / `Rhoz · notable recipes: + Devilsaur Gauntlets`. Parity matrix: the op with its four surfaces.
+The existing `character` op (own-record group, `bind_self` scopes it, already in the parity matrix) gains four `field`
+values rather than a new op, so the ConfigOp schema stays at its ≤13 fields: `profession` (value "Leatherworking 300",
+skill optional), `profession_remove`, `recipe_add` and `recipe_remove` (value = the recipe name as written; `text` = the
+profession when the character has more than one that makes things, else the bot asks which). "Rhoz is a 300
+leatherworker", "I just learned Devilsaur Gauntlets on Rhoz", "drop enchanting on Jonnie" become ops, previewed and
+applied on the press. Recipe names are member text in the data block, validated for length, never interpreted. The
+describe line: `Rhoz · Leatherworking: 275 → 300` / `Rhoz · Leatherworking recipes: + Devilsaur Gauntlets`.
 
 ## The help answer
 
