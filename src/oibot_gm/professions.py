@@ -83,16 +83,19 @@ def _entry(reg: Registry, key: str) -> CatalogEntry:
 
 
 def _rewrite(reg: Registry, old_key: str, new_name: str, by: str, by_id: int | None, preview: bool) -> list[str]:
-    """Every record holding old_key gets new_name (one table save per member); returns the 'record now reads' lines."""
-    said = []
+    """Every record holding old_key gets new_name: one table save per member, a row per touched character; returns one
+    'record now reads' line per member."""
+    touched: dict[int, tuple] = {}
     for m, c in list(_rows(reg)):
-        hit = any(norm_recipe(r.name) == old_key for p in c.professions for r in p.recipes)
-        if not hit:
+        if not any(norm_recipe(r.name) == old_key for p in c.professions for r in p.recipes):
             continue
         entries = [{"id": p.id, "skill": p.skill, "recipes": [{"name": new_name if norm_recipe(r.name) == old_key else r.name, "id": r.id} for r in p.recipes]} for p in c.professions]
+        touched.setdefault(m.discord_id, (m, []))[1].append({"label": c.label, "professions": entries})
+    said = []
+    for m, rows in touched.values():
         said.append(f"{m.display_name}'s record now reads {new_name}.")
         if not preview:
-            reg.save_character_table(m.discord_id, [{"label": c.label, "professions": entries}], by, officer=True, by_id=by_id)
+            reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)
     return said
 
 
@@ -103,6 +106,9 @@ def rename_sentences(reg: Registry, key: str, new_name: str) -> list[str]:
         raise RegistryError("A recipe needs a name.")
     if norm_recipe(new_name) == e.key and new_name == e.name:
         raise RegistryError(f"{e.name} already reads that way.")
+    other = next((x for x in catalog(reg) if x.key == norm_recipe(new_name) and x.key != e.key), None)
+    if other is not None:
+        raise RegistryError(f"{other.name} is already a recipe — merge into it instead.")
     return [f"{e.name} is renamed {new_name}."]
 
 

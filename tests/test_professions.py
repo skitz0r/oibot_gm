@@ -153,6 +153,25 @@ def test_rename_and_merge_rewrite_the_records(reg):
         pr.rename_recipe(reg, "nothing here", "X", "Officer", by_id=OFFICER_UID)
 
 
+def test_rename_saves_a_member_once_for_all_their_characters(reg):
+    _real(reg)
+    reg.add_character(REAL_UID, "Kestrel", "Hollowfen", "Hunter", "Survival", None, False)
+    bag = [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bagg"}]}]
+    reg.save_character_table(REAL_UID, [{"label": REAL_LABEL, "professions": bag}, {"label": "Hollowfen", "professions": bag}], "t", officer=True)
+    said = pr.rename_recipe(reg, "mooncloth bagg", "Mooncloth Bag", "Officer", by_id=OFFICER_UID)
+    assert said == ["Mooncloth Bagg is renamed Mooncloth Bag.", "Kestrel's record now reads Mooncloth Bag."], "one sentence per member"
+    names = {c.label: [r.name for p in c.professions for r in p.recipes] for c in reg.members[REAL_UID].active()}
+    assert names == {REAL_LABEL: ["Mooncloth Bag"], "Hollowfen": ["Mooncloth Bag"]}
+
+
+def test_rename_onto_another_recipe_is_refused(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bag"}, {"name": "Bottomless Bag"}]}])
+    with pytest.raises(RegistryError, match="Bottomless Bag is already a recipe — merge into it instead."):
+        pr.rename_recipe(reg, "mooncloth bag", "bottomless  bag", "Officer", by_id=OFFICER_UID)
+    assert [e.name for e in pr.catalog(reg)] == ["Bottomless Bag", "Mooncloth Bag"]
+
+
 def test_profession_consequence_reads_aloud(reg):
     m = reg.members[UID]
     own = cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "a"}, {"name": "b"}]}], by_id=UID)
