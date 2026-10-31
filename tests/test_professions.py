@@ -241,6 +241,16 @@ def test_rewrite_validates_every_record_before_the_first_write(reg, monkeypatch)
     assert [e.name for e in pr.catalog(reg)] == ["Mooncloth Bagg"], "no partial write"
 
 
+def test_a_case_only_rename_rewrites_the_spelling_in_place(reg):
+    _real(reg)
+    for uid, label in ((REAL_UID, REAL_LABEL), (REAL2_UID, REAL2_LABEL)):
+        _give(reg, uid, label, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "mooncloth bag"}]}])
+    pr.rename_recipe(reg, "mooncloth bag", "Mooncloth Bag", "Officer", by_id=OFFICER_UID)
+    for uid in (REAL_UID, REAL2_UID):
+        assert [r.name for p in reg.members[uid].main.professions for r in p.recipes] == ["Mooncloth Bag"], "kept, never deleted"
+    assert [(e.name, len(e.crafters)) for e in pr.catalog(reg)] == [("Mooncloth Bag", 2)]
+
+
 def test_merge_onto_a_spelling_the_record_already_holds_keeps_one(reg):
     _real(reg)
     _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlet"}, {"name": "Devilsaur Gauntlets"}]}])

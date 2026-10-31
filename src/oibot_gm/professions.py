@@ -103,7 +103,8 @@ def _rewrite(reg: Registry, old_key: str, new_name: str, by: str, by_id: int | N
             continue
         entries = []
         for p in c.professions:
-            has_new = any(norm_recipe(r.name) == new_key for r in p.recipes)
+            # a case-only rename keeps its key: the old entry IS the target, rewritten in place, never dropped
+            has_new = new_key != old_key and any(norm_recipe(r.name) == new_key for r in p.recipes)
             recipes = []
             for r in p.recipes:
                 if norm_recipe(r.name) == old_key:
