@@ -128,6 +128,23 @@ class Item:
         return None
 
 
+@dataclass
+class ProfessionDef:
+    """One profession of a game version (professions.yaml): crafting | gathering | secondary, and its CDN icon name."""
+    id: str
+    name: str
+    group: str
+    icon: str = ""
+
+
+def norm_recipe(name: str) -> str:
+    """THE recipe-name key: lower-case, punctuation folded to spaces, runs of spaces to one. 'Devilsaur  Gauntlets,' and
+    'devilsaur gauntlets' are one recipe; 'Gauntlet' and 'Gauntlets' are two until an officer merges them."""
+    import re
+
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", (name or "").lower())).strip()
+
+
 ARMOR_RANK = {"cloth": 0, "leather": 1, "mail": 2, "plate": 3}
 
 
@@ -161,6 +178,9 @@ class GameProfile:
     families: dict[str, Family] = field(default_factory=dict)  # stacking families; buffs without one get a family of their own
     label: str = ""  # display name for people ("WoW: Forever"): profiles/<version>/profile.yaml `label`, else the name titled
     guides: dict[str, Any] = field(default_factory=dict)  # guides.yaml: the leveling-guide tool's zone / continent / dungeon tables (§5.55); empty = no tool for this version
+    professions: dict[str, ProfessionDef] = field(default_factory=dict)  # professions.yaml (§5.60); empty = the version has none
+    profession_rules: dict[str, int] = field(default_factory=lambda: {"skill_cap": 300, "trade_slots": 2})
+    recipe_seed: dict[str, dict[str, Any]] = field(default_factory=dict)  # normalised name → {id, name, profession, skill}
     _spec_cache: dict[str, SpecInfo] = field(default_factory=dict)
 
     @classmethod
@@ -183,6 +203,12 @@ class GameProfile:
         for it in items.values():
             known.setdefault(it.id, it.name)
         meta = y("profile.yaml") if (root / "profile.yaml").exists() else {}
+        pdoc = (y("professions.yaml") or {}) if (root / "professions.yaml").exists() else {}
+        professions = {pid: ProfessionDef(id=pid, name=str(d["name"]), group=str(d["group"]), icon=str(d.get("icon") or ""))
+                       for pid, d in (pdoc.get("professions") or {}).items()}
+        rules = {"skill_cap": int(pdoc.get("skill_cap", 300)), "trade_slots": int(pdoc.get("trade_slots", 2))}
+        seed = {norm_recipe(r["name"]): {"id": int(r["id"]), "name": str(r["name"]), "profession": str(r["profession"]), "skill": int(r.get("skill", 0))}
+                for r in (pdoc.get("recipes") or [])}
         return cls(
             name=c["profile"],
             label=str((meta or {}).get("label") or c["profile"].title()),
@@ -201,6 +227,9 @@ class GameProfile:
             known_items=known,
             loot=y("loot_defaults.yaml"),
             guides=(y("guides.yaml") or {}) if (root / "guides.yaml").exists() else {},
+            professions=professions,
+            profession_rules=rules,
+            recipe_seed=seed,
         )
 
     def __post_init__(self):
@@ -245,6 +274,16 @@ class GameProfile:
         out._spec_cache = dict(self._spec_cache)
         out.link_families()
         return out
+
+    @property
+    def has_professions(self) -> bool:
+        return bool(self.professions)
+
+    def profession(self, pid: str) -> ProfessionDef:
+        return self.professions[pid]
+
+    def professions_in(self, group: str) -> list[ProfessionDef]:
+        return [d for d in self.professions.values() if d.group == group]
 
     def spec(self, cls: str, spec: str) -> SpecInfo:
         spec = self.spec_aliases.get(spec, spec)

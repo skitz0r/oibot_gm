@@ -1,0 +1,19 @@
+# profiles/forever/professions.yaml — the twelve WoW: Forever professions (design §5.60). Game data, never in code.
+# icon: a Blizzard render-CDN icon name, proxied by /img/icon/<name>.jpg like the class icons; the badge is the fallback.
+skill_cap: 300
+trade_slots: 2            # crafting + gathering together; secondary professions are free
+professions:
+  alchemy:        {name: Alchemy,        group: crafting,  icon: trade_alchemy}
+  blacksmithing:  {name: Blacksmithing,  group: crafting,  icon: trade_blacksmithing}
+  enchanting:     {name: Enchanting,     group: crafting,  icon: trade_engraving}
+  engineering:    {name: Engineering,    group: crafting,  icon: trade_engineering}
+  leatherworking: {name: Leatherworking, group: crafting,  icon: trade_leatherworking}
+  tailoring:      {name: Tailoring,      group: crafting,  icon: trade_tailoring}
+  herbalism:      {name: Herbalism,      group: gathering, icon: trade_herbalism}
+  mining:         {name: Mining,         group: gathering, icon: trade_mining}
+  skinning:       {name: Skinning,       group: gathering, icon: inv_misc_pelt_wolf_01}
+  cooking:        {name: Cooking,        group: secondary, icon: inv_misc_food_15}
+  first_aid:      {name: First Aid,      group: secondary, icon: spell_holy_sealofsacrifice}
+  fishing:        {name: Fishing,        group: secondary, icon: trade_fishing}
+# later, an addon export or a wago.tools seed: [{id: <game recipe id>, name: Devilsaur Gauntlets, profession: leatherworking, skill: 300}]
+recipes: []

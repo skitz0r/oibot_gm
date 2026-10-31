@@ -3830,6 +3830,10 @@ the Host line), tests/test_mcp.py, tests/test_frontend_source.py.
 said); no change to the @mention, DM or loot-thread paths; threads of a listened channel are not listened in. Tests:
 tests/test_decisions.py (the provider on a fake transport), tests/test_listen.py (policy, op, words, the gate).
 
+### 5.60 Professions: a tracker and a finder (built 2026-10-30)
+
+Members record each character's professions, skill and notable recipes; anyone finds who can make a thing. Game data in `profiles/<version>/professions.yaml`; member data on `RegisteredCharacter.professions`; behaviour in `professions.py`. The decisions, data shapes, surfaces and build order are in `docs/superpowers/specs/2026-10-30-professions-design.md`; this section fills in as the phases land.
+
 ## 6. Architecture
 
 ```mermaid
