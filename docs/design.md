@@ -3906,8 +3906,13 @@ sentences). Character rows and `/api/meta.professions` (the list, skill cap, tra
    catalog and finders, rename and merge; the import boundary; tests/test_professions.py. **Built 2026-10-30.**
 2. The plain-text fields and parity; the help section; the Listening words; the routes and MCP tools; the manual's words.
    **Built 2026-10-30.**
-3. The site: a professions line and the in-place editor on Me and Members (row ⋮ › Professions…), the Professions page
-   (finder, a tab per profession, officers' Rename… / Merge…), phone layout, shots. Not built yet.
+3. The site. **Partly built 2026-10-30:** the professions line under each character on Me and Members
+   (`components/ProfessionLine.tsx`: icon + skill, teal at the cap, recipe chips, the empty states in words) and the
+   in-place editor (`components/ProfessionsEditor.tsx`, the character ⋮ › Professions…: a grouped profession select with
+   taken trades greyed, skill 1..cap, recipe chips with an Add box; Save previews the server's sentences, then writes —
+   Me through `POST /api/me/characters` rows `{label, professions}` with the "your" sentences on preview, Members through
+   `POST /api/members/set` `professions`); Members' search also matches recipe names. Still to build: the Professions
+   page (finder, a tab per profession, officers' Rename… / Merge…), the phone layout, shots.
 4. Discord: `/me professions` and `/roster professions` (wizards: selects for profession and skill in 25-point steps, a
    prose modal for a recipe), `/professions who|list` (ephemeral, no model). Not built yet.
 

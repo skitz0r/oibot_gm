@@ -77,8 +77,8 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
 - **Who could play** — every member's main: the headcount the Readiness page and the analytics cards measure against
   the raid's size, limits and aims. Alts and offspecs don't add to the headcount; they show as who could cover a role.
 - **Your record** — your characters (name, spec, offspec, extra roles, which is your main, their professions) and your
-  absences. You keep
-  it on the Me page or with `/me char` and `/me absent`; officers can edit it for you, and they set your rank.
+  absences. You keep it on the Me page or with `/me char` and `/me absent`; professions are set from the character's
+  **Professions…** on the Me page or by telling the bot. Officers can edit it for you, and they set your rank.
 - **Profession / skill** — a character's trade (Alchemy, Leatherworking…) and how far along it is, a number from 1 to 300.
 - **Notable recipes** — the ones worth telling the guild about, never a whole recipe book. A **crafter** is a character
   that has them.
@@ -286,19 +286,23 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     answer now names Stormcall"*); answers and seats it holds take the new name.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
 - **Professions**: each character can carry its professions with their skill (1 to 300) and its **notable recipes** —
-  the ones worth telling the guild about, not the whole book. For now you set them by telling the bot (a DM, an
-  @mention, or a channel it listens in): "Rhoz is a 300 leatherworker", "Rhoz is a leatherworker" (a new profession with
-  no number starts at 1; saying it again with a number changes the skill), "I just learned Devilsaur Gauntlets on Rhoz",
-  "take Devilsaur Gauntlets off Rhoz", "drop enchanting on Jonnie". It shows the change and waits for your **Apply**, like
-  any change to your record. When two of the character's professions make things, the bot asks which one makes the
-  recipe (*"Which profession makes Elixir of Fortitude — Alchemy or Cooking?"*); say "… with alchemy" to skip the
-  question. A character has at most two trade professions (Alchemy, Blacksmithing, Enchanting, Engineering,
-  Leatherworking, Tailoring, Herbalism, Mining and Skinning count); Cooking, First Aid and Fishing are free. Herbalism,
-  Mining, Skinning and Fishing make nothing, so they take no recipes. A recipe name is up to 60 characters and is kept as
-  you wrote it. Officers change anyone's the same way, naming the character, where their changes act (§8c). Professions belong to the character: they
-  stay with it when you change your main, and a retired character is no longer named as a crafter. Reading an addon's
-  export of your professions is planned; nothing is imported yet. Anyone in the guild can then ask who can make a thing
-  (§10a).
+  the ones worth telling the guild about, not the whole book. On the Me page each character shows them on one line
+  under it: the profession's icon with its skill beside it (green at 300), then the recipes. The character's ⋮ has
+  **Professions…**, which edits that character's professions in place: pick a profession, type its skill, add or remove
+  notable recipes. **Save** first shows the bot's own sentences (*"Your Alchemy is recorded at 300."*), then writes.
+  Or tell the bot (a DM, an @mention, or a channel it listens in): "Rhoz is a 300 leatherworker", "Rhoz is a
+  leatherworker" (a new profession with no number starts at 1; saying it again with a number changes the skill), "I just
+  learned Devilsaur Gauntlets on Rhoz", "take Devilsaur Gauntlets off Rhoz", "drop enchanting on Jonnie". It shows the
+  change and waits for your **Apply**, like any change to your record. When two of the character's professions make
+  things, the bot asks which one makes the recipe (*"Which profession makes Elixir of Fortitude — Alchemy or
+  Cooking?"*); say "… with alchemy" to skip the question. A character has at most two trade professions (Alchemy,
+  Blacksmithing, Enchanting, Engineering, Leatherworking, Tailoring, Herbalism, Mining and Skinning count); Cooking,
+  First Aid and Fishing are free. Herbalism, Mining, Skinning and Fishing make nothing, so they take no recipes. A recipe
+  name is up to 60 characters and is kept as you wrote it. Officers do the same for anyone: on the Members page the
+  character's ⋮ › **Professions…** opens the same editor, and the search box there finds recipe names too; in plain
+  text, naming the character, where their changes act (§8c). Professions belong to the character: they stay with it
+  when you change your main, and a retired character is no longer named as a crafter. Reading an addon's export of your
+  professions is planned; nothing is imported yet. Anyone in the guild can then ask who can make a thing (§10a).
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
   owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.
