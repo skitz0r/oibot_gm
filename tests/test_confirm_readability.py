@@ -579,6 +579,14 @@ def people_cases(reg, rs, runs, ms, dump):
         tank.main.flex = []
         dump.add("profession_consequence", f"one recorded, {who}", _said(cq.profession_consequence, reg, tank, main, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}]}], by_id=by))
         dump.add("profession_consequence", f"two recorded, {who}", _said(cq.profession_consequence, reg, tank, main, [{"id": "alchemy", "skill": 120}, {"id": "cooking", "skill": 300}], by_id=by))
+        dump.add("profession_consequence", f"three recorded, {who}", _said(cq.profession_consequence, reg, tank, main,
+                 [{"id": "tailoring", "skill": 300}, {"id": "cooking", "skill": 200}, {"id": "first_aid", "skill": 150}], by_id=by))
+        tank.main.professions = reg.check_professions([{"id": "alchemy", "skill": 120}, {"id": "herbalism", "skill": 90}, {"id": "fishing", "skill": 40}])
+        dump.add("profession_consequence", f"three recorded and three removed, {who}", _said(cq.profession_consequence, reg, tank, main,
+                 [{"id": "tailoring", "skill": 300}, {"id": "cooking", "skill": 200}, {"id": "first_aid", "skill": 150}], by_id=by))
+        dump.add("profession_consequence", f"two recorded and two removed, {who}", _said(cq.profession_consequence, reg, tank, main,
+                 [{"id": "alchemy", "skill": 300}, {"id": "tailoring", "skill": 300}], by_id=by))
+        dump.add("profession_consequence", f"three removed, {who}", _said(cq.profession_consequence, reg, tank, main, [], by_id=by))
         tank.main.professions = reg.check_professions([{"id": "alchemy", "skill": 120}])
         dump.add("profession_consequence", f"removed, {who}", _said(cq.profession_consequence, reg, tank, main, [], by_id=by))
         dump.add("profession_consequence", f"the same professions, {who}", _said(cq.profession_consequence, reg, tank, main, [{"id": "alchemy", "skill": 120}], by_id=by))
@@ -598,6 +606,19 @@ def people_cases(reg, rs, runs, ms, dump):
     dump.add("confirm_consequence", "a planned character, an officer", _said(cq.confirm_consequence, reg, reg.members[REAL + 61], "Priest (Holy)", by_id=OFFICER_ID), {"Priest"})
     nomain = SimpleNamespace(discord_id=REAL + 62, display_name="Nomain", main=None, rank=None, dm_opt_out=False)
     dump.add("rank_consequence", "no main yet, an officer", _said(cq.rank_consequence, reg, nomain, "core", by_id=OFFICER_ID), {"Nomain"})
+    # professions: an officer's rename / merge of a recipe several members hold (folded past two members)
+    from oibot_gm import professions as pr
+
+    crafters = ms[6:11]
+    for i, cm in enumerate(crafters):
+        reg.save_character_table(cm.discord_id, [{"label": cm.main.label, "professions": [{"id": "tailoring", "skill": 300, "recipes": [
+            {"name": "Moonclth Bag" if i == 0 else "Mooncloth Bagg"}]}]}], "t", officer=True)
+    dump.add("rename_recipe", "four members", _said(pr.rename_recipe, reg, "mooncloth bagg", "Mooncloth Bag", "Officer", by_id=OFFICER_ID, preview=True))
+    dump.add("merge_recipe", "four members", _said(pr.merge_recipe, reg, "mooncloth bagg", "moonclth bag", "Officer", by_id=OFFICER_ID, preview=True))
+    dump.add("rename_recipe", "one member", _said(pr.rename_recipe, reg, "moonclth bag", "Mooncloth Bag", "Officer", by_id=OFFICER_ID, preview=True))
+    dump.add("rename_recipe", "too long", _said(pr.rename_recipe, reg, "mooncloth bagg", "M" * 61, "Officer", by_id=OFFICER_ID, preview=True))
+    for cm in crafters:
+        reg.save_character_table(cm.discord_id, [{"label": cm.main.label, "professions": []}], "t", officer=True)
     # I'm back: an absence over the open sheet it answered No thanks, and one that touched no sheet
     ev = runs["open recurring"]
     m = ms[0]

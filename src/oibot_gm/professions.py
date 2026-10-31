@@ -6,8 +6,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .llm.provider import unfence
 from .profiles import norm_recipe
-from .registry import Registry, RegistryError
+from .registry import RECIPE_NAME_MAX, Registry, RegistryError
+
+COUNT_WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
+
+
+def count_word(n: int) -> str:
+    """A count in words up to twelve, digits beyond (the Confirm rule's folded sentences)."""
+    return COUNT_WORDS[n] if 0 <= n < len(COUNT_WORDS) else str(n)
 
 
 @dataclass
@@ -84,18 +92,38 @@ def _entry(reg: Registry, key: str) -> CatalogEntry:
 
 
 def _rewrite(reg: Registry, old_key: str, new_name: str, by: str, by_id: int | None, preview: bool) -> list[str]:
-    """Every record holding old_key gets new_name: one table save per member, a row per touched character; returns one
-    'record now reads' line per member."""
+    """Every record holding old_key gets new_name: one table save per member, a row per touched character. Every
+    touched record is validated (Registry.check_professions) BEFORE the first write, so a refusal leaves nothing half
+    written. Returns one 'record now reads' line per member for one or two members, else ONE folded sentence
+    ("Six members' records now read …") — the Confirm rule's three sentences with the head."""
+    new_key = norm_recipe(new_name)
     touched: dict[int, tuple] = {}
     for m, c in list(_rows(reg)):
         if not any(norm_recipe(r.name) == old_key for p in c.professions for r in p.recipes):
             continue
-        entries = [{"id": p.id, "skill": p.skill, "recipes": [{"name": new_name if norm_recipe(r.name) == old_key else r.name, "id": r.id} for r in p.recipes]} for p in c.professions]
+        entries = []
+        for p in c.professions:
+            has_new = any(norm_recipe(r.name) == new_key for r in p.recipes)
+            recipes = []
+            for r in p.recipes:
+                if norm_recipe(r.name) == old_key:
+                    if has_new:  # a merge onto a spelling this record already holds: one entry stays
+                        continue
+                    recipes.append({"name": new_name, "id": r.id})
+                    has_new = True
+                else:
+                    recipes.append({"name": r.name, "id": r.id})
+            entries.append({"id": p.id, "skill": p.skill, "recipes": recipes})
         touched.setdefault(m.discord_id, (m, []))[1].append({"label": c.label, "professions": entries})
-    said = []
     for m, rows in touched.values():
-        said.append(f"{m.display_name}'s record now reads {new_name}.")
-        if not preview:
+        for row in rows:
+            reg.check_professions(row["professions"])
+    if len(touched) > 2:
+        said = [f"{count_word(len(touched)).capitalize()} members' records now read {new_name}."]
+    else:
+        said = [f"{m.display_name}'s record now reads {new_name}." for m, _ in touched.values()]
+    if not preview:
+        for m, rows in touched.values():
             reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)
     return said
 
@@ -105,6 +133,8 @@ def rename_sentences(reg: Registry, key: str, new_name: str) -> list[str]:
     new_name = " ".join((new_name or "").split())
     if not new_name:
         raise RegistryError("A recipe needs a name.")
+    if len(new_name) > RECIPE_NAME_MAX:
+        raise RegistryError(f"A recipe name is up to {RECIPE_NAME_MAX} characters.")
     if norm_recipe(new_name) == e.key and new_name == e.name:
         raise RegistryError(f"{e.name} already reads that way.")
     other = next((x for x in catalog(reg) if x.key == norm_recipe(new_name) and x.key != e.key), None)
@@ -209,7 +239,8 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
     raise ValueError(field)
 
 
-HELP_WORDS = re.compile(r"\b(profession|professions|craft\w*|make|makes|recipe|recipes|enchant\w*|who can|crafter|crafters|skill)\b")
+HELP_WORDS = re.compile(r"\b(professions?|craft\w*|who can make|recipes?|enchant\w*|crafters?)\b")
+"""Bare make / makes / skill are left out: 'I can't make it tonight' is not a professions question."""
 
 
 def help_hit(reg: Registry, q: str) -> bool:
@@ -232,11 +263,14 @@ def help_section(ask) -> list[str]:
     out = ["### Who can make what: professions with their crafters (highest skill first), then the notable recipes the guild has registered "
            "and who makes them · a question about a recipe nobody registered: say so and that a crafter adds it on the Me page, with "
            "/me professions or by saying 'I can make …' in the professions channel"]
+    def safe(text) -> str:  # member text (character, display and recipe names) can't open or close a block
+        return unfence(text, "member-text").replace("\n", " ").strip()
+
     for d in reg.profile.professions.values():
         cs = crafters_of(reg, d.id)
-        out.append(f"{d.name}: " + (", ".join(f"{c.label} ({c.member}, {c.skill})" for c in cs[:12]) if cs else "nobody registered yet"))
+        out.append(f"{d.name}: " + (", ".join(f"{safe(c.label)} ({safe(c.member)}, {c.skill})" for c in cs[:12]) if cs else "nobody registered yet"))
     cat = catalog(reg)
     out.append(f"recipes registered ({len(cat)}):" if cat else "recipes registered: none yet")
     for e in cat[:80]:
-        out.append(f"- {e.name} [{reg.profile.profession(e.profession).name}]: " + ", ".join(f"{c.label} ({c.skill})" for c in e.crafters[:6]))
+        out.append(f"- {safe(e.name)} [{reg.profile.profession(e.profession).name}]: " + ", ".join(f"{safe(c.label)} ({c.skill})" for c in e.crafters[:6]))
     return out

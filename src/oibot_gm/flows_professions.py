@@ -168,7 +168,7 @@ class ProfessionsWizard(MemberWizard):
 
     async def recipe_form(self, interaction: discord.Interaction) -> None:
         field = Field("recipe", "The recipe's name", description="Kept as you write it, like Devilsaur Gauntlets.", max_length=RECIPE_NAME_MAX)
-        await self.open_form(interaction, Form(f"A {self.name(self.draft['pid'])} recipe", [field], self.recipe_typed))
+        await self.open_form(interaction, Form(f"{self.name(self.draft['pid'])}: add a recipe", [field], self.recipe_typed))
 
     async def recipe_typed(self, interaction: discord.Interaction, values: dict[str, str]) -> None:
         if interaction.user.id != self.owner_id:  # a Modal has no interaction_check
@@ -191,7 +191,7 @@ class ProfessionsWizard(MemberWizard):
     async def remove(self, interaction: discord.Interaction, page: int = 0) -> None:
         c = self.char()
         opts = [Opt(f"p:{p.id}", self.name(p.id), "the profession and its recipes") for p in c.professions]
-        opts += [Opt(f"r:{p.id}:{i}", r.name, f"a {self.name(p.id)} recipe") for p in c.professions for i, r in enumerate(p.recipes)]
+        opts += [Opt(f"r:{p.id}:{i}", r.name, f"{self.name(p.id)} recipe") for p in c.professions for i, r in enumerate(p.recipes)]
         await self.show(interaction, f"What comes off **{c.label}**'s record?", *self.paged("Pick what to remove", opts, page, self.remove_picked, self._remove_page),
                         self.button("Back", self.hub), self.button("Cancel", self.cancel))
 

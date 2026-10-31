@@ -40,6 +40,7 @@ def test_me_professions_adds_a_profession_a_skill_and_a_recipe(reg):
         await FLOWS["me_professions"](h.command(), reg)
         assert "Leatherworking 300" in h.text
         await h.press("Add recipe…")
+        assert h.modal.title == "Leatherworking: add a recipe", "never 'A Alchemy recipe'"
         await h.submit(h.modal, recipe="Devilsaur Gauntlets")
         assert "Your Leatherworking is recorded at 300 with 1 notable recipe." in h.text
         await h.press("Do it")
@@ -81,6 +82,8 @@ def test_change_skill_and_remove_end_on_the_consequence(reg):
         await h.press("Do it")
         await FLOWS["me_professions"](h.command(), reg)
         await h.press("Remove…")
+        sel = next(x for x in h._items() if isinstance(x, discord.ui.Select) and x.placeholder == "Pick what to remove")
+        assert {o.description for o in sel.options if o.value.startswith("r:")} == {"Alchemy recipe"}
         await h.pick("Pick what to remove", "p:fishing")
         assert "Your Fishing is removed from your record." in h.text
         await h.press("Do it")

@@ -408,25 +408,32 @@ def flex_consequence(reg: Registry, rs, m, label: str, roles: list[str], *, by_i
 
 def profession_consequence(reg: Registry, m, label: str, entries: list[dict], *, by_id: int | None = None) -> list[str]:
     """A character's professions as the save will leave them (design §5.60): one sentence per profession recorded or
-    removed. Nothing about runs: professions touch no seat. Unchanged → refused."""
+    removed — folded under the Confirm rule: three or more recorded make one sentence without skills, every removal
+    one sentence. Nothing about runs: professions touch no seat. Unchanged → refused."""
     v = _Voice(reg, m, by_id)
     c = _char(reg, m, label, v)
     after = {p.id: p for p in reg.check_professions(entries)}
     before = {p.id: p for p in c.professions}
     if {k: p.model_dump() for k, p in after.items()} == {k: p.model_dump() for k, p in before.items()}:
         raise RegistryError(f"{c.label}'s professions are already as given.")
+
+    def names(ids) -> str:
+        ns = [reg.profile.profession(pid).name for pid in ids]
+        return ns[0] if len(ns) == 1 else ", ".join(ns[:-1]) + " and " + ns[-1]
+
+    changed = [pid for pid, p in after.items() if pid not in before or before[pid].model_dump() != p.model_dump()]
+    removed = [pid for pid in before if pid not in after]
     out = []
-    for pid, p in after.items():
-        old = before.get(pid)
-        if old is not None and old.model_dump() == p.model_dump():
-            continue
-        name = reg.profile.profession(pid).name
-        n = len(p.recipes)
-        tail = f" with {n} notable recipe{'s' if n != 1 else ''}" if n else ""
-        out.append(f"{v.Whose} {name} is recorded at {p.skill}{tail}.")
-    for pid in before:
-        if pid not in after:
-            out.append(f"{v.Whose} {reg.profile.profession(pid).name} is removed from {v.their} record.")
+    if len(changed) > 2:  # the Confirm rule: folded, skills left out
+        out.append(f"{v.Whose} {names(changed)} are recorded.")
+    else:
+        for pid in changed:
+            p = after[pid]
+            n = len(p.recipes)
+            tail = f" with {n} notable recipe{'s' if n != 1 else ''}" if n else ""
+            out.append(f"{v.Whose} {reg.profile.profession(pid).name} is recorded at {p.skill}{tail}.")
+    if removed:
+        out.append(f"{v.Whose} {names(removed)} {'is' if len(removed) == 1 else 'are'} removed from {v.their} record.")
     return out
 
 

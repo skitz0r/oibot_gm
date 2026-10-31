@@ -50,6 +50,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
   useEffect(() => { const t = setTimeout(() => find(q), 250); return () => clearTimeout(t); }, [q]);
 
   const profs = data?.professions || [];
+  const makes = (id: string) => !!meta.professions?.list.find((d) => d.id === id)?.makes;  // Fishing and the gathering trades hold none
   const pname = (id: string) => profs.find((p) => p.id === id)?.name || meta.professions?.list.find((p) => p.id === id)?.name || id;
   const shown = tab && profs.some((p) => p.id === tab) ? tab : (profs.find((p) => p.crafters.length) || profs[0])?.id || null;
   const recipesOf = (c: Crafter) => (data?.recipes || []).filter((r) => r.profession === c.profession && r.crafters.some((x) => x.uid === c.uid && x.label === c.label));
@@ -127,7 +128,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
                           <div className={css.recipes}>
                             {mine.length
                               ? <Group gap={6} wrap="wrap">{mine.map((r) => <Badge key={r.key} variant="outline" color="gray" radius="xl" tt="none" fw={500}>{r.name}</Badge>)}</Group>
-                              : p.group !== "gathering" && <Text size="xs" c="dimmed">no notable recipes registered</Text>}
+                              : makes(p.id) && <Text size="xs" c="dimmed">no notable recipes registered — the crafter adds them on the Me page</Text>}
                           </div>
                         </div>
                       );

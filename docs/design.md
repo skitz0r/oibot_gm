@@ -3886,12 +3886,14 @@ lacks says so ("Rhoz has no Tailoring on record.").
 **The help answer.** `help.SECTIONS["professions"]` (members' view, cap 3 000, `professions.help_section`): each
 profession's crafters with skill, then every registered recipe with its makers. Gated by `professions.help_hit`: the question
 names a profession as a word ("any alchemists?", "first aid") or a registered recipe by its whole words — "who killed the
-first boss" and "baggage" hit nothing (tightened 2026-10-30). The bot says plainly when nobody registered a recipe and how a
+first boss" and "baggage" hit nothing (tightened 2026-10-30) — or by `HELP_WORDS` (profession, craft…, who can make,
+recipe, crafter, enchant…; never a bare "make" or "skill": "I can't make it tonight" is no professions question). Every
+character, member and recipe name in the section goes through `unfence` (member text is data). The bot says plainly when nobody registered a recipe and how a
 crafter adds one.
 
 **Listening** (§5.59): no new channel kind. `LISTEN_BOT_WORDS` says the bot knows each character's professions, skill and
-notable recipes and who can make a thing; the glossary gains "profession", "skill", "recipe", "craft", "who can make",
-"enchant" and six profession names. The owner sets #professions to Replies with plain text Own record only: a change becomes an own-record preview
+notable recipes and who can make a thing; the glossary gains "profession", "skill", "recipe", "craft", "who can make"
+and "enchant", and `listen_state` adds the profile's profession names (game data, never a list in code). The owner sets #professions to Replies with plain text Own record only: a change becomes an own-record preview
 with Apply, a question an answer.
 
 **Site and MCP routes** (`web/api_professions.py`): `GET /api/professions` (every member: each profession with its
@@ -3906,15 +3908,29 @@ sentences). Character rows and `/api/meta.professions` (the list, skill cap, tra
    catalog and finders, rename and merge; the import boundary; tests/test_professions.py. **Built 2026-10-30.**
 2. The plain-text fields and parity; the help section; the Listening words; the routes and MCP tools; the manual's words.
    **Built 2026-10-30.**
-3. The site. **Partly built 2026-10-30:** the professions line under each character on Me and Members
-   (`components/ProfessionLine.tsx`: icon + skill, teal at the cap, recipe chips, the empty states in words) and the
-   in-place editor (`components/ProfessionsEditor.tsx`, the character ⋮ › Professions…: a grouped profession select with
-   taken trades greyed, skill 1..cap, recipe chips with an Add box; Save previews the server's sentences, then writes —
-   Me through `POST /api/me/characters` rows `{label, professions}` with the "your" sentences on preview, Members through
-   `POST /api/members/set` `professions`); Members' search also matches recipe names. Still to build: the Professions
-   page (finder, a tab per profession, officers' Rename… / Merge…), the phone layout, shots.
-4. Discord: `/me professions` and `/roster professions` (wizards: selects for profession and skill in 25-point steps, a
-   prose modal for a recipe), `/professions who|list` (ephemeral, no model). Not built yet.
+3. The site. **Built 2026-10-30:** the professions line under each character on Me and Members
+   (`components/ProfessionLine.tsx`: icon + skill, teal at the cap, recipe chips, the empty states in words — each says
+   who fills it and where) and the in-place editor (`components/ProfessionsEditor.tsx`, the character ⋮ › Professions…:
+   a grouped profession select with taken trades greyed, skill 1..cap — the box keeps what is typed, the server refuses
+   an out-of-range skill —, recipe chips with an Add box only where the profession makes things (`/api/meta.professions`
+   `list[].makes`: a gathering trade and Fishing have none); Save previews the server's sentences, then writes — Me
+   through `POST /api/me/characters` rows `{label, professions}` with the "your" sentences on preview, Members through
+   `POST /api/members/set` `professions`); Members' search also matches recipe names. The Professions page
+   (`pages/Professions.tsx` + `professions.module.css`, every member): the finder (a typed recipe name → each match with
+   its crafters, highest skill first, names only), a tab per profession (crafters with a skill bar and their notable
+   recipes), and officers' **Rename…** / **Merge…** on a recipe, each previewing `rename_recipe` / `merge_recipe`'s
+   sentences before the write. On a phone the search comes first, hits are cards and the tabs scroll sideways.
+4. Discord (`flows_professions.py`). **Built 2026-10-30:** `/me professions` and `/roster professions` (the officers'
+   form): one hub per character with Add profession…, Change skill…, Add recipe… and Remove…; profession and skill are
+   selects — the skill in 17 steps: 1, 25 to 275 by 25, then 280 to 300 by 5 —, a recipe's name is one prose modal
+   ("Leatherworking: add a recipe"), and every write ends on the decide screen with `profession_consequence`'s
+   sentences. `/professions who` (the recipe autocompleted from the guild's own catalog) and `/professions list` (a
+   profession's crafters): ephemeral, no model, under Discord's message limit with "…and N more".
+
+**Confirm-rule folds.** `profession_consequence` folds three or more recorded professions into one sentence without
+skills ("Your Tailoring, Cooking and First Aid are recorded.") and every removal into one; a rename or merge touching
+more than two members says "Six members' records now read Mooncloth Bag." (count words up to twelve). `_rewrite`
+validates every touched record before its first write, and a new name over 60 characters is refused on the preview.
 
 **Out of scope.** A request queue, pings or DMs about crafting; materials or tips; a full recipe database; reading any
 website; skill history; recipes on gathering professions.

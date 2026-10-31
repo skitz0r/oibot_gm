@@ -60,7 +60,9 @@ def test_members_set_takes_professions_with_the_confirm_sentences(w):
     row = next(r for r in rows if r["uid"] == str(uid))
     assert row["characters"][0]["professions"][0]["id"] == "alchemy"
     meta = w.c.get("/api/meta", headers=h).json()["professions"]
-    assert meta["skill_cap"] == 300 and meta["trade_slots"] == 2 and meta["list"][0] == {"id": "alchemy", "name": "Alchemy", "group": "crafting", "icon": "trade_alchemy"}
+    assert meta["skill_cap"] == 300 and meta["trade_slots"] == 2 and meta["list"][0] == {"id": "alchemy", "name": "Alchemy", "group": "crafting", "icon": "trade_alchemy", "makes": True}
+    makes = {d["id"]: d["makes"] for d in meta["list"]}
+    assert makes["fishing"] is False and makes["skinning"] is False and makes["cooking"] is True, "Fishing makes nothing"
 
 
 def test_me_characters_preview_carries_the_professions_sentences(w):

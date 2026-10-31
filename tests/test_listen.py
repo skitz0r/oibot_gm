@@ -385,8 +385,12 @@ def test_a_listened_message_reads_the_name_everywhere(gate):
     assert gate.bot.handled == [(msg.id, want, SIGNUP_CH)]
 
 
-def test_listening_words_cover_professions():
+def test_listening_words_cover_professions(gate):
     from oibot_gm import discord_bot as db
     assert "professions" in db.LISTEN_BOT_WORDS and "notable recipes" in db.LISTEN_BOT_WORDS
     assert "who can make" in db.LISTEN_QUESTION
     assert {"recipe", "craft", "who can make", "profession", "skill"} <= set(db.LISTEN_GLOSSARY)
+    assert not {"leatherworking", "alchemy", "tailoring"} & set(db.LISTEN_GLOSSARY), "game data lives in the profile"
+    dec = gate.run(0.93, message(gate.g.me.discord_id, text="who can make a bag?"))
+    words = dec.states[0]["guild"]["words"]
+    assert {d.name.lower() for d in gate.g.reg.profile.professions.values()} <= set(words) and "leatherworking" in words

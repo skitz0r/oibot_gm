@@ -499,7 +499,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "group_caps": {"tank": int(grouping.get("tank_max_per_group", 2)), "healer": int(grouping.get("healer_max_per_group", 3))},
             "class_colours": dict(render.CLASS),
             # professions (design §5.60): the version's list (empty when it has none), the skill cap and the trade slots
-            "professions": {"list": [{"id": d.id, "name": d.name, "group": d.group, "icon": d.icon} for d in reg.profile.professions.values()],
+            "professions": {"list": [{"id": d.id, "name": d.name, "group": d.group, "icon": d.icon, "makes": d.makes} for d in reg.profile.professions.values()],
                             "skill_cap": reg.profile.profession_rules["skill_cap"], "trade_slots": reg.profile.profession_rules["trade_slots"]},
             "started_at": float(getattr(bot, "started_at", STARTED)),
             # absences: the Discord wizard's For how long list (presets.DURATIONS) and the verb's caps, so the web modals can't drift

@@ -138,11 +138,11 @@ LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or 
                    "topic and its category); `recent` is the chat just before, for context only.")
 LISTEN_CRITERIA = {"true": "The message asks the bot something it knows or tells it something it records.",
                    "false": "The message is people talking to each other, game talk, a joke, a link or a reply to someone else."}
-# the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things
+# the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things; listen_state adds the game
+# version's profession names from the profile (game version is data)
 LISTEN_GLOSSARY = ["sheet", "signup", "join", "bench", "no thanks", "roster", "rostered", "regular", "lock", "confirm",
                    "can't make it", "absence", "away", "main", "alt", "spec", "offspec", "loot council", "wishlist", "award",
-                   "attendance", "raid schedule", "profession", "skill", "recipe", "craft", "who can make", "enchant",
-                   "leatherworking", "alchemy", "tailoring", "engineering", "blacksmithing", "cooking"]
+                   "attendance", "raid schedule", "profession", "skill", "recipe", "craft", "who can make", "enchant"]
 LISTEN_SURE = 0.8  # at or above: a reply channel answers it as an @mention would
 LISTEN_MAYBE = 0.5  # from here to SURE: unsure — a reply channel adds 👀 and the writer may click it to ask
 LISTEN_PER_HOUR = 600  # decisions per guild per hour; over it the rest are skipped (the monthly budget cap applies too)
@@ -254,7 +254,7 @@ class ListenMixin:
         me = getattr(self, "user", None)
         category = getattr(ch, "category", None)
         return {"bot": LISTEN_BOT_WORDS,
-                "guild": {"raids": [str(reg.raid_def(r).get("name", r)) for r in raids], "words": LISTEN_GLOSSARY},
+                "guild": {"raids": [str(reg.raid_def(r).get("name", r)) for r in raids], "words": [*LISTEN_GLOSSARY, *(d.name.lower() for d in reg.profile.professions.values())]},
                 # where it was written: the bot's own job for the channel, and what Discord knows — its topic (the owner's
                 # description) and its category — so a listening channel without a bot job still says what kind of room it is
                 "channel": {"name": f"#{getattr(ch, 'name', '') or ''}", "purpose": purpose.get(ch.id, "") if ch.id else "",

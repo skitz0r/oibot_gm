@@ -80,7 +80,7 @@ export interface Meta {
   guides?: boolean;
   /** §5.60: the version's professions (empty list = none: render nothing), the skill cap and how many trades (crafting +
    *  gathering) a character may hold */
-  professions?: { list: { id: string; name: string; group: string; icon: string }[]; skill_cap: number; trade_slots: number };
+  professions?: { list: { id: string; name: string; group: string; icon: string; makes: boolean }[]; skill_cap: number; trade_slots: number };
   /** The run's vocabulary, defined once in Python (design §5.56 phase 2) — a page never keeps its own copy: the state words
    *  (open · locked · done · cancelled), the run verbs' labels (raid_buttons.RUN_WORDS — the Discord buttons' own), the
    *  confirmation marks with their words (constants.MARK / MARK_WORDS; "waiting" = no answer yet), how an ask reaches

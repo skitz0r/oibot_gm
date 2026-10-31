@@ -4,16 +4,20 @@ import { GameIcon } from "./Icons";
 
 /** One character's professions (design §5.60): a profession icon with its skill beside it (an icon plus a number, like a
  *  role count — never a text label; the tooltip carries the name), green at the cap, the notable recipes as chips, or the
- *  empty state in words. A game version without professions renders nothing. */
-export function ProfessionLine({ meta, professions, compact }: { meta: Meta; professions?: Profession[]; compact?: boolean }) {
+ *  empty state in words. `member` = the Members page's row (the empty state names who fills it); without it the line is
+ *  the reader's own on Me. A game version without professions renders nothing. */
+export function ProfessionLine({ meta, professions, compact, member }: { meta: Meta; professions?: Profession[]; compact?: boolean; member?: string }) {
   const defs = meta.professions?.list || [];
   if (!defs.length) return null;
   const def = (id: string) => defs.find((d) => d.id === id);
   const name = (id: string) => def(id)?.name || id;
   const cap = meta.professions?.skill_cap || 300;
-  if (!professions || professions.length === 0) return <Text size="xs" c="dimmed">no professions on record</Text>;
+  if (!professions || professions.length === 0)
+    return <Text size="xs" c="dimmed">{member
+      ? `no professions on record — ${member} adds them on the Me page or with /me professions`
+      : "no professions on record — add them with Professions… in this row's ⋮"}</Text>;
   const recipes = professions.flatMap((p) => p.recipes.map((r) => ({ ...r, prof: name(p.id) })));
-  const makesThings = professions.some((p) => def(p.id)?.group !== "gathering");  // a gathering trade has no recipes to wait for
+  const makesThings = professions.some((p) => def(p.id)?.makes);  // a gathering trade or Fishing has no recipes to wait for
   return (
     <Group gap={compact ? 8 : 14} wrap="wrap" align="center">
       {professions.map((p) => (

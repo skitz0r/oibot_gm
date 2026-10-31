@@ -427,13 +427,22 @@ def test_professions_line_and_editor_on_me_and_members():
     recipes as chips, or the empty state in words; Professions… in the character ⋮ on Me and Members; the editor posts a
     preview first and prints only the server's sentences; skill is a number input 1..skill_cap."""
     line = (SRC / "components" / "ProfessionLine.tsx").read_text()
-    assert 'kind="profession"' in line and "No notable recipes yet" in line and "no professions on record" in line
+    assert 'kind="profession"' in line and "No notable recipes yet" in line
+    assert "no professions on record — add them with Professions… in this row's ⋮" in line
+    assert "no professions on record — ${member} adds them on the Me page or with /me professions" in line
     ed = (SRC / "components" / "ProfessionsEditor.tsx").read_text()
     assert "preview: true" in ed and "sentences" in ed and "NumberInput" in ed and "skill_cap" in ed and "trade_slots" in ed
-    assert "A gathering trade has no recipes." in ed
+    assert "A gathering trade has no recipes." in ed and "has no recipes.`" in ed
+    # the site knows Fishing makes nothing (meta.professions.list[].makes), never by group
+    for src in (line, ed, (SRC / "pages" / "Professions.tsx").read_text()):
+        assert "makes" in src and 'group !== "gathering"' not in src
+    assert "?.makes" in line and "d?.makes" in ed
+    # a cleared skill box stays empty while typing; the server refuses an out-of-range skill (never clamped to 1)
+    assert 'clampBehavior="strict"' not in ed and "|| 1" not in ed
     me = (SRC / "components" / "CharacterTable.tsx").read_text()
     mem = (SRC / "pages" / "Members.tsx").read_text()
     assert "<ProfessionLine" in me and "Professions…" in me and "<ProfessionLine" in mem and "Professions…" in mem
+    assert "member={r.display_name}" in mem, "the Members empty state names who fills it"
     icons = (SRC / "components" / "Icons.tsx").read_text()
     assert '"profession"' in icons
 
@@ -444,5 +453,5 @@ def test_professions_page_is_the_finder_with_officer_maintenance():
     assert 'path="/professions"' in app and '{ to: "/professions", label: "Professions"' in app
     assert "/api/professions/find" in src and "Who can make what" in src
     assert "Rename…" in src and "Merge…" in src and "officer" in src
-    assert "Nobody has registered" in src and "no notable recipes registered" in src
+    assert "Nobody has registered" in src and "no notable recipes registered — the crafter adds them on the Me page" in src
     assert 'useLive(load, ["member", "config"])' in src

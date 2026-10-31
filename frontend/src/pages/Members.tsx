@@ -197,7 +197,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
       {hasProfs && (prof && prof.r.uid === r.uid && prof.c.label === c.label
         ? <Box mt={4} mb={6}><ProfessionsEditor meta={meta} label={c.label} professions={c.professions} onCancel={() => setProf(null)}
             onSaved={() => { setProf(null); load(); }} onSave={professionsSave(r, c)} /></Box>
-        : <Box ml={32} mt={2} mb={4}><ProfessionLine meta={meta} professions={c.professions} compact /></Box>)}
+        : <Box ml={32} mt={2} mb={4}><ProfessionLine meta={meta} professions={c.professions} compact member={r.display_name} /></Box>)}
     </Box>
   );
 

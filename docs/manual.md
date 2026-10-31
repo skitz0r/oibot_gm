@@ -195,7 +195,8 @@ site keeps showing what you could see for up to six hours, but an officer's chan
 yellow line at the top says so; a change you try meanwhile answers *"Discord can't confirm your officer role right now —
 reading works, changes wait."*).
 
-Log in with Discord. Every member gets **Me** and the **Loot log** (every award the council recorded, §9).
+Log in with Discord. Every member gets **Me**, the **Loot log** (every award the council recorded, §9) and
+**Professions** (who can make what, §3 *Professions*).
 Someone who has applied sees **Your application** at the top of Me: waiting, or the decision.
 Everything below can also be done there:
 your characters (press **Edit**: add a row, first + last name, spec/offspec, extra roles (*Flex*), main/alt, then one **Save changes**; the crown marks your main; each row's **⋮** menu has *Make main*, *Retire* and *Delete* — when the change reaches a sheet or a seat, the confirm says so first), absences (*Add*: **From** a day **for how long**, previewed; **I'm back** clears one),
@@ -313,6 +314,14 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   guild's own list of recipes; the answer names its crafters, highest skill first, and only you see it. Nobody is
   pinged: ask them yourself. A recipe nobody has added yet says so, and how a crafter adds theirs. `/professions list`
   — pick a profession and see everyone who has it, highest skill first. The Professions page on the site shows the same.
+- **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name in the search
+  box and each matching recipe shows its crafters, highest skill first, with their skill — names only, nobody is
+  pinged. Below it, a tab per profession lists everyone who has it with a skill bar and their notable recipes. A
+  recipe nobody has added says so, and that the crafter adds it on the Me page. Officers keep the list tidy: a
+  recipe's **Rename…** fixes a misspelling on every record that holds it, and **Merge…** folds two spellings of the
+  same recipe into one (the same profession only). Both show the bot's own sentences first (*"Devilsaur Gauntlet is
+  merged into Devilsaur Gauntlets."*) and change nothing before you confirm. On a phone the search comes first, each
+  recipe is a card and the tabs scroll sideways.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
   owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.
