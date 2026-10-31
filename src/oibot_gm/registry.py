@@ -72,6 +72,22 @@ class WishlistEntry(BaseModel):
         return item_key(self.item_id, self.name)
 
 
+RECIPE_NAME_MAX = 60
+
+
+class Recipe(BaseModel):
+    """A notable recipe a character knows: the name as typed (member text), the game's id once an import knew it."""
+    name: str
+    id: Optional[int] = None
+
+
+class Profession(BaseModel):
+    """One profession on a character (design §5.60): a profile profession id, a skill 1..cap, notable recipes (none for gathering)."""
+    id: str
+    skill: int
+    recipes: list[Recipe] = Field(default_factory=list)
+
+
 class RegisteredCharacter(BaseModel):
     name: Optional[str] = None  # first name; None until the character exists (pre-launch "planned")
     surname: Optional[str] = None  # WoW: Forever names are first + last
@@ -83,6 +99,7 @@ class RegisteredCharacter(BaseModel):
     status: str = "active"  # planned | active | retired
     rosters: list[str] = Field(default_factory=list)  # regular-series keys "<raid>:<schedule>" (seats on runs live in the run files)
     flex: list[str] = Field(default_factory=list)  # extra roles this character can play besides its spec/offspec
+    professions: list[Profession] = Field(default_factory=list)  # design §5.60; saved through the table verb like flex
     confirmed_by: Optional[str] = None
     confirmed_at: Optional[str] = None
     created_at: str = Field(default_factory=now)
@@ -2101,6 +2118,78 @@ class Registry:
         c.flex, c.updated_at = new, now()
         self.save(m, f"{m.display_name}: {c.label} flex {', '.join(new) or 'none'}")
         return c
+
+    def check_professions(self, entries: list[dict]) -> list[Profession]:
+        """Validate and normalise a character's whole professions list (design §5.60) — one sentence per refusal:
+        a profile profession, skill 1..cap, at most trade_slots crafting+gathering, each profession once, recipe names
+        non-empty, ≤ RECIPE_NAME_MAX, one per normalised name, none on a gathering profession."""
+        from .profiles import norm_recipe
+
+        prof = self.profile
+        if not isinstance(entries, list):
+            raise RegistryError("professions is a list")
+        rules = prof.profession_rules
+        cap, slots = rules["skill_cap"], rules["trade_slots"]
+        out: list[Profession] = []
+        seen: set[str] = set()
+        for e in entries:
+            if not isinstance(e, dict):
+                raise RegistryError("professions is a list of objects")
+            pid = str(e.get("id") or "").strip().lower().replace(" ", "_")
+            if pid not in prof.professions:
+                raise RegistryError(f"{(str(e.get('id') or '?')).strip().title()} isn't a profession in this game version.")
+            d = prof.profession(pid)
+            if pid in seen:
+                raise RegistryError(f"{d.name} is listed twice.")
+            seen.add(pid)
+            try:
+                skill = int(e.get("skill"))
+            except (TypeError, ValueError):
+                raise RegistryError(f"Skill is a number from 1 to {cap}.")
+            if not 1 <= skill <= cap:
+                raise RegistryError(f"Skill is a number from 1 to {cap}.")
+            recipes: list[Recipe] = []
+            keys: set[str] = set()
+            for r in e.get("recipes") or []:
+                name = str((r.get("name") if isinstance(r, dict) else r) or "").strip()
+                name = " ".join(name.split())
+                if not name:
+                    raise RegistryError("A recipe needs a name.")
+                if len(name) > RECIPE_NAME_MAX:
+                    raise RegistryError(f"A recipe name is up to {RECIPE_NAME_MAX} characters.")
+                k = norm_recipe(name)
+                if k in keys:
+                    continue
+                keys.add(k)
+                rid = (r.get("id") if isinstance(r, dict) else None)
+                seeded = prof.recipe_seed.get(k)
+                recipes.append(Recipe(name=name, id=int(rid) if rid else (seeded["id"] if seeded else None)))
+            if recipes and d.group == "gathering":
+                raise RegistryError("A gathering profession has no recipes.")
+            out.append(Profession(id=pid, skill=skill, recipes=recipes))
+        if sum(1 for p in out if prof.profession(p.id).group in ("crafting", "gathering")) > slots:
+            raise RegistryError("A character has two trade professions — drop one first.")
+        return out
+
+    @_member_write
+    def set_professions(self, discord_id: int, label: str, entries: list[dict]) -> RegisteredCharacter:
+        """Replace a character's professions with a validated list — the one setter; the table save calls it (like set_flex)."""
+        m = self.member(discord_id)
+        c = next((c for c in m.active() if c.matches(label)), None)
+        if not c:
+            raise RegistryError(f"You have no active character named {label}.")
+        new = self.check_professions(entries)
+        if [p.model_dump() for p in new] == [p.model_dump() for p in c.professions]:
+            return c
+        c.professions, c.updated_at = new, now()
+        self.save(m, f"{m.display_name}: {c.label} professions {self.professions_summary(c)}")
+        return c
+
+    def professions_summary(self, c: RegisteredCharacter) -> str:
+        """'Leatherworking 300 · Skinning 285', or the empty state in words."""
+        if not c.professions:
+            return "no professions on record"
+        return " · ".join(f"{self.profile.profession(p.id).name} {p.skill}" for p in c.professions)
 
     @_member_write
     def set_roles(self, discord_id: int, display_name: str, primary: str, flex: list[str]) -> Member:
@@ -4924,6 +5013,11 @@ class Registry:
                 cur = self.set_flex(discord_id, cur.label, [str(r).strip().lower() for r in fl if str(r).strip()])
                 if cur.flex != before:
                     done.append(f"{cur.label}: flex {', '.join(cur.flex) or 'none'}")
+            if row.get("professions") is not None:  # the whole list replaces (design §5.60); absent keeps
+                before = [p.model_dump() for p in cur.professions]
+                cur = self.set_professions(discord_id, cur.label, row["professions"])
+                if [p.model_dump() for p in cur.professions] != before:
+                    done.append(f"{cur.label}: professions {self.professions_summary(cur)}")
             if is_main:
                 want_main = cur.label
         m = self.members.get(discord_id) or m
