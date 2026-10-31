@@ -503,3 +503,17 @@ def test_the_manuals_loot_section_is_one_text_true_to_the_code():
               "Override…", "Disenchant", "Give the reason", "Correct…", "Keep open", "Replace their override…", "Give the reason…"):
         assert b in labels and b in sec, b
     assert "Edit the reason" not in sec and "inferred — edit before Apply" not in sec and "loot channel\n(else the officer channel)" not in sec
+
+
+# ---------------------------------------------------------------- professions (design §5.60)
+
+def test_professions_section_answers_who_can_make_for_members(reg):
+    from oibot_gm import help as H
+    uid, label = 9100, "Thornwick"  # the fixture's members are puppets, which the finders never name: a real member first
+    reg.add_character(uid, "Kestrel", label, "Hunter", "Survival", None, True)
+    reg.save_character_table(uid, [{"label": label, "professions": [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bag"}]}]}], "t", officer=True)
+    s = H.guild_state(reg, None, uid, False, "anyone able to make a mooncloth bag?", None, public=False)
+    assert "### Who can make what" in s and "Mooncloth Bag" in s and f"Tailoring: {label} (Kestrel, 300)" in s
+    assert f"- Mooncloth Bag [Tailoring]: {label} (300)" in s
+    assert "### Who can make what" in H.guild_state(reg, None, uid, False, "who is our alchemist", None, public=False)
+    assert "### Who can make what" not in H.guild_state(reg, None, uid, False, "when is the next raid", None, public=False)

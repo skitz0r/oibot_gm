@@ -194,3 +194,33 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
         p["recipes"] = [r for r in p["recipes"] if r is not hit]
         return [{"label": c.label, "professions": cur}], f"{c.label} · {pname} recipes: − {hit['name']}"
     raise ValueError(field)
+
+
+HELP_WORDS = re.compile(r"\b(profession|professions|craft\w*|make|makes|recipe|recipes|enchant\w*|who can|crafter|crafters|skill)\b")
+
+
+def help_hit(reg: Registry, q: str) -> bool:
+    """The question names a profession ('alchemist', 'leatherworking') or a registered recipe."""
+    q = norm_recipe(q)
+    for d in reg.profile.professions.values():
+        stem = norm_recipe(d.name)[:6].strip()
+        if stem and stem in q:
+            return True
+    return any(e.key in q for e in catalog(reg))
+
+
+def help_section(ask) -> list[str]:
+    """The help snapshot's professions section (members' view, design §5.60): each profession's crafters with skill,
+    then the catalog with makers. Names only: the bot says who, never pings."""
+    reg = ask.reg
+    out = ["### Who can make what: professions with their crafters (highest skill first), then the notable recipes the guild has registered "
+           "and who makes them · a question about a recipe nobody registered: say so and that a crafter adds it on the Me page, with "
+           "/me professions or by saying 'I can make …' in the professions channel"]
+    for d in reg.profile.professions.values():
+        cs = crafters_of(reg, d.id)
+        out.append(f"{d.name}: " + (", ".join(f"{c.label} ({c.member}, {c.skill})" for c in cs[:12]) if cs else "nobody registered yet"))
+    cat = catalog(reg)
+    out.append(f"recipes registered ({len(cat)}):" if cat else "recipes registered: none yet")
+    for e in cat[:80]:
+        out.append(f"- {e.name} [{reg.profile.profession(e.profession).name}]: " + ", ".join(f"{c.label} ({c.skill})" for c in e.crafters[:6]))
+    return out

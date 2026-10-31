@@ -4,7 +4,7 @@ No state is changed here — answers point at commands; officers' change request
 configops.
 
 The live snapshot (`guild_state`) is built in code and bounded (MAX_STATE_CHARS). It has fixed parts (settings, raids,
-live runs, the asker) and keyword-gated SECTIONS (status, loot — a member gets their own awards only —, who plays what (every member), bank, absences,
+live runs, the asker) and keyword-gated SECTIONS (status, loot — a member gets their own awards only —, who plays what (every member), who can make what (professions, every member), bank, absences,
 auras, readiness, news, policy, applications, test bench), each with its own character cap. Officer data (other people's absence reasons,
 applications, ops, precedents, proposals, privilege) only ever reaches an officer's snapshot. Text people typed that
 is shown at length (news titles, applicants' answers, absence reasons, precedent reasons, commit subjects) sits inside
@@ -20,6 +20,7 @@ from typing import Callable
 
 from pydantic import BaseModel, Field
 
+from . import professions
 from .constants import ROLES
 from .registry import CLOCK12, Registry
 
@@ -969,6 +970,7 @@ SECTIONS: dict[str, tuple[re.Pattern, Callable[[Ask], list[str]], int, bool]] = 
     "news": (re.compile(r"\b(news|proposals?|jobs?|review|agents?|patch(es)?|hotfix\w*|blue ?posts?|go(ne)? through|went through|revert\w*|(was|were|been|got|it) applied)\b"), _news, 2_500, True),
     "loot": (re.compile(r"\b(loot|precedents?|ledger|award(ed|s)?|got|drops?|items?|council|gear|overrid\w*|overrode|overruled?)\b"), _loot, 2_500, False),  # members: their own
     "who": (re.compile(r"\b(list|who|whos|plays?|playing|class(es)?|specs?|heal(er|ers|s|ing)?|tank(s|ing)?|melee|ranged|dps|roles?|offspec|alts?|mains?|members?|characters?|ranks?)\b"), _who, 4_000, False),  # members: public-safe
+    "professions": (professions.HELP_WORDS, professions.help_section, 3_000, False),
     "bank": (re.compile(r"\b(list|who|healers?|tanks?|melee|ranged|dps|unconfirmed|confirm\w*|officers?|alts?|mains?|members?|bank|characters?|ranks?|privilege)\b"), _bank, 4_000, True),
     "policy": (re.compile(r"\b(polic(y|ies)|loot rules?|comp rules?|persona|standing instructions?)\b"), _policy, 3_000, True),
     "auras": (re.compile(r"\b(auras?|buffs?|stacks?|stacking|totems?|provides?|providers?|famil(y|ies)|blessings?)\b"), _auras, 4_000, False),
@@ -998,6 +1000,8 @@ def _section_hit(ask: Ask, key: str) -> bool:
         return _words(q, *(t for b in reg.profile.buffs for t in (b.id, b.id.replace("_", " "), b.short)), *(t for fid, f in reg.profile.families.items() for t in (fid, f.name)))
     if key == "applications":
         return bool(mentioned_applicants(reg, ask.question))
+    if key == "professions":
+        return professions.help_hit(reg, ask.question)
     return False
 
 
