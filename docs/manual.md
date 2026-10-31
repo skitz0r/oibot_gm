@@ -76,8 +76,13 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   (§8c *Listening*).
 - **Who could play** — every member's main: the headcount the Readiness page and the analytics cards measure against
   the raid's size, limits and aims. Alts and offspecs don't add to the headcount; they show as who could cover a role.
-- **Your record** — your characters (name, spec, offspec, extra roles, which is your main) and your absences. You keep
+- **Your record** — your characters (name, spec, offspec, extra roles, which is your main, their professions) and your
+  absences. You keep
   it on the Me page or with `/me char` and `/me absent`; officers can edit it for you, and they set your rank.
+- **Profession / skill** — a character's trade (Alchemy, Leatherworking…) and how far along it is, a number from 1 to 300.
+- **Notable recipes** — the ones worth telling the guild about, never a whole recipe book. A **crafter** is a character
+  that has them.
+- **Who can make** — the finder: the crafters of a recipe, names only; nobody is pinged.
 - **Main / alt** — your main is the character you raid on by default (one per member; your rank is on it); alts are
   your other characters.
 - **Rank** — the member's standing: *trial*, *raider*, *core* or *social*. It lives on the main and counts for who gets a
@@ -280,6 +285,20 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     there is only one), type first and last name, and the confirm screen says what follows (*"Answered Join on … — the
     answer now names Stormcall"*); answers and seats it holds take the new name.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
+- **Professions**: each character can carry its professions with their skill (1 to 300) and its **notable recipes** —
+  the ones worth telling the guild about, not the whole book. For now you set them by telling the bot (a DM, an
+  @mention, or a channel it listens in): "Rhoz is a 300 leatherworker", "Rhoz is a leatherworker" (a new profession with
+  no number starts at 1; saying it again with a number changes the skill), "I just learned Devilsaur Gauntlets on Rhoz",
+  "take Devilsaur Gauntlets off Rhoz", "drop enchanting on Jonnie". It shows the change and waits for your **Apply**, like
+  any change to your record. When two of the character's professions make things, the bot asks which one makes the
+  recipe (*"Which profession makes Elixir of Fortitude — Alchemy or Cooking?"*); say "… with alchemy" to skip the
+  question. A character has at most two trade professions (Alchemy, Blacksmithing, Enchanting, Engineering,
+  Leatherworking, Tailoring, Herbalism, Mining and Skinning count); Cooking, First Aid and Fishing are free. Herbalism,
+  Mining, Skinning and Fishing make nothing, so they take no recipes. A recipe name is up to 60 characters and is kept as
+  you wrote it. Officers change anyone's the same way, naming the character, where their changes act (§8c). Professions belong to the character: they
+  stay with it when you change your main, and a retired character is no longer named as a crafter. Reading an addon's
+  export of your professions is planned; nothing is imported yet. Anyone in the guild can then ask who can make a thing
+  (§10a).
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
   owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.
@@ -1430,6 +1449,9 @@ and links are left alone. Each listening channel is one of two:
 The bot judges a message with what it knows about the room: its own job there (the signup channel, the officers'
 channel) and the channel's topic and category in Discord — so give a listening channel a topic ("General chat about the
 game", "Raid signups and questions") and the bot reads it in that light.
+A channel for professions is set like any listening channel: "listen in #professions" with *Replies*, and plain text
+there left at *Own record only*. Then "just hit 300 leatherworking on Rhoz" becomes your change to Apply, and "anyone able
+to make a Mooncloth Bag?" gets an answer, with no tag.
 
 The owner turns it on in plain text ("listen in #signups", "only watch #general", "stop listening in #signups"), or on
 the Ops page's **Plain-text permissions** tab: the table has a **Listening** column, a *Watches* or *Replies* badge on each listening channel,
@@ -1453,7 +1475,7 @@ record*; someone else's is *Other people's records*):
 
 | Group | Default | Someone could type |
 |---|---|---|
-| Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles) and your own answer or confirmation on a run; re-posting a live sheet here (it touches nobody's record, like `/raid sheet`) | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight", "post tonight's sheet here" |
+| Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles, professions and recipes) and your own answer or confirmation on a run; re-posting a live sheet here (it touches nobody's record, like `/raid sheet`) | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight", "post tonight's sheet here" |
 | Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters, deciding applications | officers | "rank Jonny raider", "Mira is away next week", "accept Nyx" |
 | Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, pins (who the lock rosters), `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight", "pin Jonny in tonight" |
 | Comp & policy — aims and group layout, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "we want 3–4 healers in Barrow Deeps", "add a loot rule" |
@@ -1642,6 +1664,7 @@ news post says can make the review read or write another server.
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, limits, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
+| `set_professions` · `who_can_make` | replace one character's professions — the whole list, each `{id, skill, recipes: [{name}]}`; `[]` clears; the two-trade rule and the rest are checked as everywhere else · the registered recipes matching a name, each with its crafters, highest skill first — names only, nobody pinged |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
 | `import_members` | a roster from a signup list (§7): rows `{discord_id, name, character, cls, spec, offspec?, rank?}` — `scripts/raidhelper_roster.py --members event.json` writes them from a Raid-Helper export — register each person with the character as their main; `preview=true` lists what would be added and skipped, nothing written; a row's `rank` needs the actor (D8), without one they start as trial |
 | `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone (with runs open or locked, preview it, then add `timezone_runs`: `keep` or `move`), ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `public` (listed on the homepage and the public schedule, or not), `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
@@ -2129,6 +2152,12 @@ reasons, applications, the loot council's scores and reasons, someone else's att
 is an officer, or the bot's own running (spend, errors, setup): those stay with officers, in a DM or an officer channel.
 An @mention in a question reads as that person's name, for every way you ask (an @mention of the bot, a DM, a channel
 the bot listens in).
+
+**Who can make what** is open to every member the same way: "who can make Devilsaur Gauntlets?", "any alchemists?",
+"who has the highest tailoring?" are answered from what members registered (§3 *Professions*) — each profession's crafters
+with their skill, and every notable recipe with who makes it — names only, nobody pinged. The question has to name a
+profession or a registered recipe. When nobody has registered a recipe, the bot says so and how a crafter adds it. Retired
+characters, puppets and people who left the server are never named.
 
 Officers get more, only when the question is about it (a few keywords decide; "status", "overview" or "what's going
 on" brings the main ones): **status** (data repo and push, LLM spend, the loot feed, uptime, the last ops lines, the

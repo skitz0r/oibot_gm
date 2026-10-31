@@ -3832,7 +3832,87 @@ tests/test_decisions.py (the provider on a fake transport), tests/test_listen.py
 
 ### 5.60 Professions: a tracker and a finder (built 2026-10-30)
 
-Members record each character's professions, skill and notable recipes; anyone finds who can make a thing. Game data in `profiles/<version>/professions.yaml`; member data on `RegisteredCharacter.professions`; behaviour in `professions.py`. The decisions, data shapes, surfaces and build order are in `docs/superpowers/specs/2026-10-30-professions-design.md`; this section fills in as the phases land.
+Members record each character's professions, skill and notable recipes; anyone finds who can make a thing. Game data in
+`profiles/<version>/professions.yaml`; member data on `RegisteredCharacter.professions`; behaviour in `professions.py`. The
+full spec, with the approved mockups (six boards: Me, the in-place editor, Members, the Professions page, Discord, phone), is
+`docs/superpowers/specs/2026-10-30-professions-design.md`; this section records what is built and what was decided.
+
+**Decisions.**
+- **Depth: both, recipes optional.** Profession and skill always; **notable recipes** when the crafter types or pastes
+  them. Nobody types a 200-recipe book: the record holds the ones worth telling the guild about.
+- **Names only.** The finder answers with crafters' names. Nobody is pinged, nothing is tracked after the answer.
+- **No recipe database now.** The catalog is what members register. The import boundary is built so an addon export or a
+  wago.tools seed (the client's data tables as CSV) can drop in later. Nothing reads any website; Wowhead stays off limits.
+- **Read-only data is public** (owner decision 2026-10-29): who can make what is answered to any member in any channel the
+  bot answers in, like who plays what (§5.25).
+- **Rights follow the people rules** (§5.41, §5.58): a member edits their own characters' professions, an officer anyone's,
+  the owner everything. No officer confirm applies to a profession, and a profession touches no seat or run.
+
+**Data.** `profiles/forever/professions.yaml`: `skill_cap: 300`, `trade_slots: 2` (crafting + gathering together;
+secondary free), twelve professions in three groups (crafting: Alchemy, Blacksmithing, Enchanting, Engineering,
+Leatherworking, Tailoring; gathering: Herbalism, Mining, Skinning; secondary: Cooking, First Aid, Fishing), an icon name
+each (the render-CDN proxy, the badge as fallback), and an empty `recipes:` seed list. `ProfessionDef(id, name, group,
+icon, recipes, makes)`: `makes` is false for a gathering profession and for one marked `recipes: false` (Fishing, added
+2026-10-30 after "a leatherworker who fishes" was asked which profession makes a recipe). On the character:
+`professions: [Profession {id, skill, recipes: [Recipe {name, id?}]}]`, in the member's file, versioned by
+`characters_rev`, written through the character-table verb (`save_character_table` row key `professions`, the whole list
+replaces; `Registry.set_professions` is the one setter). It goes with the character on retire, delete and set-main.
+`Registry.check_professions` refuses, one sentence each: a profession the profile lacks ("Smelting isn't a profession in
+this game version."), skill outside 1..cap ("Skill is a number from 1 to 300."), a third trade ("A character has two trade
+professions — drop one first."), a recipe name over 60 characters, a recipe on a profession that makes nothing ("A gathering
+profession has no recipes." / "Fishing has no recipes."), a profession listed twice; a repeated recipe (after normalising) is
+kept once.
+
+**The catalog** (`professions.catalog(reg)`) is derived from the records, never stored: one entry per normalised name
+(`profiles.norm_recipe`: lower case, punctuation and double spaces folded, a trailing "s" kept — "Gauntlet" and
+"Gauntlets" stay two until an officer merges them), the spelling most crafters use, the profession, the crafters highest
+skill first. `who_can_make(reg, text)`: the exact normalised name, else every recipe whose words all appear in the text.
+`crafters_of(reg, pid)`. Both skip retired characters, test puppets and members who left (`visible`). Officers'
+`rename_recipe` / `merge_recipe` (same profession only) preview their sentences ("Devilsaur Gauntlet is merged into
+Devilsaur Gauntlets." · "Mira's record now reads Devilsaur Gauntlets.") and then rewrite every record holding the name, one
+table save per member. The confirm words for a character's professions are `consequences.profession_consequence` (people
+verb `professions`), linted by tests/test_confirm_readability.py. The import boundary
+(`importers/professions.py`: `detect`, `parse`, `FORMATS`) recognises nothing yet; no paste box shows until it does.
+
+**Plain text.** No new op: the `character` op (own record, `bind_self`, already in the parity matrix) gains four fields —
+`profession` ("Rhoz is a 300 leatherworker"; a new profession without a number starts at 1, one on record keeps its skill),
+`profession_remove` ("drop enchanting on Jonnie"), `recipe_add` / `recipe_remove` ("I just learned Devilsaur Gauntlets on
+Rhoz"; value = the name as written, member text, never interpreted; `text` = the profession when the member names one).
+`professions.op_rows` turns each into a table row and a describe line (`Rhoz · Leatherworking: 275 → 300`, `Rhoz ·
+Leatherworking recipes: + Devilsaur Gauntlets`). A recipe add asks "Which profession makes X — A or B?" only when two of
+the character's professions make things; a remove finds the profession that holds it; naming a profession the character
+lacks says so ("Rhoz has no Tailoring on record.").
+
+**The help answer.** `help.SECTIONS["professions"]` (members' view, cap 3 000, `professions.help_section`): each
+profession's crafters with skill, then every registered recipe with its makers. Gated by `professions.help_hit`: the question
+names a profession as a word ("any alchemists?", "first aid") or a registered recipe by its whole words — "who killed the
+first boss" and "baggage" hit nothing (tightened 2026-10-30). The bot says plainly when nobody registered a recipe and how a
+crafter adds one.
+
+**Listening** (§5.59): no new channel kind. `LISTEN_BOT_WORDS` says the bot knows each character's professions, skill and
+notable recipes and who can make a thing; the glossary gains "profession", "skill", "recipe", "craft", "who can make",
+"enchant" and six profession names. The owner sets #professions to Replies with plain text Own record only: a change becomes an own-record preview
+with Apply, a question an answer.
+
+**Site and MCP routes** (`web/api_professions.py`): `GET /api/professions` (every member: each profession with its
+crafters, the catalog, `officer`), `GET /api/professions/find?q=`, `POST /api/professions/rename|merge` (officers,
+`preview` first). `POST /api/members/set` takes `professions` (a character's whole list, `[]` clears; preview = the
+sentences). Character rows and `/api/meta.professions` (the list, skill cap, trade slots) carry them. MCP:
+`set_professions(member, character, professions)` over `/api/members/set`, `who_can_make(text)` over the finder;
+`plain_change` already covers the op.
+
+**Phases.**
+1. Profile file and `GameProfile.professions`; `Profession` / `Recipe` on the character; validation, the confirm words, the
+   catalog and finders, rename and merge; the import boundary; tests/test_professions.py. **Built 2026-10-30.**
+2. The plain-text fields and parity; the help section; the Listening words; the routes and MCP tools; the manual's words.
+   **Built 2026-10-30.**
+3. The site: a professions line and the in-place editor on Me and Members (row ⋮ › Professions…), the Professions page
+   (finder, a tab per profession, officers' Rename… / Merge…), phone layout, shots. Not built yet.
+4. Discord: `/me professions` and `/roster professions` (wizards: selects for profession and skill in 25-point steps, a
+   prose modal for a recipe), `/professions who|list` (ephemeral, no model). Not built yet.
+
+**Out of scope.** A request queue, pings or DMs about crafting; materials or tips; a full recipe database; reading any
+website; skill history; recipes on gathering professions.
 
 ## 6. Architecture
 

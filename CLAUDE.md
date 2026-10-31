@@ -85,6 +85,8 @@ src/oibot_gm/
                        (+ detect; stamp keeps a time WITH its zone as received_at); Gargul / RCLC NOT read (D13 open) — Registry.import_awards does the
                        dedupe (_import_plan on a ledger snapshot outside config_lock: guild day, ±1 day for a zone-less day, one for one) and the
                        append; an apply is refused while a council of the guild is live (live_council_refusal)
+                       professions.py (§5.60) = THE professions import boundary: detect / parse / FORMATS → rows {character, profession, skill, recipes};
+                       EMPTY — no format is read yet (no paste box); a format = one parser here + the Me page's box
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
   loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
                        Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),
@@ -195,6 +197,10 @@ src/oibot_gm/
                        item id|name, day) for imports only; appends source=import rows, never edits); loot_cfg merges `loot:` at every depth;
                        loot_weight_defaults / loot_weights / loot_overridden / loot_weight_check; set_loot_weights(fields, by, rev=) = one write of the
                        new `loot` config section; import_tmb_wishlists reports per_character
+                       Professions (§5.60): RegisteredCharacter.professions [Profession {id, skill, recipes [Recipe {name, id}]}]; check_professions = THE
+                       validation (a profile profession, skill 1..skill_cap, ≤ trade_slots crafting + gathering, once each, recipe names ≤ RECIPE_NAME_MAX
+                       and unique after norm_recipe, none where ProfessionDef.makes is false); set_professions = the one setter, called by
+                       save_character_table's `professions` row key (the whole list replaces); professions_summary
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|loot-ask|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me loot-ask = flows_appeal, a question about one of your own awards;
@@ -310,10 +316,19 @@ src/oibot_gm/
                        transfer_owner (D50; Discord only — /gm config owner, BY_DESIGN_ONLY), absence_lines / absence_clear_lines (the preview words);
                        a member's own retire / delete — and their own absence (record_absence → announce_absence → RaidMixin.after_absence(by_id=)) — frees the seat with no self-notice (by_id decides). No DMs anywhere
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
+  professions.py       professions (design §5.60): catalog(reg) = the recipe catalog DERIVED from the records (norm_recipe keys, the most
+                       used spelling, crafters highest skill first; never stored), who_can_make(reg, text) (exact name, else every recipe whose words all
+                       appear), crafters_of(reg, pid); visible = active character, not a puppet, not left; rename_recipe / merge_recipe (officers, preview
+                       sentences, the rewrite through save_character_table); op_rows = the plain-text `character` op's four profession fields → a table
+                       row + its describe line (asks which profession when two could make it); HELP_WORDS / help_hit / help_section = the help section.
+                       Names only: nothing pings, DMs, tracks a request or reads a website. Game data: profiles/<v>/professions.yaml (GameProfile.professions,
+                       profession_rules, ProfessionDef.makes); the confirm words: consequences.profession_consequence (verb "professions")
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
                        officers' `config` section = configops.summary_text(config_summary(audience)) (owner: Host too);
                        `who` section (every member, any channel: who plays what + rank, named members first, no officer marks; an officer
                        in private gets `bank` instead — owner decision 2026-10-29, design §5.25);
+                       `professions` section (every member, any channel: each profession's crafters with skill, then every registered recipe with its
+                       makers; gated by professions.help_hit — a profession named as a word or a registered recipe's whole words — design §5.60);
                        manual_sections (the manual by its own ## headings, mtime-cached, tiers tagged — the Help page), command_rows(tree, tier),
                        site_url(reg, path, anchor) = THE site link (?g= before the #anchor)
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
@@ -345,6 +360,8 @@ src/oibot_gm/
                        flows_config._save_settings = the settings wizards' (timezone, about) Save through apply_ops.
                        Phase 3 (§5.44): config_summary(reg, bot, audience) → [SummarySection] (owner: host_facts) + summary_text; the `comp` structured
                        kind → comp_target ops → Registry.set_comp_targets; schedule_pause_sentence; the timezone CONSEQUENCE_HOOK
+                       Professions (§5.60): the `character` op's fields profession | profession_remove | recipe_add | recipe_remove (value = "Leatherworking 300"
+                       or the recipe name as written, `text` = the profession when two could make it) → professions.op_rows; own record, no new op
   cli.py               `oibot roster|loot|demo|discord`; root logger → out/oibot.log (rotating) + stderr
   mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, plain_change …)
                        that call the RUNNING bot's /api/* over HTTP as the OWNER OF THE CHOSEN GUILD (every tool's optional `guild` = key or name,
@@ -452,6 +469,10 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
   web/api_guides.py    install_guides_api (called from api.py): GET/POST /api/me/guide (status / build in a thread; MCP never builds), /clear,
                        GET /api/me/guide/explorer (inline, its own CSP sandbox, no-store), /file/{name} (the three downloads) — the folder is
                        always the session's own uid; /api/meta.guides = the version has the tool
+  web/api_professions.py  install_professions_api (called from api.py; design §5.60): GET /api/professions (every member: each profession's
+                       crafters + the catalog; `officer`), GET /api/professions/find?q= (who_can_make), POST /api/professions/rename|merge (officers;
+                       `preview` → the sentences, then the write). A character's professions are written by /api/members/set `professions` (officers,
+                       the one-member route; MCP set_professions) and read on every character row and /api/meta.professions
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409); sheet_row_extras
