@@ -299,7 +299,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   only those.
   Or tell the bot (a DM, an @mention, or a channel it listens in): "Rhoz is a 300 leatherworker", "Rhoz is a
   leatherworker" (a new profession with no number starts at 1; saying it again with a number changes the skill), "I just
-  learned Devilsaur Gauntlets on Rhoz", "take Devilsaur Gauntlets off Rhoz", "drop enchanting on Jonnie". It shows the
+  learned Devilsaur Gauntlets on Rhoz", "take Devilsaur Gauntlets off Rhoz", "remove enchanting from Jonnie". It shows the
   change and waits for your **Apply**, like any change to your record. You need not name the character: "I can make
   Witherbark Boots" goes to your one character that makes things, else to your main, and the bot asks which only when
   two of your characters could hold it. When two of the character's professions make

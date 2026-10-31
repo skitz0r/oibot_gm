@@ -240,3 +240,29 @@ def test_run_open_stamp_in_the_proposed_changes_embed(reg, value):
         assert "<t:" in log[-1][2]["embed"].description
 
     asyncio.run(go())
+
+
+# ---- a people action the registry refuses is a refusal, not a proposed change (design §5.60 follow-up)
+
+def test_the_schema_names_the_profession_fields_so_the_parser_fills_field():
+    desc = ConfigOp.model_fields["field"].description
+    assert "character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex|profession|profession_remove|recipe_add|recipe_remove" in desc
+
+
+def test_a_character_op_without_a_field_is_refused_not_proposed(reg):
+    """A malformed character op (no field) used to render as "• character @Jon: character field is …" with Apply under it."""
+    m = next(m for m in reg.members.values() if m.active())
+    op = ConfigOp(op="character", member=m.display_name, value="Red Leather Boots")
+    with pytest.raises(configops.RegistryError, match="Say what to change on the character"):
+        configops.describe(reg, op, GENERAL_CH, strict=True)
+    assert "Say what to change on the character" in configops.describe(reg, op, GENERAL_CH), "the lenient form still prints the sentence"
+    log = []
+
+    async def go():
+        it = interaction(m.discord_id, log, officer=True)
+        req = ConfigRequest(kind="change", reply="Added Red Leather Boots to Jonster's known recipes.", ops=[op, op.model_copy()])
+        await discord_policy.handle_change(it, reg, None, None, Feed(), "i can make red leather boots", bot=it.client, channel=GENERAL_CH, req=req)
+    asyncio.run(go())
+    kind, content, kw = log[-1]
+    assert "⛔" in content and "Say what to change on the character" in content, content
+    assert "view" not in kw or kw["view"] is None, "no Apply button on a refusal"

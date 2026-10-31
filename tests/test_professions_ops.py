@@ -75,7 +75,7 @@ def test_recipe_remove_finds_the_profession_that_holds_it(reg):
 
 def test_an_unknown_character_field_lists_the_profession_fields(reg):
     m = reg.members[UID]
-    with pytest.raises(RegistryError, match="flex \\| profession \\| profession_remove \\| recipe_add \\| recipe_remove$"):
+    with pytest.raises(RegistryError, match="flex \\| profession \\| profession_remove \\| recipe_add \\| recipe_remove\\.$"):
         configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="haircut", value="x"))
 
 

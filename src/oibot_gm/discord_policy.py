@@ -442,6 +442,16 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         return
     raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
     allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)
+    # a people or run action the registry already refuses (an unknown field, a character that isn't theirs) is a refusal,
+    # never a proposed change with an Apply button under it
+    sound = []
+    for op in allowed:
+        try:
+            configops.describe(reg, op, channel, strict=True)
+            sound.append(op)
+        except RegistryError as e:
+            refused.append(str(e))
+    allowed = sound
 
     def apply_button(base=None):  # a newcomer refused with APPLY_FIRST gets the Apply to join button right on the reply
         if configops.APPLY_FIRST not in refused:
