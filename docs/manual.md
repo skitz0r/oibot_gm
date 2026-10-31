@@ -290,6 +290,12 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   under it: the profession's icon with its skill beside it (green at 300), then the recipes. The character's ⋮ has
   **Professions…**, which edits that character's professions in place: pick a profession, type its skill, add or remove
   notable recipes. **Save** first shows the bot's own sentences (*"Your Alchemy is recorded at 300."*), then writes.
+  In Discord, `/me professions` does the same: pick the character (skipped when you have one), and it lists that
+  character's professions with **Add profession…**, **Change skill…**, **Add recipe…** and **Remove…**. The profession
+  and the skill are picked from lists; only a recipe's name is typed. Each ends on one confirm screen with the same
+  sentences (*"Your Leatherworking is recorded at 300 with 1 notable recipe."*), and nothing changes before **Do it**.
+  When both trades are taken it says so (*"Two trades are taken. Cooking, First Aid and Fishing are open."*) and offers
+  only those.
   Or tell the bot (a DM, an @mention, or a channel it listens in): "Rhoz is a 300 leatherworker", "Rhoz is a
   leatherworker" (a new profession with no number starts at 1; saying it again with a number changes the skill), "I just
   learned Devilsaur Gauntlets on Rhoz", "take Devilsaur Gauntlets off Rhoz", "drop enchanting on Jonnie". It shows the
@@ -924,11 +930,12 @@ edits that new family and leaves the one it shared alone.
 
 ## 7. Officers: day-to-day commands
 
-- Registry: `/roster list|confirm|rank|set-main|char|add|remove|members|absences|absent|back|comp` (`comp` = the
+- Registry: `/roster list|confirm|rank|set-main|char|professions|add|remove|members|absences|absent|back|comp` (`comp` = the
   aims, §6). They take at most a member
   (Discord's own picker) and a fixed choice; the character, rank or schedule is picked from a list and confirmed before anything saves.
   `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete), with the
-  same ripple on the confirm screen; `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the
+  same ripple on the confirm screen; `/roster professions member:` is `/me professions` on their behalf, and its confirm
+  names them (*"Kestrel's Tailoring is recorded at 275."*); `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the
   member's (on the main): no character to pick, and the choices are trial, raider, core and social. Every confirm names
   the member once (*"Kestrel's character Kestrelle retires, and …"*) and prints the same sentences as the Members page.
   `/roster confirm` alone walks the characters waiting for a confirm (§1a) — never your

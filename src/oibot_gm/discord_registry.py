@@ -926,6 +926,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["member_char"](interaction, reg, action=action.value if action else None)
 
+    # /me professions (design §5.60): one character's professions, skill and notable recipes — picked, never typed but a
+    # recipe's name; the confirm prints consequences.profession_consequence, the write is the character verb.
+    @me.command(name="professions", description="Your characters' professions, skill and notable recipes")
+    async def me_professions(interaction: discord.Interaction):
+        reg, interaction = await need(interaction)
+        if reg:
+            await FLOWS["me_professions"](interaction, reg)
+
 
     # ---------------- /me absent, /me
     absent = app_commands.Group(name="absent", description="Future absences (reason is officer-only)", parent=me)
@@ -1139,6 +1147,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg, interaction = await officer(interaction)
         if reg:
             await FLOWS["member_char"](interaction, reg, member=member, action=action.value if action else None)
+
+    @roster.command(name="professions", description="A member's professions on their behalf: add, change skill, recipes, remove")
+    @app_commands.describe(member="whose professions")
+    async def roster_professions(interaction: discord.Interaction, member: discord.User):
+        reg, interaction = await officer(interaction)
+        if reg:
+            await FLOWS["roster_professions"](interaction, reg, member=member)
 
     @roster.command(name="back", description="Someone is back early: clear one of their absences — its sheets re-open for them")
     @app_commands.describe(member="who is back")
