@@ -1,0 +1,28 @@
+/* The Professions page (design §5.60): the finder's hits as rows under one card, each profession's crafters as a grid —
+   who · skill bar · notable recipes. Below the sm breakpoint the search comes first, every hit is a card of its own,
+   a crafter stacks (who, then the bar, then the chips), the tabs scroll sideways and every control is 44 px. */
+.hits { display: flex; flex-direction: column; }
+.hit { padding: 10px 16px; border-bottom: 1px solid var(--mantine-color-slate-6); }
+.hit:last-child { border-bottom: none; }
+.crafter { min-width: 0; }
+.who { min-width: 0; }
+.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crafters { display: flex; flex-direction: column; }
+.craftRow { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(140px, 1fr) minmax(0, 2fr); gap: 6px 16px; align-items: center;
+            padding: 10px 16px; border-bottom: 1px solid var(--mantine-color-slate-6); }
+.craftRow:last-child { border-bottom: none; }
+.craftRow > * { min-width: 0; }
+.skill { min-width: 0; }
+.recipes { min-width: 0; }
+.tabs { scrollbar-width: thin; }
+.tabs :global(.mantine-Tabs-tab) { flex-shrink: 0; }
+
+@media (max-width: 48em) {
+  .hit { margin: 10px 12px; border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; padding: 10px 12px; }
+  .hit:last-child { border-bottom: 1px solid var(--mantine-color-slate-5); }
+  .craftRow { grid-template-columns: minmax(0, 1fr); padding: 10px 12px; }
+  .touch :global(.mantine-Button-root),
+  .touch :global(.mantine-ActionIcon-root) { min-height: 44px; min-width: 44px; }
+  .touch :global(.mantine-Tabs-tab),
+  .touch :global(.mantine-Input-input) { min-height: 44px; }
+}

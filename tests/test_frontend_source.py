@@ -436,3 +436,13 @@ def test_professions_line_and_editor_on_me_and_members():
     assert "<ProfessionLine" in me and "Professions…" in me and "<ProfessionLine" in mem and "Professions…" in mem
     icons = (SRC / "components" / "Icons.tsx").read_text()
     assert '"profession"' in icons
+
+
+def test_professions_page_is_the_finder_with_officer_maintenance():
+    src = (SRC / "pages" / "Professions.tsx").read_text()
+    app = (SRC / "App.tsx").read_text()
+    assert 'path="/professions"' in app and '{ to: "/professions", label: "Professions"' in app
+    assert "/api/professions/find" in src and "Who can make what" in src
+    assert "Rename…" in src and "Merge…" in src and "officer" in src
+    assert "Nobody has registered" in src and "no notable recipes registered" in src
+    assert 'useLive(load, ["member", "config"])' in src

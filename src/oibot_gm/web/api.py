@@ -2557,7 +2557,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     from .api_professions import install_professions_api  # the Professions page: catalog, finder, rename / merge (design §5.60)
 
-    install_professions_api(app, bot, who=who, body=body)
+    install_professions_api(app, bot, who=who, body=body, publish=publish)
 
     from .api_guides import install_guides_api  # the leveling-guide tool on the Me page (design §5.55)
 

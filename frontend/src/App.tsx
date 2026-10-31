@@ -3,7 +3,7 @@ import { REFRESH_EVENT } from "./hooks/usePoll";
 import { Alert, AppShell, Avatar, Box, Burger, Button, Group, Menu, Modal, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconGauge, IconMessageCircle, IconHelp, IconScale, IconUserPlus } from "@tabler/icons-react";
+import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconGauge, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
@@ -17,6 +17,7 @@ import { AurasPage } from "./pages/Auras";
 import { AgentsPage } from "./pages/Agents";
 import { LootPage } from "./pages/Loot";
 import { LootLogPage } from "./pages/LootLog";
+import { ProfessionsPage } from "./pages/Professions";
 import { ReadinessPage } from "./pages/Readiness";
 import { TellTheBot } from "./components/TellTheBot";
 import { PolicyPage } from "./pages/Policy";
@@ -24,7 +25,7 @@ import { HelpPage } from "./pages/Help";
 import { ApplicationsPage } from "./pages/Applications";
 import { anyDirty } from "./hooks/useDirty";
 
-const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", label: "Loot log", icon: IconClipboardList }, { to: "/help", label: "Help", icon: IconHelp }];
+const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", label: "Loot log", icon: IconClipboardList }, { to: "/professions", label: "Professions", icon: IconTool }, { to: "/help", label: "Help", icon: IconHelp }];
 const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
   { to: "/raids", label: "Raids", icon: IconMountain },
@@ -182,6 +183,7 @@ export default function App() {
             <Route path="/help" element={<HelpPage />} />
             <Route path="/loot" element={officer(<LootPage meta={meta} />)} />
             <Route path="/loot-log" element={<LootLogPage meta={meta} />} />
+            <Route path="/professions" element={<ProfessionsPage meta={meta} />} />
             <Route path="/config" element={officer(<ConfigPage meta={meta} />)} />
             <Route path="*" element={<Navigate to="/me" replace />} />
           </Routes>

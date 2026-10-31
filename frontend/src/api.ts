@@ -105,6 +105,13 @@ export interface GuideStatus {
 export interface Recipe { name: string; id: number | null }
 /** One profession on a character: a profile profession id, its skill (1..meta.professions.skill_cap), notable recipes. */
 export interface Profession { id: string; skill: number; recipes: Recipe[] }
+/** The Professions page (GET /api/professions, design §5.60): one crafter = a character holding a profession; `cls` = its
+ *  class (icon and colour), `member` = the display name (a name, never a ping). */
+export interface Crafter { label: string; member: string; uid: string; skill: number; profession: string; cls: string | null }
+/** A registered recipe and its makers (highest skill first); `key` = the normalised name rename / merge take. */
+export interface CatalogRecipe { key: string; name: string; profession: string; id: number | null; crafters: Crafter[] }
+/** Every profession with its crafters, every registered recipe, and `officer` = the reader may rename or merge. */
+export interface ProfessionsData { professions: { id: string; name: string; group: string; icon: string; crafters: Crafter[] }[]; recipes: CatalogRecipe[]; officer: boolean }
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
 export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[]; professions?: Profession[] }
 export interface Absence { start: string; end: string; reason: string | null; span?: string }  // `span` = the days in words (the clock rule); start/end stay ISO for the clear call

@@ -20,7 +20,7 @@ HEADERS = {"Authorization": f"Bearer {os.environ['OIBOT_MCP_TOKEN']}"} if os.env
 
 OUT = Path(__file__).resolve().parents[1] / "out" / "shots"
 OUT.mkdir(parents=True, exist_ok=True)
-PAGES = ["/app/me", "/app/rosters", "/app/raids", "/app/members", "/app/readiness", "/app/loot", "/app/loot-log", "/app/applications",
+PAGES = ["/app/me", "/app/rosters", "/app/raids", "/app/members", "/app/readiness", "/app/loot", "/app/loot-log", "/app/professions", "/app/applications",
          "/app/policy", "/app/agents", "/app/auras", "/app/ops", "/app/config", "/app/help", "/schedule"]
 ap = argparse.ArgumentParser(description="Screenshot every dashboard page.")
 ap.add_argument("base", nargs="?", default="http://127.0.0.1:8788")

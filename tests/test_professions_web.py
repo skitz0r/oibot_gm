@@ -21,7 +21,7 @@ def test_professions_page_reads_catalog_and_find(w):
     assert [p["id"] for p in d["professions"]][:3] == ["alchemy", "blacksmithing", "enchanting"] and d["officer"] is False
     assert d["recipes"][0]["name"] == "Mooncloth Bag" and d["recipes"][0]["crafters"][0]["skill"] == 300
     tailoring = next(p for p in d["professions"] if p["id"] == "tailoring")
-    assert tailoring["crafters"] == [{"label": m.main.label, "member": m.display_name, "uid": str(m.discord_id), "skill": 300, "profession": "tailoring"}]
+    assert tailoring["crafters"] == [{"label": m.main.label, "member": m.display_name, "uid": str(m.discord_id), "skill": 300, "profession": "tailoring", "cls": m.main.cls}]
     assert w.c.get("/api/professions/find?q=mooncloth%20bag", headers=h).json()["recipes"][0]["name"] == "Mooncloth Bag"
     assert w.c.get("/api/professions", headers=as_user(w, OFFICER)).json()["officer"] is True
 
