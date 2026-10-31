@@ -182,10 +182,13 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
             d, _ = _find_profession(reg, hint)
             if not any(p["id"] == d.id for p in cur):
                 raise RegistryError(f"{c.label} has no {d.name} on record.")
+            if not d.makes:
+                raise RegistryError(f"{d.name} has no recipes.")
             takes = [p for p in takes if p["id"] == d.id]
         if field == "recipe_remove":  # a remove names the profession that holds it; it asks which only when several do
-            holding = [p for p in takes if any(norm_recipe(r["name"]) == k for r in p["recipes"])]
-            takes = holding or takes
+            takes = [p for p in takes if any(norm_recipe(r["name"]) == k for r in p["recipes"])]
+            if not takes:
+                raise RegistryError(f"{c.label} has no {name} on record.")
         if not takes:
             raise RegistryError(f"{c.label} has no profession that makes things on record — say which, like 'Leatherworking 300'.")
         if len(takes) > 1:
@@ -210,13 +213,16 @@ HELP_WORDS = re.compile(r"\b(profession|professions|craft\w*|make|makes|recipe|r
 
 
 def help_hit(reg: Registry, q: str) -> bool:
-    """The question names a profession ('alchemist', 'leatherworking') or a registered recipe."""
+    """The question names a profession ('alchemist', 'leatherworking': a one-word name's first six letters at a word
+    start; 'first aid': the whole name) or a registered recipe (its whole words). 'the first boss', 'determining the
+    comp' and 'baggage' hit nothing."""
     q = norm_recipe(q)
     for d in reg.profile.professions.values():
-        stem = norm_recipe(d.name)[:6].strip()
-        if stem and stem in q:
+        name = norm_recipe(d.name)
+        pat = rf"\b{re.escape(name)}\b" if " " in name else rf"\b{re.escape(name[:6])}"
+        if name and re.search(pat, q):
             return True
-    return any(e.key in q for e in catalog(reg))
+    return any(re.search(rf"\b{re.escape(e.key)}\b", q) for e in catalog(reg) if e.key)
 
 
 def help_section(ask) -> list[str]:

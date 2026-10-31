@@ -77,3 +77,17 @@ def test_an_unknown_character_field_lists_the_profession_fields(reg):
     m = reg.members[UID]
     with pytest.raises(RegistryError, match="flex \\| profession \\| profession_remove \\| recipe_add \\| recipe_remove$"):
         configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="haircut", value="x"))
+
+
+def test_recipe_remove_of_a_recipe_nobody_holds_is_refused_not_asked(reg):
+    reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "leatherworking", "skill": 300}, {"id": "cooking", "skill": 300}]}], "t", officer=True)
+    m = reg.members[UID]
+    with pytest.raises(RegistryError, match=f"^{LABEL} has no Mooncloth Bag on record\\.$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_remove", value="Mooncloth Bag"))
+
+
+def test_a_hint_naming_a_profession_that_makes_nothing_is_refused(reg):
+    reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "leatherworking", "skill": 300}, {"id": "fishing", "skill": 150}]}], "t", officer=True)
+    m = reg.members[UID]
+    with pytest.raises(RegistryError, match="^Fishing has no recipes\\.$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Big Fish", text="fishing"))

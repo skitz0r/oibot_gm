@@ -192,3 +192,14 @@ def test_import_boundary_recognises_nothing_yet():
     assert pimp.detect("anything") is None and pimp.FORMATS == {}
     with pytest.raises(pimp.ImportError_, match="isn't a professions export the bot can read yet"):
         pimp.parse("anything")
+
+
+def test_help_hit_matches_words_not_pieces_of_words(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Bag"}]}])
+    assert not pr.help_hit(reg, "who killed the first boss")
+    assert not pr.help_hit(reg, "determining the comp")
+    assert not pr.help_hit(reg, "where does my baggage go")
+    assert pr.help_hit(reg, "first aid 300 on Jonnie")
+    assert pr.help_hit(reg, "any alchemists?")
+    assert pr.help_hit(reg, "who has a bag for me")
