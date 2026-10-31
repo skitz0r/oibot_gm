@@ -79,7 +79,9 @@ verb, one audit line.
 
 *profession* · *skill* (a number, 1–300; 300 reads green) · *notable recipes* (the ones worth telling the guild about,
 never a full book) · *crafter* (a character that knows a recipe or has the profession) · *who can make* (the finder).
-Skill is typed on the site (validated 1–300) and a select of 25-point steps in Discord (Wizard rule). Icons stand
+Skill is typed on the site (validated 1–300) and a select in Discord (Wizard rule): 1, then 25 to 275 by 25, then
+280 to 300 by 5, seventeen choices, finer near the cap where people ask. Built: the decide screen has no "Do it with a
+note…" because the character save keeps no note. Icons stand
 alone: a profession icon with the skill beside it, no label (Iconography rule). Empty states in words: "No notable
 recipes yet — add the ones worth telling the guild about in Professions…"; "no professions on record — <name> adds
 them on the Me page or with /me professions"; "Nobody has registered Cooking yet. A cook adds it on the Me page, with
