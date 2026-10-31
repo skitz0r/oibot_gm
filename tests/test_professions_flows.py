@@ -237,3 +237,38 @@ def test_professions_list_shows_crafters_or_says_how_to_add_one(reg):
     text, kw = ix.response.sent[0]
     assert "**Leatherworking** · 1 crafter" in text and "Thornwick" in text and kw["ephemeral"]
     assert kw["allowed_mentions"].to_dict()["parse"] == []
+
+
+def test_professions_who_stays_under_discords_limit_and_says_how_many_more(reg):
+    tree = _offline_tree(reg)
+    recipes = [{"name": "Devilsaur Gauntlets"}, {"name": "Devilsaur Leggings"}, {"name": "Devilsaur Armor"}]
+    for i in range(10):
+        uid = 9200 + i
+        label = "Crafterxxx" + "abcdefghij"[i]
+        reg.add_character(uid, f"A rather long display name for crafter number {i:02d}", label, "Hunter", "Survival", None, True)
+        reg.save_character_table(uid, [{"label": label, "professions": [{"id": "leatherworking", "skill": 300 - i, "recipes": recipes}]}], "t", officer=True)
+    ix = _ix(reg)
+    asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="devilsaur gauntlets leggings armor"))
+    text, kw = ix.response.sent[0]
+    assert len(text) < 2000
+    assert text.splitlines()[-1].startswith("…and ") and text.endswith("more — the Professions page has them all.")
+    shown = sum(1 for line in text.splitlines() if line.startswith("• "))
+    assert int(text.splitlines()[-1].split()[1]) == 30 - shown
+
+
+def test_professions_who_escapes_member_text_and_survives_a_profession_left_out_of_the_profile(reg):
+    tree = _offline_tree(reg)
+    reg.add_character(9300, "Star*Man_", "Starman", "Hunter", "Survival", None, True)
+    reg.save_character_table(9300, [{"label": "Starman", "professions": [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Bold *Gloves*"}]}]}], "t", officer=True)
+    ix = _ix(reg)
+    asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="bold gloves"))
+    text, _ = ix.response.sent[0]
+    assert "Star\\*Man\\_" in text and "Bold \\*Gloves\\*" in text
+    gone = reg.profile.professions.pop("leatherworking")
+    try:
+        ix = _ix(reg)
+        asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="bold gloves"))
+        text, _ = ix.response.sent[0]
+        assert text.splitlines()[0] == "**Bold \\*Gloves\\***"
+    finally:
+        reg.profile.professions["leatherworking"] = gone  # the profile may be shared by the session's fixtures

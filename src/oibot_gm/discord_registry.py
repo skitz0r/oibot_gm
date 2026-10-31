@@ -856,10 +856,43 @@ def profession_choices(guilds) -> list[app_commands.Choice[str]]:
     if not seen:
         import yaml
 
-        for f in sorted((Path(__file__).resolve().parents[2] / "profiles").glob("*/professions.yaml")):
-            for pid, d in ((yaml.safe_load(f.read_text()) or {}).get("professions") or {}).items():
-                seen.setdefault(pid, str(d["name"]))
+        root = getattr(guilds, "code_root", None) or Path(__file__).resolve().parents[2]
+        for f in sorted((Path(root) / "profiles").glob("*/professions.yaml")):
+            try:
+                for pid, d in ((yaml.safe_load(f.read_text()) or {}).get("professions") or {}).items():
+                    seen.setdefault(pid, str(d["name"]))
+            except Exception:  # noqa: BLE001 — a malformed file never fails registration
+                log.exception("professions choices: %s does not read", f)
     return [app_commands.Choice(name=n, value=v) for v, n in seen.items()][:25]
+
+
+MORE_LINE = "…and {n} more — the Professions page has them all."
+
+
+def fit_lines(blocks: list[tuple[str, list[str]]], footer: str | None = None, budget: int = 1900) -> str:
+    """A finder's reply under Discord's 2000 characters: each (header, crafter lines) block in order while the budget
+    lasts, then the footer; whatever is left out is counted in one closing MORE_LINE (a block cut before its header counts its lines, at least 1)."""
+    out: list[str] = []
+    used = len(footer) + 1 if footer else 0
+    reserve = len(MORE_LINE.format(n=99999)) + 1
+    left = 0
+    for head, rows in blocks:
+        if left or used + len(head) + 1 + reserve > budget:
+            left += max(1, len(rows))
+            continue
+        out.append(head)
+        used += len(head) + 1
+        for i, r in enumerate(rows):
+            if used + len(r) + 1 + reserve > budget:
+                left += len(rows) - i
+                break
+            out.append(r)
+            used += len(r) + 1
+    if footer:
+        out.append(footer)
+    if left:  # the last line, so a cut reply ends on where the rest is
+        out.append(MORE_LINE.format(n=left))
+    return "\n".join(out)
 
 
 def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_mod.Ops, ico) -> None:
@@ -1108,12 +1141,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not hits:
             await interaction.response.send_message("Nobody has registered that recipe yet — crafters add theirs with /me professions.", ephemeral=True)
             return
-        lines = []
-        for e in hits[:3]:
-            lines.append(f"**{e.name}** · {reg.profile.profession(e.profession).name}")
-            lines += [f"• **{c.label}** — {c.member} · {c.skill}" for c in e.crafters[:10]]
-        lines.append("Names only — ask them. Crafters add theirs with /me professions.")
-        await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        esc = discord.utils.escape_markdown
+        blocks = []
+        for e in hits:
+            d = reg.profile.professions.get(e.profession)  # a recipe whose profession left the profile keeps no suffix
+            blocks.append((f"**{esc(e.name)}**" + (f" · {d.name}" if d else ""),
+                           [f"• **{esc(c.label)}** — {esc(c.member)} · {c.skill}" for c in e.crafters]))
+        footer = "Names only — ask them. Crafters add theirs with /me professions."
+        await interaction.response.send_message(fit_lines(blocks, footer), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     async def professions_list(interaction: discord.Interaction, profession: str):
         reg, interaction = await need(interaction)
@@ -1128,9 +1163,10 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not cs:
             await interaction.response.send_message(f"Nobody has registered {d.name} yet. A crafter adds it with /me professions or on the Me page.", ephemeral=True)
             return
-        body = "\n".join(f"• **{c.label}** — {c.member} · {c.skill}" for c in cs[:25])
-        await interaction.response.send_message(f"**{d.name}** · {len(cs)} crafter{'s' if len(cs) != 1 else ''}\n{body}", ephemeral=True,
-                                                allowed_mentions=discord.AllowedMentions.none())
+        esc = discord.utils.escape_markdown
+        head = f"**{d.name}** · {len(cs)} crafter{'s' if len(cs) != 1 else ''}"
+        text = fit_lines([(head, [f"• **{esc(c.label)}** — {esc(c.member)} · {c.skill}" for c in cs])])
+        await interaction.response.send_message(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     professions_list = app_commands.describe(profession="which profession")(professions_list)
     if choices := profession_choices(guilds):  # a Choice list from the game data, never a typed name
