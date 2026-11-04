@@ -312,3 +312,14 @@ News as memories (dropped 2026-11-04). Editing a memory (forget and say it again
 of the message (Forget covers it). Threads of a listening channel (not listened, so not remembered). Memories across
 guilds. A summary or distillation of memories (they are quotes). A per-guild keep line (the host's `OIBOT_REMEMBER_AT`
 only). Profile words as synonyms in recall (the names list covers the observed miss; revisit with evidence). Any DM.
+
+## Rulings made while planning (2026-11-04, `docs/superpowers/plans/2026-11-04-chat-memory.md`)
+
+- A memory's id is `"m-" + sha1(f"{guild key}:{message id}")[:8]` (eight hex, not six).
+- The channel-Off forget runs from `memory.on_save` on `registry.SAVE_LISTENERS` after every config commit (`Memories.sync`:
+  rows of a channel no longer in `memory_channels()` are forgotten), not from `_apply_async` — `plain` is a pure op applied
+  in a worker thread, and one listener covers Discord, the web and MCP.
+- `MEMORIES` lives in `memory.py` (a leaf module; `discord_bot.run` sets it) so `configops` can read counts without a cycle.
+- A failed embedder is one log line an hour and the Host card's "Memory model: not loaded yet" line, not an ops warn.
+- The Me card's empty state reads "Nothing remembered yet. …" (the Copy rule's lint on bare "nothing yet").
+- `GET /api/memories` and the forget routes name their parameter `{key}`; the parity exemption matches that spelling.
