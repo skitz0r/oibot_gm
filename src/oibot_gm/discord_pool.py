@@ -21,7 +21,7 @@ from . import perms
 from . import raid_views as views
 from .discord_people import PeopleMixin
 from .discord_registry import registration_card, registration_view
-from .registry import LISTEN_WORDS, Registry, RegistryError
+from .registry import LISTEN_WORDS, MEMORY_WORDS, Registry, RegistryError
 
 log = logging.getLogger(__name__)
 
@@ -517,8 +517,10 @@ def plain_read_text(reg: Registry, table: dict, here) -> str:
     where = "Here (DMs)" if here is None else (f"Here (#{name})" if name else f"Here (<#{here}>)")
     mode = reg.plain_mode(here)
     heard = reg.listen_mode(here) if here is not None else None
+    kept = reg.memory_mode(here) if here is not None else None
     lines = [f"**{where}: {PLAIN_MODE_WORDS.get(mode, mode)}** — {plain_why(reg, here)}"
-             + (f" — listening ({LISTEN_WORDS.get(heard, heard)})" if heard else ""), "", "**Who may change what**"]
+             + (f" — listening ({LISTEN_WORDS.get(heard, heard)})" if heard else "")
+             + (f", {MEMORY_WORDS[kept].lower()}" if heard and kept in MEMORY_WORDS else ""), "", "**Who may change what**"]
     lines += [f"• {g['label']}: {g['who']}" for g in table["groups"]]
     lines += ["", "**Where**", f"• DMs to the bot: {PLAIN_MODE_WORDS.get(table['dm'], table['dm'])}",
               f"• Any other channel: {PLAIN_MODE_WORDS.get(table['default'], table['default'])}"]
@@ -527,9 +529,11 @@ def plain_read_text(reg: Registry, table: dict, here) -> str:
             label = "#" + c["name"] if c["name"] else "<#" + str(c["id"]) + ">"
             lines.append(f"• {label}: {PLAIN_MODE_WORDS.get(c['mode'], c['mode'])} — {c['why']}")
     lines.append("• The site and MCP: Acts (not configurable)")
+    remembers = {str(c["id"]): c["mode"] for c in table.get("remember") or []}  # §5.61: a listening channel the bot also remembers
     for c in table.get("listen") or []:  # §5.59: where the bot reads untagged messages and answers what is clearly for it
         label = "#" + c["name"] if c.get("name") else "<#" + str(c["id"]) + ">"
-        lines.append(f"• {label}: {LISTEN_WORDS.get(c['mode'], c['mode'])} — listening")
+        kept = remembers.get(str(c["id"]))
+        lines.append(f"• {label}: {LISTEN_WORDS.get(c['mode'], c['mode'])} — listening" + (f", {MEMORY_WORDS[kept].lower()}" if kept in MEMORY_WORDS else ""))
     lines += ["", "-# The owner edits this on the site (Ops › Plain-text permissions). Refusals say who may and where."]
     return "\n".join(lines)
 
@@ -706,7 +710,9 @@ class SetupMixin:
         ids = list(cfg.plain.channels) + [str(c) for c in (cfg.ops_channel_id, cfg.analytics_channel_id) if c and str(c) not in cfg.plain.channels]
         channels = [{"id": cid, "name": names.get(cid), "mode": reg.plain_mode(cid), "why": plain_why(reg, cid)} for cid in dict.fromkeys(ids)]
         listen = [{"id": cid, "name": names.get(cid), "mode": mode} for cid, mode in reg.listen_channels().items()]  # §5.59
-        return {"groups": groups, "channels": channels, "dm": cfg.plain.dm, "default": cfg.plain.default, "names": names, "listen": listen}
+        remember = [{"id": cid, "name": names.get(cid), "mode": mode} for cid, mode in reg.memory_channels().items()]  # §5.61
+        return {"groups": groups, "channels": channels, "dm": cfg.plain.dm, "default": cfg.plain.default, "names": names, "listen": listen,
+                "remember": remember}
 
     def role_refusal(self, reg: Registry, rid: int | None) -> str | None:
         """Why a role can't be an officer (or member) role: @everyone, a bot's or an integration's managed role, a role this

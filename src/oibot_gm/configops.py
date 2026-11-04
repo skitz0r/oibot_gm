@@ -95,6 +95,9 @@ Plain-text permissions (owner only, never opened to anyone else): plain: target=
     "clear" = a listed channel goes back to the default) — "only officers can run runs by chat" = target=runs, value=officers;
   or target=listen <channel mention>, value=watch|reply|off (listening: the bot reads that channel without being tagged and
     answers what is clearly for it; watch = only notes what it would have answered) — "listen in #signups" = value=reply.
+  or target=remember <channel mention>, value=shared|channel|off (memory, §5.61: in a listening channel the bot keeps what members say
+    that is worth asking about later and repeats it as their words; shared = recalled anywhere it answers, channel = only when answering
+    in that channel; off forgets what it held) — "remember what's said in #general" = value=shared, "remember #officers here only" = value=channel.
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character> (character="all pending" = every
   character in the unconfirmed list: "confirm everyone pending"); set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
@@ -233,9 +236,9 @@ class ConfigOp(BaseModel):
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> (plain), item name or id (tier)")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
     field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex|profession|profession_remove|recipe_add|recipe_remove (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off; set <channel>: a mention or none; loot_weights: a number or default)")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
     end: Optional[str] = None
@@ -401,6 +404,7 @@ def plain_text_policy(reg: Registry) -> str:
     lines += [f"- channel <#{c}>: {m}" for c, m in chans.items()]
     lines += [f"- DMs: {p.dm}", f"- every other channel: {p.default}"]
     lines += [f"- listening in <#{c}>: {m}" for c, m in p.listen.items()] or ["- listening: off in every channel"]
+    lines += [f"- memory in <#{c}>: {m}" for c, m in p.remember.items()] or ["- memory: off in every channel"]
     return "\n".join(lines)
 
 
@@ -1660,6 +1664,9 @@ def _plain_patch(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
     from .registry import PLAIN_GROUPS, PLAIN_MODES
 
     t, v = (op.target or "").strip(), (op.value or "").strip()
+    cid = _remember_target(t)
+    if cid is not None:
+        return _remember_patch(reg, cid, v)
     listen_cid = _listen_target(t)
     if listen_cid is not None:
         return _listen_patch(reg, listen_cid, v)
@@ -1732,6 +1739,67 @@ def _listen_patch(reg: Registry, cid: int, value: str) -> tuple[dict, str]:
 def listen_reply_sentence(cid) -> str:
     """The one sentence a diff carries when a channel starts replying (the Confirm rule: one idea, a full sentence)."""
     return f"The bot answers messages in <#{cid}> that are clearly for it, without being tagged."
+
+
+MEMORY_OFF = LISTEN_OFF
+_REMEMBER_PREFIX = re.compile(r"^(?:remember(?:ing)?(?:\s+what(?:'s| is) said)?(?:\s+in)?|stop\s+remembering(?:\s+in)?|memory(?:\s+in)?|forget)\s+", re.I)
+_MEMORY_VALUES = {"on": "shared", "anywhere": "shared", "everywhere": "shared", "remembers": "shared", "remember": "shared", "yes": "shared",
+                  "here": "channel", "here only": "channel", "this channel": "channel", "this channel only": "channel", "remembers here only": "channel"}
+
+
+def _remember_target(target: str) -> int | None:
+    """'remember <#id>' · 'remember what's said in <#id>' · 'memory in <#id>' · 'stop remembering <#id>' · 'forget <#id>' → the id."""
+    m = _REMEMBER_PREFIX.match(target or "")
+    return _channel_id(target[m.end():]) if m else None
+
+
+def memory_word(mode: str | None) -> str:
+    """off | remembers | remembers here only — a channel's memory as a diff and a summary read it."""
+    from .registry import MEMORY_WORDS
+
+    return MEMORY_WORDS[mode].lower() if mode in MEMORY_WORDS else "off"
+
+
+def _remember_patch(reg: Registry, cid: int, value: str) -> tuple[dict, str]:
+    """The plain op's memory form: patch {"set_remember": {id: mode | None}} and 'memory in <#id>: off → remembers'."""
+    from .registry import MEMORY_MODES
+
+    mode = (value or "").strip().lower()
+    mode = _MEMORY_VALUES.get(mode, mode)
+    if mode not in MEMORY_OFF and mode not in MEMORY_MODES:
+        raise RegistryError("memory is shared, channel or off")
+    new = None if mode in MEMORY_OFF else mode
+    line = f"memory in <#{cid}>: {memory_word(reg.memory_mode(cid))} → {memory_word(new)}"
+    if new is not None:
+        from .llm import decisions
+
+        if not decisions.key_set():
+            line += " — the host hasn't set the TypeSafe key, so nothing is remembered yet"
+    return {"set_remember": {str(cid): new}}, line
+
+
+def memory_off_count(reg: Registry, cid) -> int:
+    """How many memories a channel holds (0 without the service)."""
+    from . import memory as mem
+
+    try:
+        return int(mem.MEMORIES.count(reg, channel=int(cid))) if mem.MEMORIES is not None else 0
+    except Exception:  # noqa: BLE001 — a preview never fails on a count
+        return 0
+
+
+def _memory_goes_off(reg: Registry, op: ConfigOp) -> list:
+    """The channel ids whose memory this plain op turns Off (a `remember … off`, or a `listen … off` on a remembering channel)."""
+    t = op.target or ""
+    cid = _remember_target(t)
+    if cid is not None:
+        patch, _ = _remember_patch(reg, cid, op.value or "")
+        return [cid] if patch["set_remember"][str(cid)] is None and reg.memory_mode(cid) else []
+    cid = _listen_target(t)
+    if cid is not None:
+        patch, _ = _listen_patch(reg, cid, op.value or "")
+        return [cid] if patch["set_listen"][str(cid)] is None and reg.memory_mode(cid) else []
+    return []
 
 
 def _plain_warning(reg: Registry, patch: dict, channel) -> str:
@@ -3337,6 +3405,7 @@ def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[S
     out.append(SummarySection(key="plain", title="Plain text", lines=[
         f"In DMs: {reg.plain_mode(None)} · elsewhere: {cfg.plain.default} by default" + (f" · {len(cfg.plain.channels)} channel(s) set" if cfg.plain.channels else ""),
         listen_summary(reg),
+        memory_summary(reg),
         "The whole policy is on the site's Ops page (Plain-text permissions)."]))
     puppets = reg.test_members()
     if puppets:
@@ -3361,6 +3430,14 @@ def listen_summary(reg: Registry) -> str:
     return "Listening: " + ", ".join(f"<#{c}> {listen_word(m)}" for c, m in chans.items())
 
 
+def memory_summary(reg: Registry) -> str:
+    """'Memory: <#1> remembers, <#2> remembers here only' or how to turn it on (§5.61)."""
+    chans = reg.memory_channels()
+    if not chans:
+        return "Memory: off in every channel — the owner turns it on per listening channel on the Ops page."
+    return "Memory: " + ", ".join(f"<#{c}> {memory_word(m)}" for c, m in chans.items())
+
+
 def host_facts(reg: Registry, bot=None) -> list[str]:
     """What the guild's owner must know about the host they share (design §3.5 O-01 / O-19 / O-20 / OPS-01, owner only):
     who gets the error alerts, who can act as them (the host superusers, by name), the LLM spend against the shared cap,
@@ -3378,6 +3455,10 @@ def host_facts(reg: Registry, bot=None) -> list[str]:
     from .llm import decisions
 
     lines.append("TypeSafe key: set" if decisions.key_set() else "TypeSafe key: not set (Listening stays quiet)")  # names only, never the value (§5.59)
+    from . import memory as mem
+
+    state = mem.MEMORIES.model_state() if mem.MEMORIES is not None else "off"  # a state, never a path (§5.61)
+    lines.append("Memory model: loaded" if state == "loaded" else "Memory model: not loaded yet (the bot downloads it once; until then it remembers words without the meaning search)")
     if reg.config.detached_at:
         lines.append(f"Parked since {reg.local12(reg.config.detached_at)}: the bot is no longer in this server — invite it back")
     started = float(getattr(bot, "started_at", 0) or 0) if bot is not None else 0.0
@@ -3487,6 +3568,8 @@ def _plain_merged(reg: Registry, parts: list[ConfigOp]) -> dict:
             patch.setdefault("set_channels", {}).update(one["set_channels"])
         if "set_listen" in one:
             patch.setdefault("set_listen", {}).update(one["set_listen"])
+        if "set_remember" in one:
+            patch.setdefault("set_remember", {}).update(one["set_remember"])
         for k in ("dm", "default"):
             if k in one:
                 patch[k] = one[k]
@@ -3671,9 +3754,19 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
                     ops.append(ConfigOp(op="plain", target=f"listen <#{cid}>", value="off"))
         for cid, mode in (fields.get("set_listen") or {}).items():
             ops.append(ConfigOp(op="plain", target=f"listen <#{str(cid).strip('<#>')}>", value=str(mode) if mode not in (None, "") else "off"))
-        bad = [f for f in fields if f not in ("groups", "channels", "set_channels", "dm", "default", "listen", "set_listen")]
+        if "remember" in fields:  # the WHOLE memory map (§5.61)
+            want = {str(c).strip("<#>"): m for c, m in (fields.get("remember") or {}).items() if m not in (None, "", "off")}
+            for cid, mode in want.items():
+                if cur.remember.get(cid) != mode:
+                    ops.append(ConfigOp(op="plain", target=f"remember <#{cid}>", value=str(mode)))
+            for cid in cur.remember:
+                if cid not in want:
+                    ops.append(ConfigOp(op="plain", target=f"remember <#{cid}>", value="off"))
+        for cid, mode in (fields.get("set_remember") or {}).items():
+            ops.append(ConfigOp(op="plain", target=f"remember <#{str(cid).strip('<#>')}>", value=str(mode) if mode not in (None, "") else "off"))
+        bad = [f for f in fields if f not in ("groups", "channels", "set_channels", "dm", "default", "listen", "set_listen", "remember", "set_remember")]
         if bad:
-            raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default, listen, set_listen)")
+            raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default, listen, set_listen, remember, set_remember)")
         return ops
     if k == "comp":  # officers' comp targets: target = a raid id (or a run key); fields = {slot: {min, max, note} | null}
         key = (target or "").strip()
@@ -3875,6 +3968,16 @@ def _warn_plain(reg: Registry, op: ConfigOp) -> bool:
     return t in ("dm", "dms", "direct messages") or (_channel_id(op.target) is not None and str(_channel_id(op.target)) == str(reg.config.ops_channel_id))
 
 
+def _warn_plain_or_memory(reg: Registry, op: ConfigOp) -> bool:
+    """The plain op's warn class: plain text on the ops channel or in DMs, or a channel's memory turned Off (§5.61)."""
+    if _warn_plain(reg, op):
+        return True
+    try:
+        return bool(_memory_goes_off(reg, op))
+    except RegistryError:
+        return False
+
+
 def _warn_schedule(reg: Registry, op: ConfigOp) -> bool:
     try:
         _sid, setting = _schedule_ref(op)
@@ -3893,7 +3996,7 @@ WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
     "aura_set": lambda reg, op: (op.field or "").strip() in ("scope", "family"),  # what stacks and how far it reaches
     "aura_reset": _always,  # every aura, or one buff / family, back to the defaults (the AuraWizard asks with decide, the web with the review)
     "recruit": lambda reg, op: (op.field or "").strip().lower() == "open" and (op.value or "").strip().lower() in ("false", "no", "off", "closed"),
-    "plain": _warn_plain,  # plain text on the ops channel or in DMs
+    "plain": _warn_plain_or_memory,  # plain text on the ops channel or in DMs, or a channel's memory turned Off
     "run_lock": _always, "run_cancel": _always, "proposal": _always,
     "test": lambda reg, op: (op.value or "").strip().lower().startswith("clear"),
     "loot_weights": _always,  # every future award's score (phase 4, §5.48): reviewed with the profile default beside each number
@@ -4006,6 +4109,16 @@ def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None =
                 out.append("Sheets will have nowhere to post until a signup channel is set.")
             else:
                 out.append(f"The bot stops posting this in <#{getattr(reg.config, f'{op.path}_id')}>, and what is already there stays.")
+        elif op.op == "plain" and (_remember_target(op.target or "") is not None or (_listen_target(op.target or "") is not None and _memory_goes_off(reg, op))):
+            from .consequences import memory_off_consequence
+
+            for cid in _memory_goes_off(reg, op):
+                out.append(memory_off_consequence(reg, cid, memory_off_count(reg, cid)))
+            if _listen_target(op.target or "") is not None:
+                patch, _ = _plain_patch(reg, op)
+                for cid, mode in patch["set_listen"].items():
+                    if mode == "reply" and reg.listen_mode(cid) != "reply":
+                        out.append(listen_reply_sentence(cid))
         elif op.op == "plain" and _listen_target(op.target or "") is not None:
             patch, _ = _plain_patch(reg, op)
             for cid, mode in patch["set_listen"].items():
