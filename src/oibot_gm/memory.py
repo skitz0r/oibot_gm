@@ -1,11 +1,12 @@
-"""Chat memory (design §5.61, a spike for now — nothing in the live bot calls this yet).
+"""Chat memory (design §5.61): what members said in the channels the owner set to remember, kept verbatim and recalled
+when someone later asks the bot — the listening gate, @mentions, DMs and the site all read it through `MEMORIES`.
 
 What the bot remembers is what a member SAID, kept verbatim with who, where and when, and repeated later as their words
-("Mara said on Oct 30 that …") — never restated as the bot's own claim. Three parts, all offline-capable:
+("Mara said on 30 Oct that …") — never restated as the bot's own claim. Three parts, all offline-capable:
 
 - the REMEMBER question (`REMEMBER_QUESTION` / `REMEMBER_CRITERIA`): a Jev noul over a listened message, "is this a
-  fact someone could ask about later?" — meant to ride in the same request as listening's gate;
-- `MemoryStore`: one SQLite file per host (rows per guild) with FTS5 for the words and the embeddings as blobs, searched
+  fact someone could ask about later?" — it rides in the same request as listening's gate;
+- `MemoryStore`: one SQLite file per guild with FTS5 for the words and the embeddings as blobs, searched
   by brute force in numpy (a guild's memories are thousands, not millions); `recall` fuses the lexical and the vector
   ranks (reciprocal rank fusion) and honours the channel scope (`shared` recalled anywhere, `channel` only in its own);
 - the RELEVANCE question (`relevance_question`): a Jev choice over the recalled candidates, "which one answers this,
@@ -13,7 +14,8 @@ What the bot remembers is what a member SAID, kept verbatim with who, where and 
 
 The embedder is local (bge-small-en-v1.5 through fastembed / ONNX Runtime; the model is ~130 MB, downloaded once):
 member chat never leaves the machine. Member text is data: everything typed goes into the state as JSON values, and
-the memory text in a prompt goes through `llm.provider.unfence`.
+the memory text in a prompt goes through `llm.provider.unfence`. Every date a person reads is the guild's local day
+(pass the guild's `tz`, Registry.tz; UTC when none is given).
 """
 from __future__ import annotations
 
@@ -31,6 +33,8 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 EMBED_DIMS = 384
@@ -99,19 +103,24 @@ class Memory:
     context: str = ""  # the message it replied to ("Mara: …"), when it was a Discord reply — a reply alone says little
     rowid: int = 0  # the store's own row number (its joins with the words index); never an id anyone sees
 
-    def when(self) -> str:
-        """'30 Oct' / '30 Oct 2025' — the date a citation carries (never a time: people quote days)."""
+    def when(self, tz=None) -> str:
+        """'30 Oct' / '30 Oct 2025' — the date a citation carries (never a time: people quote days), on the guild's own
+        day when `tz` is given (Registry.tz: an evening message in Pacific time is that evening's day, not UTC's)."""
         try:
             d = datetime.fromisoformat(self.at)
         except ValueError:
             return self.at[:10]
-        now = datetime.now(timezone.utc)
+        zone = tz or timezone.utc
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        d = d.astimezone(zone)
+        now = datetime.now(zone)
         return d.strftime("%-d %b") if d.year == now.year else d.strftime("%-d %b %Y")
 
-    def citation(self) -> str:
+    def citation(self, tz=None) -> str:
         """The words an answer repeats: who said it, when, and what — verbatim (and what they replied to, when known)."""
         tail = f" (replying to {self.context})" if self.context else ""
-        return f"{self.author} said on {self.when()}: {self.text}{tail}"
+        return f"{self.author} said on {self.when(tz)}: {self.text}{tail}"
 
 
 def index_text(author: str, text: str, context: str = "") -> str:
@@ -137,32 +146,33 @@ def remember_state(bot_words: str, channel_name: str, recent: list[dict], author
             "message": {"author": author, "text": text[:TEXT_MAX]}}
 
 
-def memory_state(candidates: list[Candidate]) -> list[dict]:
+def memory_state(candidates: list[Candidate], tz=None) -> list[dict]:
     """The `memory` key of a decision state: the recalled memories as data (id m1.., who, when, words, what it replied to)."""
-    return [{"id": f"m{i + 1}", "author": c.memory.author, "when": c.memory.when(), "text": c.memory.text,
+    return [{"id": f"m{i + 1}", "author": c.memory.author, "when": c.memory.when(tz), "text": c.memory.text,
              **({"replying_to": c.memory.context} if c.memory.context else {})} for i, c in enumerate(candidates)]
 
 
-def relevance_criteria(candidates: list[Candidate]) -> dict:
+def relevance_criteria(candidates: list[Candidate], tz=None) -> dict:
     """The judge's options: m1..mN carry each memory's citation, plus `none`."""
-    criteria = {f"m{i + 1}": c.memory.citation() for i, c in enumerate(candidates)}
+    criteria = {f"m{i + 1}": c.memory.citation(tz) for i, c in enumerate(candidates)}
     criteria[NONE] = "No remembered message answers it."
     return criteria
 
 
-def relevance_question(message: str, candidates: list[Candidate]) -> tuple[dict, str, dict]:
+def relevance_question(message: str, candidates: list[Candidate], tz=None) -> tuple[dict, str, dict]:
     """(state, instructions, criteria) for the judge alone (an @mention, a DM, the site)."""
-    return {"message": {"text": message[:TEXT_MAX]}, "memory": memory_state(candidates)}, RELEVANCE_INSTRUCTIONS, relevance_criteria(candidates)
+    return ({"message": {"text": message[:TEXT_MAX]}, "memory": memory_state(candidates, tz)}, RELEVANCE_INSTRUCTIONS,
+            relevance_criteria(candidates, tz))
 
 
-def questions(listen_instructions: str, listen_criteria: dict, candidates: list[Candidate], remember: bool) -> dict:
+def questions(listen_instructions: str, listen_criteria: dict, candidates: list[Candidate], remember: bool, tz=None) -> dict:
     """ONE Jev request's questions against the listening state: `decision` (is it for the bot), `remember` (worth
     keeping — only in a channel that remembers) and `relevance` (which recalled memory answers it — only with candidates)."""
     q = {"decision": {"type": "noul", "instructions": listen_instructions, "criteria": dict(listen_criteria)}}
     if remember:
         q["remember"] = {"type": "noul", "instructions": REMEMBER_QUESTION, "criteria": dict(REMEMBER_CRITERIA)}
     if candidates:
-        q["relevance"] = {"type": "choice", "instructions": RELEVANCE_INSTRUCTIONS, "criteria": relevance_criteria(candidates)}
+        q["relevance"] = {"type": "choice", "instructions": RELEVANCE_INSTRUCTIONS, "criteria": relevance_criteria(candidates, tz)}
     return q
 
 
@@ -235,9 +245,11 @@ class Embedder:
                 try:
                     self._m = self._construct()
                     self._failed_at = None
-                except Exception:
+                except Exception as e:
                     self._failed_at = time.monotonic()
+                    log.info("memory: model load failed (%s)", type(e).__name__)
                     raise
+                log.info("memory: model loaded")
         finally:
             self._lock.release()
         return self._m
@@ -424,7 +436,7 @@ class MemoryStore:
             args.append(fts_query(q))
         with self._lock:
             total = int(self.db.execute(f"SELECT count(*) FROM memory WHERE {where}", args).fetchone()[0])
-            rows = self.db.execute(f"SELECT * FROM memory WHERE {where} ORDER BY at DESC LIMIT ? OFFSET ?", [*args, int(limit), int(offset)])
+            rows = self.db.execute(f"SELECT * FROM memory WHERE {where} ORDER BY at DESC, id DESC LIMIT ? OFFSET ?", [*args, int(limit), int(offset)])
             return [self._row(r) for r in rows], total
 
     def count(self, guild: str, channel: int | None = None) -> int:
@@ -501,12 +513,12 @@ class MemoryStore:
         return out
 
 
-async def judge(dec, message: str, candidates: list[Candidate], workload: str = "listen") -> list[Candidate]:
+async def judge(dec, message: str, candidates: list[Candidate], workload: str = "listen", tz=None) -> list[Candidate]:
     """Ask the relevance question; returns the candidates with `judged` filled (those the judge gave ≥ RELEVANT keep
     their place, the rest are dropped). No decision provider, or a failed call → nothing is cited."""
     if not candidates or dec is None:
         return []
-    state, instructions, criteria = relevance_question(message, candidates)
+    state, instructions, criteria = relevance_question(message, candidates, tz)
     probs = await dec.choice(state, instructions, criteria, workload=workload)
     if probs is None:
         return []
@@ -519,18 +531,25 @@ async def judge(dec, message: str, candidates: list[Candidate], workload: str = 
     return kept
 
 
-def memory_block(cands: Iterable[Candidate]) -> str:
+def memory_block(cands: Iterable[Candidate], tz=None) -> str:
     """The data block a help answer gets: one citation per line, member text fenced as data."""
     from .llm.provider import unfence
 
-    lines = [unfence(c.memory.citation(), "memory") for c in cands]
+    lines = [unfence(c.memory.citation(tz), "memory") for c in cands]
     return "<memory>\n" + "\n".join(lines) + "\n</memory>" if lines else ""
 
 
 # ------------------------------------------------------------------------------------------------------- the service
 MEMORIES: "Memories | None" = None  # THE per-process service (discord_bot.run sets it; None offline and in most tests)
 MEMORY_LISTENERS: list = []  # fn(guild key) after every write — the web's officers-only `memory` topic
-log = logging.getLogger(__name__)
+
+
+def guild_tz(reg):
+    """The guild's zone for the days a person reads (Registry.tz); None (UTC) when it has none or it doesn't load."""
+    try:
+        return reg.tz
+    except Exception:  # noqa: BLE001 — a bad zone name never breaks a citation: UTC days instead
+        return None
 
 
 def _channels(reg) -> dict[str, str]:
@@ -566,6 +585,7 @@ class Memories:
         self._lock = threading.RLock()
         self._model = "off"  # off | loading | loaded | failed
         self._warned = 0.0
+        self._warming = threading.Lock()  # one background warm at a time (warm_soon)
 
     # ---- plumbing
     def store(self, key: str) -> MemoryStore:
@@ -669,13 +689,46 @@ class Memories:
         return len(gone)
 
     def sync(self, reg) -> int:
-        """Rows of a channel no longer remembering are forgotten (the setting means what it says); the count forgotten."""
+        """Rows of a channel no longer remembering are forgotten (the setting means what it says); the count forgotten.
+        A guild that now remembers starts the model's load in the background (warm_soon) — the first download happens
+        when Memory is first turned on, never on the saving thread."""
         live = _channels(reg)
         n = 0
         for cid in list(self.store(reg.key).counts(reg.key)):
             if cid not in live:
                 n += self.forget_channel(reg, int(cid), why="off")
+        if live:
+            self.warm_soon(reg)
         return n
+
+    def needs_warm(self) -> bool:
+        """The model isn't loaded and a load may be tried now: never tried, or a failed load past its retry window."""
+        if getattr(self.embedder, "ready", False):
+            return False
+        if self._model == "off":
+            return True
+        return self._model == "failed" and not getattr(self.embedder, "failed", False)
+
+    def warm_soon(self, reg) -> threading.Thread | None:
+        """Load the model in a daemon thread when it is needed and no warm is running; the thread, or None. Never blocks."""
+        if not self.needs_warm() or not self._warming.acquire(blocking=False):
+            return None
+
+        def go():
+            try:
+                self.warm([reg])
+            except Exception as e:  # noqa: BLE001 — a background warm only logs (the load logs its own failure)
+                log.warning("memory: warm-up failed (%s)", type(e).__name__)
+            finally:
+                self._warming.release()
+
+        t = threading.Thread(target=go, name="memory-warm", daemon=True)
+        try:
+            t.start()
+        except Exception:  # noqa: BLE001 — no thread to be had: the first capture loads it instead
+            self._warming.release()
+            return None
+        return t
 
     # ---- reads
     def recall_for(self, reg, text: str, *, channel: int | None = None) -> list[Candidate]:
@@ -692,6 +745,8 @@ class Memories:
     def rebuild(self, reg) -> int:
         """At start: the rows the index lacks, then the vectors that are missing."""
         n = self.store(reg.key).replay(reg.key, self.rows(reg))
+        if n:
+            log.info("memory: rebuilt %d rows for %s", n, reg.key)
         self._embed_missing(reg)
         return n
 

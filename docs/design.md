@@ -4286,7 +4286,11 @@ never a row number — every forget, route and citation names it. `out/memory/<k
 SQLite, a `memory` row with `key TEXT UNIQUE` and the rowid FTS5 joins on, an FTS5 table over `index_text` = "<author>: <text>
 (replying to …)", the embedding as a float32 blob, `forgotten_at`); nothing a person reads lives only there. At ready
 `OibotGM._memory_rebuild` runs in a thread: `Memories.rebuild` replays what the index lacks (`replay` top to bottom, `ids_of`),
-fills missing vectors, then `warm` loads the model once when any guild remembers; the hourly tick calls `embed_missing_all`.
+fills missing vectors (logging `memory: rebuilt N rows for <key>`), then `warm` loads the model once when any guild remembers;
+before any channel remembers nothing downloads — the config save that first turns a channel on (`on_save` → `sync`) starts
+`warm_soon`, one daemon thread at a time, never on the saving thread. A load logs `memory: model loaded` or `memory: model
+load failed (<type>)`. The hourly tick (`memory_tick`) starts `embed_missing_all` as a background task and never holds up
+the scheduler's minute; a pass still running when the next hour comes is left to finish.
 `memory.MEMORIES` is the host's one `Memories` (a leaf module, so `configops` reads counts without a cycle; `discord_bot.run`
 sets it); `MEMORY_LISTENERS` fn(guild key) on every write (the web's `memory` topic). The embedder is loaded on first use; a failed
 load is not retried for `EMBED_RETRY_S` 3600 s (one log line an hour, no ops warn) and meanwhile rows are stored without vectors

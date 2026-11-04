@@ -282,7 +282,7 @@ class ListenMixin:
                 "channel": {"name": f"#{getattr(ch, 'name', '') or ''}", "purpose": purpose.get(ch.id, "") if ch.id else "",
                             "topic": str(getattr(ch, "topic", None) or "")[:200], "category": str(getattr(category, "name", None) or "")},
                 "recent": list(self._listen()["recent"].get(ch.id, ()))[-(LISTEN_RECENT - 1):],
-                "memory": mem.memory_state(list(candidates)),
+                "memory": mem.memory_state(list(candidates), mem.guild_tz(reg)),
                 "message": msg}
 
     def _listen_hour_ok(self, reg) -> bool:
@@ -341,7 +341,7 @@ class ListenMixin:
             self._listen_record(reg, message, text, None, mode, "skipped")
             return "skipped"
         with for_guild(reg.key):  # ONE request: is it for the bot, is it worth keeping, which memory answers it
-            answers = await dec.ask(state, mem.questions(LISTEN_QUESTION, LISTEN_CRITERIA, cands, remember=remembering), workload="listen")
+            answers = await dec.ask(state, mem.questions(LISTEN_QUESTION, LISTEN_CRITERIA, cands, remember=remembering, tz=mem.guild_tz(reg)), workload="listen")
         p, p_remember, judged = mem.read_answers(answers, cands)
         if p is None:
             self._listen_record(reg, message, text, None, mode, "skipped")
@@ -395,15 +395,26 @@ class ListenMixin:
         return kept is not None
 
     async def memory_tick(self, now: float | None = None) -> None:
-        """Hourly: vectors for rows kept while the model was away (raid_scheduler.scheduler_tick)."""
+        """Hourly: vectors for rows kept while the model was away (raid_scheduler.scheduler_tick). The pass runs as a
+        background task in a thread: the scheduler never waits on a model download or an embedding, and a pass still
+        running when the hour comes round again is left to finish (no second one)."""
         now = time.time() if now is None else now
         last = self.__dict__.setdefault("_memory_ticked", 0.0)
         if mem.MEMORIES is None or now - last < 3600:
             return
+        running = self.__dict__.get("_memory_task")
+        if running is not None and not running.done():
+            return
         self.__dict__["_memory_ticked"] = now
         regs = [r for r in self.registries.ordered() if r.memory_channels()]
         if regs:
+            self.__dict__["_memory_task"] = asyncio.get_running_loop().create_task(self._memory_pass(regs))
+
+    async def _memory_pass(self, regs) -> None:
+        try:
             await asyncio.to_thread(mem.MEMORIES.embed_missing_all, regs)
+        except Exception as e:  # noqa: BLE001 — a background pass only logs
+            log.warning("memory: hourly vectors failed (%s)", type(e).__name__)
 
     def _memory_rebuild(self) -> None:
         """At start, in a thread: the index from the rows, then the model once (seconds) when any guild remembers."""
@@ -1117,7 +1128,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         try:
             cands = await asyncio.wait_for(asyncio.to_thread(mem.MEMORIES.recall_for, reg, text, channel=channel), timeout=RECALL_TIMEOUT_S)
             with for_guild(reg.key):
-                return await mem.judge(decisions.DECISIONS, text, cands, workload="memory")
+                return await mem.judge(decisions.DECISIONS, text, cands, workload="memory", tz=mem.guild_tz(reg))
         except Exception as e:  # noqa: BLE001 — never a reply about it
             log.warning("memory: recall failed (%s)", type(e).__name__)
             return []
@@ -1172,7 +1183,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
                 return
             if memory is None and provider is not None and reg.may_ask(uid, officer):  # an @mention or a DM: recall and judge here
                 memory = await self.recall_memories(reg, text, channel)  # (the listening gate hands its own judged list)
-            mem_kw = {"memory": mem.memory_block(memory)} if memory else {}
+            mem_kw = {"memory": mem.memory_block(memory, mem.guild_tz(reg))} if memory else {}
             answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw)
             if answer == HELP_ACT:
                 await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo)

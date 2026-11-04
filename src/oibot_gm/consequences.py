@@ -554,10 +554,11 @@ def people_consequence(reg: Registry, rs, m, verb: str, *, by_id: int | None = N
     raise ValueError(f"unknown people verb {verb}")
 
 
-def forget_consequence(m, by_id: int | None) -> str:
-    """The Forget confirm (the Me page's own words, the Ops page's any): what goes, and that it stays gone."""
+def forget_consequence(m, by_id: int | None, tz=None) -> str:
+    """The Forget confirm (the Me page's own words, the Ops page's any): what goes, and that it stays gone. `tz` = the
+    guild's zone (Registry.tz), so the day matches the Ops row's."""
     whose = "what you said" if by_id is not None and int(by_id) == int(m.author_id) else f"what {m.author} said"
-    return f"The bot forgets {whose} on {m.when()}. It never repeats it again."
+    return f"The bot forgets {whose} on {m.when(tz)}. It never repeats it again."
 
 
 def memory_off_consequence(reg, cid, n: int) -> str:
@@ -568,8 +569,13 @@ def memory_off_consequence(reg, cid, n: int) -> str:
     return f"The bot forgets {things} from <#{cid}>."
 
 
+def memory_shared_consequence(reg, cid) -> str:
+    """An officers' channel set to Remembers (shared): what is said there can reach any member anywhere."""
+    return f"What is said in <#{cid}> can then be repeated to any member in any channel."
+
+
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
            "VERBS", "absence_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
-           "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "people_consequence", "profession_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
+           "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "people_consequence", "profession_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 

@@ -14,7 +14,7 @@ from oibot_gm import memory as mem
 from oibot_gm.configops import ConfigOp
 from oibot_gm.registry import MEMORY_MODES, MEMORY_WORDS, RegistryError
 
-OPS_CH, SIGNUP_CH, GENERAL_CH, OFFICER_CH = 920_001, 920_002, 920_003, 920_004
+OPS_CH, SIGNUP_CH, GENERAL_CH, OFFICER_CH, ROSTER_CH = 920_001, 920_002, 920_003, 920_004, 920_005
 
 
 @pytest.fixture
@@ -481,14 +481,143 @@ def test_turning_a_channel_off_forgets_through_the_save_listener(gate, monkeypat
     assert gate.svc.count(gate.reg) == 0 and gate.svc.rows(gate.reg)[-1]["kind"] == "forget_channel"
 
 
-def test_the_hourly_tick_fills_vectors_and_the_run_wiring_exists():
-    assert callable(getattr(db.ListenMixin, "memory_tick", None))
+def test_the_run_wiring_exists():
     import inspect
 
     src = inspect.getsource(db.run)
     assert "memory.MEMORIES = " in src or "mem.MEMORIES = " in src
     assert "on_save" in src
-    assert "memory_tick" in inspect.getsource(__import__("oibot_gm.raid_scheduler", fromlist=["x"]).RaidSchedulerMixin.scheduler_tick)
+
+
+def test_the_hourly_tick_never_holds_up_the_scheduler_and_runs_one_pass_at_a_time(gate, monkeypatch):
+    """A slow embedding (a model download) runs in the background: the scheduler's tick returns at once, a tick an hour
+    later while it still runs starts no second pass, and the next hour after it finished starts one."""
+    import threading
+    import time as _time
+
+    from oibot_gm import raid_scheduler
+
+    started, release = threading.Event(), threading.Event()
+    calls = []
+
+    def slow(regs):
+        calls.append([r.key for r in regs])
+        started.set()
+        release.wait(5)
+        return 0
+
+    monkeypatch.setattr(gate.svc, "embed_missing_all", slow)
+    plain(gate.reg, set_listen={str(GENERAL_CH): "watch"}, set_remember={str(GENERAL_CH): "shared"})
+
+    class Sched(raid_scheduler.RaidSchedulerMixin):
+        pass
+
+    bot = gate.bot
+    for name in ("_tick_errors", "_tick_failed", "scheduler_tick"):
+        setattr(bot, name, getattr(Sched, name).__get__(bot))
+    guild_ticks = []
+
+    async def companion_check():
+        pass
+
+    async def scheduler_tick_guild(reg):
+        guild_ticks.append(reg.key)
+
+    bot.companion_check, bot.scheduler_tick_guild = companion_check, scheduler_tick_guild
+
+    async def go():
+        t0 = _time.monotonic()
+        await bot.scheduler_tick()
+        took = _time.monotonic() - t0
+        await asyncio.to_thread(started.wait, 5)
+        await bot.memory_tick(now=_time.time() + 7200)  # an hour on, the pass still running: no second one
+        release.set()
+        await bot.__dict__["_memory_task"]
+        await bot.memory_tick(now=_time.time() + 3 * 3600)  # the next hour after it finished: a new pass
+        await bot.__dict__["_memory_task"]
+        return took
+
+    took = asyncio.run(go())
+    assert took < 1.0 and guild_ticks == [gate.reg.key], "the guild's open / lock / fill work never waits on the embedding"
+    assert calls == [[gate.reg.key], [gate.reg.key]]
+
+
+def test_turning_memory_on_loads_the_model_in_the_background_once(gate, monkeypatch):
+    import threading
+
+    from oibot_gm import registry as registry_mod
+
+    gate.svc.embedder.ready = False
+    gate.svc._model = "off"
+    gate.svc.embedder.failed = False
+    release, threads, warms = threading.Event(), [], []
+    real_warm_soon = gate.svc.warm_soon
+
+    def warm(regs):
+        warms.append(threading.current_thread().name)
+        release.wait(5)
+
+    monkeypatch.setattr(gate.svc, "warm", warm)
+    monkeypatch.setattr(gate.svc, "warm_soon", lambda reg: threads.append(real_warm_soon(reg)) or threads[-1])
+    monkeypatch.setattr(registry_mod, "SAVE_LISTENERS", [mem.on_save])
+    plain(gate.reg, set_listen={str(GENERAL_CH): "watch"})
+    assert threads == [], "nothing loads before a channel remembers"
+    plain(gate.reg, set_remember={str(GENERAL_CH): "shared"})
+    plain(gate.reg, set_remember={str(GENERAL_CH): "channel"})
+    release.set()
+    first = threads[0]
+    assert first is not None and first.daemon and first is not threading.current_thread()
+    first.join(5)
+    assert threads[1:] == [None] and warms == ["memory-warm"], "one warm at a time, never on the saving thread"
+    gate.svc._model = "loaded"
+    gate.svc.embedder.ready = True
+    assert not gate.svc.needs_warm()
+    gate.svc.embedder.ready, gate.svc._model, gate.svc.embedder.failed = False, "failed", True
+    assert not gate.svc.needs_warm(), "a failed load inside its retry window waits"
+    gate.svc.embedder.failed = False
+    assert gate.svc.needs_warm(), "past the window it is tried again"
+
+
+def test_an_evening_message_reads_as_that_evenings_day_everywhere(web_client, gate):
+    """7:30 PM on 24 Sep in Pacific time is 25 Sep in UTC: the citation, the judge's state, the Forget confirm, the
+    audit line and the Ops row all say 24 Sep."""
+    from oibot_gm.consequences import forget_consequence
+    from oibot_gm.web.api_memory import row_json
+
+    reg = gate.reg
+    reg.config.timezone = "America/Los_Angeles"
+    reg.save_config("timezone (test)")
+    me = gate.g.me
+    m = gate.svc.remember(reg, channel=GENERAL_CH, channel_name="general", scope="shared", author_id=me.discord_id, author=me.display_name,
+                          at="2025-09-25T02:30:00+00:00", text="our only jc is Ysolde", p=0.9, message_id=424242)
+    tz = mem.guild_tz(reg)
+    assert m.when() == "25 Sep 2025" and m.when(tz) == "24 Sep 2025"
+    c = mem.Candidate(memory=m, cosine=0.9, bm25_rank=1, vec_rank=1, score=1.0)
+    assert m.citation(tz).startswith(f"{me.display_name} said on 24 Sep 2025: ")
+    assert mem.memory_state([c], tz)[0]["when"] == "24 Sep 2025" and "24 Sep 2025" in mem.memory_block([c], tz)
+    assert "24 Sep 2025" in mem.relevance_criteria([c], tz)["m1"]
+    assert "24 Sep 2025" in mem.questions("q", {"true": "y", "false": "n"}, [c], remember=False, tz=tz)["relevance"]["criteria"]["m1"]
+    row = row_json(reg, m)
+    assert row["when"] == "Wed 24 Sep 7:30 PM", row["when"]
+    assert forget_consequence(m, me.discord_id, tz) == "The bot forgets what you said on 24 Sep 2025. It never repeats it again."
+    w = web_client
+    r = w.c.post(f"/api/memories/{m.id}/forget", json={"preview": True}, headers=w.as_(w.officer))
+    assert r.json()["sentences"] == [f"The bot forgets what {me.display_name} said on 24 Sep 2025. It never repeats it again."]
+    assert w.c.post(f"/api/memories/{m.id}/forget", json={}, headers=w.as_(w.officer)).status_code == 200
+    line = next(t for _lvl, t in w.bot.ops.lines if "forgot" in t)
+    assert "on 24 Sep 2025 in #general" in line and "25 Sep" not in line and "Ysolde" not in line
+
+
+@pytest.mark.parametrize("cid,value,warn", [(OPS_CH, "shared", True), (ROSTER_CH, "on", True), (OPS_CH, "channel", False),
+                                            (GENERAL_CH, "shared", False)])
+def test_an_officers_channel_set_to_remembers_is_a_warn(g, cid, value, warn):
+    reg = g.reg
+    reg.config.roster_channel_id = ROSTER_CH
+    reg.save_config("roster channel (test)")
+    op = ConfigOp(op="plain", target=f"remember <#{cid}>", value=value)
+    sentence = f"What is said in <#{cid}> can then be repeated to any member in any channel."
+    assert configops.is_warn(reg, op) is warn
+    assert (sentence in configops.op_consequences(reg, op)) is warn
 
 
 def test_a_recall_that_hangs_or_raises_still_decides_and_replies_with_no_memory(gate, monkeypatch):
@@ -659,7 +788,7 @@ def test_officers_list_search_filter_and_forget(web_client, gate, monkeypatch):
     assert w.c.get("/api/memories", headers=w.as_(w.member)).status_code == 403
     mid = next(r.id for r in rows if r.channel == GENERAL_CH)
     r = w.c.post(f"/api/memories/{mid}/forget", json={"preview": True}, headers=w.as_(w.officer))
-    assert r.status_code == 200 and r.json()["sentences"] == [f"The bot forgets what {gate.g.me.display_name} said on {rows[1].when()}. It never repeats it again."]
+    assert r.status_code == 200 and r.json()["sentences"] == [f"The bot forgets what {gate.g.me.display_name} said on {rows[1].when(gate.reg.tz)}. It never repeats it again."]
     r = w.c.post(f"/api/memories/{mid}/forget", json={}, headers=w.as_(w.officer))
     assert r.status_code == 200 and gate.svc.count(gate.reg) == 1
     r = w.c.post(f"/api/memories/{mid}/forget", json={}, headers=w.as_(w.officer))
@@ -684,7 +813,7 @@ def test_a_forget_writes_one_audit_line_naming_the_author_never_the_words(web_cl
     mid = next(r.id for r in rows if r.channel == GENERAL_CH)
     assert w.c.post(f"/api/memories/{mid}/forget", json={}, headers=w.as_(w.officer)).status_code == 200
     line = next(t for _lvl, t in w.bot.ops.lines if "forgot" in t)
-    assert gate.g.me.display_name in line and rows[1].when() in line and "#general" in line and "Ysolde" not in line
+    assert gate.g.me.display_name in line and rows[1].when(gate.reg.tz) in line and "#general" in line and "Ysolde" not in line
 
 
 def test_a_member_sees_and_forgets_their_own_only(web_client, gate):

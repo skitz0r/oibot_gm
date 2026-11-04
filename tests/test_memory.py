@@ -181,6 +181,11 @@ def test_list_searches_filters_and_pages(store):
     rows, total = store.list("g", offset=2, limit=2)
     assert total == 3 and len(rows) == 1
     assert store.counts("g") == {"1": 2, "2": 1} and store.count("g", channel=2) == 1
+    for i in (1, 2):  # the same second twice: the newer row first, so offset paging never repeats or skips one
+        store.add("g", key=mem.memory_key("g", 200 + i), channel=3, channel_name="general", scope="shared", author_id=13, author="Rolf",
+                  at="2026-10-05T10:00:00+00:00", text=f"tie {i}", vec=vec(10 + i), message_id=200 + i)
+    pages = [store.list("g", channel=3, offset=o, limit=1)[0][0].text for o in (0, 1)]
+    assert pages == ["tie 2", "tie 1"]
 
 
 def test_remember_at_reads_the_hosts_line(monkeypatch):

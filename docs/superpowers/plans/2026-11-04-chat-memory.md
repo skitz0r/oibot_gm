@@ -2441,7 +2441,7 @@ Claude-Session: https://claude.ai/code/session_015RL9NVKiW8AE3woB2Dw8ko"
 ## After the last task (the lead, not an implementer)
 
 1. The full gate: `uv run python scripts/check_commands.py > <scratch>/check_memory.log 2>&1; echo EXIT=$? >> <scratch>/check_memory.log` (background, ~14 min) and `uv run python scripts/check_bundle.py`.
-2. `uv sync` on the host (fastembed), then `launchctl kickstart -k gui/$(id -u)/gg.earlyandoften.oibot`; watch `out/oibot.log` for the model download (~130 MB into `out/fastembed`) and "memory: rebuild".
+2. `uv sync` on the host (fastembed), then `launchctl kickstart -k gui/$(id -u)/gg.earlyandoften.oibot`; nothing downloads at this start unless a channel already remembers. The model (~130 MB into `out/fastembed`) downloads in the background when Memory is first turned on (step 4); the sign is the Host card's "Memory model: loaded" and the log line `memory: model loaded` (a start with rows logs `memory: rebuilt N rows for <key>`).
 3. `uv run python scripts/shots.py --guild oi` and look at the Ops Memory tab, the Memory column and the Me card on desktop and phone.
 4. Turn Memory on where the owner wants it (the Ops page), starting with Big Guys' #professions and #general as Remembers; read the first day's rows on the Memory tab before trusting the keep line.
 5. Push: `git push origin main`.

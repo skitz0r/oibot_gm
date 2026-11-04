@@ -34,10 +34,12 @@ launchctl bootout gui/$(id -u)/gg.earlyandoften.oibot
 Logs: `out/oibot.log` (rotating, the bot's own) and `out/launchd.log` (stdout/stderr of the process).
 Do not also start the bot with `nohup`: two processes would fight over the Discord gateway and the web port.
 
-## The memory model on first start
-The first start after the chat-memory version downloads the embedding model (~130 MB) into `out/fastembed`, once, in the
-background. Until it is there the bot remembers words without the meaning search, and the owner's Host card says
-"Memory model: not loaded yet". A failed download (no network) is retried after an hour; nothing else waits on it.
+## The memory model
+The bot downloads the embedding model (~130 MB) into `out/fastembed` once, in the background, when Memory is first turned
+on for a channel — or at a start where a channel already remembers. Nothing downloads before that. The sign it worked is
+the owner's Host card saying "Memory model: loaded" and the line `memory: model loaded` in `out/oibot.log`
+(`memory: model load failed (<error type>)` otherwise). Until then the bot remembers words without the meaning search.
+A failed download (no network) is retried after an hour; nothing else waits on it.
 
 ## The news review, apply and menu-bar agents
 `gg.earlyandoften.oibot.news-review.plist` (daily 9:00 AM), `gg.earlyandoften.oibot.apply.plist` (every 15 minutes) and

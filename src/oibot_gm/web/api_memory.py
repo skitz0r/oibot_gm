@@ -25,7 +25,7 @@ def row_json(reg, m: mem.Memory, names: dict[str, str] | None = None) -> dict:
     try:
         when = reg.local12(m.at)
     except (TypeError, ValueError):
-        when = m.when()
+        when = m.when(mem.guild_tz(reg))
     mode = reg.memory_mode(m.channel) or m.scope
     return {"id": m.id, "when": when, "at": m.at, "channel": str(m.channel), "channel_name": (names or {}).get(str(m.channel)) or m.channel_name,
             "author": m.author, "author_id": str(m.author_id), "text": m.text, "context": m.context, "scope": mode, "scope_word": MEMORY_WORDS.get(mode, mode)}
@@ -69,14 +69,14 @@ def install_memory_api(app: FastAPI, bot, *, who, body, publish=None) -> None:
             return JSONResponse({"error": ALREADY}, status_code=404)
         if not officer and int(m.author_id) != int(v.uid):
             return JSONResponse({"error": "Only the officers can forget what someone else said."}, status_code=403)
-        sentence = forget_consequence(m, v.uid)
+        sentence = forget_consequence(m, v.uid, mem.guild_tz(v.reg))
         if d.get("preview"):
             return {"sentences": [sentence]}
         gone = await asyncio.to_thread(mem.MEMORIES.forget, v.reg, key, by=v.name, by_id=v.uid, via=v.via, officer=officer)
         if gone is None:
             return JSONResponse({"error": ALREADY}, status_code=404)
         whose = "their own words" if int(gone.author_id) == int(v.uid) else f"what {gone.author} said"
-        await ops_mod.audited(bot.ops, v.reg, v.name, f"forgot {whose} on {gone.when()} in #{gone.channel_name}", via=v.via, by_id=v.uid)
+        await ops_mod.audited(bot.ops, v.reg, v.name, f"forgot {whose} on {gone.when(mem.guild_tz(v.reg))} in #{gone.channel_name}", via=v.via, by_id=v.uid)
         return {"message": sentence}
 
     @app.post("/api/memories/{key}/forget")

@@ -1805,6 +1805,20 @@ def _memory_goes_off(reg: Registry, op: ConfigOp) -> list:
     return []
 
 
+def _officer_channel_ids(reg: Registry) -> set[str]:
+    """The officers' channels as listening names them (the ops channel, the officers' roster channel), ids as strings."""
+    return {str(c) for c in (reg.config.ops_channel_id, reg.config.roster_channel_id) if c}
+
+
+def _memory_goes_shared(reg: Registry, op: ConfigOp) -> list:
+    """The officers' channel ids this plain op turns to Remembers (shared): officer talk then reaches any member (§5.61)."""
+    cid = _remember_target(op.target or "")
+    if cid is None or str(cid) not in _officer_channel_ids(reg):
+        return []
+    patch, _ = _remember_patch(reg, cid, op.value or "")
+    return [cid] if patch["set_remember"][str(cid)] == "shared" and reg.memory_mode(cid) != "shared" else []
+
+
 def _plain_warning(reg: Registry, patch: dict, channel) -> str:
     """When the change takes 'act' away from the channel it is being made in (or ignores it): say so in the diff."""
     if channel is _UNSET or not patch:
@@ -3972,11 +3986,12 @@ def _warn_plain(reg: Registry, op: ConfigOp) -> bool:
 
 
 def _warn_plain_or_memory(reg: Registry, op: ConfigOp) -> bool:
-    """The plain op's warn class: plain text on the ops channel or in DMs, or a channel's memory turned Off (§5.61)."""
+    """The plain op's warn class: plain text on the ops channel or in DMs, a channel's memory turned Off, or an officers'
+    channel turned to Remembers (shared) (§5.61)."""
     if _warn_plain(reg, op):
         return True
     try:
-        return bool(_memory_goes_off(reg, op))
+        return bool(_memory_goes_off(reg, op)) or bool(_memory_goes_shared(reg, op))
     except RegistryError:
         return False
 
@@ -3999,7 +4014,7 @@ WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
     "aura_set": lambda reg, op: (op.field or "").strip() in ("scope", "family"),  # what stacks and how far it reaches
     "aura_reset": _always,  # every aura, or one buff / family, back to the defaults (the AuraWizard asks with decide, the web with the review)
     "recruit": lambda reg, op: (op.field or "").strip().lower() == "open" and (op.value or "").strip().lower() in ("false", "no", "off", "closed"),
-    "plain": _warn_plain_or_memory,  # plain text on the ops channel or in DMs, or a channel's memory turned Off
+    "plain": _warn_plain_or_memory,  # plain text on the ops channel or in DMs, a channel's memory turned Off, an officers' channel shared
     "run_lock": _always, "run_cancel": _always, "proposal": _always,
     "test": lambda reg, op: (op.value or "").strip().lower().startswith("clear"),
     "loot_weights": _always,  # every future award's score (phase 4, §5.48): reviewed with the profile default beside each number
@@ -4113,10 +4128,12 @@ def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None =
             else:
                 out.append(f"The bot stops posting this in <#{getattr(reg.config, f'{op.path}_id')}>, and what is already there stays.")
         elif op.op == "plain" and (_remember_target(op.target or "") is not None or (_listen_target(op.target or "") is not None and _memory_goes_off(reg, op))):
-            from .consequences import memory_off_consequence
+            from .consequences import memory_off_consequence, memory_shared_consequence
 
             for cid in _memory_goes_off(reg, op):
                 out.append(memory_off_consequence(reg, cid, memory_off_count(reg, cid)))
+            for cid in _memory_goes_shared(reg, op):
+                out.append(memory_shared_consequence(reg, cid))
             if _listen_target(op.target or "") is not None:
                 patch, _ = _plain_patch(reg, op)
                 for cid, mode in patch["set_listen"].items():
