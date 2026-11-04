@@ -455,3 +455,23 @@ def test_professions_page_is_the_finder_with_officer_maintenance():
     assert "Rename…" in src and "Merge…" in src and "officer" in src
     assert "Nobody has registered" in src and "no notable recipes registered — the crafter adds them on the Me page" in src
     assert 'useLive(load, ["member", "config"])' in src
+
+
+def test_memory_surfaces_read_by_their_shape():
+    """The Memory column sits beside Listening in the permissions table and is sent in the one plain change; the Ops page has a
+    Memory tab; the Me card shows own rows with Forget previewing the server's sentence; no literal 'embedding' / 'vector' words."""
+    pp = (SRC / "components" / "PlainPermissions.tsx").read_text()
+    assert "<Table.Th w={140}>Listening</Table.Th><Table.Th w={190}>Memory</Table.Th>" in pp
+    assert "remember: d.remember" in pp and "memoryWords[m] || m" in pp, "the select's words come from the server (memory_words)"
+    assert "Turn on Listening first." in pp and "Memory needs the host's TypeSafe key." in pp
+    ops = (SRC / "pages" / "Ops.tsx").read_text()
+    assert '<Tabs.Tab value="memory">Memory</Tabs.Tab>' in ops and 'memory: "#memory"' in ops
+    m = (SRC / "components" / "Memories.tsx").read_text()
+    assert '"/api/memories' in m and "/forget" in m and "preview: true" in m and 'useLive(load, ["memory", "config"])' in m
+    assert "The bot remembers nothing yet." in m
+    my = (SRC / "components" / "MyMemories.tsx").read_text()
+    assert "What the bot remembers you saying" in my and "/api/me/memories/" in my and "preview: true" in my and "Nothing remembered yet." in my
+    me = (SRC / "pages" / "Me.tsx").read_text()
+    assert "me.memory_on && <MyMemories" in me
+    for f in (pp, m, my):
+        assert not re.search(r"\b(embedding|vector|cosine|judge|RRF|index)\b", f, re.I)

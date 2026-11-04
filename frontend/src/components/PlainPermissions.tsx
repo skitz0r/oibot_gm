@@ -16,6 +16,7 @@ export interface PlainPermissionsData {
   groups: PlainGroup[]; channels: PlainChannel[]; listed: Record<string, string>; dm: string; default: string;
   tiers: string[]; modes: string[]; guild_roles: RoleRef[]; owner: boolean; rev?: string;
   listen?: Record<string, string>; listen_modes?: string[]; listen_words?: Record<string, string>; listen_ready?: boolean; listen_recent?: ListenRow[];
+  remember?: Record<string, string>; memory_modes?: string[]; memory_words?: Record<string, string>; memory_counts?: Record<string, number>; memory_ready?: boolean;
 }
 
 const TIER: Record<string, string> = { everyone: "Everyone", registered: "Registered members", officers: "Officers", owner: "Owner only" };
@@ -25,8 +26,10 @@ const MODE_HINT = "Acts: anything the person's groups allow · Own record only: 
 
 const LISTEN_HINT = "Listening: the bot reads these channels and answers what is clearly for it, without a tag. Watches only notes what it would have answered.";
 const LISTEN_COLOUR: Record<string, string> = { watch: "gray", reply: "teal" };
+const MEMORY_HINT = "Memory: in these channels the bot keeps what members say that is worth asking about later, as their words, and repeats it with who said it and when. Remembers here only keeps it for answers in that channel alone. Off forgets what the channel held.";
+const MEMORY_COLOUR: Record<string, string> = { shared: "teal", channel: "blue" };
 
-type Draft = { who: Record<string, string[]>; listed: Record<string, string>; dm: string; default: string; listen: Record<string, string> };
+type Draft = { who: Record<string, string[]>; listed: Record<string, string>; dm: string; default: string; listen: Record<string, string>; remember: Record<string, string> };
 
 /** Who may act through plain text (an @mention, a DM, /gm change, the site's box), and where. Officers read; the owner edits. */
 export function PlainPermissions() {
@@ -49,7 +52,7 @@ export function PlainPermissions() {
   const modeOptions = data.modes.map((m) => ({ value: m, label: MODE[m] || m }));
   const listenMap = data.listen || {};
   const listenWords = data.listen_words || { watch: "Watches", reply: "Replies" };
-  const start = () => setD({ who: Object.fromEntries(data.groups.map((g) => [g.id, g.who])), listed: { ...data.listed }, dm: data.dm, default: data.default, listen: { ...listenMap } });
+  const start = () => setD({ who: Object.fromEntries(data.groups.map((g) => [g.id, g.who])), listed: { ...data.listed }, dm: data.dm, default: data.default, listen: { ...listenMap }, remember: { ...(data.remember || {}) } });
 
   /** One structured change on the ops path: a cut that locks people out (plain text off in the ops channel or in DMs) is
    *  warn-class, so the Review shows the server's own consequence sentence (configops.op_consequences); a stale grid is a 409. */
@@ -57,7 +60,7 @@ export function PlainPermissions() {
     if (!d || !data) return;
     setBusy(true);
     try {
-      const r = await saveOps([{ kind: "plain", fields: { groups: d.who, channels: d.listed, dm: d.dm, default: d.default, listen: d.listen } }],
+      const r = await saveOps([{ kind: "plain", fields: { groups: d.who, channels: d.listed, dm: d.dm, default: d.default, listen: d.listen, remember: d.remember } }],
         { revs: data.rev ? { "config:plain": data.rev } : undefined, title: "Review the plain-text permissions" });
       if (r === null) return;  // Back to edits: the draft stays
       if (r.changed?.length) { fail(new Error("Someone else changed the plain-text permissions since you opened them — reload to see their change, your edits are kept.")); return; }
@@ -73,8 +76,9 @@ export function PlainPermissions() {
       data={[{ value: "default", label: `Default · ${MODE[implicit(c)]}` }, ...modeOptions]}
       onChange={(v) => {
         const listed = { ...d!.listed }; if (v && v !== "default") listed[c.id] = v; else delete listed[c.id];
-        const listen = { ...d!.listen }; if ((listed[c.id] ?? implicit(c)) === "ignore") delete listen[c.id];  // an ignored channel can't listen
-        setD({ ...d!, listed, listen });
+        const listen = { ...d!.listen }; const remember = { ...d!.remember };
+        if ((listed[c.id] ?? implicit(c)) === "ignore") { delete listen[c.id]; delete remember[c.id]; }  // an ignored channel can't listen, so it can't remember
+        setD({ ...d!, listed, listen, remember });
       }} />
   );
   const listenBadge = (c: PlainChannel) => (listenMap[c.id] ? <Badge variant="light" color={LISTEN_COLOUR[listenMap[c.id]] || "gray"}>{listenWords[listenMap[c.id]] || listenMap[c.id]}</Badge> : null);
@@ -84,10 +88,27 @@ export function PlainPermissions() {
       <Select size="xs" w={130} value={d!.listen[c.id] ?? "off"} allowDeselect={false} disabled={ignored}
         title={ignored ? "The bot ignores this channel, so it can't listen here." : undefined}
         data={[{ value: "off", label: "Off" }, ...(data.listen_modes || ["watch", "reply"]).map((m) => ({ value: m, label: listenWords[m] || m }))]}
-        onChange={(v) => { const listen = { ...d!.listen }; if (v && v !== "off") listen[c.id] = v; else delete listen[c.id]; setD({ ...d!, listen }); }} />
+        onChange={(v) => {
+          const listen = { ...d!.listen }; if (v && v !== "off") listen[c.id] = v; else delete listen[c.id];
+          const remember = { ...d!.remember }; if (!v || v === "off") delete remember[c.id];  // memory rides on listening
+          setD({ ...d!, listen, remember });
+        }} />
     );
   };
   const anyListening = Object.keys(editing ? d!.listen : listenMap).length > 0;
+  const memoryMap = data.remember || {};
+  const memoryWords = data.memory_words || {};
+  const memoryBadge = (c: PlainChannel) => (memoryMap[c.id] ? <Badge variant="light" color={MEMORY_COLOUR[memoryMap[c.id]] || "gray"}>{memoryWords[memoryMap[c.id]] || memoryMap[c.id]}</Badge> : null);
+  const memorySelect = (c: PlainChannel) => {
+    const notListening = !d!.listen[c.id];
+    return (
+      <Select size="xs" w={180} value={d!.remember[c.id] ?? "off"} allowDeselect={false} disabled={notListening}
+        title={notListening ? "Turn on Listening first." : undefined}
+        data={[{ value: "off", label: "Off" }, ...(data.memory_modes || ["shared", "channel"]).map((m) => ({ value: m, label: memoryWords[m] || m }))]}
+        onChange={(v) => { const remember = { ...d!.remember }; if (v && v !== "off") remember[c.id] = v; else delete remember[c.id]; setD({ ...d!, remember }); }} />
+    );
+  };
+  const anyRemembering = Object.keys(editing ? d!.remember : memoryMap).length > 0;
 
   return (
     <Card id="plain">
@@ -125,16 +146,18 @@ export function PlainPermissions() {
         <Text size="xs" c="dimmed" mt="lg" mb={4}>{MODE_HINT}</Text>
         <Table.ScrollContainer minWidth={560}>
           <Table verticalSpacing={6}>
-            <Table.Thead><Table.Tr><Table.Th>Where</Table.Th><Table.Th w={220}>Plain text</Table.Th><Table.Th w={140}>Listening</Table.Th></Table.Tr></Table.Thead>
+            <Table.Thead><Table.Tr><Table.Th>Where</Table.Th><Table.Th w={220}>Plain text</Table.Th><Table.Th w={140}>Listening</Table.Th><Table.Th w={190}>Memory</Table.Th></Table.Tr></Table.Thead>
             <Table.Tbody>
               <Table.Tr>
                 <Table.Td><Text size="sm" fw={600}>DMs to the bot</Text></Table.Td>
                 <Table.Td>{editing ? <Select size="xs" w={200} data={modeOptions} value={d!.dm} allowDeselect={false} onChange={(v) => v && setD({ ...d!, dm: v })} /> : modeBadge(data.dm)}</Table.Td>
                 <Table.Td />
+                <Table.Td />
               </Table.Tr>
               <Table.Tr>
                 <Table.Td><Text size="sm" fw={600}>Any other channel</Text><Text size="xs" c="dimmed">channels not set below</Text></Table.Td>
                 <Table.Td>{editing ? <Select size="xs" w={200} data={modeOptions} value={d!.default} allowDeselect={false} onChange={(v) => v && setD({ ...d!, default: v })} /> : modeBadge(data.default)}</Table.Td>
+                <Table.Td />
                 <Table.Td />
               </Table.Tr>
               {data.channels.map((c) => (
@@ -145,12 +168,14 @@ export function PlainPermissions() {
                   </Table.Td>
                   <Table.Td>{editing ? channelSelect(c) : (c.listed ? modeBadge(c.mode) : <Group gap={6}>{modeBadge(c.mode)}<Text size="xs" c="dimmed">default</Text></Group>)}</Table.Td>
                   <Table.Td>{editing ? listenSelect(c) : listenBadge(c)}</Table.Td>
+                  <Table.Td>{editing ? memorySelect(c) : memoryBadge(c)}</Table.Td>
                 </Table.Tr>
               ))}
-              {data.channels.length === 0 && <Table.Tr><Table.Td colSpan={3}><Text size="xs" c="dimmed">The bot can't see the server's channels right now.</Text></Table.Td></Table.Tr>}
+              {data.channels.length === 0 && <Table.Tr><Table.Td colSpan={4}><Text size="xs" c="dimmed">The bot can't see the server's channels right now.</Text></Table.Td></Table.Tr>}
               <Table.Tr style={{ opacity: 0.55 }}>
                 <Table.Td><Text size="sm" fw={600}>The site and MCP</Text><Text size="xs" c="dimmed">the Ops page's box and MCP plain_change; what they may do is the person's own rights</Text></Table.Td>
                 <Table.Td><Group gap={6}>{modeBadge("act")}<Text size="xs" c="dimmed">not configurable</Text></Group></Table.Td>
+                <Table.Td />
                 <Table.Td />
               </Table.Tr>
             </Table.Tbody>
@@ -158,6 +183,8 @@ export function PlainPermissions() {
         </Table.ScrollContainer>
         <Text size="xs" c="dimmed" mt={6}>{LISTEN_HINT}</Text>
         {anyListening && data.listen_ready === false && <Text size="xs" c="dimmed" style={{ opacity: 0.7 }}>Listening needs the host's TypeSafe key.</Text>}
+        <Text size="xs" c="dimmed" mt={4}>{MEMORY_HINT}</Text>
+        {anyRemembering && data.memory_ready === false && <Text size="xs" c="dimmed" style={{ opacity: 0.7 }}>Memory needs the host's TypeSafe key.</Text>}
         {editing && (
           <Group gap="sm" justify="flex-end" mt="md">
             <Button variant="default" size="sm" onClick={() => setD(null)}>Cancel</Button>

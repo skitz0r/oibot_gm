@@ -4321,7 +4321,23 @@ instructions)\n<memory>…</memory>" after the conversation block, every line th
 "what day do the horde runs happen?" 84 %, "i can't make thursday" 93 %, the rest 95–98 %), banter 2–3 %. Exit 0; the question
 was not reworded.
 
-Surfaces: task 10 of the plan.
+**Surfaces (built 2026-11-04).** The Ops page's **Plain-text permissions** tab gained a **Memory** column beside Listening
+(`components/PlainPermissions.tsx`): read, a badge in the server's `memory_words` (Remembers · Remembers here only); edit, a Select
+(Off · the server's words) that is disabled while the channel's Listening is Off ("Turn on Listening first.") and dropped whenever
+Listening goes Off or the channel becomes Ignored; the draft is sent as `remember` in the one `plain` change through `useOpsSave`,
+so a channel going Off is a reviewed change and the review sheet shows the server's Off sentence (how much it forgets). The hints
+under the table say what Memory does and, when a channel remembers without the key, "Memory needs the host's TypeSafe key." A
+fourth Ops tab, **Memory** (`#memory`, `components/Memories.tsx`, officers), names the remembering channels (their names from
+`/api/plain-permissions`, since a channel with nothing kept has no row), then lists `GET /api/memories` newest first — when ·
+channel · who said it · their words (and what they replied to) · Remembers here only when scoped — with a search box, a channel
+filter, Show more (50 at a time) and **Forget** on each row: the press previews `POST /api/memories/{id}/forget` and `useConfirm`
+prints only the server's `sentences`, then the write; a line says when the memory model is loading or failed (recall by words
+only); it reloads on the `memory` and `config` topics. The Me page's right column carries **What the bot remembers you saying**
+(`components/MyMemories.tsx`) when `GET /api/me`'s `memory_on` is set: the member's own `memories` rows with Forget through
+`POST /api/me/memories/{id}/forget` the same way, an empty state that says how a memory gets there, and a pointer to the Ops page
+past the first page; the page reloads on `memory`. The routes are `web/api_memory.py`; MCP has `list_memories` and
+`forget_memory`; `configops.BY_DESIGN_ONLY` carries `memories_list` and `my_memories` (lists with a Forget per row are web
+surfaces; Discord reads the setting in `/gm config plain`). Every memory's text and context render as text nodes, never HTML.
 
 **Not done.** News as memories (dropped 2026-11-04). Editing a memory (forget and say it again). Tracking a Discord edit or
 delete of the message (Forget covers it). Threads of a listening channel (not listened, so not remembered). Memories across

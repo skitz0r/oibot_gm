@@ -4,6 +4,7 @@ import { api, type Ops as OpsData } from "../api";
 import { CardHeader, Eyebrow, PageTitle, fail } from "../components/Page";
 import { PlainPermissions } from "../components/PlainPermissions";
 import { ListenDecisions } from "../components/ListenDecisions";
+import { Memories } from "../components/Memories";
 import { usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
 
@@ -11,13 +12,14 @@ const LEVEL: Record<string, string> = { error: "red", warn: "yellow", info: "tea
 
 const uptime = (secs: number) => (secs >= 3600 ? `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m` : `${Math.floor(secs / 60)}m`);
 
-const TAB_HASH: Record<string, string> = { permissions: "#plain", listening: "#listening" };
+const TAB_HASH: Record<string, string> = { permissions: "#plain", listening: "#listening", memory: "#memory" };
 
-/** Ops: three tabs — Recent actions (the bot's lines and its facts), Plain-text permissions (the owner's policy) and
- *  Listening (design §5.59: the channels the bot reads and its Recent decisions); #plain and #listening open a tab. */
+/** Ops: four tabs — Recent actions (the bot's lines and its facts), Plain-text permissions (the owner's policy),
+ *  Listening (design §5.59: the channels the bot reads and its Recent decisions) and Memory (design §5.61: what the bot
+ *  remembers members saying, with Forget); #plain, #listening and #memory open a tab. */
 export function OpsPage() {
   const [data, setData] = useState<OpsData | null>(null);
-  const [tab, setTab] = useState<string | null>(window.location.hash === "#listening" ? "listening" : window.location.hash === "#plain" ? "permissions" : "actions");
+  const [tab, setTab] = useState<string | null>(window.location.hash === "#memory" ? "memory" : window.location.hash === "#listening" ? "listening" : window.location.hash === "#plain" ? "permissions" : "actions");
   const load = () => api.get<OpsData>("/api/ops").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
   usePoll(load);
@@ -43,6 +45,7 @@ export function OpsPage() {
           <Tabs.Tab value="actions">Recent actions</Tabs.Tab>
           <Tabs.Tab value="permissions">Plain-text permissions</Tabs.Tab>
           <Tabs.Tab value="listening">Listening</Tabs.Tab>
+          <Tabs.Tab value="memory">Memory</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="actions" pt="md">
           <Card>
@@ -59,6 +62,7 @@ export function OpsPage() {
         </Tabs.Panel>
         <Tabs.Panel value="permissions" pt="md"><PlainPermissions /></Tabs.Panel>
         <Tabs.Panel value="listening" pt="md"><ListenDecisions /></Tabs.Panel>
+        <Tabs.Panel value="memory" pt="md"><Memories /></Tabs.Panel>
       </Tabs>
     </Stack>
   );

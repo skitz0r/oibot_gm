@@ -17,6 +17,7 @@ import { AbsencesCard } from "../components/AbsencesCard";
 import { AttendanceCard } from "../components/AttendanceCard";
 import { MyApplication } from "../components/MyApplication";
 import { GuideTools } from "../components/GuideTools";
+import { MyMemories } from "../components/MyMemories";
 
 
 /** Me: the member's own record and inbox, and — when the game version has the tool (meta.guides, §5.55) — a second tab,
@@ -31,7 +32,7 @@ export function MePage({ meta }: { meta: Meta }) {
   const load = () => api.get<Me>("/api/me").then(setMe).catch(fail);
   useEffect(() => { load(); }, []);
   usePoll(() => { if (!editing) load(); });
-  useLive(() => { if (!editing) load(); }, ["run:", "member"]);
+  useLive(() => { if (!editing) load(); }, ["run:", "member", "memory"]);
 
   async function stepDown(r: MyRegular) {
     if (!(await ask({ title: `Step down from ${r.label}?`, message: `You stop being one of its regulars (${r.character}): the bot no longer expects your answer or reminds you. You can still Join any of its sheets. To come back, ask an officer.`, confirmLabel: "Step down", color: "red" }))) return;
@@ -109,6 +110,7 @@ export function MePage({ meta }: { meta: Meta }) {
               </Stack>
             </Card>
           )}
+          {me.memory_on && <MyMemories page={me.memories || { rows: [], total: 0, more: false }} onChanged={load} />}
           <Card>
             <CardHeader title="My sheets" />
             <Stack p="md" gap="xs">

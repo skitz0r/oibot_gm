@@ -344,7 +344,12 @@ export interface Me {
   dm_sentence?: string;
   /** their own application (registry.application_state): open → waiting; decided → the decision (components/MyApplication.tsx) */
   application?: import("./setupApi").MyApplicationState | null;
+  /** what the bot remembers them saying (design §5.61), newest first; memory_on = some channel of the guild remembers */
+  memories?: MemoryPage; memory_on?: boolean;
 }
+/** One thing the bot remembers someone saying (design §5.61): `when` is already 12-hour words from the server. */
+export interface MemoryRow { id: string; when: string; at: string; channel: string; channel_name: string; author: string; author_id: string; text: string; context: string; scope: string; scope_word: string }
+export interface MemoryPage { rows: MemoryRow[]; total: number; more: boolean }
 
 // ---- the loot council (mirror src/oibot_gm/web/api_loot.py). Every label a person reads arrives as words from the server
 // (`*_label` in 12-hour guild time, `when`, the End sentence); scores, reasons and candidates are officers' only (D2).
