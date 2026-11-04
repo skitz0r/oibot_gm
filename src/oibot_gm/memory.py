@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -202,10 +203,15 @@ class Embedder:
         self._m = None
         self._lock = threading.Lock()
 
+    @property
+    def ready(self) -> bool:
+        """The model is loaded (a first embed or `warm` loads it)."""
+        return self._m is not None
+
     def _load(self):
         with self._lock:
             if self._m is None:
-                from fastembed import TextEmbedding  # the optional dependency: `uv run --with fastembed` for the probe
+                from fastembed import TextEmbedding  # imported here, never at module load: the import alone costs seconds
 
                 kw = {"cache_dir": self.cache_dir} if self.cache_dir else {}
                 self._m = TextEmbedding(model_name=self.model, **kw)
@@ -488,3 +494,198 @@ def memory_block(cands: Iterable[Candidate]) -> str:
 
     lines = [unfence(c.memory.citation(), "memory") for c in cands]
     return "<memory>\n" + "\n".join(lines) + "\n</memory>" if lines else ""
+
+
+# ------------------------------------------------------------------------------------------------------- the service
+MEMORIES: "Memories | None" = None  # THE per-process service (discord_bot.run sets it; None offline and in most tests)
+MEMORY_LISTENERS: list = []  # fn(guild key) after every write — the web's officers-only `memory` topic
+log = logging.getLogger(__name__)
+
+
+def _channels(reg) -> dict[str, str]:
+    """The guild's remembering channels {channel id: shared | channel} (Registry.memory_channels; {} before it exists)."""
+    return getattr(reg, "memory_channels", lambda: {})()
+
+
+def enabled(reg) -> bool:
+    """Memory does anything for this guild: a channel remembers and the host's TypeSafe key is set."""
+    from .llm import decisions
+
+    return bool(_channels(reg)) and decisions.key_set()
+
+
+def on_save(reg, kind: str, lines) -> None:
+    """registry.SAVE_LISTENERS: after a config commit, a channel no longer remembering forgets what it held."""
+    if kind == "config" and MEMORIES is not None:
+        try:
+            MEMORIES.sync(reg)
+        except Exception:  # noqa: BLE001 — a listener never breaks a save
+            log.exception("memory sync failed (%s)", getattr(reg, "key", "?"))
+
+
+class Memories:
+    """The host's memory service: the data repo's `<guild>/memory.jsonl` is the record (append-only, one commit per
+    row), `out/memory/<guild>.db` the derived index (rebuilt from the rows when missing). Every call is synchronous and
+    may block for a git commit or an embedding: the bot calls it through asyncio.to_thread."""
+
+    def __init__(self, out_dir: Path, embedder: Embedder | None = None):
+        self.out = Path(out_dir)
+        self.embedder = embedder or Embedder(cache_dir=str(self.out / "fastembed"))
+        self._stores: dict[str, MemoryStore] = {}
+        self._lock = threading.RLock()
+        self._model = "off"  # off | loading | loaded | failed
+        self._warned = 0.0
+
+    # ---- plumbing
+    def store(self, key: str) -> MemoryStore:
+        with self._lock:
+            s = self._stores.get(key)
+            if s is None:
+                s = self._stores[key] = MemoryStore(self.out / "memory" / f"{key}.db")
+            return s
+
+    @staticmethod
+    def rel(reg) -> Path:
+        return Path(reg.key) / "memory.jsonl"
+
+    def rows(self, reg) -> list[dict]:
+        return reg.store.read_jsonl(self.rel(reg))
+
+    def _notify(self, key: str) -> None:
+        for fn in list(MEMORY_LISTENERS):
+            try:
+                fn(key)
+            except Exception:  # noqa: BLE001
+                log.exception("memory listener failed")
+
+    def model_state(self) -> str:
+        return self._model
+
+    def _embed(self, texts: list[str]) -> np.ndarray | None:
+        """Vectors, or None when the model isn't there (logged once an hour; the rows wait for embed_missing_all)."""
+        try:
+            if self._model != "loaded":
+                self._model = "loading"
+            out = self.embedder.passages(texts)
+            self._model = "loaded"
+            return out
+        except Exception as e:  # noqa: BLE001 — no network on first start, a bad cache: words still work
+            self._model = "failed"
+            if time.monotonic() - self._warned > 3600:
+                self._warned = time.monotonic()
+                log.warning("memory: the embedding model is not available (%s); words only until it is", type(e).__name__)
+            return None
+
+    def _query(self, text: str) -> np.ndarray | None:
+        try:
+            v = self.embedder.query(text)
+            self._model = "loaded"
+            return v
+        except Exception:  # noqa: BLE001
+            self._model = "failed"
+            return None
+
+    # ---- writes
+    def remember(self, reg, *, channel: int, channel_name: str, scope: str, author_id: int, author: str, at: str, text: str,
+                 context: str = "", p: float | None = None, message_id: int | None = None) -> Memory | None:
+        key = memory_key(reg.key, message_id, at, author_id)
+        store = self.store(reg.key)
+        if key in store.ids_of(reg.key):
+            return None
+        text = (text or "").strip()[:TEXT_MAX]
+        if not text:
+            return None
+        vecs = self._embed([index_text(author, text, context)])
+        m = store.add(reg.key, key=key, channel=channel, channel_name=channel_name, scope=scope, author_id=author_id, author=author, at=at,
+                      text=text, vec=None if vecs is None else vecs[0], p=p, message_id=message_id, context=context)
+        if m is None:
+            return None
+        row = {"kind": "memory", "id": key, "channel": int(channel), "channel_name": channel_name, "scope": scope, "author_id": int(author_id),
+               "author": author, "at": at, "text": text, "context": (context or "")[:200], "p": p, "message_id": message_id}
+        with reg.store.lock:
+            reg.store.append_jsonl(self.rel(reg), row)
+            reg.store.commit(f"{reg.key}: memory: {author} in #{channel_name}")
+        self._notify(reg.key)
+        return m
+
+    def forget(self, reg, key: str, *, by: str, by_id: int | None, via: str, officer: bool) -> Memory | None:
+        m = self.store(reg.key).forget(reg.key, key, by_id=by_id, officer=officer)
+        if m is None:
+            return None
+        row = {"kind": "forget", "id": key, "by": by, "by_id": by_id, "via": via, "at": _now(), "why": "member" if by_id == m.author_id else "officer"}
+        with reg.store.lock:
+            reg.store.append_jsonl(self.rel(reg), row)
+            reg.store.commit(f"{reg.key}: memory: {by} forgot one of {m.author}'s")
+        self._notify(reg.key)
+        return m
+
+    def forget_channel(self, reg, channel: int, *, why: str = "off") -> int:
+        gone = self.store(reg.key).forget_channel(reg.key, int(channel))
+        if not gone:
+            return 0
+        row = {"kind": "forget_channel", "channel": int(channel), "at": _now(), "count": len(gone), "why": why}
+        with reg.store.lock:
+            reg.store.append_jsonl(self.rel(reg), row)
+            reg.store.commit(f"{reg.key}: memory: #{gone[0].channel_name} forgot {len(gone)}")
+        self._notify(reg.key)
+        return len(gone)
+
+    def sync(self, reg) -> int:
+        """Rows of a channel no longer remembering are forgotten (the setting means what it says); the count forgotten."""
+        live = _channels(reg)
+        n = 0
+        for cid in list(self.store(reg.key).counts(reg.key)):
+            if cid not in live:
+                n += self.forget_channel(reg, int(cid), why="off")
+        return n
+
+    # ---- reads
+    def recall_for(self, reg, text: str, *, channel: int | None = None) -> list[Candidate]:
+        """The candidates for a question asked in `channel` (None = a DM or the site): the words, the meaning (when the
+        model is there) and the words of any member the question names, in the channel scope the owner set."""
+        from .help import mentioned_members
+
+        store = self.store(reg.key)
+        if not store.count(reg.key):
+            return []
+        names = [m.discord_id for m in mentioned_members(reg, text)]
+        return store.recall(reg.key, text, self._query(text), channel=channel, names=names, modes=_channels(reg))
+
+    def rebuild(self, reg) -> int:
+        """At start: the rows the index lacks, then the vectors that are missing."""
+        n = self.store(reg.key).replay(reg.key, self.rows(reg))
+        self._embed_missing(reg)
+        return n
+
+    def _embed_missing(self, reg) -> int:
+        store = self.store(reg.key)
+        try:
+            n = store.embed_missing(reg.key, self.embedder)
+        except Exception as e:  # noqa: BLE001
+            self._model = "failed"
+            log.warning("memory: vectors not filled for %s (%s)", reg.key, type(e).__name__)
+            return 0
+        if n:
+            self._model = "loaded"
+        return n
+
+    def embed_missing_all(self, regs) -> int:
+        return sum(self._embed_missing(reg) for reg in regs)
+
+    def warm(self, regs) -> None:
+        """Load the model once (seconds) when any guild remembers, so the first capture doesn't wait."""
+        if any(_channels(reg) for reg in regs):
+            self._embed(["warm up"])
+
+    def count(self, reg, channel: int | None = None) -> int:
+        return self.store(reg.key).count(reg.key, channel=channel)
+
+    def counts(self, reg) -> dict[str, int]:
+        return self.store(reg.key).counts(reg.key)
+
+    def list(self, reg, **kw) -> tuple[list[Memory], int]:
+        return self.store(reg.key).list(reg.key, **kw)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")

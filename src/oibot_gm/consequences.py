@@ -554,8 +554,22 @@ def people_consequence(reg: Registry, rs, m, verb: str, *, by_id: int | None = N
     raise ValueError(f"unknown people verb {verb}")
 
 
+def forget_consequence(m, by_id: int | None) -> str:
+    """The Forget confirm (the Me page's own words, the Ops page's any): what goes, and that it stays gone."""
+    whose = "what you said" if by_id is not None and int(by_id) == int(m.author_id) else f"what {m.author} said"
+    return f"The bot forgets {whose} on {m.when()}. It never repeats it again."
+
+
+def memory_off_consequence(reg, cid, n: int) -> str:
+    """Turning a channel's Memory off forgets what it held (the setting means what it says)."""
+    if n <= 0:
+        return f"The bot remembers nothing from <#{cid}> yet, so nothing is forgotten."
+    things = "the one thing it remembers" if n == 1 else f"the {n} things it remembers"
+    return f"The bot forgets {things} from <#{cid}>."
+
+
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
            "VERBS", "absence_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
-           "flex_consequence", "main_consequence", "people_consequence", "profession_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
+           "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "people_consequence", "profession_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 

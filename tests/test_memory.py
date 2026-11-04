@@ -232,3 +232,131 @@ def test_the_names_list_alone_brings_a_named_authors_words(store):
     assert not any(c.memory.author == "Rolf" for c in store.recall("g", question, None))
     named = [c for c in store.recall("g", question, None, names=[13]) if c.memory.author == "Rolf"]
     assert named and named[0].name_rank == 1 and named[0].bm25_rank is None and named[0].score > 0
+
+
+class FakeEmbedder:
+    """Deterministic vectors; `fail=True` behaves like a model that never loaded."""
+
+    def __init__(self, fail=False):
+        self.fail, self.calls = fail, 0
+
+    @property
+    def ready(self):
+        return not self.fail
+
+    def _v(self, text):
+        return vec(sum(map(ord, text)) % 1000)
+
+    def passages(self, texts):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("no model")
+        return np.stack([self._v(t) for t in texts])
+
+    def query(self, text):
+        if self.fail:
+            raise RuntimeError("no model")
+        return self._v(text)
+
+
+class FakeReg:
+    """What Memories needs of a Registry: key, store, memory_channels()."""
+
+    def __init__(self, store, key="g", channels=None):
+        self.key, self.store, self._channels = key, store, channels or {"5": "shared", "6": "channel"}
+        self.members = {}
+
+    def memory_channels(self):
+        return dict(self._channels)
+
+
+@pytest.fixture
+def svc(tmp_path, store):
+    from oibot_gm.store import GitStore
+
+    gs = GitStore(tmp_path / "data", push=False)
+    reg = FakeReg(gs)
+    return mem.Memories(tmp_path / "out", embedder=FakeEmbedder()), reg
+
+
+def test_remember_writes_the_row_the_index_and_notifies_once(svc, monkeypatch):
+    m, reg = svc
+    seen = []
+    monkeypatch.setattr(mem, "MEMORY_LISTENERS", [seen.append])
+    kept = m.remember(reg, channel=5, channel_name="general", scope="shared", author_id=10, author="Mara", at="2026-10-01T10:00:00+00:00",
+                      text="the horde runs are on thursday", p=0.9, message_id=1)
+    assert kept is not None and kept.id == mem.memory_key("g", 1)
+    rows = m.rows(reg)
+    assert rows == [{"kind": "memory", "id": kept.id, "channel": 5, "channel_name": "general", "scope": "shared", "author_id": 10, "author": "Mara",
+                     "at": "2026-10-01T10:00:00+00:00", "text": "the horde runs are on thursday", "context": "", "p": 0.9, "message_id": 1}]
+    assert m.count(reg) == 1 and seen == ["g"]
+    assert m.remember(reg, channel=5, channel_name="general", scope="shared", author_id=10, author="Mara", at="2026-10-01T10:00:00+00:00",
+                      text="the horde runs are on thursday", p=0.9, message_id=1) is None, "the same message twice is kept once"
+    assert len(m.rows(reg)) == 1 and seen == ["g"]
+    assert m.store("g").get("g", kept.id).rowid and m.store("g")._vectors("g")[1].shape == (1, mem.EMBED_DIMS)
+
+
+def test_a_dead_embedder_still_stores_and_the_hourly_pass_fills_the_vector(tmp_path, monkeypatch):
+    from oibot_gm.store import GitStore
+
+    emb = FakeEmbedder(fail=True)
+    m = mem.Memories(tmp_path / "out", embedder=emb)
+    reg = FakeReg(GitStore(tmp_path / "data", push=False))
+    kept = m.remember(reg, channel=5, channel_name="general", scope="shared", author_id=10, author="Mara", at="2026-10-01T10:00:00+00:00",
+                      text="our only jc is Ysolde", p=0.9, message_id=1)
+    assert kept is not None and m.model_state() == "failed"
+    cands = m.recall_for(reg, "who is our jc?")
+    assert cands and cands[0].memory.id == kept.id and cands[0].cosine == 0.0, "the words still find it"
+    assert m.store("g")._vectors("g")[1].shape == (0, mem.EMBED_DIMS)
+    emb.fail = False
+    assert m.embed_missing_all([reg]) == 1 and m.model_state() == "loaded"
+    assert m.store("g")._vectors("g")[1].shape == (1, mem.EMBED_DIMS)
+
+
+def test_forget_rules_rows_and_the_channel_sync(svc, monkeypatch):
+    m, reg = svc
+    a = m.remember(reg, channel=5, channel_name="general", scope="shared", author_id=10, author="Mara", at="2026-10-01T10:00:00+00:00", text="a fact", p=0.9, message_id=1)
+    b = m.remember(reg, channel=6, channel_name="officer-chat", scope="channel", author_id=12, author="Tomas", at="2026-10-02T10:00:00+00:00", text="another fact", p=0.9, message_id=2)
+    assert m.forget(reg, a.id, by="Elin", by_id=11, via="web", officer=False) is None, "not theirs, not an officer"
+    gone = m.forget(reg, a.id, by="Mara", by_id=10, via="web", officer=False)
+    assert gone is not None and gone.id == a.id and m.rows(reg)[-1]["kind"] == "forget" and m.rows(reg)[-1]["why"] == "member" and m.rows(reg)[-1]["by_id"] == 10
+    assert m.forget(reg, a.id, by="Mara", by_id=10, via="web", officer=False) is None, "already forgotten"
+    reg._channels = {"5": "shared"}  # officer-chat went Off
+    assert m.sync(reg) == 1 and m.count(reg) == 0
+    row = m.rows(reg)[-1]
+    assert row["kind"] == "forget_channel" and row["channel"] == 6 and row["count"] == 1 and row["why"] == "off"
+    assert m.sync(reg) == 0
+
+
+def test_rebuild_replays_the_rows_the_index_lacks(svc):
+    m, reg = svc
+    a = m.remember(reg, channel=5, channel_name="general", scope="shared", author_id=10, author="Mara", at="2026-10-01T10:00:00+00:00", text="a fact", p=0.9, message_id=1)
+    m.remember(reg, channel=5, channel_name="general", scope="shared", author_id=11, author="Elin", at="2026-10-02T10:00:00+00:00", text="a second fact", p=0.9, message_id=2)
+    m.forget(reg, a.id, by="Mara", by_id=10, via="web", officer=False)
+    fresh = mem.Memories(m.out / "elsewhere", embedder=FakeEmbedder())
+    assert fresh.rebuild(reg) == 3 and fresh.count(reg) == 1 and fresh.store("g")._vectors("g")[1].shape == (1, mem.EMBED_DIMS)
+    assert fresh.rebuild(reg) == 0
+
+
+def test_enabled_needs_a_remembering_channel_and_the_key(svc, monkeypatch):
+    from oibot_gm.llm import decisions
+
+    m, reg = svc
+    monkeypatch.setattr(decisions, "DECISIONS", None)
+    monkeypatch.delenv(decisions.KEY_ENV, raising=False)
+    assert mem.enabled(reg) is False
+    monkeypatch.setenv(decisions.KEY_ENV, "x")
+    assert mem.enabled(reg) is True
+    reg._channels = {}
+    assert mem.enabled(reg) is False
+
+
+def test_on_save_syncs_after_a_config_commit(svc, monkeypatch):
+    m, reg = svc
+    monkeypatch.setattr(mem, "MEMORIES", m)
+    m.remember(reg, channel=6, channel_name="officer-chat", scope="channel", author_id=12, author="Tomas", at="2026-10-02T10:00:00+00:00", text="x y z", p=0.9, message_id=2)
+    reg._channels = {}
+    mem.on_save(reg, "member", [])
+    assert m.count(reg) == 1
+    mem.on_save(reg, "config", [])
+    assert m.count(reg) == 0
