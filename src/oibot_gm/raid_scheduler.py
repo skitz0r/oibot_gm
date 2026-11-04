@@ -70,6 +70,9 @@ class RaidSchedulerMixin:
             setup = getattr(self, "setup_tick", None)  # SetupMixin: the hourly channel-permission check, the daily invite check
             if setup is not None:
                 await setup()
+            tick = getattr(self, "memory_tick", None)  # ListenMixin: chat memory's hourly vectors for rows kept while the model was away
+            if tick is not None:
+                await tick()
             errors.pop("", None)
         except Exception as e:  # noqa: BLE001
             await self._tick_failed(None, e)

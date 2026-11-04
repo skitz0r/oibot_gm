@@ -161,6 +161,12 @@ class Decide:
         self.states.append(state)
         return self.p
 
+    async def ask(self, state, questions, workload="listen"):
+        """The gate's one request (chat memory, §5.61): only the decision is answered here."""
+        self.calls += 1
+        self.states.append(state)
+        return {"decision": {"type": "noul", "noul": self.p}}
+
 
 class Ops:
     def __init__(self):
@@ -181,7 +187,7 @@ class Bot(db.ListenMixin):
         self.user = types.SimpleNamespace(id=BOT_ID)
         self.handled = []
 
-    async def plain_text(self, message, reg, text, channel):
+    async def plain_text(self, message, reg, text, channel, memory=None):
         self.handled.append((message.id, text, channel))
 
     async def news_message(self, message):
@@ -370,7 +376,7 @@ def test_the_log_file_carries_no_text_and_recent_is_context(gate):
     dec = gate.run(0.9, second)
     assert dec.states[0]["recent"] == [{"author": f"user{me}", "text": "anyone up for a dungeon"}]
     rows = [json.loads(x) for x in gate.log.read_text().splitlines()]
-    assert len(rows) == 2 and all(set(r) == {"at", "guild", "channel", "author_id", "p", "mode", "did"} for r in rows)
+    assert len(rows) == 2 and all(set(r) == {"at", "guild", "channel", "author_id", "p", "mode", "did", "remembered"} for r in rows)
     assert "dungeon" not in gate.log.read_text() and rows[1]["did"] == "replied" and rows[1]["author_id"] == me
 
 

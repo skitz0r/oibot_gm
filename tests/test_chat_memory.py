@@ -228,3 +228,264 @@ def test_mcp_tools_carry_the_memory_setting():
     finally:
         ms.use(None)
     assert json.loads(calls[1][2])["changes"] == [{"kind": "plain", "fields": {"set_remember": {"1": "channel"}}}]
+
+
+# ---- the gate: capture and recall in one request
+
+from oibot_gm import discord_bot as db  # noqa: E402
+
+BOT_ID = 777
+
+
+class Ask:
+    """A fake decision service answering one `ask` with fixed probabilities; keeps every request."""
+
+    available = True
+
+    def __init__(self, p, remember=None, relevance=None):
+        self.p, self.remember, self.relevance, self.requests = p, remember, relevance, []
+
+    async def ask(self, state, questions, workload="listen"):
+        self.requests.append((state, questions, workload))
+        out = {}
+        for name, q in questions.items():
+            if q["type"] == "choice":
+                if self.relevance is None:
+                    continue
+                probs = {o: 0.0 for o in q["criteria"]}
+                probs.update(self.relevance)
+                out[name] = {"type": "choice", "choice": max(probs, key=probs.get), "probabilities": probs}
+            elif name == "remember":
+                if self.remember is not None:
+                    out[name] = {"type": "noul", "noul": self.remember}
+            else:
+                out[name] = {"type": "noul", "noul": self.p}
+        return out
+
+    async def noul(self, state, instructions, criteria=None, workload="listen"):
+        a = await self.ask(state, {"decision": {"type": "noul", "instructions": instructions, "criteria": criteria}}, workload)
+        return a["decision"]["noul"]
+
+    async def choice(self, state, instructions, criteria, workload="listen"):
+        a = await self.ask(state, {"decision": {"type": "choice", "instructions": instructions, "criteria": criteria}}, workload)
+        return a.get("decision", {}).get("probabilities")
+
+
+class Ops:
+    def __init__(self):
+        self.lines = []
+
+    async def emit(self, cfg, level, text, exc=None, **kw):
+        self.lines.append((level, text))
+
+
+class Bot(db.ListenMixin):
+    on_message = db.OibotGM.on_message
+    _addressed = db.OibotGM._addressed
+
+    def __init__(self, reg):
+        self.reg = reg
+        self.registries = types.SimpleNamespace(by_key={reg.key: reg}, for_guild=lambda gid: reg, ordered=lambda: [reg])
+        self.ops = Ops()
+        self.user = types.SimpleNamespace(id=BOT_ID)
+        self.handled = []
+
+    async def plain_text(self, message, reg, text, channel, memory=None):
+        self.handled.append((message.id, text, channel, memory))
+
+    async def news_message(self, message):
+        return False
+
+    def saw_member(self, gid, author):
+        pass
+
+    def event_for(self, channel_id):
+        return None
+
+
+_next_id = iter(range(7000, 9000))
+
+
+def message(author, channel=GENERAL_CH, text="our only jc is Ysolde", *, bot=False, mentions=(), reply=None, name="general"):
+    reacts = []
+
+    async def add_reaction(emoji):
+        reacts.append(emoji)
+
+    async def remove_reaction(emoji, member):
+        reacts.remove(emoji)
+
+    ref = None if reply is None else types.SimpleNamespace(resolved=reply)
+    return types.SimpleNamespace(id=next(_next_id), content=text, author=types.SimpleNamespace(id=author, display_name=f"user{author}", bot=bot),
+                                 channel=types.SimpleNamespace(id=channel, name=name, topic="General chat", category=types.SimpleNamespace(name="Guild")),
+                                 guild=types.SimpleNamespace(id=1, me=None), created_at=None,
+                                 mentions=list(mentions), role_mentions=[], reference=ref, add_reaction=add_reaction, remove_reaction=remove_reaction, reacts=reacts)
+
+
+@pytest.fixture
+def gate(g, monkeypatch, tmp_path):
+    from oibot_gm.llm import decisions
+
+    monkeypatch.setattr(db, "LISTEN_LOG", tmp_path / "listen.jsonl")
+    monkeypatch.delenv("OIBOT_LISTEN_SURE", raising=False)
+    monkeypatch.delenv("OIBOT_REMEMBER_AT", raising=False)
+    monkeypatch.setenv(decisions.KEY_ENV, "x")
+
+    class Emb:
+        ready = True
+
+        def passages(self, texts):
+            import numpy as np
+
+            return np.stack([mem._unit(np.ones(mem.EMBED_DIMS, dtype=np.float32)) for _ in texts])
+
+        def query(self, text):
+            import numpy as np
+
+            return mem._unit(np.ones(mem.EMBED_DIMS, dtype=np.float32))
+
+    svc = mem.Memories(tmp_path / "out", embedder=Emb())
+    monkeypatch.setattr(mem, "MEMORIES", svc)
+    bot = Bot(g.reg)
+
+    def run(p, msg, *, listen="reply", remember_mode=None, remember=None, relevance=None):
+        patch = {"set_listen": {str(msg.channel.id): listen}}
+        if remember_mode:
+            patch["set_remember"] = {str(msg.channel.id): remember_mode}
+        g.reg.set_plain_policy(g.reg.merge_plain_policy(patch), "owner")
+        dec = Ask(p, remember=remember, relevance=relevance)
+        monkeypatch.setattr(decisions, "DECISIONS", dec)
+        asyncio.run(bot.on_message(msg))
+        return dec
+
+    return types.SimpleNamespace(bot=bot, run=run, g=g, svc=svc, reg=g.reg)
+
+
+def test_a_remembering_channel_asks_two_questions_and_keeps_a_kept_message(gate):
+    me = gate.g.me.discord_id
+    msg = message(me)
+    dec = gate.run(0.2, msg, remember_mode="shared", remember=0.9)
+    state, questions, workload = dec.requests[0]
+    assert set(questions) == {"decision", "remember"} and workload == "listen"
+    assert state["memory"] == [] and "replying_to" not in state["message"]
+    assert "`memory` lists things members said that the bot remembers" in db.LISTEN_QUESTION
+    kept = gate.svc.list(gate.reg)[0]
+    assert len(kept) == 1 and kept[0].text == msg.content and kept[0].channel == GENERAL_CH and kept[0].scope == "shared"
+    assert kept[0].author == gate.g.me.display_name and kept[0].author_id == me and kept[0].p == 0.9 and kept[0].id == mem.memory_key(gate.reg.key, msg.id)
+    row = gate.bot.listen_recent(gate.reg)[0]
+    assert row["did"] == "quiet" and row["remembered"] is True
+    assert gate.svc.rows(gate.reg)[-1]["kind"] == "memory"
+
+
+def test_watches_remembers_too_off_never_and_under_the_line_is_not_kept(gate):
+    me = gate.g.me.discord_id
+    msg = message(me, text="the horde runs are on thursday")
+    gate.run(0.2, msg, listen="watch", remember_mode="shared", remember=0.8)
+    assert gate.svc.count(gate.reg) == 1
+    msg2 = message(me, text="lol nice pull")
+    dec = gate.run(0.1, msg2, listen="reply", remember_mode="shared", remember=0.3)
+    assert gate.svc.count(gate.reg) == 1 and gate.bot.listen_recent(gate.reg)[0]["remembered"] is False
+    msg3 = message(me, channel=SIGNUP_CH, text="i can make devilsaur gauntlets now", name="signups")
+    dec = gate.run(0.2, msg3, listen="reply", remember=0.95)
+    assert "remember" not in dec.requests[0][1] and gate.svc.count(gate.reg) == 1 and gate.bot.listen_recent(gate.reg)[0]["remembered"] is None
+
+
+def test_the_hosts_line_raises_the_keep_line(gate, monkeypatch):
+    monkeypatch.setenv("OIBOT_REMEMBER_AT", "0.8")
+    gate.run(0.2, message(gate.g.me.discord_id), remember_mode="shared", remember=0.7)
+    assert gate.svc.count(gate.reg) == 0
+
+
+def test_a_reply_carries_what_it_answered_and_a_gone_reference_carries_nothing(gate):
+    me, other = gate.g.me.discord_id, gate.g.other.discord_id
+    asked = types.SimpleNamespace(content="anyone have a jewelcrafter?", author=types.SimpleNamespace(id=other, display_name="Rolf"))
+    msg = message(me, text="yep, Ysolde", reply=asked)
+    dec = gate.run(0.2, msg, remember_mode="shared", remember=0.9)
+    state = dec.requests[0][0]
+    assert state["message"]["replying_to"].endswith(": anyone have a jewelcrafter?")
+    kept = gate.svc.list(gate.reg)[0][0]
+    assert kept.context.endswith(": anyone have a jewelcrafter?") and kept.citation().endswith("(replying to " + kept.context + ")")
+    gone = message(me, text="yep i do", reply=types.SimpleNamespace(content="", author=None))
+    dec = gate.run(0.2, gone, remember_mode="shared", remember=0.9)
+    assert "replying_to" not in dec.requests[0][0]["message"]
+    # by its key: both rows share the same second, and the list's newest-first order does not break that tie
+    assert gate.svc.store(gate.reg.key).get(gate.reg.key, mem.memory_key(gate.reg.key, gone.id)).context == ""
+
+
+def test_recall_feeds_the_gate_and_the_judged_memories_reach_the_reply(gate):
+    me = gate.g.me.discord_id
+    gate.run(0.2, message(me, text="our only jc is Ysolde"), remember_mode="shared", remember=0.9)
+    ask = message(me, text="who is our jc?")
+    dec = gate.run(0.95, ask, remember_mode="shared", remember=0.1, relevance={"m1": 0.9})
+    state, questions, _ = dec.requests[-1]
+    assert set(questions) == {"decision", "remember", "relevance"}
+    assert state["memory"][0]["id"] == "m1" and state["memory"][0]["text"] == "our only jc is Ysolde"
+    assert questions["relevance"]["criteria"]["m1"].startswith(f"{gate.g.me.display_name} said on ")
+    mid, text, channel, memory = gate.bot.handled[-1]
+    assert mid == ask.id and [c.memory.text for c in memory] == ["our only jc is Ysolde"] and memory[0].judged == 0.9
+    assert gate.svc.count(gate.reg) == 1, "a question is not a memory"
+
+
+def test_a_channel_scoped_memory_is_recalled_only_in_its_channel(gate):
+    me = gate.g.me.discord_id
+    gate.run(0.2, message(me, channel=OFFICER_CH, text="we bench whoever is late twice", name="officer-chat"), remember_mode="channel", remember=0.9)
+    dec = gate.run(0.95, message(me, channel=GENERAL_CH, text="what happens when someone is late?"), remember_mode="shared", remember=0.1, relevance={"m1": 0.9})
+    assert dec.requests[-1][0]["memory"] == [] and "relevance" not in dec.requests[-1][1] and gate.bot.handled[-1][3] == []
+    dec = gate.run(0.95, message(me, channel=OFFICER_CH, text="what happens when someone is late?", name="officer-chat"), remember_mode="channel", remember=0.1, relevance={"m1": 0.9})
+    assert len(dec.requests[-1][0]["memory"]) == 1 and [c.memory.channel for c in gate.bot.handled[-1][3]] == [OFFICER_CH]
+
+
+def test_an_unsure_ask_keeps_its_memories_for_the_click(gate):
+    me = gate.g.me.discord_id
+    gate.run(0.2, message(me, text="our only jc is Ysolde"), remember_mode="shared", remember=0.9)
+    ask = message(me, text="jc?")
+    gate.run(0.6, ask, remember_mode="shared", remember=0.1, relevance={"m1": 0.85})
+    assert ask.reacts == ["👀"] and gate.bot.handled == []
+    payload = types.SimpleNamespace(emoji="👀", message_id=ask.id, user_id=me, channel_id=GENERAL_CH, guild_id=1)
+    asyncio.run(gate.bot.on_raw_reaction_add(payload))
+    assert [c.judged for c in gate.bot.handled[-1][3]] == [0.85]
+
+
+def test_no_key_captures_nothing_and_a_failed_request_is_skipped(gate, monkeypatch):
+    from oibot_gm.llm import decisions
+
+    me = gate.g.me.discord_id
+    monkeypatch.delenv(decisions.KEY_ENV, raising=False)
+
+    class Down(Ask):
+        available = False
+
+    gate.reg.set_plain_policy(gate.reg.merge_plain_policy({"set_listen": {str(GENERAL_CH): "reply"}, "set_remember": {str(GENERAL_CH): "shared"}}), "owner")
+    monkeypatch.setattr(decisions, "DECISIONS", Down(0.9))
+    asyncio.run(gate.bot.on_message(message(me)))
+    assert gate.svc.count(gate.reg) == 0 and gate.bot.ops.lines and gate.bot.ops.lines[0][0] == "warn"
+
+    class Failing(Ask):
+        async def ask(self, state, questions, workload="listen"):
+            return None
+
+    monkeypatch.setenv(decisions.KEY_ENV, "x")
+    monkeypatch.setattr(decisions, "DECISIONS", Failing(0.9))
+    asyncio.run(gate.bot.on_message(message(me)))
+    assert gate.svc.count(gate.reg) == 0 and gate.bot.listen_recent(gate.reg)[0]["did"] == "skipped"
+
+
+def test_turning_a_channel_off_forgets_through_the_save_listener(gate, monkeypatch):
+    from oibot_gm import registry as registry_mod
+
+    me = gate.g.me.discord_id
+    gate.run(0.2, message(me), remember_mode="shared", remember=0.9)
+    assert gate.svc.count(gate.reg) == 1
+    monkeypatch.setattr(registry_mod, "SAVE_LISTENERS", [mem.on_save])
+    gate.reg.set_plain_policy(gate.reg.merge_plain_policy({"set_remember": {str(GENERAL_CH): None}}), "owner")
+    assert gate.svc.count(gate.reg) == 0 and gate.svc.rows(gate.reg)[-1]["kind"] == "forget_channel"
+
+
+def test_the_hourly_tick_fills_vectors_and_the_run_wiring_exists():
+    assert callable(getattr(db.ListenMixin, "memory_tick", None))
+    import inspect
+
+    src = inspect.getsource(db.run)
+    assert "memory.MEMORIES = " in src or "mem.MEMORIES = " in src
+    assert "on_save" in src
+    assert "memory_tick" in inspect.getsource(__import__("oibot_gm.raid_scheduler", fromlist=["x"]).RaidSchedulerMixin.scheduler_tick)

@@ -19,6 +19,8 @@ import yaml
 from discord import app_commands
 
 from . import configops, conversation, guild_routing, render
+from . import memory as mem
+from . import registry as registry_mod
 from .discord_feed import FeedMixin
 from .discord_loot import LootMixin
 from .discord_loot_surface import LootSurfaceMixin
@@ -137,6 +139,8 @@ LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or 
                    "records, even when it is addressed to everyone. A message saying the writer got, learned or can now make a "
                    "pattern or recipe, or reached a skill, is something the bot records. "
                    "No when it is conversation between people, game talk, a joke, a link, or a reply to another person. "
+                   "`memory` lists things members said that the bot remembers and can repeat; a message asking about one of "
+                   "them is for the bot. "
                    "`bot` says what the bot does; `channel` says where it was written (the bot's job there, the channel's own "
                    "topic and its category); `recent` is the chat just before, for context only.")
 LISTEN_CRITERIA = {"true": "The message asks who can make something or what the bot knows, or tells it a profession, skill, "
@@ -227,13 +231,14 @@ class ListenMixin:
         """The guild's last verdicts, newest first: {at, channel, author, text (≤120, memory only), p, mode, did}."""
         return list(reversed(self._listen()["log"].get(reg.key, ())))
 
-    def _listen_record(self, reg, message, text: str, p: float | None, mode: str, did: str) -> None:
+    def _listen_record(self, reg, message, text: str, p: float | None, mode: str, did: str, remembered: bool | None = None) -> None:
         at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         ring = self._listen()["log"].setdefault(reg.key, collections.deque(maxlen=LISTEN_RING))
         ring.append({"at": at, "channel": message.channel.id, "author": getattr(message.author, "display_name", "") or "",
-                     "text": (text or "")[:120], "p": None if p is None else round(p, 3), "mode": mode, "did": did})
+                     "text": (text or "")[:120], "p": None if p is None else round(p, 3), "mode": mode, "did": did,
+                     "remembered": remembered})
         row = {"at": at, "guild": reg.key, "channel": message.channel.id, "author_id": message.author.id,
-               "p": None if p is None else round(p, 3), "mode": mode, "did": did}
+               "p": None if p is None else round(p, 3), "mode": mode, "did": did, "remembered": remembered}
         try:
             LISTEN_LOG.parent.mkdir(parents=True, exist_ok=True)
             with LISTEN_LOG.open("a") as f:
@@ -246,9 +251,10 @@ class ListenMixin:
             except Exception:  # noqa: BLE001 — a listener never breaks the gate
                 log.exception("listen listener failed")
 
-    def listen_state(self, reg, message, text: str) -> dict:
-        """The decision's state: what the bot does, the guild's raids and words, the channel, the chat just before and the
-        message — member text as data, never as instructions."""
+    def listen_state(self, reg, message, text: str, candidates=()) -> dict:
+        """The decision's state: what the bot does, the guild's raids and words, the channel, the chat just before, the
+        recalled memories (`memory`, always a list — chat memory, design §5.61) and the message, with what it replied to
+        when it is a reply to a message the gateway resolved — member text as data, never as instructions."""
         cfg = reg.config
         raids = list(dict.fromkeys([*reg.profile.raids, *(cfg.raids or {})]))
         purpose = {cfg.signup_channel_id: "the signup channel", cfg.ops_channel_id: "the officers' channel",
@@ -258,6 +264,16 @@ class ListenMixin:
         ref = message.reference.resolved if getattr(message, "reference", None) else None
         me = getattr(self, "user", None)
         category = getattr(ch, "category", None)
+        msg = {"author": getattr(message.author, "display_name", "") or "", "text": text[:600],
+               "reply_to_bot": bool(me is not None and getattr(getattr(ref, "author", None), "id", None) == getattr(me, "id", -1))}
+        # a reply carries what it answered — only a resolved message with words and an author (an unresolved or deleted
+        # reference carries nothing), and never the bot's own message (reply_to_bot says that)
+        ref_text = (getattr(ref, "content", None) or "").strip()
+        ref_author = getattr(getattr(ref, "author", None), "display_name", None)
+        if ref_text and ref_author and not (me is not None and getattr(ref.author, "id", None) == getattr(me, "id", -1)):
+            body = (mention_names(ref, reg, me) if hasattr(ref, "mentions") else ref_text)[:160]
+            if body:
+                msg["replying_to"] = f"{ref_author}: {body}"
         return {"bot": LISTEN_BOT_WORDS,
                 "guild": {"raids": [str(reg.raid_def(r).get("name", r)) for r in raids], "words": [*LISTEN_GLOSSARY, *(d.name.lower() for d in reg.profile.professions.values())]},
                 # where it was written: the bot's own job for the channel, and what Discord knows — its topic (the owner's
@@ -265,8 +281,8 @@ class ListenMixin:
                 "channel": {"name": f"#{getattr(ch, 'name', '') or ''}", "purpose": purpose.get(ch.id, "") if ch.id else "",
                             "topic": str(getattr(ch, "topic", None) or "")[:200], "category": str(getattr(category, "name", None) or "")},
                 "recent": list(self._listen()["recent"].get(ch.id, ()))[-(LISTEN_RECENT - 1):],
-                "message": {"author": getattr(message.author, "display_name", "") or "", "text": text[:600],
-                            "reply_to_bot": bool(me is not None and getattr(getattr(ref, "author", None), "id", None) == getattr(me, "id", -1))}}
+                "memory": mem.memory_state(list(candidates)),
+                "message": msg}
 
     def _listen_hour_ok(self, reg) -> bool:
         hour = int(time.time() // 3600)
@@ -308,17 +324,32 @@ class ListenMixin:
                                                        "(TYPESAFE_API_KEY), so the bot reads nothing there yet.")
             return None
         self._listen_purge()
-        state = self.listen_state(reg, message, text)
+        # chat memory (design §5.61): recall BEFORE deciding — a question about something remembered is for the bot
+        remembering = mem.MEMORIES is not None and reg.memory_mode(cid) is not None and mem.enabled(reg)
+        cands: list = []
+        if mem.MEMORIES is not None and mem.enabled(reg):
+            try:
+                cands = await asyncio.to_thread(mem.MEMORIES.recall_for, reg, text, channel=cid)
+            except Exception as e:  # noqa: BLE001 — recall never breaks the gate
+                log.warning("listen: recall failed in %s (%s)", cid, type(e).__name__)
+                cands = []
+        state = self.listen_state(reg, message, text, cands)
         recent = self._listen()["recent"].setdefault(cid, collections.deque(maxlen=LISTEN_RECENT))
         recent.append({"author": state["message"]["author"], "text": text[:200]})
         if not self._listen_hour_ok(reg):
             self._listen_record(reg, message, text, None, mode, "skipped")
             return "skipped"
-        with for_guild(reg.key):
-            p = await dec.noul(state, LISTEN_QUESTION, LISTEN_CRITERIA, workload="listen")
+        with for_guild(reg.key):  # ONE request: is it for the bot, is it worth keeping, which memory answers it
+            answers = await dec.ask(state, mem.questions(LISTEN_QUESTION, LISTEN_CRITERIA, cands, remember=remembering), workload="listen")
+        p, p_remember, judged = mem.read_answers(answers, cands)
         if p is None:
             self._listen_record(reg, message, text, None, mode, "skipped")
             return "skipped"
+        remembered: bool | None = None
+        if remembering and p_remember is not None:
+            remembered = p_remember >= mem.remember_at()
+            if remembered:
+                await self._remember(reg, message, text, cid, state["message"].get("replying_to", ""), p_remember)
         if p >= listen_sure():
             did = "replied" if mode == "reply" else "would reply"
         elif p >= LISTEN_MAYBE:
@@ -333,12 +364,52 @@ class ListenMixin:
                 did = "quiet"
             else:
                 self._listen()["asks"][message.id] = {"guild": reg.key, "channel": cid, "author": message.author.id, "text": text,
-                                                      "message": message, "expires": time.monotonic() + LISTEN_ASK_S}
+                                                      "message": message, "memory": judged, "expires": time.monotonic() + LISTEN_ASK_S}
                 asyncio.get_running_loop().create_task(self._listen_expire(message.id))
-        self._listen_record(reg, message, text, p, mode, did)
+        self._listen_record(reg, message, text, p, mode, did, remembered=remembered)
         if did == "replied":
-            await self.plain_text(message, reg, text, cid)
+            await self.plain_text(message, reg, text, cid, memory=judged)
         return did
+
+    async def _remember(self, reg, message, text: str, cid: int, context: str, p: float) -> None:
+        """Keep the message as the writer's words (off the loop: an embedding and a git commit)."""
+        uid = message.author.id
+        member = reg.members.get(uid)
+        author = (member.display_name if member is not None and member.display_name else None) or getattr(message.author, "display_name", "") or "someone"
+        at = getattr(message, "created_at", None)
+        at = at.isoformat(timespec="seconds") if at else datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            await asyncio.to_thread(mem.MEMORIES.remember, reg, channel=cid, channel_name=getattr(message.channel, "name", "") or str(cid),
+                                    scope=reg.memory_mode(cid), author_id=uid, author=author, at=at, text=text, context=context, p=p,
+                                    message_id=message.id)
+        except Exception as e:  # noqa: BLE001 — a failed write is a warning, never a reply
+            log.warning("memory: not kept in %s (%s)", cid, type(e).__name__)
+
+    async def memory_tick(self, now: float | None = None) -> None:
+        """Hourly: vectors for rows kept while the model was away (raid_scheduler.scheduler_tick)."""
+        now = time.time() if now is None else now
+        last = self.__dict__.setdefault("_memory_ticked", 0.0)
+        if mem.MEMORIES is None or now - last < 3600:
+            return
+        self.__dict__["_memory_ticked"] = now
+        regs = [r for r in self.registries.ordered() if r.memory_channels()]
+        if regs:
+            await asyncio.to_thread(mem.MEMORIES.embed_missing_all, regs)
+
+    def _memory_rebuild(self) -> None:
+        """At start, in a thread: the index from the rows, then the model once (seconds) when any guild remembers."""
+        if mem.MEMORIES is None:
+            return
+        regs = self.registries.ordered()
+        for reg in regs:
+            try:
+                mem.MEMORIES.rebuild(reg)
+            except Exception as e:  # noqa: BLE001
+                log.warning("memory: rebuild failed for %s (%s)", reg.key, type(e).__name__)
+        try:
+            mem.MEMORIES.warm(regs)
+        except Exception as e:  # noqa: BLE001
+            log.warning("memory: warm-up failed (%s)", type(e).__name__)
 
     async def _listen_expire(self, message_id: int, delay: float | None = None) -> None:
         """The window closed with no click from the writer: forget the ask and take the bot's own 👀 off the message, so
@@ -368,7 +439,7 @@ class ListenMixin:
         reg = self.registries.by_key.get(ask["guild"])
         if reg is None or reg.listen_mode(ask["channel"]) != "reply":
             return  # listening was turned off (or to watch) since the 👀
-        await self.plain_text(ask["message"], reg, ask["text"], ask["channel"])
+        await self.plain_text(ask["message"], reg, ask["text"], ask["channel"], memory=ask.get("memory"))
 
 
 class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
@@ -1028,7 +1099,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             return True
         return (guild.id, user.id) not in self.__dict__.get("_member_gone", set())
 
-    async def plain_text(self, message: discord.Message, reg, text: str, channel) -> None:
+    async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None) -> None:
         """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).
         An "act" channel (ops/analytics by default): configops.parse first — a change becomes the diff + Apply, a
         question gets the parser's own reply from the live config (one model call either way). Elsewhere (DMs and
@@ -1164,6 +1235,10 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         await self.resolve_officer_roles()  # legacy officer role names → ids, name cache for display
         st = _store()
         regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.registries.ordered())
+        if not getattr(self, "_memory_booted", False):  # chat memory (design §5.61): the index from the rows, off the loop
+            self._memory_booted = True
+            self.__dict__["_memory_ticked"] = time.time()  # the rebuild fills missing vectors now: the hourly tick starts an hour on
+            self.loop.create_task(asyncio.to_thread(self._memory_rebuild))
         print(f"oibot_GM online as {self.user} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · loot sessions: {len(self.events)}")
         for err in self.registries.load_errors:  # a guild that didn't load has no ops channel to tell
             print(f"guild NOT loaded — {err}")
@@ -1215,5 +1290,8 @@ def run(guild_dir: Path, signup_file: str) -> None:
     ctx = GuildContext(guild_dir, signup_file)
     # listening's decision service (design §5.59): None without TYPESAFE_API_KEY; its usage shares Claude's ledger and cap
     decisions.DECISIONS = decisions.get_decisions(ledger=ctx.provider if hasattr(ctx.provider, "_record") else None)
+    # chat memory (design §5.61): the host's service; rows in the data repo, the index under out/
+    mem.MEMORIES = mem.Memories(OUT)
+    registry_mod.SAVE_LISTENERS.append(mem.on_save)  # a channel turned Off forgets after the config commit, from every surface
     # logging is configured by cli.setup_logging (rotating out/oibot.log); discord.py's own handler is off
     OibotGM(ctx, test_guild).run(token, log_handler=None)
