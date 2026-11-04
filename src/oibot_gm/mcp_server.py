@@ -924,19 +924,23 @@ def plain_permissions(guild: Guild = None) -> dict:
     default for unlisted channels, and the guild's roles (for role:<id> in `who`). Listening (design §5.59): `listen`
     {channel id: watch | reply} where the bot reads untagged messages, `listen_ready` (the host's TypeSafe key is set —
     never the value) and `listen_recent`, the last verdicts newest first (when in 12-hour words, channel, author, text,
-    p = how likely the message was for the bot, did = replied | asked | quiet | would reply | would ask | skipped)."""
+    p = how likely the message was for the bot, did = replied | asked | quiet | would reply | would ask | skipped).
+    Memory (design §5.61): `remember` {channel id: shared | channel} where the bot keeps what members say as their words
+    (shared = repeated anywhere it answers, channel = only in that channel); needs Listening there."""
     d = api(guild).get("/api/plain-permissions")
     return {"groups": [{k: g[k] for k in ("id", "label", "who", "who_text", "ops", "example")} for g in d["groups"]],
             "channels": [{"id": c["id"], "name": c["name"], "mode": c["mode"]} for c in d["channels"]], "listed": d["listed"],
             "dm": d["dm"], "default": d["default"], "roles": d["guild_roles"],
             "listen": d.get("listen", {}), "listen_ready": d.get("listen_ready", False),
+            "remember": d.get("remember", {}), "memory_ready": d.get("memory_ready", False), "memory_model": d.get("memory_model", "off"),
             "listen_recent": [{k: r.get(k) for k in ("when", "channel", "channel_name", "author", "text", "p", "mode", "did")} for r in d.get("listen_recent", [])]}
 
 
 @mcp.tool()
 def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: dict[str, str] | None = None, set_channels: dict[str, str | None] | None = None,
                           dm: str | None = None, default: str | None = None, listen: dict[str, str] | None = None,
-                          set_listen: dict[str, str | None] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
+                          set_listen: dict[str, str | None] | None = None, remember: dict[str, str] | None = None,
+                          set_remember: dict[str, str | None] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """Change the plain-text permissions (owner). `groups`: {group id: [who…]} for the groups to change — who is
     everyone | registered | officers | owner | role:<role id> (the owner can always do everything; [] = owner only).
     `channels`: the WHOLE per-channel map {channel id: act|self|answer|ignore} (unlisted channels use `default`; the ops
@@ -944,7 +948,9 @@ def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: 
     default}). `dm` / `default`: act | self | answer | ignore. Listening (design §5.59): `listen` = the WHOLE map {channel
     id: watch | reply} (a channel left out stops listening); `set_listen` = some channels only ({id: watch | reply | null
     = off}). watch = the bot only notes what it would have answered; reply = it answers what is clearly for it, untagged.
-    A channel that ignores plain text can't listen. Read plain_permissions first; `preview=True` first."""
+    A channel that ignores plain text can't listen. Memory (design §5.61): `remember` = the WHOLE memory map / `set_remember`
+    some channels ({id: shared | channel | null = off}); off FORGETS what the channel held — preview first.
+    Read plain_permissions first; `preview=True` first."""
     fields: dict[str, Any] = {}
     if groups is not None:
         fields["groups"] = groups
@@ -960,6 +966,10 @@ def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: 
         fields["listen"] = listen
     if set_listen is not None:
         fields["set_listen"] = set_listen
+    if remember is not None:
+        fields["remember"] = remember
+    if set_remember is not None:
+        fields["set_remember"] = set_remember
     return ops_change(guild, [{"kind": "plain", "fields": fields}], preview)
 
 

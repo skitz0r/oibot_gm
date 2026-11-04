@@ -4,9 +4,12 @@ No network, no Discord, no model: fake decisions, a fake embedder."""
 from __future__ import annotations
 
 import asyncio
+import time
 import types
 
 import pytest
+from conftest import OFFICER_ROLE, OWNER
+from web_helpers import post_confirmed
 
 from oibot_gm import configops
 from oibot_gm import memory as mem
@@ -14,6 +17,7 @@ from oibot_gm.configops import ConfigOp
 from oibot_gm.registry import MEMORY_MODES, MEMORY_WORDS, RegistryError
 
 OPS_CH, SIGNUP_CH, GENERAL_CH, OFFICER_CH = 920_001, 920_002, 920_003, 920_004
+RAID_LEAD = 300_000_000_000_000_007  # a Discord role the owner can grant groups to
 
 
 @pytest.fixture
@@ -173,3 +177,100 @@ def test_host_facts_name_the_memory_model_never_a_path(g, monkeypatch):
     assert "Memory model: not loaded yet (the bot downloads it once; until then it remembers words without the meaning search)" in configops.host_facts(g.reg)
     monkeypatch.setattr(mem, "MEMORIES", types.SimpleNamespace(model_state=lambda: "loaded"))
     assert "Memory model: loaded" in configops.host_facts(g.reg)
+
+
+# ---- the web and MCP (task 5): the map, the counts and the model's state; the same plain change
+
+class Guild:
+    def __init__(self):
+        self.id = 1
+        self.roles = [types.SimpleNamespace(id=RAID_LEAD, name="Raid Lead", position=2, is_default=lambda: False, managed=False)]
+
+
+@pytest.fixture
+def web_client(g, rs, monkeypatch):
+    from fastapi.testclient import TestClient
+    from itsdangerous import URLSafeSerializer
+    from test_mcp import TOKEN, FakeBot
+
+    from oibot_gm.web import app as web
+
+    officer_id = g.other.discord_id
+    guild = Guild()
+
+    class Bot(FakeBot):
+        def get_guild(self, gid):
+            return guild
+
+        async def cached_member(self, guild, uid, max_age=300):
+            return types.SimpleNamespace(id=uid, display_name=f"u{uid}", roles=[types.SimpleNamespace(id=OFFICER_ROLE)] if uid == officer_id else [])
+
+        def officiates(self, member, guild):
+            return member.id in (officer_id, OWNER)
+
+        def guild_channels(self, reg):
+            return [{"id": str(OPS_CH), "name": "ops", "category": None}, {"id": str(GENERAL_CH), "name": "general", "category": None}]
+
+    monkeypatch.setenv("OIBOT_WEB_SECRET", "s" * 40)
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    sign = URLSafeSerializer("s" * 40, salt="session")
+    bot = Bot(g.reg, rs)
+    c = TestClient(web.create_app(bot))
+
+    def as_(uid):
+        c.cookies.set(web.COOKIE, sign.dumps({"uid": str(uid), "name": "x", "iat": time.time()}))
+        return {"X-Requested-With": "oibot"}
+
+    return types.SimpleNamespace(c=c, as_=as_, officer=officer_id, member=g.me.discord_id, bot=bot, token=TOKEN)
+
+
+def test_api_memory_setting_reads_and_writes(web_client, g, monkeypatch):
+    from oibot_gm.llm import decisions
+
+    w = web_client
+    monkeypatch.setattr(decisions, "DECISIONS", None)
+    monkeypatch.delenv(decisions.KEY_ENV, raising=False)
+    monkeypatch.setattr(mem, "MEMORIES", None)
+    d = w.c.get("/api/plain-permissions", headers=w.as_(w.officer)).json()
+    assert d["remember"] == {} and d["memory_modes"] == ["shared", "channel"] and d["memory_words"] == {"shared": "Remembers", "channel": "Remembers here only"}
+    assert d["memory_counts"] == {} and d["memory_ready"] is False and d["memory_model"] == "off"
+    owner = {"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"}
+    r = post_confirmed(w.c, "/api/admin/plain-permissions", {"remember": {str(GENERAL_CH): "shared"}}, headers=owner)
+    assert "isn't a listening channel" in r.text and g.reg.memory_mode(GENERAL_CH) is None, "refused by the verb, whatever the status"
+    r = post_confirmed(w.c, "/api/admin/plain-permissions", {"listen": {str(GENERAL_CH): "watch"}, "remember": {str(GENERAL_CH): "shared"}}, headers=owner)
+    assert r.status_code == 200, r.text
+    assert g.reg.memory_mode(GENERAL_CH) == "shared" and r.json()["remember"] == {str(GENERAL_CH): "shared"}
+    monkeypatch.setattr(mem, "MEMORIES", types.SimpleNamespace(counts=lambda reg: {str(GENERAL_CH): 3}, model_state=lambda: "loaded", count=lambda reg, channel=None: 3))
+    monkeypatch.setenv(decisions.KEY_ENV, "x")
+    d = w.c.get("/api/plain-permissions", headers=w.as_(w.officer)).json()
+    assert d["memory_counts"] == {str(GENERAL_CH): 3} and d["memory_ready"] is True and d["memory_model"] == "loaded"
+    r = w.c.post("/api/admin/plain-permissions", json={"set_remember": {str(GENERAL_CH): None}}, headers=owner)
+    assert r.status_code == 200 and r.json().get("review_required"), "Off is reviewed first: it forgets"
+    r = post_confirmed(w.c, "/api/admin/plain-permissions", {"set_remember": {str(GENERAL_CH): None}}, headers=owner)
+    assert r.status_code == 200 and g.reg.memory_mode(GENERAL_CH) is None
+
+
+def test_mcp_tools_carry_the_memory_setting():
+    import json
+
+    import httpx
+
+    from oibot_gm import mcp_server as ms
+
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path, request.read()))
+        if request.method == "GET":
+            return httpx.Response(200, json={"groups": [], "channels": [], "listed": {}, "dm": "self", "default": "self", "guild_roles": [],
+                                             "listen": {"1": "reply"}, "remember": {"1": "shared"}, "memory_ready": True, "memory_model": "loaded"})
+        return httpx.Response(200, json={"applied": ["plain-text permissions: memory 1 changed"], "refused": []})
+
+    ms.use(ms.Api(url="http://bot", token="a" * 64, transport=httpx.MockTransport(handler)))
+    try:
+        d = ms.plain_permissions()
+        assert d["remember"] == {"1": "shared"} and d["memory_ready"] is True and d["memory_model"] == "loaded"
+        assert ms.set_plain_permissions(set_remember={"1": "channel"}).startswith("plain-text permissions")
+    finally:
+        ms.use(None)
+    assert json.loads(calls[1][2])["changes"] == [{"kind": "plain", "fields": {"set_remember": {"1": "channel"}}}]

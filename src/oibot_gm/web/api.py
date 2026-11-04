@@ -2449,9 +2449,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     def listen_json(reg, chans) -> dict:
         """Listening (design §5.59): the map, its words, whether the host's key is set (never the value) and the guild's
-        recent verdicts — `when` in Registry.local12 words (the Clock rule) and the channel's name resolved."""
+        recent verdicts — `when` in Registry.local12 words (the Clock rule) and the channel's name resolved. Memory (design
+        §5.61): the map, its words, how much each channel holds and the model's state (off before the service is set)."""
+        from .. import memory as mem
         from ..llm import decisions
-        from ..registry import LISTEN_MODES, LISTEN_WORDS
+        from ..registry import LISTEN_MODES, LISTEN_WORDS, MEMORY_MODES, MEMORY_WORDS
 
         names = {str(c["id"]): c["name"] for c in chans}
         recent = bot.listen_recent(reg) if hasattr(bot, "listen_recent") else []
@@ -2463,8 +2465,17 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             except (KeyError, TypeError, ValueError):
                 when = ""
             rows.append({**r, "channel": cid, "channel_name": names.get(cid) or channel_label(cid), "when": when})
+        memories = mem.MEMORIES
+        try:
+            counts = memories.counts(reg) if memories is not None else {}
+        except Exception:  # a read never fails the page
+            log.exception("memory counts failed")
+            counts = {}
         return {"listen": reg.listen_channels(), "listen_modes": list(LISTEN_MODES), "listen_words": dict(LISTEN_WORDS),
-                "listen_ready": decisions.key_set(), "listen_recent": rows}
+                "listen_ready": decisions.key_set(), "listen_recent": rows,
+                "remember": reg.memory_channels(), "memory_modes": list(MEMORY_MODES), "memory_words": dict(MEMORY_WORDS),
+                "memory_counts": counts, "memory_ready": decisions.key_set(),
+                "memory_model": (memories.model_state() if memories is not None else "off")}
 
     def channel_label(cid: str) -> str:
         ch = bot.get_channel(int(cid)) if cid.isdigit() and hasattr(bot, "get_channel") else None
