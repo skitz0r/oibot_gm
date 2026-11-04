@@ -316,6 +316,12 @@ src/oibot_gm/
                        transfer_owner (D50; Discord only — /gm config owner, BY_DESIGN_ONLY), absence_lines / absence_clear_lines (the preview words);
                        a member's own retire / delete — and their own absence (record_absence → announce_absence → RaidMixin.after_absence(by_id=)) — frees the seat with no self-notice (by_id decides). No DMs anywhere
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
+  memory.py            chat memory (design §5.61, a SPIKE — nothing live calls it): REMEMBER_QUESTION (a Jev noul: a fact someone could ask about
+                       later, kept as the speaker's words), MemoryStore (SQLite: a row per kept message with its reply `context`, FTS5 over
+                       index_text "<author>: <text>", the embedding as a blob; recall = cosine list + bm25 list fused by reciprocal rank, scope
+                       shared | channel; forget / forget_channel), judge = a Jev CHOICE over the candidates (RELEVANT 0.7 — the threshold is the
+                       judge, not a cosine), citation / memory_block ("Mara said on 25 Sep: …", unfenced). Embedder = bge-small through fastembed
+                       (local; `uv run --with fastembed`). scripts/memory_probe.py capture|ask = the offline probe over a guild's channel history
   professions.py       professions (design §5.60): catalog(reg) = the recipe catalog DERIVED from the records (norm_recipe keys, the most
                        used spelling, crafters highest skill first; never stored), who_can_make(reg, text) (exact name, else every recipe whose words all
                        appear), crafters_of(reg, pid); visible = active character, not a puppet, not left; rename_recipe / merge_recipe (officers, preview

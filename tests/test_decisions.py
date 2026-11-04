@@ -119,3 +119,37 @@ def test_the_cap_refuses_before_a_request():
     assert ask(dp) is None and seen == []
     led.log.clear()
     assert ask(dp) == pytest.approx(0.87) and len(seen) == 1
+
+
+def choice_answer(probs, model="jev-1.13.0"):
+    return {"model": model, "answers": {"decision": {"type": "choice", "choice": max(probs, key=probs.get), "probabilities": probs,
+                                                      "confidence": 0.9}}, "usage": {"input_tokens": 400, "output_tokens": 0}}
+
+
+def test_a_choice_answer_is_the_distribution_over_the_options(monkeypatch):
+    """§5.61: the relevance judge — every option's probability comes back, keyed as the criteria named them."""
+    dp, seen = make(lambda r: httpx.Response(200, json=choice_answer({"m1": 0.85, "m2": 0.05, "none": 0.10})))
+    probs = asyncio.run(dp.choice({"message": {"text": "who is our jc?"}}, "Which one answers it?",
+                                  {"m1": "Mara said: our only jc is Ysolde", "m2": "Elin said: buying herbs", "none": "nothing answers it"}))
+    assert probs == {"m1": 0.85, "m2": 0.05, "none": 0.10}
+    body = json.loads(seen[0].content)
+    q = body["questions"]["decision"]
+    assert q["type"] == "choice" and set(q["criteria"]) == {"m1", "m2", "none"} and body["state"]["message"]["text"] == "who is our jc?"
+    assert dp.last_usage == {"input_tokens": 400, "output_tokens": 0}
+
+
+def test_a_choice_missing_an_option_or_out_of_range_is_none():
+    dp, _ = make(lambda r: httpx.Response(200, json=choice_answer({"m1": 0.9, "none": 0.1})))
+    assert asyncio.run(dp.choice("s", "q", {"m1": "a", "m2": "b", "none": "c"})) is None
+    dp, _ = make(lambda r: httpx.Response(200, json=choice_answer({"m1": 1.4, "none": -0.4})))
+    assert asyncio.run(dp.choice("s", "q", {"m1": "a", "none": "c"})) is None
+
+
+def test_ask_returns_every_answer_of_a_mixed_request():
+    """One state, several questions (the fan-out TypeSafe documents): listening's gate and the remember question ride together."""
+    reply = {"model": "jev-1.13.0", "answers": {"listen": {"type": "noul", "noul": 0.9}, "remember": {"type": "noul", "noul": 0.3}},
+             "usage": {"input_tokens": 500, "output_tokens": 0}}
+    dp, seen = make(lambda r: httpx.Response(200, json=reply))
+    answers = asyncio.run(dp.ask("state", {"listen": {"type": "noul", "instructions": "a"}, "remember": {"type": "noul", "instructions": "b"}}))
+    assert answers["listen"]["noul"] == 0.9 and answers["remember"]["noul"] == 0.3
+    assert set(json.loads(seen[0].content)["questions"]) == {"listen", "remember"}

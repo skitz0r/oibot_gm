@@ -4244,3 +4244,50 @@ These are the numbers to confirm with real usage logs.
 **Analytics cards (2026-09-20):** the analytics channel no longer posts images. `discord_pool.pool_layout` builds one native layout card per raid (readiness + comp shortfalls, icons and numbers only, links to the site); `refresh_pool` edits them in place under `analytics_message_ids["pool2:<raid>"]` and deletes any other stored id once (the bank / pool / comp / groups PNG cards). Removed: `render.health_png|bank_png|groups_png|comp_png`, `registry.bank_rows`, the web `/card/*` PNG endpoints. `render.py` keeps the /mock roster image, raid thumbnails and the generated badges (the roster image went in §5.38).
 
 **Signup sheet layout (2026-09-21):** the sheet went back from layout components to an embed (`raid_views.sheet_message` → `(Embed, View)`), because embed inline fields are the only column layout Discord offers and the owner found Raid-Helper's class columns easier to scan than wrapped text lines. Open: one inline field per class (`<class icon> (n)`, members one per line with the spec icon), then Bench / No thanks rows; locked: one inline field per group (confirmation marks), *Not rostered*, Bench / No thanks; buttons in a classic persistent `View` under the embed (same `SignupButton` custom ids). Officer cards and DMs stay layout components. A sheet message posted in the component era cannot be edited into an embed (the V2 flag is permanent), so `refresh_sheet` re-posts it once. Guards: 1024 chars per column (`_column`), spec icons dropped when the embed would near 6000.
+
+### 5.61 Chat memory: what the bot remembers people saying (spike 2026-11-03, not live)
+
+**Why.** Guild knowledge lives in chat and nowhere else: who can craft what, what a pattern costs, where it drops, when
+the meetup is. The bot answers from its records today; this gives it the words people said, kept as *their* words.
+
+**The owner's decisions (2026-11-03).** (1) A memory is free-form guild knowledge — a fact someone could ask about later —
+not a personal record (those have the people verbs) and not chat context. (2) Memory is a per-channel setting next to
+Listening's mode: **Off** (default) · **Remembers** (recalled anywhere the bot answers: channels, DMs, the site) ·
+**Remembers here only** (recalled only when answering in that channel — the officers' channel); it can only be on
+where listening is on, since capture rides on the same Jev request; turning a channel Off forgets what it held. (3)
+Recall shows up everywhere the bot answers; officers see a Memories list with Forget on the Ops page; a member sees
+what the bot remembers *them* saying on the Me page, with Forget. (4) Memories are hearsay and read like it: the answer
+says "Mara said on 25 Sep that …", never the bare claim (provenance). (5) Local: the embedder runs on the host
+(bge-small-en-v1.5 through fastembed / ONNX Runtime, ~130 MB, 2 ms a query, 400 messages/s on the Mac mini), the store
+is one SQLite file; member chat never leaves the machine. Turbopuffer and the like solve a scale we don't have (listening
+sees 100–200 messages a day across both guilds; a year of everything is tens of MB).
+
+**The pieces (`memory.py`).** The REMEMBER question: a Jev noul — "does `message.text` state something a member might
+later ask about … kept as something `message.author` said, with the date" (`REMEMBER_QUESTION` / `REMEMBER_CRITERIA`,
+kept at `REMEMBER_AT` 0.5 in the spike). `MemoryStore`: SQLite, a `memory` row per kept message (guild, channel, scope,
+author, at, text ≤600, `context` = the message it replied to when it was a Discord reply, p, message id — kept once —,
+the embedding as a float32 blob, `forgotten_at`), an FTS5 table over `index_text` = "<author>: <text> (replying to …)" —
+the speaker's name is part of what the words index, because questions name people. `recall(guild, text, qvec, channel)`:
+the vector list (cosine, brute force in numpy over the guild's vectors — thousands, not millions) and the lexical list
+(FTS5 bm25) fused by reciprocal rank (k = 60), scope applied (`shared` anywhere; `channel` only in its own; None = a DM
+or the site), the top `RECALL_K` 5. Then THE JUDGE replaces a cosine threshold: a Jev **choice** question over the
+candidates ("which remembered message, if any, answers `message.text`?", options m1..mN = each memory's citation, plus
+`none`) returns a probability per option; `judge()` keeps those at or over `RELEVANT` 0.7, best first. `citation()` =
+"<author> said on <day>: <text> (replying to <who>: <words>)"; `memory_block` = the `<memory>` data block a help answer
+gets, every line through `unfence`. `DecisionProvider.ask` is the one request (any mix of questions, one state —
+TypeSafe's fan-out); `noul` and `choice` read their answers out of it.
+
+**The spike (`scripts/memory_probe.py`, reads only; reports in the scratch directory, never committed).** Big Guys'
+four listened channels, the newest ~400 human messages each (1,541): the remember question kept 444 (29%) at 0.5 for
+$0.05 of Jev; embedding them took 7 s. 18 questions written against what it kept: 14 answered with the right memory
+cited (judge 0.85–1.0: "who is our jewelcrafter?" → Mara's "Our only jc is Ysolde" — cosine 0.49, vector rank 21,
+bm25 rank 1: the lexical list earned its place; "what day do the horde runs happen?" cited from #officer-chat and
+*none* from #professions: scope held), 4 answered *none* rightly (banter, a question nothing covers), 0 wrong citations
+after raising the line to 0.7 (at 0.5 two wrong ones scored 0.53 and 0.62; the right ones never scored under 0.85).
+One miss: "what professions is Rolf going?" never recalled Rolf's "Mining/BS for warrior" — the small model does not
+know Mining/BS are professions and the words differ; the fix is the bot's own vocabulary (a question naming a member
+boosts that member's memories; the profile's profession words as synonyms), not a bigger model. Capture's weak spot:
+replies kept without what they answered ("yep i do", "those two have it for sure") — hence `context`; the 0.5 line
+keeps some banter ("they banned me", "Rogué") that a 0.7 line would drop at the cost of a few real facts; the choice
+is the owner's once it is live. Recall costs 10–15 ms, the judge ~150 ms. Nothing in the live bot calls any of this.
+

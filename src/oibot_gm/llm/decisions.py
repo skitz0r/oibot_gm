@@ -42,6 +42,7 @@ class DecisionProvider:
         self._transport = transport  # tests: httpx.MockTransport
         self._warned: dict[str, float] = {}
         self.calls = 0  # requests actually sent (tests, the host's log)
+        self.last_usage: dict = {}  # the last reply's token counts (the probe scripts' cost line)
 
     @property
     def available(self) -> bool:
@@ -81,15 +82,47 @@ class DecisionProvider:
     async def noul(self, state, instructions: str, criteria: dict | None = None, workload: str = "listen") -> float | None:
         """One request, one yes/no question. `state` is the data (a string or a JSON object: member text stays data);
         `instructions` the whole question; `criteria` {"true": …, "false": …}."""
+        q: dict = {"type": "noul", "instructions": instructions}
+        if criteria:
+            q["criteria"] = {"true": criteria.get("true", ""), "false": criteria.get("false", "")}
+        answers = await self.ask(state, {"decision": q}, workload)
+        if answers is None:
+            return None
+        try:
+            p = float(answers["decision"]["noul"])
+        except (KeyError, TypeError, ValueError):
+            self._warn("json", "decision answer unreadable")
+            return None
+        if not 0.0 <= p <= 1.0:
+            self._warn("range", "decision answer out of range: %s", p)
+            return None
+        return p
+
+    async def choice(self, state, instructions: str, criteria: dict, workload: str = "listen") -> dict[str, float] | None:
+        """One request, one pick among `criteria`'s keys (option name → its description, up to 255): the probability of
+        every option (they sum to 1), or None. Code reads the distribution; the model never writes text."""
+        answers = await self.ask(state, {"decision": {"type": "choice", "instructions": instructions, "criteria": dict(criteria)}}, workload)
+        if answers is None:
+            return None
+        try:
+            probs = {str(k): float(v) for k, v in answers["decision"]["probabilities"].items()}
+        except (KeyError, TypeError, ValueError, AttributeError):
+            self._warn("json", "decision answer unreadable")
+            return None
+        if set(probs) != set(criteria) or any(not 0.0 <= v <= 1.0 for v in probs.values()):
+            self._warn("range", "decision answer out of range or missing options")
+            return None
+        return probs
+
+    async def ask(self, state, questions: dict, workload: str = "listen") -> dict | None:
+        """THE request: any mix of questions against one state → the `answers` object, or None (no key, the cap, a
+        failure). noul / choice read their own answer out of it; a caller with several questions reads each by its id."""
         if not self._key:
             return None
         if self._capped(workload):
             self._warn("cap", "decision workload %s refused: the monthly budget or its share is used up", workload)
             return None
-        q: dict = {"type": "noul", "instructions": instructions}
-        if criteria:
-            q["criteria"] = {"true": criteria.get("true", ""), "false": criteria.get("false", "")}
-        body = {"model": self.model, "state": state, "questions": {"decision": q}}
+        body = {"model": self.model, "state": state, "questions": questions}
         headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=self.timeout, transport=self._transport) as client:
@@ -111,15 +144,13 @@ class DecisionProvider:
             return None
         try:
             data = resp.json()
-            p = float(data["answers"]["decision"]["noul"])
+            answers = data["answers"]
         except (ValueError, KeyError, TypeError, json.JSONDecodeError):
             self._warn("json", "decision answer unreadable")
             return None
-        self._record(workload, str(data.get("model") or self.model), data.get("usage") or {})
-        if not 0.0 <= p <= 1.0:
-            self._warn("range", "decision answer out of range: %s", p)
-            return None
-        return p
+        self.last_usage = data.get("usage") or {}
+        self._record(workload, str(data.get("model") or self.model), self.last_usage)
+        return answers if isinstance(answers, dict) else None
 
 
 DECISIONS: DecisionProvider | None = None  # set at bot start (discord_bot.run / OibotGM.setup); None when no key is set
