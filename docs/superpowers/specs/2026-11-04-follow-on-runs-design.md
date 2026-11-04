@@ -172,8 +172,8 @@ copied: a 20-man's groups say nothing about two 10s); Auto-fill and Propose spli
   is cleared and its sheet title loses ", then …".
 - **End**: each ends on its own (`end_run`); the loot council per roster of the follow-on uses the existing split keys
   (`<follow key>-r1`, `-r2`). `loot_may_close` and `loot_boss_down` work per run.
-- **Reopen** a cancelled lead within the grace window reopens the follow-on with it when the follow-on was cancelled by
-  that same cancel (`prev_state` both); a follow-on cancelled on its own stays cancelled.
+- **Reopen** (an END by mistake, within the hour; never a cancelled run — D19) reopens one run only: each run ends on
+  its own, so each reopens on its own. A cancel is final for both.
 - **Cleanup** of ephemeral run dicts removes the pair together (the follow-on's dict goes with the lead's).
 
 ## 8. Surfaces
