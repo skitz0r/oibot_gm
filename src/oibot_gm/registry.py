@@ -299,6 +299,10 @@ PLAIN_WEB = "web"  # POST /api/ops/change (MCP plain_change): not a Discord chan
 # watch = it only notes what it would have answered · reply = a message that is clearly for it is handled like an @mention
 LISTEN_MODES = ("watch", "reply")
 LISTEN_WORDS = {"watch": "Watches", "reply": "Replies"}
+# Memory (design §5.61): channels whose worth-keeping messages the bot remembers as the writer's words; needs Listening there.
+# shared = recalled anywhere the bot answers · channel = only when answering in that same channel (the officers' channel)
+MEMORY_MODES = ("shared", "channel")
+MEMORY_WORDS = {"shared": "Remembers", "channel": "Remembers here only"}
 
 
 class PlainPolicy(BaseModel):
@@ -309,6 +313,7 @@ class PlainPolicy(BaseModel):
     dm: str = "self"
     default: str = "self"
     listen: dict[str, str] = Field(default_factory=dict)  # channel id (as a string) -> watch | reply (§5.59); absent = not listening
+    remember: dict[str, str] = Field(default_factory=dict)  # channel id (as a string) -> shared | channel (§5.61); absent = Off
 
 
 SUPERUSERS_ENV = "OIBOT_SUPERUSERS"  # .env: Discord user ids (comma/space separated) with owner rights in EVERY guild the bot serves
@@ -4046,6 +4051,16 @@ class Registry:
         """Every listening channel: channel id (string) → watch | reply."""
         return dict(self.config.plain.listen)
 
+    def memory_mode(self, channel) -> str | None:
+        """shared | channel for a channel the bot remembers in (design §5.61), None = Off (DMs and the web are never a channel)."""
+        if channel is None or channel == PLAIN_WEB:
+            return None
+        return self.config.plain.remember.get(str(channel)) or None
+
+    def memory_channels(self) -> dict[str, str]:
+        """Every remembering channel: channel id (string) → shared | channel."""
+        return dict(self.config.plain.remember)
+
     def plain_allows(self, group: str, author_id: int, officer: bool, role_ids=()) -> bool:
         if self.is_owner_id(author_id):
             return True  # the owner can always do everything
@@ -4088,7 +4103,8 @@ class Registry:
         `groups` {group: [who...]} (only the groups named change), `channels` (the WHOLE per-channel map, as the Ops page
         sends it), `set_channels` {channel id: mode | None} (merged into the current map; None = back to the default),
         `dm`, `default`, `listen` (the WHOLE listening map, §5.59) and `set_listen` {channel id: watch | reply | None}
-        (None / "off" = stop listening there). Anything left out keeps its value. Shared by the web route, MCP and plain text."""
+        (None / "off" = stop listening there), `remember` (the WHOLE memory map, §5.61) and `set_remember` {channel id: shared |
+        channel | None} (None / "off" = Off; a channel the patch stops listening in drops its memory too). Anything left out keeps its value. Shared by the web route, MCP and plain text."""
         cur = self.config.plain
         patch = patch or {}
         groups = {**{g: self.plain_who(g) for g in cur.groups}, **(patch.get("groups") or {})} if "groups" in patch else dict(cur.groups)
@@ -4106,8 +4122,17 @@ class Registry:
                 listen.pop(key, None)
             else:
                 listen[key] = mode
+        remember = {str(c).strip("<#>"): m for c, m in patch["remember"].items()} if "remember" in patch else dict(cur.remember)
+        for cid, mode in (patch.get("set_remember") or {}).items():
+            key = str(cid).strip("<#>")
+            if mode in (None, "", "off", "stop", "clear"):
+                remember.pop(key, None)
+            else:
+                remember[key] = mode
+        lost = set(cur.listen) - set(listen)  # a channel this patch stops listening in forgets its memory setting too
+        remember = {c: m for c, m in remember.items() if c not in lost}
         return {"groups": groups, "channels": channels, "dm": patch.get("dm") or cur.dm, "default": patch.get("default") or cur.default,
-                "listen": listen}
+                "listen": listen, "remember": remember}
 
     @_config_verb("plain")
     def set_plain_policy(self, policy: dict, by: str) -> str:
@@ -4137,6 +4162,14 @@ class Registry:
             mode = listed or ("act" if c in (str(self.config.ops_channel_id), str(self.config.analytics_channel_id)) else p.default)
             if mode == "ignore":
                 raise RegistryError(f"<#{c}> ignores plain text, so the bot can't listen there — set its plain-text mode first")
+        if any(not str(c).isdigit() for c in p.remember):
+            raise RegistryError("memory is set per channel, by channel id — DMs aren't a channel")
+        wrong = [f"<#{c}>={m}" for c, m in p.remember.items() if m not in MEMORY_MODES]
+        if wrong:
+            raise RegistryError(f"memory is {' or '.join(MEMORY_MODES)}, not {', '.join(wrong)}")
+        for c in p.remember:
+            if c not in p.listen:
+                raise RegistryError(f"<#{c}> isn't a listening channel, so the bot can't remember what is said there — set its Listening first")
         # a group left at its default is not stored, so a changed default later reaches it
         p.groups = {g: w for g, w in p.groups.items() if w != PLAIN_GROUPS[g][1]}
         before = self.config.plain
@@ -4146,7 +4179,8 @@ class Registry:
         line = "plain-text permissions: " + ("; ".join(f"{PLAIN_GROUPS[g][0]} → {self.plain_who_text(g)}" for g in changed) or "groups unchanged") \
             + (f"; channels {len({c for c, _ in chans})} changed" if chans else "") + (f"; DMs {before.dm} → {p.dm}" if before.dm != p.dm else "") \
             + (f"; other channels {before.default} → {p.default}" if before.default != p.default else "") \
-            + (f"; listening {len({c for c, _ in set(p.listen.items()) ^ set(before.listen.items())})} changed" if p.listen != before.listen else "")
+            + (f"; listening {len({c for c, _ in set(p.listen.items()) ^ set(before.listen.items())})} changed" if p.listen != before.listen else "") \
+            + (f"; memory {len({c for c, _ in set(p.remember.items()) ^ set(before.remember.items())})} changed" if p.remember != before.remember else "")
         self.save_config(f"{line} (by {by})")
         return line
 
