@@ -147,7 +147,7 @@ async def capture(args) -> None:
             if kept:
                 kept_total += 1
                 scope = "channel" if cid == g.get("officer_channel_id") or "officer" in chan_names[cid] else "shared"
-                store.add(args.guild, channel=cid, channel_name=chan_names[cid], scope=scope, author_id=int(m["author"]["id"]),
+                store.add(args.guild, key=mem.memory_key(args.guild, int(m["id"])), channel=cid, channel_name=chan_names[cid], scope=scope, author_id=int(m["author"]["id"]),
                           author=authors[i], at=m["timestamp"], text=texts[i], vec=None, p=p, message_id=int(m["id"]), context=contexts[i])
             rows.append((p, kept, m["timestamp"][:16].replace("T", " "), authors[i], texts[i] + (f"  ↩ {contexts[i]}" if contexts[i] else "")))
         lines += [f"## #{chan_names[cid]} — {sum(1 for r in rows if r[1])} kept of {len(rows)}", "", "| p | kept | when (UTC) | who | text |", "|---|---|---|---|---|"]
