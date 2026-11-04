@@ -34,6 +34,7 @@ import numpy as np
 
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 EMBED_DIMS = 384
+EMBED_RETRY_S = 3600  # after a failed model load, no new attempt for this long: words-only recall, nothing waits on a load
 SCOPES = ("shared", "channel")  # shared: recalled anywhere the bot answers; channel: only when answering in that channel
 REMEMBER_AT = 0.5  # the remember question's yes line
 RELEVANT = 0.7  # a recalled memory is cited when the judge gives it at least this (the spike: true answers scored 0.85–1.0,
@@ -202,28 +203,56 @@ class Embedder:
         self.cache_dir = cache_dir
         self._m = None
         self._lock = threading.Lock()
+        self._failed_at: float | None = None  # time.monotonic() of the last failed load
 
     @property
     def ready(self) -> bool:
         """The model is loaded (a first embed or `warm` loads it)."""
         return self._m is not None
 
-    def _load(self):
-        with self._lock:
-            if self._m is None:
-                from fastembed import TextEmbedding  # imported here, never at module load: the import alone costs seconds
+    @property
+    def failed(self) -> bool:
+        """A load failed within EMBED_RETRY_S: no new attempt until the window passes."""
+        return self._m is None and self._failed_at is not None and time.monotonic() - self._failed_at < EMBED_RETRY_S
 
-                kw = {"cache_dir": self.cache_dir} if self.cache_dir else {}
-                self._m = TextEmbedding(model_name=self.model, **kw)
+    def _construct(self):
+        from fastembed import TextEmbedding  # imported here, never at module load: the import alone costs seconds
+
+        kw = {"cache_dir": self.cache_dir} if self.cache_dir else {}
+        return TextEmbedding(model_name=self.model, **kw)
+
+    def _load(self, wait: bool = True):
+        """The model, or None: a load failed within the window (remembered, never retried per call), or — with
+        wait=False — another thread is loading it right now (a question never queues behind a load)."""
+        if self._m is not None:
+            return self._m
+        if self.failed:
+            return None
+        if not self._lock.acquire(blocking=wait):
+            return None
+        try:
+            if self._m is None and not self.failed:
+                try:
+                    self._m = self._construct()
+                    self._failed_at = None
+                except Exception:
+                    self._failed_at = time.monotonic()
+                    raise
+        finally:
+            self._lock.release()
         return self._m
 
-    def passages(self, texts: list[str]) -> np.ndarray:
+    def passages(self, texts: list[str]) -> np.ndarray | None:
         m = self._load()
+        if m is None:
+            return None
         vecs = np.asarray(list(m.embed(texts)), dtype=np.float32)
         return _unit(vecs)
 
-    def query(self, text: str) -> np.ndarray:
-        m = self._load()
+    def query(self, text: str) -> np.ndarray | None:
+        m = self._load(wait=False)
+        if m is None:
+            return None
         v = np.asarray(list(m.query_embed([text])), dtype=np.float32)
         return _unit(v)[0]
 
@@ -302,6 +331,8 @@ class MemoryStore:
         for i in range(0, len(rows), batch):
             chunk = rows[i:i + batch]
             vecs = embedder.passages([index_text(r["author"], r["text"], r["context"]) for r in chunk])
+            if vecs is None:  # the model is away (a failed load within its retry window): the rows wait for the next pass
+                break
             with self._lock:
                 self.db.executemany("UPDATE memory SET vec=? WHERE id=?", [(v.tobytes(), r["id"]) for v, r in zip(vecs, chunk)])
                 self.db.commit()
@@ -567,6 +598,9 @@ class Memories:
             if self._model != "loaded":
                 self._model = "loading"
             out = self.embedder.passages(texts)
+            if out is None:  # a load failed within EMBED_RETRY_S: words only, no new attempt (Embedder.failed)
+                self._model = "failed"
+                return None
             self._model = "loaded"
             return out
         except Exception as e:  # noqa: BLE001 — no network on first start, a bad cache: words still work
@@ -579,6 +613,10 @@ class Memories:
     def _query(self, text: str) -> np.ndarray | None:
         try:
             v = self.embedder.query(text)
+            if v is None:  # failed within the retry window, or another thread is loading it: words only for this question
+                if getattr(self.embedder, "failed", False):
+                    self._model = "failed"
+                return None
             self._model = "loaded"
             return v
         except Exception:  # noqa: BLE001

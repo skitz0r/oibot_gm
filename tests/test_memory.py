@@ -360,3 +360,48 @@ def test_on_save_syncs_after_a_config_commit(svc, monkeypatch):
     assert m.count(reg) == 1
     mem.on_save(reg, "config", [])
     assert m.count(reg) == 0
+
+
+def test_a_failed_model_load_is_remembered_and_not_retried_within_the_window(monkeypatch):
+    """A load that failed (no network on first start, a bad cache) is not tried again on every message: for
+    EMBED_RETRY_S the embedder answers None at once (words-only recall), then one retry is allowed."""
+    emb = mem.Embedder()
+    attempts = []
+
+    def construct():
+        attempts.append(1)
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(emb, "_construct", construct)
+    with pytest.raises(RuntimeError):
+        emb.passages(["our only jc is Ysolde"])  # the first load fails loudly (Memories._embed logs it)
+    assert attempts == [1] and emb.failed and not emb.ready
+    assert emb.query("who is our jc?") is None and emb.passages(["x"]) is None and attempts == [1], "no retry inside the window"
+    t0 = mem.time.monotonic()
+    monkeypatch.setattr(mem.time, "monotonic", lambda: t0 + mem.EMBED_RETRY_S + 1)
+    assert not emb.failed
+    with pytest.raises(RuntimeError):
+        emb.query("who is our jc?")
+    assert attempts == [1, 1], "one retry once the window passed"
+
+
+def test_the_service_stays_words_only_while_the_load_is_failed(tmp_path, monkeypatch):
+    from oibot_gm.store import GitStore
+
+    emb = mem.Embedder()
+    attempts = []
+
+    def construct():
+        attempts.append(1)
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(emb, "_construct", construct)
+    m = mem.Memories(tmp_path / "out", embedder=emb)
+    reg = FakeReg(GitStore(tmp_path / "data", push=False))
+    kept = m.remember(reg, channel=5, channel_name="general", scope="shared", author_id=10, author="Mara", at="2026-10-01T10:00:00+00:00",
+                      text="our only jc is Ysolde", p=0.9, message_id=1)
+    assert kept is not None and m.model_state() == "failed"
+    for _ in range(3):
+        cands = m.recall_for(reg, "who is our jc?")
+        assert cands and cands[0].memory.id == kept.id
+    assert m.embed_missing_all([reg]) == 0 and m.model_state() == "failed" and attempts == [1]

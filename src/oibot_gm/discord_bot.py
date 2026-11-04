@@ -159,6 +159,7 @@ LISTEN_RING = 50  # verdicts kept in memory per guild (listen_recent, the Ops pa
 LISTEN_ASK_S = 3600  # how long a 👀 waits for its writer's click; then the bot takes its 👀 off (a 👀 you can see still works)
 LISTEN_RECENT = 3  # earlier messages kept per listened channel (context for the next decision; no REST call)
 LISTEN_EYES = "👀"
+RECALL_TIMEOUT_S = 2.0  # chat memory's recall before a decision: past this the gate decides with `memory: []` (the thread finishes alone)
 LISTEN_WARN_S = 3600  # "listening is on but there is no key": one ops warn per guild per hour
 LISTEN_LOG = OUT / "listen.jsonl"  # one row per verdict, NO text: {at, guild, channel, author_id, p, mode, did}
 
@@ -329,8 +330,8 @@ class ListenMixin:
         cands: list = []
         if mem.MEMORIES is not None and mem.enabled(reg):
             try:
-                cands = await asyncio.to_thread(mem.MEMORIES.recall_for, reg, text, channel=cid)
-            except Exception as e:  # noqa: BLE001 — recall never breaks the gate
+                cands = await asyncio.wait_for(asyncio.to_thread(mem.MEMORIES.recall_for, reg, text, channel=cid), timeout=RECALL_TIMEOUT_S)
+            except Exception as e:  # noqa: BLE001 — recall never breaks or holds up the gate (a timeout included)
                 log.warning("listen: recall failed in %s (%s)", cid, type(e).__name__)
                 cands = []
         state = self.listen_state(reg, message, text, cands)
@@ -345,11 +346,10 @@ class ListenMixin:
         if p is None:
             self._listen_record(reg, message, text, None, mode, "skipped")
             return "skipped"
-        remembered: bool | None = None
-        if remembering and p_remember is not None:
-            remembered = p_remember >= mem.remember_at()
-            if remembered:
-                await self._remember(reg, message, text, cid, state["message"].get("replying_to", ""), p_remember)
+        remembered: bool | None = None  # None: not asked; else whether the message was kept
+        keep = remembering and p_remember is not None and p_remember >= mem.remember_at()
+        if remembering and p_remember is not None and not keep:
+            remembered = False
         if p >= listen_sure():
             did = "replied" if mode == "reply" else "would reply"
         elif p >= LISTEN_MAYBE:
@@ -366,24 +366,33 @@ class ListenMixin:
                 self._listen()["asks"][message.id] = {"guild": reg.key, "channel": cid, "author": message.author.id, "text": text,
                                                       "message": message, "memory": judged, "expires": time.monotonic() + LISTEN_ASK_S}
                 asyncio.get_running_loop().create_task(self._listen_expire(message.id))
-        self._listen_record(reg, message, text, p, mode, did, remembered=remembered)
-        if did == "replied":
-            await self.plain_text(message, reg, text, cid, memory=judged)
+        try:
+            if did == "replied":
+                await self.plain_text(message, reg, text, cid, memory=judged)
+        finally:
+            # the capture comes AFTER the reply, the 👀 and the watch verdict (an embedding and a git commit never
+            # hold up an answer); `judged` came from the recall before, so the reply saw the same memories. The
+            # verdict is recorded after it, so `remembered` says whether the message was really kept.
+            if keep:
+                remembered = await self._remember(reg, message, text, cid, state["message"].get("replying_to", ""), p_remember)
+            self._listen_record(reg, message, text, p, mode, did, remembered=remembered)
         return did
 
-    async def _remember(self, reg, message, text: str, cid: int, context: str, p: float) -> None:
-        """Keep the message as the writer's words (off the loop: an embedding and a git commit)."""
+    async def _remember(self, reg, message, text: str, cid: int, context: str, p: float) -> bool:
+        """Keep the message as the writer's words (off the loop: an embedding and a git commit); whether it was kept."""
         uid = message.author.id
         member = reg.members.get(uid)
         author = (member.display_name if member is not None and member.display_name else None) or getattr(message.author, "display_name", "") or "someone"
         at = getattr(message, "created_at", None)
         at = at.isoformat(timespec="seconds") if at else datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
-            await asyncio.to_thread(mem.MEMORIES.remember, reg, channel=cid, channel_name=getattr(message.channel, "name", "") or str(cid),
-                                    scope=reg.memory_mode(cid), author_id=uid, author=author, at=at, text=text, context=context, p=p,
-                                    message_id=message.id)
+            kept = await asyncio.to_thread(mem.MEMORIES.remember, reg, channel=cid, channel_name=getattr(message.channel, "name", "") or str(cid),
+                                           scope=reg.memory_mode(cid), author_id=uid, author=author, at=at, text=text, context=context, p=p,
+                                           message_id=message.id)
         except Exception as e:  # noqa: BLE001 — a failed write is a warning, never a reply
             log.warning("memory: not kept in %s (%s)", cid, type(e).__name__)
+            return False
+        return kept is not None
 
     async def memory_tick(self, now: float | None = None) -> None:
         """Hourly: vectors for rows kept while the model was away (raid_scheduler.scheduler_tick)."""

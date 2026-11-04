@@ -489,3 +489,58 @@ def test_the_hourly_tick_fills_vectors_and_the_run_wiring_exists():
     assert "memory.MEMORIES = " in src or "mem.MEMORIES = " in src
     assert "on_save" in src
     assert "memory_tick" in inspect.getsource(__import__("oibot_gm.raid_scheduler", fromlist=["x"]).RaidSchedulerMixin.scheduler_tick)
+
+
+def test_a_recall_that_hangs_or_raises_still_decides_and_replies_with_no_memory(gate, monkeypatch):
+    import time as _time
+
+    me = gate.g.me.discord_id
+    gate.run(0.2, message(me, text="our only jc is Ysolde"), remember_mode="shared", remember=0.9)
+    monkeypatch.setattr(db, "RECALL_TIMEOUT_S", 0.05)
+
+    def hangs(reg, text, *, channel=None):
+        _time.sleep(0.5)
+        return []
+
+    monkeypatch.setattr(gate.svc, "recall_for", hangs)
+    ask = message(me, text="who is our jc?")
+    dec = gate.run(0.95, ask, remember_mode="shared", remember=0.1, relevance={"m1": 0.9})
+    assert dec.requests[-1][0]["memory"] == [] and "relevance" not in dec.requests[-1][1]
+    assert gate.bot.handled[-1][0] == ask.id and gate.bot.handled[-1][3] == []
+
+    def raises(reg, text, *, channel=None):
+        raise RuntimeError("index gone")
+
+    monkeypatch.setattr(gate.svc, "recall_for", raises)
+    ask2 = message(me, text="who is our jc?")
+    dec = gate.run(0.95, ask2, remember_mode="shared", remember=0.1, relevance={"m1": 0.9})
+    assert dec.requests[-1][0]["memory"] == [] and gate.bot.handled[-1][0] == ask2.id and gate.bot.handled[-1][3] == []
+    assert gate.bot.listen_recent(gate.reg)[0]["did"] == "replied"
+
+
+def test_the_capture_comes_after_the_reply_and_the_verdict_says_it_was_kept(gate, monkeypatch):
+    me = gate.g.me.discord_id
+    order = []
+    real_plain, real_remember = gate.bot.plain_text, gate.svc.remember
+
+    async def plain_text(message, reg, text, channel, memory=None):
+        order.append(("reply", gate.svc.count(gate.reg)))
+        await real_plain(message, reg, text, channel, memory=memory)
+
+    def remember(*a, **kw):
+        order.append(("keep", None))
+        return real_remember(*a, **kw)
+
+    monkeypatch.setattr(gate.bot, "plain_text", plain_text)
+    monkeypatch.setattr(gate.svc, "remember", remember)
+    gate.run(0.95, message(me, text="i can make devilsaur gauntlets now"), remember_mode="shared", remember=0.9)
+    assert order == [("reply", 0), ("keep", None)] and gate.svc.count(gate.reg) == 1
+    assert gate.bot.listen_recent(gate.reg)[0]["remembered"] is True
+
+    def broken(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(gate.svc, "remember", broken)
+    gate.run(0.95, message(me, text="i can make the elemental flux too"), remember_mode="shared", remember=0.9)
+    row = gate.bot.listen_recent(gate.reg)[0]
+    assert row["did"] == "replied" and row["remembered"] is False, "a capture that failed is not recorded as kept"
