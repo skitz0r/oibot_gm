@@ -253,6 +253,7 @@ def test_plain_text_answer_is_remembered_and_recalled(reg):
         return Sent(8001)
 
     stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
+                                 recall_memories=lambda reg, text, channel: asyncio.sleep(0, result=[]),
                                  help_answer=help_answer, plain_identity=plain_identity, reply_private=lambda r, ch: True)
     for i, text in enumerate(["who tanks bd?", "and heals?"]):
         msg = types.SimpleNamespace(id=10 + i, author=types.SimpleNamespace(id=OWNER, display_name="Owner"), channel=Typing(), reply=reply, guild=None, reference=None)

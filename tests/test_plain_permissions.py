@@ -388,6 +388,7 @@ def router(reg, monkeypatch, help_says, officer=False):
         return officer or user.id == OWNER, []
 
     stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
+                                 recall_memories=lambda reg, text, channel: asyncio.sleep(0, result=[]),
                                  help_answer=help_answer, plain_identity=plain_identity, reply_private=lambda r, ch: ch is None)
 
     async def reply(content=None, **kw):

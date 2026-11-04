@@ -609,6 +609,7 @@ def test_a_member_who_left_the_server_gets_the_guide_not_a_change(reg, monkeypat
             yield
 
     stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
+                                 recall_memories=lambda reg, text, channel: asyncio.sleep(0, result=[]),
                                  help_answer=help_answer, plain_identity=plain_identity, in_guild=in_guild, reply_private=lambda r, ch: ch is None)
 
     def dm(uid, text="I'm in for Thursday's Barrow Deeps"):

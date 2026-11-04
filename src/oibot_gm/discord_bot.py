@@ -1170,9 +1170,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
                 else:
                     await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
                 return
-            if memory is None:  # an @mention or a DM: recall and judge here (the listening gate hands its own judged list)
-                recall = getattr(self, "recall_memories", None)  # a bare test client has none: no memories
-                memory = await recall(reg, text, channel) if recall is not None else []
+            if memory is None and provider is not None and reg.may_ask(uid, officer):  # an @mention or a DM: recall and judge here
+                memory = await self.recall_memories(reg, text, channel)  # (the listening gate hands its own judged list)
             mem_kw = {"memory": mem.memory_block(memory)} if memory else {}
             answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw)
             if answer == HELP_ACT:

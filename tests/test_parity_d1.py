@@ -216,6 +216,7 @@ def test_plain_text_mention_by_an_officer_in_a_public_channel_is_answered_public
 
     private = {"yes": False}
     stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
+                                 recall_memories=lambda reg, text, channel: asyncio.sleep(0, result=[]),
                                  help_answer=help_answer, plain_identity=plain_identity, reply_private=lambda r, ch: private["yes"] or ch is None)
 
     def send(guild):

@@ -1211,11 +1211,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         officer = bool(v.officer)
         try:
             from .. import conversation  # the box's own last exchanges, never stored (design §5.51)
+            from .. import memory as mem
 
             convo = conversation.context_block(conversation.exchanges_from_client(d.get("conversation"), v.uid))
             recall = getattr(bot, "recall_memories", None)
-            judged = await recall(v.reg, q, None) if recall is not None else []
-            from .. import memory as mem
+            judged = await recall(v.reg, q, None) if recall is not None and v.reg.may_ask(v.uid, officer) else []
             mem_kw = {"memory": mem.memory_block(judged)} if judged else {}
             ans = await answer_fn(v.reg, v.uid, officer, q, may_act=officer, public=False, **({"conversation": convo} if convo else {}), **mem_kw)
         except Exception as e:  # noqa: BLE001 — never a type name in a reply

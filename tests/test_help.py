@@ -168,6 +168,7 @@ def test_plain_text_reply_to_a_newcomer_carries_the_apply_button(reg, monkeypatc
         replies.append((content, kw.get("view")))
 
     stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
+                                 recall_memories=lambda reg, text, channel: asyncio.sleep(0, result=[]),
                                  help_answer=help_answer, plain_identity=plain_identity, reply_private=lambda r, ch: ch is None)
 
     def send(uid, text="how do I join?"):

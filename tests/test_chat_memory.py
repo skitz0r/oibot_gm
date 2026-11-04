@@ -548,26 +548,62 @@ def test_the_capture_comes_after_the_reply_and_the_verdict_says_it_was_kept(gate
 
 # ---- every answer path recalls
 
-def test_an_at_mention_recalls_and_judges_itself_once(gate, monkeypatch):
-    """plain_text with memory=None (an @mention, a DM): one Jev request (the judge, workload memory), the block into help_answer."""
+def test_plain_text_recalls_only_without_the_gates_list_and_the_block_reaches_help_answer(gate, monkeypatch):
+    """The real plain_text three ways: memory=None (an @mention, a DM) → ONE recall + judge (workload memory) and the block
+    into help_answer; memory=[] (the gate found nothing) → no recall, no block; the gate's judged list → no recall, its block."""
+    import contextlib
+
     me = gate.g.me.discord_id
     gate.run(0.2, message(me, text="our only jc is Ysolde"), remember_mode="shared", remember=0.9)
     from oibot_gm.llm import decisions
 
     dec = Ask(0.0, relevance={"m1": 0.9})
     monkeypatch.setattr(decisions, "DECISIONS", dec)
-    seen = {}
+    recalls, seen = [], []
 
-    async def help_answer(reg, uid, officer, text, may_act=False, public=False, memory=None, **kw):
-        seen["memory"] = memory
+    async def help_answer(reg, uid, officer, text, may_act=False, public=False, **kw):
+        seen.append(kw.get("memory"))
         return "answered"
 
-    bot = types.SimpleNamespace(recall_memories=db.OibotGM.recall_memories.__get__(types.SimpleNamespace(registries=gate.bot.registries), object), help_answer=help_answer)
-    cands = asyncio.run(bot.recall_memories(gate.reg, "who is our jc?", GENERAL_CH))
-    assert [c.judged for c in cands] == [0.9] and dec.requests[-1][2] == "memory" and set(dec.requests[-1][1]) == {"decision"}
-    assert mem.memory_block(cands).startswith("<memory>\n") and " said on " in mem.memory_block(cands)
+    async def plain_identity(reg, user, **_):
+        return False, []
+
+    class Chan:
+        @contextlib.asynccontextmanager
+        async def typing(self):
+            yield
+
+    async def reply(content=None, **kw):
+        return types.SimpleNamespace(id=None)
+
+    stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
+                                 help_answer=help_answer, plain_identity=plain_identity, reply_private=lambda r, ch: True)
+
+    async def recall_memories(reg, text, channel):
+        recalls.append(channel)
+        return await db.OibotGM.recall_memories(stub, reg, text, channel)
+
+    stub.recall_memories = recall_memories
+
+    def send(**kw):
+        msg = types.SimpleNamespace(id=next(_next_id), author=types.SimpleNamespace(id=me, display_name="Mara"), channel=Chan(), reply=reply,
+                                    guild=None, reference=None)
+        asyncio.run(db.OibotGM.plain_text(stub, msg, gate.reg, "who is our jc?", GENERAL_CH, **kw))
+
+    send()
+    assert recalls == [GENERAL_CH] and len(dec.requests) == 1 and dec.requests[0][2] == "memory" and set(dec.requests[0][1]) == {"decision"}
+    assert seen[-1].startswith("<memory>\n") and " said on " in seen[-1] and "our only jc is Ysolde" in seen[-1]
+    send(memory=[])
+    assert recalls == [GENERAL_CH] and len(dec.requests) == 1 and seen[-1] is None
+    judged = asyncio.run(db.OibotGM.recall_memories(stub, gate.reg, "who is our jc?", GENERAL_CH))
+    n = len(dec.requests)
+    send(memory=judged)
+    assert recalls == [GENERAL_CH] and len(dec.requests) == n and seen[-1] == mem.memory_block(judged)
+    monkeypatch.setattr(gate.reg.config, "ask_audience", "officers")
+    send()
+    assert recalls == [GENERAL_CH] and len(dec.requests) == n, "outside the ask audience nothing is recalled or judged"
     monkeypatch.setattr(decisions, "DECISIONS", None)
-    assert asyncio.run(bot.recall_memories(gate.reg, "who is our jc?", None)) == []
+    assert asyncio.run(db.OibotGM.recall_memories(stub, gate.reg, "who is our jc?", None)) == [], "no decision service: no memories"
 
 
 def test_the_memory_share_of_the_budget():
