@@ -222,3 +222,13 @@ def test_a_replayed_off_never_reaches_what_the_channel_kept_after_it(tmp_path):
             row(2, "2026-10-03T10:00:00+00:00")]
     assert s.replay("g", rows) == 3 and s.count("g") == 1
     assert s.replay("g", rows) == 0 and s.get("g", mem.memory_key("g", 2)) is not None
+
+
+def test_the_names_list_alone_brings_a_named_authors_words(store):
+    """No query vector and no shared word: only the names list can find Rolf's row."""
+    store.add("g", key=mem.memory_key("g", 104), channel=1, channel_name="professions", scope="shared", author_id=13, author="Rolf",
+              at="2026-10-10T10:00:00+00:00", text="Mining/BS for warrior", vec=vec(9), p=0.8, message_id=104)
+    question = "which trade did he pick?"
+    assert not any(c.memory.author == "Rolf" for c in store.recall("g", question, None))
+    named = [c for c in store.recall("g", question, None, names=[13]) if c.memory.author == "Rolf"]
+    assert named and named[0].name_rank == 1 and named[0].bm25_rank is None and named[0].score > 0

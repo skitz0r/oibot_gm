@@ -126,6 +126,7 @@ class Candidate:
     vec_rank: int
     score: float  # reciprocal rank fusion
     judged: float | None = None  # the relevance judge's probability, once asked
+    name_rank: int | None = None  # 1-based rank among the named authors' newest words, None when no named author wrote it
 
 
 def remember_state(bot_words: str, channel_name: str, recent: list[dict], author: str, text: str) -> dict:
@@ -456,7 +457,8 @@ class MemoryStore:
             m = self._by_rowid(guild, rid)
             if m is None or not self.in_scope(m, channel, modes):
                 continue
-            out.append(Candidate(memory=m, cosine=cosine.get(rid, 0.0), bm25_rank=bm_rank.get(rid), vec_rank=vec_rank.get(rid, pool + 1), score=score))
+            out.append(Candidate(memory=m, cosine=cosine.get(rid, 0.0), bm25_rank=bm_rank.get(rid), vec_rank=vec_rank.get(rid, pool + 1), score=score,
+                                 name_rank=name_rank.get(rid)))
             if len(out) >= k:
                 break
         return out
