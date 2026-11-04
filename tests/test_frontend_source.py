@@ -469,6 +469,11 @@ def test_memory_surfaces_read_by_their_shape():
     m = (SRC / "components" / "Memories.tsx").read_text()
     assert '"/api/memories' in m and "/forget" in m and "preview: true" in m and 'useLive(load, ["memory", "config"])' in m
     assert "The bot remembers nothing yet." in m
+    assert "&offset=${offset}&limit=${limit}" in m and "page(data.rows.length, PAGE)" in m and "[...data.rows, ...p.rows]" in m, \
+        "Show more pages by offset and appends (the server caps one page at 200)"
+    assert "The bot is still getting ready to search memories by meaning. Until then it finds them by their words." in m
+    assert "The bot couldn't get ready to search memories by meaning, so it finds them by their words. Tell the host." in m
+    assert "memory model" not in m
     my = (SRC / "components" / "MyMemories.tsx").read_text()
     assert "What the bot remembers you saying" in my and "/api/me/memories/" in my and "preview: true" in my and "Nothing remembered yet." in my
     me = (SRC / "pages" / "Me.tsx").read_text()

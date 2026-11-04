@@ -4330,9 +4330,9 @@ under the table say what Memory does and, when a channel remembers without the k
 fourth Ops tab, **Memory** (`#memory`, `components/Memories.tsx`, officers), names the remembering channels (their names from
 `/api/plain-permissions`, since a channel with nothing kept has no row), then lists `GET /api/memories` newest first — when ·
 channel · who said it · their words (and what they replied to) · Remembers here only when scoped — with a search box, a channel
-filter, Show more (50 at a time) and **Forget** on each row: the press previews `POST /api/memories/{id}/forget` and `useConfirm`
-prints only the server's `sentences`, then the write; a line says when the memory model is loading or failed (recall by words
-only); it reloads on the `memory` and `config` topics. The Me page's right column carries **What the bot remembers you saying**
+filter, Show more (the next 50 by offset, appended; a filter change starts again at the top, a live reload re-reads the rows shown) and **Forget** on each row: the press previews `POST /api/memories/{id}/forget` and `useConfirm`
+prints only the server's `sentences`, then the write; one line says when the bot is still getting ready to search by meaning, another when it couldn't (recall by
+words only, tell the host); it reloads on the `memory` and `config` topics. The Me page's right column carries **What the bot remembers you saying**
 (`components/MyMemories.tsx`) when `GET /api/me`'s `memory_on` is set: the member's own `memories` rows with Forget through
 `POST /api/me/memories/{id}/forget` the same way, an empty state that says how a memory gets there, and a pointer to the Ops page
 past the first page; the page reloads on `memory`. The routes are `web/api_memory.py`; MCP has `list_memories` and

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Box, Button, Card, Group, Select, Text, TextInput } from "@mantine/core";
 import { api, type MemoryRow } from "../api";
 import { CardHeader, fail, ok } from "./Page";
@@ -10,6 +10,7 @@ import css from "./plain.module.css";
 interface Page { rows: MemoryRow[]; total: number; more: boolean; channels: Record<string, string>; words: Record<string, string>; ready: boolean; model: string }
 const COLOUR: Record<string, string> = { shared: "teal", channel: "blue" };
 const PAGE = 50;
+const MAX = 200;  // the server's cap on one page (api_memory.py)
 
 /** The Ops page's Memory tab (design §5.61): which channels remember, then everything the bot remembers members saying —
  *  newest first, searchable, a channel filter, Forget on each row (the server's sentence first). Officers only. The
@@ -19,19 +20,37 @@ export function Memories() {
   const [chanNames, setChanNames] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   const [channel, setChannel] = useState<string | null>(null);
-  const [limit, setLimit] = useState(PAGE);
+  const [more, setMore] = useState(false);
   const [ask, confirmDialog] = useConfirm();
-  const params = () => `?q=${encodeURIComponent(q)}&channel=${channel || ""}&limit=${limit}`;
+  const shown = useRef(0);  // rows on screen: a reload keeps the officer's place (up to the server's cap)
+  const seq = useRef(0);    // a newer request wins over a slower older one
+  const page = (offset: number, limit: number) =>
+    api.get<Page>("/api/memories" + `?q=${encodeURIComponent(q)}&channel=${channel || ""}&offset=${offset}&limit=${limit}`);
+  /** The first page again (a filter change, a Forget, a live reload): offset 0, as many rows as were shown. */
   const load = () => {
-    api.get<Page>("/api/memories" + params()).then(setData).catch(fail);
+    const n = ++seq.current;
+    page(0, Math.min(MAX, Math.max(PAGE, shown.current))).then((p) => { if (n !== seq.current) return; shown.current = p.rows.length; setData(p); setMore(p.more); }).catch(fail);
     api.get<PlainPermissionsData>("/api/plain-permissions").then((p) => setChanNames(Object.fromEntries(p.channels.map((c) => [c.id, c.name])))).catch(() => {});
   };
-  useEffect(() => { load(); }, [q, channel, limit]);  // eslint-disable-line react-hooks/exhaustive-deps
+  /** Show more: the next page from where the list ends, appended. */
+  const showMore = () => {
+    if (!data) return;
+    const n = ++seq.current;
+    page(data.rows.length, PAGE).then((p) => {
+      if (n !== seq.current) return;
+      const rows = [...data.rows, ...p.rows];
+      shown.current = rows.length; setData({ ...p, rows }); setMore(p.more);
+    }).catch(fail);
+  };
+  useEffect(() => { shown.current = 0; load(); }, [q, channel]);  // eslint-disable-line react-hooks/exhaustive-deps
   useLive(load, ["memory", "config"]);
   if (!data) return null;
   const names: Record<string, string> = { ...Object.fromEntries(data.rows.map((r) => [r.channel, r.channel_name])), ...chanNames };
   const remembering = Object.entries(data.channels).map(([id, mode]) => ({ id, mode, name: names[id] }));
-  const fetching = data.model === "loading" || data.model === "failed";
+  const MODEL_LINE: Record<string, string> = {
+    loading: "The bot is still getting ready to search memories by meaning. Until then it finds them by their words.",
+    failed: "The bot couldn't get ready to search memories by meaning, so it finds them by their words. Tell the host.",
+  };
 
   async function forget(r: MemoryRow) {
     try {
@@ -56,12 +75,12 @@ export function Memories() {
           </Group>
         )}
         {remembering.length > 0 && !data.ready && <Text size="xs" c="dimmed" mt={4}>Memory needs the host's TypeSafe key.</Text>}
-        {remembering.length > 0 && fetching && <Text size="xs" c="dimmed" mt={4}>The bot is still fetching its memory model, so for now it finds memories by their words only.</Text>}
+        {remembering.length > 0 && MODEL_LINE[data.model] && <Text size="xs" c="dimmed" mt={4}>{MODEL_LINE[data.model]}</Text>}
       </Box>
       <Box px="md" pb="sm">
         <Group gap="sm">
-          <TextInput size="xs" placeholder="Search the words" value={q} onChange={(e) => { setQ(e.currentTarget.value); setLimit(PAGE); }} w={240} />
-          <Select size="xs" placeholder="Every channel" clearable value={channel} onChange={(v) => { setChannel(v); setLimit(PAGE); }} w={200}
+          <TextInput size="xs" placeholder="Search the words" value={q} onChange={(e) => setQ(e.currentTarget.value)} w={240} />
+          <Select size="xs" placeholder="Every channel" clearable value={channel} onChange={(v) => setChannel(v)} w={200}
             data={Object.keys(data.channels).map((id) => ({ value: id, label: names[id] ? `#${names[id]}` : "a channel the bot can't see" }))} />
           <Text size="xs" c="dimmed">{data.total === 1 ? "1 memory" : `${data.total} memories`}</Text>
         </Group>
@@ -83,7 +102,7 @@ export function Memories() {
                 <div className={css.did}><Button size="xs" variant="subtle" color="red" onClick={() => forget(r)}>Forget</Button></div>
               </div>
             ))}
-            {data.more && <Group justify="center" mt="sm"><Button size="xs" variant="default" onClick={() => setLimit(limit + PAGE)}>Show more</Button></Group>}
+            {more && <Group justify="center" mt="sm"><Button size="xs" variant="default" onClick={showMore}>Show more</Button></Group>}
           </div>
         )}
       </Box>
