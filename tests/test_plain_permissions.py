@@ -7,12 +7,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import time
 import types
 
 import pytest
-from conftest import OFFICER_ROLE, OWNER, join, lock_with_board, open_test_run
-from web_helpers import post_confirmed
+from conftest import OWNER, join, lock_with_board, open_test_run
+from web_helpers import RAID_LEAD, post_confirmed, web_client  # noqa: F401 — web_client is a shared fixture
 
 from oibot_gm import configops
 from oibot_gm.configops import ConfigOp, ConfigRequest
@@ -20,7 +19,6 @@ from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.registry import PLAIN_GROUPS, PLAIN_WEB, RegistryError
 
 OPS_CH, ANALYTICS_CH, GENERAL_CH, RAIDERS_CH = 900_001, 900_002, 900_003, 900_004
-RAID_LEAD = 300_000_000_000_000_007  # a Discord role the owner can grant groups to
 
 
 @pytest.fixture
@@ -278,49 +276,6 @@ def test_confirm_for_groups(g, rs):
 
 
 # ---- the web: officers read, the owner writes, others 403; MCP is the owner
-
-class Guild:
-    def __init__(self):
-        self.id = 1
-        self.roles = [types.SimpleNamespace(id=RAID_LEAD, name="Raid Lead", position=2, is_default=lambda: False, managed=False)]
-
-
-@pytest.fixture
-def web_client(g, rs, monkeypatch):
-    from fastapi.testclient import TestClient
-    from itsdangerous import URLSafeSerializer
-    from test_mcp import TOKEN, FakeBot
-
-    from oibot_gm.web import app as web
-
-    officer_id = g.other.discord_id
-    guild = Guild()
-
-    class Bot(FakeBot):
-        def get_guild(self, gid):
-            return guild
-
-        async def cached_member(self, guild, uid, max_age=300):
-            return types.SimpleNamespace(id=uid, display_name=f"u{uid}", roles=[types.SimpleNamespace(id=OFFICER_ROLE)] if uid == officer_id else [])
-
-        def officiates(self, member, guild):
-            return member.id in (officer_id, OWNER)
-
-        def guild_channels(self, reg):
-            return [{"id": str(OPS_CH), "name": "ops", "category": None}, {"id": str(GENERAL_CH), "name": "general", "category": None}]
-
-    monkeypatch.setenv("OIBOT_WEB_SECRET", "s" * 40)
-    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
-    sign = URLSafeSerializer("s" * 40, salt="session")
-    bot = Bot(g.reg, rs)
-    c = TestClient(web.create_app(bot))
-
-    def as_(uid):
-        c.cookies.set(web.COOKIE, sign.dumps({"uid": str(uid), "name": "x", "iat": time.time()}))
-        return {"X-Requested-With": "oibot"}
-
-    return types.SimpleNamespace(c=c, as_=as_, officer=officer_id, member=g.me.discord_id, bot=bot, token=TOKEN)
-
 
 def test_api_officers_read_owner_writes(web_client, g):
     w = web_client
