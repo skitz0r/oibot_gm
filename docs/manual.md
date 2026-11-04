@@ -74,6 +74,7 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
 - **Listening** (owner) — a channel the bot reads without being tagged: it answers what is clearly for it there.
   *Watches* means it only notes what it would have answered; *Replies* means it answers. The owner chooses the channels
   (§8c *Listening*).
+- **Memory** (owner) — a listening channel where the bot keeps what members say that is worth asking about later, as their words with the day, and repeats it when asked: "Mara said on 25 Sep that …". *Remembers* means anywhere it answers; *Remembers here only* means only in that channel. Anyone can make it **Forget** their own words (§8c *Memory*).
 - **Who could play** — every member's main: the headcount the Readiness page and the analytics cards measure against
   the raid's size, limits and aims. Alts and offspecs don't add to the headcount; they show as who could cover a role.
 - **Your record** — your characters (name, spec, offspec, extra roles, which is your main, their professions) and your
@@ -201,7 +202,8 @@ Log in with Discord. Every member gets **Me**, the **Loot log** (every award the
 Someone who has applied sees **Your application** at the top of Me: waiting, or the decision.
 Everything below can also be done there:
 your characters (press **Edit**: add a row, first + last name, spec/offspec, extra roles (*Flex*), main/alt, then one **Save changes**; the crown marks your main; each row's **⋮** menu has *Make main*, *Retire* and *Delete* — when the change reaches a sheet or a seat, the confirm says so first), absences (*Add*: **From** a day **for how long**, previewed; **I'm back** clears one),
-your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**. **Me is your
+your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**.
+**What the bot remembers you saying** lists your own words the bot keeps from a remembering channel, each with **Forget** (§8c *Memory*). **Me is your
 inbox** (§4 *Your inbox*): every ask waiting for you — Confirm / Can't make it, a seat or swap question, a pre-lock
 "could you come?" — as a card with its two buttons and its deadline, then your **Notices** (what happened that you
 should know: not rostered, a seat released, an officer answered for you, a run cancelled…), and **My sheets** with
@@ -1502,6 +1504,9 @@ the channel, who wrote, what they wrote, how likely it was for the bot (a bar an
 replied, asked with 👀, stayed quiet, would have replied, would have asked, or skipped (over the hourly limit). The list
 updates as messages come in. `/gm config plain` lists the listening channels too ("• #signups: Replies — listening"), and
 its first line ends "— listening (Replies)" when the channel you are in listens.
+
+**Memory.** In a listening channel the owner can also turn on Memory: the bot then keeps what members say there that someone could ask about later — where a pattern drops, who the guild's jewelcrafter is, what day the horde runs happen — and, asked later, repeats it as that person's words with the day: "Mara said on 25 Sep that our only jewelcrafter is Ysolde." It never states a memory as its own fact, and the guild's records win when they disagree. Questions, jokes, links and chat between people are not kept. Each remembering channel is one of two: **Remembers** — repeated anywhere the bot answers, in channels, DMs and on the site; **Remembers here only** — repeated only when answering in that same channel, for an officers' channel. Memory needs Listening on in the channel (Watches is enough: watching still reads) and the host's TypeSafe key. Turning a channel's Memory **Off forgets everything it held**, and the change says how much before Apply.
+The owner sets it in plain text ("remember what's said in #general", "remember #officer-chat here only", "stop remembering #general") or on the Ops page's **Plain-text permissions** tab, in the **Memory** column beside Listening. Officers read everything the bot remembers on the Ops page's **Memory** tab — when, the channel, who said it, their words — with a search box and **Forget** on each; a member sees what the bot remembers *them* saying on their Me page, under **What the bot remembers you saying**, with **Forget**. A forgotten memory is never repeated or listed again. Nothing here sends a DM. `/gm config plain` shows which channels remember ("• #general: Replies — listening, remembers").
 
 **DMs with several servers (D41).** When the bot looks after more than one server, a plain DM asks which server it is
 for, listing every server you belong to; one whose policy ignores DMs is marked "(plain text off here)" and picking it

@@ -610,3 +610,15 @@ def test_the_memory_share_of_the_budget():
     from oibot_gm.llm import provider
 
     assert provider.SHARES["memory"] == 0.1
+
+
+def test_the_probe_reads_the_live_question_and_the_manual_names_the_feature():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("listen_probe", "scripts/listen_probe.py")
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    st = probe.state("who is our jc?")
+    assert st["memory"] == [] and st["message"]["text"] == "who is our jc?" and len(probe.BAIT) >= 8 and len(probe.BANTER) >= 8
+    manual = open("docs/manual.md", encoding="utf-8").read()
+    assert "**Memory**" in manual and "Remembers here only" in manual and "said on" in manual and "Forget" in manual

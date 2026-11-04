@@ -316,12 +316,12 @@ src/oibot_gm/
                        transfer_owner (D50; Discord only — /gm config owner, BY_DESIGN_ONLY), absence_lines / absence_clear_lines (the preview words);
                        a member's own retire / delete — and their own absence (record_absence → announce_absence → RaidMixin.after_absence(by_id=)) — frees the seat with no self-notice (by_id decides). No DMs anywhere
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
-  memory.py            chat memory (design §5.61, a SPIKE — nothing live calls it): REMEMBER_QUESTION (a Jev noul: a fact someone could ask about
-                       later, kept as the speaker's words), MemoryStore (SQLite: a row per kept message with its reply `context`, FTS5 over
-                       index_text "<author>: <text>", the embedding as a blob; recall = cosine list + bm25 list fused by reciprocal rank, scope
-                       shared | channel; forget / forget_channel), judge = a Jev CHOICE over the candidates (RELEVANT 0.7 — the threshold is the
-                       judge, not a cosine), citation / memory_block ("Mara said on 25 Sep: …", unfenced). Embedder = bge-small through fastembed
-                       (local; `uv run --with fastembed`). scripts/memory_probe.py capture|ask = the offline probe over a guild's channel history
+  memory.py            chat memory (design §5.61): MEMORIES = the host's service — rows in <guild>/memory.jsonl (append-only, a commit each),
+                       the index out/memory/<key>.db (SQLite FTS5 + bge-small vectors through fastembed, derived, replayed at ready), recall = words +
+                       meaning + a named member's own words fused by rank in the owner's channel scope (shared | channel), questions()/read_answers() =
+                       the gate's ONE Jev request (decision · remember · relevance), judge() for the other paths, memory_block() = the <memory> data
+                       block (unfenced), on_save = a channel turned Off forgets; remember_at() = the keep line (OIBOT_REMEMBER_AT raises it);
+                       scripts/memory_probe.py = the spike's offline probe, scripts/listen_probe.py = the gate's retune check (bait ≥ 80 %, banter ≤ 15 %)
   professions.py       professions (design §5.60): catalog(reg) = the recipe catalog DERIVED from the records (norm_recipe keys, the most
                        used spelling, crafters highest skill first; never stored), who_can_make(reg, text) (exact name, else every recipe whose words all
                        appear), crafters_of(reg, pid); visible = active character, not a puppet, not left; rename_recipe / merge_recipe (officers, preview
@@ -483,6 +483,8 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        crafters + the catalog; `officer`), GET /api/professions/find?q= (who_can_make), POST /api/professions/rename|merge (officers;
                        `preview` → the sentences, then the write). A character's professions are written by /api/members/set `professions` (officers,
                        the one-member route; MCP set_professions) and read on every character row and /api/meta.professions
+  web/api_memory.py    install_memory_api (design §5.61): GET /api/memories (officers: search, channel, member, paging), POST
+                       /api/memories/{key}/forget (officers; MCP needs the actor), POST /api/me/memories/{key}/forget (own words only, never MCP)
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409); sheet_row_extras
