@@ -937,6 +937,23 @@ def plain_permissions(guild: Guild = None) -> dict:
 
 
 @mcp.tool()
+def list_memories(q: str | None = None, channel: str | None = None, member: str | None = None, limit: int = 50, guild: Guild = None) -> dict:
+    """What the bot remembers members saying (design §5.61), newest first: each row is one message kept as that person's
+    words — when (12-hour words), the channel, who said it, the words, what it replied to, and whether it is repeated
+    anywhere (Remembers) or only in its channel (Remembers here only). `q` searches the words; `channel` / `member` are ids."""
+    d = api(guild).get("/api/memories", q=q, channel=channel, member=member, limit=limit)
+    return {"rows": [{k: r.get(k) for k in ("id", "when", "channel_name", "author", "text", "context", "scope_word")} for r in d.get("rows", [])],
+            "total": d.get("total", 0), "more": d.get("more", False)}
+
+
+@mcp.tool()
+def forget_memory(id: str, guild: Guild = None) -> str:
+    """Forget one memory for good (an officer's decision: needs OIBOT_MCP_ACTOR). `id` from list_memories. The bot never
+    repeats or lists it again; the person's own record is untouched."""
+    return msg(api(guild).post(f"/api/memories/{id}/forget", {}, actor=True))
+
+
+@mcp.tool()
 def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: dict[str, str] | None = None, set_channels: dict[str, str | None] | None = None,
                           dm: str | None = None, default: str | None = None, listen: dict[str, str] | None = None,
                           set_listen: dict[str, str | None] | None = None, remember: dict[str, str] | None = None,

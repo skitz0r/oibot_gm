@@ -622,3 +622,119 @@ def test_the_probe_reads_the_live_question_and_the_manual_names_the_feature():
     assert st["memory"] == [] and st["message"]["text"] == "who is our jc?" and len(probe.BAIT) >= 8 and len(probe.BANTER) >= 8
     manual = open("docs/manual.md", encoding="utf-8").read()
     assert "**Memory**" in manual and "Remembers here only" in manual and "said on" in manual and "Forget" in manual
+
+
+# ---- the routes
+
+def seeded(gate):
+    """Two memories: one of `me` in #general (shared), one of `other` in #officer-chat (channel), five minutes apart
+    (distinct `at`: the list is newest first and two rows of one second have no fixed order)."""
+    from datetime import datetime, timezone
+
+    me, other = gate.g.me.discord_id, gate.g.other.discord_id
+    first = message(me, text="our only jc is Ysolde")
+    first.created_at = datetime(2026, 9, 25, 19, 0, tzinfo=timezone.utc)
+    gate.run(0.2, first, remember_mode="shared", remember=0.9)
+    second = message(other, channel=OFFICER_CH, text="we bench whoever is late twice", name="officer-chat")
+    second.created_at = datetime(2026, 9, 25, 19, 5, tzinfo=timezone.utc)
+    gate.run(0.2, second, remember_mode="channel", remember=0.9)
+    return gate.svc.list(gate.reg)[0]
+
+
+def test_officers_list_search_filter_and_forget(web_client, gate, monkeypatch):
+    import re
+
+    w = web_client
+    rows = seeded(gate)
+    d = w.c.get("/api/memories", headers=w.as_(w.officer)).json()
+    assert d["total"] == 2 and len(d["rows"]) == 2 and d["more"] is False and d["words"] == {"shared": "Remembers", "channel": "Remembers here only"}
+    assert d["channels"] == {str(GENERAL_CH): "shared", str(OFFICER_CH): "channel"} and d["model"] in ("off", "loading", "loaded", "failed")
+    r0 = d["rows"][0]
+    assert r0["text"] == "we bench whoever is late twice" and r0["scope"] == "channel" and r0["scope_word"] == "Remembers here only" and r0["channel_name"] == "officer-chat"
+    assert re.fullmatch(r"\w{3} \d{1,2} \w{3} \d{1,2}:\d{2} (AM|PM)", r0["when"]), r0["when"]
+    assert w.c.get(f"/api/memories?q=jc", headers=w.as_(w.officer)).json()["total"] == 1
+    assert w.c.get(f"/api/memories?channel={OFFICER_CH}", headers=w.as_(w.officer)).json()["total"] == 1
+    assert w.c.get(f"/api/memories?member={gate.g.me.discord_id}", headers=w.as_(w.officer)).json()["rows"][0]["author_id"] == str(gate.g.me.discord_id)
+    assert w.c.get("/api/memories?limit=1", headers=w.as_(w.officer)).json()["more"] is True
+    assert w.c.get("/api/memories", headers=w.as_(w.member)).status_code == 403
+    mid = next(r.id for r in rows if r.channel == GENERAL_CH)
+    r = w.c.post(f"/api/memories/{mid}/forget", json={"preview": True}, headers=w.as_(w.officer))
+    assert r.status_code == 200 and r.json()["sentences"] == [f"The bot forgets what {gate.g.me.display_name} said on {rows[1].when()}. It never repeats it again."]
+    r = w.c.post(f"/api/memories/{mid}/forget", json={}, headers=w.as_(w.officer))
+    assert r.status_code == 200 and gate.svc.count(gate.reg) == 1
+    r = w.c.post(f"/api/memories/{mid}/forget", json={}, headers=w.as_(w.officer))
+    assert r.status_code == 404 and r.json()["error"] == "That memory is already forgotten."
+    owner = {"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"}
+    other_id = next(r.id for r in rows if r.channel == OFFICER_CH)
+    r = w.c.post(f"/api/memories/{other_id}/forget", json={}, headers=owner)
+    assert r.status_code == 403 and "OIBOT_MCP_ACTOR" in r.json()["error"], "a bare bearer never forgets"
+
+
+def test_the_list_answers_the_empty_shape_without_the_service(web_client, monkeypatch):
+    w = web_client
+    monkeypatch.setattr(mem, "MEMORIES", None)
+    r = w.c.get("/api/memories", headers=w.as_(w.officer))
+    assert r.status_code == 200 and r.json()["rows"] == [] and r.json()["total"] == 0 and r.json()["model"] == "off"
+    assert w.c.get("/api/me", headers=w.as_(w.member)).json()["memories"] == {"rows": [], "total": 0, "more": False}
+
+
+def test_a_forget_writes_one_audit_line_naming_the_author_never_the_words(web_client, gate):
+    w = web_client
+    rows = seeded(gate)
+    mid = next(r.id for r in rows if r.channel == GENERAL_CH)
+    assert w.c.post(f"/api/memories/{mid}/forget", json={}, headers=w.as_(w.officer)).status_code == 200
+    line = next(t for _lvl, t in w.bot.ops.lines if "forgot" in t)
+    assert gate.g.me.display_name in line and rows[1].when() in line and "#general" in line and "Ysolde" not in line
+
+
+def test_a_member_sees_and_forgets_their_own_only(web_client, gate):
+    w = web_client
+    rows = seeded(gate)
+    me_id = gate.g.me.discord_id
+    gate.reg.rename(me_id, "Renamed", "owner") if hasattr(gate.reg, "rename") else None
+    d = w.c.get("/api/me", headers=w.as_(w.member)).json()
+    assert d["memory_on"] is True and d["memories"]["total"] == 1 and d["memories"]["rows"][0]["text"] == "our only jc is Ysolde"
+    mine = d["memories"]["rows"][0]["id"]
+    theirs = next(r.id for r in rows if r.channel == OFFICER_CH)
+    assert w.c.post(f"/api/me/memories/{theirs}/forget", json={}, headers=w.as_(w.member)).status_code == 403
+    r = w.c.post(f"/api/me/memories/{mine}/forget", json={"preview": True}, headers=w.as_(w.member))
+    assert r.status_code == 200 and r.json()["sentences"][0].startswith("The bot forgets what you said on ")
+    assert w.c.post(f"/api/me/memories/{mine}/forget", json={}, headers=w.as_(w.member)).status_code == 200
+    assert w.c.get("/api/me", headers=w.as_(w.member)).json()["memories"]["total"] == 0
+    owner = {"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"}
+    assert w.c.post(f"/api/me/memories/{theirs}/forget", json={}, headers=owner).status_code == 403, "never MCP"
+    gate.reg.set_plain_policy(gate.reg.merge_plain_policy({"set_remember": {str(GENERAL_CH): None, str(OFFICER_CH): None}}), "owner")
+    assert w.c.get("/api/me", headers=w.as_(w.member)).json()["memory_on"] is False
+
+
+def test_a_write_publishes_the_memory_topic(web_client, gate, monkeypatch):
+    assert any(getattr(f, "__name__", "") == "memory_changed" for f in mem.MEMORY_LISTENERS)
+
+
+def test_mcp_memory_tools_call_the_routes():
+    import json
+
+    import httpx
+
+    from oibot_gm import mcp_server as ms
+
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path, str(request.url), request.read()))
+        if request.method == "GET":
+            return httpx.Response(200, json={"rows": [{"id": "m-1", "when": "Wed 5 Nov 9:00 PM", "channel_name": "general", "author": "Mara", "text": "x", "scope_word": "Remembers"}], "total": 1, "more": False})
+        return httpx.Response(200, json={"message": "The bot forgets what Mara said on 5 Nov."})
+
+    ms.use(ms.Api(url="http://bot", token="a" * 64, transport=httpx.MockTransport(handler)))
+    try:
+        d = ms.list_memories(q="x", channel="1")
+        assert d["rows"][0]["author"] == "Mara" and d["total"] == 1
+        assert ms.forget_memory("m-1").startswith("The bot forgets")
+    finally:
+        ms.use(None)
+    assert calls[0][:2] == ("GET", "/api/memories") and "q=x" in calls[0][2] and calls[1][:2] == ("POST", "/api/memories/m-1/forget")
+
+
+def test_the_by_design_entries_name_living_routes():
+    assert configops.BY_DESIGN_ONLY["memories_list"]["path"] == "GET /api/memories" and configops.BY_DESIGN_ONLY["my_memories"]["path"] == "POST /api/me/memories/{key}/forget"

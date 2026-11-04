@@ -205,7 +205,7 @@ def test_single_surface_features_are_written_down_with_a_living_path(web_routes,
     (which must exist) and the reason."""
     # owner transfer is Discord-only (§2.1): /gm config owner in the server — tests/test_people.py
     expected = {"guild_claim", "owner_transfer", "application_wizard", "registration_card", "absences_card", "guide", "dm_picker",
-                "board", "applications_review", "policy_editor", "history", "plain_permissions_grid"}
+                "board", "applications_review", "policy_editor", "history", "plain_permissions_grid", "memories_list", "my_memories"}
     assert expected <= set(configops.BY_DESIGN_ONLY)
     # phase 2 B9: the comp sandbox and test-bench compose are on both surfaces now (/gm test comp | compose) — never web-only again
     assert not {"comp_sandbox", "test_bench_compose"} & set(configops.BY_DESIGN_ONLY)

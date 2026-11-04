@@ -30,6 +30,7 @@ from ..registry import ABSENCE_REASON_MAX, DECISION_NOTE_MAX, MAX_ABSENCE_DAYS, 
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 from .api_me import sheet_row_extras
+from .api_memory import own_rows
 from .api_setup import discord_ready
 from .app import GUILD_COOKIE, NotMember, login_href, owner_name, set_guild_cookie
 
@@ -656,6 +657,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "notices": inbox.notices_of(reg, v.uid),
             # their OWN application (design §3.3 D): open → waiting, decided → the decision; components/MyApplication.tsx
             "application": reg.application_state(v.uid),
+            # what the bot remembers them saying (design §5.61), by their Discord id; `memory_on` = some channel remembers
+            "memories": own_rows(reg, v.uid), "memory_on": bool(reg.memory_channels()),
         }
 
     # ---- member self-service
@@ -1307,7 +1310,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     subscribers: dict[asyncio.Queue, tuple[str, bool]] = {}  # queue -> (guild key, the page's viewer is an officer)
 
     def publish(topic: str, guild: str | None = None, *, officers: bool = False) -> None:
-        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy` | `listen`. `guild` None = every
+        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy` | `listen` | `memory`. `guild` None = every
         page (process-wide news: the agents' job status); otherwise only that guild's pages. `officers`: only pages an
         officer opened (the test feed: what it names is officers' business). Safe from worker threads."""
         def fan_out():
@@ -1338,7 +1341,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def test_event(guild_key: str, run_key: str) -> None:
         publish(f"test:{run_key}", guild_key, officers=True)  # the test feed (testfeed.FEED): the Test bench card and the Rosters Test tab reload
 
-    from .. import discord_bot as discord_bot_mod, testfeed
+    from .. import discord_bot as discord_bot_mod, memory as mem, testfeed
 
     def membership_changed(guild_key: str) -> None:
         publish("member", guild_key)  # a server snapshot found someone joined, left or changed roles: the Members page reloads
@@ -1346,9 +1349,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def listen_verdict(guild_key: str) -> None:
         publish("listen", guild_key, officers=True)  # a listening verdict was recorded (§5.59): the Ops page's Recent decisions reload
 
+    def memory_changed(guild_key: str) -> None:
+        publish("memory", guild_key)  # a memory kept or forgotten (§5.61): the Ops page's Memory tab and the Me page reload (rows filtered server-side)
+
     for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
                       (loot_session_mod.LOOT_LISTENERS, loot_saved), (testfeed.LISTENERS, test_event), (discord_bot_mod.MEMBERSHIP_LISTENERS, membership_changed),
-                      (discord_bot_mod.LISTEN_LISTENERS, listen_verdict)):
+                      (discord_bot_mod.LISTEN_LISTENERS, listen_verdict), (mem.MEMORY_LISTENERS, memory_changed)):
         hooks[:] = [f for f in hooks if getattr(f, "__name__", "") != fn.__name__] + [fn]  # one per process, the newest app wins
 
     def test_lookup(guild_key: str, run_key: str):
@@ -2573,6 +2579,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_professions import install_professions_api  # the Professions page: catalog, finder, rename / merge (design §5.60)
 
     install_professions_api(app, bot, who=who, body=body, publish=publish)
+
+    from .api_memory import install_memory_api  # what the bot remembers: the officers' list and Forget, a member's own (design §5.61)
+
+    install_memory_api(app, bot, who=who, body=body, publish=publish)
 
     from .api_guides import install_guides_api  # the leveling-guide tool on the Me page (design §5.55)
 

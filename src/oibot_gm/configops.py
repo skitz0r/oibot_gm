@@ -552,6 +552,9 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     # addon, explorer and text on the Me page alone; MCP's token is the owner's (the string must not land in a transcript)
     "leveling_guide": {"surface": "web", "path": "POST /api/me/guide", "reason": "a RestedXP import string is a ~1 MB paste with the member's own BattleTag as its key: the Me page's Leveling guide tab is the only place it is typed; Discord has no paste of that size and MCP's token is the owner's, so it reads the status but never builds"},
     "member_import": {"surface": "web", "path": "POST /api/members/import", "reason": "a signup list (a Raid-Helper export turned into rows by scripts/raidhelper_roster.py) is a file imported with a preview and the skipped rows named (MCP import_members reads the same route); Discord has no file editor, and a person's own registration is /register everywhere"},
+    # §5.61: what the bot remembers is read and forgotten in lists; Discord reads the setting and answers from the memories
+    "memories_list": {"surface": "web", "path": "GET /api/memories", "reason": "what the bot remembers is a searchable list with a Forget on every row: the Ops page's Memory tab (design §5.61); Discord reads the setting in /gm config plain and answers from the memories"},
+    "my_memories": {"surface": "web", "path": "POST /api/me/memories/{key}/forget", "reason": "a member's own memories are a list on their Me page with Forget on each (design §5.61); a DM command would list prose nobody can skim"},
 }
 
 
