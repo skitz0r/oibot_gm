@@ -403,7 +403,7 @@ class HelpMixin:
         return f"-# Posted where members read it, so this is the member view — officers can ask in {where} or by DM for the officer view."
 
     async def help_answer(self, reg, user_id: int, officer: bool, question: str, may_act: bool = False, public: bool = False,
-                          data: str | None = None, conversation: str | None = None):
+                          data: str | None = None, conversation: str | None = None, memory: str | None = None):
         """The answer text; None outside the ask audience (the caller shows the static guide). `may_act`: plain text
         may act for this person here — a message the model reads as a request to DO something returns ACT instead
         (the caller hands it to the change flow), so a plain question costs one model call. `public`: the reply is
@@ -411,7 +411,8 @@ class HelpMixin:
         officer sections, no officer index, no other people's reasons) and a line saying where the officer view is.
         `data`: a surface's own facts for the question (the loot council's proposals, asked in its thread) — an
         officer's private snapshot only, in a <data> block. `conversation`: the recent exchange with this person
-        (conversation.context_block — one fenced data block, design §5.51)."""
+        (conversation.context_block — one fenced data block, design §5.51). `memory`: the <memory> block
+        (memory.memory_block) of the memories a judge found relevant (design §5.61)."""
         audience_public = bool(public)  # anyone's reply in a channel others read: their own absence reasons stay out too
         public = bool(public and officer)
         if not reg.may_ask(user_id, officer):
@@ -432,7 +433,8 @@ class HelpMixin:
         try:
             with for_guild(reg.key):  # D45: the usage row is this guild's (the cap is shared)
                 ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, audience_public,
-                                            **({"conversation": conversation} if conversation else {}))
+                                            **({"conversation": conversation} if conversation else {}),
+                                            **({"memory": memory} if memory else {}))
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             return "Something went wrong answering that; the officers have been told. `/help` lists what I do."

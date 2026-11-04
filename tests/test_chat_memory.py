@@ -544,3 +544,33 @@ def test_the_capture_comes_after_the_reply_and_the_verdict_says_it_was_kept(gate
     gate.run(0.95, message(me, text="i can make the elemental flux too"), remember_mode="shared", remember=0.9)
     row = gate.bot.listen_recent(gate.reg)[0]
     assert row["did"] == "replied" and row["remembered"] is False, "a capture that failed is not recorded as kept"
+
+
+# ---- every answer path recalls
+
+def test_an_at_mention_recalls_and_judges_itself_once(gate, monkeypatch):
+    """plain_text with memory=None (an @mention, a DM): one Jev request (the judge, workload memory), the block into help_answer."""
+    me = gate.g.me.discord_id
+    gate.run(0.2, message(me, text="our only jc is Ysolde"), remember_mode="shared", remember=0.9)
+    from oibot_gm.llm import decisions
+
+    dec = Ask(0.0, relevance={"m1": 0.9})
+    monkeypatch.setattr(decisions, "DECISIONS", dec)
+    seen = {}
+
+    async def help_answer(reg, uid, officer, text, may_act=False, public=False, memory=None, **kw):
+        seen["memory"] = memory
+        return "answered"
+
+    bot = types.SimpleNamespace(recall_memories=db.OibotGM.recall_memories.__get__(types.SimpleNamespace(registries=gate.bot.registries), object), help_answer=help_answer)
+    cands = asyncio.run(bot.recall_memories(gate.reg, "who is our jc?", GENERAL_CH))
+    assert [c.judged for c in cands] == [0.9] and dec.requests[-1][2] == "memory" and set(dec.requests[-1][1]) == {"decision"}
+    assert mem.memory_block(cands).startswith("<memory>\n") and " said on " in mem.memory_block(cands)
+    monkeypatch.setattr(decisions, "DECISIONS", None)
+    assert asyncio.run(bot.recall_memories(gate.reg, "who is our jc?", None)) == []
+
+
+def test_the_memory_share_of_the_budget():
+    from oibot_gm.llm import provider
+
+    assert provider.SHARES["memory"] == 0.1

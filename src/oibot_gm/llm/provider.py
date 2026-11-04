@@ -57,7 +57,7 @@ PRICES: dict[str, tuple[float, float, float, float]] = {
 
 # A workload's share of the monthly budget when OIBOT_BUDGET_USD_<WORKLOAD> doesn't set its own cap: questions and
 # plain-text parsing are open to many people, so a flood of them can't spend the money loot night needs.
-SHARES: dict[str, float] = {"help": 0.5, "config_change": 0.5, "listen": 0.2}  # listen: the decisions on listened channels (§5.59)
+SHARES: dict[str, float] = {"help": 0.5, "config_change": 0.5, "listen": 0.2, "memory": 0.1}  # listen: the decisions on listened channels (§5.59); memory: the relevance judge on @mention / DM / site answers (§5.61)
 
 log = logging.getLogger(__name__)
 

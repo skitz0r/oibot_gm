@@ -1108,6 +1108,20 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             return True
         return (guild.id, user.id) not in self.__dict__.get("_member_gone", set())
 
+    async def recall_memories(self, reg, text: str, channel) -> list:
+        """The memories that answer `text` (an @mention, a DM, the site — the gate judged its own): recall in the channel's
+        scope (bounded by RECALL_TIMEOUT_S, as the gate's), then ONE Jev choice (workload memory). Nothing without the
+        service, the key or a candidate."""
+        if mem.MEMORIES is None or decisions.DECISIONS is None or not mem.enabled(reg):
+            return []
+        try:
+            cands = await asyncio.wait_for(asyncio.to_thread(mem.MEMORIES.recall_for, reg, text, channel=channel), timeout=RECALL_TIMEOUT_S)
+            with for_guild(reg.key):
+                return await mem.judge(decisions.DECISIONS, text, cands, workload="memory")
+        except Exception as e:  # noqa: BLE001 — never a reply about it
+            log.warning("memory: recall failed (%s)", type(e).__name__)
+            return []
+
     async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None) -> None:
         """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).
         An "act" channel (ops/analytics by default): configops.parse first — a change becomes the diff + Apply, a
@@ -1156,7 +1170,11 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
                 else:
                     await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
                 return
-            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw)
+            if memory is None:  # an @mention or a DM: recall and judge here (the listening gate hands its own judged list)
+                recall = getattr(self, "recall_memories", None)  # a bare test client has none: no memories
+                memory = await recall(reg, text, channel) if recall is not None else []
+            mem_kw = {"memory": mem.memory_block(memory)} if memory else {}
+            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw)
             if answer == HELP_ACT:
                 await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo)
                 return
