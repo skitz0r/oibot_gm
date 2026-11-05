@@ -476,3 +476,24 @@ def test_me_rows_offer_leaving_and_staying(reg, rs, monkeypatch):
     rc.leave_follow(reg, rs, rs.events[fev.key], m)
     f = rows()[fev.key]
     assert f["may_leave"] is False and f["may_stay"] is True
+
+
+def test_the_lock_lines_in_the_signup_channel_count_and_name_the_lead(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms)
+    names = [m.display_name for m in ms]
+    monkeypatch.setattr(rc, "propose", seat_by_name({LEAD: names[:20], FOLLOW: names[:20]}))
+    lead.channel_id = bot.signup.id
+    rs.save(lead, "test: the sheet's channel")
+    fev = rs.events[fev.key]
+    fev.channel_id = bot.signup.id  # a follow-on carrying a channel posts its own line
+    rs.save(fev, "test: the follow-on's channel")
+    run(bot.lock_run(reg, rs, lead, by="Jon"))
+    lines = [str(c["content"]) for c in bot.signup.sent if "is locked" in str(c["content"])]
+    assert len(lines) == 2 and not any("{sum(" in x for x in lines)
+    lead_line, follow_line = lines
+    assert f"is locked: {len(rs.events[lead.key].seated())} rostered" in lead_line and "after" not in lead_line
+    assert " · after Hyjal Summit is locked: " in follow_line and f"{len(rs.events[fev.key].seated())} rostered" in follow_line

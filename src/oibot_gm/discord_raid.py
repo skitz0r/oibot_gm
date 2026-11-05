@@ -913,7 +913,7 @@ class RaidMixin:
             then = ("Rostered? confirm in your DMs. Not rostered? nothing to do." if confirms
                     else "Rostered? you're in — press Can't make it on the sheet if that changes. Not rostered? nothing to do.")
             try:
-                await sig.send(f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "") + " is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}", allowed_mentions=discord.AllowedMentions.none())
+                await sig.send(f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "") + f" is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}", allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:  # noqa: BLE001
                 log.warning("lock line failed (%s): %s", ev.key, e)
         tail = await self.lock_follow(reg, rs, ev, by)
