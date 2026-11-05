@@ -981,8 +981,9 @@ def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
 
 def sync_follow(rs: "RaidStore", lead: RaidEvent) -> bool:
     """The follow-on's signups ARE the lead's (design §5.62): copied from the lead every time the lead is saved, the
-    members leaving after the lead as out (source callout, LEAVING_NOTE). Pins, the board and the rosters are the
-    follow-on's own. Saves the follow-on only when something changed; returns whether it did."""
+    members leaving after the lead as out (source callout, LEAVING_NOTE) — every out on the follow-on alone (their
+    own Leave, an officer's removal, a freed seat) is in `leaving` — and a row of someone with no row on the lead (a
+    pool member's fill yes) kept. Pins, the board and the rosters are the follow-on's own. Saves the follow-on only when something changed; returns whether it did."""
     fev = follow_of(rs, lead)
     if fev is None or fev.state in ("done", "cancelled"):
         return False
@@ -992,6 +993,8 @@ def sync_follow(rs: "RaidStore", lead: RaidEvent) -> bool:
         if s.discord_id in fev.leaving and c.status != "out":
             c.status, c.source, c.note, c.joined_at = "out", "callout", LEAVING_NOTE, None
         want[uid] = c
+    for uid, s in fev.signups.items():  # a row of the follow-on's own (a pool member's yes to a follow-on fill) stays
+        want.setdefault(uid, s)
     # the same answer pressed again only moves the lead's updated_at (the last touch): not a change to the follow-on
     if {k: v.model_dump(exclude={"updated_at"}) for k, v in want.items()} == {k: v.model_dump(exclude={"updated_at"}) for k, v in fev.signups.items()}:
         return False
@@ -2758,6 +2761,11 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str, *, not
     if sg:
         sg.status, sg.source, sg.updated_at = "out", why, now()
     name = sg.display_name if sg else p.signup_name
+    if ev.follows and uid is not None and uid not in ev.leaving:  # out of the follow-on while still on the lead is leaving
+        lead = lead_of(rs, ev)  # after the lead (design §5.62): kept out when the lead is saved again (sync_follow)
+        lead_row = lead.signups.get(str(uid)) if lead is not None else None
+        if lead_row is not None and lead_row.status != "out":  # a lead seat freed first (the cascade) is the whole night
+            ev.leaving.append(uid)
     ev.log.append(f"seat freed: {name} ({why})")
     rs.save(ev, f"seat freed {name}")
     if uid is not None:
@@ -2766,6 +2774,8 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str, *, not
     if ev.followed_by and uid is not None:  # out of the lead is out of the night: the follow-on seat goes too (idempotent;
         fev = follow_of(rs, ev)  # the scheduler's next fill tick covers it, RaidMixin.drop_seated asks at once)
         if fev is not None and fev.state == "locked" and fev.seat_of(uid):
+            if fev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again (as the scheduler's expiry does)
+                fev.fill_state = "idle"
             free_seat(reg, rs, fev, uid, why, notice=False)
     return p
 
@@ -3084,14 +3094,18 @@ def dst_words(reg: Registry, note: str, start: datetime) -> str:
     return ""
 
 
+OPEN_FOLLOW_REFUSAL = "A follow-on can't be added to a run that is already open."
+
+
 def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | None = None, schedule: str | None = None, follow: dict | None = None) -> dict:
     """What Open would do, before anything is written (POST /api/raid/{rid}/open/preview; the wizard's confirm shows
     the same facts): {kind, schedule, schedule_name, key, start (ISO — the exact instant Open must carry back), label
     (12-hour guild time), when_note (the DST line or ""), exists (the live run's state at that key, or None), channel
     (the signup channel id the sheet posts in, or None), rules (what kind of run it is, in sentences), past, closed
     (done | cancelled when that time's run is closed — Open is refused), refusal (the sentence why, or None), follow
-    ({raid, name, rosters, when} — `follow` given, else the schedule's own; None on a one-off without one) and
-    follow_line ("then Barrow Deeps ×2 at 9:30 PM", or "")}."""
+    ({raid, name, rosters, when} — `follow` given, else the schedule's own; None on a one-off without one; a run already
+    open at that time: ITS follow-on, or None) and follow_line (the sentence the confirm prints: "Then Barrow Deeps ×2
+    at 9:30 PM, from the same signup.", OPEN_FOLLOW_REFUSAL when a follow-on was asked of a run already open, or "")}."""
     start, sid, note = open_when(reg, instance, value, schedule)
     w = which_run(reg, instance, start, sid if sid is not None else DEFAULT_SCHEDULE)
     ev = rs.events.get(w["key"])
@@ -3100,8 +3114,18 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     rules = " ".join(open_rules(reg, instance, w["schedule"], w["kind"]))
     fw = follow if follow is not None else (reg.schedule_def(instance, w["schedule"] or DEFAULT_SCHEDULE)["schedule"].get("follow") if w["schedule"] != ADHOC_SCHEDULE else None)
     fstart = follow_start(reg, instance, start) if fw else None
+    follow_line = ""
+    if live is not None:  # Open points at the run already there: its own follow-on, never the one asked for (design §5.62)
+        asked, fev = fw, follow_of(rs, live)
+        ft = follow_dict(reg, live) if fev is not None else None
+        fw = {"raid": fev.instance, "rosters": int(ft.get("rosters") or 1) if ft else 1} if fev is not None else None
+        fstart = fev.start if fev is not None else None
+        if fw is None and asked:
+            follow_line = OPEN_FOLLOW_REFUSAL
     fjson = {"raid": fw["raid"], "name": reg.raid_def(fw["raid"]).get("name", fw["raid"]), "rosters": int(fw.get("rosters") or 1), "when": reg.local12(fstart)} if fw else None
-    return {**w, "follow": fjson, "follow_line": f"then {reg.follow_words(fw)} at {reg.local12(fstart, '%I:%M %p')}" if fw else "", "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
+    if fw:
+        follow_line = f"Then {reg.follow_words(fw)} at {reg.local12(fstart, '%I:%M %p')}, from the same signup."
+    return {**w, "follow": fjson, "follow_line": follow_line, "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
             "closed": ev.state if refusal else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
 

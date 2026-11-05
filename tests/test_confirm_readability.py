@@ -302,6 +302,9 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     for seated, lead_seated in ((True, True), (True, False), (False, False)):
         dump.add("cant_consequence", f"follow-on locked, {'rostered' if seated else 'not rostered'} here, {'rostered' if lead_seated else 'not rostered'} on the lead",
                  cant_consequence(reg, runs["follow-on locked"], seated, lead_seated))
+    for seated in (True, False):  # a lead's Can't takes the follow-on place too
+        dump.add("cant_consequence", f"lead locked, {'rostered' if seated else 'not rostered'} on it, a place on the follow-on",
+                 cant_consequence(reg, runs["lead locked"], seated, follow_seated=True))
     dump.add("QUEUE_NOTE", "ad hoc, joined", QUEUE_NOTE)
 
     # ---- raidcycle's refusals and previews

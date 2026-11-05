@@ -513,9 +513,13 @@ never asks anyone to confirm: the lead's Confirm covers the night, and a *Can't 
 however it comes (the Confirm card, the Me page, `/raid out`, an absence, an expired confirm). Its lock cards, board,
 fill asks and loot councils are its own (*Barrow Deeps · after Hyjal Summit*); a fill ask on it is a DM like any other.
 Leaving after the lead (*Leaving after Hyjal Summit…* on the Me page, or `/raid out` picking the follow-on) frees
-only the follow-on place and the lead seat stays (*"You're leaving after Hyjal Summit, so you're out of Barrow Deeps."*);
-an officer's removal on the follow-on's board frees only that place too. *I'm staying* on the Me page undoes it (*"Noted: you're staying … Your seat comes back when
-one is free."*): the place you left may already be filled. Cancelling the lead cancels the follow-on in the same press;
+only the follow-on place and the lead seat stays (*"You're leaving after Hyjal Summit, so you're out of Barrow Deeps."*).
+An officer taking someone off the follow-on (its board, or their answer set to No thanks there) is the same: they leave
+after the lead, keep their lead seat and stay off the follow-on when the lead's answers change. *I'm staying* on the Me
+page undoes it (*"Noted: you're staying … A freed seat can come back to you through Fill."*): the place you left may
+already be filled, and nobody puts you back by hand. A *Can't make it* on the lead says the follow-on place goes too
+(*"Your Barrow Deeps place goes too."*). Once the follow-on has started, the companion's drops go to its loot council,
+even while the lead's is still open. Cancelling the lead cancels the follow-on in the same press;
 cancelling the follow-on alone leaves the lead standing (*"The Barrow Deeps follow-on is called off for the 20 people
 rostered on it. The Hyjal Summit run goes ahead, and nobody gets a DM."*), and the lead's sheet loses its *then …*. A
 cancelled run is never reopened. The Discord `/raid open` and schedule wizards show a follow-on but don't set one — the
@@ -1633,6 +1637,7 @@ on the site — the bot refuses before anything is written and says so: set the 
 `/gm config signup-channel`), or use `/gm test run` in a server channel. A signup channel that is set but the bot
 can't reach (deleted, or hidden from the bot) is refused the same way, and the message says that is the problem. The
 site's card says all of this before you press.
+A test run never has a follow-on (a second raid the same night, §4): rehearse the lead and the follow-on one at a time.
 A test run never shares a real run's sheet, even when it starts the same minute as one: its key ends in `-test`
 (`bd-1209-1930-test`), and the schedule id `test` is kept for it. A test run belongs to the officer who opened it:
 a second officer opening one in the same minute is refused — "Tess opened a test run at Tue 9 Dec 7:30 PM — join

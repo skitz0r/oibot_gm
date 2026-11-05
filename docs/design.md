@@ -4441,12 +4441,17 @@ by `ev.followed_by`.
 **Leaving early.** `rc.callout` on a follow-on delegates to `rc.leave_follow(reg, rs, ev, m, note)`: the callout on the
 follow-on, the uid in `leaving`, `sync_follow` makes the row out; the seat goes through the usual call_out path. The Me page
 row (`may_leave`) → `POST /api/me/run/{key}/out`; `/raid out` picking the follow-on; plain text's `run_answer` No thanks on it (one's own, or an officer's with a reason: both reach `call_out`); an
-officer's removal on its board frees only that place. The confirm is `consequences.leave_follow_consequence(reg, ev, seated,
+officer's removal on it is leaving after the lead too (ruling F-2): every out on the follow-on alone — its board's move to
+bench, `set_answer(out)` on the locked follow-on, `drop_seated` there — reaches `rc.free_seat`, which adds the uid to
+`leaving` while their lead row is not out (a lead seat freed first, the cascade, is the whole night and adds nothing), so
+the next lead save never copies the lead's "in" back and the planner never offers them the seat just taken. `sync_follow`
+keeps a follow-on row whose uid has no row on the lead (a pool member's yes to a follow-on fill); an alt swap's signup
+character reverting to the lead's is left as is (the seat holds the character). The confirm is `consequences.leave_follow_consequence(reg, ev, seated,
 lead_seated)`: "You stay on the Hyjal Summit roster." with a lead seat, else "Your Hyjal Summit answer stands."; then "Your
 Barrow Deeps place is freed." + `rc.refill_sentence` when seated, else "You are out of the Barrow Deeps follow-on." The receipt
 (`rc._answer_state`) reads "You're leaving after Hyjal Summit, so you're out of Barrow Deeps." instead of No thanks. Undo:
 `rc.stay_for_follow` (takes the uid out of `leaving`, re-syncs, re-seats nobody) / `RaidMixin.stay_for_follow(…, by, by_id,
-via)` — cards, a thread line, an audit line, "Noted: you're staying for <run>. Your seat comes back when one is free."; a
+via)` — cards, a thread line, an audit line, "Noted: you're staying for <run>. A freed seat can come back to you through Fill."; a
 refusal "You're not marked as leaving after Hyjal Summit." to the member, "<name> isn't marked as leaving after Hyjal Summit."
 to an officer. The site's `POST /api/me/run/{key}/stay` (`may_stay`) is its one caller; `/answer` on a follow-on answers 400
 with `FOLLOW_ANSWER_REFUSAL`.
@@ -4465,7 +4470,9 @@ dict gone) is dropped at once.
 "then Barrow Deeps ×2 <t:unix:t>" under the start; advertised seats and the health check stay the lead's. `rc.follow_short(reg,
 ev)` = the follow-on's tank and healer minimums × its rosters against the lead's Join answers → the health card's one line
 "**Barrow Deeps follow-on** short <role icon> N" (icon + number). `rc.open_preview(…, follow=)` adds `follow` {raid, name,
-rosters, when} and `follow_line` "then Barrow Deeps ×2 at 9:30 PM"; `upcoming_rows` carry `follow` (words). `help.run_lines`: "·
+rosters, when} and `follow_line`, the sentence the confirm prints: "Then Barrow Deeps ×2 at 9:30 PM, from the same signup."; on a
+time whose run is already open both describe THAT run's follow-on (or none), and a follow-on asked of it reads
+`rc.OPEN_FOLLOW_REFUSAL` "A follow-on can't be added to a run that is already open."; `upcoming_rows` carry `follow` (words). `help.run_lines`: "·
 then …" on a lead, "· after … (a follow-on: its answers are the lead's)". JSON: `ev_json` `follows`, `followed_by`, `follow`
 {raid, rosters, key, when}, `lead` {raid, key}, `leaving` (names); `schedule_json` `follow`, `follow_words`; `/api/me` rows
 `then`, `lead_raid`, `may_leave`, `may_stay`, `leave_consequence` (and `may_answer` / `may_cant` false on a follow-on).
@@ -4481,12 +4488,28 @@ profile first_open (2026-12-09) already makes a Tuesday schedule's first run 202
 `schedule_set`'s `fields` take `follow`. No new tool.
 
 **The site.** `POST /api/raid/{rid}/open[/preview]` take `follow` (a dict or the text; `web/api.follow_arg` →
-`follow_of_op`, a RegistryError → 400) and the message adds ", then Barrow Deeps ×2". The Raids page's schedule editor
+`follow_of_op`, a RegistryError → 400) and the message adds ", then Barrow Deeps ×2" from the run's own follow-on
+(`rc.follow_words_of`), never from the request — Open on a run already open never claims one. The Raids page's schedule editor
 (`ScheduleCard`) has a **Then** row — *then, the same night* (every other raid, *No follow-on*) and *its rosters* — sent in
 the diff-only Save as `follow`. The Rosters page's *Start an ad hoc run…* has *Then, the same night* / *Its rosters* and the
-preview's `follow_line`. The run cards say "then …" on a lead and "after …" on a follow-on, whose counts line reads "answers on
+preview's `follow_line` as is. The follow-on's card sits under its own raid on the Rosters page (a deviation from
+spec §4.3, which put it under the lead): each raid's section lists its own runs. The run cards say "then …" on a lead and "after …" on a follow-on, whose counts line reads "answers on
 the Hyjal Summit sheet" and which has no *Answer for someone…*. The Me page's row: the title with then / after, *Leaving after
-Hyjal Summit…* (the server's `leave_consequence` in the confirm, an optional note, `/out`) and *I'm staying* (`/stay`).
+Hyjal Summit…* (the server's `leave_consequence` in the confirm, an optional note, `/out`) and *I'm staying* (`/stay`). A
+lead's *Can't make it…* confirm (`web/api_me.cant_consequence(…, follow_seated)`) adds "Your Barrow Deeps place goes too." when
+they hold a place on the locked follow-on; the Discord `/raid out` form's line says the same.
+
+**Hardening (the final review, 2026-11-05).** The scheduler's open step catches any `RegistryError` from a scheduled open
+(the follow-on's time closed, "That night already has a … follow-on", a follow-on raid gone from the profile) with ONE ops
+warn per (guild, key) (`_warn_open_refused`) and goes on: the guild's other runs still get their health, lock, expiry, fill
+and close that minute. `lock_follow` never lets the follow-on's lock fail the lead's: whatever it raises (`rc.SolverBusy`, a
+cancel between the check and the lock, a Discord error) is one ops warn per follow-on and the lead's line ends "follow-on not
+locked: <why>"; the scheduler retries the follow-on, its lead being locked. Loot routing (`FeedMixin.loot_route`, ruling
+F-3): a lead whose follow-on has started is past its window (`_past_close`) — its close covers the whole follow-on and the
+same characters sit on both — and a companion seated on several live councils goes to the run that started most recently
+(`_latest_started`; a split run's rosters share a start, so the seat still decides). `rc.free_seat`'s cascade onto the
+follow-on sets its `fill_state` back to idle when it was exhausted, so the gap refills. A test run (a rehearsal) never has a
+follow-on: `rc.ensure_run` makes none when `cutoffs` are given (`if fw and not cutoffs`), and the test bench has no Then.
 
 **Me page.** One row per run, a change from the spec's one row for the night: the lead's row says *then …*, the follow-on's
 says *after …* and carries *Leaving after …* / *I'm staying* — simpler, and each row keeps its own receipt.

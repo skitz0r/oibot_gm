@@ -124,6 +124,16 @@ class RaidSchedulerMixin:
         await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: a test run holds its key {key} "
                                                 "— clear the test bench (/gm test clear) and it opens on the next minute")
 
+    async def _warn_open_refused(self, reg, inst: str, start, key: str, err: Exception) -> None:
+        """A scheduled open the registry refused (design §5.62: the follow-on's time was closed or cancelled, that night
+        already has a follow-on, the schedule's follow-on raid left the profile): ONE ops warn per (guild, key) with the
+        refusal, and the minute goes on — the other runs' health, locks, expiry, fill and close never wait on it."""
+        warned: set = self.__dict__.setdefault("_open_refused_warned", set())
+        if (reg.key, key) in warned:
+            return
+        warned.add((reg.key, key))
+        await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: {err}")
+
     async def _close_run(self, reg, rs, ev, now, exhausted_posted: set) -> None:
         """A locked run past its close: a loot council on it decides (LootMixin.loot_may_close — ended only idle 30 min
         with no pick or drop waiting, after one "closing in 15 min" notice; never with a pick pending), else done."""
@@ -159,6 +169,8 @@ class RaidSchedulerMixin:
                         await self.open_run_and_post(reg, rs, inst, start, by="scheduler", **rc.schedule_kw(sched["id"]))
                     except rc.RunKeyClash:
                         await self._warn_key_clash(reg, inst, start, rc.run_key(inst, start, sched["id"]))
+                    except RegistryError as e:  # a refused open (its follow-on's time closed, a follow-on raid gone — design §5.62)
+                        await self._warn_open_refused(reg, inst, start, rc.run_key(inst, start, sched["id"]), e)
         else:
             await self._warn_unopened(reg, now)
         # every live run is processed even when its sheet channel can't be resolved: the steps that post to a

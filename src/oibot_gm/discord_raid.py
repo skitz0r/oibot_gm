@@ -924,11 +924,22 @@ class RaidMixin:
         the lead is locked, the follow-on solves from the night's answers with the lead's rostered preferred
         (rc.LEAD_SEAT_BONUS), flips to locked and posts its own lock cards; it never confirms. None when the run has no
         live open follow-on. A failed follow-on solve leaves it open with its lock_error, like any run — the scheduler
-        retries it, the lead stands."""
+        retries it, the lead stands. Anything the follow-on's lock raises (rc.SolverBusy, a cancel between the state
+        check and the lock, a Discord error) never turns the lead's lock into a failure: one ops warn per follow-on and
+        the tail "follow-on not locked: <why>" — the lead's line stays a success."""
         fev = rc.follow_of(rs, ev)
         if fev is None or fev.state != "open":
             return None
-        return await self.lock_run(reg, rs, fev, by=by)
+        try:
+            return await self.lock_run(reg, rs, fev, by=by)
+        except Exception as e:  # noqa: BLE001 — the lead is locked whatever happens to its follow-on
+            why = str(e) or type(e).__name__
+            log.warning("follow-on lock failed (%s after %s): %s", fev.key, ev.key, why)
+            warned: set = self.__dict__.setdefault("_follow_lock_warned", set())
+            if (reg.key, fev.key) not in warned:
+                warned.add((reg.key, fev.key))
+                await self.ops.emit(reg.config, "warn", f"{fev.key}: follow-on not locked with {ev.key}: {why}")
+            return f"follow-on not locked: {why}"
 
     async def confirm_one(self, reg, ev, sg, roster_i: int, group_i: int, by: str) -> bool:
         """Seat one signup on the run's roster and ask them to confirm: by DM, or — DMs off — as a pending ask on the
@@ -1165,7 +1176,7 @@ class RaidMixin:
         await self.refresh_cards(reg, ev)
         await self.post_run_update(reg, ev, f"↩ {m.display_name} is staying for {run_label(reg, ev)}")
         await ops_mod.audited(self.ops, reg, by, f"{m.display_name} is staying for {ev.key}", via=via, by_id=by_id)
-        return f"Noted: you're staying for {run_label(reg, ev).replace('**', '')}. Your seat comes back when one is free."
+        return f"Noted: you're staying for {run_label(reg, ev).replace('**', '')}. A freed seat can come back to you through Fill."
 
     async def answer_fill_for(self, reg, rs, ev, m, yes: bool, by: str, *, by_id: int | None = None) -> str:
         """A fill ask's Confirm / Can't make it from anywhere but the DM button (an officer on the site or MCP, plain

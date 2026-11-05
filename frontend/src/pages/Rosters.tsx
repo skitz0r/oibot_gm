@@ -145,7 +145,7 @@ function StartAdhoc({ r, others, busy, onAct }: { r: RaidRuns; others: { id: str
               <Text size="sm"><b>{p.label}</b> guild time · {yourClock(p.start)} your time</Text>
               <Text size="sm" c="dimmed">{p.rules}</Text>
               {p.when_note && <Text size="sm" c="dimmed">{p.when_note}</Text>}
-              {p.follow_line && <Text size="sm">{p.follow_line}, from the same signup.</Text>}
+              {p.follow_line && <Text size="sm">{p.follow_line}</Text>}
               {p.exists && <Text size="sm" c="dimmed">A run for that time already exists ({p.exists}); Open points you at it instead of making a second.</Text>}
               <Text size="sm" c="dimmed">{p.posts}</Text>
             </Stack>

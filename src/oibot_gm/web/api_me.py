@@ -24,15 +24,18 @@ from ..registry import RegistryError
 QUEUE_NOTE = "You'll go to the back of the queue if you change. Change anyway?"
 
 
-def cant_consequence(reg, ev, seated: bool, lead_seated: bool = False) -> str:
+def cant_consequence(reg, ev, seated: bool, lead_seated: bool = False, follow_seated: bool = False) -> str:
     """The Me page's Can't make it… confirm, from code (the Confirm rule, design §5.57): a member's own callout
-    (RaidMixin.call_out) — a rostered seat is released and the bench asked when automatic asks are on."""
+    (RaidMixin.call_out) — a rostered seat is released and the bench asked when automatic asks are on. On a lead,
+    `follow_seated` (they hold a place on its locked follow-on) adds that the follow-on place goes too (design §5.62)."""
     if ev.follows:  # leaving after the lead: the follow-on alone, the lead's answer stands
         return " ".join(leave_follow_consequence(reg, ev, seated, lead_seated))
     run = rc.run_on(reg, ev)
+    ft = rc.follow_dict(reg, ev) if follow_seated else None
+    also = f" Your {reg.raid_def(ft.get('instance')).get('name', ft.get('instance'))} place goes too." if ft else ""
     if seated:
-        return f"Your seat for {run} is released, and the officers see it as a callout. {rc.refill_sentence(reg, ev)}"
-    return f"You go to No thanks for {run}, and the officers see it as a callout."
+        return f"Your seat for {run} is released, and the officers see it as a callout.{also} {rc.refill_sentence(reg, ev)}"
+    return f"You go to No thanks for {run}, and the officers see it as a callout.{also}"
 
 
 def sheet_row_extras(reg, ev, m, rs=None) -> dict:
@@ -47,6 +50,8 @@ def sheet_row_extras(reg, ev, m, rs=None) -> dict:
     adhoc = rc.run_kind(reg, ev) == "adhoc"
     lead = rc.lead_of(rs, ev) if rs is not None and ev.follows else None
     lead_seated = bool(m and lead is not None and lead.seat_of(m))  # a follow-on's Can't: are they rostered on the lead?
+    fev = rc.follow_of(rs, ev) if rs is not None and ev.followed_by else None
+    follow_seated = bool(m and fev is not None and fev.state == "locked" and fev.seat_of(m))  # a lead's Can't frees it too
     # a follow-on (design §5.62): never answered on its own; Leave after the lead / I'm staying instead
     live = ev.state in ("open", "locked")
     leaving = bool(m and ev.follows and m.discord_id in ev.leaving)
@@ -56,7 +61,7 @@ def sheet_row_extras(reg, ev, m, rs=None) -> dict:
             "may_leave": bool(ev.follows and live and on_night and not leaving),
             "may_stay": leaving and live,
             "leave_consequence": " ".join(leave_follow_consequence(reg, ev, seated, lead_seated)) if ev.follows else None,
-            "cant_consequence": cant_consequence(reg, ev, seated, lead_seated) if locked else None,
+            "cant_consequence": cant_consequence(reg, ev, seated, lead_seated, follow_seated) if locked else None,
             "queue_note": QUEUE_NOTE if adhoc and ev.state == "open" and s is not None and s.status == "in" else None,
             "receipt": rc.answer_receipt(reg, ev, m).replace("**", "") if m else None}
 

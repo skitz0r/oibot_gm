@@ -196,6 +196,29 @@ def test_the_leads_lock_locks_the_follow_on_too(reg, rs, monkeypatch):
     assert "lock:0" in fev.cards or bot.officer_channel(reg, fev) is None  # cards post when there is a channel
 
 
+@pytest.mark.parametrize("err", [rc.SolverBusy(), RuntimeError("Discord said no")])
+def test_a_follow_on_whose_lock_raises_leaves_the_lead_locked(reg, rs, monkeypatch, err):
+    reg.seed_test_members(24, "t")
+    bot = NightBot(reg, rs)
+    lead, fev = open_pair(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms)
+    names = [m.display_name for m in ms]
+    monkeypatch.setattr(rc, "propose", seat_by_name({LEAD: names[:20], FOLLOW: names[:20]}))
+    orig = bot.lock_run
+
+    async def lock_run(reg, rs, ev, by="scheduler"):
+        if ev.key == fev.key:
+            raise err
+        return await orig(reg, rs, ev, by=by)
+
+    monkeypatch.setattr(bot, "lock_run", lock_run)
+    line = run(bot.lock_run(reg, rs, lead, by="Jon"))
+    assert lead.state == "locked" and rs.events[fev.key].state == "open"
+    assert line.startswith(f"{lead.key}: locked by Jon") and line.endswith(f"follow-on not locked: {err}")
+    assert [x for lvl, x in bot.ops.lines if lvl == "warn" and "follow-on not locked" in x]
+
+
 def test_a_follow_on_cannot_lock_before_its_lead(reg, rs):
     reg.seed_test_members(24, "t")
     bot = NightBot(reg, rs)
@@ -219,6 +242,35 @@ def test_the_scheduler_skips_a_follow_on_while_its_lead_is_open(reg, rs, monkeyp
     monkeypatch.setattr(bot, "post_health", lambda *a, **k: None)
     run(bot.scheduler_tick_guild(reg))
     assert fev.key not in locked and not fev.health_posted
+
+
+def test_a_refused_scheduled_open_never_stops_the_guilds_minute(reg, rs, monkeypatch):
+    """A weekly Hyjal with a Barrow Deeps follow-on whose follow-on time was cancelled (an officer's ad hoc pair at the
+    same minute, then cancelled): the scheduled open is refused. One ops warn, and the same tick still locks another run."""
+    unlock_hyjal(reg)
+    reg.config.signup_channel_id = 1111
+    reg.set_schedule(LEAD, "tue", {"slots": "Mon 18:30, Tue 18:30, Wed 18:30, Thu 18:30, Fri 18:30, Sat 18:30, Sun 18:30",
+                                   "follow": "barrow_deeps x2"}, "t")
+    now = reg.now_local()
+    _s, t = rc.upcoming(reg, LEAD, now, lead=True)[0]
+    bot = NightBot(reg, rs)
+    adhoc = rc.open_run(reg, rs, LEAD, t, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 2})
+    run(bot.cancel_run(reg, rs, adhoc, "t", None))
+    other = rc.open_run(reg, rs, FOLLOW, now + timedelta(minutes=30), by="t", schedule=rc.ADHOC_SCHEDULE)
+    locked = []
+
+    async def lock_run(reg, rs, ev, by="scheduler"):
+        locked.append(ev.key)
+        return "ok"
+
+    monkeypatch.setattr(bot, "lock_run", lock_run)
+    later = now + timedelta(minutes=29)  # the other run's lock is due (an ad hoc run opened this close locks just before it starts)
+    monkeypatch.setattr(reg, "now_local", lambda: later)
+    run(bot.scheduler_tick_guild(reg))
+    run(bot.scheduler_tick_guild(reg))  # a second minute: no second warn
+    assert other.key in locked
+    warns = [x for lvl, x in bot.ops.lines if lvl == "warn" and "did not open" in x]
+    assert len(warns) == 1 and "cancelled" in warns[0]
 
 
 def test_the_follow_ons_solve_prefers_the_leads_rostered_and_skips_first_come(reg, rs, monkeypatch):
@@ -275,6 +327,39 @@ def test_leaving_early_frees_only_the_follow_on_seat(reg, rs, monkeypatch):
     assert m.discord_id in fev.leaving and fev.signups[str(m.discord_id)].status == "out" and fev.signups[str(m.discord_id)].note == rc.LEAVING_NOTE
     assert fev.seat_of(m) is None and lead.seat_of(m) is not None and lead.signups[str(m.discord_id)].status == "in"
     assert "seat freed" in line and fev.callouts[-1].display_name == m.display_name
+
+
+def test_an_officers_removal_from_the_follow_on_is_leaving_after_the_lead(reg, rs, monkeypatch):
+    """Ruling F-2: an officer takes a member off the locked follow-on (set_answer out, no by_id): the next save of the
+    lead never copies their lead answer back, so the plan never offers them the seat just taken."""
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    m = ms[0]
+    run(bot.set_answer(reg, rs, fev, m, "out", None, by="Officer", by_id=None))
+    assert m.discord_id in rs.events[fev.key].leaving
+    rs.save(lead, "some lead save")
+    fev = rs.events[fev.key]
+    assert fev.signups[str(m.discord_id)].status == "out" and m.discord_id in fev.leaving and fev.seat_of(m) is None
+    assert lead.seat_of(m) is not None and lead.signups[str(m.discord_id)].status == "in"
+    plan = rc.role_plan(reg, rs, fev, None, count_waiting=False)
+    assert m.display_name not in [a.display_name for st in plan.seats for o in st.options for a in o]
+    m2 = ms[1]  # the cascade from the lead is the whole night, never "leaving after the lead"
+    run(bot.set_answer(reg, rs, lead, m2, "out", None, by="Officer", by_id=None))
+    assert m2.discord_id not in rs.events[fev.key].leaving and rs.events[fev.key].seat_of(m2) is None
+
+
+def test_a_pool_members_follow_on_row_survives_a_lead_save(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    outsider = ms[-1]
+    lead.signups.pop(str(outsider.discord_id))  # a pool member with no answer on the lead
+    rs.save(lead, "harness: never answered the lead")
+    fev = rs.events[fev.key]
+    fev.signups[str(outsider.discord_id)] = rc._signup(reg, outsider, outsider.main, "in", "fill", "filled in at request")
+    rs.save(fev, "harness: said yes to a follow-on fill")
+    rs.save(lead, "some lead save")
+    row = rs.events[fev.key].signups.get(str(outsider.discord_id))
+    assert row is not None and row.status == "in" and row.source == "fill"
 
 
 def test_leave_then_stay_keeps_the_lead_answer(reg, rs, monkeypatch):
@@ -376,11 +461,14 @@ def test_an_expired_confirmation_on_the_lead_frees_the_follow_on_seat(reg, rs, m
     lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
     m = ms[5]
     reg.add_placement_ask(m.discord_id, lead.team, m.main.label, "lock")
+    fev.fill_state = "exhausted"  # nobody was left to ask before this seat freed
+    rs.save(fev, "fill: exhausted")
     past_confirm(lead)
     rs.save(lead, "deadline")
     assert [u for u, _n in rc.expire_confirmation_asks(reg, rs, lead)] == [m.discord_id]
     fev = rs.events[fev.key]
     assert lead.seat_of(m) is None and fev.seat_of(m) is None and fev.signups[str(m.discord_id)].status == "out"
+    assert fev.fill_state == "idle"  # the follow-on's freed seat is a new gap too
     assert fev.seat_of(ms[6]) is not None  # nobody else's follow-on seat moved
 
 
@@ -428,9 +516,9 @@ def test_previews_and_json_carry_the_follow_on(reg, rs, c):
     unlock_hyjal(reg)
     reg.set_schedule(LEAD, "tue", {"slots": "Tue 18:30", "follow": "barrow_deeps x2"}, "t")
     p = rc.open_preview(reg, rs, LEAD, None, "tue")
-    assert p["follow"]["name"] == "Barrow Deeps" and p["follow"]["rosters"] == 2 and p["follow_line"].startswith("then Barrow Deeps ×2 at ") and "PM" in p["follow_line"]
+    assert p["follow"]["name"] == "Barrow Deeps" and p["follow"]["rosters"] == 2 and p["follow_line"].startswith("Then Barrow Deeps ×2 at ") and p["follow_line"].endswith("PM, from the same signup.")
     p2 = rc.open_preview(reg, rs, LEAD, (reg.now_local() + timedelta(days=4)).strftime("%Y-%m-%d 18:30"), None, follow={"raid": FOLLOW, "rosters": 1})
-    assert p2["follow"]["rosters"] == 1 and p2["follow_line"].startswith("then Barrow Deeps at ")
+    assert p2["follow"]["rosters"] == 1 and p2["follow_line"].startswith("Then Barrow Deeps at ")
     p3 = rc.open_preview(reg, rs, LEAD, (reg.now_local() + timedelta(days=4)).strftime("%Y-%m-%d 18:30"), rc.ADHOC_SCHEDULE)
     assert p3["follow"] is None and p3["follow_line"] == ""
     rows = [u for u in rc.upcoming_rows(reg, rs, LEAD) if u["schedule"] == "tue"]
@@ -549,7 +637,8 @@ def test_run_open_on_an_open_run_says_the_follow_on_is_not_added(reg, rs):
     run(configops.apply_async(reg, plain, by="Jon", is_owner=True, bot=bot))
     ask = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="barrow_deeps x2")
     line = configops.describe(reg, ask)
-    assert "a follow-on can't be added to a run that is already open" in line and "then" not in line
+    assert line.endswith(". A follow-on can't be added to a run that is already open. Cancel it and open the night again.") and "then" not in line
+    assert ";" not in line and " — " not in line.split(": already ", 1)[1]
     paired = ConfigOp(op="run_open", target=LEAD, value=f"{day} 20:00", field="adhoc", text="barrow_deeps x2")
     run(configops.apply_async(reg, paired, by="Jon", is_owner=True, bot=bot))
     again = configops.describe(reg, paired)
@@ -578,7 +667,7 @@ def test_open_route_takes_a_follow_on(reg, rs, monkeypatch):
     p = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": {"raid": FOLLOW, "rosters": 2}}, headers=bearer())
     assert p.status_code == 200, p.text
     p = p.json()
-    assert p["follow"]["name"] == "Barrow Deeps" and p["follow_line"].startswith("then Barrow Deeps ×2")
+    assert p["follow"]["name"] == "Barrow Deeps" and p["follow_line"].startswith("Then Barrow Deeps ×2")
     plain = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": ""}, headers=bearer()).json()
     assert plain["follow"] is None
     r = fc.post(f"/api/raid/{LEAD}/open", json={"start": p["start"], "key": p["key"], "schedule": "adhoc", "follow": "barrow_deeps x2"}, headers=bearer())
@@ -586,6 +675,8 @@ def test_open_route_takes_a_follow_on(reg, rs, monkeypatch):
     assert r.json()["message"].endswith(", then Barrow Deeps ×2")
     lead = rs.events[r.json()["key"]]
     assert rc.follow_of(rs, lead).instance == FOLLOW
+    again = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": {"raid": FOLLOW, "rosters": 1}}, headers=bearer()).json()
+    assert again["exists"] == "open" and again["follow"]["rosters"] == 2  # the run already there: ITS follow-on, not the one asked
     bad = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": "hyjal_summit_forever x2"}, headers=bearer())
     assert bad.status_code == 400 and "not the raid itself" in bad.json()["error"]
     bad = fc.post(f"/api/raid/{LEAD}/open", json={"when": when, "schedule": "adhoc", "follow": "hyjal_summit_forever x2"}, headers=bearer())
@@ -616,3 +707,82 @@ def test_me_routes_leave_and_stay(reg, rs, monkeypatch):
     assert m.discord_id not in rs.events[fev.key].leaving
     again = fc.post(f"/api/me/run/{fev.key}/stay", json={}, headers=h)
     assert again.status_code == 400 and again.json()["error"] == "You're not marked as leaving after Hyjal Summit."
+
+
+# ---------------------------------------------------------------- loot: the follow-on's drops go to its own council
+
+def test_a_drop_after_the_follow_ons_start_routes_to_its_council(reg, rs):
+    """Ruling F-3: the lead's close (start + length + 3 h) covers the whole follow-on and the same characters sit on
+    both, so once the follow-on has started its drops go to its council while the lead's is still open."""
+    from conftest import lock_with_board
+    from test_loot_verbs import LootBot
+
+    from oibot_gm.feed import Companion
+
+    unlock_hyjal(reg)
+    reg.seed_test_members(24, "t")
+    start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    lead = rc.open_run(reg, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 1})
+    fev = rc.follow_of(rs, lead)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms[:20])
+    lock_with_board(reg, rs, lead, [m.display_name for m in ms[:20]])
+    lock_with_board(reg, rs, rs.events[fev.key], [m.display_name for m in ms[:10]])
+    bot = LootBot(reg, rs)
+    s_lead, _ = run(bot.open_loot(reg, rs, lead, by="Officer"))
+    s_follow, _ = run(bot.open_loot(reg, rs, rs.events[fev.key], by="Officer"))
+    both = Companion(ms[0].main.name, "c", "", "p")  # rostered on both
+    lead.starts_at = (reg.now_local() - timedelta(hours=2)).replace(second=0, microsecond=0).isoformat()
+    rs.save(lead, "t: the lead started two hours ago")
+    fev = rs.events[fev.key]
+    fev.starts_at = (reg.now_local() + timedelta(hours=1)).replace(second=0, microsecond=0).isoformat()
+    rs.save(fev, "t: the follow-on starts in an hour")
+    assert bot.active_raid(both) is s_lead  # the lead's council before the follow-on starts
+    fev.starts_at = (reg.now_local() - timedelta(minutes=10)).replace(second=0, microsecond=0).isoformat()
+    rs.save(fev, "t: the follow-on started ten minutes ago")
+    lead.starts_at = (reg.now_local() - timedelta(hours=3, minutes=10)).replace(second=0, microsecond=0).isoformat()
+    rs.save(lead, "t: the lead started three hours ago")
+    assert bot.loot_live(s_lead) and reg.now_local() < rc.run_close_at(reg, lead)  # the lead's council is still open
+    assert bot.active_raid(both) is s_follow
+
+
+def test_the_leads_cant_says_the_follow_on_place_goes_too(reg, rs, monkeypatch):
+    from conftest import lock_with_board
+    from test_member_inbox_web import OFFICER, SECRET, WebNightBot, as_user
+
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    m, _c = reg.set_plan(OFFICER, "Offi", "Priest", "Holy", None, "main")  # a real member (a puppet never answers a real sheet)
+    ms = reg.test_members()
+    join(reg, rs, lead, [m] + ms[:19])
+    names = [m.display_name] + [x.display_name for x in ms[:19]]
+    lock_with_board(reg, rs, lead, names)
+    lock_with_board(reg, rs, rs.events[fev.key], names)
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.setenv("OIBOT_WEB_SECRET", SECRET)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    monkeypatch.delenv("OIBOT_WEB_SESSION_EPOCH", raising=False)
+    fc = TestClient(web.create_app(WebNightBot(reg, rs)))
+    as_user(fc, m.discord_id)
+    rows = {s["key"]: s for s in fc.get("/api/me").json()["sheets"]}
+    words = rows[lead.key]["cant_consequence"]
+    assert words.startswith("Your seat for Hyjal Summit") and " Your Barrow Deeps place goes too. " in words
+    assert len([x for x in words.split(". ") if x]) == 3
+
+
+def test_open_on_a_run_already_open_never_claims_a_follow_on(reg, rs, monkeypatch):
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    fc = TestClient(web.create_app(FollowBot(reg, rs)))
+    unlock_hyjal(reg)
+    when = (reg.now_local() + timedelta(days=5)).strftime("%Y-%m-%d 18:30")
+    first = fc.post(f"/api/raid/{LEAD}/open", json={"when": when, "schedule": "adhoc"}, headers=bearer())
+    assert first.status_code == 200, first.text
+    assert ", then" not in first.json()["message"]
+    p = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "schedule": "adhoc", "follow": "barrow_deeps x2"}, headers=bearer()).json()
+    assert p["exists"] == "open" and p["follow"] is None
+    assert p["follow_line"] == "A follow-on can't be added to a run that is already open."
+    r = fc.post(f"/api/raid/{LEAD}/open", json={"when": when, "schedule": "adhoc", "follow": "barrow_deeps x2"}, headers=bearer())
+    assert r.status_code == 200, r.text
+    assert r.json()["key"] == first.json()["key"] and ", then" not in r.json()["message"]
+    assert rc.follow_of(rs, rs.events[r.json()["key"]]) is None

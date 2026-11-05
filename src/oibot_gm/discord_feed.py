@@ -250,6 +250,8 @@ class FeedMixin:
             hit = [s for s in pool if s.id == bound] if bound else []
             if not hit and len(pool) > 1:
                 hit = [s for s in pool if self._seats_character(s, comp.character)]
+            if len(hit) > 1:  # seated on several (a lead and its follow-on): the run that started most recently (design §5.62)
+                hit = self._latest_started(hit)
             if len(pool) == 1 or len(hit) == 1:  # one council, the one an officer bound it to, or the one seating it
                 self._loot_unrouted().pop(ckey, None)  # routed again: no card offers to bind it
                 return (pool[0] if len(pool) == 1 and not hit else hit[0]), None
@@ -263,14 +265,34 @@ class FeedMixin:
         return None, "no run live"
 
     def _past_close(self, reg, session) -> bool:
+        """For routing only: past the run's close, or a lead whose follow-on has started (design §5.62 — the lead's close
+        covers the whole follow-on, and the same characters are seated on both: tonight's later drops are the follow-on's)."""
         if reg is None:
             return False
-        _, ev = self.loot_run(session)
+        rs, ev = self.loot_run(session)
         if ev is None:
             return False
         from . import raidcycle as rc
 
-        return datetime.now(ev.start.tzinfo) >= rc.run_close_at(reg, ev)
+        now = datetime.now(ev.start.tzinfo)
+        if ev.followed_by and rs is not None:
+            fev = rs.events.get(ev.followed_by)
+            if fev is not None and fev.state != "cancelled" and now >= fev.start:
+                return True
+        return now >= rc.run_close_at(reg, ev)
+
+    def _latest_started(self, sessions: list) -> list:
+        """The councils whose run started most recently (already started); all of them when none has started or the
+        latest start is shared (a split run's rosters: the seat decides)."""
+        starts = {}
+        for s in sessions:
+            _, ev = self.loot_run(s)
+            if ev is not None and datetime.now(ev.start.tzinfo) >= ev.start:
+                starts[s.id] = ev.start
+        if not starts:
+            return sessions
+        latest = max(starts.values())
+        return [s for s in sessions if starts.get(s.id) == latest]
 
     def active_raid(self, comp: Companion | None = None):
         """The council a companion's events go to now (None: nowhere) — loot_route without the reason."""

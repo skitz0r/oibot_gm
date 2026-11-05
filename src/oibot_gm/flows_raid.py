@@ -530,9 +530,13 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
                 line = f"❌ {e}"
             await wiz.finish(si, line)
 
+        fev = rc.follow_of(rs, ev) if ev.followed_by else None  # a lead's Can't is the whole night (design §5.62)
+        held = fev is not None and fev.state == "locked" and fev.seat_of(uid)
+        desc = (f"Submitting marks you out of the night. Your {raid_name(reg, fev)} place goes too." if held
+                else "Submitting marks you out (and frees your seat if you're rostered).")
         form = Form(f"Out · {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", [
             Field("note", "Note for the officers (optional)", required=False, paragraph=True, max_length=300,
-                  description="Submitting marks you out (and frees your seat if you're rostered).", placeholder="only officers see this"),
+                  description=desc[:100], placeholder="only officers see this"),
         ], submitted)
         await wiz.open_form(i, form)
     await with_run(interaction, reg, title="Can't make it", then=body, prefer=mine)

@@ -1726,7 +1726,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")
-                + (f", then {reg.follow_words(fw)}" if fw else ""), "key": ev.key}
+                + (f", then {words}" if (words := rc.follow_words_of(reg, ev)) else ""), "key": ev.key}  # the run's own follow-on, never the request's
 
     @app.post("/api/admin/confirm")
     async def admin_confirm(request: Request):
