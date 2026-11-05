@@ -142,3 +142,22 @@ def test_the_pair_finds_each_others_dicts(reg, rs):
     assert rc.lead_of(rs, fev) is lead and rc.lead_of(rs, lead) is None and rc.follow_of(rs, fev) is None
     assert rc.lead_dict(reg, fev)["key"] == lead.team and rc.follow_dict(reg, lead)["key"] == fev.team
     assert rc.lead_dict(reg, lead) is None and rc.follow_dict(reg, fev) is None
+
+
+def test_a_second_lead_on_the_same_follow_on_is_refused(reg, rs):
+    lead, fev = open_pair(reg, rs)
+    n_dicts, n_events = len(reg.config.rosters), len(rs.events)
+    with pytest.raises(RegistryError, match=r"^That night already has a Barrow Deeps follow-on after .+\. Pick another time\.$"):
+        rc.open_run(reg, rs, LEAD, lead.start, by="t", follow={"raid": FOLLOW, "rosters": 1})  # the raid's own times, same minute
+    assert len(reg.config.rosters) == n_dicts and len(rs.events) == n_events
+    assert reg.config.roster(fev.team)["follows"] == lead.team
+
+
+def test_a_cancelled_follow_on_refuses_the_night_and_opens_no_lead(reg, rs):
+    lead, fev = open_pair(reg, rs)
+    fev.state = "cancelled"
+    rs.save(fev, "cancelled")
+    n_dicts, n_events = len(reg.config.rosters), len(rs.events)
+    with pytest.raises(RegistryError, match="cancelled"):
+        rc.open_run(reg, rs, LEAD, lead.start, by="t", follow={"raid": FOLLOW, "rosters": 1})
+    assert len(reg.config.rosters) == n_dicts and len(rs.events) == n_events

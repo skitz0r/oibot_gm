@@ -619,7 +619,12 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
               "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced"}
         for k in ("follow", "followed_by", "message_id", "channel_id", "thread_id"):  # never the lead's sheet nor its pairing
             ft.pop(k, None)
-        if reg.config.roster(fkey) is None:
+        have = reg.config.roster(fkey)
+        if have is not None and have.get("follows") != key:  # one follow-on per lead: never another lead's
+            other = reg.config.roster(have.get("follows") or "") or {}
+            raise RegistryError(f"That night already has a {frd.get('name', fw['raid'])} follow-on after "
+                                f"{other.get('name') or 'another raid'}. Pick another time.")
+        if have is None:
             reg.config.rosters.append(ft)
         t["follow"] = {"raid": fw["raid"], "rosters": int(fw.get("rosters") or 1)}
         t["followed_by"] = fkey
@@ -646,7 +651,13 @@ def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by:
     """Open (or find the live) run for `instance` at `start`. RegistryError when that time's run is closed
     (closed_run_refusal) — checked before ensure_run, so a refused open re-creates no roster entry. `follow`
     ({raid, rosters}, or the schedule's own) opens the follow-on run with it (spec 2026-11-04-follow-on-runs): no sheet, its answers the lead's."""
-    why = closed_run_refusal(rs, event_key(instance, start, schedule, test=bool(cutoffs)))
+    lead_key = event_key(instance, start, schedule, test=bool(cutoffs))
+    why = closed_run_refusal(rs, lead_key)
+    if not why and not cutoffs and lead_key not in rs.events:  # a new night: its follow-on's time must be free too, so a
+        fw = follow if follow is not None else (reg.schedule_def(instance, schedule)["schedule"].get("follow") or None)
+        if fw:  # refused night opens nothing (never a lead left without its follow-on)
+            fstart = follow_start(reg, instance, start)
+            why = closed_run_refusal(rs, event_key(fw["raid"], fstart, FOLLOW_SCHEDULE))
     if why:
         raise RegistryError(why)
     t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow)
