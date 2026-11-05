@@ -637,7 +637,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                            # the badge in words ("not rostered" for a joiner the lock left out — never "Join" on a locked run) and the run's state
                            "badge": rc.answer_word(ev, s.status if s else None, (seat[0] + 1) if seat else None), "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state),
                            "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
-                           "confirms": rc.run_confirms(reg, ev), **sheet_row_extras(reg, ev, m)})
+                           "confirms": rc.run_confirms(reg, ev), **sheet_row_extras(reg, ev, m, rs)})
         primary, flex = reg.roles_of(m) if m else (None, [])
         today = reg.now_local().date().isoformat()
         return {

@@ -119,6 +119,13 @@ def _cancel(reg: Registry, ev: rc.RaidEvent) -> list[str]:
         return closed
     fx = rc.cancel_effects(reg, ev)
     fills = len(fx["fill_asks"])
+    if fx.get("lead"):  # a follow-on has no sheet of its own and the night's sheet stays: only its rosters go
+        mine = reg.raid_def(ev.instance).get("name", ev.instance)
+        r = len(fx["rostered"])
+        head = (f"The {mine} follow-on is called off for the people on it." if not fx["locked"] else
+                f"The {mine} follow-on is called off for the one person rostered on it." if r == 1 else
+                f"The {mine} follow-on is called off for the {r} people rostered on it.")
+        return [head, f"The {fx['lead']} run goes ahead, and nobody gets a DM.", "A cancelled run can't be reopened."]
     if not fx["locked"]:
         n = fx["answered"]
         head = (f"The sheet closes for the {_n(n, 'person', 'people')} who answered" if n > 1 else
@@ -130,23 +137,22 @@ def _cancel(reg: Registry, ev: rc.RaidEvent) -> list[str]:
         head += f" and {_n(asks, 'open ask')} close{'s' if asks == 1 else ''}." if asks else "."
         if not asks:
             head = head.replace("The sheet closes, the", "The sheet closes and the", 1)
-    fx_follow, fx_lead = fx.get("follow"), fx.get("lead")
-    if fx_follow:
-        return [head, f"The {fx_follow} follow-on is cancelled with it, and nobody gets a DM.", "A cancelled run can't be reopened."]
-    if fx_lead:
-        return [head, f"{fx_lead} stands, and nobody gets a DM.", "A cancelled run can't be reopened."]
+    if fx.get("follow"):
+        return [head, f"The {fx['follow']} follow-on is cancelled with it, and nobody gets a DM.", "A cancelled run can't be reopened."]
     return [head, "Nobody gets a DM, but the sheet and every ask card say Cancelled.", "A cancelled run can't be reopened."]
 
 
-def leave_follow_consequence(reg: Registry, ev: rc.RaidEvent, seated: bool) -> list[str]:
+def leave_follow_consequence(reg: Registry, ev: rc.RaidEvent, seated: bool, lead_seated: bool) -> list[str]:
     """Leaving after the lead (spec 2026-11-04-follow-on-runs): the Me page's and /raid out's confirm on a follow-on.
-    Under the Confirm rule."""
+    `seated`: rostered on the follow-on; `lead_seated`: rostered on the lead (a lead bench joiner may cover a follow-on
+    gap, so one doesn't imply the other). Under the Confirm rule."""
     lead = (rc.lead_dict(reg, ev) or {}).get("instance")
     lead_name = reg.raid_def(lead).get("name", "the first raid")
     mine = reg.raid_def(ev.instance).get("name", ev.instance)
+    first = f"You stay on the {lead_name} roster." if lead_seated else f"Your {lead_name} answer stands."
     if seated:
-        return [f"You stay on the {lead_name} roster.", f"Your {mine} place is freed.", "An officer may fill it."]
-    return [f"You stay on the {lead_name} sheet.", f"You are out of the {mine} follow-on."]
+        return [first, f"Your {mine} place is freed.", rc.refill_sentence(reg, ev)]
+    return [first, f"You are out of the {mine} follow-on."]
 
 
 def _clear(reg: Registry, ev: rc.RaidEvent) -> list[str]:

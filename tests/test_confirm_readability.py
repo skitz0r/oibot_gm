@@ -210,8 +210,9 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
             dump.add(f"consequence({verb})", case, cq.consequence(verb, reg, ev, name="Nettle", other="Ivy", to="Group 2"))
         dump.add("consequence(release, no name)", case, cq.consequence("release", reg, ev))
         if ev.follows:
-            for seated in (True, False):
-                dump.add("leave_follow_consequence", f"{case}, {'seated' if seated else 'not seated'}", cq.leave_follow_consequence(reg, ev, seated))
+            for seated, lead_seated in ((True, True), (True, False), (False, True), (False, False)):
+                dump.add("leave_follow_consequence", f"{case}, {'rostered' if seated else 'not rostered'} here, {'rostered' if lead_seated else 'not rostered'} on the lead",
+                         cq.leave_follow_consequence(reg, ev, seated, lead_seated))
         for k, v in cq.consequences_json(reg, ev).items():
             dump.add(f"consequences_json[{k}]", case, v.replace(cq.NAME_TOKEN, "Nettle").replace(cq.OTHER_TOKEN, "Ivy").replace(cq.TO_TOKEN, "Group 2"))
     # remind: reminded within the hour, everyone answered, all on the site
@@ -298,6 +299,9 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     for case in ("locked recurring, autofill on", "locked recurring, autofill off", "locked ad hoc"):
         dump.add("cant_consequence", f"{case}, rostered", cant_consequence(reg, runs[case], True))
         dump.add("cant_consequence", f"{case}, joined, not rostered", cant_consequence(reg, runs[case], False))
+    for seated, lead_seated in ((True, True), (True, False), (False, False)):
+        dump.add("cant_consequence", f"follow-on locked, {'rostered' if seated else 'not rostered'} here, {'rostered' if lead_seated else 'not rostered'} on the lead",
+                 cant_consequence(reg, runs["follow-on locked"], seated, lead_seated))
     dump.add("QUEUE_NOTE", "ad hoc, joined", QUEUE_NOTE)
 
     # ---- raidcycle's refusals and previews

@@ -345,8 +345,40 @@ def test_the_sentences(reg, rs, monkeypatch):
     bot = NightBot(reg, rs)
     lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
     assert "Barrow Deeps follow-on is cancelled with it" in " ".join(cq.consequence("cancel", reg, lead))
-    assert "Hyjal Summit stands" in " ".join(cq.consequence("cancel", reg, fev))
-    assert cq.leave_follow_consequence(reg, fev, True) == ["You stay on the Hyjal Summit roster.", "Your Barrow Deeps place is freed.", "An officer may fill it."]
-    assert cq.leave_follow_consequence(reg, fev, False) == ["You stay on the Hyjal Summit sheet.", "You are out of the Barrow Deeps follow-on."]
+    follow_cancel = cq.consequence("cancel", reg, fev)
+    assert follow_cancel[0] == "The Barrow Deeps follow-on is called off for the 20 people rostered on it."
+    assert follow_cancel[1] == "The Hyjal Summit run goes ahead, and nobody gets a DM."
+    refill = rc.refill_sentence(reg, fev)
+    assert cq.leave_follow_consequence(reg, fev, True, True) == ["You stay on the Hyjal Summit roster.", "Your Barrow Deeps place is freed.", refill]
+    assert cq.leave_follow_consequence(reg, fev, True, False) == ["Your Hyjal Summit answer stands.", "Your Barrow Deeps place is freed.", refill]
+    assert cq.leave_follow_consequence(reg, fev, False, False) == ["Your Hyjal Summit answer stands.", "You are out of the Barrow Deeps follow-on."]
+    rc.run_team(reg, fev)["autofill"] = True
+    assert cq.leave_follow_consequence(reg, fev, True, True)[2] == "The bench is asked to fill it."  # never "an officer may" when the bot asks
     fx = rc.cancel_effects(reg, lead)
     assert fx["follow"] == "Barrow Deeps" and rc.cancel_effects(reg, fev)["lead"] == "Hyjal Summit"
+
+
+def test_a_confirm_dm_cant_on_the_lead_frees_the_follow_on_seat(reg, rs, monkeypatch):
+    """Every path that frees a lead seat frees the follow-on's: here the Confirm / Can't card's Can't make it."""
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    m = ms[3]
+    assert lead.seat_of(m) and fev.seat_of(m)
+    run(bot.after_placement_answer(reg, m.discord_id, lead.team, False, f"{m.display_name} can't make it"))
+    fev = rs.events[fev.key]
+    assert lead.seat_of(m) is None and fev.seat_of(m) is None and fev.signups[str(m.discord_id)].status == "out"
+
+
+def test_an_expired_confirmation_on_the_lead_frees_the_follow_on_seat(reg, rs, monkeypatch):
+    from test_raid_night import past_confirm
+
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    m = ms[5]
+    reg.add_placement_ask(m.discord_id, lead.team, m.main.label, "lock")
+    past_confirm(lead)
+    rs.save(lead, "deadline")
+    assert [u for u, _n in rc.expire_confirmation_asks(reg, rs, lead)] == [m.discord_id]
+    fev = rs.events[fev.key]
+    assert lead.seat_of(m) is None and fev.seat_of(m) is None and fev.signups[str(m.discord_id)].status == "out"
+    assert fev.seat_of(ms[6]) is not None  # nobody else's follow-on seat moved

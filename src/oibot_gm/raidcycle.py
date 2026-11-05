@@ -2738,6 +2738,10 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str, *, not
     if uid is not None:
         seat_gone(reg, ev, uid, why, notice=notice)  # their open Confirm ask closes (a later Confirm is refused) and their inbox hears why
     on_roster_change(rs.key, ev, removed=[uid if uid is not None else name], roster_of={uid if uid is not None else name: i})
+    if ev.followed_by and uid is not None:  # out of the lead is out of the night: the follow-on seat goes too (idempotent;
+        fev = follow_of(rs, ev)  # the scheduler's next fill tick covers it, RaidMixin.drop_seated asks at once)
+        if fev is not None and fev.state == "locked" and fev.seat_of(uid):
+            free_seat(reg, rs, fev, uid, why, notice=False)
     return p
 
 

@@ -24,18 +24,18 @@ from ..registry import RegistryError
 QUEUE_NOTE = "You'll go to the back of the queue if you change. Change anyway?"
 
 
-def cant_consequence(reg, ev, seated: bool) -> str:
+def cant_consequence(reg, ev, seated: bool, lead_seated: bool = False) -> str:
     """The Me page's Can't make it… confirm, from code (the Confirm rule, design §5.57): a member's own callout
     (RaidMixin.call_out) — a rostered seat is released and the bench asked when automatic asks are on."""
     if ev.follows:  # leaving after the lead: the follow-on alone, the lead's answer stands
-        return " ".join(leave_follow_consequence(reg, ev, seated))
+        return " ".join(leave_follow_consequence(reg, ev, seated, lead_seated))
     run = rc.run_on(reg, ev)
     if seated:
         return f"Your seat for {run} is released, and the officers see it as a callout. {rc.refill_sentence(reg, ev)}"
     return f"You go to No thanks for {run}, and the officers see it as a callout."
 
 
-def sheet_row_extras(reg, ev, m) -> dict:
+def sheet_row_extras(reg, ev, m, rs=None) -> dict:
     """What the Me page's My sheets row needs to be actionable (rendered from server state only): may_answer (open: Join /
     Bench / No thanks), may_cant (locked and rostered: Can't make it… with a note) and cant_consequence (its confirm's
     sentences), queue_note (ad hoc and joined: a change away from Join asks once), receipt (rc.answer_receipt, plain)."""
@@ -43,9 +43,11 @@ def sheet_row_extras(reg, ev, m) -> dict:
     locked = ev.state == "locked"
     seated = bool(m and locked and ev.seat_of(m))
     adhoc = rc.run_kind(reg, ev) == "adhoc"
+    lead = rc.lead_of(rs, ev) if rs is not None and ev.follows else None
+    lead_seated = bool(m and lead is not None and lead.seat_of(m))  # a follow-on's Can't: are they rostered on the lead?
     return {"may_answer": ev.state == "open" and rc.on_bench_side(reg, ev, m) if m else False,
             "may_cant": seated or (locked and s is not None and s.status == "in"),
-            "cant_consequence": cant_consequence(reg, ev, seated) if locked else None,
+            "cant_consequence": cant_consequence(reg, ev, seated, lead_seated) if locked else None,
             "queue_note": QUEUE_NOTE if adhoc and ev.state == "open" and s is not None and s.status == "in" else None,
             "receipt": rc.answer_receipt(reg, ev, m).replace("**", "") if m else None}
 

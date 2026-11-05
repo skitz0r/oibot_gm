@@ -335,16 +335,11 @@ class RaidMixin:
             if "health" in ev.cards:  # the officer card's counts and Suggested block follow the answers
                 await self.refresh_cards(reg, ev)
             line = f"✅ {who}{s.character} {rc.LABELS[s.status]} for {label}" + (f" — {s.note}" if s.note and s.status != status else "")
-            if status == "out":
-                if ev.followed_by:  # a lead's No thanks / Can't is the whole night
-                    await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", None)
         elif status == "out":
             if ev.seat_of(m):
                 if mine:  # the sheet's Can't make it after lock is a (late) callout: recorded like /raid out's
                     rc.callout(reg, rs, ev, m, team, None)
                 await self.drop_seated(reg, rs, ev, team, m, "callout" if mine else "officer", None)
-                if ev.followed_by:  # a lead's No thanks / Can't is the whole night
-                    await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", None)
                 line = f"✅ {who or 'you are '}off the {label} roster — seat freed" + ("; the bot is looking for a replacement" if rc.team_setting(team, "autofill") else "")
             else:
                 rc.set_signup(reg, rs, ev, m, character, "out", source=source)
@@ -1140,8 +1135,6 @@ class RaidMixin:
             rc.on_behalf_notice(reg, ev, m.discord_id, "recorded that you can't make it", by)
         if sheet_state(ev) == "locked" and ev.seat_of(m):
             await self.drop_seated(reg, rs, ev, t, m, "callout" if mine else "officer", note)
-            if ev.followed_by:  # a lead's No thanks / Can't is the whole night
-                await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", note)
             return line + " — seat freed"
         if ev.followed_by:  # a lead's No thanks / Can't is the whole night
             await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", note)
@@ -1153,9 +1146,10 @@ class RaidMixin:
         return line
 
     async def after_lead_out(self, reg, rs, lead, m, why: str, note: str | None) -> None:
-        """A No thanks or Can't on a lead is the whole night (spec 2026-11-04-follow-on-runs): the follow-on's row is
-        already out (rc.sync_follow), and a seat they hold on the locked follow-on is freed the way the lead's is
-        (drop_seated: thread line, fill). A follow-on itself has no follow-on: nothing to do."""
+        """A No thanks or Can't on a lead from someone NOT rostered on it (a bench joiner covering a follow-on gap) is
+        the whole night too (spec 2026-11-04-follow-on-runs): the follow-on's row is already out (rc.sync_follow), and
+        a seat they hold on the locked follow-on is freed the way the lead's is (drop_seated: thread line, fill). A seat
+        freed on the lead takes the follow-on's with it in drop_seated / rc.free_seat."""
         fev = rc.follow_of(rs, lead)
         if fev is None or sheet_state(fev) != "locked" or not fev.seat_of(m):
             return
@@ -1287,7 +1281,10 @@ class RaidMixin:
 
     async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True, *, notice: bool = True) -> None:
         """A rostered member is out after lock: free the seat, edit their ask card, post it, ask the bench to fill.
-        `notice=False`: their own act (rc.seat_gone writes them no notice about it)."""
+        `notice=False`: their own act (rc.seat_gone writes them no notice about it). On a lead the follow-on's seat goes
+        too (rc.free_seat), and the follow-on's thread line and fill follow the lead's (spec 2026-11-04-follow-on-runs)."""
+        fev = rc.follow_of(rs, ev) if ev.followed_by else None
+        follow_held = fev is not None and sheet_state(fev) == "locked" and fev.seat_of(m) is not None
         rc.free_seat(reg, rs, ev, m, why, notice=notice)
         await self.seat_released(reg, ev, m, why)
         if announce:
@@ -1298,6 +1295,8 @@ class RaidMixin:
             sent, nd = await self.run_fill(reg, rs, ev, team, by=why)
             if sent:
                 await self.post_run_update(reg, ev, f"🧩 replacement for {m.display_name}:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
+        if follow_held:  # rc.free_seat freed it with the lead's: the follow-on's own line, cards and fill
+            await self.drop_seated(reg, rs, fev, rc.run_team(reg, fev), m, why, note, announce, notice=False)
 
     # ---- opening and cancelling runs (commands, the web and plain-text ops share these)
     async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None, follow: dict | None = None) -> rc.RaidEvent:
@@ -1547,6 +1546,8 @@ class RaidMixin:
                     if c:
                         rc.set_signup(reg, rs, ev, m, c.label, "out", source="absence")
                         await self.refresh_sheet(reg, ev)
+                if ev.followed_by:  # rostered on the follow-on only: the absence takes that seat
+                    await self.after_lead_out(reg, rs, ev, m, "absence", None)
                 await self.refresh_cards(reg, ev)  # the officers' No answer list, counts and Suggested block follow
                 await self.refill_after_release(reg, rs, ev, released)
             touched.append(ev.key)
