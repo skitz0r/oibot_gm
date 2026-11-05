@@ -96,7 +96,7 @@ function StartAdhoc({ r, others, busy, onAct }: { r: RaidRuns; others: { id: str
   const [tpl, setTpl] = useState<string>("adhoc");  // "adhoc" = a one-off
   const [when, setWhen] = useState<string | null>(null);
   const [p, setP] = useState<OpenPreview | null>(null);
-  // the follow-on (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): another raid the same night from this signup
+  // the follow-on (design §5.62): another raid the same night from this signup
   const [follow, setFollow] = useState<string>("");
   const [followN, setFollowN] = useState<string>("2");
   const followBody = follow ? { raid: follow, rosters: Number(followN) } : "";

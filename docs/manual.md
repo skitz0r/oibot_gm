@@ -114,6 +114,9 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   the addon's Export button gives you and the **BattleTag** of the account it was issued to (its key), and you get back a
   **companion addon** that loads the guide on any of your characters, a one-file **route explorer** to browse offline, and
   the guides as readable text. For you alone: nobody else can open your files, and the string and the BattleTag are not kept.
+  **Issue for your other account** (for your own accounts only): RestedXP sells the guide per account, so if you play
+  on another Battle.net account of your own, this locks the guide you bought to that account too and lets you run your
+  purchase there — a new import string for the other account's BattleTag, as a file to download (or DM the bot, below).
 
 ## 2. Channels
 
@@ -241,6 +244,18 @@ import string and the BattleTag are read once to unlock the guide and not kept; 
 the string again rebuilds them. When the host has a copy of the RXPGuides addon (`OIBOT_RXP_ADDON` in `.env`), the explorer adds the
 free 1–20 starter guides, so a bought 20–60 guide reads as one 1–60 route. A wrong BattleTag answers *That BattleTag doesn't unlock
 this guide*; a paste that isn't an import string says so.
+
+**Issue for your other account** (the second card on **Me › Leveling guide**; for your own accounts only). RestedXP sells the
+guide per Battle.net account; if you play on another account of your own, this lets you run your purchase there. Paste the
+**import string**, the **BattleTag it was issued to**, and **your other account's BattleTag**, then press **Issue an import string**:
+a file `RXPGuides-import-<Name>.txt` downloads with the import string that account's RestedXP accepts (open the addon's Import on that
+account and paste it). Nothing is kept — the string and both BattleTags are read once, and your files on the site are not touched.
+The same refusals as the build: a BattleTag that doesn't unlock the guide, a paste that isn't an import string, a second BattleTag that
+isn't *Name#1234*, or the same BattleTag twice (*Those are the same BattleTag*). **In a DM** the bot does the same: write
+`convert guide from Name#1234 to Other#5678` and attach the import string as a **.txt** file (or put it after the BattleTags:
+`… to Other#5678 given 78|…`, if it fits in a message). The bot answers with one line and the file. It reads that message in code —
+the string never goes to the model, the bot's memory or a log. Asked in a server channel, the bot answers *"Send me that in a DM. The
+import string is your purchase, and the answer is a file for you alone."* and does nothing else.
 
 **Tell the bot** (officers): every officer page has **Tell the bot…** in the left rail, and every live sheet on the Rosters page has
 **Tell the bot about this run** (it starts with the run's name). Type a question ("who hasn't answered tonight?") and the answer comes
@@ -392,7 +407,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   its rank and roster placement), "delete my alt Jonny", "I can also tank on Xanthe", "bench me for tonight",
   "I can't make tonight" (a callout like `/raid out`; "… — work trip" adds a note only the officers see), "I confirm for
   tonight" (also answers a fill ask the bot DMed you), "turn my DMs off", "put the Robe of Tests on my wishlist as #2
-  for offspec", "take the wand off Jonny's wishlist". It shows what it will change and waits for
+  for offspec", "take the wand off Jonny's wishlist", and in a DM only "convert guide from Name#1234 to Other#5678" with
+  your RestedXP import string attached as a .txt file (your own guide for your own other account, §2a *Leveling guide*;
+  it answers with the file at once, no Apply). For the rest it shows what it will change and waits for
   your **Apply** — only you (or an officer) can press it. Plain text only ever changes *your own* record: a
   request about someone else is refused with who can do it, and the rest of what you asked still applies.
   Ranks are officers' (see §8c for who may do what, and where).

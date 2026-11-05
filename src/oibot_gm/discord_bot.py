@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import io
 import json
 import logging
 import os
@@ -18,7 +19,7 @@ import discord
 import yaml
 from discord import app_commands
 
-from . import configops, conversation, guild_routing, render
+from . import configops, conversation, guides, guild_routing, render
 from . import memory as mem
 from . import registry as registry_mod
 from .discord_feed import FeedMixin
@@ -171,6 +172,50 @@ def listen_sure() -> float:
     except ValueError:
         return LISTEN_SURE
     return min(1.0, max(LISTEN_MAYBE + 0.01, v))
+
+
+async def guide_convert(bot, message) -> bool:
+    """`convert guide from <Tag1> to <Tag2>` (design §5.55, addendum 2026-11-05): a member's own RestedXP guide locked to
+    another Battle.net account of their own. Read IN CODE at the top of on_message, before the plain-text model, the
+    conversation ring, listening and chat memory, so the import string never reaches a prompt, a memory row or a log
+    (nothing here logs the text). True = handled (the caller stops); a module function over the client, so bare test
+    clients work. In a DM: anyone the bot routes a DM for (no picker: nothing guild-specific is read); the string is inline after `given`, else the first attached .txt file;
+    the answer is one line + the file, as the reply to their own DM. In a server channel the bot would read (an
+    @mention, a listened channel): one refusal sentence, nothing converted, no DM (the DM rule)."""
+    req = guides.convert_request(getattr(message, "content", None) or "")
+    if req is None:
+        return False
+    quiet = discord.AllowedMentions.none()
+    if message.guild is not None:
+        reg = bot.registries.for_guild(message.guild.id)
+        if bot._addressed(message) or (reg is not None and reg.listen_mode(message.channel.id)):
+            await message.reply(guides.CHANNEL_REFUSAL, allowed_mentions=quiet)
+        return True
+    if not await guild_routing.guilds_of(bot, message.author.id):
+        await message.reply(guild_routing.not_in_any(bot.registries.ordered()), allowed_mentions=quiet)
+        return True
+    text = req.text
+    if not text:
+        att = next((a for a in (getattr(message, "attachments", None) or []) if (getattr(a, "filename", "") or "").lower().endswith(".txt")), None)
+        if att is not None:
+            if (getattr(att, "size", 0) or 0) > guides.TEXT_MAX:
+                await message.reply(guides.TOO_BIG, allowed_mentions=quiet)
+                return True
+            text = (await att.read()).decode("utf-8", "replace")
+    try:
+        out = await asyncio.to_thread(guides.reissue, text, req.tag, req.new_tag)
+    except guides.GuideError as e:
+        usage = "" if (text.strip() and req.tag and req.new_tag) else " " + guides.USAGE
+        await message.reply(str(e) + usage, allowed_mentions=quiet)
+        return True
+    except Exception as e:  # noqa: BLE001 — never the text in a log line; the person gets a plain refusal
+        log.warning("guide convert failed (%s)", type(e).__name__)
+        await message.reply(guides.CONVERT_FAILED, allowed_mentions=quiet)
+        return True
+    new = req.new_tag.strip()
+    await message.reply(f"Your guide, locked to **{discord.utils.escape_markdown(new)}**: import the attached string with RestedXP on that account.",
+                        file=discord.File(io.BytesIO(out.encode()), filename=guides.reissue_filename(new)), allowed_mentions=quiet)
+    return True
 
 
 _ROLE_MENTION = re.compile(r"<@&(\d+)>")
@@ -1198,6 +1243,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         if await self.news_message(message):  # the news webhook (a bot) is read before the bot filter below
             return
         if message.author.bot:
+            return
+        if await guide_convert(self, message):  # an import string: read in code, before every model, memory and log below
             return
         if message.guild:
             self.saw_member(message.guild.id, message.author)

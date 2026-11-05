@@ -81,7 +81,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const fillTip = !locked
     ? (seatsN ? `${seatsN} seat${seatsN === 1 ? "" : "s"} short of the tank/healer minimums — ${asksN} suggestion${asksN === 1 ? "" : "s"}; nothing is sent until you press Send` : "the tank/healer minimums are covered by who joined and the regulars yet to answer")
     : (isShort ? `${(n?.headcount || 0)} short — ${asksN} suggestion${asksN === 1 ? "" : "s"}` : "every seat is taken");
-  // a follow-on run (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): the lead names what follows it, the follow-on its lead
+  // a follow-on run (design §5.62): the lead names what follows it, the follow-on its lead
   const facts = [e.follow ? `then ${e.follow.raid} ×${e.follow.rosters} at ${e.follow.when}` : e.lead ? `after ${e.lead.raid}` : null, e.kind === "adhoc" ? W.first_come : e.series_name, e.confirms === false ? W.no_confirmations : null, locked ? e.rel : e.timeline ? `locks ${e.timeline.lock}` : null].filter(Boolean).join(" · ");
 
   return (

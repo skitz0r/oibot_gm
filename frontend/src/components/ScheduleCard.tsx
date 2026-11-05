@@ -169,7 +169,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, onClose, onS
       for (const k of HOURS) f[k] = x.cadence[k] === undefined || x.cadence[k] === "" ? null : Number(x.cadence[k]);
       for (const k of BOOLS) f[k] = x.cadence[k] ? x.cadence[k] === "on" : null;
       f.split_policy = x.cadence.split_policy || null;
-      // the follow-on (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): another raid the same night from this signup
+      // the follow-on (design §5.62): another raid the same night from this signup
       f.follow = x.follow_raid ? { raid: x.follow_raid, rosters: Number(x.follow_rosters) } : null;
       f.weights = Object.fromEntries(WEIGHTS.map((k) => [k, x.weights[k] === undefined || x.weights[k] === "" ? null : Number(x.weights[k])]));
       if (x.kind === "pickup") for (const k of ADHOC_HIDDEN) delete f[k];

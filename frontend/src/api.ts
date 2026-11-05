@@ -47,10 +47,40 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return data as T;
 }
 
+/** POST a JSON body and save the file the server answers (the leveling guide's re-issued import string): the same
+ *  headers as every call; a refusal reads the server's JSON error like `call`. Nothing is kept: the blob is handed to the
+ *  browser's download and its URL revoked. */
+async function download(path: string, body: unknown, fallbackName: string): Promise<string> {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Requested-With": "oibot", ...(guild ? { "X-Oibot-Guild": guild } : {}) },
+    body: JSON.stringify(body),
+    credentials: "same-origin",
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new ApiError(r.status, (data as { error?: string }).error || r.statusText);
+  }
+  const cd = r.headers.get("Content-Disposition") || "";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  const plain = /filename="([^"]+)"/i.exec(cd);
+  const name = star ? decodeURIComponent(star[1]) : plain ? plain[1] : fallbackName;
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return name;
+}
+
 export const api = {
   get: <T>(path: string) => call<T>("GET", path),
   post: <T>(path: string, body?: unknown) => call<T>("POST", path, body),
   put: <T>(path: string, body?: unknown) => call<T>("PUT", path, body),  // the Policy page's Save draft (PUT /api/policy/{doc})
+  download: (path: string, body: unknown, fallbackName: string) => download(path, body, fallbackName),
 };
 
 // ---- shapes (mirror src/oibot_gm/web/api.py)
@@ -120,7 +150,7 @@ export interface Absence { start: string; end: string; reason: string | null; sp
  *  `may_cant` = Can't make it… (with a note) applies (locked, rostered or joined), `cant_consequence` = its confirm's sentences; `queue_note` = ad hoc and joined — a change
  *  away from Join asks this once; `receipt` = the state in words (rc.answer_receipt). The row renders from these only. */
 export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; badge?: string; state_word?: string; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean; may_answer?: boolean; may_cant?: boolean; cant_consequence?: string | null; queue_note?: string | null; receipt?: string | null;
-  /** follow-on runs (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): `then` = the follow-on in words on a lead, `lead_raid` = the lead's name on a follow-on;
+  /** follow-on runs (design §5.62): `then` = the follow-on in words on a lead, `lead_raid` = the lead's name on a follow-on;
    *  `may_leave` = Leaving after the lead applies, `leave_consequence` = its confirm's sentence; `may_stay` = I'm staying undoes it */
   then?: string | null; lead_raid?: string | null; may_leave?: boolean; may_stay?: boolean; leave_consequence?: string | null }
 /** One recurring schedule the viewer is a regular of (the Me page's My regular raids). */

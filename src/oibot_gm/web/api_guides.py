@@ -2,17 +2,20 @@
 account and its BattleTag, the bot unlocks it in a worker thread and keeps the outputs in that member's own folder under
 out/guides/<guild>/<uid>/ — the companion addon, the one-file route explorer and the readable text, plus the dataset.
 Nobody else can read them: every route resolves the folder from the session's uid, never from a parameter. The inputs
-(the string, the BattleTag) are not stored or logged. Web only (configops.BY_DESIGN_ONLY `leveling_guide`): a paste of
-this size has no Discord shape, and MCP's token is the owner's, so it may read a status but never build — the import
-string must not land in a transcript."""
+(the string, the BattleTag) are not stored or logged. The build is web only (configops.BY_DESIGN_ONLY `leveling_guide`): a
+paste of this size has no Discord shape, and MCP's token is the owner's, so it may read a status but never build — the import
+string must not land in a transcript. POST /api/me/guide/reissue (addendum 2026-11-05) locks the pasted guide to the
+member's own other Battle.net account and answers the new string as a download: nothing written, nothing logged, the
+folder untouched; the same core answers a DM (discord_bot.guide_convert)."""
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from .. import guides as g
 
@@ -63,6 +66,23 @@ def install_guides_api(app: FastAPI, bot, *, who, body) -> None:
             lock.release()
         n = st["guides"]
         return {"message": f"{n} guide{'' if n == 1 else 's'} unlocked · {st['steps']} steps", **status_json(v.reg, v.uid)}
+
+    @app.post("/api/me/guide/reissue")
+    async def guide_reissue(request: Request):
+        """The import string + the BattleTag it was issued to + the member's other account's BattleTag → the string that
+        account imports, as a file. Read once and dropped: never written, never logged; the built folder is not touched."""
+        v, d = await body(request)
+        if v.via == "mcp":
+            raise HTTPException(403, "An import string is re-issued from the Me page by the person who bought it; the string stays out of transcripts.")
+        text, tag, new = str(d.get("text") or ""), str(d.get("battletag") or ""), str(d.get("new_battletag") or "")
+        try:
+            out = await asyncio.to_thread(g.reissue, text, tag, new)
+        except g.GuideError as e:
+            raise HTTPException(400, str(e)) from None
+        fn = g.reissue_filename(new)
+        ascii_fn = fn.encode("ascii", "replace").decode().replace("?", "_")
+        return Response(out.encode(), media_type="text/plain; charset=utf-8", headers={
+            "Content-Disposition": f"attachment; filename=\"{ascii_fn}\"; filename*=UTF-8''{quote(fn)}", "Cache-Control": "no-store"})
 
     @app.post("/api/me/guide/clear")
     async def guide_clear(request: Request):

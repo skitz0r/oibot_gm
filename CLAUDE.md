@@ -483,8 +483,12 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        GameProfile.guides; dataset / summaries), explorer.html (the vendored one-file route explorer, data inlined in #guides-data),
                        build.py (build → out/guides/<guild>/<uid>/: explorer.html · RXPGuides_LocalGuides.zip · guide-text.zip · guides.json ·
                        status.json, swapped in whole; FILES = the downloads; OIBOT_RXP_ADDON = the host's addon zip for the free starter guides;
-                       the inputs are never written or logged; lock_for = one build per member at a time)
+                       the inputs are never written or logged; lock_for = one build per member at a time); reissue.py = THE re-issue to the
+                       member's own other account (reissue(text, tag, new_tag) → the new string, nothing written; convert_request = the DM's
+                       `convert guide from <Tag1> to <Tag2> [given …]` read in code; CHANNEL_REFUSAL)
   web/api_guides.py    install_guides_api (called from api.py): GET/POST /api/me/guide (status / build in a thread; MCP never builds), /clear,
+                       POST /reissue (the other-account string as a no-store download; MCP never; the DM twin is discord_bot.guide_convert,
+                       run first in on_message so the string reaches no model, memory or log),
                        GET /api/me/guide/explorer (inline, its own CSP sandbox, no-store), /file/{name} (the three downloads) — the folder is
                        always the session's own uid; /api/meta.guides = the version has the tool
   web/api_professions.py  install_professions_api (called from api.py; design §5.60): GET /api/professions (every member: each profession's

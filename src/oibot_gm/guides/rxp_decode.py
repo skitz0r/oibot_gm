@@ -1,7 +1,8 @@
 """An RXPGuides import string ↔ plain guide texts. The string is `N|` then, per section, `<adler32>:<base64>%` where the
 base64 holds zlib-compressed guide texts (NUL-separated) RC4-encrypted with a key derived from the BattleTag of the
-account the guide was issued to (a port of the addon's CheckDataIntegrity / ReadCacheData). `encode` is the inverse —
-the tests build fixtures with it; the bot never issues a string."""
+account the guide was issued to (a port of the addon's CheckDataIntegrity / ReadCacheData). `encode` is the inverse: the
+tests build fixtures with it, and the one string the bot issues is the member's own guide locked to the member's own other
+account (reissue.py; RestedXP sells a guide per account)."""
 from __future__ import annotations
 
 import base64
@@ -87,7 +88,8 @@ def decode(text: str, battletag: str) -> list[str]:
 
 
 def encode(guides: list[str], battletag: str, sections: int = 1) -> str:
-    """The inverse of decode: guide texts → an import string the given BattleTag unlocks (fixtures; never a bot output)."""
+    """The inverse of decode: guide texts → an import string the given BattleTag unlocks (fixtures, and reissue: the
+    member's own guide for their own other account — never anyone else's)."""
     S = rc4_sbox(make_base(battletag))
     out = [f"{len(guides)}|"]
     per = max(1, -(-len(guides) // max(1, sections)))

@@ -493,3 +493,16 @@ def test_follow_on_surfaces_exist():
     assert "s.may_leave" in me and "s.may_stay" in me and "/stay`" in me and "s.leave_consequence" in me
     card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
     assert "e.follow" in card and "e.lead" in card
+
+
+def test_guide_reissue_card_on_the_leveling_guide_tab():
+    """Me › Leveling guide (design §5.55 addendum 2026-11-05): the card that locks the member's own guide to another of
+    their own accounts — three boxes, one press, a download; the inputs are dropped after it and never kept."""
+    comp = (SRC / "components" / "GuideTools.tsx").read_text()
+    api = (SRC / "api.ts").read_text()
+    assert 'title="Issue for your other account"' in comp and "Issue an import string" in comp
+    assert '"/api/me/guide/reissue"' in comp and "new_battletag: newTag.trim()" in comp
+    assert "api.download(" in comp and "download:" in api and "X-Requested-With" in api
+    assert 'setReText("")' in comp and 'setFromTag("")' in comp and 'setNewTag("")' in comp, "the string and both tags are dropped after the download"
+    assert "RestedXP sells" in comp and "your own" in comp, "the card says it is for the member's own accounts"
+    assert "localStorage" not in comp

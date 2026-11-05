@@ -4,13 +4,16 @@ a string the inverse builds; the wrong key is a refusal in words; the routes res
 from a parameter; MCP reads a status but never builds."""
 from __future__ import annotations
 
+import asyncio
 import base64
+import functools
 import gzip
 import importlib
 import io
 import json
 import re
 import time
+import types
 import zipfile
 
 import pytest
@@ -294,3 +297,199 @@ def test_the_me_page_has_the_tab_and_the_component_renders_from_the_status_only(
     assert 'sandbox="allow-scripts allow-downloads"' in comp and "/api/me/guide/explorer" in comp
     assert "battletag: tag.trim()" in comp and "setText(\"\")" in comp and "setTag(\"\")" in comp, "the string and the key are dropped after the build"
     assert "localStorage" not in comp and "guides.json" not in comp
+
+
+# ---------------------------------------------------------------- re-issue for the member's own other account
+
+NEW_TAG = "Ash#5678"
+
+
+def test_reissue_locks_the_same_guides_to_the_other_account_only():
+    for sections in (1, 2):
+        new = g.reissue(fixture_string(sections), TAG, NEW_TAG)
+        assert g.decode(new, NEW_TAG) == [GUIDE_A, GUIDE_B], "the other account's tag opens the same texts"
+        assert new.count("%") == sections, "as many sections as the string pasted"
+        with pytest.raises(g.GuideError, match="doesn't unlock"):
+            g.decode(new, TAG)
+    assert g.decode(g.reissue("guide: " + fixture_string(), TAG.lower(), " Ash#5678 "), NEW_TAG) == [GUIDE_A, GUIDE_B]
+    assert g.reissue_filename(NEW_TAG) == "RXPGuides-import-Ash.txt"
+    assert g.reissue_filename("Jö n/x#1234") == "RXPGuides-import-Jö_n_x.txt", "the name part, safe for a file name"
+
+
+def test_reissue_refusals_are_the_sites_words():
+    cases = [
+        (("", TAG, NEW_TAG), "Paste the import string first"),
+        (("x" * (g.TEXT_MAX + 1), TAG, NEW_TAG), "bigger than any guide export"),
+        (("hello there", TAG, NEW_TAG), "isn't a RestedXP import string"),
+        ((fixture_string(), "Jon#4321", NEW_TAG), "doesn't unlock"),
+        ((fixture_string(), "", NEW_TAG), "Enter the BattleTag the guide was issued to"),
+        ((fixture_string(), TAG, ""), "your other account's BattleTag"),
+        ((fixture_string(), TAG, "Ash"), "name, a # and 4 to 7 digits"),
+        ((fixture_string(), TAG, "jon#1234"), "the same BattleTag"),
+    ]
+    for args, words in cases:
+        with pytest.raises(g.GuideError, match=words):
+            g.reissue(*args)
+
+
+def test_the_convert_request_is_read_in_code():
+    assert g.convert_request("when is the next raid?") is None
+    assert g.convert_request("can you convert my guide?") is None, "a question about it goes to the help answer"
+    r = g.convert_request("convert guide from Jon#1234 to Ash#5678")
+    assert (r.tag, r.new_tag, r.text) == ("Jon#1234", "Ash#5678", "")
+    r = g.convert_request("<@123> Convert Guide from Jon#1234 to Ash#5678 given " + fixture_string())
+    assert (r.tag, r.new_tag, r.text) == ("Jon#1234", "Ash#5678", fixture_string())
+    r = g.convert_request("convert guide to Ash#5678")
+    assert (r.tag, r.new_tag) == ("", "Ash#5678"), "a request with a missing part is still the convert (refused in words, never a prompt)"
+
+
+def test_a_member_downloads_a_reissued_string_and_nothing_is_kept(client, reg):
+    h = as_user(client, ME)
+    folder = g.member_dir(reg.key, ME)
+    r = client.post("/api/me/guide/reissue", json={"text": fixture_string(), "battletag": TAG, "new_battletag": NEW_TAG}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("text/plain") and r.headers["cache-control"] == "no-store"
+    assert 'filename="RXPGuides-import-Ash.txt"' in r.headers["content-disposition"] and r.headers["content-disposition"].startswith("attachment")
+    assert g.decode(r.text, NEW_TAG) == [GUIDE_A, GUIDE_B]
+    assert not folder.exists(), "a re-issue writes nothing"
+
+    client.post("/api/me/guide", json={"text": fixture_string(), "battletag": TAG}, headers=h)
+    before = {p.name: p.stat().st_mtime_ns for p in folder.iterdir()}
+    assert client.post("/api/me/guide/reissue", json={"text": fixture_string(), "battletag": TAG, "new_battletag": NEW_TAG}, headers=h).status_code == 200
+    assert {p.name: p.stat().st_mtime_ns for p in folder.iterdir()} == before, "the built folder is untouched"
+
+    for body, words in (({"text": fixture_string(), "battletag": "Jon#4321", "new_battletag": NEW_TAG}, "doesn't unlock"),
+                        ({"text": fixture_string(), "battletag": TAG, "new_battletag": "Ash"}, "name, a # and"),
+                        ({"text": fixture_string(), "battletag": TAG, "new_battletag": TAG}, "the same BattleTag"),
+                        ({"text": "hello", "battletag": TAG, "new_battletag": NEW_TAG}, "isn't a RestedXP import string"),
+                        ({"text": "", "battletag": TAG, "new_battletag": NEW_TAG}, "Paste the import string first")):
+        r = client.post("/api/me/guide/reissue", json=body, headers=h)
+        assert r.status_code == 400 and words in r.json()["error"], (body, r.text)
+
+
+def test_mcp_never_reissues(client):
+    r = client.post("/api/me/guide/reissue", json={"text": fixture_string(), "battletag": TAG, "new_battletag": NEW_TAG}, headers=bearer())
+    assert r.status_code == 403 and "transcripts" in r.json()["error"]
+
+
+# ---------------------------------------------------------------- the Discord path: a DM, read in code
+
+class Attachment:
+    def __init__(self, filename, data: bytes):
+        self.filename, self.data, self.size = filename, data, len(data)
+        self.reads = 0
+
+    async def read(self):
+        self.reads += 1
+        return self.data
+
+
+class DmMessage:
+    def __init__(self, content, uid, attachments=(), guild=None, channel_id=7):
+        self.content, self.attachments, self.guild = content, list(attachments), guild
+        self.author = types.SimpleNamespace(id=uid, bot=False, display_name="Jon")
+        self.channel = types.SimpleNamespace(id=channel_id)
+        self.mentions, self.replies = [], []
+
+    async def reply(self, text=None, **kw):
+        self.replies.append((text, kw))
+
+
+def convert_bot(duo, members=None):
+    """The real on_message over two guilds; every downstream path (the model, listening, the picker) is a tripwire."""
+    from test_multiguild_dm import dm_bot
+
+    from oibot_gm.discord_bot import OibotGM
+
+    bot = dm_bot(duo, members=members)
+    hit = []
+
+    async def tripwire(*a, **kw):
+        hit.append(a)
+        return None
+
+    async def no_news(message):
+        return False
+    bot.news_message, bot.plain_text, bot.dm_guild, bot.listen_message = no_news, tripwire, tripwire, tripwire
+    bot.saw_member = lambda *a: None
+    bot.user = types.SimpleNamespace(id=999)
+    bot._addressed = lambda m: "<@999>" in (m.content or "")
+    bot.event_for = lambda cid: None
+    return bot, hit, OibotGM
+
+
+def test_a_dm_converts_an_attached_string_and_nothing_else_sees_it(duo, monkeypatch):
+    from test_multiguild_dm import PUPPET
+
+    from oibot_gm import conversation
+
+    bot, hit, OibotGM = convert_bot(duo)
+    remembered = []
+    monkeypatch.setattr(conversation, "remember", lambda *a, **kw: remembered.append(a))
+    att = Attachment("guide.txt", fixture_string().encode())
+    m = DmMessage("convert guide from Jon#1234 to Ash#5678", PUPPET, [Attachment("pic.png", b"x"), att])
+    asyncio.run(OibotGM.on_message(bot, m))
+    [(line, kw)] = m.replies
+    f = kw["file"]
+    assert f.filename == "RXPGuides-import-Ash.txt" and "Ash#5678" in line
+    assert g.decode(f.fp.read().decode(), NEW_TAG) == [GUIDE_A, GUIDE_B]
+    assert hit == [] and remembered == [], "never the model, the picker, listening or the conversation ring"
+    assert att.reads == 1
+
+
+def test_a_dm_converts_an_inline_string_and_refuses_in_the_sites_words(duo):
+    from test_multiguild_dm import PUPPET
+
+    bot, hit, OibotGM = convert_bot(duo)
+    m = DmMessage("convert guide from Jon#1234 to Ash#5678 given " + fixture_string(), PUPPET)
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert m.replies[0][1]["file"].filename == "RXPGuides-import-Ash.txt"
+    for content, att, words in (("convert guide from Jon#4321 to Ash#5678", Attachment("g.txt", fixture_string().encode()), "doesn't unlock"),
+                                ("convert guide from Jon#1234 to Jon#1234", Attachment("g.txt", fixture_string().encode()), "the same BattleTag"),
+                                ("convert guide from Jon#1234 to Ash", Attachment("g.txt", fixture_string().encode()), "name, a # and"),
+                                ("convert guide from Jon#1234 to Ash#5678", None, "Paste the import string first"),
+                                ("convert guide from Jon#1234 to Ash#5678", Attachment("g.txt", b"hello"), "isn't a RestedXP import string"),
+                                ("convert guide to Ash#5678", Attachment("g.txt", fixture_string().encode()), "Enter the BattleTag the guide was issued to")):
+        m = DmMessage(content, PUPPET, [att] if att else [])
+        asyncio.run(OibotGM.on_message(bot, m))
+        [(line, kw)] = m.replies
+        assert words in line and "file" not in kw, (content, line)
+    big = Attachment("g.txt", b"")
+    big.size = g.TEXT_MAX + 1
+    m = DmMessage("convert guide from Jon#1234 to Ash#5678", PUPPET, [big])
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert "bigger than any guide export" in m.replies[0][0] and big.reads == 0, "an oversized file is never read"
+    assert hit == []
+
+
+def test_a_stranger_is_pointed_at_the_servers_and_nothing_is_converted(duo):
+    from test_multiguild_dm import PUPPET
+
+    bot, hit, OibotGM = convert_bot(duo, members={})
+    m = DmMessage("convert guide from Jon#1234 to Ash#5678", PUPPET, [Attachment("g.txt", fixture_string().encode())])
+    asyncio.run(OibotGM.on_message(bot, m))
+    [(line, kw)] = m.replies
+    from oibot_gm import guild_routing
+    assert "file" not in kw and line == guild_routing.not_in_any(duo.guilds.ordered())
+    assert hit == []
+
+
+def test_in_a_channel_the_convert_is_refused_and_goes_nowhere(duo, monkeypatch):
+    from test_multiguild_dm import PUPPET
+
+    bot, hit, OibotGM = convert_bot(duo)
+    guild = types.SimpleNamespace(id=duo.a.config.discord_guild_id, me=None)
+    att = Attachment("g.txt", fixture_string().encode())
+    m = DmMessage("<@999> convert guide from Jon#1234 to Ash#5678", PUPPET, [att], guild=guild)
+    asyncio.run(OibotGM.on_message(bot, m))
+    [(line, kw)] = m.replies
+    assert line == g.CHANNEL_REFUSAL and "file" not in kw and att.reads == 0 and hit == []
+    # a listened channel: the untagged request never reaches the decision model either
+    monkeypatch.setattr(type(duo.a), "listen_mode", lambda self, cid: "reply")
+    m = DmMessage("convert guide from Jon#1234 to Ash#5678 given " + fixture_string(), PUPPET, guild=guild)
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert [r[0] for r in m.replies] == [g.CHANNEL_REFUSAL] and hit == []
+    # an ordinary listened message still reaches listening (the gate is untouched)
+    m = DmMessage("anyone up for a dungeon?", PUPPET, guild=guild)
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert len(hit) == 1 and m.replies == []

@@ -3390,6 +3390,23 @@ outputs back, with the idea of status sharing later ("I'm at step 412 of 1–60 
 position: the addon's saved variables or the companion); map art (the explorer draws zone boxes from the waypoints, the
 member can overlay their own continent images); a tbc `guides.yaml`.
 
+**Addendum — re-issue for the member's own other account (built 2026-11-05; owner: "proceed", "lets not store anything,
+they have to paste guide string each time"; the DM path approved "yes").** RestedXP sells a guide per Battle.net account; a
+member who plays on another account of their own may lock the guide they bought to it. ONE core, `guides.reissue(text, tag,
+new_tag)` (guides/reissue.py): both tags validated, the same tag twice refused (case-insensitive, the key is), `decode(text,
+tag)` → `encode(guides, new_tag)` with the paste's section count; the refusals are the build's words (EMPTY_TEXT, TOO_BIG,
+NOT_A_STRING, WRONG_KEY, BAD_TAG) plus EMPTY_NEW_TAG / SAME_TAG. It is the one string the bot issues (rxp_decode.encode's
+docstring). Site: the **Issue for your other account** card on Me › Leveling guide (three boxes, **Issue an import string**)
+→ POST /api/me/guide/reissue {text, battletag, new_battletag} → `RXPGuides-import-<Name>.txt` as an attachment, no-store;
+nothing written, nothing logged, the member's folder untouched; MCP refused (403, like the build). Discord, DM only:
+`convert guide from <Tag1> to <Tag2>` (+ `given <string>`, else the first attached .txt, TEXT_MAX before the read) is read
+IN CODE by `discord_bot.guide_convert` at the top of on_message, before plain_text's model, the conversation ring, listening and
+chat memory, so the string reaches no prompt, memory row or log; anyone the bot routes a DM for (guilds_of non-empty, no
+picker: nothing guild-specific is read); the reply is one line + the file, the reply to their own DM. In a server channel
+the bot reads (an @mention, a listened channel) it answers "Send me that in a DM. The import string is your purchase, and
+the answer is a file for you alone." and nothing else (no DM — the DM rule). A request with a missing part is still the
+convert (refused in words with the usage line), so a string never falls through to a prompt. The build stays web only.
+
 ### 5.56 The Rosters page reads by its shape (built 2026-10-26)
 
 **Why.** A review of the Rosters page against the standard §5.54 set for Raids (2026-10-26, 50 findings; the user

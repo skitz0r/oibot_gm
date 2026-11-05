@@ -10,12 +10,18 @@ const EXPLORER_HEIGHT = "min(78vh, 900px)";
  *  and the bot unlocks it for you alone — a companion addon, a one-file route explorer you can keep offline, and the guides
  *  as readable text. The explorer also runs here, in a sandboxed frame. Nothing is stored but the files; the string and the
  *  BattleTag are read once and dropped. Every state renders from the server's status; a build disables the form until it
- *  answers. The text / BattleTag boxes are a form, not an edit mode of guild data: nothing here touches the guild. */
+ *  answers. The text / BattleTag boxes are a form, not an edit mode of guild data: nothing here touches the guild.
+ *  "Issue for your other account" (addendum 2026-11-05) locks the same guide to another of the member's own accounts and
+ *  downloads the new import string; its three boxes are dropped after the download, and nothing is written. */
 export function GuideTools({ meta }: { meta: Meta }) {
   const [st, setSt] = useState<GuideStatus | null>(null);
   const [text, setText] = useState("");
   const [tag, setTag] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reText, setReText] = useState("");
+  const [fromTag, setFromTag] = useState("");
+  const [newTag, setNewTag] = useState("");
+  const [reBusy, setReBusy] = useState(false);
   const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<GuideStatus>("/api/me/guide").then(setSt).catch(fail);
   useEffect(() => { load(); }, []);
@@ -29,6 +35,16 @@ export function GuideTools({ meta }: { meta: Meta }) {
       setText("");
       setTag("");
     } catch (e) { fail(e); } finally { setBusy(false); }
+  }
+  async function reissue() {
+    setReBusy(true);
+    try {
+      const name = await api.download("/api/me/guide/reissue", { text: reText, battletag: fromTag.trim(), new_battletag: newTag.trim() }, "RXPGuides-import.txt");
+      ok(`${name} is downloading: import it with RestedXP on your other account.`);
+      setReText("");
+      setFromTag("");
+      setNewTag("");
+    } catch (e) { fail(e); } finally { setReBusy(false); }
   }
   async function clear() {
     if (!(await ask({ title: "Remove your guide files?", message: "The addon, the explorer and the text built from your import string are deleted from the site. Paste the string again to rebuild them.", confirmLabel: "Remove", color: "red" }))) return;
@@ -61,6 +77,23 @@ export function GuideTools({ meta }: { meta: Meta }) {
         </Stack>
       </Card>
 
+      <Card>
+        <CardHeader title="Issue for your other account" hint="for your own accounts only" />
+        <Stack p="md" gap="sm">
+          <Text size="sm" c="dimmed">
+            RestedXP sells the guide per Battle.net account. If you play on another account of your own, this locks the guide you bought to that
+            account too, so you can run your purchase there. Paste the <b>import string</b>, the <b>BattleTag</b> it was issued to, and your other
+            account's BattleTag; you get a file with the import string that account's RestedXP accepts.
+          </Text>
+          <Textarea label="Import string" placeholder="78|…" autosize minRows={2} maxRows={5} value={reText} onChange={(e) => setReText(e.currentTarget.value)} disabled={reBusy} styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)", fontSize: 12 } }} />
+          <Group align="flex-end" gap="sm" wrap="wrap">
+            <TextInput label="BattleTag it was issued to" placeholder="Name#1234" value={fromTag} onChange={(e) => setFromTag(e.currentTarget.value)} disabled={reBusy} style={{ flex: "1 1 200px", maxWidth: 280 }} />
+            <TextInput label="Your other account's BattleTag" placeholder="Other#5678" value={newTag} onChange={(e) => setNewTag(e.currentTarget.value)} disabled={reBusy} style={{ flex: "1 1 200px", maxWidth: 280 }} />
+            <Button onClick={reissue} loading={reBusy} disabled={!reText.trim() || !fromTag.trim() || !newTag.trim()}>Issue an import string</Button>
+          </Group>
+          <Text size="xs" c="dimmed">The string and both BattleTags are read once and not kept; nothing is added to your files on the site. You can also DM the bot: convert guide from Name#1234 to Other#5678, with the string attached as a .txt file.</Text>
+        </Stack>
+      </Card>
       {!st.built ? (
         <Card><Text p="md" size="sm" c="dimmed">Nothing is built yet: paste your import string and BattleTag above and press <b>Build my guide</b>.</Text></Card>
       ) : (

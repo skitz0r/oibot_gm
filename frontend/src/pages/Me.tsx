@@ -162,7 +162,7 @@ function SheetRow({ s, me, meta, ask, onDone }: { s: MySheet; me: Me; meta: Meta
       ok(x.message);
     } catch (e) { fail(e); } finally { setBusy(null); onDone(); }
   }
-  // a follow-on (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): leave after the lead, or take it back
+  // a follow-on (design §5.62): leave after the lead, or take it back
   async function leave() {
     const r = await ask({ title: `Leaving after ${s.lead_raid}?`, message: s.leave_consequence || "", confirmLabel: "Leaving early", color: "red",
       note: { label: "Note for the officers (optional — never on the public sheet)", maxLength: 300 } });
