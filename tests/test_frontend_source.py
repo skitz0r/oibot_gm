@@ -480,3 +480,16 @@ def test_memory_surfaces_read_by_their_shape():
     assert "me.memory_on && <MyMemories" in me
     for f in (pp, m, my):
         assert not re.search(r"\b(embedding|vector|cosine|judge|RRF|index)\b", f, re.I)
+
+
+def test_follow_on_surfaces_exist():
+    """Spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md (D2): the site sets a follow-on — the schedule editor's
+    Then row and the ad hoc Open's Then field — and the Me row offers leaving early and I'm staying with the server's sentence only."""
+    sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
+    assert "follow_raid" in sched and 'label="then, the same night"' in sched and "f.follow =" in sched
+    rosters = (SRC / "pages" / "Rosters.tsx").read_text()
+    assert "follow_line" in rosters and "follow:" in rosters[rosters.index("function StartAdhoc"):]
+    me = (SRC / "pages" / "Me.tsx").read_text()
+    assert "s.may_leave" in me and "s.may_stay" in me and "/stay`" in me and "s.leave_consequence" in me
+    card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
+    assert "e.follow" in card and "e.lead" in card

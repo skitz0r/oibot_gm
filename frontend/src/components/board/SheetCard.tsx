@@ -81,7 +81,8 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const fillTip = !locked
     ? (seatsN ? `${seatsN} seat${seatsN === 1 ? "" : "s"} short of the tank/healer minimums — ${asksN} suggestion${asksN === 1 ? "" : "s"}; nothing is sent until you press Send` : "the tank/healer minimums are covered by who joined and the regulars yet to answer")
     : (isShort ? `${(n?.headcount || 0)} short — ${asksN} suggestion${asksN === 1 ? "" : "s"}` : "every seat is taken");
-  const facts = [e.kind === "adhoc" ? W.first_come : e.series_name, e.confirms === false ? W.no_confirmations : null, locked ? e.rel : e.timeline ? `locks ${e.timeline.lock}` : null].filter(Boolean).join(" · ");
+  // a follow-on run (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): the lead names what follows it, the follow-on its lead
+  const facts = [e.follow ? `then ${e.follow.raid} ×${e.follow.rosters} at ${e.follow.when}` : e.lead ? `after ${e.lead.raid}` : null, e.kind === "adhoc" ? W.first_come : e.series_name, e.confirms === false ? W.no_confirmations : null, locked ? e.rel : e.timeline ? `locks ${e.timeline.lock}` : null].filter(Boolean).join(" · ");
 
   return (
     <Box id={`run-${e.key}`} p="md" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 10, scrollMarginTop: 16, background: "var(--mantine-color-slate-8)" }}>
@@ -120,7 +121,9 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
             {e.short_why && <Text size="sm" c="dimmed">— {e.short_why}</Text>}
           </Group>
         )}
-        {!anyone && <Text size="sm" c="dimmed">Nobody has joined yet — the sheet is in Discord, or answer for someone here.</Text>}
+        {e.lead
+          ? <Text size="sm" c="dimmed">answers on the {e.lead.raid} sheet</Text>
+          : !anyone && <Text size="sm" c="dimmed">Nobody has joined yet — the sheet is in Discord, or answer for someone here.</Text>}
         {(e.double_booked || []).length > 0 && <Tooltip label={e.double_booked!.join(", ")}><Badge variant="light" color="gray" tt="none">double-booked {e.double_booked!.length}</Badge></Tooltip>}
         {!locked && joined.length > 0 && missing.length > 0 && (
           <Tooltip label={`Nobody in the run brings: ${missing.map((b) => b.name).join(", ")}`} multiline maw={320}>
@@ -130,7 +133,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           </Tooltip>
         )}
         <Box style={{ flex: "1 1 auto" }} />
-        {e.live && people && <SomeoneElse run={e.key} people={people} onDone={onReload} />}
+        {e.live && people && !e.lead && <SomeoneElse run={e.key} people={people} onDone={onReload} />}
       </Group>
       {locked && e.confirms !== false && conf.length > 0 && (
         <Group gap="md" mt={6} align="center">

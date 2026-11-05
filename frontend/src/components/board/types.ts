@@ -48,6 +48,8 @@ export interface OpenPreview {
   /** where the sheet goes, one sentence from the server */
   posts?: string;
   closed?: "done" | "cancelled" | null; refusal?: string | null;  // that time's run is closed: Open is refused (rc.closed_run_refusal)
+  /** the follow-on Open would add (its raid id and name, rosters, start in words) and that in one line ("then Barrow Deeps ×2 at 9:30 PM" | "") */
+  follow?: { raid: string; name: string; rosters: number; when: string } | null; follow_line?: string;
 }
 
 

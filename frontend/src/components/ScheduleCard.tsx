@@ -37,7 +37,7 @@ export function raidRevs(r: RaidRule): { revs?: Record<string, string> } {
  *  demand, with the rosters a run expects and any step of a run's week it sets itself (the rest follows the raid's rules
  *  above). The editor opens IN PLACE of the row it edits (a new one under the list) — the card's one edit mode at a time
  *  (design §5.54); `owner` is false while another edit mode is open, so the buttons wait. */
-export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEditing }: { r: RaidRule; meta?: Meta; owner: boolean; policies: string[]; maxRosters: number; onSaved: () => void; onEditing?: (on: boolean) => void }) {
+export function Schedules({ r, meta, owner, policies, maxRosters, others, onSaved, onEditing }: { r: RaidRule; meta?: Meta; owner: boolean; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; onSaved: () => void; onEditing?: (on: boolean) => void }) {
   const [edit, setEditState] = useState<Schedule | "new" | null>(null);
   const setEdit = (v: Schedule | "new" | null) => { if ((v === null) !== (edit === null)) onEditing?.(v !== null); setEditState(v); };
   const [ask, confirmDialog] = useConfirm();
@@ -55,7 +55,7 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
     try { await saveOps([{ kind: "schedule", target: `${r.id}:${s.id}`, fields: { active: !on } }], { ...raidRevs(r), title: `${on ? "Pause" : "Resume"} ${s.name}?` }); } catch (e) { fail(e); }
     onSaved();
   }
-  const editor = (s: Schedule | null) => <ScheduleEditor key={s ? s.id : "new"} r={r} meta={meta} s={s} policies={policies} maxRosters={maxRosters} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} onStale={onSaved} />;
+  const editor = (s: Schedule | null) => <ScheduleEditor key={s ? s.id : "new"} r={r} meta={meta} s={s} policies={policies} maxRosters={maxRosters} others={others} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} onStale={onSaved} />;
   return (
     <Box px="md" pb="md">
       <Group justify="space-between" mb={6} wrap="wrap">
@@ -103,7 +103,7 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
   );
 }
 
-type Draft = { name: string; kind: string; active: boolean; rosters: string; slots: string[]; days: string[]; time: string; cadence: Record<string, string>; weights: Record<string, string> };
+type Draft = { name: string; kind: string; active: boolean; rosters: string; slots: string[]; days: string[]; time: string; cadence: Record<string, string>; weights: Record<string, string>; follow_raid: string; follow_rosters: string };
 
 function toDraft(s: Schedule | null): Draft {
   const cadence: Record<string, string> = {};
@@ -111,7 +111,7 @@ function toDraft(s: Schedule | null): Draft {
   const weights: Record<string, string> = {};
   for (const [k, v] of Object.entries(s?.own_weights || {})) weights[k] = String(v);
   return { name: s?.name || "", kind: s?.kind || "weekly", active: s ? s.active : true, rosters: String(s?.rosters || 1), slots: s?.slots || [], days: (s?.days || []).map(String),
-    time: s?.time || "20:00", cadence, weights };
+    time: s?.time || "20:00", cadence, weights, follow_raid: s?.follow?.raid || "", follow_rosters: String(s?.follow?.rosters || 1) };
 }
 
 /** registry.ADHOC_DEFAULTS / ADHOC_WEIGHTS, for a NEW pickup's placeholders (an existing schedule reads them from the server). */
@@ -130,7 +130,7 @@ function slug(name: string, kind: string, taken: string[]): string {
  *  left empty follows the raid's. The timeline above the fields is the draft's week as it stands (what an empty field
  *  inherits included) and a preset lights up while the hours match it. One POST, one registry write: a refusal comes
  *  back as a toast and nothing is saved. */
-function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, onStale }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; onClose: () => void; onSaved: () => void; onStale?: () => void }) {
+function ScheduleEditor({ r, meta, s, policies, maxRosters, others, onClose, onSaved, onStale }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; onClose: () => void; onSaved: () => void; onStale?: () => void }) {
   const [d, setD] = useState<Draft>(() => toDraft(s));
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<OpsReply | null>(null);
@@ -169,6 +169,8 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
       for (const k of HOURS) f[k] = x.cadence[k] === undefined || x.cadence[k] === "" ? null : Number(x.cadence[k]);
       for (const k of BOOLS) f[k] = x.cadence[k] ? x.cadence[k] === "on" : null;
       f.split_policy = x.cadence.split_policy || null;
+      // the follow-on (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): another raid the same night from this signup
+      f.follow = x.follow_raid ? { raid: x.follow_raid, rosters: Number(x.follow_rosters) } : null;
       f.weights = Object.fromEntries(WEIGHTS.map((k) => [k, x.weights[k] === undefined || x.weights[k] === "" ? null : Number(x.weights[k])]));
       if (x.kind === "pickup") for (const k of ADHOC_HIDDEN) delete f[k];
       if (s?.is_default) delete f.kind;
@@ -228,6 +230,11 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
           <TextInput label="name" placeholder={d.kind === "pickup" ? "Pickup" : "Main night, Alt run…"} value={d.name} onChange={(e) => setD({ ...d, name: e.currentTarget.value })} maxLength={40} w={220} />
           <Select label="rosters per run" description={(s?.rosters_copy && s.rosters_copy[d.rosters]) || `the sheet advertises ${d.rosters} × ${r.size} seats`} data={Array.from({ length: maxRosters }, (_, i) => ({ value: String(i + 1), label: `${i + 1} roster${i ? "s" : ""}` }))}
             value={d.rosters} onChange={(v) => setD({ ...d, rosters: v || "1" })} allowDeselect={false} w={260} />
+          <Select label="then, the same night" description="a second raid from the same signup, starting when this one ends" w={260} allowDeselect={false}
+            value={d.follow_raid} onChange={(v) => setD({ ...d, follow_raid: v || "" })}
+            data={[{ value: "", label: "No follow-on" }, ...others.map((o) => ({ value: o.id, label: o.name }))]} />
+          {d.follow_raid && <Select label="its rosters" description="how many groups of that raid" w={130} allowDeselect={false} value={d.follow_rosters}
+            onChange={(v) => setD({ ...d, follow_rosters: v || "1" })} data={Array.from({ length: maxRosters }, (_x, i) => ({ value: String(i + 1), label: String(i + 1) }))} />}
           {!s && <Switch label="active" description="paused: nothing opens from it" checked={d.active} onChange={(e) => setD({ ...d, active: e.currentTarget.checked })} />}
           {s && <Text size="xs" c="dimmed" maw={200}>{s.active ? "Active — pause it from the schedule row." : "Paused — resume it from the schedule row."}</Text>}
         </Group>

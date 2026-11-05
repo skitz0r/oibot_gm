@@ -162,10 +162,24 @@ function SheetRow({ s, me, meta, ask, onDone }: { s: MySheet; me: Me; meta: Meta
       ok(x.message);
     } catch (e) { fail(e); } finally { setBusy(null); onDone(); }
   }
+  // a follow-on (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): leave after the lead, or take it back
+  async function leave() {
+    const r = await ask({ title: `Leaving after ${s.lead_raid}?`, message: s.leave_consequence || "", confirmLabel: "Leaving early", color: "red",
+      note: { label: "Note for the officers (optional — never on the public sheet)", maxLength: 300 } });
+    if (!r) return;
+    setBusy("leave");
+    try { const x = await api.post<{ message: string }>(`/api/me/run/${encodeURIComponent(s.key)}/out`, { note: typeof r === "object" ? r.note : "" }); ok(x.message); }
+    catch (e) { fail(e); } finally { setBusy(null); onDone(); }
+  }
+  async function stay() {
+    setBusy("stay");
+    try { const x = await api.post<{ message: string }>(`/api/me/run/${encodeURIComponent(s.key)}/stay`, {}); ok(x.message); }
+    catch (e) { fail(e); } finally { setBusy(null); onDone(); }
+  }
   return (
     <Stack gap={4} py={4} style={{ borderBottom: "1px solid var(--mantine-color-slate-6)" }}>
       <Group justify="space-between" wrap="nowrap">
-        <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}{s.kind === "adhoc" ? " · ad hoc" : ""}</Text><Text size="xs" c="dimmed">{s.when}{s.state_word ? ` · ${s.state_word}` : ""}{s.character ? ` · ${s.character}` : ""}{s.regular && !s.status ? " · you're a regular: answer it" : ""}</Text></Box>
+        <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}{s.then ? `, then ${s.then}` : ""}{s.lead_raid ? ` · after ${s.lead_raid}` : ""}{s.kind === "adhoc" ? " · ad hoc" : ""}</Text><Text size="xs" c="dimmed">{s.when}{s.state_word ? ` · ${s.state_word}` : ""}{s.character ? ` · ${s.character}` : ""}{s.regular && !s.status ? " · you're a regular: answer it" : ""}</Text></Box>
         {/* the badge's words are the server's (rc.answer_word): "not rostered" for a joiner the lock left out, never "Join" on a locked run */}
         <Badge variant="light" tt="none" color={s.rostered ? "teal" : s.state !== "open" && s.status === "in" ? "gray" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.badge || s.label || "not answered"}</Badge>
       </Group>
@@ -182,6 +196,8 @@ function SheetRow({ s, me, meta, ask, onDone }: { s: MySheet; me: Me; meta: Meta
         </Group>
       )}
       {s.may_cant && <Group gap={6}><Button size="compact-sm" variant="subtle" color="red" loading={busy === "cant"} disabled={busy !== null} onClick={cant}>Can't make it…</Button></Group>}
+      {s.may_leave && <Group gap={6}><Button size="compact-sm" variant="subtle" color="red" loading={busy === "leave"} disabled={busy !== null} onClick={leave}>Leaving after {s.lead_raid}…</Button></Group>}
+      {s.may_stay && <Group gap={6}><Button size="compact-sm" variant="subtle" color="teal" loading={busy === "stay"} disabled={busy !== null} onClick={stay}>I'm staying</Button></Group>}
       {s.receipt && s.status && <Text size="xs" c="dimmed">{s.receipt}</Text>}
     </Stack>
   );

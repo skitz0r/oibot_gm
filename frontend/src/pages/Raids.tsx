@@ -28,7 +28,7 @@ export function RaidsPage({ meta }: { meta: Meta }) {
   return (
     <Stack gap="lg">
       <PageTitle title="Raids" intro={`Each raid: when it runs, its rules — a run's week, the group make-up, who gets a seat — and its schedules. Amber marks a value changed from the game's default. Times in ${zone}.`} />
-      {data.raids.map((r) => <RuleCard key={r.id} r={r} meta={meta} slots={slots} owner={data.owner} weightKeys={data.weight_keys} policies={data.split_policies} maxRosters={data.max_rosters} onSaved={load} onEditing={onEditing} />)}
+      {data.raids.map((r) => <RuleCard key={r.id} r={r} meta={meta} slots={slots} owner={data.owner} weightKeys={data.weight_keys} policies={data.split_policies} maxRosters={data.max_rosters} others={data.raids.filter((x) => x.id !== r.id).map((x) => ({ id: x.id, name: x.name }))} onSaved={load} onEditing={onEditing} />)}
     </Stack>
   );
 }
@@ -56,7 +56,7 @@ type Mode = "rules" | "aims" | "schedule" | null;
 const HOURS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"] as const;
 const SWITCHES = ["nudge", "confirm", "autofill", "open_dm"] as const;
 
-function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onSaved, onEditing }: { r: RaidRule; meta: Meta; slots: CompSlot[] | null; owner: boolean; weightKeys: string[]; policies: string[]; maxRosters: number; onSaved: () => void; onEditing: (on: boolean) => void }) {
+function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, others, onSaved, onEditing }: { r: RaidRule; meta: Meta; slots: CompSlot[] | null; owner: boolean; weightKeys: string[]; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; onSaved: () => void; onEditing: (on: boolean) => void }) {
   const [mode, setModeState] = useState<Mode>(null);
   const editing = mode === "rules";
   const setMode = (m: Mode) => { if ((m !== null) !== (mode !== null)) onEditing(m !== null); setModeState(m); };
@@ -187,7 +187,7 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
           </Stack>
         )}
       </Box>
-      <Schedules r={r} meta={meta} owner={owner && (mode === null || mode === "schedule")} policies={policies} maxRosters={maxRosters} onSaved={onSaved} onEditing={childEditing("schedule")} />
+      <Schedules r={r} meta={meta} owner={owner && (mode === null || mode === "schedule")} policies={policies} maxRosters={maxRosters} others={others} onSaved={onSaved} onEditing={childEditing("schedule")} />
       {confirmDialog}
       {review}
     </Card>
