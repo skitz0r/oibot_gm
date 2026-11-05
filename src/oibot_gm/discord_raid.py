@@ -1158,7 +1158,10 @@ class RaidMixin:
     async def stay_for_follow(self, reg, rs, ev, m, by: str, by_id: int | None = None, via: str = "discord") -> str:
         """I'm staying: undo leaving early on a follow-on (rc.stay_for_follow). The site's Me row and plain text call it."""
         if not rc.stay_for_follow(reg, rs, ev, m):
-            raise RegistryError(f"{m.display_name} isn't marked as leaving after the first raid")
+            lead = rc.lead_name_of(reg, ev) or "the first raid"
+            if by_id is not None and int(by_id) == m.discord_id:  # their own press: second person
+                raise RegistryError(f"You're not marked as leaving after {lead}.")
+            raise RegistryError(f"{m.display_name} isn't marked as leaving after {lead}.")
         await self.refresh_cards(reg, ev)
         await self.post_run_update(reg, ev, f"↩ {m.display_name} is staying for {run_label(reg, ev)}")
         await ops_mod.audited(self.ops, reg, by, f"{m.display_name} is staying for {ev.key}", via=via, by_id=by_id)

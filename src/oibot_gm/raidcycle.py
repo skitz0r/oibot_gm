@@ -3695,6 +3695,9 @@ def _answer_state(reg: Registry, ev: RaidEvent, m: Member) -> str:
     dm = "you'd get a DM" if reachable(m) else "it would wait on your Me page"
     if ev.state in ("done", "cancelled"):
         return f"{run} is {ev.state}."
+    if ev.follows and m.discord_id in ev.leaving:  # leaving early (spec 2026-11-04-follow-on-runs): not a No thanks
+        name = reg.raid_def(ev.instance).get("name", ev.instance)
+        return f"You're leaving after {lead_name_of(reg, ev) or 'the first raid'}, so you're out of {name}."
     if s is None:
         return f"You haven't answered {run} yet."
     as_ = f"{s.character} ({s.spec})"

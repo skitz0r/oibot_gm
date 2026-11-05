@@ -608,10 +608,11 @@ def test_me_routes_leave_and_stay(reg, rs, monkeypatch):
     assert r.status_code == 400 and "Hyjal Summit sheet" in r.json()["error"]
     r = fc.post(f"/api/me/run/{fev.key}/out", json={"note": ""}, headers=h)
     assert r.status_code == 200, r.text
+    assert r.json()["message"] == "You're leaving after Hyjal Summit, so you're out of Barrow Deeps."
     assert m.discord_id in rs.events[fev.key].leaving
     assert rs.events[lead.key].signups[str(m.discord_id)].status == "in"  # the lead's answer stands
     r = fc.post(f"/api/me/run/{fev.key}/stay", json={}, headers=h)
     assert r.status_code == 200, r.text
     assert m.discord_id not in rs.events[fev.key].leaving
     again = fc.post(f"/api/me/run/{fev.key}/stay", json={}, headers=h)
-    assert again.status_code == 400 and again.json()["error"]
+    assert again.status_code == 400 and again.json()["error"] == "You're not marked as leaving after Hyjal Summit."
