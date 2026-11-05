@@ -497,3 +497,42 @@ def test_the_lock_lines_in_the_signup_channel_count_and_name_the_lead(reg, rs, m
     lead_line, follow_line = lines
     assert f"is locked: {len(rs.events[lead.key].seated())} rostered" in lead_line and "after" not in lead_line
     assert " · after Hyjal Summit is locked: " in follow_line and f"{len(rs.events[fev.key].seated())} rostered" in follow_line
+
+
+# ---------------------------------------------------------------- Task 6: plain text
+
+from oibot_gm import configops  # noqa: E402
+from oibot_gm.configops import ConfigOp  # noqa: E402
+
+
+def test_the_owners_sentence_as_ops(reg, rs):
+    """set up an ad hoc hyjal raid for 6:30 pst on Dec 10th with 10 man barrow deeps splits afterwards. also set up a
+    scheduled hyjal raid for 6:30 pst every tuesday beginning december 15 — as the parser's ops, described and applied."""
+    unlock_hyjal(reg)
+    day = (reg.now_local() + timedelta(days=6)).strftime("%Y-%m-%d")
+    ops = [ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="barrow_deeps x2"),
+           ConfigOp(op="schedule_set", target=LEAD, field="tue.slots", value="Tue 18:30"),
+           ConfigOp(op="schedule_set", target=LEAD, field="tue.first_open", value="2026-12-15 18:30")]
+    lines = [configops.describe(reg, o) for o in ops]
+    assert ", then Barrow Deeps ×2 at " in lines[0] and "PM" in lines[0]
+    assert "Hyjal Summit" in lines[1]
+    assert "follow" in configops.SCHEMA_TEXT and "x<N>" in configops.SCHEMA_TEXT
+    bad = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="hyjal_summit_forever x2")
+    assert "not the raid itself" in configops.describe(reg, bad)
+    assert configops.apply(reg, ops[1], by="t", is_owner=True)  # the schedule is created by its run times first
+    fw = ConfigOp(op="schedule_set", target=LEAD, field="tue.follow", value="barrow_deeps x2")
+    assert "no follow-on → then Barrow Deeps ×2" in configops.describe(reg, fw)
+    assert configops.apply(reg, fw, by="t", is_owner=True)
+    assert next(s for s in reg.schedules(LEAD) if s["id"] == "tue")["follow"] == {"raid": FOLLOW, "rosters": 2}
+    off = ConfigOp(op="schedule_set", target=LEAD, field="tue.follow", value="none")
+    assert "no follow-on" in configops.describe(reg, off)
+
+
+def test_run_open_applies_with_the_follow_on(reg, rs, monkeypatch):
+    unlock_hyjal(reg)
+    bot = NightBot(reg, rs)
+    day = (reg.now_local() + timedelta(days=6)).strftime("%Y-%m-%d")
+    op = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="barrow_deeps x2")
+    line = run(configops.apply_async(reg, op, by="Jon", is_owner=True, bot=bot))
+    lead = next(e for e in rs.live() if e.instance == LEAD)
+    assert lead.followed_by and rc.follow_of(rs, lead).instance == FOLLOW and lead.key in line

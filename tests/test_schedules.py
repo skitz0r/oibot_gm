@@ -346,7 +346,7 @@ class OpeningBot(FakeBot):
         super().__init__(reg, rs)
         self.opened = []
 
-    async def open_run_and_post(self, reg, rs, rid, start, by, schedule=None):
+    async def open_run_and_post(self, reg, rs, rid, start, by, schedule=None, follow=None):
         self.opened.append((rid, start, schedule))
         return rc.open_run(reg, rs, rid, start, by=by, schedule=schedule)
 
@@ -412,7 +412,7 @@ def test_mcp_schedule_tools_call_the_routes():
     posts = [(p, b) for m, p, b in seen if m == "POST"]
     assert posts[0] == ("/api/ops/change", {"changes": [{"kind": "schedule", "target": f"{RID}:alt", "fields": {"lock_hours_before": "12"}}], "apply": True, "confirmed": True})
     assert posts[1] == ("/api/ops/change", {"changes": [{"kind": "schedule_remove", "target": f"{RID}:alt"}], "apply": True, "confirmed": True})
-    assert posts[2] == (f"/api/raid/{RID}/open", {"when": "", "schedule": "alt"})
+    assert posts[2] == (f"/api/raid/{RID}/open", {"when": "", "schedule": "alt", "follow": ""})
 
 
 def test_help_schedule_lists_the_real_upcoming_runs_per_schedule(reg):
@@ -438,7 +438,7 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
     from oibot_gm.wizard import FLOWS
 
     class Bot(tfr.FakeBot):
-        async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None):
+        async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None):
             self.calls.append(("open_run_and_post", instance, start, schedule))
             return rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
 

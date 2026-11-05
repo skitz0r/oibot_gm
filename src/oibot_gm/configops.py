@@ -132,7 +132,9 @@ Schedules (owner): WHEN a raid runs. Each raid has schedules (ids under "A run's
   which must say what it is: <id>.slots (weekly: comma list of 'Sat 20:00' run times), <id>.lockout (value "<days> at <HH:MM>",
   e.g. "1, 3 at 20:00" = days 1 and 3 of every lockout; day 1 = the reset day) or <id>.kind=pickup (a template officers open on demand).
   Other settings: name (e.g. "Alt run") | active (true|false: false = paused, opens nothing) | rosters (1-4: rosters the run expects;
-  the sheet advertises size × this) | slots | lockout | signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before
+  the sheet advertises size × this) | follow ("<raid id> x<N>": a second raid the same night from the same signup, starting when the
+  first ends — "barrow_deeps x2" = two 10-man Barrow Deeps groups; "none" clears it) | slots | lockout | signup_lead_hours
+  | nudge_hours_before | lock_hours_before | confirm_hours_before
   | fill_ask_hours | nudge | autofill | open_dm | split_policy — a timing setting (a run's week) given value "inherit" goes back to the raid's.
   Several schedule_set ops on one schedule in a row are saved together.
   schedule_remove: target=<raid id>, field=<schedule id> (removing `default` clears the raid's weekly slots).
@@ -144,7 +146,9 @@ Auras (owner): aura_set: what the guild learns about a buff. target=<buff id, e.
 Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, or the raid id when only one of its runs is live):
   run_open: target=<raid id>, value=<optional "YYYY-MM-DD HH:MM" in guild time — one of the raid's upcoming runs listed below, or any
     other time for a one-off; a bare "HH:MM" = the next listed run at that time; blank = the raid's next run>, field=<optional schedule id:
-    its next run, or with a time its settings (a pickup template needs the time)> — opens the sheet now and posts it in the signup channel.
+    its next run, or with a time its settings (a pickup template needs the time)>, text=<optional follow-on "<raid id> x<N>" — a second
+    raid the same night from the same signup, starting when the first ends ("10 man barrow deeps splits afterwards" = "barrow_deeps x2")>
+    — opens the sheet now and posts it in the signup channel.
   run_answer: target, member, value=join|bench|no thanks, character=<optional: which of their characters>, reason=<optional, with
     no thanks: why, a note only the officers see> — an officer sets someone's answer, or someone answers for themselves
     (after lock: join seats them and asks them to confirm, no thanks frees their seat and the fill engine looks for cover).
@@ -244,7 +248,7 @@ class ConfigOp(BaseModel):
     end: Optional[str] = None
     reason: Optional[str] = Field(default=None, description="a note: run_cancel why, run_answer no thanks why (officers only), comp_target justification, application/proposal note, recruit hint; loot award/reason/correct/retire: the reason (required); wishlist: a note")
     doc: Optional[str] = Field(default=None, description="policy_append: loot|comp; policy: loot|comp|persona")
-    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional; loot tick: the boss; loot retire: restore; wishlist: ms|os; tier: reweight")
+    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional; loot tick: the boss; loot retire: restore; wishlist: ms|os; tier: reweight; run_open: the follow-on '<raid id> x<N>'")
 
 
 class ConfigRequest(BaseModel):
@@ -805,6 +809,21 @@ def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None 
     return start, sid
 
 
+def follow_of_op(reg: Registry, rid: str, text: str | None) -> dict | None:
+    """run_open's follow-on from its `text` ('barrow_deeps x2'): parsed in code (registry.parse_follow), the raid checked
+    (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md)."""
+    from .registry import parse_follow
+
+    fw = parse_follow(text)
+    if fw is None:
+        return None
+    if fw["raid"] not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {fw['raid']} for the follow-on (one of {', '.join(reg.profile.raids)})")
+    if fw["raid"] == rid:
+        raise RegistryError("a follow-on is another raid, not the raid itself")
+    return fw
+
+
 def _schedule_ref(op: ConfigOp) -> tuple[str, str]:
     """schedule_set's field '<schedule id>.<setting>' → (id, setting)."""
     sid, _, setting = (op.field or "").strip().partition(".")
@@ -820,7 +839,7 @@ def _schedule_fields(setting: str, value: str | None) -> dict:
         if not sep:
             raise RegistryError('lockout is "<days> at <time>", e.g. "1, 3 at 20:00"')
         return {"kind": "lockout", "days": days, "time": at.strip()}
-    return {setting: _typed(value) if setting == "weights" else value}
+    return {setting: _typed(value) if setting in ("weights", "follow") else value}
 
 
 def _typed(value):
@@ -862,6 +881,9 @@ def _schedule_words(reg: Registry, rid: str, fields: dict) -> str:
             out.append(f"{n} roster{'s' if n != 1 else ''}")
         elif f == "active":
             out.append("active" if schedule_value(f, v) else "paused")
+        elif f == "follow":  # the text 'barrow_deeps x2' or the site's {raid, rosters}
+            fw = schedule_value(f, v)
+            out.append(f"then {reg.follow_words(fw)}" if fw else "no follow-on")
         else:
             out.append(f"{f} “{v}”")
     return ", ".join(out)
@@ -2288,7 +2310,7 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
     if cur is None:
         return f"{name}: new schedule {sid} — {new}{after}"
     own = reg.schedule_def(rid, sid)["schedule"]["own"]
-    now = {f: (own.get(f) if f in own else "inherit") if f not in ("kind", "slots", "days", "time", "rosters", "active", "name") else cur.get(f) for f in fields}
+    now = {f: (own.get(f) if f in own else "inherit") if f not in ("kind", "slots", "days", "time", "rosters", "active", "name", "follow") else cur.get(f) for f in fields}
     if "rosters" in fields and not after:  # the rosters-per-run sentence (rc.rosters_copy): the next run, never the open one
         from . import raidcycle as rc
         from .registry import schedule_value
@@ -2297,7 +2319,8 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
             after = " — " + rc.rosters_copy(reg, rid, sid, int(schedule_value("rosters", fields["rosters"]) or 1))
         except (RegistryError, TypeError, ValueError):
             pass
-    return f"{name} · {cur['name']}: {_schedule_words(reg, rid, {k: v for k, v in now.items() if v is not None}) or 'not set'} → {new}{after}"
+    was = {k: v for k, v in now.items() if v is not None or k == "follow"}  # no follow-on yet reads "no follow-on"
+    return f"{name} · {cur['name']}: {_schedule_words(reg, rid, was) or 'not set'} → {new}{after}"
 
 
 def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int | None = None) -> str:
@@ -2314,9 +2337,11 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         have = rs.events.get(key)
         where = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "nowhere (no signup channel set — /raid sheet can place it)"
         sname = next((f" · {s['name']}" for s in reg.schedules(rid) if s["id"] == sid and sid != "default"), "")
+        fw = follow_of_op(reg, rid, op.text)
+        then = f", then {reg.follow_words(fw)} at {reg.local12(rc.follow_start(reg, rid, start))}" if fw else ""
         if have and have.state in ("open", "locked"):
-            return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}: already {have.state} as {have.key} — nothing new is posted"
-        return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)} now ({key}): sheet posted in {where}, absences pre-filled"
+            return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then}: already {have.state} as {have.key} — nothing new is posted"
+        return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then} now ({key}): sheet posted in {where}, absences pre-filled"
     if op.op == "test":
         kind, arg = _test_op(op.value)
         n = len(reg.test_members())
@@ -3133,7 +3158,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_open":
         rid = op.target or ""
         start, sid = _open_time(reg, rid, op.value, op.field)
-        ev = await bot.open_run_and_post(reg, rs, rid, start, by, **rc.schedule_kw(sid))
+        ev = await bot.open_run_and_post(reg, rs, rid, start, by, follow=follow_of_op(reg, rid, op.text), **rc.schedule_kw(sid))
         return f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted; /raid sheet places it)")
     if op.op == "absence_clear":  # THE "I'm back" verb (discord_people.im_back): the absence goes, its sheets re-open
         from . import discord_people

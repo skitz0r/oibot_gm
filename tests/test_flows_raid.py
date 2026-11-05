@@ -71,7 +71,7 @@ class FakeBot(LootMixin):
     async def _emit(self, cfg, level, text, *a):
         self.calls.append(("emit", level, text))
 
-    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None):
+    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None):
         ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
         self.calls.append(("open_run_and_post", instance, start, by) + ((schedule,) if schedule else ()))
         return ev

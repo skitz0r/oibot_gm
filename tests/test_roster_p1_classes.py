@@ -177,7 +177,7 @@ def test_plain_text_and_mcp_open_paths(reg, rs):
         ms.open_run(RID, when="2030-01-08 19:30")
     finally:
         ms.use(None)
-    assert seen[-1] == (f"/api/raid/{RID}/open", {"when": "2030-01-08 19:30", "schedule": ""}), "MCP opens through the site's route"
+    assert seen[-1] == (f"/api/raid/{RID}/open", {"when": "2030-01-08 19:30", "schedule": "", "follow": ""}), "MCP opens through the site's route"
 
 
 # ---------------------------------------------------------------- ad hoc behaviour

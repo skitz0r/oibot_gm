@@ -417,7 +417,7 @@ def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypat
     monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
 
     class Bot(FakeBot):
-        async def open_run_and_post(self, reg_, rs_, instance, start, by, schedule=None):
+        async def open_run_and_post(self, reg_, rs_, instance, start, by, schedule=None, follow=None):
             return rc.open_run(reg_, rs_, instance, start, by=by, schedule=schedule)
     c = TestClient(web.create_app(Bot(reg, rs)))
     alt_schedule(reg)

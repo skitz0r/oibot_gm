@@ -457,14 +457,15 @@ def ops_log(limit: int = 40, precedents_limit: int = 10, ledger_limit: int = 10,
 # ---------------------------------------------------------------- writes: runs
 
 @mcp.tool()
-def open_run(raid: str, when: str | None = None, schedule: str | None = None, guild: Guild = None) -> str:
+def open_run(raid: str, when: str | None = None, schedule: str | None = None, follow: str | None = None, guild: Guild = None) -> str:
     """Open a signup sheet now for `raid` (id or name): its next scheduled run, or a start `when` as 'YYYY-MM-DD
     HH:MM' in guild time — one of its upcoming runs at that exact time opens as that run, any other time is a one-off
     AD HOC run (first come, no regulars, no reminder, no confirmations, locks 2 h before). `schedule` (an id from
     get_raid's schedules) picks that schedule's next run, or with `when` its settings — a pickup template (ad hoc)
-    always needs `when`. Posts the sheet in the signup channel (and DMs members if the schedule says so)."""
+    always needs `when`. `follow` ('<raid id> x<N>', e.g. 'barrow_deeps x2'): a second raid the same night from the same
+    signup, starting when the first ends. Posts the sheet in the signup channel (and DMs members if the schedule says so)."""
     rid = get_raid(raid, guild)["id"]
-    return msg(api(guild).post(f"/api/raid/{rid}/open", {"when": when or "", "schedule": schedule or ""}))
+    return msg(api(guild).post(f"/api/raid/{rid}/open", {"when": when or "", "schedule": schedule or "", "follow": follow or ""}))
 
 
 @mcp.tool()
@@ -669,7 +670,8 @@ def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any 
     list ['Sat 20:00', 'Sun 20:00']) | days (a list [1, 3] = days of each lockout, 1 = reset day) | time ('20:00') |
     signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge | autofill |
     open_dm | confirm (bools) | split_policy | weights (the schedule's own seat weights {rank, main, sat_out,
-    signup_order, regular}; a key set to null follows the raid). A cadence field set to null goes back to the raid's
+    signup_order, regular}; a key set to null follows the raid) | follow ('<raid id> x<N>' or null: a second raid the
+    same night from the same signup, starting when the first ends). A cadence field set to null goes back to the raid's
     value. A new schedule starts with its kind, slots, or days/time. `preview=True`: what would change, nothing saved."""
     rid = get_raid(raid, guild)["id"]
     want = {str(k).strip(): v for k, v in (fields or {}).items()}

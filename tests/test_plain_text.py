@@ -82,7 +82,7 @@ class FakeBot:
         self.calls.append(("absence_cleared", m.display_name, a.start, by))
         return ["sheet re-opened"]
 
-    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None):
+    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None):
         self.calls.append(("open_run_and_post", instance, start.isoformat(), by) + ((schedule,) if schedule else ()))
         return rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
 
