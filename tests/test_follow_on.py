@@ -51,3 +51,94 @@ def test_schedule_follow_is_validated_and_read_back(reg):
     assert next(x for x in reg.schedules(LEAD) if x["id"] == "tue")["follow"] is None
     with pytest.raises(RegistryError, match="kept for follow-on"):
         reg.set_schedule(LEAD, "after", {"slots": "Tue 18:30"}, "t")
+
+
+# ---------------------------------------------------------------- Task 2: the pair of runs
+
+def open_pair(reg, rs, days: float = 3):
+    unlock_hyjal(reg)
+    start = (reg.now_local() + timedelta(days=days)).replace(hour=18, minute=30, second=0, microsecond=0)
+    lead = rc.open_run(reg, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 2})
+    return lead, rc.follow_of(rs, lead)
+
+
+def test_open_pair_opens_two_runs_with_one_signup(reg, rs):
+    lead, fev = open_pair(reg, rs)
+    assert fev is not None and fev.follows == lead.key and lead.followed_by == fev.key
+    assert fev.instance == FOLLOW and "-after-" in fev.key  # 'bd-MMDD-HHMM-after-YYYY-MM-DD'
+    assert fev.start == lead.start + timedelta(hours=3)  # Hyjal lasts 3 h
+    t, ft = reg.config.roster(lead.team), reg.config.roster(fev.team)
+    assert t["follow"] == {"raid": FOLLOW, "rosters": 2} and t["followed_by"] == ft["key"] and ft["follows"] == t["key"]
+    assert ft["rosters"] == 2 and ft["size"] == 10 and ft["confirm"] is False and ft["kind"] == t["kind"] and ft["series"] is None
+    assert ft["cutoff_hard_hours"] == t["cutoff_hard_hours"] + 3  # the same instant as the lead's lock
+    assert fev.message_id is None and fev.signups == {}  # no sheet, no answers of its own yet
+    assert rc.run_rosters(reg, fev) == 2 and rc.run_confirms(reg, fev) is False
+
+
+def test_open_pair_is_idempotent(reg, rs):
+    lead, fev = open_pair(reg, rs)
+    again = rc.open_run(reg, rs, LEAD, lead.start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 2})
+    assert again is lead and rc.follow_of(rs, again) is fev
+    assert sum(1 for t in reg.config.rosters if t.get("follows") or t.get("followed_by")) == 2
+
+
+def test_a_schedule_with_a_follow_on_opens_the_pair_on_its_own(reg, rs):
+    unlock_hyjal(reg)
+    reg.set_schedule(LEAD, "tue", {"slots": "Tue 18:30", "follow": "barrow_deeps x2"}, "t")
+    now = reg.now_local()
+    t = next(t for s, t in rc.upcoming(reg, LEAD, now, 24 * 21) if s["id"] == "tue" and t - now >= timedelta(hours=30))
+    lead = rc.open_run(reg, rs, LEAD, t, by="scheduler", schedule="tue")  # no explicit follow: the schedule's
+    fev = rc.follow_of(rs, lead)
+    assert fev is not None and fev.instance == FOLLOW and rc.run_rosters(reg, fev) == 2
+
+
+def test_answers_materialise_on_the_follow_on(reg, rs):
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms[:3])
+    join(reg, rs, lead, ms[3:4], "sub")
+    join(reg, rs, lead, ms[4:5], "out")
+    fev = rs.events[fev.key]
+    assert {k: v.status for k, v in fev.signups.items()} == {str(m.discord_id): st for m, st in zip(ms[:5], ["in"] * 3 + ["sub", "out"])}
+    assert fev.signups[str(ms[0].discord_id)].character == lead.signups[str(ms[0].discord_id)].character
+    rc.set_signup(reg, rs, lead, ms[0], None, "out", source="test")
+    assert rs.events[fev.key].signups[str(ms[0].discord_id)].status == "out"
+    with pytest.raises(RegistryError, match="Hyjal Summit sheet"):
+        rc.set_signup(reg, rs, fev, ms[1], None, "sub", source="test")
+
+
+def test_sync_runs_once_and_never_back(reg, rs, monkeypatch):
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    saves = []
+    orig = rc.RaidStore.save
+
+    def spy(self, ev, message):
+        saves.append((ev.key, message))
+        return orig(self, ev, message)
+
+    monkeypatch.setattr(rc.RaidStore, "save", spy)
+    join(reg, rs, lead, reg.test_members()[:1])
+    assert [k for k, _m in saves] == [lead.key, fev.key]  # the lead, then its follow-on once — nothing back
+    saves.clear()
+    join(reg, rs, lead, reg.test_members()[:1])  # the same answer again: the follow-on is unchanged, no save
+    assert [k for k, _m in saves] == [lead.key]
+
+
+def test_conflicts_exempt_the_pair_and_absences_skip_the_follow_on(reg, rs):
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms[:2])
+    assert rc.conflicts(rs, fev) == {} and rc.conflicts(rs, lead) == {}
+    day = lead.start.astimezone(reg.tz).date().isoformat()
+    assert [ev.key for ev in rc.runs_in_span(reg, rs, day, day)] == [lead.key]  # an absence touches the lead; the follow-on follows it
+
+
+def test_the_pair_finds_each_others_dicts(reg, rs):
+    lead, fev = open_pair(reg, rs)
+    assert rc.is_follow(fev) and not rc.is_follow(lead)
+    assert rc.lead_of(rs, fev) is lead and rc.lead_of(rs, lead) is None and rc.follow_of(rs, fev) is None
+    assert rc.lead_dict(reg, fev)["key"] == lead.team and rc.follow_dict(reg, lead)["key"] == fev.team
+    assert rc.lead_dict(reg, lead) is None and rc.follow_dict(reg, fev) is None

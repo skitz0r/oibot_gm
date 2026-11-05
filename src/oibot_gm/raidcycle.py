@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
+from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, FOLLOW_SCHEDULE, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
                        RegisteredCharacter, RegistryError, can_cover, now, schedule_class, series_key)
 from .roster import explain, solver
 from .store import GitStore
@@ -45,6 +45,10 @@ PIN_WORDS = {"in": "pinned: the lock keeps them where you put them", "out": "kep
 LEFTOVERS = "Leftovers"
 # a machine code, never shown: a run that sends no reminders (`reminders`), an ad hoc run that expects nobody (`expected_from`)
 OFF = "none"
+# follow-on runs (spec 2026-11-04-follow-on-runs): a second raid the same night from the lead's signup
+LEAVING_NOTE = "leaving after the first raid"  # the follow-on's out row for someone who stays for the lead only
+FOLLOW_ANSWER_REFUSAL = "Answer on the {lead} sheet. It covers the whole night."
+LEAD_SEAT_BONUS = 1000  # a follow-on's solve: the lead's rostered beat every seat weight combined, so the splits are the lead's roster split
 # a member's own Join / Bench after lock: the sheet's SignupButton and plain text (configops.authorize) refuse it in these words
 LOCKED_JOIN = "The roster is locked — answer your confirmation DM, or press Can't make it on the sheet."
 STATES = ("open", "locked", "done", "cancelled")
@@ -198,6 +202,12 @@ class RaidEvent(BaseModel):
     reminded_by: Optional[str] = None
     closed_at: Optional[str] = None  # when it became done / cancelled (cleanup_ephemeral's grace, reopen's window)
     prev_state: Optional[str] = None  # the state before done / cancelled (reopen_run restores it)
+    # a follow-on (spec 2026-11-04-follow-on-runs): a second raid the same night from the same signup. `follows` = the lead run's key (on the
+    # follow-on), `followed_by` = the follow-on's key (on the lead). The follow-on's signups are materialised from the
+    # lead's (rc.sync_follow) and never answered directly; `leaving` = the discord ids out of the follow-on alone
+    follows: Optional[str] = None
+    followed_by: Optional[str] = None
+    leaving: list[int] = Field(default_factory=list)
     last_proposal: Optional[dict] = None  # the last lock preview / split shown on any surface: {layout, strategy, rev, by, by_id, at, kind} — the same officer's plain-text "use it" falls back to it (configops._propose)
     log: list[str] = Field(default_factory=list)
     log_at: Optional[list[str]] = None  # ISO stamp per log line (RaidStore.save stamps new lines; "" = from before stamps were kept)
@@ -313,6 +323,38 @@ def run_size(reg: Registry, ev: "RaidEvent") -> int:
 def run_close_at(reg: Registry, ev: "RaidEvent") -> datetime:
     """When the scheduler marks a locked run done: start + the raid's duration + CLOSE_AFTER_HOURS."""
     return ev.start + timedelta(hours=float(reg.raid_def(ev.instance).get("duration_hours") or RAID_DEFAULTS["duration_hours"]) + CLOSE_AFTER_HOURS)
+
+
+def follow_start(reg: Registry, instance: str, start: datetime) -> datetime:
+    """When a follow-on starts: the lead's start plus the lead raid's length (spec 2026-11-04-follow-on-runs)."""
+    return start + timedelta(hours=float(reg.raid_def(instance).get("duration_hours") or RAID_DEFAULTS["duration_hours"]))
+
+
+def is_follow(ev: "RaidEvent") -> bool:
+    return bool(ev.follows)
+
+
+def lead_of(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent | None":
+    """The lead run of a follow-on (its answers are the lead's), else None."""
+    return rs.events.get(ev.follows) if ev.follows else None
+
+
+def follow_of(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent | None":
+    """The follow-on run of a lead, else None."""
+    return rs.events.get(ev.followed_by) if ev.followed_by else None
+
+
+def lead_dict(reg: Registry, ev: "RaidEvent") -> dict | None:
+    """The lead's run dict for a follow-on (no store needed: the sheet, the cards and the confirms read it). The
+    events carry run (event) keys; the dicts are found through the run's own dict, whose `follows` is a roster key."""
+    t = reg.config.team(ev.team) if ev.follows else None
+    return reg.config.team(t["follows"]) if t and t.get("follows") else None
+
+
+def follow_dict(reg: Registry, ev: "RaidEvent") -> dict | None:
+    """The follow-on's run dict for a lead, else None."""
+    t = reg.config.team(ev.team) if ev.followed_by else None
+    return reg.config.team(t["followed_by"]) if t and t.get("followed_by") else None
 
 
 def abbr(instance: str) -> str:
@@ -510,13 +552,16 @@ def fit_cutoffs(available_h: float, nudge_h: float, lock_h: float, confirm_h: fl
     return (min(nudge_h, available_h * FIT_NUDGE), min(lock_h, available_h * FIT_LOCK), min(confirm_h, available_h * FIT_CONFIRM))
 
 
-def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None) -> dict:
+def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None,
+               follow: dict | None = None) -> dict:
     """The ephemeral roster that carries one run's settings (size, cutoffs from its schedule's cadence, how many rosters
     it expects); created once. `schedule` = the schedule id it comes from (None: the raid's own cadence).
     `cutoffs` = {soft, hard, confirm} in hours to override the cadence (test runs compress it to minutes) — and makes
     it a TEST run: its key is in the '-test' key space (TEST_SCHEDULE), and an existing roster whose test flag differs
     from what is asked is refused (a rehearsal never takes over a real run's roster, nor a real run a rehearsal's).
-    `cutoffs["test_channel"]`: where the command was used — the test run's cards post there (D20)."""
+    `cutoffs["test_channel"]`: where the command was used — the test run's cards post there (D20).
+    `follow` ({raid, rosters}; None = the schedule's own) also creates the follow-on's dict (spec 2026-11-04-follow-on-runs): the lead's dict
+    gains `follow` and `followed_by`, the follow-on's carries `follows`; both are saved in the one config write."""
     test = bool(cutoffs)
     key = run_key(instance, start, schedule, test=test)
     t = reg.config.roster(key)
@@ -557,6 +602,27 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         t["test_by"] = c.get("test_by")
         if c.get("test_channel"):
             t["test_channel"] = int(c["test_channel"])  # the asking channel: the run's officer cards post there (D20)
+    fw = follow if follow is not None else (sched.get("follow") or None)
+    if fw and not cutoffs:  # a follow-on (spec 2026-11-04-follow-on-runs): the second run's dict, keyed in the reserved 'after' space
+        if fw["raid"] not in reg.profile.raids or fw["raid"] == instance:
+            raise RegistryError(f"a follow-on is another raid of the profile (one of {', '.join(reg.profile.raids)})")
+        dur = float(rd.get("duration_hours") or RAID_DEFAULTS["duration_hours"])
+        fstart = follow_start(reg, instance, start)
+        fkey = run_key(fw["raid"], fstart, FOLLOW_SCHEDULE)
+        frd = reg.raid_def(fw["raid"])
+        ft = {**t, "key": fkey, "instance": fw["raid"], "size": int(frd.get("size") or DEFAULT_RAID_SIZE),
+              "name": f"{frd.get('name', fw['raid'])} · after {rd.get('name', instance)} {reg.local12(start)}",
+              "schedule": fstart.strftime("%a %H:%M"), "schedule_id": FOLLOW_SCHEDULE, "series": None, "confirm": False,
+              "rosters": int(fw.get("rosters") or 1), "follows": key, "reminders": OFF, "open_dm": False,
+              # its lock, nudge and confirm fall at the same instants as the lead's (its start is `dur` later)
+              "cutoff_soft_hours": t["cutoff_soft_hours"] + dur, "cutoff_hard_hours": t["cutoff_hard_hours"] + dur, "confirm_hours": t["confirm_hours"] + dur,
+              "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced"}
+        for k in ("follow", "followed_by", "message_id", "channel_id", "thread_id"):  # never the lead's sheet nor its pairing
+            ft.pop(k, None)
+        if reg.config.roster(fkey) is None:
+            reg.config.rosters.append(ft)
+        t["follow"] = {"raid": fw["raid"], "rosters": int(fw.get("rosters") or 1)}
+        t["followed_by"] = fkey
     reg.config.rosters.append(t)
     reg.save_config(f"run {key} ({t['name']}) created by {by}", notify=False)
     return t
@@ -575,13 +641,27 @@ def closed_run_refusal(rs: "RaidStore", key: str) -> str | None:
             "Otherwise pick another time.")
 
 
-def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None) -> "RaidEvent":
+def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None,
+             schedule: str | None = None, follow: dict | None = None) -> "RaidEvent":
     """Open (or find the live) run for `instance` at `start`. RegistryError when that time's run is closed
-    (closed_run_refusal) — checked before ensure_run, so a refused open re-creates no roster entry."""
+    (closed_run_refusal) — checked before ensure_run, so a refused open re-creates no roster entry. `follow`
+    ({raid, rosters}, or the schedule's own) opens the follow-on run with it (spec 2026-11-04-follow-on-runs): no sheet, its answers the lead's."""
     why = closed_run_refusal(rs, event_key(instance, start, schedule, test=bool(cutoffs)))
     if why:
         raise RegistryError(why)
-    return open_event(reg, rs, ensure_run(reg, instance, start, by, cutoffs, schedule), start)
+    t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow)
+    ev = open_event(reg, rs, t, start)
+    if t.get("followed_by") and not ev.followed_by:
+        ft = reg.config.roster(t["followed_by"]) or {}
+        fstart = follow_start(reg, instance, start)
+        why = closed_run_refusal(rs, f"{ft['key']}-{fstart.date().isoformat()}")
+        if why:
+            raise RegistryError(why)
+        fev = open_event(reg, rs, ft, fstart)
+        ev.followed_by = fev.key
+        ev.log.append(f"then {reg.raid_def(fev.instance).get('name', fev.instance)} ×{int(ft.get('rosters') or 1)} at {reg.local12(fstart)} from this signup")
+        rs.save(ev, "follow-on opened")  # the save syncs the follow-on's answers
+    return ev
 
 
 def forget_test_members(reg: Registry, rs: "RaidStore", uids: list[int], by: str) -> list["RaidEvent"]:
@@ -794,6 +874,8 @@ class RaidStore:
                 fn(self.key, ev.key)
             except Exception:  # noqa: BLE001 — a listener must never break a save
                 log.exception("run listener failed")
+        if ev.followed_by:  # a lead: its follow-on's answers follow (never the other way round)
+            sync_follow(self, ev)
 
     def live(self) -> list[RaidEvent]:
         return sorted([e for e in self.events.values() if e.state not in ("done", "cancelled")], key=lambda e: e.starts_at)
@@ -829,10 +911,22 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
             raise RegistryError(why)
         return ev
     sid = team.get("schedule_id")
+    follows = None
+    if team.get("follows"):  # the dict names the lead's ROSTER key; the event carries the lead RUN's key
+        lead = rs.for_team(team["follows"])
+        if lead is None:  # not live (an old pair): the lead started the raid's length before
+            inst = (reg.config.roster(team["follows"]) or {}).get("instance")
+            lstart = starts_at - (follow_start(reg, inst, starts_at) - starts_at) if inst else starts_at
+            follows = f"{team['follows']}-{lstart.date().isoformat()}"
+        else:
+            follows = lead.key
     ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=None if sid in (None, DEFAULT_SCHEDULE) else sid,
-                   series=team.get("series"), kind=team.get("kind"), test=bool(team.get("test")), starts_at=starts_at.isoformat())
-    prefill(reg, ev, team)
-    ev.log.append(f"opened ({run_kind(reg, ev)}); {len(ev.signups)} marked away from absences")
+                   series=team.get("series"), kind=team.get("kind"), test=bool(team.get("test")), starts_at=starts_at.isoformat(),
+                   follows=follows)
+    if not ev.follows:  # a follow-on's answers come from its lead (sync_follow), absences included
+        prefill(reg, ev, team)
+    ev.log.append(f"opened ({run_kind(reg, ev)}); {len(ev.signups)} marked away from absences" if not ev.follows
+                  else "opened as a follow-on: its answers are the lead's")
     rs.save(ev, "opened")
     return ev
 
@@ -847,6 +941,27 @@ def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
         if m.absent_on(day):
             ev.signups[str(m.discord_id)] = _signup(reg, m, c, "out", "absence")
     ev.regulars = [m.discord_id for m, _ in reg.regulars(ev.series)] if ev.series and not ev.test else []
+
+
+def sync_follow(rs: "RaidStore", lead: RaidEvent) -> bool:
+    """The follow-on's signups ARE the lead's (spec 2026-11-04-follow-on-runs): copied from the lead every time the lead is saved, the
+    members leaving after the lead as out (source callout, LEAVING_NOTE). Pins, the board and the rosters are the
+    follow-on's own. Saves the follow-on only when something changed; returns whether it did."""
+    fev = follow_of(rs, lead)
+    if fev is None or fev.state in ("done", "cancelled"):
+        return False
+    want: dict[str, Signup] = {}
+    for uid, s in lead.signups.items():
+        c = s.model_copy()
+        if s.discord_id in fev.leaving and c.status != "out":
+            c.status, c.source, c.note, c.joined_at = "out", "callout", LEAVING_NOTE, None
+        want[uid] = c
+    # the same answer pressed again only moves the lead's updated_at (the last touch): not a change to the follow-on
+    if {k: v.model_dump(exclude={"updated_at"}) for k, v in want.items()} == {k: v.model_dump(exclude={"updated_at"}) for k, v in fev.signups.items()}:
+        return False
+    fev.signups = want
+    rs.save(fev, "answers follow the lead")
+    return True
 
 
 # ---------------------------------------------------------------- who a run is for (roster redesign Phase 1)
@@ -996,6 +1111,9 @@ def carry_joined(old: Signup | None, s: Signup) -> Signup:
 
 
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None) -> Signup:
+    if ev.follows:  # D1: one Join for the night — the follow-on is never answered on its own
+        lead = rs.events.get(ev.follows)
+        raise RegistryError(FOLLOW_ANSWER_REFUSAL.format(lead=reg.raid_def(lead.instance if lead else None).get("name", "first raid")))
     if status not in STATUSES:
         raise ValueError(f"status must be one of {STATUSES}")
     want = (character or "").strip().lower()
@@ -1047,7 +1165,8 @@ def pin_summary(ev: RaidEvent) -> str:
 
 def runs_in_span(reg: Registry, rs: RaidStore, start: str, end: str) -> list[RaidEvent]:
     """The live runs whose day (guild time) falls inside an absence's ISO days: the sheets it touches."""
-    return [ev for ev in rs.live() if start <= ev.start.astimezone(reg.tz).date().isoformat() <= end]
+    # a follow-on is never touched directly: the absence marks its lead and the follow-on's answers follow it
+    return [ev for ev in rs.live() if not ev.follows and start <= ev.start.astimezone(reg.tz).date().isoformat() <= end]
 
 
 def absence_effects(reg: Registry, rs: RaidStore, m: Member | None, start: str, end: str) -> list[tuple[RaidEvent, str]]:
@@ -1091,6 +1210,8 @@ def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = CONFLICT_WINDO
     out: dict[int, str] = {}
     for other in rs.live():
         if other.key == ev.key:
+            continue
+        if other.key in (ev.follows, ev.followed_by):  # a run and its follow-on share their people (spec 2026-11-04-follow-on-runs)
             continue
         if abs((other.start - ev.start).total_seconds()) > window_hours * 3600:
             continue
