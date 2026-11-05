@@ -45,7 +45,7 @@ PIN_WORDS = {"in": "pinned: the lock keeps them where you put them", "out": "kep
 LEFTOVERS = "Leftovers"
 # a machine code, never shown: a run that sends no reminders (`reminders`), an ad hoc run that expects nobody (`expected_from`)
 OFF = "none"
-# follow-on runs (spec 2026-11-04-follow-on-runs): a second raid the same night from the lead's signup
+# follow-on runs (design §5.62): a second raid the same night from the lead's signup
 LEAVING_NOTE = "leaving after the first raid"  # the follow-on's out row for someone who stays for the lead only
 FOLLOW_ANSWER_REFUSAL = "Answer on the {lead} sheet. It covers the whole night."
 LEAD_SEAT_BONUS = 1000  # a follow-on's solve: the lead's rostered beat every seat weight combined, so the splits are the lead's roster split
@@ -202,7 +202,7 @@ class RaidEvent(BaseModel):
     reminded_by: Optional[str] = None
     closed_at: Optional[str] = None  # when it became done / cancelled (cleanup_ephemeral's grace, reopen's window)
     prev_state: Optional[str] = None  # the state before done / cancelled (reopen_run restores it)
-    # a follow-on (spec 2026-11-04-follow-on-runs): a second raid the same night from the same signup. `follows` = the lead run's key (on the
+    # a follow-on (design §5.62): a second raid the same night from the same signup. `follows` = the lead run's key (on the
     # follow-on), `followed_by` = the follow-on's key (on the lead). The follow-on's signups are materialised from the
     # lead's (rc.sync_follow) and never answered directly; `leaving` = the discord ids out of the follow-on alone
     follows: Optional[str] = None
@@ -326,7 +326,7 @@ def run_close_at(reg: Registry, ev: "RaidEvent") -> datetime:
 
 
 def follow_start(reg: Registry, instance: str, start: datetime) -> datetime:
-    """When a follow-on starts: the lead's start plus the lead raid's length (spec 2026-11-04-follow-on-runs)."""
+    """When a follow-on starts: the lead's start plus the lead raid's length (design §5.62)."""
     return start + timedelta(hours=float(reg.raid_def(instance).get("duration_hours") or RAID_DEFAULTS["duration_hours"]))
 
 
@@ -585,7 +585,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     it a TEST run: its key is in the '-test' key space (TEST_SCHEDULE), and an existing roster whose test flag differs
     from what is asked is refused (a rehearsal never takes over a real run's roster, nor a real run a rehearsal's).
     `cutoffs["test_channel"]`: where the command was used — the test run's cards post there (D20).
-    `follow` ({raid, rosters}; None = the schedule's own) also creates the follow-on's dict (spec 2026-11-04-follow-on-runs): the lead's dict
+    `follow` ({raid, rosters}; None = the schedule's own) also creates the follow-on's dict (design §5.62): the lead's dict
     gains `follow` and `followed_by`, the follow-on's carries `follows`; both are saved in the one config write."""
     test = bool(cutoffs)
     key = run_key(instance, start, schedule, test=test)
@@ -628,7 +628,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         if c.get("test_channel"):
             t["test_channel"] = int(c["test_channel"])  # the asking channel: the run's officer cards post there (D20)
     fw = follow if follow is not None else (sched.get("follow") or None)
-    if fw and not cutoffs:  # a follow-on (spec 2026-11-04-follow-on-runs): the second run's dict, keyed in the reserved 'after' space
+    if fw and not cutoffs:  # a follow-on (design §5.62): the second run's dict, keyed in the reserved 'after' space
         if fw["raid"] not in reg.profile.raids or fw["raid"] == instance:
             raise RegistryError(f"a follow-on is another raid of the profile (one of {', '.join(reg.profile.raids)})")
         dur = float(rd.get("duration_hours") or RAID_DEFAULTS["duration_hours"])
@@ -675,7 +675,7 @@ def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by:
              schedule: str | None = None, follow: dict | None = None) -> "RaidEvent":
     """Open (or find the live) run for `instance` at `start`. RegistryError when that time's run is closed
     (closed_run_refusal) — checked before ensure_run, so a refused open re-creates no roster entry. `follow`
-    ({raid, rosters}, or the schedule's own) opens the follow-on run with it (spec 2026-11-04-follow-on-runs): no sheet, its answers the lead's."""
+    ({raid, rosters}, or the schedule's own) opens the follow-on run with it (design §5.62): no sheet, its answers the lead's."""
     lead_key = event_key(instance, start, schedule, test=bool(cutoffs))
     why = closed_run_refusal(rs, lead_key)
     if not why and not cutoffs and lead_key not in rs.events:  # a new night: its follow-on's time must be free too, so a
@@ -980,7 +980,7 @@ def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
 
 
 def sync_follow(rs: "RaidStore", lead: RaidEvent) -> bool:
-    """The follow-on's signups ARE the lead's (spec 2026-11-04-follow-on-runs): copied from the lead every time the lead is saved, the
+    """The follow-on's signups ARE the lead's (design §5.62): copied from the lead every time the lead is saved, the
     members leaving after the lead as out (source callout, LEAVING_NOTE). Pins, the board and the rosters are the
     follow-on's own. Saves the follow-on only when something changed; returns whether it did."""
     fev = follow_of(rs, lead)
@@ -1223,7 +1223,7 @@ def absence_effects(reg: Registry, rs: RaidStore, m: Member | None, start: str, 
 
 
 def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, note: str | None) -> Callout:
-    if ev.follows:  # a follow-on: leaving after the lead (spec 2026-11-04-follow-on-runs); the lead's answer stands
+    if ev.follows:  # a follow-on: leaving after the lead (design §5.62); the lead's answer stands
         return leave_follow(reg, rs, ev, m, note)
     s = ev.signups.get(str(m.discord_id))
     c = s.character if s else (m.main.name if m.main else "?")
@@ -1242,7 +1242,7 @@ def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, 
 
 
 def leave_follow(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, note: str | None = None) -> Callout:
-    """Leaving after the lead: out of the follow-on alone (spec 2026-11-04-follow-on-runs). Records the callout on the
+    """Leaving after the lead: out of the follow-on alone (design §5.62). Records the callout on the
     follow-on, adds them to `leaving`, re-materialises their row as out; the caller frees a held seat
     (RaidMixin.call_out → drop_seated)."""
     s = ev.signups.get(str(m.discord_id))
@@ -1282,7 +1282,7 @@ def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = CONFLICT_WINDO
     for other in rs.live():
         if other.key == ev.key:
             continue
-        if other.key in (ev.follows, ev.followed_by):  # a run and its follow-on share their people (spec 2026-11-04-follow-on-runs)
+        if other.key in (ev.follows, ev.followed_by):  # a run and its follow-on share their people (design §5.62)
             continue
         if abs((other.start - ev.start).total_seconds()) > window_hours * 3600:
             continue
@@ -2464,7 +2464,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     strategy = strategy or ev.split_strategy or (reg.config.team(ev.team) or {}).get("split_policy") or rd.get("split_policy") or "balanced"
     bonus = seat_bonus(reg, rs, ev, players)
     lead = lead_of(rs, ev)
-    if lead is not None and lead.all_rosters:  # a follow-on: the lead's rostered come first — the splits are the lead's roster split (docs/superpowers/specs/2026-11-04-follow-on-runs-design.md)
+    if lead is not None and lead.all_rosters:  # a follow-on: the lead's rostered come first — the splits are the lead's roster split (design §5.62)
         on_lead = {player_uid(lead, p) for p in lead.seated()}
         bonus = {**bonus, **{p.signup_name: int(bonus.get(p.signup_name, 0)) + LEAD_SEAT_BONUS for p in players if player_uid(ev, p) in on_lead}}
     roster_bonus = None
@@ -3695,7 +3695,7 @@ def _answer_state(reg: Registry, ev: RaidEvent, m: Member) -> str:
     dm = "you'd get a DM" if reachable(m) else "it would wait on your Me page"
     if ev.state in ("done", "cancelled"):
         return f"{run} is {ev.state}."
-    if ev.follows and m.discord_id in ev.leaving:  # leaving early (spec 2026-11-04-follow-on-runs): not a No thanks
+    if ev.follows and m.discord_id in ev.leaving:  # leaving early (design §5.62): not a No thanks
         name = reg.raid_def(ev.instance).get("name", ev.instance)
         return f"You're leaving after {lead_name_of(reg, ev) or 'the first raid'}, so you're out of {name}."
     if s is None:

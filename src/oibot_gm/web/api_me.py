@@ -47,7 +47,7 @@ def sheet_row_extras(reg, ev, m, rs=None) -> dict:
     adhoc = rc.run_kind(reg, ev) == "adhoc"
     lead = rc.lead_of(rs, ev) if rs is not None and ev.follows else None
     lead_seated = bool(m and lead is not None and lead.seat_of(m))  # a follow-on's Can't: are they rostered on the lead?
-    # a follow-on (spec 2026-11-04-follow-on-runs): never answered on its own; Leave after the lead / I'm staying instead
+    # a follow-on (design §5.62): never answered on its own; Leave after the lead / I'm staying instead
     live = ev.state in ("open", "locked")
     leaving = bool(m and ev.follows and m.discord_id in ev.leaving)
     on_night = seated or bool(m and ev.follows and s is not None and s.status == "in")
@@ -111,7 +111,7 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
 
     @app.post("/api/me/run/{key}/stay")
     async def me_stay(request: Request, key: str):
-        """I'm staying: undo leaving after the lead on a follow-on (spec 2026-11-04-follow-on-runs) —
+        """I'm staying: undo leaving after the lead on a follow-on (design §5.62) —
         RaidMixin.stay_for_follow as myself; not leaving → the verb's refusal."""
         v, _d = await body(request)
         m = me_of(v)

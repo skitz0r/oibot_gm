@@ -64,6 +64,11 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   were put) or *kept off* (the lock leaves them off the roster).
 - **Leftovers** — the joiners a full roster left out at the lock (more joined than there are places, or the roles
   didn't fit). They head the *Not rostered* list and the lock card, with what another run would be short.
+- **Follow-on** — a second raid the same night, from the same signup, that starts when the first ends (the **lead**).
+  One Join covers both; the lead's lock builds the follow-on's rosters from the lead's roster (two 10s are the 20 split
+  in two, bench joiners cover gaps); nobody confirms twice. *Leaving after <lead>…* on the Me page (or `/raid out`,
+  picking the follow-on) frees your follow-on place and keeps your lead seat; *I'm staying* on the Me page undoes it. Cancelling the
+  lead cancels its follow-on; the follow-on can be cancelled alone.
 - **Suggest… / Fill seats…** — the same screen under two names, on the site and in Discord: **Suggest…** before the
   lock (who could cover a tank or healer minimum — a yes changes their signup, nobody is seated until the lock) and
   **Fill seats…** after it (who to ask for an open place). Both show exactly the DMs **Send** will send. **Pause
@@ -488,6 +493,33 @@ its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same 
   where from (*raid* or *ad hoc default*). The owner can change any of them per schedule, including **confirmations**
   (on/off) and the **who gets a seat** weights — on the Raids page, in plain text, over MCP, or in `/gm config raid`
   (*Behaviour*: the raid's **Ask the rostered to confirm** switch; per schedule, *Change a switch* → default / on / off).
+
+**A second raid the same night (a follow-on).** A schedule (Raids page › *then, the same night* and *its rosters* in the
+schedule's editor; plain text `<schedule>.follow = barrow_deeps x2`) or an ad hoc Open (*Then, the same night* and *Its
+rosters* on the Rosters page's *Start an ad hoc run…*; plain text *"set up an ad hoc Hyjal raid for 6:30 on Dec 10 with
+10-man Barrow Deeps splits afterwards"*) names a follow-on: a second raid with its own rosters per run, starting when the
+first ends (the lead's length: a 6:30 PM Hyjal Summit of 3 hours is followed at 9:30 PM). A follow-on is another raid,
+never the lead's own, and never has a follow-on of its own. A night has one follow-on of each raid: a second lead whose
+follow-on would land on the same time is refused (*"That night already has a Barrow Deeps follow-on after … Pick another
+time."*). The lead's sheet is the night's sheet (*Hyjal Summit, then Barrow Deeps ×2*, with the second start); the
+follow-on has no sheet and no answers of its own — they follow the lead's, and answering it directly says *"Answer on
+the Hyjal Summit sheet. It covers the whole night."* Its health shows on the lead's card as one line (*Barrow Deeps
+follow-on* short, with the role icon and a number). The Rosters page shows it as its own card, *after Hyjal Summit*, that
+*answers on the Hyjal Summit sheet*.
+The lead's lock locks both: the follow-on prefers the lead's rostered, so the 10s are the 20 split in two and bench
+joiners only cover gaps (a tank or healer the 20 can't give twice); first come applies to the lead only. A follow-on
+can't be locked on its own while its lead is open (*"Lock Hyjal Summit — its lock builds the follow-on too"*), and it
+never asks anyone to confirm: the lead's Confirm covers the night, and a *Can't make it* on the lead frees both seats,
+however it comes (the Confirm card, the Me page, `/raid out`, an absence, an expired confirm). Its lock cards, board,
+fill asks and loot councils are its own (*Barrow Deeps · after Hyjal Summit*); a fill ask on it is a DM like any other.
+Leaving after the lead (*Leaving after Hyjal Summit…* on the Me page, or `/raid out` picking the follow-on) frees
+only the follow-on place and the lead seat stays (*"You're leaving after Hyjal Summit, so you're out of Barrow Deeps."*);
+an officer's removal on the follow-on's board frees only that place too. *I'm staying* on the Me page undoes it (*"Noted: you're staying … Your seat comes back when
+one is free."*): the place you left may already be filled. Cancelling the lead cancels the follow-on in the same press;
+cancelling the follow-on alone leaves the lead standing (*"The Barrow Deeps follow-on is called off for the 20 people
+rostered on it. The Hyjal Summit run goes ahead, and nobody gets a DM."*), and the lead's sheet loses its *then …*. A
+cancelled run is never reopened. The Discord `/raid open` and schedule wizards show a follow-on but don't set one — the
+site, plain text and MCP do.
 
 **Regulars** (recurring schedules only). Officers keep, per recurring schedule, a list of **regulars**: one member and
 the one character they raid on there. Regulars are the people the bot *expects* on every sheet of that schedule:
@@ -1049,6 +1081,13 @@ edits that new family and leaves the one it shared alone.
   entered this way are announced like `/me absent add`; channel changes post (or drop) their card like the Config page
   does. Several raid or schedule settings in a row are saved as one change, so "open 100 hours before and lock 60
   before" can't fail half way.
+  A whole night and a series in one message works too: *"set up an ad hoc hyjal raid for 6:30 pst on Dec 10th with 10 man
+  barrow deeps splits afterwards. also set up a scheduled hyjal raid for 6:30 pst every tuesday"* opens the ad hoc Hyjal
+  Summit with a Barrow Deeps ×2 follow-on (*"…, then Barrow Deeps ×2 at Thu 10 Dec 9:30 PM"*) and sets the weekly Tuesday
+  schedule — one diff, one Apply. Its first run follows the raid's first opening (Hyjal Summit's is Wed 9 Dec, so the
+  first Tuesday is the 15th); a later start for the whole raid is its *first opening* ("Hyjal opens first on Dec 15"),
+  as no single schedule has a start date of its own. A run already open can't take a follow-on: cancel it and open the
+  night again (§4 *A second raid the same night*).
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, the news review — last run,
   its result, the next run, proposals waiting — and the apply job: idle, running, busy with another server's proposal or
   failed with why, recent ops),
@@ -1696,8 +1735,8 @@ news post says can make the review read or write another server.
 | `import_batches` · `undo_import` | the ledger's imports, newest first (batch id, who, when, rows still live, what an undo does) · void every award of one import (`batch`, an optional `reason`; needs the actor) — the rows stay, a fixed file imports again |
 | `loot_weights` · `set_loot_weights` | the scoring weights with the game's default beside each · change some (`fields` = {path: number or null for the default}; the owner's; `preview=True` first — weights are reviewed) |
 | `distil` | Claude's draft of up to five loot-policy sentences from the active precedents, each with the precedents it rests on — nothing written; add the ones the person wants with `policy_append` |
-| `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`) |
-| `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
+| `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`; `follow` ('barrow_deeps x2') = a follow-on the same night from the same signup, §4) |
+| `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days; `follow` = 'barrow_deeps x2' or none, its follow-on) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
 | `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · the bot builds the groups on the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
@@ -2250,5 +2289,7 @@ again). Splits: the **Loot-quality** split philosophy is a greyed placeholder, n
 and Rotation work). Buff facts, limits, a run's week and split policy *can* be changed (Auras page, Raids page,
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
 repository. Regulars are a list of who is expected, never a standing answer: there is no standing availability or
-standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). If you ask for one
-of these, say so plainly.
+standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). A follow-on
+(§4) is set on the site, in plain text or over MCP, not in Discord's `/raid open` or schedule wizards (they show it); a
+follow-on of a follow-on, a "first raid only" answer on the sheet (leave after the lead instead) and a follow-on added to a
+run already open don't exist. If you ask for one of these, say so plainly.

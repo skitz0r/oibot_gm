@@ -920,7 +920,7 @@ class RaidMixin:
         return f"{ev.key}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)" + (f" · {tail}" if tail else "")
 
     async def lock_follow(self, reg, rs, ev, by: str) -> str | None:
-        """The lead's lock builds the follow-on too (docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): once
+        """The lead's lock builds the follow-on too (design §5.62): once
         the lead is locked, the follow-on solves from the night's answers with the lead's rostered preferred
         (rc.LEAD_SEAT_BONUS), flips to locked and posts its own lock cards; it never confirms. None when the run has no
         live open follow-on. A failed follow-on solve leaves it open with its lock_error, like any run — the scheduler
@@ -1147,7 +1147,7 @@ class RaidMixin:
 
     async def after_lead_out(self, reg, rs, lead, m, why: str, note: str | None) -> None:
         """A No thanks or Can't on a lead from someone NOT rostered on it (a bench joiner covering a follow-on gap) is
-        the whole night too (spec 2026-11-04-follow-on-runs): the follow-on's row is already out (rc.sync_follow), and
+        the whole night too (design §5.62): the follow-on's row is already out (rc.sync_follow), and
         a seat they hold on the locked follow-on is freed the way the lead's is (drop_seated: thread line, fill). A seat
         freed on the lead takes the follow-on's with it in drop_seated / rc.free_seat."""
         fev = rc.follow_of(rs, lead)
@@ -1285,7 +1285,7 @@ class RaidMixin:
     async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True, *, notice: bool = True) -> None:
         """A rostered member is out after lock: free the seat, edit their ask card, post it, ask the bench to fill.
         `notice=False`: their own act (rc.seat_gone writes them no notice about it). On a lead the follow-on's seat goes
-        too (rc.free_seat), and the follow-on's thread line and fill follow the lead's (spec 2026-11-04-follow-on-runs)."""
+        too (rc.free_seat), and the follow-on's thread line and fill follow the lead's (design §5.62)."""
         fev = rc.follow_of(rs, ev) if ev.followed_by else None
         follow_held = fev is not None and sheet_state(fev) == "locked" and fev.seat_of(m) is not None
         rc.free_seat(reg, rs, ev, m, why, notice=notice)
@@ -1396,7 +1396,7 @@ class RaidMixin:
                 log.warning("cancel line failed (%s): %s", ev.key, e)
         fev = rc.follow_of(rs, ev)
         tail = ""
-        if fev is not None and fev.state not in ("done", "cancelled"):  # the lead's cancel takes its follow-on with it (spec 2026-11-04-follow-on-runs)
+        if fev is not None and fev.state not in ("done", "cancelled"):  # the lead's cancel takes its follow-on with it (design §5.62)
             await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False)
             tail = f" and its follow-on {fev.key}"
         if ev.follows and audit and (lead := rc.lead_of(rs, ev)) is not None and lead.followed_by == ev.key:  # cancelled on its own: the lead stands alone

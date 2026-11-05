@@ -4361,3 +4361,140 @@ boosts that member's memories; the profile's profession words as synonyms), not 
 replies kept without what they answered ("yep i do", "those two have it for sure") — hence `context`; the 0.5 line
 keeps some banter ("they banned me", "Rogué") that a 0.7 line would drop at the cost of a few real facts; the choice
 is the owner's once it is live. Recall costs 10–15 ms, the judge ~150 ms.
+
+### 5.62 Follow-on runs: a second raid the same night from one signup (built 2026-11-04)
+
+**Why.** The owner's message: *"set up an ad hoc hyjal raid for 6:30 pst on Dec 10th with 10 man barrow deeps splits
+afterwards. also set up a scheduled hyjal raid for 6:30 pst every tuesday beginning december 15"*. One signup must cover the
+20-man Hyjal Summit and the two 10-man Barrow Deeps groups after it. Before this, a schedule's `rosters` split ONE raid into N
+rosters of its own size (§5.22, §5.27); two raids on one night were two schedules with two sheets, and `rc.conflicts` (±4 h)
+counted anyone In on one as busy for the other. Spec: `docs/superpowers/specs/2026-11-04-follow-on-runs-design.md`; plan:
+`docs/superpowers/plans/2026-11-04-follow-on-runs.md`.
+
+**Decisions (owner, 2026-11-04).** D1 One Join for the night: Join on the one sheet means both raids; leaving after the first
+is a callout on the follow-on alone; no new answer on the sheet. D2 Surfaces: plain text and the site set a follow-on; the
+Discord `/raid open` wizard and the schedule screens of `RaidConfigWizard` SHOW one (the open wizard's confirm: "Then Barrow
+Deeps ×2 at 9:30 PM, from the same signup."; the schedule screens through `Registry.schedule_label`'s "· then …") and set
+none; MCP reaches it through the same routes. The parity matrix is keyed by op (`run_open`, `schedule_set`), and both ops
+already have a Discord path, so there is NO `PARITY_PENDING` row — the D2 gap is named here and in the manual (§4, §11)
+instead. D3 Shape: a second ordinary run linked one field each way, not parts inside one run, so loot, cards, callouts, the
+board and the site treat the follow-on as any run.
+
+**The word.** **Follow-on** = the second raid; the first is the **lead** (manual §1a). Never "legs", "chained", "child",
+"linked run" or "phase" where a person reads; the Copy rule's lint covers the new labels.
+
+**Config.** A schedule entry gains `follow: {raid, rosters}` (`SCHEDULE_FIELDS`; `schedules_of` fills `follow: None`, the
+default is not stored). `registry.parse_follow(value)` reads a map or the text "<raid id> x<N>" (`barrow_deeps x2`; a bare id
+or `x1` = one roster; `FOLLOW_WORDS` none / clear / off / no / "" = None; rosters a whole number 1–`MAX_SCHEDULE_ROSTERS`).
+`_check_schedules` refuses an unknown raid and the schedule's own raid. `Registry.follow_words(follow)` = "Barrow Deeps ×2"
+("" for none); `schedule_label` ends "· then Barrow Deeps ×2". `FOLLOW_SCHEDULE = "after"` is a reserved schedule id
+(`norm_schedule` refuses it: "kept for follow-on runs"). An ad hoc open takes the same value once, for that night only.
+
+**The pair.** `rc.ensure_run(…, follow=)` (the explicit value, else the schedule's) writes BOTH run dicts in the one
+`save_config`. The lead's dict records `follow: {raid, rosters}` (a later schedule edit never changes a night in flight) and
+`followed_by` = the follow-on's ROSTER key. The follow-on's dict: key `run_key(follow.raid, follow_start, "after")` →
+`bd-1210-2130-after` (its run file's key adds the date: `…-after-2026-12-10`, so it never collides with a Barrow Deeps run of
+its own at that minute); `rc.follow_start` = the lead's start + the LEAD raid's `duration_hours` (Hyjal 3 h: 6:30 PM → 9:30
+PM); name "Barrow Deeps · after Hyjal Summit <local12>"; the follow raid's size; `rosters` = follow.rosters; the lead's kind;
+`series: None`; `confirm: False`; `reminders` off; `open_dm: False`; cutoffs = the lead's + the lead's length (its lock, nudge
+and confirm instants are the lead's); `follows` = the lead's roster key; never the lead's `message_id` / `channel_id` /
+`thread_id` / `follow` / `followed_by`. A night's follow-on belongs to ONE lead: a second lead landing on the same follow-on
+key is refused before anything is written — "That night already has a Barrow Deeps follow-on after <lead>. Pick another
+time." `rc.open_run(…, follow=)` runs `closed_run_refusal` on the follow-on's key next to the lead's, so a cancelled
+follow-on time refuses the whole night before the lead opens, then opens the lead, then the follow-on (`open_event` stamps
+`follows`, no prefill, no sheet), and logs "then Barrow Deeps ×2 at … from this signup". `RaidMixin.open_run_and_post(…,
+follow=)` posts the lead's sheet only; its ops line adds "then <raid> <key>". The scheduler's open step is unchanged: it opens
+the lead, the lead opens its follow-on.
+
+**The run file.** `RaidEvent.follows` (on the follow-on) and `followed_by` (on the lead) hold RUN (event) keys; the run
+dicts hold roster keys under the same names (`open_event` resolves the lead's event key). `leaving: list[int]` on the
+follow-on = who leaves after the lead. Helpers: `rc.is_follow`, `lead_of` / `follow_of` (the other event), `lead_dict` /
+`follow_dict` (the other dict, through the run's own), `follow_words_of`, `lead_name_of`. **Signups are the lead's:**
+`RaidStore.save(lead)` calls `rc.sync_follow(rs, lead)`, which copies every lead signup (status, character, spec — not pins,
+a pin is one roster's decision; `updated_at` is ignored when comparing, so a repeat answer saves only the lead) and makes each
+uid in `leaving` `out` with source callout and `rc.LEAVING_NOTE` ("leaving after the first raid"); never syncs back. The copy
+is persisted so every offline reader sees the same answers. `set_signup` on a follow-on raises `FOLLOW_ANSWER_REFUSAL` —
+"Answer on the Hyjal Summit sheet. It covers the whole night."; `runs_in_span` skips follow-ons; `conflicts` skips the other
+run of the pair.
+
+**The lock.** `RaidMixin.lock_run` on a follow-on whose lead is open is refused: "Lock Hyjal Summit — its lock builds the
+follow-on too". The lead's lock runs as before, then `RaidMixin.lock_follow(reg, rs, lead, by)` locks the open follow-on
+through `lock_run` and the lead's line gains " · <its line>" (a follow-on whose solve fails stays open with `lock_error`; the
+scheduler retries it, its lead being locked). In `_solve_run` every player rostered on the lead gets `+rc.LEAD_SEAT_BONUS`
+(1000, beating every seat weight combined), so the two 10s are the 20 split in two whenever the role minimums allow and bench
+joiners cover the rest (a lead with 2 tanks and two 10s needing 2 each brings 2 bench tanks in); first-come benching applies
+to the lead only (`run_kind == "adhoc" and not is_follow(ev)`). Roster count is the usual `how_many_rosters` cap. The
+follow-on never confirms (`confirm: False` → no `confirm_by`, no DM). The scheduler (`scheduler_tick_guild`) skips a
+follow-on while its lead is open: no health card, no lock of its own. The lock cards read "🔒 Barrow Deeps · after Hyjal
+Summit"; the signup-channel lock line adds " · after Hyjal Summit". After the lock the follow-on is an ordinary locked run:
+its own board, pins, fill asks (a must-act DM, as on any run), cards, updates thread and loot councils (`<key>-r1`, `-r2`).
+
+**A Can't on the lead is the whole night**, on every path that frees a lead seat: `rc.free_seat` on a run with
+`followed_by` also frees the same member's seat on the locked follow-on (`notice=False`, idempotent — expired confirmations,
+a board's move to bench, a client-less fallback); `RaidMixin.drop_seated` notes the follow-on seat first and, after the
+lead's own line, cards and fill, runs `drop_seated` on the follow-on, so it gets its own thread line, cards and fill (the
+Confirm card's Can't, an absence, a retire or respec, `call_out` / `set_answer` while seated). `RaidMixin.after_lead_out`
+covers the one remaining case: out on the lead without a lead seat while holding a follow-on seat (a lead bench joiner
+covering a follow-on gap) — from `call_out`, `set_answer`'s locked not-seated out, and `after_absence`; every call is guarded
+by `ev.followed_by`.
+
+**Leaving early.** `rc.callout` on a follow-on delegates to `rc.leave_follow(reg, rs, ev, m, note)`: the callout on the
+follow-on, the uid in `leaving`, `sync_follow` makes the row out; the seat goes through the usual call_out path. The Me page
+row (`may_leave`) → `POST /api/me/run/{key}/out`; `/raid out` picking the follow-on; plain text's `run_answer` No thanks on it (one's own, or an officer's with a reason: both reach `call_out`); an
+officer's removal on its board frees only that place. The confirm is `consequences.leave_follow_consequence(reg, ev, seated,
+lead_seated)`: "You stay on the Hyjal Summit roster." with a lead seat, else "Your Hyjal Summit answer stands."; then "Your
+Barrow Deeps place is freed." + `rc.refill_sentence` when seated, else "You are out of the Barrow Deeps follow-on." The receipt
+(`rc._answer_state`) reads "You're leaving after Hyjal Summit, so you're out of Barrow Deeps." instead of No thanks. Undo:
+`rc.stay_for_follow` (takes the uid out of `leaving`, re-syncs, re-seats nobody) / `RaidMixin.stay_for_follow(…, by, by_id,
+via)` — cards, a thread line, an audit line, "Noted: you're staying for <run>. Your seat comes back when one is free."; a
+refusal "You're not marked as leaving after Hyjal Summit." to the member, "<name> isn't marked as leaving after Hyjal Summit."
+to an officer. The site's `POST /api/me/run/{key}/stay` (`may_stay`) is its one caller; `/answer` on a follow-on answers 400
+with `FOLLOW_ANSWER_REFUSAL`.
+
+**Cancel, end, reopen, cleanup.** `RaidMixin.cancel_run` on a lead cascades to the follow-on (`notify=False`, `audit=False`)
+with ONE audit line "cancelled <lead> and its follow-on <key>"; the confirm (`consequences._cancel` over `rc.cancel_effects`'
+`follow`) ends "The Barrow Deeps follow-on is cancelled with it, and nobody gets a DM." Cancelling the follow-on alone clears
+the lead's `followed_by` (event and dict) and redraws the lead's sheet without its "then …"; its confirm reads "The Barrow
+Deeps follow-on is called off for the N people rostered on it." (before the lock: "for the people on it.") then "The Hyjal
+Summit run goes ahead, and nobody gets a DM." A cancelled run never reopens (D19), so a cancel is final for both; each run
+ENDS on its own and so each reopens on its own within `REOPEN_GRACE_HOURS`. `cleanup_ephemeral`: a lead's dict waits for its
+follow-on's run too (the keys `{key, followed_by}`), a follow-on's dict goes on its own, an orphan follow-on dict (its lead's
+dict gone) is dropped at once.
+
+**The words on every surface.** The sheet (`raid_views.sheet_message`): title "Hyjal Summit, then Barrow Deeps ×2" and a line
+"then Barrow Deeps ×2 <t:unix:t>" under the start; advertised seats and the health check stay the lead's. `rc.follow_short(reg,
+ev)` = the follow-on's tank and healer minimums × its rosters against the lead's Join answers → the health card's one line
+"**Barrow Deeps follow-on** short <role icon> N" (icon + number). `rc.open_preview(…, follow=)` adds `follow` {raid, name,
+rosters, when} and `follow_line` "then Barrow Deeps ×2 at 9:30 PM"; `upcoming_rows` carry `follow` (words). `help.run_lines`: "·
+then …" on a lead, "· after … (a follow-on: its answers are the lead's)". JSON: `ev_json` `follows`, `followed_by`, `follow`
+{raid, rosters, key, when}, `lead` {raid, key}, `leaving` (names); `schedule_json` `follow`, `follow_words`; `/api/me` rows
+`then`, `lead_raid`, `may_leave`, `may_stay`, `leave_consequence` (and `may_answer` / `may_cant` false on a follow-on).
+
+**Plain text and MCP.** `run_open`'s `text` = the follow-on ("barrow_deeps x2"; the schema tells the parser "10 man barrow
+deeps splits afterwards" = that), read in code by `configops.follow_of_op(reg, rid, text)` (`parse_follow` + "a follow-on is
+another raid, not the raid itself"); the describe line adds ", then Barrow Deeps ×2 at Thu 10 Dec 9:30 PM"; `run_open` on a
+run already open names the follow-on it has, or says one can't be added to a run already open (cancel it and open the night
+again). `schedule_set <sid>.follow` takes the same value or "none"; its diff reads "no follow-on → then Barrow Deeps ×2" (never
+"not set"). There is NO per-schedule first_open: "beginning December 15" is the raid-level `raid_set first_open`, and Hyjal's
+profile first_open (2026-12-09) already makes a Tuesday schedule's first run 2026-12-15, so the owner's sentence needs only
+`run_open` (+ text) and `schedule_set tue.slots`. MCP: `open_run(raid, when, schedule, follow)` posts `follow`;
+`schedule_set`'s `fields` take `follow`. No new tool.
+
+**The site.** `POST /api/raid/{rid}/open[/preview]` take `follow` (a dict or the text; `web/api.follow_arg` →
+`follow_of_op`, a RegistryError → 400) and the message adds ", then Barrow Deeps ×2". The Raids page's schedule editor
+(`ScheduleCard`) has a **Then** row — *then, the same night* (every other raid, *No follow-on*) and *its rosters* — sent in
+the diff-only Save as `follow`. The Rosters page's *Start an ad hoc run…* has *Then, the same night* / *Its rosters* and the
+preview's `follow_line`. The run cards say "then …" on a lead and "after …" on a follow-on, whose counts line reads "answers on
+the Hyjal Summit sheet" and which has no *Answer for someone…*. The Me page's row: the title with then / after, *Leaving after
+Hyjal Summit…* (the server's `leave_consequence` in the confirm, an optional note, `/out`) and *I'm staying* (`/stay`).
+
+**Tests.** `tests/test_follow_on.py` (the pair, sync, refusals, the lock, a Can't on every path, leaving and staying,
+cancel and cleanup, the words, plain text, the routes), `tests/test_follow_on_solver.py` (slow, real CP-SAT: the splits are
+the lead's roster whenever roles allow), `tests/test_confirm_readability.py` (the cancel pair, the follow-on's cancel,
+leaving early), `tests/test_frontend_source.py` (the Then rows, the Me buttons).
+
+**Not done.** Discord wizards that set a follow-on (D2); *I'm staying* outside the Me page (Discord and plain text reach
+leaving only); a follow-on of a follow-on; a per-member "first raid only" answer (D1 — leaving early covers it); copying the
+lead's groups onto the follow-on's board (a 20's groups say nothing about two 10s); a follow-on added to a run already open;
+the Me page shows the lead and the follow-on as two rows, not one grouped row; the follow-on's shortfall line
+doesn't change the health card's colour.

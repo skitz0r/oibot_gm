@@ -157,7 +157,8 @@ src/oibot_gm/
                        phase 4 (§5.48): the `loot_weights` op's words (weight_rows / weight_part / WEIGHT_GROUPS) + apply_weights, received_map
                        (the Me page's and /me wishlist's "received" marks), last_council (what re-score reads)
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
-                       schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule/remove_schedule = one set_raid_overrides write, _check_schedules);
+                       schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule/remove_schedule = one set_raid_overrides write, _check_schedules;
+                       follow {raid, rosters} (parse_follow, follow_words) — §5.62);
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
                        applies in Discord before registering: every first-character path checks it — Discord, plain text, the Me page);
                        PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check;
@@ -258,6 +259,11 @@ src/oibot_gm/
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
                        asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; upcoming_rows (each active schedule's next three runs whatever the horizon, can_open + open_row_refusal's why) / short_why (the Rosters card's short clause) — §5.56; FillAsk.channel dm|web (a failed DM = web)
+                       Follow-on runs (§5.62): a lead's `followed_by` / a follow-on's `follows` (RUN keys on RaidEvent, roster keys in the dicts);
+                       `ensure_run(follow=)` makes both run dicts (the follow-on in the reserved `after` key space, confirm off; one follow-on per lead
+                       per night); `sync_follow` = the follow-on's answers are the lead's (every save of the lead), `leave_follow` / `stay_for_follow`;
+                       `_solve_run` prefers the lead's rostered (LEAD_SEAT_BONUS); `conflicts` exempts the pair; free_seat on a lead frees the follow-on's
+                       seat too; follow_short = the health card's follow-on line
   discord_raid.py      RaidMixin on the client: send_member_dm (test puppets → the tester), set_answer / call_out (the one path for an answer; `by` = a
                        display name to read, `by_id` = the actor's Discord id decides "their own" — never a name compare; seats found by id, ev.seat_of(member)), lock_run → roster
                        cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below.
@@ -265,6 +271,8 @@ src/oibot_gm/
                        record_placement (check-and-set on the loop), lock_run resumable (lock_seats + confirmations_sent_at; recover_lock in the scheduler),
                        lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind (the older card goes dead), set_autofill_paused, withdraw_sent_ask;
                        every writer of ev.fill_asks holds plan_lock (_send_asks is the one sender)
+                       Follow-on (§5.62): lock_follow (the lead's lock locks both; a follow-on never locks before its lead), after_lead_out, drop_seated
+                       carries a lead's freed seat to the follow-on, stay_for_follow, cancel_run cascades to the follow-on (one audit line)
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
                        run_times, run_label/run_title/clock12, gaps_text/ask_line, leftover_block, split_away (the sheet's Away row); BotProto = what the mixins expect from the client;

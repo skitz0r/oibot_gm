@@ -165,7 +165,7 @@ class RaidSchedulerMixin:
         # channel (refresh_sheet, post_run_update, cards) fail soft on their own
         for ev in rs.live():
             if rc.is_follow(ev) and (lead := rc.lead_of(rs, ev)) is not None and lead.state == "open":
-                continue  # a follow-on waits for its lead's lock (docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): no health card, no lock of its own
+                continue  # a follow-on waits for its lead's lock (design §5.62): no health card, no lock of its own
             team = rc.run_team(reg, ev)
             officer_ch = self.officer_channel(reg, ev)
             soft, hard, confirm = run_times(reg, ev, team)

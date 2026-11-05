@@ -133,7 +133,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     ins, subs, outs = (ev.by_status(s) for s in ("in", "sub", "out"))
     rd = reg.raid_def(ev.instance)
     name = rd.get("name", ev.instance or "raid")
-    then = rc.follow_words_of(reg, ev)  # a lead: "Hyjal Summit, then Barrow Deeps ×2" (spec 2026-11-04-follow-on-runs)
+    then = rc.follow_words_of(reg, ev)  # a lead: "Hyjal Summit, then Barrow Deeps ×2" (design §5.62)
     if then:
         name = f"{name}, then {then}"
     size = int(team.get("size") or rd.get("size") or 20)

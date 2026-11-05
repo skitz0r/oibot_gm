@@ -811,7 +811,7 @@ def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None 
 
 def follow_of_op(reg: Registry, rid: str, text: str | None) -> dict | None:
     """run_open's follow-on from its `text` ('barrow_deeps x2'): parsed in code (registry.parse_follow), the raid checked
-    (spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md)."""
+    (design §5.62)."""
     from .registry import parse_follow
 
     fw = parse_follow(text)

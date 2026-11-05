@@ -143,7 +143,7 @@ def _cancel(reg: Registry, ev: rc.RaidEvent) -> list[str]:
 
 
 def leave_follow_consequence(reg: Registry, ev: rc.RaidEvent, seated: bool, lead_seated: bool) -> list[str]:
-    """Leaving after the lead (spec 2026-11-04-follow-on-runs): the Me page's and /raid out's confirm on a follow-on.
+    """Leaving after the lead (design §5.62): the Me page's and /raid out's confirm on a follow-on.
     `seated`: rostered on the follow-on; `lead_seated`: rostered on the lead (a lead bench joiner may cover a follow-on
     gap, so one doesn't imply the other). Under the Confirm rule."""
     lead = (rc.lead_dict(reg, ev) or {}).get("instance")

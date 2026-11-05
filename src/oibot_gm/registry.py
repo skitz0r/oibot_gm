@@ -764,7 +764,7 @@ SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_befor
 # `weights`: a partial seat-order map {rank, main, sat_out, signup_order, regular} merged per key over the raid's (ad hoc: ADHOC_WEIGHTS)
 SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow") + SCHEDULE_CADENCE
 MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
-# A follow-on run (spec 2026-11-04-follow-on-runs) — a second raid the same night from the same signup — keys its run with this reserved
+# A follow-on run (design §5.62) — a second raid the same night from the same signup — keys its run with this reserved
 # schedule id ('bd-1209-2130-after'), so it never collides with a run of that raid's own schedules at the same minute.
 FOLLOW_SCHEDULE = "after"
 FOLLOW_WORDS = {"none", "clear", "off", "no", ""}

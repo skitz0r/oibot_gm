@@ -483,7 +483,7 @@ def test_memory_surfaces_read_by_their_shape():
 
 
 def test_follow_on_surfaces_exist():
-    """Spec docs/superpowers/specs/2026-11-04-follow-on-runs-design.md (D2): the site sets a follow-on — the schedule editor's
+    """Design §5.62 (D2): the site sets a follow-on — the schedule editor's
     Then row and the ad hoc Open's Then field — and the Me row offers leaving early and I'm staying with the server's sentence only."""
     sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
     assert "follow_raid" in sched and 'label="then, the same night"' in sched and "f.follow =" in sched

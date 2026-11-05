@@ -936,7 +936,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters), "schedule": ev.schedule, "rosters_expected": rc.run_rosters(reg, ev),
                 "kind": rc.run_kind(reg, ev), "series": rc.run_series(reg, ev), "series_name": reg.series_label(rc.run_series(reg, ev)) if rc.run_series(reg, ev) else None,
                 "confirms": rc.run_confirms(reg, ev), "test": rc.is_test_run(reg, ev),
-                # follow-on runs (spec 2026-11-04-follow-on-runs): the pair's run keys, the follow-on in words on the lead,
+                # follow-on runs (design §5.62): the pair's run keys, the follow-on in words on the lead,
                 # the lead on the follow-on, and who leaves after the lead
                 "follows": ev.follows, "followed_by": ev.followed_by,
                 "follow": ({"raid": reg.raid_def(ft["instance"]).get("name", ft["instance"]), "rosters": int(ft.get("rosters") or 1), "key": ev.followed_by,
@@ -1669,7 +1669,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     def follow_arg(reg, rid: str, d: dict) -> dict | None:
         """The open / preview body's `follow` ({raid, rosters} or 'barrow_deeps x2'; None / '' = none) → the follow-on,
-        checked in code (configops.follow_of_op: a RegistryError sentence; spec 2026-11-04-follow-on-runs)."""
+        checked in code (configops.follow_of_op: a RegistryError sentence; design §5.62)."""
         from ..configops import follow_of_op
 
         return follow_of_op(reg, rid, d.get("follow")) if d.get("follow") not in (None, "") else None

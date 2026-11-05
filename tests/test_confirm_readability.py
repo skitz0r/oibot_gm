@@ -184,7 +184,7 @@ def run_cases(reg, rs, ms):
     c.state = "cancelled"
     rs.save(c, "harness")
     cases["cancelled"] = c
-    # a lead with a follow-on (spec 2026-11-04-follow-on-runs): the cancel pair sentences and leaving early. Two
+    # a lead with a follow-on (design §5.62): the cancel pair sentences and leaving early. Two
     # nights, so the open pair stays open while the other is locked.
     reg.set_raid_overrides("hyjal_summit_forever", {"first_open": "2026-01-01T00:00"}, "t")
     for days, state in ((3, "open"), (4, "locked")):
