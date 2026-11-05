@@ -2,6 +2,7 @@
 answers on the follow-on, the lock, leaving early, cancel, the words, plain text and the routes."""
 from __future__ import annotations
 
+import types
 from datetime import timedelta
 
 import pytest
@@ -792,3 +793,41 @@ def test_open_on_a_run_already_open_never_claims_a_follow_on(reg, rs, monkeypatc
     assert r.status_code == 200, r.text
     assert r.json()["key"] == first.json()["key"] and ", then" not in r.json()["message"]
     assert rc.follow_of(rs, rs.events[r.json()["key"]]) is None
+
+
+def test_another_guilds_council_on_the_same_run_key_never_moves_this_leads_window(duo):
+    """Run keys carry no guild: guild B's live council on a follow-on keyed like A's must not push A's lead past its
+    routing window while A has no follow-on council of its own (A's drops would be held and expire unrecorded)."""
+    from conftest import lock_with_board
+    from test_loot_verbs import LootBot
+
+    from oibot_gm.feed import Companion
+
+    a, b, rs_a, rs_b = duo.a, duo.b, duo.rs_a, duo.rs_b
+    a.seed_test_members(24, "t")
+    b.seed_test_members(24, "t")
+    start = (a.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    pairs = {}
+    for r, rs in ((a, rs_a), (b, rs_b)):
+        unlock_hyjal(r)
+        lead = rc.open_run(r, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 1})
+        fev = rc.follow_of(rs, lead)
+        ms = r.test_members()
+        join(r, rs, lead, ms[:20])
+        lock_with_board(r, rs, lead, [m.display_name for m in ms[:20]])
+        lock_with_board(r, rs, rs.events[fev.key], [m.display_name for m in ms[:10]])
+        lead.starts_at = (r.now_local() - timedelta(hours=3, minutes=10)).replace(second=0, microsecond=0).isoformat()
+        rs.save(lead, "t: the lead started three hours ago")
+        fev = rs.events[fev.key]
+        fev.starts_at = (r.now_local() - timedelta(minutes=10)).replace(second=0, microsecond=0).isoformat()
+        rs.save(fev, "t: the follow-on started ten minutes ago")
+        pairs[r.key] = (lead, fev)
+    assert pairs[a.key][1].key == pairs[b.key][1].key, "the premise: one follow-on run key in both guilds"
+    bot = LootBot(a, rs_a)
+    bot.registries.by_key[b.key] = b
+    bot.raids = types.SimpleNamespace(store=lambda r: rs_a if r.key == a.key else rs_b)
+    s_lead, _ = run(bot.open_loot(a, rs_a, pairs[a.key][0], by="Officer"))
+    s_b, _ = run(bot.open_loot(b, rs_b, pairs[b.key][1], by="Officer"))  # guild B's follow-on council, same run key
+    assert s_b.guild == b.key and bot.loot_live(s_b)
+    assert not bot._past_close(a, s_lead)
+    assert bot.active_raid(Companion(a.test_members()[0].main.name, "c", "", "p")) is s_lead

@@ -279,7 +279,7 @@ class FeedMixin:
         if ev.followed_by and rs is not None:
             fev = rs.events.get(ev.followed_by)
             if (fev is not None and fev.state != "cancelled" and now >= fev.start
-                    and any(s.run_key == fev.key and s.origin == "raid" and not s.test and self.loot_live(s) for s in self.events.values())):
+                    and any(s.guild == reg.key and s.run_key == fev.key and s.origin == "raid" and not s.test and self.loot_live(s) for s in self.events.values())):
                 return True  # only once the follow-on has a live council of its own: else the lead's keeps every drop
         return now >= rc.run_close_at(reg, ev)
 
