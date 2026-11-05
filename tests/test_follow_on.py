@@ -512,10 +512,13 @@ def test_the_owners_sentence_as_ops(reg, rs):
     day = (reg.now_local() + timedelta(days=6)).strftime("%Y-%m-%d")
     ops = [ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="barrow_deeps x2"),
            ConfigOp(op="schedule_set", target=LEAD, field="tue.slots", value="Tue 18:30"),
-           ConfigOp(op="schedule_set", target=LEAD, field="tue.first_open", value="2026-12-15 18:30")]
+           # Hyjal's profile first_open is 2026-12-09, so a Tuesday schedule's first run already falls on 2026-12-15 and the
+           # owner's sentence needs no date op; the raid-wide first_open is only described here (applying it moves the lockouts)
+           ConfigOp(op="raid_set", target=LEAD, field="first_open", value="2026-12-15 18:30")]
     lines = [configops.describe(reg, o) for o in ops]
     assert ", then Barrow Deeps ×2 at " in lines[0] and "PM" in lines[0]
     assert "Hyjal Summit" in lines[1]
+    assert "6:30 PM" in lines[2] and "15" in lines[2] and "18:30" not in lines[2]
     assert "follow" in configops.SCHEMA_TEXT and "x<N>" in configops.SCHEMA_TEXT
     bad = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="hyjal_summit_forever x2")
     assert "not the raid itself" in configops.describe(reg, bad)
@@ -536,3 +539,18 @@ def test_run_open_applies_with_the_follow_on(reg, rs, monkeypatch):
     line = run(configops.apply_async(reg, op, by="Jon", is_owner=True, bot=bot))
     lead = next(e for e in rs.live() if e.instance == LEAD)
     assert lead.followed_by and rc.follow_of(rs, lead).instance == FOLLOW and lead.key in line
+
+
+def test_run_open_on_an_open_run_says_the_follow_on_is_not_added(reg, rs):
+    unlock_hyjal(reg)
+    bot = NightBot(reg, rs)
+    day = (reg.now_local() + timedelta(days=6)).strftime("%Y-%m-%d")
+    plain = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc")
+    run(configops.apply_async(reg, plain, by="Jon", is_owner=True, bot=bot))
+    ask = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="barrow_deeps x2")
+    line = configops.describe(reg, ask)
+    assert "a follow-on can't be added to a run that is already open" in line and "then" not in line
+    paired = ConfigOp(op="run_open", target=LEAD, value=f"{day} 20:00", field="adhoc", text="barrow_deeps x2")
+    run(configops.apply_async(reg, paired, by="Jon", is_owner=True, bot=bot))
+    again = configops.describe(reg, paired)
+    assert "then Barrow Deeps ×2 at " in again and "already open" in again and "can't be added" not in again

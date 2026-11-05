@@ -2339,8 +2339,15 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         sname = next((f" · {s['name']}" for s in reg.schedules(rid) if s["id"] == sid and sid != "default"), "")
         fw = follow_of_op(reg, rid, op.text)
         then = f", then {reg.follow_words(fw)} at {reg.local12(rc.follow_start(reg, rid, start))}" if fw else ""
-        if have and have.state in ("open", "locked"):
-            return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then}: already {have.state} as {have.key} — nothing new is posted"
+        if have and have.state in ("open", "locked"):  # rc.ensure_run returns it unchanged: a follow-on is never added to it
+            head = f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}"
+            if have.followed_by:  # its follow-on as it stands
+                then = f", then {rc.follow_words_of(reg, have)} at {reg.local12(rc.follow_start(reg, rid, have.start))}"
+                return f"{head}{then}: already {have.state} as {have.key} — nothing new is posted"
+            if fw:
+                return (f"{head}: already {have.state} as {have.key} — a follow-on can't be added to a run that is already open;"
+                        " cancel it and open the night again")
+            return f"{head}: already {have.state} as {have.key} — nothing new is posted"
         return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then} now ({key}): sheet posted in {where}, absences pre-filled"
     if op.op == "test":
         kind, arg = _test_op(op.value)
