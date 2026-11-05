@@ -109,6 +109,19 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
             return JSONResponse({"error": str(e)}, status_code=400)
         return receipt(v, ev, m, line)
 
+    @app.post("/api/me/run/{key}/stay")
+    async def me_stay(request: Request, key: str):
+        """I'm staying: undo leaving after the lead on a follow-on (spec 2026-11-04-follow-on-runs) —
+        RaidMixin.stay_for_follow as myself; not leaving → the verb's refusal."""
+        v, _d = await body(request)
+        m = me_of(v)
+        rs, ev = run_of(v, key)
+        try:
+            line = await bot.stay_for_follow(v.reg, rs, ev, m, m.display_name, by_id=v.uid, via="web")
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return receipt(v, ev, m, line)
+
     @app.post("/api/me/fill/{key}")
     async def me_fill(request: Request, key: str):
         """My answer to a fill / swap / pre-lock ask on run `key` {answer yes|no}: RaidMixin.answer_fill_for as myself (the

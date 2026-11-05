@@ -1667,17 +1667,26 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         over `when` ('YYYY-MM-DD HH:MM' guild wall time from the picker, resolved DST-safely); neither = the next run."""
         return ((d.get("start") or d.get("when") or "").strip() or None), ((d.get("schedule") or "").strip() or None)
 
+    def follow_arg(reg, rid: str, d: dict) -> dict | None:
+        """The open / preview body's `follow` ({raid, rosters} or 'barrow_deeps x2'; None / '' = none) → the follow-on,
+        checked in code (configops.follow_of_op: a RegistryError sentence; spec 2026-11-04-follow-on-runs)."""
+        from ..configops import follow_of_op
+
+        return follow_of_op(reg, rid, d.get("follow")) if d.get("follow") not in (None, "") else None
+
     @app.post("/api/raid/{rid}/open/preview")
     async def raid_open_preview(request: Request, rid: str):
         """What Open would do, nothing written (design B4; rc.open_preview — the /raid open wizard says the same):
         {kind: scheduled | adhoc, schedule, schedule_name, key, start (ISO: carry it back to Open), label (12-hour guild
-        time), when_note (the DST line), exists, channel, rules, past}. Body as Open's: {when? | start?, schedule?}."""
+        time), when_note (the DST line), exists, channel, rules, past, follow, follow_line}. Body as Open's: {when? | start?,
+        schedule?, follow?}."""
         v, d = await body(request, officer=True)
         if rid not in v.reg.profile.raids:
             return JSONResponse({"error": "unknown raid"}, status_code=400)
         when, sid = open_args(v.reg, rid, d)
         try:
-            p = rc.open_preview(v.reg, bot.raids.store(v.reg), rid, when, sid)
+            fw = follow_arg(v.reg, rid, d)
+            p = rc.open_preview(v.reg, bot.raids.store(v.reg), rid, when, sid, follow=fw)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         ch = bot.get_channel(int(p["channel"])) if p.get("channel") else None
@@ -1700,6 +1709,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": "unknown raid"}, status_code=400)
         when, sid = open_args(reg, rid, d)
         try:
+            fw = follow_arg(reg, rid, d)
             start, sid, _note = rc.open_when(reg, rid, when, sid)
             rc.refuse_past_start(reg, start, reg.now_local())  # a mistyped year would open a run the scheduler may close at once
         except RegistryError as e:
@@ -1712,10 +1722,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                                      "preview": rc.open_preview(reg, bot.raids.store(reg), rid, start.isoformat(), sid)}, status_code=409)
         rs = bot.raids.store(reg)
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
-            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, **rc.schedule_kw(sid)))
+            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, follow=fw, **rc.schedule_kw(sid)))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)"), "key": ev.key}
+        return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")
+                + (f", then {reg.follow_words(fw)}" if fw else ""), "key": ev.key}
 
     @app.post("/api/admin/confirm")
     async def admin_confirm(request: Request):

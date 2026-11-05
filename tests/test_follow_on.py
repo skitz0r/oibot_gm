@@ -554,3 +554,64 @@ def test_run_open_on_an_open_run_says_the_follow_on_is_not_added(reg, rs):
     run(configops.apply_async(reg, paired, by="Jon", is_owner=True, bot=bot))
     again = configops.describe(reg, paired)
     assert "then Barrow Deeps ×2 at " in again and "already open" in again and "can't be added" not in again
+
+
+# ---------------------------------------------------------------- Task 7: routes
+
+
+class FollowBot(FakeBot):
+    """FakeBot plus the open verb the open route calls (the real RaidMixin's posts the sheet through Discord)."""
+
+    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None):
+        return rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow)
+
+
+H = {"X-Requested-With": "oibot"}
+
+
+def test_open_route_takes_a_follow_on(reg, rs, monkeypatch):
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    fc = TestClient(web.create_app(FollowBot(reg, rs)))
+    unlock_hyjal(reg)
+    when = (reg.now_local() + timedelta(days=5)).strftime("%Y-%m-%d 18:30")
+    p = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": {"raid": FOLLOW, "rosters": 2}}, headers=bearer())
+    assert p.status_code == 200, p.text
+    p = p.json()
+    assert p["follow"]["name"] == "Barrow Deeps" and p["follow_line"].startswith("then Barrow Deeps ×2")
+    plain = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": ""}, headers=bearer()).json()
+    assert plain["follow"] is None
+    r = fc.post(f"/api/raid/{LEAD}/open", json={"start": p["start"], "key": p["key"], "schedule": "adhoc", "follow": "barrow_deeps x2"}, headers=bearer())
+    assert r.status_code == 200, r.text
+    assert r.json()["message"].endswith(", then Barrow Deeps ×2")
+    lead = rs.events[r.json()["key"]]
+    assert rc.follow_of(rs, lead).instance == FOLLOW
+    bad = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": "hyjal_summit_forever x2"}, headers=bearer())
+    assert bad.status_code == 400 and "not the raid itself" in bad.json()["error"]
+    bad = fc.post(f"/api/raid/{LEAD}/open", json={"when": when, "schedule": "adhoc", "follow": "hyjal_summit_forever x2"}, headers=bearer())
+    assert bad.status_code == 400 and "not the raid itself" in bad.json()["error"]
+
+
+def test_me_routes_leave_and_stay(reg, rs, monkeypatch):
+    from test_member_inbox_web import OFFICER, SECRET, WebNightBot, as_user
+
+    lead, fev = open_pair(reg, rs)
+    m, _c = reg.set_plan(OFFICER, "Offi", "Priest", "Holy", None, "main")  # a real member (a puppet never answers a real sheet)
+    join(reg, rs, lead, [m])
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.setenv("OIBOT_WEB_SECRET", SECRET)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    monkeypatch.delenv("OIBOT_WEB_SESSION_EPOCH", raising=False)
+    fc = TestClient(web.create_app(WebNightBot(reg, rs)))  # the real RaidMixin verbs: call_out, stay_for_follow, set_answer
+    h = as_user(fc, m.discord_id)
+    r = fc.post(f"/api/me/run/{fev.key}/answer", json={"status": "sub"}, headers=h)
+    assert r.status_code == 400 and "Hyjal Summit sheet" in r.json()["error"]
+    r = fc.post(f"/api/me/run/{fev.key}/out", json={"note": ""}, headers=h)
+    assert r.status_code == 200, r.text
+    assert m.discord_id in rs.events[fev.key].leaving
+    assert rs.events[lead.key].signups[str(m.discord_id)].status == "in"  # the lead's answer stands
+    r = fc.post(f"/api/me/run/{fev.key}/stay", json={}, headers=h)
+    assert r.status_code == 200, r.text
+    assert m.discord_id not in rs.events[fev.key].leaving
+    again = fc.post(f"/api/me/run/{fev.key}/stay", json={}, headers=h)
+    assert again.status_code == 400 and again.json()["error"]
