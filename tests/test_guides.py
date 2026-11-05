@@ -646,3 +646,21 @@ def test_a_strangers_empty_dm_with_a_file_is_never_read(duo):
     m = DmMessage("", PUPPET, [att])
     asyncio.run(OibotGM.on_message(bot, m))
     assert att.reads == 1 and m.replies == [] and hit == []
+
+
+def test_a_file_that_only_starts_like_the_command_is_left_alone_like_the_text(duo):
+    """"convert guides …" is not the command: as a message it goes on to the ordinary DM path; as an empty DM's file it
+    gets what an empty DM gets (no reply) — and never an exception out of on_message."""
+    from test_multiguild_dm import PUPPET
+
+    bot, hit, OibotGM = convert_bot(duo)
+    m = DmMessage("convert guides from A#1234 to B#5678", PUPPET)
+    asyncio.run(OibotGM.on_message(bot, m))
+    text_path = (m.replies, len(hit))
+    assert text_path == ([], 1), "the text goes on to the ordinary DM path (the picker here)"
+    for body in (b"convert guides from A#1234 to B#5678", b"convert guide2 from A#1234 to B#5678"):
+        bot, hit, OibotGM = convert_bot(duo)
+        att = Attachment("message.txt", body)
+        m = DmMessage("", PUPPET, [att])
+        asyncio.run(OibotGM.on_message(bot, m))
+        assert m.replies == [] and hit == [] and att.reads == 1

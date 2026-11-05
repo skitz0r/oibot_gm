@@ -215,6 +215,8 @@ async def guide_convert(bot, message) -> bool:
         if body.lstrip()[:13].lower() != "convert guide":  # the prefix only: a file that isn't the command is never scanned
             return False
         req, txts, text = guides.convert_request(body), [], ""
+        if req is None:  # "convert guides …", "convert guide2": not the command, as on the text path (left alone, no reply)
+            return False
     elif not await belongs():
         await message.reply(guild_routing.not_in_any(regs), allowed_mentions=quiet)
         return True
