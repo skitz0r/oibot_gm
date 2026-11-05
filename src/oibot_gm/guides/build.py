@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import rxp_json, rxp_md
-from .rxp_decode import GuideError, decode
+from .rxp_decode import TOO_BIG, GuideError, decode
 from .rxp_json import GuideGame
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -41,7 +41,6 @@ _locks_guard = threading.Lock()
 EMPTY_TEXT = "Paste the import string first."
 EMPTY_TAG = "Enter the BattleTag the guide was issued to (Name#1234)."
 BAD_TAG = "A BattleTag is a name, a # and 4 to 7 digits: Name#1234."
-TOO_BIG = "That paste is bigger than any guide export; paste the import string alone."
 BUSY = "Your guide is being built already; wait for it to finish."
 
 

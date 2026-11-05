@@ -3406,6 +3406,15 @@ picker: nothing guild-specific is read); the reply is one line + the file, the r
 the bot reads (an @mention, a listened channel) it answers "Send me that in a DM. The import string is your purchase, and
 the answer is a file for you alone." and nothing else (no DM — the DM rule). A request with a missing part is still the
 convert (refused in words with the usage line), so a string never falls through to a prompt. The build stays web only.
+*Review fixes (2026-11-05):* `decode` unpacks at most `MAX_PLAIN` (64 MB, every section together) through a bounded
+`decompressobj` and refuses past it with TOO_BIG (a small crafted string can't inflate to gigabytes); `reissue_guarded` =
+at most two re-issues at once (`SLOTS`, a BoundedSemaphore) → "Other guides are being converted right now." on both
+surfaces; the channel refusal only where the bot may talk (an @mention outside an `ignore` channel, a `reply` listening
+channel), silence elsewhere (a `watch` channel too), with "Delete your message here."; trailing .,;!? come off the tags; any
+message shaped like an import string (`\d+\|-?\d+:[A-Za-z0-9+/]{32,}`) is swallowed before every model and memory, command
+or not; an empty DM with one message.txt that starts with the command is read from the file; a DM counts only a strict
+membership (`guild_routing.may_access`: owner or Discord's "yes", never an outage's "unknown"); and (controller ruling) the
+convert ignores a guild's plain-text DM setting, as the Me page does — no model, no guild data.
 
 ### 5.56 The Rosters page reads by its shape (built 2026-10-26)
 

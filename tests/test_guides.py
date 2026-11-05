@@ -484,12 +484,132 @@ def test_in_a_channel_the_convert_is_refused_and_goes_nowhere(duo, monkeypatch):
     asyncio.run(OibotGM.on_message(bot, m))
     [(line, kw)] = m.replies
     assert line == g.CHANNEL_REFUSAL and "file" not in kw and att.reads == 0 and hit == []
-    # a listened channel: the untagged request never reaches the decision model either
+    assert line.endswith("Delete your message here.")
+    # a `reply` listening channel: the untagged request never reaches the decision model, and gets the one refusal
     monkeypatch.setattr(type(duo.a), "listen_mode", lambda self, cid: "reply")
     m = DmMessage("convert guide from Jon#1234 to Ash#5678 given " + fixture_string(), PUPPET, guild=guild)
     asyncio.run(OibotGM.on_message(bot, m))
     assert [r[0] for r in m.replies] == [g.CHANNEL_REFUSAL] and hit == []
+    # a `watch` channel: the bot never talks there — swallowed in silence
+    monkeypatch.setattr(type(duo.a), "listen_mode", lambda self, cid: "watch")
+    m = DmMessage("convert guide from Jon#1234 to Ash#5678 given " + fixture_string(), PUPPET, guild=guild)
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert m.replies == [] and hit == []
+    # an import string without the command words is swallowed too: never the decision model
+    m = DmMessage("look at my guide " + fixture_string(), PUPPET, guild=guild)
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert m.replies == [] and hit == []
+    # an @mention in a channel where plain text is ignored: silence
+    monkeypatch.setattr(type(duo.a), "listen_mode", lambda self, cid: None)
+    monkeypatch.setattr(type(duo.a), "plain_mode", lambda self, cid: "ignore")
+    m = DmMessage("<@999> convert guide from Jon#1234 to Ash#5678", PUPPET, guild=guild)
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert m.replies == [] and hit == []
+    monkeypatch.undo()
+    monkeypatch.setattr(type(duo.a), "listen_mode", lambda self, cid: "watch")
     # an ordinary listened message still reaches listening (the gate is untouched)
     m = DmMessage("anyone up for a dungeon?", PUPPET, guild=guild)
     asyncio.run(OibotGM.on_message(bot, m))
     assert len(hit) == 1 and m.replies == []
+
+
+def test_a_string_that_unpacks_past_the_cap_is_refused_before_unpacking_more(monkeypatch):
+    """A small crafted string can inflate to gigabytes: decode never asks zlib for more than the cap left."""
+    monkeypatch.setattr(rxp_decode, "MAX_PLAIN", 10_000)
+    bomb = rxp_decode.encode(["#name bomb\n" + "a" * 200_000], TAG)
+    asked = []
+    real = rxp_decode.zlib.decompressobj
+
+    class Spy:
+        def __init__(self):
+            self.d = real()
+
+        def decompress(self, data, max_length=0):
+            out = self.d.decompress(data, max_length)
+            asked.append((max_length, len(out)))
+            return out
+
+        @property
+        def unconsumed_tail(self):
+            return self.d.unconsumed_tail
+    monkeypatch.setattr(rxp_decode.zlib, "decompressobj", Spy)
+    with pytest.raises(g.GuideError, match="bigger than any guide export"):
+        g.decode(bomb, TAG)
+    assert asked and all(0 < cap <= 10_001 and n <= cap for cap, n in asked), asked
+    with pytest.raises(g.GuideError, match="bigger than any guide export"):
+        g.reissue(bomb, TAG, NEW_TAG)
+    assert rxp_decode.MAX_PLAIN == 10_000 and g.decode(fixture_string(2), TAG) == [GUIDE_A, GUIDE_B], "a real guide fits"
+
+
+def test_a_cap_spread_over_sections_counts_every_section(monkeypatch):
+    monkeypatch.setattr(rxp_decode, "MAX_PLAIN", len(GUIDE_A) + 10)
+    with pytest.raises(g.GuideError, match="bigger than any guide export"):
+        g.decode(fixture_string(2), TAG)
+
+
+def test_two_reissues_at_once_and_the_third_is_busy(client, duo):
+    from test_multiguild_dm import PUPPET
+
+    assert g.REISSUE_SLOTS.acquire(blocking=False) and g.REISSUE_SLOTS.acquire(blocking=False)
+    try:
+        with pytest.raises(g.GuideError, match="being converted right now"):
+            g.reissue_guarded(fixture_string(), TAG, NEW_TAG)
+        r = client.post("/api/me/guide/reissue", json={"text": fixture_string(), "battletag": TAG, "new_battletag": NEW_TAG}, headers=as_user(client, ME))
+        assert r.status_code == 400 and "being converted right now" in r.json()["error"]
+        bot, hit, OibotGM = convert_bot(duo)
+        m = DmMessage("convert guide from Jon#1234 to Ash#5678", PUPPET, [Attachment("g.txt", fixture_string().encode())])
+        asyncio.run(OibotGM.on_message(bot, m))
+        [(line, kw)] = m.replies
+        assert "being converted right now" in line and "file" not in kw
+    finally:
+        g.REISSUE_SLOTS.release()
+        g.REISSUE_SLOTS.release()
+    assert g.reissue_guarded(fixture_string(), TAG, NEW_TAG), "the slots come back"
+
+
+def test_tags_lose_trailing_punctuation_and_a_string_may_follow_the_tags():
+    r = g.convert_request("convert guide from Jon#1234, to Ash#5678!")
+    assert (r.tag, r.new_tag, r.text) == ("Jon#1234", "Ash#5678", "")
+    r = g.convert_request("convert guide from Jon#1234 to Ash#5678.\n" + fixture_string())
+    assert (r.tag, r.new_tag, r.text) == ("Jon#1234", "Ash#5678", fixture_string())
+    assert g.looks_like_string("hi " + fixture_string()) and not g.looks_like_string("2|3 tanks tonight?")
+
+
+def test_a_dm_with_an_import_string_but_no_command_is_swallowed(duo):
+    from test_multiguild_dm import PUPPET
+
+    bot, hit, OibotGM = convert_bot(duo)
+    m = DmMessage("what is this? " + fixture_string(), PUPPET)
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert m.replies == [] and hit == [], "never the model, never memory"
+
+
+def test_a_long_dm_discord_turned_into_message_txt_is_read_from_the_file(duo):
+    from test_multiguild_dm import PUPPET
+
+    bot, hit, OibotGM = convert_bot(duo)
+    att = Attachment("message.txt", ("convert guide from Jon#1234 to Ash#5678 given " + fixture_string()).encode())
+    m = DmMessage("", PUPPET, [att])
+    asyncio.run(OibotGM.on_message(bot, m))
+    [(line, kw)] = m.replies
+    assert kw["file"].filename == "RXPGuides-import-Ash.txt" and g.decode(kw["file"].fp.read().decode(), NEW_TAG) == [GUIDE_A, GUIDE_B]
+    assert att.reads == 1 and hit == []
+    # a message.txt that isn't the command is left alone (an empty DM gets no answer, as before)
+    m = DmMessage("", PUPPET, [Attachment("message.txt", b"a long story about my week")])
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert m.replies == [] and hit == []
+
+
+def test_an_outage_is_not_membership(duo):
+    """guilds_of counts 'unknown' as routable (so a blip asks); the convert needs a real yes or the owner."""
+    from conftest import DUO_SERVER
+    from oibot_gm import guild_routing
+    from test_multiguild_dm import PUPPET
+
+    bot, hit, OibotGM = convert_bot(duo, members={})
+    from conftest import MemberDirectory
+    MemberDirectory({}, {(1, PUPPET), (DUO_SERVER, PUPPET)}).install(bot)
+    m = DmMessage("convert guide from Jon#1234 to Ash#5678", PUPPET, [Attachment("g.txt", fixture_string().encode())])
+    asyncio.run(OibotGM.on_message(bot, m))
+    [(line, kw)] = m.replies
+    assert line == guild_routing.not_in_any(duo.guilds.ordered()) and "file" not in kw and hit == []

@@ -253,9 +253,13 @@ account and paste it). Nothing is kept — the string and both BattleTags are re
 The same refusals as the build: a BattleTag that doesn't unlock the guide, a paste that isn't an import string, a second BattleTag that
 isn't *Name#1234*, or the same BattleTag twice (*Those are the same BattleTag*). **In a DM** the bot does the same: write
 `convert guide from Name#1234 to Other#5678` and attach the import string as a **.txt** file (or put it after the BattleTags:
-`… to Other#5678 given 78|…`, if it fits in a message). The bot answers with one line and the file. It reads that message in code —
-the string never goes to the model, the bot's memory or a log. Asked in a server channel, the bot answers *"Send me that in a DM. The
-import string is your purchase, and the answer is a file for you alone."* and does nothing else.
+`… to Other#5678 given 78|…`; a long message Discord turns into *message.txt* works too). The bot answers with one line and the file.
+It works for anyone in a server the bot looks after, in a DM, whatever a server's plain-text setting for DMs is, like the Me page.
+It reads that message in code — the string never goes to the model, the bot's memory or a log, and any message carrying an import
+string is left alone the same way, command or not. Asked in a server channel, the bot answers *"Send me that in a DM. The import
+string is your purchase, and the answer is a file for you alone. Delete your message here."* where it may talk (an @mention, a channel
+where it replies), and stays silent anywhere else. When two conversions are already running it says *Other guides are being converted
+right now. Try again in a minute.*; a string that would unpack past any real guide's size is refused as too big.
 
 **Tell the bot** (officers): every officer page has **Tell the bot…** in the left rail, and every live sheet on the Rosters page has
 **Tell the bot about this run** (it starts with the run's name). Type a question ("who hasn't answered tonight?") and the answer comes

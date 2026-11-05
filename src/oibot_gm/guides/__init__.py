@@ -8,6 +8,7 @@ from .build import (  # noqa: F401
     member_dir, status, validate_battletag,
 )
 from .reissue import (  # noqa: F401
-    CHANNEL_REFUSAL, CONVERT_FAILED, EMPTY_NEW_TAG, SAME_TAG, USAGE, ConvertRequest, convert_request, reissue, reissue_filename,
+    BUSY as REISSUE_BUSY, CHANNEL_REFUSAL, CONVERT_FAILED, EMPTY_NEW_TAG, SAME_TAG, SLOTS as REISSUE_SLOTS, USAGE, ConvertRequest,
+    convert_request, looks_like_string, reissue, reissue_filename, reissue_guarded,
 )
 from .rxp_decode import decode, encode  # noqa: F401

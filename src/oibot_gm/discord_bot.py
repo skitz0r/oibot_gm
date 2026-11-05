@@ -179,31 +179,48 @@ async def guide_convert(bot, message) -> bool:
     another Battle.net account of their own. Read IN CODE at the top of on_message, before the plain-text model, the
     conversation ring, listening and chat memory, so the import string never reaches a prompt, a memory row or a log
     (nothing here logs the text). True = handled (the caller stops); a module function over the client, so bare test
-    clients work. In a DM: anyone the bot routes a DM for (no picker: nothing guild-specific is read); the string is inline after `given`, else the first attached .txt file;
-    the answer is one line + the file, as the reply to their own DM. In a server channel the bot would read (an
-    @mention, a listened channel): one refusal sentence, nothing converted, no DM (the DM rule)."""
-    req = guides.convert_request(getattr(message, "content", None) or "")
-    if req is None:
-        return False
+    clients work. Any message shaped like an import string is swallowed too, command or not.
+    In a server channel: CHANNEL_REFUSAL only where the bot may talk (an @mention where plain text isn't ignored, or a
+    `reply` listening channel); anywhere else silence. Never a DM (the DM rule).
+    In a DM: whoever belongs to a server the bot looks after (strict: its owner, or "yes" from Discord — an outage is not
+    a yes); no picker and no guild's plain-text DM setting, since nothing guild-specific is read (like the Me page). The
+    string is after the tags (`given …`), else the first attached .txt; a long DM Discord turned into message.txt (empty
+    content) is read from that file when it starts with the command. The answer is one line + the file."""
+    content = getattr(message, "content", None) or ""
+    req = guides.convert_request(content)
     quiet = discord.AllowedMentions.none()
     if message.guild is not None:
+        if req is None:
+            return guides.looks_like_string(content)
         reg = bot.registries.for_guild(message.guild.id)
-        if bot._addressed(message) or (reg is not None and reg.listen_mode(message.channel.id)):
+        cid = message.channel.id
+        if reg is not None and ((bot._addressed(message) and reg.plain_mode(cid) != "ignore") or reg.listen_mode(cid) == "reply"):
             await message.reply(guides.CHANNEL_REFUSAL, allowed_mentions=quiet)
         return True
-    if not await guild_routing.guilds_of(bot, message.author.id):
-        await message.reply(guild_routing.not_in_any(bot.registries.ordered()), allowed_mentions=quiet)
+    txts = [a for a in (getattr(message, "attachments", None) or []) if (getattr(a, "filename", "") or "").lower().endswith(".txt")]
+    text = None
+    if req is None:
+        if guides.looks_like_string(content):
+            return True
+        if content.strip() or len(txts) != 1 or (getattr(txts[0], "size", 0) or 0) > guides.TEXT_MAX:
+            return False
+        body = (await txts[0].read()).decode("utf-8", "replace")
+        if not body.lstrip().lower().startswith("convert guide"):
+            return guides.looks_like_string(body)
+        req, txts, text = guides.convert_request(body), [], ""
+    uid = message.author.id
+    regs = bot.registries.ordered()
+    if not any([await guild_routing.may_access(bot, r, uid) for r in regs]):
+        await message.reply(guild_routing.not_in_any(regs), allowed_mentions=quiet)
         return True
-    text = req.text
-    if not text:
-        att = next((a for a in (getattr(message, "attachments", None) or []) if (getattr(a, "filename", "") or "").lower().endswith(".txt")), None)
-        if att is not None:
-            if (getattr(att, "size", 0) or 0) > guides.TEXT_MAX:
-                await message.reply(guides.TOO_BIG, allowed_mentions=quiet)
-                return True
-            text = (await att.read()).decode("utf-8", "replace")
+    text = req.text or text or ""
+    if not text and txts:
+        if (getattr(txts[0], "size", 0) or 0) > guides.TEXT_MAX:
+            await message.reply(guides.TOO_BIG, allowed_mentions=quiet)
+            return True
+        text = (await txts[0].read()).decode("utf-8", "replace")
     try:
-        out = await asyncio.to_thread(guides.reissue, text, req.tag, req.new_tag)
+        out = await asyncio.to_thread(guides.reissue_guarded, text, req.tag, req.new_tag)
     except guides.GuideError as e:
         usage = "" if (text.strip() and req.tag and req.new_tag) else " " + guides.USAGE
         await message.reply(str(e) + usage, allowed_mentions=quiet)

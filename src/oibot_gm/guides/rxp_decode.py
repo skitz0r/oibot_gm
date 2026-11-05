@@ -61,24 +61,34 @@ def a32(data: bytes) -> int:
 _SECTION = re.compile(r"(-?\d+)(\D)([A-Za-z0-9+/]+=*)(?:%|\s|$)")
 NOT_A_STRING = "That isn't a RestedXP import string: it starts with a number and a bar, like 78|…, and the addon's Export button gives you one."
 WRONG_KEY = "That BattleTag doesn't unlock this guide: an import string opens only with the BattleTag of the account it was issued to."
+TOO_BIG = "That paste is bigger than any guide export; paste the import string alone."  # also the build's paste-size refusal
+# the most guide text an import string may unpack to, across every section: a full 1–60 purchase is a few MB of text, so
+# 64 MB is far past any real guide and stops a small crafted string from inflating to gigabytes (memory, a32, re-encode)
+MAX_PLAIN = 64 * 1024 * 1024
 
 
 def decode(text: str, battletag: str) -> list[str]:
     """The guide texts (RXP step syntax) inside an import string, in order. GuideError when the paste isn't an import
-    string or the BattleTag isn't its key (a checksum mismatch after decrypting is the same wrong key)."""
+    string or the BattleTag isn't its key (a checksum mismatch after decrypting is the same wrong key), or when the texts
+    would unpack past MAX_PLAIN (refused before unpacking any further)."""
     s = re.sub(r"^[^\d]*?(?=\d+\|)", "", text.strip())  # a label pasted in front of the string ("guide: 78|…") is dropped
     if not re.match(r"^\d+\|", s):
         raise GuideError(NOT_A_STRING)
     S = rc4_sbox(make_base(battletag))
     guides: list[str] = []
+    total = 0
     for h, mode, content in _SECTION.findall(s):
         if mode != ":":
             continue
         try:
             raw = base64.b64decode(content + "=" * (-len(content) % 4))
-            txt = zlib.decompress(rc4(S, raw))
+            d = zlib.decompressobj()
+            txt = d.decompress(rc4(S, raw), MAX_PLAIN - total + 1)  # never more than the cap left (+1 to see it overflow)
         except (ValueError, zlib.error) as e:
             raise GuideError(WRONG_KEY) from e
+        total += len(txt)
+        if d.unconsumed_tail or total > MAX_PLAIN:
+            raise GuideError(TOO_BIG)
         if a32(txt) != int(h) % 4294967296:
             raise GuideError(WRONG_KEY)
         guides += [g.decode("utf-8", "replace") for g in txt.split(b"\0") if g.strip()]

@@ -76,7 +76,7 @@ def install_guides_api(app: FastAPI, bot, *, who, body) -> None:
             raise HTTPException(403, "An import string is re-issued from the Me page by the person who bought it; the string stays out of transcripts.")
         text, tag, new = str(d.get("text") or ""), str(d.get("battletag") or ""), str(d.get("new_battletag") or "")
         try:
-            out = await asyncio.to_thread(g.reissue, text, tag, new)
+            out = await asyncio.to_thread(g.reissue_guarded, text, tag, new)
         except g.GuideError as e:
             raise HTTPException(400, str(e)) from None
         fn = g.reissue_filename(new)
