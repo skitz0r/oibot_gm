@@ -825,6 +825,8 @@ class RaidMixin:
         and pins take no lock while the sheet is open, so one written during the solve (a No thanks, a pin out) makes
         the lock solve again on the live run (rc.solve_inputs), up to rc.LOCK_SOLVES times; still moving after that,
         the lock fails and the sheet stays open — nobody is rostered from answers they already changed."""
+        if rc.is_follow(ev) and (lead := rc.lead_of(rs, ev)) is not None and lead.state == "open":
+            raise RegistryError(f"Lock {run_title(reg, lead)} — its lock builds the follow-on too")
         team = rc.run_team(reg, ev)
         async with self.solving(reg, ev.key), self.board_lock(reg, ev.key):
             if ev.state != "open":
@@ -906,7 +908,19 @@ class RaidMixin:
                 await sig.send(f"🔒 {run_label(reg, ev)} is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}", allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:  # noqa: BLE001
                 log.warning("lock line failed (%s): %s", ev.key, e)
-        return f"{ev.key}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)"
+        tail = await self.lock_follow(reg, rs, ev, by)
+        return f"{ev.key}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)" + (f" · {tail}" if tail else "")
+
+    async def lock_follow(self, reg, rs, ev, by: str) -> str | None:
+        """The lead's lock builds the follow-on too (docs/superpowers/specs/2026-11-04-follow-on-runs-design.md): once
+        the lead is locked, the follow-on solves from the night's answers with the lead's rostered preferred
+        (rc.LEAD_SEAT_BONUS), flips to locked and posts its own lock cards; it never confirms. None when the run has no
+        live open follow-on. A failed follow-on solve leaves it open with its lock_error, like any run — the scheduler
+        retries it, the lead stands."""
+        fev = rc.follow_of(rs, ev)
+        if fev is None or fev.state != "open":
+            return None
+        return await self.lock_run(reg, rs, fev, by=by)
 
     async def confirm_one(self, reg, ev, sg, roster_i: int, group_i: int, by: str) -> bool:
         """Seat one signup on the run's roster and ask them to confirm: by DM, or — DMs off — as a pending ask on the
@@ -1251,13 +1265,13 @@ class RaidMixin:
                 await self.post_run_update(reg, ev, f"🧩 replacement for {m.display_name}:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
 
     # ---- opening and cancelling runs (commands, the web and plain-text ops share these)
-    async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None) -> rc.RaidEvent:
+    async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None, follow: dict | None = None) -> rc.RaidEvent:
         """Open (or find) the run for `instance` at `start` (from `schedule`, None = the raid's own cadence), post its
         sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
         place it), and say so on the ops feed. A start more than a few minutes in the past is refused
         (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts."""
         rc.refuse_past_start(reg, start)
-        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
+        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow)
         channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel and not ev.message_id:
             await self.post_sheet(reg, rs, ev, channel)
@@ -1265,7 +1279,8 @@ class RaidMixin:
             officer_ch = self.officer_channel(reg, ev)
             if officer_ch is not None:
                 await self.post_health(reg, rs, ev, officer_ch, nudge=False, early=True)
-        await self.ops.emit(reg.config, "info", f"{by} opened {ev.key} ({len(ev.signups)} pre-filled out from absences)" + ("" if ev.message_id else " — no signup channel: sheet not posted"))
+        await self.ops.emit(reg.config, "info", f"{by} opened {ev.key} ({len(ev.signups)} pre-filled out from absences)" + ("" if ev.message_id else " — no signup channel: sheet not posted")
+                             + (f" then {reg.raid_def(fev.instance).get('name', fev.instance)} {fev.key}" if (fev := rc.follow_of(rs, ev)) else ""))
         return ev
 
     async def open_test_run(self, reg, rs, raid: str, *, start_in: int, nudge_in: int, lock_in: int, confirm_in: int, dm: bool, by: str, by_id: int | None,

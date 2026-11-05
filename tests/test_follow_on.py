@@ -161,3 +161,90 @@ def test_a_cancelled_follow_on_refuses_the_night_and_opens_no_lead(reg, rs):
     with pytest.raises(RegistryError, match="cancelled"):
         rc.open_run(reg, rs, LEAD, lead.start, by="t", follow={"raid": FOLLOW, "rosters": 1})
     assert len(reg.config.rosters) == n_dicts and len(rs.events) == n_events
+
+
+# ---------------------------------------------------------------- Task 3: the lock builds both
+
+from test_raid_night import NightBot, fast_propose, run  # noqa: E402,F401
+
+
+def seat_by_name(names_by_key: dict[str, list[str]]):
+    """rc.propose without the solver, per run key prefix: the lead's names and the follow-on's names."""
+    def propose(reg, rs, ev, save=True):
+        names = names_by_key[ev.instance]
+        size = rc.run_size(reg, ev)
+        g = int(reg.profile.comp_rules["group_size"])
+        layout = [names[i:i + g] for i in range(0, len(names), g)]
+        ev.rosters = rc.board_rosters(reg, ev, layout, size)
+        return [], ev.rosters[0]
+    return propose
+
+
+def test_the_leads_lock_locks_the_follow_on_too(reg, rs, monkeypatch):
+    reg.seed_test_members(24, "t")
+    bot = NightBot(reg, rs)
+    lead, fev = open_pair(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms)
+    names = [m.display_name for m in ms]
+    monkeypatch.setattr(rc, "propose", seat_by_name({LEAD: names[:20], FOLLOW: names[:20]}))
+    line = run(bot.lock_run(reg, rs, lead, by="Jon"))
+    fev = rs.events[fev.key]
+    assert lead.state == "locked" and fev.state == "locked" and fev.key in line
+    assert len(fev.all_rosters) == 2 and sorted(p.signup_name for r in fev.all_rosters for p in r.selected) == sorted(names[:20])
+    assert fev.confirm_by is None and not bot.dms  # a follow-on never confirms (its lead is ad hoc here: no DMs either)
+    assert "lock:0" in fev.cards or bot.officer_channel(reg, fev) is None  # cards post when there is a channel
+
+
+def test_a_follow_on_cannot_lock_before_its_lead(reg, rs):
+    reg.seed_test_members(24, "t")
+    bot = NightBot(reg, rs)
+    lead, fev = open_pair(reg, rs)
+    with pytest.raises(RegistryError, match="its lock builds the follow-on too"):
+        run(bot.lock_run(reg, rs, fev, by="Jon"))
+    assert fev.state == "open" and lead.state == "open"
+
+
+def test_the_scheduler_skips_a_follow_on_while_its_lead_is_open(reg, rs, monkeypatch):
+    reg.seed_test_members(24, "t")
+    bot = NightBot(reg, rs)
+    lead, fev = open_pair(reg, rs, days=0.5)  # inside the ad hoc lock window would be days < 2/24; keep both open
+    locked = []
+
+    async def lock_run(reg, rs, ev, by="scheduler"):
+        locked.append(ev.key)
+        return "ok"
+
+    monkeypatch.setattr(bot, "lock_run", lock_run)
+    monkeypatch.setattr(bot, "post_health", lambda *a, **k: None)
+    run(bot.scheduler_tick_guild(reg))
+    assert fev.key not in locked and not fev.health_posted
+
+
+def test_the_follow_ons_solve_prefers_the_leads_rostered_and_skips_first_come(reg, rs, monkeypatch):
+    """What the follow-on hands the solver: every lead seat carries rc.LEAD_SEAT_BONUS, nobody else does, and no late
+    joiner is benched by first come (the lead's roster comes first instead)."""
+    from conftest import lock_with_board
+    from oibot_gm.roster import solver
+
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms)
+    lock_with_board(reg, rs, lead, [m.display_name for m in ms[4:]])
+    seen = {}
+
+    class Seen(Exception):
+        pass
+
+    def capture(profile, players, raid_id, opts, **kw):
+        seen["opts"] = opts
+        raise Seen
+
+    monkeypatch.setattr(solver, "solve_rosters", capture)
+    with pytest.raises(Seen):
+        rc.propose(reg, rs, rs.events[fev.key], save=False)
+    bonus, out = seen["opts"].bonus, set(seen["opts"].force_out)
+    assert all(bonus.get(m.display_name, 0) >= rc.LEAD_SEAT_BONUS for m in ms[4:])
+    assert all(bonus.get(m.display_name, 0) < rc.LEAD_SEAT_BONUS for m in ms[:4])
+    assert not out, "a follow-on benches nobody by first come"

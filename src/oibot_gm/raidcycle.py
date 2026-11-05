@@ -2403,6 +2403,10 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     n_rosters = max(how_many_rosters(reg, players, size, rb, want=run_rosters(reg, ev)), -(-len(layout) // k) if any(layout) else 1)
     strategy = strategy or ev.split_strategy or (reg.config.team(ev.team) or {}).get("split_policy") or rd.get("split_policy") or "balanced"
     bonus = seat_bonus(reg, rs, ev, players)
+    lead = lead_of(rs, ev)
+    if lead is not None and lead.all_rosters:  # a follow-on: the lead's rostered come first — the splits are the lead's roster split (docs/superpowers/specs/2026-11-04-follow-on-runs-design.md)
+        on_lead = {player_uid(lead, p) for p in lead.seated()}
+        bonus = {**bonus, **{p.signup_name: int(bonus.get(p.signup_name, 0)) + LEAD_SEAT_BONUS for p in players if player_uid(ev, p) in on_lead}}
     roster_bonus = None
     if strategy == "rotation":
         w = int(rd["weights"].get("sat_out", 2))
@@ -2413,7 +2417,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     late: set[str] = set()
     benched = {x for x in pin_out + [resolve(n) for n in cc["always_bench"]] if x and x in pool and x not in placed}
     kept = {x for x in pin_in + list(placed) + [resolve(n) for n in cc["never_bench"]] if x and x in pool and x not in pin_out}
-    if run_kind(reg, ev) == "adhoc":  # first come, first rostered: the late joiners are benched before the solve
+    if run_kind(reg, ev) == "adhoc" and not is_follow(ev):  # first come, first rostered (a follow-on: the lead's roster comes first instead): the late joiners are benched before the solve
         # a joiner benched by a pin / always_bench takes no first-come seat, and a never_bench joiner keeps one —
         # otherwise the same name lands in force_in and force_out, or a seat goes unfilled (INFEASIBLE)
         late = first_come_out([p for p in players if p.signup_name not in benched], size * n_rosters,
