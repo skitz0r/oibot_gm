@@ -445,7 +445,9 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     series = rc.run_series(reg, ev)
     head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · {kind}" + (f" ({reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
              + ("" if rc.run_confirms(reg, ev) else " · no confirmations (Join is the commitment)")
-             + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else ""))
+             + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else "")
+             + (f" · then {then}" if (then := rc.follow_words_of(reg, ev)) else "")
+             + (f" · after {after} (a follow-on: its answers are the lead's)" if (after := rc.lead_name_of(reg, ev)) else ""))
     out = [head]
     # "not answered" = who the bot expects an answer from (the series' regulars; every main while it has none; ad hoc: nobody)
     unanswered = [m.display_name for m, _c in rc.not_answered(reg, ev)]

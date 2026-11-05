@@ -357,6 +357,31 @@ def follow_dict(reg: Registry, ev: "RaidEvent") -> dict | None:
     return reg.config.team(t["followed_by"]) if t and t.get("followed_by") else None
 
 
+def follow_short(reg: Registry, ev: "RaidEvent") -> dict[str, int]:
+    """What the follow-on's tank and healer minimums × its rosters are short, counted on the lead's Join answers (the
+    health card's one follow-on line; {} when none or covered)."""
+    ft = follow_dict(reg, ev)
+    if not ft:
+        return {}
+    size, n = int(ft.get("size") or DEFAULT_RAID_SIZE), int(ft.get("rosters") or 1)
+    rb = reg.role_bounds(ft.get("instance"), size)
+    ins = ev.by_status("in")
+    have = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer")}
+    return {r: int(rb[r]["min"]) * n - have[r] for r in ("tank", "healer") if int(rb[r]["min"]) * n > have[r]}
+
+
+def follow_words_of(reg: Registry, ev: "RaidEvent") -> str:
+    """'Barrow Deeps ×2' for a lead's follow-on ('' when none)."""
+    ft = follow_dict(reg, ev)
+    return reg.follow_words({"raid": ft.get("instance"), "rosters": ft.get("rosters") or 1}) if ft else ""
+
+
+def lead_name_of(reg: Registry, ev: "RaidEvent") -> str:
+    """'Hyjal Summit' for a follow-on's lead ('' when the run is not a follow-on)."""
+    lt = lead_dict(reg, ev)
+    return reg.raid_def(lt.get("instance")).get("name", lt.get("instance")) if lt else ""
+
+
 def abbr(instance: str) -> str:
     return "".join(w[0] for w in instance.split("_"))[:4]
 
@@ -3059,19 +3084,24 @@ def dst_words(reg: Registry, note: str, start: datetime) -> str:
     return ""
 
 
-def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | None = None, schedule: str | None = None) -> dict:
+def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | None = None, schedule: str | None = None, follow: dict | None = None) -> dict:
     """What Open would do, before anything is written (POST /api/raid/{rid}/open/preview; the wizard's confirm shows
     the same facts): {kind, schedule, schedule_name, key, start (ISO — the exact instant Open must carry back), label
     (12-hour guild time), when_note (the DST line or ""), exists (the live run's state at that key, or None), channel
     (the signup channel id the sheet posts in, or None), rules (what kind of run it is, in sentences), past, closed
-    (done | cancelled when that time's run is closed — Open is refused) and refusal (the sentence why, or None)}."""
+    (done | cancelled when that time's run is closed — Open is refused), refusal (the sentence why, or None), follow
+    ({raid, name, rosters, when} — `follow` given, else the schedule's own; None on a one-off without one) and
+    follow_line ("then Barrow Deeps ×2 at 9:30 PM", or "")}."""
     start, sid, note = open_when(reg, instance, value, schedule)
     w = which_run(reg, instance, start, sid if sid is not None else DEFAULT_SCHEDULE)
     ev = rs.events.get(w["key"])
     live = ev if ev is not None and ev.state not in ("done", "cancelled") else None
     refusal = closed_run_refusal(rs, w["key"])
     rules = " ".join(open_rules(reg, instance, w["schedule"], w["kind"]))
-    return {**w, "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
+    fw = follow if follow is not None else (reg.schedule_def(instance, w["schedule"] or DEFAULT_SCHEDULE)["schedule"].get("follow") if w["schedule"] != ADHOC_SCHEDULE else None)
+    fstart = follow_start(reg, instance, start) if fw else None
+    fjson = {"raid": fw["raid"], "name": reg.raid_def(fw["raid"]).get("name", fw["raid"]), "rosters": int(fw.get("rosters") or 1), "when": reg.local12(fstart)} if fw else None
+    return {**w, "follow": fjson, "follow_line": f"then {reg.follow_words(fw)} at {reg.local12(fstart, '%I:%M %p')}" if fw else "", "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
             "closed": ev.state if refusal else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
 
@@ -3097,7 +3127,8 @@ def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime |
     """Each ACTIVE recurring schedule's next `n` runs that aren't live yet, soonest first, whatever the horizon (the
     Rosters page's "When it runs" block and its Open buttons; a pickup template opens nothing on its own): {schedule,
     schedule_name, start (words), start_iso (the exact instant Open carries back), key, opens (words), opens_iso,
-    needs_channel (the sheet is due and no signup channel can take it), can_open, why (open_row_refusal's sentence)}."""
+    needs_channel (the sheet is due and no signup channel can take it), can_open, why (open_row_refusal's sentence),
+    follow (the schedule's follow-on in words, "Barrow Deeps ×2", or "")}."""
     now = now or reg.now_local()
     no_channel = not reg.config.signup_channel_id
     out = []
@@ -3115,7 +3146,7 @@ def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime |
             why = open_row_refusal(reg, rs, instance, t, key, opens, now)
             rows.append({"schedule": s["id"], "schedule_name": s.get("name") or s["id"], "start": reg.local12(t), "start_iso": t.isoformat(), "key": key,
                          "opens": reg.local12(opens), "opens_iso": opens.isoformat(), "needs_channel": no_channel and opens <= now,
-                         "can_open": why is None, "why": why})
+                         "can_open": why is None, "why": why, "follow": reg.follow_words(s.get("follow"))})
             if len(rows) >= n:
                 break
         out += rows

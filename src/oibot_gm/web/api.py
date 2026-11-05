@@ -637,7 +637,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                            # the badge in words ("not rostered" for a joiner the lock left out — never "Join" on a locked run) and the run's state
                            "badge": rc.answer_word(ev, s.status if s else None, (seat[0] + 1) if seat else None), "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state),
                            "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
-                           "confirms": rc.run_confirms(reg, ev), **sheet_row_extras(reg, ev, m, rs)})
+                           "confirms": rc.run_confirms(reg, ev), "then": rc.follow_words_of(reg, ev) or None, "lead_raid": rc.lead_name_of(reg, ev) or None,
+                           **sheet_row_extras(reg, ev, m, rs)})
         primary, flex = reg.roles_of(m) if m else (None, [])
         today = reg.now_local().date().isoformat()
         return {
@@ -841,7 +842,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "seats": size * int(s.get("rosters") or 1), "slots": list(s.get("slots") or []), "slot_labels": [reg.slot_label(x) for x in s.get("slots") or []],
                 "days": list(s.get("days") or []), "time": s.get("time") or "", "time_label": reg.time_label(s.get("time")) if s.get("time") else "",
                 "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]), "is_default": s["id"] == "default",
-                "effective": {k: sd[k] for k in SCHEDULE_CADENCE}, **schedule_words(reg, rid, s)}
+                "effective": {k: sd[k] for k in SCHEDULE_CADENCE}, "follow": s.get("follow"), "follow_words": reg.follow_words(s.get("follow")),
+                **schedule_words(reg, rid, s)}
 
     def schedule_words(reg, rid: str, s: dict) -> dict:
         """What the Raids page's schedule row and editor say, from code (dual interfaces §3.4 RD-10, §3.5 RD-11): `next` =
@@ -934,6 +936,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters), "schedule": ev.schedule, "rosters_expected": rc.run_rosters(reg, ev),
                 "kind": rc.run_kind(reg, ev), "series": rc.run_series(reg, ev), "series_name": reg.series_label(rc.run_series(reg, ev)) if rc.run_series(reg, ev) else None,
                 "confirms": rc.run_confirms(reg, ev), "test": rc.is_test_run(reg, ev),
+                # follow-on runs (spec 2026-11-04-follow-on-runs): the pair's run keys, the follow-on in words on the lead,
+                # the lead on the follow-on, and who leaves after the lead
+                "follows": ev.follows, "followed_by": ev.followed_by,
+                "follow": ({"raid": reg.raid_def(ft["instance"]).get("name", ft["instance"]), "rosters": int(ft.get("rosters") or 1), "key": ev.followed_by,
+                            "when": t12(reg, rc.follow_start(reg, ev.instance, ev.start))} if (ft := rc.follow_dict(reg, ev)) else None),
+                "lead": ({"raid": rc.lead_name_of(reg, ev), "key": ev.follows} if ev.follows else None),
+                "leaving": [reg.members[u].display_name for u in ev.leaving if u in reg.members],
                 "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state)}  # the state in words (meta.run_states), History and the drawer print it
         if not full:
             return base

@@ -315,6 +315,9 @@ class OpenWizard(Wizard):
             n = int(sd["schedule"].get("rosters") or 1)
             if n > 1:
                 lines.append(f"-# It has {n} rosters of {sd.get('size', '?')}, so the sheet offers {n * int(sd.get('size') or 0)} seats.")
+        fw = self.reg.schedule_def(self.rid, sid)["schedule"].get("follow") if sid and sid != rc.ADHOC_SCHEDULE else None
+        if fw:  # D2: the wizard shows a schedule's follow-on; it sets none
+            lines.append(f"-# Then {self.reg.follow_words(fw)} at {self.reg.local12(rc.follow_start(self.reg, self.rid, start), '%I:%M %p')}, from the same signup.")
         if self.draft["note"]:
             lines.append(when_note(self.draft["note"], start))
         ev = self.existing(start)

@@ -382,3 +382,97 @@ def test_an_expired_confirmation_on_the_lead_frees_the_follow_on_seat(reg, rs, m
     fev = rs.events[fev.key]
     assert lead.seat_of(m) is None and fev.seat_of(m) is None and fev.signups[str(m.discord_id)].status == "out"
     assert fev.seat_of(ms[6]) is not None  # nobody else's follow-on seat moved
+
+
+# ---------------------------------------------------------------- Task 5: the words
+
+import discord  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from test_mcp import TOKEN, FakeBot, bearer  # noqa: E402
+
+from oibot_gm import raid_views  # noqa: E402
+from oibot_gm.web import app as web  # noqa: E402
+
+
+@pytest.fixture
+def c(reg, rs, monkeypatch):
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    return TestClient(web.create_app(FakeBot(reg, rs)))
+
+
+def card_text(view) -> str:
+    return "\n".join(str(ch.content) for ch in view.walk_children() if isinstance(ch, discord.ui.TextDisplay))
+
+
+def test_sheet_and_cards_say_then_and_after(reg, rs):
+    from conftest import lock_with_board
+
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    ico = lambda *a, **k: ""  # noqa: E731
+    e, _view = raid_views.sheet_message(reg, lead, rc.run_team(reg, lead), ico)
+    assert e.title.endswith("Hyjal Summit, then Barrow Deeps ×2") and "\nthen Barrow Deeps ×2 <t:" in e.description
+    join(reg, rs, lead, reg.test_members()[:5])
+    assert rc.follow_short(reg, lead)  # five joiners can't cover two 10s' tanks and healers
+    assert "Barrow Deeps follow-on" in card_text(raid_views.health_layout(reg, rs, lead, rc.run_team(reg, lead), ico))
+    assert rc.follow_short(reg, fev) == {}  # a follow-on has no follow-on of its own
+    join(reg, rs, lead, reg.test_members()[5:10])
+    fev = rs.events[fev.key]
+    lock_with_board(reg, rs, fev, [m.display_name for m in reg.test_members()[:10]])
+    card = card_text(raid_views.lock_layout(reg, rs.events[fev.key], rc.run_team(reg, fev), ico, 0, rs))
+    assert "Barrow Deeps · after Hyjal Summit" in card
+
+
+def test_previews_and_json_carry_the_follow_on(reg, rs, c):
+    unlock_hyjal(reg)
+    reg.set_schedule(LEAD, "tue", {"slots": "Tue 18:30", "follow": "barrow_deeps x2"}, "t")
+    p = rc.open_preview(reg, rs, LEAD, None, "tue")
+    assert p["follow"]["name"] == "Barrow Deeps" and p["follow"]["rosters"] == 2 and p["follow_line"].startswith("then Barrow Deeps ×2 at ") and "PM" in p["follow_line"]
+    p2 = rc.open_preview(reg, rs, LEAD, (reg.now_local() + timedelta(days=4)).strftime("%Y-%m-%d 18:30"), None, follow={"raid": FOLLOW, "rosters": 1})
+    assert p2["follow"]["rosters"] == 1 and p2["follow_line"].startswith("then Barrow Deeps at ")
+    p3 = rc.open_preview(reg, rs, LEAD, (reg.now_local() + timedelta(days=4)).strftime("%Y-%m-%d 18:30"), rc.ADHOC_SCHEDULE)
+    assert p3["follow"] is None and p3["follow_line"] == ""
+    rows = [u for u in rc.upcoming_rows(reg, rs, LEAD) if u["schedule"] == "tue"]
+    assert rows and all(u["follow"] == "Barrow Deeps ×2" for u in rows)
+    raids = c.get("/api/raids", headers=bearer()).json()["raids"]
+    s = next(x for r in raids if r["id"] == LEAD for x in r["schedules"] if x["id"] == "tue")
+    assert s["follow"] == {"raid": FOLLOW, "rosters": 2} and s["follow_words"] == "Barrow Deeps ×2"
+    lead, fev = open_pair(reg, rs)
+    reg.seed_test_members(4, "t")
+    join(reg, rs, lead, reg.test_members()[:2])
+    j = c.get(f"/api/run/{lead.key}", headers=bearer()).json()
+    assert j["followed_by"] == fev.key and j["follow"]["raid"] == "Barrow Deeps" and j["follow"]["rosters"] == 2 and j["follow"]["key"] == fev.key
+    assert "PM" in j["follow"]["when"] and j["lead"] is None and j["follows"] is None
+    jf = c.get(f"/api/run/{fev.key}", headers=bearer()).json()
+    assert jf["follows"] == lead.key and jf["lead"] == {"raid": "Hyjal Summit", "key": lead.key} and jf["follow"] is None and jf["leaving"] == []
+
+
+def test_me_rows_offer_leaving_and_staying(reg, rs, monkeypatch):
+    from test_member_inbox_web import OFFICER, SECRET, WebNightBot, as_user
+
+    lead, fev = open_pair(reg, rs)
+    m, _c = reg.set_plan(OFFICER, "Offi", "Priest", "Holy", None, "main")  # a real member (a puppet never answers a real sheet)
+    join(reg, rs, lead, [m])
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.setenv("OIBOT_WEB_SECRET", SECRET)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    monkeypatch.delenv("OIBOT_WEB_SESSION_EPOCH", raising=False)
+    c = TestClient(web.create_app(WebNightBot(reg, rs)))
+
+    def rows() -> dict:
+        as_user(c, m.discord_id)
+        me = c.get("/api/me")
+        assert me.status_code == 200, me.text
+        return {s["key"]: s for s in me.json()["sheets"]}
+
+    r = rows()
+    assert r[lead.key]["then"] == "Barrow Deeps ×2" and r[lead.key]["may_answer"] and r[lead.key]["lead_raid"] is None
+    assert r[lead.key]["may_leave"] is False and r[lead.key]["leave_consequence"] is None
+    f = r[fev.key]
+    assert f["lead_raid"] == "Hyjal Summit" and f["then"] is None and f["may_answer"] is False and f["may_cant"] is False
+    assert f["may_leave"] is True and f["may_stay"] is False
+    assert f["leave_consequence"] == "Your Hyjal Summit answer stands. You are out of the Barrow Deeps follow-on."
+    rc.leave_follow(reg, rs, rs.events[fev.key], m)
+    f = rows()[fev.key]
+    assert f["may_leave"] is False and f["may_stay"] is True

@@ -133,6 +133,9 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     ins, subs, outs = (ev.by_status(s) for s in ("in", "sub", "out"))
     rd = reg.raid_def(ev.instance)
     name = rd.get("name", ev.instance or "raid")
+    then = rc.follow_words_of(reg, ev)  # a lead: "Hyjal Summit, then Barrow Deeps ×2" (spec 2026-11-04-follow-on-runs)
+    if then:
+        name = f"{name}, then {then}"
     size = int(team.get("size") or rd.get("size") or 20)
     test = bool(team.get("test"))
     tag = "🧪 " if test else ""
@@ -163,7 +166,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         _soft, hard, confirm = run_times(reg, ev, team)
         confirms = rc.run_confirms(reg, ev)
         e.title = f"{tag}{name}"
-        e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n**{len(ins)}** / {size * want}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
+        e.description = (f"<t:{unix}:F> · <t:{unix}:R>" + (f"\nthen {then} <t:{int(rc.follow_start(reg, ev.instance, ev.start).timestamp())}:t>" if then else "") + f"\n**{len(ins)}** / {size * want}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
                          + f"\n🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
         by_cls: dict[str, list] = {}
         for sg in ins:
@@ -545,6 +548,10 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
         hints = [x["hint"] for x in rc.cover_hints(short)] if officer else []  # names of who could cover: officers only; "not on the sheet" once
         if hints:
             body.append("-# " + " · ".join(hints))  # `-#` only renders at the start of a line
+    fshort = rc.follow_short(reg, ev)  # the follow-on's tanks and healers, counted on this sheet's Join answers
+    if fshort:
+        fid = rc.follow_dict(reg, ev)["instance"]
+        body.append(f"**{reg.raid_def(fid).get('name', fid)} follow-on** short " + "   ".join(f"{ico('role', r)} {k}" for r, k in fshort.items()))
     missing = [b for b in h["buffs"] if not b["providers"]]
     if missing:
         body.append("⛔ " + " ".join(ico("buff", b["id"]) for b in missing if ico("buff", b["id"])))
@@ -643,7 +650,8 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
     marks = {n: MARK.get(a) for n, a in conf.items()}
     tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
     rd = reg.raid_def(ev.instance)
-    head = _header(reg, ev, f"🔒 {rd.get('name', ev.instance)}" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else ""),
+    after = rc.lead_name_of(reg, ev)  # a follow-on: "Barrow Deeps · after Hyjal Summit"
+    head = _header(reg, ev, f"🔒 {rd.get('name', ev.instance)}" + (f" · after {after}" if after else "") + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else ""),
                    [f"**{len(r.selected)}** rostered" + "   " + _role_counts(ico, r.selected), tally if confirms else f"-# {rc.NO_CONFIRMATIONS}"])
     summaries = _group_summaries(reg, r)
     parts = [head, ui.Separator()]

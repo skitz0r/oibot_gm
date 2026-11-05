@@ -38,15 +38,24 @@ def cant_consequence(reg, ev, seated: bool, lead_seated: bool = False) -> str:
 def sheet_row_extras(reg, ev, m, rs=None) -> dict:
     """What the Me page's My sheets row needs to be actionable (rendered from server state only): may_answer (open: Join /
     Bench / No thanks), may_cant (locked and rostered: Can't make it… with a note) and cant_consequence (its confirm's
-    sentences), queue_note (ad hoc and joined: a change away from Join asks once), receipt (rc.answer_receipt, plain)."""
+    sentences), queue_note (ad hoc and joined: a change away from Join asks once), receipt (rc.answer_receipt, plain).
+    A follow-on is never answered on its own: may_leave (on the night and not leaving: Leave after the lead), may_stay
+    (leaving: I'm staying) and leave_consequence (the leave confirm's sentences)."""
     s = ev.signups.get(str(m.discord_id)) if m else None
     locked = ev.state == "locked"
     seated = bool(m and locked and ev.seat_of(m))
     adhoc = rc.run_kind(reg, ev) == "adhoc"
     lead = rc.lead_of(rs, ev) if rs is not None and ev.follows else None
     lead_seated = bool(m and lead is not None and lead.seat_of(m))  # a follow-on's Can't: are they rostered on the lead?
-    return {"may_answer": ev.state == "open" and rc.on_bench_side(reg, ev, m) if m else False,
-            "may_cant": seated or (locked and s is not None and s.status == "in"),
+    # a follow-on (spec 2026-11-04-follow-on-runs): never answered on its own; Leave after the lead / I'm staying instead
+    live = ev.state in ("open", "locked")
+    leaving = bool(m and ev.follows and m.discord_id in ev.leaving)
+    on_night = seated or bool(m and ev.follows and s is not None and s.status == "in")
+    return {"may_answer": (ev.state == "open" and rc.on_bench_side(reg, ev, m) and not ev.follows) if m else False,
+            "may_cant": (seated or (locked and s is not None and s.status == "in")) and not ev.follows,
+            "may_leave": bool(ev.follows and live and on_night and not leaving),
+            "may_stay": leaving and live,
+            "leave_consequence": " ".join(leave_follow_consequence(reg, ev, seated, lead_seated)) if ev.follows else None,
             "cant_consequence": cant_consequence(reg, ev, seated, lead_seated) if locked else None,
             "queue_note": QUEUE_NOTE if adhoc and ev.state == "open" and s is not None and s.status == "in" else None,
             "receipt": rc.answer_receipt(reg, ev, m).replace("**", "") if m else None}
