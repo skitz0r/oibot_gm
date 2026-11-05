@@ -198,19 +198,24 @@ async def guide_convert(bot, message) -> bool:
             await message.reply(guides.CHANNEL_REFUSAL, allowed_mentions=quiet)
         return True
     txts = [a for a in (getattr(message, "attachments", None) or []) if (getattr(a, "filename", "") or "").lower().endswith(".txt")]
+    uid = message.author.id
+    regs = bot.registries.ordered()
+
+    async def belongs() -> bool:  # strict: the owner or Discord's "yes" (an outage's "unknown" is not a yes)
+        return any([await guild_routing.may_access(bot, r, uid) for r in regs])
     text = None
     if req is None:
         if guides.looks_like_string(content):
             return True
         if content.strip() or len(txts) != 1 or (getattr(txts[0], "size", 0) or 0) > guides.TEXT_MAX:
+            return False  # an empty DM stops at on_message's empty-content guard: nothing downstream reads the file
+        if not await belongs():  # before any read: a stranger's file is never opened
             return False
         body = (await txts[0].read()).decode("utf-8", "replace")
-        if not body.lstrip().lower().startswith("convert guide"):
-            return guides.looks_like_string(body)
+        if body.lstrip()[:13].lower() != "convert guide":  # the prefix only: a file that isn't the command is never scanned
+            return False
         req, txts, text = guides.convert_request(body), [], ""
-    uid = message.author.id
-    regs = bot.registries.ordered()
-    if not any([await guild_routing.may_access(bot, r, uid) for r in regs]):
+    elif not await belongs():
         await message.reply(guild_routing.not_in_any(regs), allowed_mentions=quiet)
         return True
     text = req.text or text or ""

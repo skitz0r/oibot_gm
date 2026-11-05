@@ -50,15 +50,14 @@ def rc4(S: list[int], data: bytes) -> bytes:
 
 
 def a32(data: bytes) -> int:
-    a, b = 1, 0
-    for x in data:
-        a = (a + x) % 65521
-        b = (b + a) % 65521
-    return (b << 16 | a) & 0xFFFFFFFF
+    """Adler-32 (the addon's checksum): zlib's own, in C, so a 64 MB text is not a Python loop."""
+    return zlib.adler32(data) & 0xFFFFFFFF
 
 
 # `<adler32>:<base64>%` per section; the last % may be missing from a paste that was trimmed (padding is restored below)
-_SECTION = re.compile(r"(-?\d+)(\D)([A-Za-z0-9+/]+=*)(?:%|\s|$)")
+# Linear on any input: a section starts only right after the `N|`, a `%` or whitespace (the lookbehinds), and every run is
+# possessive, so a long run of digits or base64 is walked once, never retried from each position (a 4 MB paste stays fast)
+_SECTION = re.compile(r"(?:(?<=\|)|(?<=%)|(?<=\s))(-?\d++)(\D)([A-Za-z0-9+/]++=*+)(?:%|\s|$)")
 NOT_A_STRING = "That isn't a RestedXP import string: it starts with a number and a bar, like 78|…, and the addon's Export button gives you one."
 WRONG_KEY = "That BattleTag doesn't unlock this guide: an import string opens only with the BattleTag of the account it was issued to."
 TOO_BIG = "That paste is bigger than any guide export; paste the import string alone."  # also the build's paste-size refusal

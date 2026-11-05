@@ -550,8 +550,9 @@ def test_a_cap_spread_over_sections_counts_every_section(monkeypatch):
 def test_two_reissues_at_once_and_the_third_is_busy(client, duo):
     from test_multiguild_dm import PUPPET
 
-    assert g.REISSUE_SLOTS.acquire(blocking=False) and g.REISSUE_SLOTS.acquire(blocking=False)
+    got = [g.REISSUE_SLOTS.acquire(blocking=False) for _ in range(2)]
     try:
+        assert all(got)
         with pytest.raises(g.GuideError, match="being converted right now"):
             g.reissue_guarded(fixture_string(), TAG, NEW_TAG)
         r = client.post("/api/me/guide/reissue", json={"text": fixture_string(), "battletag": TAG, "new_battletag": NEW_TAG}, headers=as_user(client, ME))
@@ -562,8 +563,9 @@ def test_two_reissues_at_once_and_the_third_is_busy(client, duo):
         [(line, kw)] = m.replies
         assert "being converted right now" in line and "file" not in kw
     finally:
-        g.REISSUE_SLOTS.release()
-        g.REISSUE_SLOTS.release()
+        for held in got:  # release exactly what was taken: a BoundedSemaphore raises on one release too many
+            if held:
+                g.REISSUE_SLOTS.release()
     assert g.reissue_guarded(fixture_string(), TAG, NEW_TAG), "the slots come back"
 
 
@@ -613,3 +615,34 @@ def test_an_outage_is_not_membership(duo):
     asyncio.run(OibotGM.on_message(bot, m))
     [(line, kw)] = m.replies
     assert line == guild_routing.not_in_any(duo.guilds.ordered()) and "file" not in kw and hit == []
+
+
+def test_the_shape_and_section_scans_are_linear_on_a_4_mb_digit_run():
+    """A crafted paste (a 4 MB run of digits) must not freeze the bot: each scan is one pass, well under a second."""
+    digits = "1" * 4_000_000
+    for label, fn in (("looks_like_string", lambda: g.looks_like_string(digits)),
+                      ("convert_request", lambda: g.convert_request("convert guide from Jon#1234 to Ash#5678 " + digits)),
+                      ("decode", lambda: g.decode("1|" + digits + "!", TAG))):
+        t = time.perf_counter()
+        try:
+            fn()
+        except g.GuideError:
+            pass
+        assert time.perf_counter() - t < 1.0, label
+    assert not g.looks_like_string(digits)
+
+
+def test_a_strangers_empty_dm_with_a_file_is_never_read(duo):
+    from test_multiguild_dm import PUPPET
+
+    bot, hit, OibotGM = convert_bot(duo, members={})
+    att = Attachment("message.txt", ("convert guide from Jon#1234 to Ash#5678 " + fixture_string()).encode())
+    m = DmMessage("", PUPPET, [att])
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert att.reads == 0 and m.replies == [] and hit == []
+    # a member's empty DM whose file isn't the command: read for its first words only, then left alone
+    bot, hit, OibotGM = convert_bot(duo)
+    att = Attachment("message.txt", b"1" * 1000)
+    m = DmMessage("", PUPPET, [att])
+    asyncio.run(OibotGM.on_message(bot, m))
+    assert att.reads == 1 and m.replies == [] and hit == []

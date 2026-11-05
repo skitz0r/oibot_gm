@@ -3415,6 +3415,10 @@ message shaped like an import string (`\d+\|-?\d+:[A-Za-z0-9+/]{32,}`) is swallo
 or not; an empty DM with one message.txt that starts with the command is read from the file; a DM counts only a strict
 membership (`guild_routing.may_access`: owner or Discord's "yes", never an outage's "unknown"); and (controller ruling) the
 convert ignores a guild's plain-text DM setting, as the Me page does — no model, no guild data.
+*Re-review fixes (2026-11-05):* every scan is linear on a 4 MB paste — the shape regex starts only where a digit run starts
+(`(?<!\d)\d{1,6}\|-?\d{1,10}:[A-Za-z0-9+/]{32}`), `rxp_decode._SECTION` starts only after `|`, `%` or whitespace with
+possessive runs (the old one was quadratic and froze the loop under the GIL); an empty DM's .txt is read only after the strict
+membership check and only its first 13 characters are compared with "convert guide" (never scanned); `a32` is zlib.adler32.
 
 ### 5.56 The Rosters page reads by its shape (built 2026-10-26)
 

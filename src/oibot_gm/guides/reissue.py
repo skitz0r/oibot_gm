@@ -67,8 +67,9 @@ class ConvertRequest:
 
 _CONVERT = re.compile(r"^\s*convert\s+guide\b(.*)$", re.I | re.S)
 _MENTION = re.compile(r"<@[!&]?\d+>")
-# the shape of an import string: N|, a checksum, a colon and a run of base64 (enough of it not to match prose)
-_STRING = re.compile(r"\d+\|-?\d+:[A-Za-z0-9+/]{32,}")
+# the shape of an import string: N|, a checksum, a colon and 32 base64 characters (enough not to match prose). Linear: it
+# starts only where a digit run starts (the lookbehind) and every run is bounded, so a 4 MB run of digits is one pass
+_STRING = re.compile(r"(?<!\d)\d{1,6}\|-?\d{1,10}:[A-Za-z0-9+/]{32}")
 _TRAIL = ".,;!?"
 
 
