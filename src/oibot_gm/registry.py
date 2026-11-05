@@ -762,8 +762,12 @@ SCHEDULE_KINDS = ("weekly", "lockout", "pickup")  # weekly slots · day N of eac
 SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours",
                     "nudge", "autofill", "open_dm", "confirm", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
 # `weights`: a partial seat-order map {rank, main, sat_out, signup_order, regular} merged per key over the raid's (ad hoc: ADHOC_WEIGHTS)
-SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights") + SCHEDULE_CADENCE
+SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow") + SCHEDULE_CADENCE
 MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
+# A follow-on run (design §5.62) — a second raid the same night from the same signup — keys its run with this reserved
+# schedule id ('bd-1209-2130-after'), so it never collides with a run of that raid's own schedules at the same minute.
+FOLLOW_SCHEDULE = "after"
+FOLLOW_WORDS = {"none", "clear", "off", "no", ""}
 SCHEDULE_NAMES = {"weekly": "Weekly", "lockout": "Lockout days", "pickup": "Pickup"}
 DEFAULT_SCHEDULE_NAME = "Raid nights"  # D10: members see "regulars", so the raid's own run times are no longer "Regular nights"
 # ---- classes (roster redesign §2): derived from the kind, never set by hand. Recurring = weekly or lockout (opens on its
@@ -847,6 +851,32 @@ def parse_days(value) -> list[int]:
     return sorted(out)
 
 
+def parse_follow(value) -> dict | None:
+    """A schedule's follow-on: {raid, rosters} from a map or the text '<raid id> x<N>' ('barrow_deeps x2'; a bare id =
+    one roster); None / '' / 'none' / 'clear' = no follow-on. The raid id is checked against the profile by
+    Registry._check_schedules (this is a free function, like schedule_value)."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        rid, n = str(value.get("raid") or "").strip().lower(), value.get("rosters", 1)
+        if not rid:
+            return None
+    else:
+        text = str(value).strip().lower().replace("×", "x")
+        if text in FOLLOW_WORDS:
+            return None
+        rid, _sep, rest = text.partition(" ")
+        rest = rest.strip()
+        n = rest.removeprefix("x").strip() if rest else 1
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        raise RegistryError('a follow-on\'s rosters is a whole number, e.g. "barrow_deeps x2"')
+    if not 1 <= n <= MAX_SCHEDULE_ROSTERS:
+        raise RegistryError(f"a follow-on's rosters is 1 to {MAX_SCHEDULE_ROSTERS}")
+    return {"raid": rid, "rosters": n}
+
+
 def schedule_value(field: str, value):
     """One schedule setting, validated and in its stored form. None = not set (a cadence field then inherits the raid's)."""
     if field in SCHEDULE_CADENCE and (value is None or str(value).strip().lower() in INHERIT_WORDS):
@@ -889,6 +919,8 @@ def schedule_value(field: str, value):
         if value not in SPLIT_POLICIES:
             raise RegistryError(f"split_policy must be one of {', '.join(SPLIT_POLICIES)}")
         return value
+    if field == "follow":
+        return parse_follow(value)
     raise RegistryError(f"unknown schedule setting {field} (one of {', '.join(SCHEDULE_FIELDS)})")
 
 
@@ -946,6 +978,8 @@ def norm_schedule(row: dict) -> dict:
         raise RegistryError(f"schedule id {ADHOC_SCHEDULE!r} is kept for one-off runs; pick another id")
     if sid == "test":  # raidcycle.TEST_SCHEDULE: the test runs' key space ('bd-1209-1930-test'), never a real schedule's
         raise RegistryError("schedule id 'test' is kept for test runs; pick another id")
+    if sid == FOLLOW_SCHEDULE:
+        raise RegistryError(f"schedule id {FOLLOW_SCHEDULE!r} is kept for follow-on runs; pick another id")
     if sid == DEFAULT_SCHEDULE:
         if out.pop("kind", "weekly") != "weekly":
             raise RegistryError("the default schedule is the raid's own weekly run times; add another schedule for other kinds")
@@ -959,7 +993,7 @@ def schedules_of(rd: dict) -> list[dict]:
     (from the raid's slots, listed when it has slots or settings of its own), then the stored ones in order."""
     stored = [s for s in (rd.get("schedules") or []) if isinstance(s, dict) and s.get("id")]
     dflt = next((s for s in stored if s["id"] == DEFAULT_SCHEDULE), None)
-    base = {"active": True, "rosters": 1, "slots": [], "days": [], "time": None}
+    base = {"active": True, "rosters": 1, "slots": [], "days": [], "time": None, "follow": None}
     out = []
     if rd.get("slots") or dflt:
         out.append({**base, "name": DEFAULT_SCHEDULE_NAME, **(dflt or {}), "id": DEFAULT_SCHEDULE, "kind": "weekly", "slots": list(rd.get("slots") or [])})
@@ -1556,7 +1590,16 @@ class Registry:
                 day, hm = slot.split()
                 by_time.setdefault(hm, []).append(DAY_PLURAL.get(day[:3].title(), day))
             text = ", ".join(f"{join_words(days)} {self.time_label(hm)}" for hm, days in sorted(by_time.items(), key=lambda kv: order.get(kv[1][0][:3], 9))) or "No run times yet"
-        return text + (f" · {n} rosters" if n > 1 else "") + ("" if s.get("active", True) else " · paused")
+        return (text + (f" · {n} rosters" if n > 1 else "") + (f" · then {self.follow_words(s.get('follow'))}" if s.get("follow") else "")
+                + ("" if s.get("active", True) else " · paused"))
+
+    def follow_words(self, follow: dict | None) -> str:
+        """'Barrow Deeps ×2' — a follow-on as a person reads it ('' when none)."""
+        if not follow:
+            return ""
+        name = self.raid_def(follow["raid"]).get("name", follow["raid"])
+        n = int(follow.get("rosters") or 1)
+        return f"{name} ×{n}" if n > 1 else name
 
     def day_label(self, iso_day: str, with_year: bool = False) -> str:
         """'2026-12-24' -> 'Thu 24 Dec' (a date a person reads; ISO stays for the data repo and the API)."""
@@ -3534,6 +3577,12 @@ class Registry:
                 raise RegistryError(f"{name}: the nudge must fall between signup opening and lock (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)")
             if not 1 <= int(s.get("rosters") or 1) <= MAX_SCHEDULE_ROSTERS:
                 raise RegistryError(f"{name}: a run holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
+            f = s.get("follow")
+            if f:
+                if f["raid"] not in self.profile.raids:
+                    raise RegistryError(f"{name}: unknown raid {f['raid']} for the follow-on (one of {', '.join(self.profile.raids)})")
+                if f["raid"] == eff.get("id"):
+                    raise RegistryError(f"{name}: a follow-on is another raid, not the raid itself")
             if s["kind"] == "weekly" and s["id"] != DEFAULT_SCHEDULE and not s.get("slots"):
                 raise RegistryError(f"{name}: a weekly schedule needs at least one run time")
             if s["kind"] == "lockout":
