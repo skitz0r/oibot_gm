@@ -518,8 +518,8 @@ An officer taking someone off the follow-on (its board, or their answer set to N
 after the lead, keep their lead seat and stay off the follow-on when the lead's answers change. *I'm staying* on the Me
 page undoes it (*"Noted: you're staying … A freed seat can come back to you through Fill."*): the place you left may
 already be filled, and nobody puts you back by hand. A *Can't make it* on the lead says the follow-on place goes too
-(*"Your Barrow Deeps place goes too."*). Once the follow-on has started, the companion's drops go to its loot council,
-even while the lead's is still open. Cancelling the lead cancels the follow-on in the same press;
+(*"Your Barrow Deeps place goes too."*). Once the follow-on has started and its loot council is open, the
+companion's drops go there, even while the lead's is still open; until then the lead's council takes them. Cancelling the lead cancels the follow-on in the same press;
 cancelling the follow-on alone leaves the lead standing (*"The Barrow Deeps follow-on is called off for the 20 people
 rostered on it. The Hyjal Summit run goes ahead, and nobody gets a DM."*), and the lead's sheet loses its *then …*. A
 cancelled run is never reopened. The Discord `/raid open` and schedule wizards show a follow-on but don't set one — the

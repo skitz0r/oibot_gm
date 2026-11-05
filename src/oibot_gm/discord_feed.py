@@ -265,8 +265,9 @@ class FeedMixin:
         return None, "no run live"
 
     def _past_close(self, reg, session) -> bool:
-        """For routing only: past the run's close, or a lead whose follow-on has started (design §5.62 — the lead's close
-        covers the whole follow-on, and the same characters are seated on both: tonight's later drops are the follow-on's)."""
+        """For routing only: past the run's close, or a lead whose follow-on has started AND has a live, non-test loot
+        council of its own (design §5.62, ruling F-3 narrowed — the lead's close covers the whole follow-on and the same
+        characters sit on both; with no follow-on council open, the lead's council keeps every drop, a late lead's too)."""
         if reg is None:
             return False
         rs, ev = self.loot_run(session)
@@ -277,8 +278,9 @@ class FeedMixin:
         now = datetime.now(ev.start.tzinfo)
         if ev.followed_by and rs is not None:
             fev = rs.events.get(ev.followed_by)
-            if fev is not None and fev.state != "cancelled" and now >= fev.start:
-                return True
+            if (fev is not None and fev.state != "cancelled" and now >= fev.start
+                    and any(s.run_key == fev.key and s.origin == "raid" and not s.test and self.loot_live(s) for s in self.events.values())):
+                return True  # only once the follow-on has a live council of its own: else the lead's keeps every drop
         return now >= rc.run_close_at(reg, ev)
 
     def _latest_started(self, sessions: list) -> list:

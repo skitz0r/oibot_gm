@@ -730,8 +730,14 @@ def test_a_drop_after_the_follow_ons_start_routes_to_its_council(reg, rs):
     lock_with_board(reg, rs, rs.events[fev.key], [m.display_name for m in ms[:10]])
     bot = LootBot(reg, rs)
     s_lead, _ = run(bot.open_loot(reg, rs, lead, by="Officer"))
-    s_follow, _ = run(bot.open_loot(reg, rs, rs.events[fev.key], by="Officer"))
     both = Companion(ms[0].main.name, "c", "", "p")  # rostered on both
+    lead.starts_at = (reg.now_local() - timedelta(hours=3, minutes=10)).replace(second=0, microsecond=0).isoformat()
+    rs.save(lead, "t: the lead started three hours ago")
+    fev = rs.events[fev.key]
+    fev.starts_at = (reg.now_local() - timedelta(minutes=10)).replace(second=0, microsecond=0).isoformat()
+    rs.save(fev, "t: the follow-on's nominal start was ten minutes ago")
+    assert bot.active_raid(both) is s_lead  # no follow-on council open: the lead's keeps every drop (a late lead's last bosses)
+    s_follow, _ = run(bot.open_loot(reg, rs, rs.events[fev.key], by="Officer"))
     lead.starts_at = (reg.now_local() - timedelta(hours=2)).replace(second=0, microsecond=0).isoformat()
     rs.save(lead, "t: the lead started two hours ago")
     fev = rs.events[fev.key]

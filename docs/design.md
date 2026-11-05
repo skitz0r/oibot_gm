@@ -4505,8 +4505,9 @@ warn per (guild, key) (`_warn_open_refused`) and goes on: the guild's other runs
 and close that minute. `lock_follow` never lets the follow-on's lock fail the lead's: whatever it raises (`rc.SolverBusy`, a
 cancel between the check and the lock, a Discord error) is one ops warn per follow-on and the lead's line ends "follow-on not
 locked: <why>"; the scheduler retries the follow-on, its lead being locked. Loot routing (`FeedMixin.loot_route`, ruling
-F-3): a lead whose follow-on has started is past its window (`_past_close`) — its close covers the whole follow-on and the
-same characters sit on both — and a companion seated on several live councils goes to the run that started most recently
+F-3, narrowed): a lead whose follow-on has started AND has a live, non-test loot council of its own is past its window
+(`_past_close`) — its close covers the whole follow-on and the same characters sit on both; with no follow-on council open
+the lead's council keeps every drop, a late lead's last bosses too — and a companion seated on several live councils goes to the run that started most recently
 (`_latest_started`; a split run's rosters share a start, so the seat still decides). `rc.free_seat`'s cascade onto the
 follow-on sets its `fill_state` back to idle when it was exhausted, so the gap refills. A test run (a rehearsal) never has a
 follow-on: `rc.ensure_run` makes none when `cutoffs` are given (`if fw and not cutoffs`), and the test bench has no Then.
