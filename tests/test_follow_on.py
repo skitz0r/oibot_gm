@@ -248,3 +248,105 @@ def test_the_follow_ons_solve_prefers_the_leads_rostered_and_skips_first_come(re
     assert all(bonus.get(m.display_name, 0) >= rc.LEAD_SEAT_BONUS for m in ms[4:])
     assert all(bonus.get(m.display_name, 0) < rc.LEAD_SEAT_BONUS for m in ms[:4])
     assert not out, "a follow-on benches nobody by first come"
+
+
+# ---------------------------------------------------------------- Task 4: leaving early, cancel, the sentences
+
+from oibot_gm import consequences as cq  # noqa: E402
+
+
+def locked_pair(reg, rs, monkeypatch, bot):
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms)
+    names = [m.display_name for m in ms]
+    monkeypatch.setattr(rc, "propose", seat_by_name({LEAD: names[:20], FOLLOW: names[:20]}))
+    run(bot.lock_run(reg, rs, lead, by="Jon"))
+    return lead, rs.events[fev.key], ms
+
+
+def test_leaving_early_frees_only_the_follow_on_seat(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    m = ms[0]
+    line = run(bot.call_out(reg, rs, fev, m, "early night", by=m.display_name, by_id=m.discord_id))
+    fev = rs.events[fev.key]
+    assert m.discord_id in fev.leaving and fev.signups[str(m.discord_id)].status == "out" and fev.signups[str(m.discord_id)].note == rc.LEAVING_NOTE
+    assert fev.seat_of(m) is None and lead.seat_of(m) is not None and lead.signups[str(m.discord_id)].status == "in"
+    assert "seat freed" in line and fev.callouts[-1].display_name == m.display_name
+
+
+def test_leave_then_stay_keeps_the_lead_answer(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    m, gone = ms[0], ms[4]
+    rc.set_signup(reg, rs, lead, gone, None, "out", source="test")  # No thanks on the lead: out on both, for good
+    run(bot.call_out(reg, rs, fev, m, None, by=m.display_name, by_id=m.discord_id))
+    assert run(bot.stay_for_follow(reg, rs, rs.events[fev.key], m, by=m.display_name, by_id=m.discord_id)).startswith("Noted")
+    fev = rs.events[fev.key]
+    assert m.discord_id not in fev.leaving and fev.signups[str(m.discord_id)].status == "in" and fev.seat_of(m) is None  # back on the sheet, not re-seated
+    assert fev.signups[str(gone.discord_id)].status == "out"
+    assert rc.stay_for_follow(reg, rs, fev, gone) is False  # nothing to undo: they left the night, not the follow-on
+
+
+def test_a_cant_on_the_lead_frees_both_seats(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    m = ms[1]
+    run(bot.call_out(reg, rs, lead, m, None, by=m.display_name, by_id=m.discord_id))
+    fev = rs.events[fev.key]
+    assert lead.seat_of(m) is None and fev.seat_of(m) is None and fev.signups[str(m.discord_id)].status == "out"
+    m2 = ms[2]
+    run(bot.set_answer(reg, rs, lead, m2, "out", None, by=m2.display_name, by_id=m2.discord_id))
+    assert rs.events[fev.key].seat_of(m2) is None
+
+
+def test_cancel_lead_cancels_follow_on(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    run(bot.cancel_run(reg, rs, lead, "Jon", "storm"))
+    fev = rs.events[fev.key]
+    assert lead.state == "cancelled" and fev.state == "cancelled"
+    audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
+    assert len(audits) == 1 and fev.key in audits[0] and lead.key in audits[0]
+
+
+def test_cancel_follow_on_alone_leaves_the_lead_standing(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    run(bot.cancel_run(reg, rs, fev, "Jon", None))
+    assert fev.state == "cancelled" and lead.state == "locked" and lead.followed_by is None
+    assert reg.config.roster(lead.team).get("followed_by") is None
+    run(bot.cleanup_ephemeral(reg, rs))
+    assert reg.config.roster(lead.team) is not None and reg.config.roster(fev.team) is None
+
+
+def test_cleanup_drops_the_pair_together(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    run(bot.cancel_run(reg, rs, lead, "Jon", None))
+    run(bot.cleanup_ephemeral(reg, rs))
+    assert reg.config.roster(lead.team) is None and reg.config.roster(fev.team) is None
+
+
+def test_cleanup_drops_an_orphaned_follow_on(reg, rs):
+    """A follow-on dict whose lead dict is gone would block its night for good (ensure_run refuses a new lead on it)."""
+    reg.seed_test_members(24, "t")
+    bot = NightBot(reg, rs)
+    lead, fev = open_pair(reg, rs)
+    reg.config.rosters = [t for t in reg.config.rosters if t["key"] != lead.team]
+    reg.save_config("harness: the lead's dict is gone", notify=False)
+    run(bot.cleanup_ephemeral(reg, rs))
+    assert reg.config.roster(fev.team) is None
+
+
+def test_the_sentences(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
+    assert "Barrow Deeps follow-on is cancelled with it" in " ".join(cq.consequence("cancel", reg, lead))
+    assert "Hyjal Summit stands" in " ".join(cq.consequence("cancel", reg, fev))
+    assert cq.leave_follow_consequence(reg, fev, True) == ["You stay on the Hyjal Summit roster.", "Your Barrow Deeps place is freed.", "An officer may fill it."]
+    assert cq.leave_follow_consequence(reg, fev, False) == ["You stay on the Hyjal Summit sheet.", "You are out of the Barrow Deeps follow-on."]
+    fx = rc.cancel_effects(reg, lead)
+    assert fx["follow"] == "Barrow Deeps" and rc.cancel_effects(reg, fev)["lead"] == "Hyjal Summit"

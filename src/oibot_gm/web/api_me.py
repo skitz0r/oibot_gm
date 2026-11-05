@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 
 from .. import inbox
 from .. import raidcycle as rc
+from ..consequences import leave_follow_consequence
 from ..registry import RegistryError
 
 QUEUE_NOTE = "You'll go to the back of the queue if you change. Change anyway?"
@@ -26,6 +27,8 @@ QUEUE_NOTE = "You'll go to the back of the queue if you change. Change anyway?"
 def cant_consequence(reg, ev, seated: bool) -> str:
     """The Me page's Can't make it… confirm, from code (the Confirm rule, design §5.57): a member's own callout
     (RaidMixin.call_out) — a rostered seat is released and the bench asked when automatic asks are on."""
+    if ev.follows:  # leaving after the lead: the follow-on alone, the lead's answer stands
+        return " ".join(leave_follow_consequence(reg, ev, seated))
     run = rc.run_on(reg, ev)
     if seated:
         return f"Your seat for {run} is released, and the officers see it as a callout. {rc.refill_sentence(reg, ev)}"

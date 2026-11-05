@@ -184,6 +184,18 @@ def run_cases(reg, rs, ms):
     c.state = "cancelled"
     rs.save(c, "harness")
     cases["cancelled"] = c
+    # a lead with a follow-on (spec 2026-11-04-follow-on-runs): the cancel pair sentences and leaving early. Two
+    # nights, so the open pair stays open while the other is locked.
+    reg.set_raid_overrides("hyjal_summit_forever", {"first_open": "2026-01-01T00:00"}, "t")
+    for days, state in ((3, "open"), (4, "locked")):
+        start = (reg.now_local() + timedelta(days=days)).replace(hour=18, minute=30, second=0, microsecond=0)
+        lead = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": RID, "rosters": 2})
+        join(reg, rs, lead, ms)
+        fev = rs.events[lead.followed_by]
+        if state == "locked":
+            lock_with_board(reg, rs, lead, [m.display_name for m in ms[:10]], hours_to_confirm=2)
+            lock_with_board(reg, rs, fev, [m.display_name for m in ms[:10]], hours_to_confirm=2)
+        cases[f"lead {state}"], cases[f"follow-on {state}"] = lead, fev
     return cases
 
 
@@ -197,6 +209,9 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
         for verb in cq.VERBS:
             dump.add(f"consequence({verb})", case, cq.consequence(verb, reg, ev, name="Nettle", other="Ivy", to="Group 2"))
         dump.add("consequence(release, no name)", case, cq.consequence("release", reg, ev))
+        if ev.follows:
+            for seated in (True, False):
+                dump.add("leave_follow_consequence", f"{case}, {'seated' if seated else 'not seated'}", cq.leave_follow_consequence(reg, ev, seated))
         for k, v in cq.consequences_json(reg, ev).items():
             dump.add(f"consequences_json[{k}]", case, v.replace(cq.NAME_TOKEN, "Nettle").replace(cq.OTHER_TOKEN, "Ivy").replace(cq.TO_TOKEN, "Group 2"))
     # remind: reminded within the hour, everyone answered, all on the site

@@ -335,14 +335,21 @@ class RaidMixin:
             if "health" in ev.cards:  # the officer card's counts and Suggested block follow the answers
                 await self.refresh_cards(reg, ev)
             line = f"✅ {who}{s.character} {rc.LABELS[s.status]} for {label}" + (f" — {s.note}" if s.note and s.status != status else "")
+            if status == "out":
+                if ev.followed_by:  # a lead's No thanks / Can't is the whole night
+                    await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", None)
         elif status == "out":
             if ev.seat_of(m):
                 if mine:  # the sheet's Can't make it after lock is a (late) callout: recorded like /raid out's
                     rc.callout(reg, rs, ev, m, team, None)
                 await self.drop_seated(reg, rs, ev, team, m, "callout" if mine else "officer", None)
+                if ev.followed_by:  # a lead's No thanks / Can't is the whole night
+                    await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", None)
                 line = f"✅ {who or 'you are '}off the {label} roster — seat freed" + ("; the bot is looking for a replacement" if rc.team_setting(team, "autofill") else "")
             else:
                 rc.set_signup(reg, rs, ev, m, character, "out", source=source)
+                if ev.followed_by:  # a lead's No thanks / Can't is the whole night
+                    await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", None)
                 await self.refresh_sheet(reg, ev)
                 await self.refresh_cards(reg, ev)
                 await self.refill_after_release(reg, rs, ev, released)
@@ -769,7 +776,13 @@ class RaidMixin:
         for t in list(cfg.rosters):
             if not t.get("ephemeral"):
                 continue
-            evs = [e for e in rs.events.values() if e.team == t["key"]]
+            if t.get("follows") and cfg.team(t["follows"]) is None:  # an orphaned follow-on: its lead's entry is gone
+                cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
+                gone.append(t["key"])
+                continue
+            # a lead's entry waits for its follow-on's run too, so the pair goes together; a follow-on goes on its own
+            keys = {t["key"], t.get("followed_by")} - {None}
+            evs = [e for e in rs.events.values() if e.team in keys]
             if evs and all(e.state == "cancelled" or (e.state == "done" and not rc.closed_recently(e)) for e in evs):
                 cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
                 gone.append(t["key"])
@@ -1127,13 +1140,35 @@ class RaidMixin:
             rc.on_behalf_notice(reg, ev, m.discord_id, "recorded that you can't make it", by)
         if sheet_state(ev) == "locked" and ev.seat_of(m):
             await self.drop_seated(reg, rs, ev, t, m, "callout" if mine else "officer", note)
+            if ev.followed_by:  # a lead's No thanks / Can't is the whole night
+                await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", note)
             return line + " — seat freed"
+        if ev.followed_by:  # a lead's No thanks / Can't is the whole night
+            await self.after_lead_out(reg, rs, ev, m, "callout" if mine else "officer", note)
         await self.refresh_sheet(reg, ev)
         await self.refresh_cards(reg, ev)
         await self.refill_after_release(reg, rs, ev, released)
         await self.post_run_update(reg, ev, f"⚑ {m.display_name} ({co.character}) called out, {co.hours_before:.0f}h before" + ("" if mine else f" (by {by})"))
         await self.ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {ev.key} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else "") + ("" if mine else f" (by {by})"))
         return line
+
+    async def after_lead_out(self, reg, rs, lead, m, why: str, note: str | None) -> None:
+        """A No thanks or Can't on a lead is the whole night (spec 2026-11-04-follow-on-runs): the follow-on's row is
+        already out (rc.sync_follow), and a seat they hold on the locked follow-on is freed the way the lead's is
+        (drop_seated: thread line, fill). A follow-on itself has no follow-on: nothing to do."""
+        fev = rc.follow_of(rs, lead)
+        if fev is None or sheet_state(fev) != "locked" or not fev.seat_of(m):
+            return
+        await self.drop_seated(reg, rs, fev, rc.run_team(reg, fev), m, why, note)
+
+    async def stay_for_follow(self, reg, rs, ev, m, by: str, by_id: int | None = None, via: str = "discord") -> str:
+        """I'm staying: undo leaving early on a follow-on (rc.stay_for_follow). The site's Me row and plain text call it."""
+        if not rc.stay_for_follow(reg, rs, ev, m):
+            raise RegistryError(f"{m.display_name} isn't marked as leaving after the first raid")
+        await self.refresh_cards(reg, ev)
+        await self.post_run_update(reg, ev, f"↩ {m.display_name} is staying for {run_label(reg, ev)}")
+        await ops_mod.audited(self.ops, reg, by, f"{m.display_name} is staying for {ev.key}", via=via, by_id=by_id)
+        return f"Noted: you're staying for {run_label(reg, ev).replace('**', '')}. Your seat comes back when one is free."
 
     async def answer_fill_for(self, reg, rs, ev, m, yes: bool, by: str, *, by_id: int | None = None) -> str:
         """A fill ask's Confirm / Can't make it from anywhere but the DM button (an officer on the site or MCP, plain
@@ -1313,7 +1348,8 @@ class RaidMixin:
         await ops_mod.audited(self.ops, reg, by, f"test bench: opened test run {ev.key} (lock in {start_in - lock_in} min)", via=via, level="warn", by_id=by_id)
         return ev, target
 
-    async def cancel_run(self, reg, rs, ev, by: str, reason: str | None, *, notify: bool = True, by_id: int | None = None, via: str = "discord") -> str:
+    async def cancel_run(self, reg, rs, ev, by: str, reason: str | None, *, notify: bool = True, by_id: int | None = None, via: str = "discord",
+                         audit: bool = True) -> str:
         """Cancel a run — the ONE verb behind the card's Cancel, /raid cancel, the site, plain text and MCP. Under the run's
         board lock, so a lock in progress finishes its flip first (lock_run then re-checks the state before every
         confirmation); refused when the run is already done / cancelled. Nobody is DMed (the DM rule): every open ask
@@ -1356,7 +1392,22 @@ class RaidMixin:
                 posted = True
             except Exception as e:  # noqa: BLE001
                 log.warning("cancel line failed (%s): %s", ev.key, e)
-        await ops_mod.audited(self.ops, reg, by, f"cancelled {ev.key}" + (f": {reason}" if reason else ""), via=via, level="warn", by_id=by_id)
+        fev = rc.follow_of(rs, ev)
+        tail = ""
+        if fev is not None and fev.state not in ("done", "cancelled"):  # the lead's cancel takes its follow-on with it (spec 2026-11-04-follow-on-runs)
+            await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False)
+            tail = f" and its follow-on {fev.key}"
+        if ev.follows and audit and (lead := rc.lead_of(rs, ev)) is not None and lead.followed_by == ev.key:  # cancelled on its own: the lead stands alone
+            lead.followed_by = None
+            lead.log.append(f"the {reg.raid_def(ev.instance).get('name', ev.instance)} follow-on was cancelled; this run stands")
+            rs.save(lead, "follow-on cancelled")
+            t = reg.config.team(lead.team)
+            if t is not None and t.get("followed_by"):
+                t.pop("followed_by", None)
+                reg.save_config(f"run {lead.team}: follow-on cancelled", notify=False)
+            await self.refresh_sheet(reg, lead)
+        if audit:
+            await ops_mod.audited(self.ops, reg, by, f"cancelled {ev.key}{tail}" + (f": {reason}" if reason else ""), via=via, level="warn", by_id=by_id)
         told = [f"{len(cards) + len(fills)} open ask card(s) now say Cancelled"] if cards or fills else []
         told.append("a line went to the signup channel" if posted else "no line in the signup channel")
         return f"Cancelled {run_title(reg, ev)}. Nobody was DMed: the sheet shows it, " + ", ".join(told) + "."

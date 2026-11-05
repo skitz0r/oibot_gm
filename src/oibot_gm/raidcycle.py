@@ -1198,6 +1198,8 @@ def absence_effects(reg: Registry, rs: RaidStore, m: Member | None, start: str, 
 
 
 def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, note: str | None) -> Callout:
+    if ev.follows:  # a follow-on: leaving after the lead (spec 2026-11-04-follow-on-runs); the lead's answer stands
+        return leave_follow(reg, rs, ev, m, note)
     s = ev.signups.get(str(m.discord_id))
     c = s.character if s else (m.main.name if m.main else "?")
     hours = (ev.start - datetime.now(ev.start.tzinfo)).total_seconds() / 3600
@@ -1212,6 +1214,39 @@ def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, 
     ev.log.append(f"callout {m.display_name} {hours:.0f}h before{' (late)' if late else ''}")
     rs.save(ev, f"callout {m.display_name}")
     return co
+
+
+def leave_follow(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, note: str | None = None) -> Callout:
+    """Leaving after the lead: out of the follow-on alone (spec 2026-11-04-follow-on-runs). Records the callout on the
+    follow-on, adds them to `leaving`, re-materialises their row as out; the caller frees a held seat
+    (RaidMixin.call_out → drop_seated)."""
+    s = ev.signups.get(str(m.discord_id))
+    hours = (ev.start - datetime.now(ev.start.tzinfo)).total_seconds() / 3600
+    co = Callout(discord_id=m.discord_id, display_name=m.display_name, character=s.character if s else (m.main.name if m.main else "?"),
+                 at=now(), hours_before=round(hours, 1), note=note, late=ev.state != "open")
+    ev.callouts.append(co)
+    if m.discord_id not in ev.leaving:
+        ev.leaving.append(m.discord_id)
+    ev.log.append(f"{m.display_name} is {LEAVING_NOTE}")
+    rs.save(ev, f"leaving: {m.display_name}")
+    lead = lead_of(rs, ev)
+    if lead is not None:
+        sync_follow(rs, lead)
+    return co
+
+
+def stay_for_follow(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member) -> bool:
+    """Undo leaving early: their lead answer stands on the follow-on again (not re-seated: fill may have taken the
+    seat, and the fill engine offers one when short). False when they weren't leaving (a No thanks on the lead is the night)."""
+    if m.discord_id not in ev.leaving:
+        return False
+    ev.leaving = [u for u in ev.leaving if u != m.discord_id]
+    ev.log.append(f"{m.display_name} is staying for the follow-on")
+    rs.save(ev, f"staying: {m.display_name}")
+    lead = lead_of(rs, ev)
+    if lead is not None:
+        sync_follow(rs, lead)
+    return True
 
 
 # ---------------------------------------------------------------- filling gaps
@@ -2936,7 +2971,10 @@ def cancel_effects(reg: Registry, ev: RaidEvent) -> dict:
             "rostered": [p.signup_name for p in ev.seated()] if locked else [],
             "open_asks": [m.display_name for m, _a in open_placement_rows(reg, ev)] if locked else [],
             "fill_asks": [a.display_name for a in ev.fill_asks if a.pending],
-            "answered": len([s for s in ev.signups.values() if s.status in STATUSES])}
+            "answered": len([s for s in ev.signups.values() if s.status in STATUSES]),
+            # a lead's cancel takes its follow-on with it; a follow-on cancelled alone leaves its lead standing
+            "follow": reg.raid_def((follow_dict(reg, ev) or {}).get("instance")).get("name") if ev.followed_by else None,
+            "lead": reg.raid_def((lead_dict(reg, ev) or {}).get("instance")).get("name") if ev.follows else None}
 
 
 # ---------------------------------------------------------------- opening: which run a picked time is (design B4)
