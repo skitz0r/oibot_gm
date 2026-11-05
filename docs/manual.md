@@ -66,7 +66,7 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   didn't fit). They head the *Not rostered* list and the lock card, with what another run would be short.
 - **Follow-on** — a second raid the same night, from the same signup, that starts when the first ends (the **lead**).
   One Join covers both; the lead's lock builds the follow-on's rosters from the lead's roster (two 10s are the 20 split
-  in two, bench joiners cover gaps); nobody confirms twice. *Leaving after <lead>…* on the Me page (or `/raid out`,
+  in two, bench joiners cover gaps); nobody confirms twice. *Leaving after …* on the Me page (or `/raid out`,
   picking the follow-on) frees your follow-on place and keeps your lead seat; *I'm staying* on the Me page undoes it. Cancelling the
   lead cancels its follow-on; the follow-on can be cancelled alone.
 - **Suggest… / Fill seats…** — the same screen under two names, on the site and in Discord: **Suggest…** before the
@@ -499,7 +499,7 @@ schedule's editor; plain text `<schedule>.follow = barrow_deeps x2`) or an ad ho
 rosters* on the Rosters page's *Start an ad hoc run…*; plain text *"set up an ad hoc Hyjal raid for 6:30 on Dec 10 with
 10-man Barrow Deeps splits afterwards"*) names a follow-on: a second raid with its own rosters per run, starting when the
 first ends (the lead's length: a 6:30 PM Hyjal Summit of 3 hours is followed at 9:30 PM). A follow-on is another raid,
-never the lead's own, and never has a follow-on of its own. A night has one follow-on of each raid: a second lead whose
+never the lead's own, and never has a follow-on of its own. A night has one follow-on per raid: a second lead whose
 follow-on would land on the same time is refused (*"That night already has a Barrow Deeps follow-on after … Pick another
 time."*). The lead's sheet is the night's sheet (*Hyjal Summit, then Barrow Deeps ×2*, with the second start); the
 follow-on has no sheet and no answers of its own — they follow the lead's, and answering it directly says *"Answer on
@@ -1081,7 +1081,7 @@ edits that new family and leaves the one it shared alone.
   entered this way are announced like `/me absent add`; channel changes post (or drop) their card like the Config page
   does. Several raid or schedule settings in a row are saved as one change, so "open 100 hours before and lock 60
   before" can't fail half way.
-  A whole night and a series in one message works too: *"set up an ad hoc hyjal raid for 6:30 pst on Dec 10th with 10 man
+  A whole night and a weekly schedule in one message works too: *"set up an ad hoc hyjal raid for 6:30 pst on Dec 10th with 10 man
   barrow deeps splits afterwards. also set up a scheduled hyjal raid for 6:30 pst every tuesday"* opens the ad hoc Hyjal
   Summit with a Barrow Deeps ×2 follow-on (*"…, then Barrow Deeps ×2 at Thu 10 Dec 9:30 PM"*) and sets the weekly Tuesday
   schedule — one diff, one Apply. Its first run follows the raid's first opening (Hyjal Summit's is Wed 9 Dec, so the

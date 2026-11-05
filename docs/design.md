@@ -4456,8 +4456,8 @@ with ONE audit line "cancelled <lead> and its follow-on <key>"; the confirm (`co
 `follow`) ends "The Barrow Deeps follow-on is cancelled with it, and nobody gets a DM." Cancelling the follow-on alone clears
 the lead's `followed_by` (event and dict) and redraws the lead's sheet without its "then …"; its confirm reads "The Barrow
 Deeps follow-on is called off for the N people rostered on it." (before the lock: "for the people on it.") then "The Hyjal
-Summit run goes ahead, and nobody gets a DM." A cancelled run never reopens (D19), so a cancel is final for both; each run
-ENDS on its own and so each reopens on its own within `REOPEN_GRACE_HOURS`. `cleanup_ephemeral`: a lead's dict waits for its
+Summit run goes ahead, and nobody gets a DM." Reopen corrects the spec's §7 line: a cancelled run never reopens (D19), so a
+cancel is final for both, and each run ENDS on its own and so reopens on its own within `REOPEN_GRACE_HOURS`. `cleanup_ephemeral`: a lead's dict waits for its
 follow-on's run too (the keys `{key, followed_by}`), a follow-on's dict goes on its own, an orphan follow-on dict (its lead's
 dict gone) is dropped at once.
 
@@ -4488,6 +4488,9 @@ preview's `follow_line`. The run cards say "then …" on a lead and "after …" 
 the Hyjal Summit sheet" and which has no *Answer for someone…*. The Me page's row: the title with then / after, *Leaving after
 Hyjal Summit…* (the server's `leave_consequence` in the confirm, an optional note, `/out`) and *I'm staying* (`/stay`).
 
+**Me page.** One row per run, a change from the spec's one row for the night: the lead's row says *then …*, the follow-on's
+says *after …* and carries *Leaving after …* / *I'm staying* — simpler, and each row keeps its own receipt.
+
 **Tests.** `tests/test_follow_on.py` (the pair, sync, refusals, the lock, a Can't on every path, leaving and staying,
 cancel and cleanup, the words, plain text, the routes), `tests/test_follow_on_solver.py` (slow, real CP-SAT: the splits are
 the lead's roster whenever roles allow), `tests/test_confirm_readability.py` (the cancel pair, the follow-on's cancel,
@@ -4496,5 +4499,4 @@ leaving early), `tests/test_frontend_source.py` (the Then rows, the Me buttons).
 **Not done.** Discord wizards that set a follow-on (D2); *I'm staying* outside the Me page (Discord and plain text reach
 leaving only); a follow-on of a follow-on; a per-member "first raid only" answer (D1 — leaving early covers it); copying the
 lead's groups onto the follow-on's board (a 20's groups say nothing about two 10s); a follow-on added to a run already open;
-the Me page shows the lead and the follow-on as two rows, not one grouped row; the follow-on's shortfall line
-doesn't change the health card's colour.
+the follow-on's shortfall line doesn't change the health card's colour.

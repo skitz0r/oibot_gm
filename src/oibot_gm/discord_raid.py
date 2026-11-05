@@ -1156,7 +1156,7 @@ class RaidMixin:
         await self.drop_seated(reg, rs, fev, rc.run_team(reg, fev), m, why, note)
 
     async def stay_for_follow(self, reg, rs, ev, m, by: str, by_id: int | None = None, via: str = "discord") -> str:
-        """I'm staying: undo leaving early on a follow-on (rc.stay_for_follow). The site's Me row and plain text call it."""
+        """I'm staying: undo leaving early on a follow-on (rc.stay_for_follow). The site's Me row (POST /api/me/run/{key}/stay) is its one caller."""
         if not rc.stay_for_follow(reg, rs, ev, m):
             lead = rc.lead_name_of(reg, ev) or "the first raid"
             if by_id is not None and int(by_id) == m.discord_id:  # their own press: second person
