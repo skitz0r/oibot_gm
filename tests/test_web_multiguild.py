@@ -405,6 +405,7 @@ def test_discord_links_and_emblems_name_their_guild(duo, monkeypatch):
     monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
     ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
     assert raid_views.board_url(duo.b, ev_b) == f"https://gm.example/app/rosters?g={GUILD2}#run-{ev_b.key}"
+    assert raid_views.me_url(duo.b, ev_b) == f"https://gm.example/app/me?g={GUILD2}#run-{ev_b.key}"  # the sheet's title link
     assert raid_views.raid_thumb_url(duo.a, ev_a.instance) == f"https://gm.example/img/raid/{ev_a.instance}.png?g={GUILD}"
     assert discord_pool._site(duo.b, "/app/members") == f"https://gm.example/app/members?g={GUILD2}"
     monkeypatch.setenv("OIBOT_WEB_URL", "http://127.0.0.1:8788")

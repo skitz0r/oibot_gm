@@ -31,6 +31,12 @@ export function MePage({ meta }: { meta: Meta }) {
   const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<Me>("/api/me").then(setMe).catch(fail);
   useEffect(() => { load(); }, []);
+  // deep link from a Discord sheet's title: /app/me#run-<key> scrolls to that run's row once it has rendered
+  useEffect(() => {
+    if (!me || !window.location.hash.startsWith("#run-")) return;
+    const t = setTimeout(() => document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    return () => clearTimeout(t);
+  }, [me]);
   usePoll(() => { if (!editing) load(); });
   useLive(() => { if (!editing) load(); }, ["run:", "member", "memory"]);
 
@@ -177,7 +183,7 @@ function SheetRow({ s, me, meta, ask, onDone }: { s: MySheet; me: Me; meta: Meta
     catch (e) { fail(e); } finally { setBusy(null); onDone(); }
   }
   return (
-    <Stack gap={4} py={4} style={{ borderBottom: "1px solid var(--mantine-color-slate-6)" }}>
+    <Stack id={`run-${s.key}`} gap={4} py={4} style={{ borderBottom: "1px solid var(--mantine-color-slate-6)" }}>
       <Group justify="space-between" wrap="nowrap">
         <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}{s.then ? `, then ${s.then}` : ""}{s.lead_raid ? ` · after ${s.lead_raid}` : ""}{s.kind === "adhoc" ? " · ad hoc" : ""}</Text><Text size="xs" c="dimmed">{s.when}{s.state_word ? ` · ${s.state_word}` : ""}{s.character ? ` · ${s.character}` : ""}{s.regular && !s.status ? " · you're a regular: answer it" : ""}</Text></Box>
         {/* the badge's words are the server's (rc.answer_word): "not rostered" for a joiner the lock left out, never "Join" on a locked run */}

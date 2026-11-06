@@ -67,6 +67,29 @@ def test_sheet_is_an_embed_with_class_then_group_columns(reg, rs):
     assert len(e) < 6000
 
 
+def test_sheet_title_links_to_the_run_on_the_me_page(reg, rs, monkeypatch):
+    """The sheet's title is a deep link to that run's row on the member's own Me page (owner request 2026-11-05): with
+    OIBOT_WEB_URL set, while the sheet is open or locked; a finished or cancelled sheet has no row to open; off http(s)
+    the title is plain. Never the officers' board."""
+    from oibot_gm import raidcycle as rc
+    ev = open_test_run(reg, rs)
+    members = reg.test_members()[:10]
+    join(reg, rs, ev, members)
+    team = rc.run_team(reg, ev)
+    tag = lambda kind, key: ""  # noqa: E731
+    monkeypatch.delenv("OIBOT_WEB_URL", raising=False)
+    assert views.sheet_message(reg, ev, team, tag)[0].url is None
+    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
+    want = f"https://gm.example/app/me?g={reg.key}#run-{ev.key}"
+    assert views.sheet_message(reg, ev, team, tag)[0].url == want and "rosters" not in want
+    lock_with_board(reg, rs, ev, [m.display_name for m in members])
+    assert views.sheet_message(reg, ev, team, tag)[0].url == want
+    ev.state = "done"
+    assert views.sheet_message(reg, ev, team, tag)[0].url is None
+    ev.state = "cancelled"
+    assert views.sheet_message(reg, ev, team, tag)[0].url is None
+
+
 def test_away_row_holds_registered_absences_only(reg, rs, monkeypatch):
     """Away = a registered absence covers the run's day; No thanks = people who chose it. Someone away who joins anyway
     is not Away; the row names 15 then +N."""

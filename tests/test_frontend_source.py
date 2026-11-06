@@ -482,6 +482,14 @@ def test_memory_surfaces_read_by_their_shape():
         assert not re.search(r"\b(embedding|vector|cosine|judge|RRF|index)\b", f, re.I)
 
 
+def test_me_page_sheet_rows_take_the_sheet_title_deep_link():
+    """A Discord sheet's title links to /app/me#run-<key> (raid_views.me_url): the Me page gives each sheet row that id and
+    scrolls to the hash once the record has loaded, like the Rosters page does for Open the board."""
+    me = (SRC / "pages" / "Me.tsx").read_text()
+    assert 'id={`run-${s.key}`}' in me
+    assert 'window.location.hash.startsWith("#run-")' in me and "scrollIntoView" in me
+
+
 def test_follow_on_surfaces_exist():
     """Design §5.62 (D2): the site sets a follow-on — the schedule editor's
     Then row and the ad hoc Open's Then field — and the Me row offers leaving early and I'm staying with the server's sentence only."""

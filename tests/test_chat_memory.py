@@ -727,7 +727,7 @@ def test_plain_text_recalls_only_without_the_gates_list_and_the_block_reaches_he
     judged = asyncio.run(db.OibotGM.recall_memories(stub, gate.reg, "who is our jc?", GENERAL_CH))
     n = len(dec.requests)
     send(memory=judged)
-    assert recalls == [GENERAL_CH] and len(dec.requests) == n and seen[-1] == mem.memory_block(judged)
+    assert recalls == [GENERAL_CH] and len(dec.requests) == n and seen[-1] == mem.memory_block(judged, mem.guild_tz(gate.reg))  # the guild's day (an evening in Pacific time is still today, not UTC's tomorrow)
     monkeypatch.setattr(gate.reg.config, "ask_audience", "officers")
     send()
     assert recalls == [GENERAL_CH] and len(dec.requests) == n, "outside the ask audience nothing is recalled or judged"

@@ -124,7 +124,8 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   (newcomers start here), *Register / plan my main*, *Add an alt*, *My status*. Anyone can press them. The card
   says when applications are closed and shows the recruitment note; the bot edits it in place when those change.
 - **Signup channel** — one sheet per run. An **open** sheet has **Join / Bench / No thanks** buttons (Bench =
-  call me if you need me). The sheet is a card: raid emblem, date and countdown, joined count and role counts,
+  call me if you need me). The sheet's title is a link to that run's row on your Me page, so you can answer on the
+  site from Discord. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
   joiners grouped by class with real class/spec/role icons, Bench and No thanks as member rows, lock and confirm
   times; it updates in place on every answer. With more than one character, Join, Bench and No thanks each ask which
   one (a Bench on your alt makes your alt the fill candidate): up to four characters are one button each, your main
@@ -190,7 +191,7 @@ doesn't serve, and someone in none of the servers who DMs the bot is never told 
 its own icon, name, about text, **Join our Discord** (its own invite) and **Log in with Discord**. Once you're logged
 in, a **server selector** at the top of the left rail lists the servers you can use (you're in that Discord server, or
 you own its guild) with your role in each; pick one and every page, save and live update is for that server only. Your
-choice is remembered in this browser. Links the bot posts in Discord (Open the board, Members, Raid rules) open the
+choice is remembered in this browser. Links the bot posts in Discord (a sheet's title, Open the board, Members, Raid rules) open the
 right server. If you leave the server you had selected, the site opens on another one you're in and tells you so; if
 you're in none of them you get the not-a-member page with every server's Join button. A link to a server you aren't
 in opens one you are in, with a note saying so. If Discord doesn't answer whether you're in a server (it happens for

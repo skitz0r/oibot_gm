@@ -143,6 +143,8 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     thumb = raid_thumb_url(reg, ev.instance)
     if thumb:
         e.set_thumbnail(url=thumb)
+    if state in ("open", "locked"):
+        e.url = me_url(reg, ev)  # the title is the deep link to this run's row on the member's Me page (a finished sheet has no row)
 
     def member(character: str, cls: str, spec: str, mark: str | None = None, icons: bool = True) -> str:
         return ((mark + " ") if mark else "") + ((ico("spec", f"{cls}:{spec}") + " ") if icons else "") + character
@@ -249,6 +251,13 @@ def board_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
     """The run on the site's Rosters page, in this guild (?g= selects it; two guilds can hold one run key)."""
     web = os.environ.get("OIBOT_WEB_URL", "")
     return f"{web}/app/rosters?g={reg.key}#run-{ev.key}" if web.startswith("http") else None
+
+
+def me_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
+    """The run's row on the member's own Me page (`/app/me?g=<key>#run-<key>`): the sheet's title links here, so a member
+    answers on the site from Discord in one tap (the board is officers' — a member link never points there). None off http(s)."""
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    return f"{web}/app/me?g={reg.key}#run-{ev.key}" if web.startswith("http") else None
 
 
 def guild_prefix(reg: Registry) -> str:
