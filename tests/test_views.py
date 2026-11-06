@@ -108,3 +108,30 @@ def test_away_row_holds_registered_absences_only(reg, rs, monkeypatch):
     assert rows["No thanks (2)"].split(" · ") == [m.display_name for m in chose]
     assert rows["Away (12)"].endswith(" · +2") and len(rows["Away (12)"].split(" · ")) == 11
     assert joined_anyway.display_name not in rows["Away (12)"] and "✈" not in str(rows)
+
+
+def test_sheets_restore_redraws_every_live_sheet_once_per_guild():
+    """On the first ready, every live (open or locked) sheet of every guild is redrawn in place — a run without a posted
+    sheet (a follow-on, a run whose post failed) is skipped, a finished run too, and one guild's failure never stops the
+    next guild's redraw."""
+    import asyncio
+    import types
+    from oibot_gm.discord_raid import RaidMixin
+
+    def ev(key, state="open", posted=True):
+        return types.SimpleNamespace(key=key, state=state, channel_id=1 if posted else None, message_id=2 if posted else None)
+
+    stores = {"a": [ev("a-open"), ev("a-locked", "locked"), ev("a-nosheet", posted=False)], "b": [ev("b-open")]}
+    regs = [types.SimpleNamespace(key=k) for k in stores]
+    done = []
+
+    async def refresh_sheet(reg, e):
+        if reg.key == "a" and e.key == "a-locked":
+            raise RuntimeError("Discord said no")
+        done.append((reg.key, e.key))
+
+    bot = types.SimpleNamespace(registries=types.SimpleNamespace(ordered=lambda: regs),
+                                raids=types.SimpleNamespace(store=lambda r: types.SimpleNamespace(live=lambda: stores[r.key])),
+                                refresh_sheet=refresh_sheet)
+    n = asyncio.run(RaidMixin.sheets_restore(bot))
+    assert done == [("a", "a-open"), ("b", "b-open")] and n == 2

@@ -270,6 +270,7 @@ src/oibot_gm/
                        Phase 2 (§5.39): send_member_card + edit_ask_card (an outcome edits the ask's DM card — never an FYI DM; seat_released),
                        record_placement (check-and-set on the loop), lock_run resumable (lock_seats + confirmations_sent_at; recover_lock in the scheduler),
                        lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind (the older card goes dead), set_autofill_paused, withdraw_sent_ask;
+                       sheets_restore = on_ready's first boot redraws every live sheet in place (refresh_sheet), so a look change reaches posted sheets;
                        every writer of ev.fill_asks holds plan_lock (_send_asks is the one sender)
                        Follow-on (§5.62): lock_follow (the lead's lock locks both; a follow-on never locks before its lead), after_lead_out, drop_seated
                        carries a lead's freed seat to the follow-on, stay_for_follow, cancel_run cascades to the follow-on (one audit line)

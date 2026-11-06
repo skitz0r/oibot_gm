@@ -1370,6 +1370,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             for line in await self.loot_restore():  # an interrupted Distribute is reported, never re-run; pending threads made
                 log.info("loot restore: %s", line)
             await self.loot_cards_restore()  # every live council's cards redrawn as this version draws them
+            await self.sheets_restore()  # every live signup sheet too (its look is this version's from the first minute)
         else:
             await self.loot_threads_pending()  # a later ready (a full reconnect): a council opened while Discord was down gets its thread
         self._pool_booted = True

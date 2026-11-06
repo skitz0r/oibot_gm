@@ -127,7 +127,8 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   call me if you need me). The sheet's title is a link to that run's row on your Me page, so you can answer on the
   site from Discord. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
   joiners grouped by class with real class/spec/role icons, Bench and No thanks as member rows, lock and confirm
-  times; it updates in place on every answer. With more than one character, Join, Bench and No thanks each ask which
+  times; it updates in place on every answer, and every live sheet is redrawn when the bot starts, so a change to
+  the sheet's look reaches sheets already posted. With more than one character, Join, Bench and No thanks each ask which
   one (a Bench on your alt makes your alt the fill candidate): up to four characters are one button each, your main
   first; five or more are one list with your main already picked, plus a *Join as <main>* button — nothing is left
   out. The reply is your state, not the press: *"You're joined as Kestrel (Holy) for Barrow Deeps Tue 9 Dec 7:30 PM ·

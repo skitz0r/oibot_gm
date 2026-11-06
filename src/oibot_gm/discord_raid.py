@@ -408,6 +408,24 @@ class RaidMixin:
             except Exception as e:  # noqa: BLE001 — a deleted copy just stops following
                 log.debug("sheet copy refresh failed (%s %s): %s", ev.key, mid, e)
 
+    async def sheets_restore(self) -> int:
+        """On the first ready of a process: every live (open or locked) sheet of every guild redrawn in place as this
+        version draws it — a change to the sheet's look (its title link, a new line) reaches the sheets already posted
+        at the next restart instead of at the next answer on each. One edit per sheet; a failure is logged and the
+        rest go on. Returns the sheets touched."""
+        n = 0
+        for reg in self.registries.ordered():
+            rs = self.raids.store(reg)
+            for ev in list(rs.live()):
+                if not (ev.channel_id and ev.message_id):
+                    continue
+                try:
+                    await self.refresh_sheet(reg, ev)
+                    n += 1
+                except Exception as e:  # noqa: BLE001
+                    log.warning("sheet restore failed (%s %s): %s", reg.key, ev.key, e)
+        return n
+
     async def post_sheet(self, reg, rs, ev, channel) -> None:
         team = rc.run_team(reg, ev)
         embed, view = sheet_message(reg, ev, team, self.ico)
