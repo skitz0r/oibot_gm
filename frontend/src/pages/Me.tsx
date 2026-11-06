@@ -31,10 +31,19 @@ export function MePage({ meta }: { meta: Meta }) {
   const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<Me>("/api/me").then(setMe).catch(fail);
   useEffect(() => { load(); }, []);
-  // deep link from a Discord sheet's title: /app/me#run-<key> scrolls to that run's row once it has rendered
+  // deep link from a Discord sheet's title: /app/me#run-<key> scrolls to that run's row ONCE it has rendered (below the
+  // phone header: scrollMarginTop on the row), lights the row for a moment, and drops the hash so the next reload (the
+  // poll, a live event) does not jump back there
+  const [flash, setFlash] = useState<string | null>(null);
   useEffect(() => {
     if (!me || !window.location.hash.startsWith("#run-")) return;
-    const t = setTimeout(() => document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    const key = window.location.hash.slice(5);
+    const t = setTimeout(() => {
+      document.getElementById(`run-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setFlash(key);
+      setTimeout(() => setFlash(null), 3000);
+    }, 150);
     return () => clearTimeout(t);
   }, [me]);
   usePoll(() => { if (!editing) load(); });
@@ -121,7 +130,7 @@ export function MePage({ meta }: { meta: Meta }) {
             <CardHeader title="My sheets" />
             <Stack p="md" gap="xs">
               {me.sheets.length === 0 && <Text c="dimmed" size="sm">No live raids.</Text>}
-              {me.sheets.map((s) => <SheetRow key={s.key} s={s} me={me} meta={meta} ask={ask} onDone={load} />)}
+              {me.sheets.map((s) => <SheetRow key={s.key} s={s} me={me} meta={meta} ask={ask} onDone={load} flash={flash === s.key} />)}
               {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer here or on the sheet in Discord — the same answer either way. Once the roster locks you confirm {me.dm ? "by DM or here" : "here — your DMs are off"}.</Text>}
             </Stack>
           </Card>
@@ -144,7 +153,7 @@ export function MePage({ meta }: { meta: Meta }) {
  *  optional note for the officers. Rendered from the server's state only: every button is disabled while a press is in flight,
  *  nothing flips before the reply, the reply's receipt is the toast and the page reloads (two devices: the last press wins). An
  *  ad hoc run you joined asks once before a change away from Join (the queue). */
-function SheetRow({ s, me, meta, ask, onDone }: { s: MySheet; me: Me; meta: Meta; ask: (o: ConfirmOpts) => Promise<ConfirmResult>; onDone: () => void }) {
+function SheetRow({ s, me, meta, ask, onDone, flash }: { s: MySheet; me: Me; meta: Meta; ask: (o: ConfirmOpts) => Promise<ConfirmResult>; onDone: () => void; flash?: boolean }) {
   const chars = me.characters;  // the active ones (planned by label), main first on the server
   const main = chars.find((c) => c.is_main) || chars[0];
   const [pick, setPick] = useState<string | null>(null);
@@ -183,7 +192,8 @@ function SheetRow({ s, me, meta, ask, onDone }: { s: MySheet; me: Me; meta: Meta
     catch (e) { fail(e); } finally { setBusy(null); onDone(); }
   }
   return (
-    <Stack id={`run-${s.key}`} gap={4} py={4} style={{ borderBottom: "1px solid var(--mantine-color-slate-6)" }}>
+    <Stack id={`run-${s.key}`} gap={4} py={4} px={flash ? 6 : 0} style={{ borderBottom: "1px solid var(--mantine-color-slate-6)", scrollMarginTop: 72, borderRadius: 8, transition: "background 1.5s, box-shadow 1.5s",
+      background: flash ? "var(--mantine-color-slate-7)" : undefined, boxShadow: flash ? "0 0 0 2px var(--mantine-color-teal-5)" : undefined }}>
       <Group justify="space-between" wrap="nowrap">
         <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}{s.then ? `, then ${s.then}` : ""}{s.lead_raid ? ` · after ${s.lead_raid}` : ""}{s.kind === "adhoc" ? " · ad hoc" : ""}</Text><Text size="xs" c="dimmed">{s.when}{s.state_word ? ` · ${s.state_word}` : ""}{s.character ? ` · ${s.character}` : ""}{s.regular && !s.status ? " · you're a regular: answer it" : ""}</Text></Box>
         {/* the badge's words are the server's (rc.answer_word): "not rostered" for a joiner the lock left out, never "Join" on a locked run */}

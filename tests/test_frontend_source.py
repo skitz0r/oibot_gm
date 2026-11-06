@@ -486,8 +486,10 @@ def test_me_page_sheet_rows_take_the_sheet_title_deep_link():
     """A Discord sheet's title links to /app/me#run-<key> (raid_views.me_url): the Me page gives each sheet row that id and
     scrolls to the hash once the record has loaded, like the Rosters page does for Open the board."""
     me = (SRC / "pages" / "Me.tsx").read_text()
-    assert 'id={`run-${s.key}`}' in me
+    assert 'id={`run-${s.key}`}' in me and "scrollMarginTop: 72" in me  # the row lands below the phone header, not under it
     assert 'window.location.hash.startsWith("#run-")' in me and "scrollIntoView" in me
+    assert "window.history.replaceState" in me  # once: the hash goes, so the poll's reload never jumps back
+    assert "flash === s.key" in me  # the row is lit for a moment so the eye lands on it
 
 
 def test_follow_on_surfaces_exist():
