@@ -1,6 +1,7 @@
 """The leveling-guide tool (design §5.55): a member unlocks the RestedXP guide issued to their own account — the import
 string plus the BattleTag it was issued to, which is the key — and gets a companion addon, an offline route explorer and
-readable text, for themselves alone; and may lock it to another Battle.net account of their own (reissue). Pure functions
+readable text, for themselves alone; and may lock it to another Battle.net account of their own (reissue). The guild's
+own guides live in the library (library.py, the guide library spec of 2026-11-09): `from oibot_gm.guides import library` for its verbs. Pure functions
 over text; the callers are the web routes (web/api_guides.py) and, for the re-issue, a DM (discord_bot.guide_convert).
 The game-specific tables (zone ids, continent rects, dungeon tags) are profile data: profiles/<version>/guides.yaml."""
 from .build import (  # noqa: F401
@@ -10,5 +11,9 @@ from .build import (  # noqa: F401
 from .reissue import (  # noqa: F401
     BUSY as REISSUE_BUSY, CHANNEL_REFUSAL, CONVERT_FAILED, EMPTY_NEW_TAG, SAME_TAG, SLOTS as REISSUE_SLOTS, USAGE, ConvertRequest,
     convert_request, looks_like_string, reissue, reissue_filename, reissue_guarded,
+)
+from .library import (  # noqa: F401
+    FACTION_WORDS, FACTIONS, GUIDE_LISTENERS, UPLOADS_PER_DAY, GuideVersion, issue_filename, restore_consequence,
+    upload_consequence, withdraw_consequence,
 )
 from .rxp_decode import decode, encode  # noqa: F401

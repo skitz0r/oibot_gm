@@ -540,6 +540,39 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     for outcome in appeals.OUTCOMES:
         dump.add("resolve_consequence", outcome, appeals.resolve_consequence(reg, apl, outcome))
 
+    # ---- the guild guide library (the 2026-11-09 spec)
+    from oibot_gm.guides import library as guide_lib
+    from oibot_gm.guides.rxp_decode import encode as guide_encode
+
+    for faction in guide_lib.FACTIONS:
+        dump.add("upload_consequence", faction, guide_lib.upload_consequence(reg, faction))
+    gtag, uploader = "Quillwright#48213", ms[0]
+    gtext = guide_encode(["#name 1-6 A\nstep\n.xp 2\n"], gtag)
+    from datetime import datetime, timezone
+
+    gclock = [datetime(2026, 11, 2, 23, 0, tzinfo=timezone.utc)]
+
+    def gnow():  # each upload a day after the last, so the rendered dates differ as they would
+        gclock[0] += timedelta(days=1)
+        return gclock[0]
+
+    monkeypatch.setattr(guide_lib, "_now", gnow)
+    for faction in ("horde", "both"):
+        older = guide_lib.upload(reg, gtext, gtag, faction, uploader.discord_id, uploader.display_name)
+        newer = guide_lib.upload(reg, gtext, gtag, faction, uploader.discord_id, uploader.display_name)
+        dump.add("withdraw_consequence", f"{faction}, the latest, an older one live", guide_lib.withdraw_consequence(reg, newer, by_id=OFFICER_ID))
+        dump.add("withdraw_consequence", f"{faction}, the latest, by its uploader", guide_lib.withdraw_consequence(reg, newer, by_id=uploader.discord_id))
+        dump.add("withdraw_consequence", f"{faction}, an older one", guide_lib.withdraw_consequence(reg, older, by_id=OFFICER_ID))
+        guide_lib.withdraw(reg, newer.id, "Offi", OFFICER_ID)
+        dump.add("withdraw_consequence", f"{faction}, the last one live", guide_lib.withdraw_consequence(reg, older, by_id=OFFICER_ID))
+        dump.add("restore_consequence", f"{faction}, the newest", guide_lib.restore_consequence(reg, guide_lib.get(reg, newer.id)))
+        guide_lib.withdraw(reg, older.id, "Offi", OFFICER_ID)
+        guide_lib.restore(reg, newer.id, "Offi", OFFICER_ID)
+        dump.add("restore_consequence", f"{faction}, an older one", guide_lib.restore_consequence(reg, guide_lib.get(reg, older.id)))
+        dump.add("guide notice", faction, guide_lib.notice_text(reg, older, "Offi"))
+    for text in (guide_lib.BAD_FACTION, guide_lib.DAILY_CAP, guide_lib.NO_VERSION, guide_lib.WITHDRAWN, guide_lib.NOT_WITHDRAWN, guide_lib.BUSY):
+        dump.add("guide refusal", text[:24], text)
+
     # ---- news proposals
     from oibot_gm import news
     from oibot_gm.news import Proposal

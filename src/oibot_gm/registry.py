@@ -36,7 +36,8 @@ NOTICE_CAP = 20
 NOTICE_DAYS = 30
 NOTICE_TEXT_MAX = 300
 NOTICE_KINDS = ("not_rostered", "released", "answered_for_you", "cancelled", "schedule_removed", "application", "loot_award", "ask_closed", "confirmed",
-                "appeal")  # appeal: the council answered a member's question about an award (appeals.py, design §5.49)
+                "appeal", "guide")  # appeal: the council answered a member's question about an award (appeals.py, design §5.49);
+# guide: an officer withdrew the member's guild guide upload (guides/library.py, the guide library spec)
 MAX_ABSENCE_DAYS = 120
 ABSENCE_REASON_MAX = 200  # an absence's reason (officer-only prose), capped at the verb so every surface refuses alike
 PLAYER_RANKS = ("trial", "raider", "core")
