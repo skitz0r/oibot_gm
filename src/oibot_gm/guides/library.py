@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from .build import EMPTY_TEXT, TEXT_MAX, TOO_BIG, validate_battletag
 from .reissue import SLOTS
-from .rxp_decode import _SECTION, GuideError, decode, encode
+from .rxp_decode import GuideError, decode_sections, encode
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +33,11 @@ FACTIONS = ("alliance", "horde", "both")
 FACTION_WORDS = {"alliance": "Alliance", "horde": "Horde", "both": "Both factions"}
 _NOUN = {"alliance": "Alliance guide", "horde": "Horde guide", "both": "guide for both factions"}  # inside a sentence
 UPLOADS_PER_DAY = 5  # per member per guild, on the guild's day
+# What one upload may keep, in characters of unlocked guide text: a full 1–60 route is a few MB, so 12 MB is past any
+# real guide. The import string's own cap (TEXT_MAX) doesn't bound this: a small string can unpack to tens of MB
+STORED_MAX = 12 * 1024 * 1024
+# What the library may hold in all (every version's `size`, withdrawn ones too: nothing deletes a version)
+LIBRARY_MAX = 200 * 1024 * 1024
 
 GUIDES_DIR = "guides"
 INDEX = "index.yaml"
@@ -44,6 +49,8 @@ NO_VERSION = "That guild guide version isn't in the library."
 WITHDRAWN = "That guild guide version was withdrawn by an officer. Pick the latest one instead."
 NOT_WITHDRAWN = "That guild guide version isn't withdrawn."
 BUSY = "Other guides are being locked right now. Try again in a minute."
+STORED_TOO_BIG = "That guide is bigger than any leveling guide. Upload the guild's guide alone."
+LIBRARY_FULL = "The guild guide library is full, so nothing more can be uploaded. Ask an officer."
 
 _ID = re.compile(r"(alliance|horde|both)-\d{8}-\d{6}(?:-\d{1,3})?")
 
@@ -68,7 +75,8 @@ class GuideVersion(BaseModel):
     by_id: int
     by_name: str  # the uploader's display name at upload (member text: escaped on Discord, fenced in a prompt)
     guides: int
-    sections: int  # the uploaded string's section count, kept on every issue so it imports like the upload
+    sections: int  # the uploaded string's section count (older records: the issue splits evenly by it)
+    layout: list[int] = []  # the guide count of each section of the upload, in order: every issue keeps it exactly
     size: int  # characters of guide text
     withdrawn_at: str | None = None
     withdrawn_by: str | None = None
@@ -134,10 +142,11 @@ def version_words(reg, v: GuideVersion) -> str:
     return f"{_NOUN[v.faction]} of {when(reg, v)}"
 
 
-def issue_filename(v: GuideVersion, battletag: str) -> str:
-    """GuildGuide-<Faction>-<YYYYMMDD>-<Name>.txt: the requester's name part, kept to letters, digits, _ and -."""
+def issue_filename(reg, v: GuideVersion, battletag: str) -> str:
+    """GuildGuide-<Faction>-<YYYYMMDD>-<Name>.txt: the guild's day of the upload (what every surface shows), the
+    requester's name part kept to letters, digits, _ and -."""
     name = re.sub(r"[^\w-]+", "_", (battletag or "").strip().split("#", 1)[0]).strip("_") or "account"
-    day = v.id.split("-")[1]
+    day = f"{_guild_day(reg, v.uploaded_at):%Y%m%d}"
     return f"GuildGuide-{v.faction.title()}-{day}-{name}.txt"
 
 
@@ -164,10 +173,17 @@ def upload_consequence(reg, faction: str) -> str:
     return f"This becomes the latest {_NOUN.get(faction, 'guild guide')} {prep} {reg.config.name}. Nobody gets a DM. An officer can withdraw it."
 
 
-def withdraw_consequence(reg, v: GuideVersion, by_id: int | None = None) -> str:
-    """What Withdraw does. `by_id` = the officer: the uploader is named when they are someone else (they get a notice)."""
+def _gets_notice(reg, v: GuideVersion, by_id: int | None) -> bool:
+    """withdraw() notices the uploader when someone else withdraws and they still have a member record (reg.notify
+    gives a notice to a known member only)."""
+    return (by_id is None or int(by_id) != v.by_id) and v.by_id in reg.members
+
+
+def withdraw_consequence(reg, v: GuideVersion, by_id: int | None = None, esc=None) -> str:
+    """What Withdraw does. `by_id` = the officer: the uploader is named when they get a notice (someone else withdraws
+    and they have a member record). `esc` = the surface's escape for the uploader's name (Discord markdown)."""
     head = f"The {version_words(reg, v)} is withdrawn"
-    head += "." if by_id is not None and by_id == v.by_id else f" and {v.by_name} gets a notice."
+    head += f" and {(esc or str)(v.by_name)} gets a notice." if _gets_notice(reg, v, by_id) else "."
     now = latest(reg, v.faction)
     if now is None or now.id == v.id:
         nxt = next((x for x in versions(reg, v.faction, live_only=True) if x.id != v.id), None)
@@ -193,6 +209,14 @@ def notice_text(reg, v: GuideVersion, by: str) -> str:
 
 def _guild_day(reg, iso: str):
     return datetime.fromisoformat(iso).astimezone(reg.tz).date()
+
+
+def _check_room(vs: list[GuideVersion], size: int) -> None:
+    """The stored caps, checked before anything is written: one upload's text, then the library's total."""
+    if size > STORED_MAX:
+        raise GuideError(STORED_TOO_BIG)
+    if sum(v.size for v in vs) + size > LIBRARY_MAX:
+        raise GuideError(LIBRARY_FULL)
 
 
 def _check_cap(reg, by_id: int, stamp: datetime) -> None:
@@ -224,15 +248,19 @@ def upload(reg, text: str, battletag: str, faction: str, by_id: int, by_name: st
     if not SLOTS.acquire(blocking=False):
         raise GuideError(BUSY)
     try:
-        texts = decode(text, tag)
+        secs = decode_sections(text, tag)
     finally:
         SLOTS.release()
-    sections = max(1, sum(1 for _h, mode, _c in _SECTION.findall(text) if mode == ":"))
+    texts = [t for sec in secs for t in sec]
+    layout = [len(sec) for sec in secs]
+    size = sum(len(t) for t in texts)
+    _check_room(_load(reg), size)  # cheap refusal before the lock; checked again under it
     name = str(by_name or "").strip()[:64] or "a member"
     with _lock(reg):
         stamp = _now()
         _check_cap(reg, by_id, stamp)
         vs = _load(reg)
+        _check_room(vs, size)
         taken = {v.id for v in vs}
         base = f"{faction}-{stamp.astimezone(timezone.utc):%Y%m%d-%H%M%S}"
         vid, i = base, 1
@@ -240,7 +268,7 @@ def upload(reg, text: str, battletag: str, faction: str, by_id: int, by_name: st
             i += 1
             vid = f"{base}-{i}"
         v = GuideVersion(id=vid, faction=faction, uploaded_at=stamp.astimezone(timezone.utc).isoformat(timespec="seconds"), by_id=int(by_id),
-                         by_name=name, guides=len(texts), sections=sections, size=sum(len(t) for t in texts))
+                         by_name=name, guides=len(texts), sections=len(layout), layout=layout, size=size)
         msg = f"{reg.key}: guild guide {vid} uploaded by {name}"
         with reg.store.batch(msg):
             for n, t in enumerate(texts, 1):
@@ -252,7 +280,7 @@ def upload(reg, text: str, battletag: str, faction: str, by_id: int, by_name: st
 
 
 def issue(reg, vid: str, battletag: str, *, officer: bool = False) -> str:
-    """The version's guide texts locked to `battletag`, with the upload's section count. Nothing is written. A withdrawn
+    """The version's guide texts locked to `battletag`, in the upload's section layout (older records: its count). Nothing is written. A withdrawn
     version is refused to a member (WITHDRAWN); an officer may still get it."""
     tag = validate_battletag(battletag)
     v = get(reg, vid)
@@ -263,7 +291,7 @@ def issue(reg, vid: str, battletag: str, *, officer: bool = False) -> str:
     if not SLOTS.acquire(blocking=False):
         raise GuideError(BUSY)
     try:
-        return encode(_texts(reg, v), tag, sections=v.sections)
+        return encode(_texts(reg, v), tag, sections=v.sections, layout=v.layout or None)
     finally:
         SLOTS.release()
 
@@ -283,7 +311,7 @@ def withdraw(reg, vid: str, by: str, by_id: int | None) -> GuideVersion:
         with reg.store.batch(msg):
             _save_index(reg, vs)
             reg.store.commit(msg)
-            if by_id is None or int(by_id) != v.by_id:
+            if _gets_notice(reg, v, by_id):
                 reg.notify(v.by_id, "guide", notice_text(reg, v, by))
     _published(reg)
     return v

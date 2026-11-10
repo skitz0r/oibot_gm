@@ -570,7 +570,12 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
         guide_lib.restore(reg, newer.id, "Offi", OFFICER_ID)
         dump.add("restore_consequence", f"{faction}, an older one", guide_lib.restore_consequence(reg, guide_lib.get(reg, older.id)))
         dump.add("guide notice", faction, guide_lib.notice_text(reg, older, "Offi"))
-    for text in (guide_lib.BAD_FACTION, guide_lib.DAILY_CAP, guide_lib.NO_VERSION, guide_lib.WITHDRAWN, guide_lib.NOT_WITHDRAWN, guide_lib.BUSY):
+    gone = guide_lib.upload(reg, gtext, gtag, "alliance", 480_000_000_000_000_999, "Gone")  # an uploader with no member record
+    dump.add("withdraw_consequence", "alliance, an uploader with no record", guide_lib.withdraw_consequence(reg, gone, by_id=OFFICER_ID))
+    dump.add("withdraw_consequence", "horde, the Discord escape",
+             guide_lib.withdraw_consequence(reg, guide_lib.latest(reg, "horde"), by_id=OFFICER_ID, esc=lambda t: t.replace("_", "\\_")))
+    for text in (guide_lib.BAD_FACTION, guide_lib.DAILY_CAP, guide_lib.NO_VERSION, guide_lib.WITHDRAWN, guide_lib.NOT_WITHDRAWN, guide_lib.BUSY,
+                 guide_lib.STORED_TOO_BIG, guide_lib.LIBRARY_FULL):
         dump.add("guide refusal", text[:24], text)
 
     # ---- news proposals

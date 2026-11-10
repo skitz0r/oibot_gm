@@ -492,16 +492,21 @@ In Discord (every reply is private to you):
 - `/guide get` — pick the faction, then the version (latest first; withdrawn ones aren't offered), then type your
   BattleTag in the pop-up. The bot DMs you the guide as a **.txt** file: *"Your guild guide (Horde · Mon 9 Nov 3:00 PM),
   locked to Name#1234: import the attached string with RestedXP."* You asked for it, so this DM is one you act on. If your
-  DMs are closed to the bot, the file comes on the private reply instead. Nothing is written and no ops line is posted.
+  DMs are closed to the bot, the file comes on the private reply instead. If Discord won't carry the file (too big for
+  the server, or refused for another reason), the bot says *"Discord won't take this file, so get it on the Me page's
+  Leveling guide tab"* with the link. The file is named for the guild's day of the upload. Nothing is written and no ops
+  line is posted.
 - `/guide upload file: faction:` — attach the import string saved as a **.txt** file and pick the faction. The bot checks
   that you belong to the guild and that the file is a .txt of a sensible size before it reads it, then asks in a pop-up
   for the BattleTag the string was issued to, reads the file, and shows what happens: *"This becomes the latest Horde
-  guide for <guild>. Nobody gets a DM. An officer can withdraw it."* **Upload** keeps it (*Uploaded: Horde · …*) and the
+  guide for <guild>. Nobody gets a DM. An officer can withdraw it."* Under it, a small line: *Upload only a guide the guild
+  made itself, never one bought from RestedXP.* **Upload** keeps it (*Uploaded: Horde · …*) and the
   ops channel gets one line. A wrong BattleTag answers *That BattleTag doesn't unlock this guide*.
 - `/guide withdraw` / `/guide restore` (officers, checked on every press) — pick a version, read what happens (*"The
   Horde guide of Mon 9 Nov 3:00 PM is withdrawn and Quill gets a notice. Members get the one from Sun 8 Nov 12:00 PM as
   the latest. You can restore it."*), confirm. The uploader sees the withdrawal as a notice on their Me page, never a DM
-  (none when they withdrew their own). One ops line each.
+  (none when they withdrew their own, and none when they no longer have a record here — the sentence then just says the
+  guide *is withdrawn*). One ops line each.
 
 On the site, **Me › Leveling guide** starts with two cards. **Guild guides** lists each faction's versions (when, who
 uploaded it, a *Latest* badge, how many guides it holds); type your BattleTag once in the field at the top (it is kept
@@ -512,7 +517,11 @@ import string (paste it, or pick the .txt file), the BattleTag it was issued to 
 above **Upload**, and the list updates for everyone at once. With no upload yet the card says *No guild guide yet. Upload
 one below.*
 
-Limits: five uploads per member a day (the guild's day); an import string past the tool's size is refused as too big;
+Limits: five uploads per member a day (the guild's day); an import string past the tool's size is refused as too big; a
+guide that unlocks to more than 12 MB of text answers *"That guide is bigger than any leveling guide. Upload the guild's
+guide alone."*; the whole library holds at most 200 MB of guides, withdrawn ones included, and past that every upload
+answers *"The guild guide library is full, so nothing more can be uploaded. Ask an officer."* — nobody can delete a
+version from Discord or the site, so an officer has to have old ones removed by whoever runs the bot;
 two guides being locked at once is the most (*Other guides are being locked right now. Try again in a minute.*). Upload
 only guides the guild made itself (the Me page's upload card says so); every version shows who uploaded it, and an officer
 withdraws one that isn't the guild's. Plain text

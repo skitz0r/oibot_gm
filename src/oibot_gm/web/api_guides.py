@@ -193,20 +193,24 @@ def install_guides_api(app: FastAPI, bot, *, who, body, publish=None, live_offic
     @app.post("/api/guides/library/{vid}/download")
     async def library_download(request: Request, vid: str):
         """{battletag}: the version locked to that BattleTag, as a file. Nothing is written and no ops line. A withdrawn
-        version is an officer's only (`v.officer` is already off for a write on a stale membership, §2.9)."""
+        version is an officer's only, decided live (live_officer: a demoted officer's cached role never fetches one)."""
         v, d = await body(request)
         if v.via == "mcp":
             raise HTTPException(403, FROM_MCP)
         if not lib.available(v.reg):
             raise HTTPException(400, NO_TOOL)
         tag = str(d.get("battletag") or "")
+        gv = await asyncio.to_thread(lib.get, v.reg, vid)
+        officer = False
+        if gv is not None and gv.withdrawn_at:  # an officer's only: decided now (PRIV_LIVE), never the page's cached role
+            officer = bool(await live_officer(v)) if live_officer is not None else bool(v.officer)
         try:
-            out, gv = await asyncio.to_thread(lambda: (lib.issue(v.reg, vid, tag, officer=bool(v.officer)), lib.get(v.reg, vid)))
+            out, gv = await asyncio.to_thread(lambda: (lib.issue(v.reg, vid, tag, officer=officer), lib.get(v.reg, vid)))
         except g.GuideError as e:
             return guide_error(e)
         except Exception as e:  # noqa: BLE001 — D7: never the exception's words
             return await failed(v, "download", e)
-        fn = lib.issue_filename(gv, tag)
+        fn = lib.issue_filename(v.reg, gv, tag)
         ascii_fn = fn.encode("ascii", "replace").decode().replace("?", "_")
         return Response(out.encode(), media_type="text/plain; charset=utf-8", headers={
             "Content-Disposition": f"attachment; filename=\"{ascii_fn}\"; filename*=UTF-8''{quote(fn)}", "Cache-Control": "no-store"})
@@ -231,7 +235,8 @@ def install_guides_api(app: FastAPI, bot, *, who, body, publish=None, live_offic
                 raise HTTPException(400, f"Already withdrawn by {gv.withdrawn_by or 'an officer'} on {reg.local12(gv.withdrawn_at)}.")
             if verb == "restore" and not gv.withdrawn_at:
                 raise HTTPException(400, lib.NOT_WITHDRAWN)
-            text = lib.withdraw_consequence(reg, gv, by_id=v.uid) if verb == "withdraw" else lib.restore_consequence(reg, gv)
+            text = await asyncio.to_thread(lambda: lib.withdraw_consequence(reg, gv, by_id=v.uid) if verb == "withdraw"
+                                           else lib.restore_consequence(reg, gv))
             return {"preview": True, "sentences": sentences(text)}
         fn = lib.withdraw if verb == "withdraw" else lib.restore
         try:

@@ -4,8 +4,9 @@ their words are guides/library.py). `/guide …` is registered by discord_guides
 - `guide_list`: each faction's latest and up to four older versions, with the uploader, and the Me page's link.
 - `guide_get`: faction select (lines with a live version) → version select (latest first, newest 25) → the BattleTag
   modal (prose, validated by validate_battletag, never parsed) → the version locked to that tag, DMed as a .txt (the
-  member asked: an act under the DM rule); a refused DM puts the file on the private reply. Nothing is written, no
-  ops line, no decide screen.
+  member asked: an act under the DM rule); closed DMs (Forbidden) put the file on the private reply; a file past the
+  server's limit, any other refusal by Discord or a reply that can't carry it → too_big_for_discord (the Me page).
+  Nothing is written, no ops line, no decide screen.
 - `guide_upload`: the attachment and the faction are widgets (the Wizard rule). Membership, the .txt name and the size
   from Discord's metadata are checked BEFORE the file is read; the BattleTag modal → the file read → the decide screen
   with library.upload_consequence → library.upload → one ops line.
@@ -42,6 +43,8 @@ EMPTY_FILE = "That file is empty. Attach the RestedXP import string saved as a .
 NOTHING_TO_WITHDRAW = "No guild guide is in members' reach to withdraw. Members upload them with /guide upload or on the Me page."
 NOTHING_TO_RESTORE = "No guild guide is withdrawn, so there is nothing to restore."
 OFFICERS_ONLY = "Officers only."
+UPLOAD_HINT = "Upload only a guide the guild made itself, never one bought from RestedXP."  # the Me page's upload card says the same
+FILE_LIMIT = 10 * 1024 * 1024  # Discord's default attachment limit, where the server's own (filesize_limit) isn't known
 _TAG_REFUSALS = {BAD_TAG, EMPTY_TAG, WRONG_KEY}  # a refusal the person fixes by typing the BattleTag again
 
 
@@ -72,6 +75,13 @@ def site_link(reg: Registry) -> str | None:
 
     url = site_url(reg, "/app/me")
     return f"{url}&tab=guide" if url else None
+
+
+def too_big_for_discord(reg: Registry) -> str:
+    """One sentence when Discord won't carry the issued file: the Me page has the same download."""
+    url = site_link(reg)
+    return ("Discord won't take this file, so get it on the Me page's Leveling guide tab"
+            + (f": {url}" if url else " on the site."))
 
 
 def tag_form(on_submit, why: str) -> Form:
@@ -182,14 +192,24 @@ class GetWizard(Wizard):
         except Exception as e:  # noqa: BLE001 — D7: never the exception's words
             await self.finish(interaction, _failed("get", self.reg, e))
             return
-        data, fn = out.encode(), lib.issue_filename(v, tag)
+        data, fn = out.encode(), lib.issue_filename(self.reg, v, tag)
         where = f" from {self.reg.config.name}" if self.reg.many_guilds else ""
         line = (f"Your guild guide{where} ({words(self.reg, v)}), locked to **{discord.utils.escape_markdown(tag)}**: "
                 "import the attached string with RestedXP.")
+        limit = getattr(getattr(interaction, "guild", None), "filesize_limit", None) or FILE_LIMIT
+        if len(data) > limit:  # Discord would refuse it: never sent
+            await self.finish(interaction, too_big_for_discord(self.reg))
+            return
         try:
             await interaction.user.send(line, file=discord.File(io.BytesIO(data), filename=fn), allowed_mentions=discord.AllowedMentions.none())
-        except discord.HTTPException:  # DMs closed (Forbidden) or Discord refused: the file comes here instead
-            await self.finish_with_file(interaction, f"I can't DM you, so here it is. {line}", discord.File(io.BytesIO(data), filename=fn))
+        except discord.Forbidden:  # DMs closed: the file comes on the private reply instead
+            try:
+                await self.finish_with_file(interaction, f"I can't DM you, so here it is. {line}", discord.File(io.BytesIO(data), filename=fn))
+            except discord.HTTPException:
+                await self.finish(interaction, too_big_for_discord(self.reg))
+            return
+        except discord.HTTPException:  # Discord refused the file for another reason (a 413): the site has it
+            await self.finish(interaction, too_big_for_discord(self.reg))
             return
         await self.finish(interaction, f"Sent to your DMs: {words(self.reg, v)}.")
 
@@ -257,7 +277,7 @@ class UploadWizard(Wizard):
             if not self.text.strip():
                 await self.finish(interaction, f"❌ {EMPTY_FILE}")
                 return
-        await self.decide(interaction, lib.upload_consequence(self.reg, self.faction), do=self.upload, do_label="Upload")
+        await self.decide(interaction, lib.upload_consequence(self.reg, self.faction), do=self.upload, do_label="Upload", hint=UPLOAD_HINT)
 
     async def upload(self, interaction: discord.Interaction, _note: str | None) -> None:
         try:
@@ -313,7 +333,7 @@ async def _officer_flow(interaction: discord.Interaction, reg: Registry, verb: s
         return None if await is_officer(bot, reg, i.user) else OFFICERS_ONLY
 
     wiz = Wizard(reg, interaction.user.id, title="Withdraw a guild guide" if withdraw else "Restore a guild guide", guard=guard)
-    latest = {f: getattr(lib.latest(reg, f), "id", None) for f in lib.FACTIONS}
+    latest = await asyncio.to_thread(lambda: {f: getattr(lib.latest(reg, f), "id", None) for f in lib.FACTIONS})
 
     def describe(v: lib.GuideVersion) -> str:
         if v.withdrawn_at:
@@ -325,7 +345,9 @@ async def _officer_flow(interaction: discord.Interaction, reg: Registry, verb: s
         if v is None or bool(v.withdrawn_at) == withdraw:  # someone else got there first
             await wiz.finish(i, f"❌ {lib.NO_VERSION if v is None else (lib.NOT_WITHDRAWN if not withdraw else 'Already withdrawn.')}")
             return
-        text = lib.withdraw_consequence(reg, v, by_id=i.user.id) if withdraw else lib.restore_consequence(reg, v)
+        esc = discord.utils.escape_markdown
+        text = await asyncio.to_thread(lambda: lib.withdraw_consequence(reg, v, by_id=i.user.id, esc=esc) if withdraw
+                                       else lib.restore_consequence(reg, v))
 
         async def do(di: discord.Interaction, _note: str | None) -> None:
             fn = lib.withdraw if withdraw else lib.restore

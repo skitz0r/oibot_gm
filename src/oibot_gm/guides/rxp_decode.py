@@ -70,11 +70,17 @@ def decode(text: str, battletag: str) -> list[str]:
     """The guide texts (RXP step syntax) inside an import string, in order. GuideError when the paste isn't an import
     string or the BattleTag isn't its key (a checksum mismatch after decrypting is the same wrong key), or when the texts
     would unpack past MAX_PLAIN (refused before unpacking any further)."""
+    return [g for sec in decode_sections(text, battletag) for g in sec]
+
+
+def decode_sections(text: str, battletag: str) -> list[list[str]]:
+    """decode, keeping the string's sections: one list of guide texts per section that holds any (the guide library
+    keeps the counts so a version is issued in the upload's own layout)."""
     s = re.sub(r"^[^\d]*?(?=\d+\|)", "", text.strip())  # a label pasted in front of the string ("guide: 78|…") is dropped
     if not re.match(r"^\d+\|", s):
         raise GuideError(NOT_A_STRING)
     S = rc4_sbox(make_base(battletag))
-    guides: list[str] = []
+    out: list[list[str]] = []
     total = 0
     for h, mode, content in _SECTION.findall(s):
         if mode != ":":
@@ -90,19 +96,31 @@ def decode(text: str, battletag: str) -> list[str]:
             raise GuideError(TOO_BIG)
         if a32(txt) != int(h) % 4294967296:
             raise GuideError(WRONG_KEY)
-        guides += [g.decode("utf-8", "replace") for g in txt.split(b"\0") if g.strip()]
-    if not guides:
+        sec = [g.decode("utf-8", "replace") for g in txt.split(b"\0") if g.strip()]
+        if sec:
+            out.append(sec)
+    if not out:
         raise GuideError(NOT_A_STRING)
-    return guides
+    return out
 
 
-def encode(guides: list[str], battletag: str, sections: int = 1) -> str:
+def encode(guides: list[str], battletag: str, sections: int = 1, layout: list[int] | None = None) -> str:
     """The inverse of decode: guide texts → an import string the given BattleTag unlocks (fixtures, and reissue: the
-    member's own guide for their own other account — never anyone else's)."""
+    member's own guide for their own other account — never anyone else's). `sections` splits the guides evenly;
+    `layout` = the guide count of each section, in order (the guide library's upload layout; ValueError unless every
+    count is positive and they cover every guide)."""
+    if layout:
+        if any(int(n) < 1 for n in layout) or sum(int(n) for n in layout) != len(guides):
+            raise ValueError("the layout must cover every guide")
+        sizes = [int(n) for n in layout]
+    else:
+        per = max(1, -(-len(guides) // max(1, sections)))
+        sizes = [min(per, len(guides) - i) for i in range(0, len(guides), per)]
     S = rc4_sbox(make_base(battletag))
     out = [f"{len(guides)}|"]
-    per = max(1, -(-len(guides) // max(1, sections)))
-    for i in range(0, len(guides), per):
-        txt = b"\0".join(g.encode() for g in guides[i:i + per])
+    i = 0
+    for n in sizes:
+        txt = b"\0".join(g.encode() for g in guides[i:i + n])
+        i += n
         out.append(f"{a32(txt)}:{base64.b64encode(rc4(S, zlib.compress(txt, 9))).decode()}%")
     return "".join(out)

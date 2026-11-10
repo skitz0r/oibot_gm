@@ -140,6 +140,7 @@ export function GuideLibrary() {
         <CardHeader title="Guild guides" hint="leveling guides the guild made, locked to your BattleTag when you get one" />
         <Stack p="md" gap="md">
           <TextInput ref={tagRef} label="Your BattleTag" placeholder="Name#1234" value={tag} style={{ maxWidth: 320 }}
+            autoComplete="off" spellCheck={false} data-1p-ignore data-lpignore="true"
             description="Each guide you get here is locked to this BattleTag. It is not kept."
             error={tagAsk && !tag.trim() ? "Type your BattleTag first, then press Get it for my BattleTag again." : undefined}
             onChange={(e) => { setTag(e.currentTarget.value); setTagAsk(false); }} />
@@ -169,6 +170,7 @@ export function GuideLibrary() {
           </Group>
           <Group align="flex-end" gap="sm" wrap="wrap">
             <TextInput label="The BattleTag this string was issued to" placeholder="Name#1234" value={upTag} disabled={uploading}
+              autoComplete="off" spellCheck={false} data-1p-ignore data-lpignore="true"
               onChange={(e) => setUpTag(e.currentTarget.value)} style={{ flex: "1 1 220px", maxWidth: 320 }} />
             <Select label="Faction" placeholder="Pick the guide's faction" data={lib.factions.map((f) => ({ value: f.id, label: f.words }))}
               value={faction} onChange={setFaction} disabled={uploading} allowDeselect={false} style={{ flex: "1 1 180px", maxWidth: 240 }} />

@@ -41,15 +41,18 @@ class FakeOps:
 
 
 class FakeUser:
-    """A Discord user with a DM channel: `refuse` = the person's DMs are closed (discord.Forbidden)."""
+    """A Discord user with a DM channel: `refuse` = the person's DMs are closed (discord.Forbidden); `fail` = Discord
+    refuses the message for another reason (a 413: the file is too large)."""
 
-    def __init__(self, uid: int, name: str, refuse: bool = False):
-        self.id, self.display_name, self.mention, self.refuse = uid, name, f"<@{uid}>", refuse
+    def __init__(self, uid: int, name: str, refuse: bool = False, fail: bool = False):
+        self.id, self.display_name, self.mention, self.refuse, self.fail = uid, name, f"<@{uid}>", refuse, fail
         self.dms: list[dict] = []
 
     async def send(self, content=None, *, file=None, **kw):
         if self.refuse:
             raise discord.Forbidden(types.SimpleNamespace(status=403, reason="Forbidden"), "Cannot send messages to this user")
+        if self.fail:
+            raise discord.HTTPException(types.SimpleNamespace(status=413, reason="Payload Too Large"), "Request entity too large")
         self.dms.append({"text": content, "file": file})
 
 
@@ -92,8 +95,8 @@ def people(reg, monkeypatch):
     return reg
 
 
-def harness(reg, uid, name, refuse=False):
-    user = FakeUser(uid, name, refuse=refuse)
+def harness(reg, uid, name, refuse=False, fail=False):
+    user = FakeUser(uid, name, refuse=refuse, fail=fail)
     client = types.SimpleNamespace(ops=FakeOps())
     return Harness(reg, None, user=user, client=client)
 
@@ -129,7 +132,7 @@ def test_get_dms_a_file_that_unlocks_with_the_typed_battletag(people, clock, cap
     dm = h.user.dms[-1]
     assert dm["text"] == f"Your guild guide (Horde · {lib.when(reg, v)}), locked to **{READER_TAG}**: import the attached string with RestedXP."
     f = dm["file"]
-    assert f.filename == lib.issue_filename(v, READER_TAG)
+    assert f.filename == lib.issue_filename(reg, v, READER_TAG)
     assert decode(f.fp.read().decode(), READER_TAG) == TEXTS
     assert "Sent to your DMs" in h.text and h.screen["view"] is None and not h.screen["files"]
     assert h.client.ops.lines == [], "no ops line for a get"
@@ -167,6 +170,53 @@ def test_a_refused_dm_puts_the_file_on_the_private_reply(people, clock):
     files = h.screen["files"]
     assert len(files) == 1 and decode(files[0].fp.read().decode(), READER_TAG) == TEXTS
     assert "I can't DM you" in h.text and f"locked to **{READER_TAG}**" in h.text
+
+
+def _get(h, reg, v):
+    async def go():
+        await FLOWS["guide_get"](h.command(), reg)
+        await h.pick("Pick the faction…", "horde")
+        await h.pick("Pick the version…", v.id)
+        await h.submit(h.modal, tag=READER_TAG)
+    asyncio.run(go())
+
+
+def test_a_dm_discord_refuses_for_another_reason_points_at_the_site(people, clock, monkeypatch):
+    reg = people
+    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
+    v = stored(reg)
+    h = harness(reg, READER, "Marrow", fail=True)
+    _get(h, reg, v)
+    assert not h.user.dms and not h.screen["files"]
+    assert h.text.endswith(flows_guides.too_big_for_discord(reg))
+    assert "Me page" in h.text and "Leveling guide" in h.text and "https://gm.example/app/me?g=" in h.text
+
+
+def test_a_file_past_the_servers_limit_is_never_sent(people, clock, monkeypatch):
+    reg = people
+    monkeypatch.delenv("OIBOT_WEB_URL", raising=False)
+    v = stored(reg)
+    h = harness(reg, READER, "Marrow")
+    h.guild = types.SimpleNamespace(id=1, filesize_limit=100)  # the server's own limit, when Discord gives it
+    _get(h, reg, v)
+    assert not h.user.dms and not h.screen["files"] and h.text.endswith(flows_guides.too_big_for_discord(reg))
+    h2 = harness(reg, READER, "Marrow")  # no server (a DM): Discord's default limit
+    monkeypatch.setattr(flows_guides, "FILE_LIMIT", 100)
+    _get(h2, reg, v)
+    assert not h2.user.dms and h2.text.endswith(flows_guides.too_big_for_discord(reg))
+    assert flows_guides.too_big_for_discord(reg) == "Discord won't take this file, so get it on the Me page's Leveling guide tab on the site."
+
+
+def test_a_reply_that_cannot_carry_the_file_points_at_the_site(people, clock, monkeypatch):
+    reg = people
+    v = stored(reg)
+    h = harness(reg, READER, "Marrow", refuse=True)
+
+    async def no_attach(self, interaction, text, file):
+        raise discord.HTTPException(types.SimpleNamespace(status=413, reason="Payload Too Large"), "too large")
+    monkeypatch.setattr(flows_guides.GetWizard, "finish_with_file", no_attach)
+    _get(h, reg, v)
+    assert h.text.endswith(flows_guides.too_big_for_discord(reg)) and not h.screen["files"]
 
 
 def test_get_refuses_a_bad_battletag_and_lets_the_person_fix_it(people, clock):
@@ -228,7 +278,8 @@ def test_upload_prints_the_consequence_then_writes_one_version_and_one_ops_line(
         assert att.reads == 0, "nothing read before the BattleTag"
         assert h.modal.title == "Your BattleTag"
         await h.submit(h.modal, tag=AUTHOR_TAG)
-        assert h.text.split("\n", 1)[1] == lib.upload_consequence(reg, "horde")
+        assert h.text.split("\n", 2)[1] == lib.upload_consequence(reg, "horde")
+        assert h.text.endswith(f"-# {flows_guides.UPLOAD_HINT}"), "the guild-made hint, apart from the confirm sentences"
         assert h.buttons() == ["Upload", "Back"]
         assert AUTHOR_TAG not in json.dumps(pending_views._live) and STRING[:40] not in json.dumps(pending_views._live)
         await h.press("Upload")
@@ -353,6 +404,19 @@ def test_withdraw_prints_the_consequence_writes_and_says_so_in_the_ops_channel(p
     asyncio.run(back())
     assert lib.latest(reg, "horde").id == v.id
     assert h2.client.ops.lines == [("info", f"Offi: guild guide restored: Horde · {lib.when(reg, v)}")]
+
+
+def test_the_withdraw_screen_escapes_the_uploaders_name(people, clock):
+    reg = people
+    v = lib.upload(reg, STRING, AUTHOR_TAG, "horde", AUTHOR, "Qu_ill*")
+    h = harness(reg, OFFICER, "Offi")
+
+    async def go():
+        await FLOWS["guide_withdraw"](h.command(), reg)
+        await h.pick("Pick the version…", v.id)
+    asyncio.run(go())
+    assert "Qu\\_ill\\* gets a notice." in h.text
+    assert h.text.split("\n", 1)[1] == lib.withdraw_consequence(reg, v, by_id=OFFICER, esc=discord.utils.escape_markdown)
 
 
 def test_rights_lost_between_open_and_press_stop_the_write(people, clock):

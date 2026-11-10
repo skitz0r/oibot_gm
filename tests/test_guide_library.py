@@ -68,7 +68,7 @@ def test_an_upload_issues_for_another_tag_with_the_same_texts_and_sections(peopl
     d = reg.store.root / reg.key / "guides"
     assert (d / "index.yaml").exists()
     assert [(d / v.id / f"guide-{i:03d}.txt").read_text() for i in (1, 2, 3)] == TEXTS
-    assert lib.issue_filename(v, READER_TAG) == "GuildGuide-Horde-20261109-Marrowfen.txt"
+    assert lib.issue_filename(reg, v, READER_TAG) == "GuildGuide-Horde-20261109-Marrowfen.txt"
 
 
 def test_an_upload_is_one_commit_naming_the_version_and_the_uploader(people, clock):
@@ -260,3 +260,74 @@ def test_no_battletag_or_string_reaches_the_repo_or_a_log(people, clock, caplog)
     for t in secrets:
         assert t not in log, f"{t!r} in git log"
         assert t not in caplog.text
+
+
+# ---------------------------------------------------------------- fix wave: stored size, layout, file name, notices
+
+def test_a_guide_that_unpacks_past_the_stored_cap_is_refused_before_anything_is_written(people, clock):
+    reg = people
+    assert lib.STORED_MAX == 12 * 1024 * 1024 and lib.LIBRARY_MAX == 200 * 1024 * 1024
+    big = encode(["step goto 1,2\n" * 1_000_000], AUTHOR_TAG)  # ~14 MB of text from a small string
+    assert len(big) < g.TEXT_MAX
+    with pytest.raises(GuideError) as e:
+        up(reg, text=big)
+    assert str(e.value) == lib.STORED_TOO_BIG == "That guide is bigger than any leveling guide. Upload the guild's guide alone."
+    assert lib.versions(reg) == [] and not (reg.store.root / reg.key / "guides").exists()
+
+
+def test_a_full_library_refuses_an_upload_and_withdrawn_versions_count(people, clock, monkeypatch):
+    reg = people
+    one = sum(len(t) for t in TEXTS)
+    monkeypatch.setattr(lib, "LIBRARY_MAX", one * 2 + 10)
+    a = up(reg)
+    up(reg, uid=READER, name="Marrow", tag=READER_TAG, text=string(READER_TAG))
+    lib.withdraw(reg, a.id, "Offi", OFFICER)  # a withdrawn version still takes its room: nothing deletes one
+    with pytest.raises(GuideError) as e:
+        up(reg, faction="alliance")
+    assert str(e.value) == lib.LIBRARY_FULL
+    assert "Ask an officer" in lib.LIBRARY_FULL
+    assert len(lib.versions(reg)) == 2
+
+
+def test_an_uneven_section_layout_is_issued_exactly_as_uploaded(people, clock):
+    from oibot_gm.guides.rxp_decode import decode_sections
+
+    reg = people
+    four = TEXTS + ["#name 20-24 Guildpeak\n#group Our Route\nstep\n.goto 1,2\n"]
+    s = encode(four, AUTHOR_TAG, layout=[1, 1, 2])
+    assert [len(x) for x in decode_sections(s, AUTHOR_TAG)] == [1, 1, 2]
+    v = up(reg, text=s)
+    assert v.layout == [1, 1, 2] and v.sections == 3
+    out = lib.issue(reg, v.id, READER_TAG)
+    assert [len(x) for x in decode_sections(out, READER_TAG)] == [1, 1, 2]
+    assert decode(out, READER_TAG) == four
+    # an older record without a layout: the even split by its section count, as before
+    old = v.model_copy(update={"layout": []})
+    assert lib.GuideVersion.model_validate({k: x for k, x in v.model_dump().items() if k != "layout"}).layout == []
+    assert [len(x) for x in decode_sections(encode(four, READER_TAG, sections=old.sections, layout=old.layout or None), READER_TAG)] == [2, 2]
+    with pytest.raises(ValueError):
+        encode(four, READER_TAG, layout=[1, 1])  # a layout must cover every guide
+
+
+def test_the_issued_file_name_carries_the_guilds_day(people, clock):
+    reg = people
+    clock[0] = datetime(2026, 11, 10, 7, 30, tzinfo=timezone.utc)  # still Mon 9 Nov in Los Angeles
+    v = up(reg)
+    assert v.id.startswith("horde-20261110-")
+    assert lib.issue_filename(reg, v, READER_TAG) == "GuildGuide-Horde-20261109-Marrowfen.txt"
+
+
+def test_withdrawing_a_guide_whose_uploader_has_no_record_names_no_notice(people, clock):
+    reg = people
+    v = up(reg, uid=480_000_000_000_000_999, name="Gone")
+    s = lib.withdraw_consequence(reg, v, by_id=OFFICER)
+    assert s.startswith(f"The Horde guide of {lib.when(reg, v)} is withdrawn. ") and "notice" not in s
+    lib.withdraw(reg, v.id, "Offi", OFFICER)
+
+
+def test_the_withdraw_sentence_escapes_the_uploader_on_request(people, clock):
+    reg = people
+    v = up(reg, name="Qu_ill*")
+    s = lib.withdraw_consequence(reg, v, by_id=OFFICER, esc=lambda t: t.replace("_", "\\_").replace("*", "\\*"))
+    assert "Qu\\_ill\\* gets a notice." in s
+    assert "Qu_ill* gets a notice." in lib.withdraw_consequence(reg, v, by_id=OFFICER)

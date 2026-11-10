@@ -491,8 +491,8 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        member's own other account (reissue(text, tag, new_tag) → the new string, nothing written; convert_request = the DM's
                        `convert guide from <Tag1> to <Tag2> [given …]` read in code; CHANNEL_REFUSAL); library.py (§5.63) = the guild guide library:
                        <guild>/guides/index.yaml + one unlocked text per guide, a VERSION per faction (alliance|horde|both, id <faction>-<UTC stamp>),
-                       latest = newest not withdrawn; upload (any member, unlocked once by their tag, UPLOADS_PER_DAY 5) / issue (locked to the
-                       requester's tag, a withdrawn one officers only) / withdraw (a `guide` notice to the uploader) / restore, one commit each under a
+                       latest = newest not withdrawn; upload (any member, unlocked once by their tag, UPLOADS_PER_DAY 5, STORED_MAX 12 MB per upload,
+                       LIBRARY_MAX 200 MB in all — no delete) / issue (locked to the requester's tag in the upload's section `layout`, a withdrawn one officers only) / withdraw (a `guide` notice to the uploader) / restore, one commit each under a
                        per-guild lock, decode/encode under reissue.SLOTS; rows / the *_consequence sentences; NO BattleTag or string is ever written (D7)
   web/api_guides.py    install_guides_api (called from api.py): GET/POST /api/me/guide (status / build in a thread; MCP never builds), /clear,
                        POST /reissue (the other-account string as a no-store download; MCP never; the DM twin is discord_bot.guide_convert,

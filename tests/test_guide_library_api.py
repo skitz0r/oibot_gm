@@ -311,3 +311,21 @@ def test_mcp_tools_read_withdraw_and_restore_through_the_routes(monkeypatch):
         assert not {n for n in names if "guide" in n and ("upload" in n or "issue" in n or "download" in n or "get_guild_guide" == n)}, "no upload, no issue tool"
     finally:
         ms.use(None)
+
+
+def test_a_withdrawn_download_decides_the_officer_live(w, monkeypatch):
+    """An officer demoted since the page loaded: the cached role says officer, the live check says member."""
+    from oibot_gm import guild_routing
+
+    assert upload(w).status_code == 200
+    vid = "horde-20261109-230012"
+    assert w.c.post(f"/api/guides/library/{vid}/withdraw", json={}, headers=as_user(w.c, OFFICER)).status_code == 200
+    calls = []
+
+    async def resolve_role(bot, reg, who, max_age=None):
+        calls.append(max_age)
+        return types.SimpleNamespace(officer=False, role="member", stale=False)
+    monkeypatch.setattr(guild_routing, "resolve_role", resolve_role)
+    r = w.c.post(f"/api/guides/library/{vid}/download", json={"battletag": READER_TAG}, headers=as_user(w.c, OFFICER))
+    assert r.status_code == 400 and r.json()["error"] == lib.WITHDRAWN
+    assert guild_routing.PRIV_LIVE in calls

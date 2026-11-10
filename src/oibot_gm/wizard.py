@@ -280,7 +280,7 @@ class Wizard(discord.ui.View):
     # ---- the ONE confirm screen (dual interfaces §2.3)
     async def decide(self, interaction: discord.Interaction, text: str, *, do: Callable[[discord.Interaction, str | None], Awaitable[None]],
                      note: Field | dict | None = None, do_label: str = "Do it", danger: bool = False, back_label: str = "Back",
-                     extra: Sequence[discord.ui.Item] = ()) -> None:
+                     extra: Sequence[discord.ui.Item] = (), hint: str | None = None) -> None:
         """The consequence, then `[Do it]` `[Do it with a note…]` `[Back]`. `text` is the consequence sentence(s) from
         code (consequences.consequence, news.consequence) — never composed here. `do(interaction, note)` is the write:
         this screen has already acknowledged the press (`working`) before calling it, so `do` may run a solver or a DM
@@ -288,7 +288,8 @@ class Wizard(discord.ui.View):
         {label, max_length, description}: the note button opens a one-field Form whose Submit IS the write (a modal is
         the only place a text box lives). Owner-only presses and the guard are re-checked on every press (the View's
         interaction_check) and again on the note's submit (a Modal has no interaction_check). `extra`: buttons that read
-        more before deciding (the lock's Preview lock) — they sit between the write and Back and never write."""
+        more before deciding (the lock's Preview lock) — they sit between the write and Back and never write. `hint`: one
+        small line under the consequence (what the thing is for), never part of the confirm sentences."""
         field = note if isinstance(note, Field) else (Field("note", str(note.get("label") or "Note"), required=False, paragraph=True,
                                                             max_length=int(note.get("max_length") or 400), description=note.get("description"),
                                                             placeholder=note.get("placeholder")) if note else None)
@@ -322,7 +323,7 @@ class Wizard(discord.ui.View):
             items.append(self.button(f"{do_label} with a note…", with_note, discord.ButtonStyle.secondary))
         items += list(extra)
         items.append(self.button(back_label, back, discord.ButtonStyle.secondary))
-        await self.show(interaction, text, *items)
+        await self.show(interaction, f"{text}\n-# {hint}" if hint else text, *items)
 
 
 # ---------------------------------------------------------------- dates and times (never typed)
