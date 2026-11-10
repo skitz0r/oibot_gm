@@ -237,7 +237,7 @@ async def guide_convert(bot, message) -> bool:
         await message.reply(guides.CONVERT_FAILED, allowed_mentions=quiet)
         return True
     new = req.new_tag.strip()
-    await message.reply(f"Your guide, locked to **{discord.utils.escape_markdown(new)}**: import the attached string with RestedXP on that account.",
+    await message.reply(f"Your guide, locked to **{discord.utils.escape_markdown(new)}**: import the attached string with RestedXP on that account. Download the file and copy all of it. Discord's preview shows only the start.",
                         file=discord.File(io.BytesIO(out.encode()), filename=guides.reissue_filename(new)), allowed_mentions=quiet)
     return True
 

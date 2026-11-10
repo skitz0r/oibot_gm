@@ -491,7 +491,7 @@ In Discord (every reply is private to you):
 - `/guide list` — each faction's latest and up to four older versions, with who uploaded them, and the Me page's link.
 - `/guide get` — pick the faction, then the version (latest first; withdrawn ones aren't offered), then type your
   BattleTag in the pop-up. The bot DMs you the guide as a **.txt** file: *"Your guild guide (Horde · Mon 9 Nov 3:00 PM),
-  locked to Name#1234: import the attached string with RestedXP."* You asked for it, so this DM is one you act on. If your
+  locked to Name#1234: import the attached string with RestedXP. Download the file and copy all of it. Discord's preview shows only the start."* You asked for it, so this DM is one you act on. If your
   DMs are closed to the bot, the file comes on the private reply instead. If Discord won't carry the file (too big for
   the server, or refused for another reason), the bot says *"Discord won't take this file, so get it on the Me page's
   Leveling guide tab"* with the link. The file is named for the guild's day of the upload. Nothing is written and no ops

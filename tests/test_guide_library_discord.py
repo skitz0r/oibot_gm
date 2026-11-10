@@ -130,7 +130,7 @@ def test_get_dms_a_file_that_unlocks_with_the_typed_battletag(people, clock, cap
         await h.submit(h.modal, tag=READER_TAG)
     asyncio.run(go())
     dm = h.user.dms[-1]
-    assert dm["text"] == f"Your guild guide (Horde · {lib.when(reg, v)}), locked to **{READER_TAG}**: import the attached string with RestedXP."
+    assert dm["text"] == f"Your guild guide (Horde · {lib.when(reg, v)}), locked to **{READER_TAG}**: import the attached string with RestedXP. Download the file and copy all of it. Discord's preview shows only the start."
     f = dm["file"]
     assert f.filename == lib.issue_filename(reg, v, READER_TAG)
     assert decode(f.fp.read().decode(), READER_TAG) == TEXTS

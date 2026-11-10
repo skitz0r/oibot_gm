@@ -207,7 +207,7 @@ class GetWizard(Wizard):
         data, fn = out.encode(), lib.issue_filename(self.reg, v, tag)
         where = f" from {self.reg.config.name}" if self.reg.many_guilds else ""
         line = (f"Your guild guide{where} ({words(self.reg, v)}), locked to **{discord.utils.escape_markdown(tag)}**: "
-                "import the attached string with RestedXP.")
+                "import the attached string with RestedXP. Download the file and copy all of it. Discord's preview shows only the start.")
         limit = getattr(getattr(interaction, "guild", None), "filesize_limit", None) or FILE_LIMIT
         if len(data) > limit:  # Discord would refuse it: never sent
             await self.finish(interaction, too_big_for_discord(self.reg))
