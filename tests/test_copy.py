@@ -161,7 +161,7 @@ PY_FILES = ["raid_views.py", "wizard.py", "inbox.py", "consequences.py", "discor
             "discord_help.py",
             # the leveling-guide tool's refusals (§5.55) and its routes' sentences
             "guides/build.py", "guides/rxp_decode.py", "web/api_guides.py",
-            # the guild guide library: its refusals and the /guide commands (spec 2026-11-09)
+            # the guild guide library: its refusals and the /guide commands (design §5.63)
             "guides/library.py", "discord_guides.py"]
 LOG_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical"}
 # calls whose string arguments are machine-facing (patterns, keys, ids), not words a person reads

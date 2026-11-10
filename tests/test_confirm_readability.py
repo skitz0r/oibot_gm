@@ -540,7 +540,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     for outcome in appeals.OUTCOMES:
         dump.add("resolve_consequence", outcome, appeals.resolve_consequence(reg, apl, outcome))
 
-    # ---- the guild guide library (the 2026-11-09 spec)
+    # ---- the guild guide library (design §5.63)
     from oibot_gm.guides import library as guide_lib
     from oibot_gm.guides.rxp_decode import encode as guide_encode
 

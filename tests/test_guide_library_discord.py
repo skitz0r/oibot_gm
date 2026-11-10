@@ -1,4 +1,4 @@
-"""/guide list|get|upload|withdraw|restore (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §4): the guild
+"""/guide list|get|upload|withdraw|restore (design §5.63): the guild
 guide library in Discord, driven end to end through tests/wizard_harness.py — every screen and modal linted. A get DMs a
 file that unlocks with the typed BattleTag (or attaches it to the private reply when the DM is refused); an upload reads
 the attachment only after the membership, type and size checks and prints exactly library.upload_consequence before the

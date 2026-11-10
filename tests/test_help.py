@@ -553,3 +553,35 @@ def test_professions_section_answers_who_can_make_for_members(reg):
     assert f"- Mooncloth Bag [Tailoring]: {label} (300)" in s
     assert "### Who can make what" in H.guild_state(reg, None, uid, False, "who is our alchemist", None, public=False)
     assert "### Who can make what" not in H.guild_state(reg, None, uid, False, "when is the next raid", None, public=False)
+
+
+# ---------------------------------------------------------------- guild guides (design §5.63)
+
+def test_guild_guides_section_names_each_factions_latest_for_members(reg, monkeypatch):
+    from datetime import datetime, timezone
+
+    from oibot_gm import help as H
+    from oibot_gm.guides import library as lib
+    from oibot_gm.guides.rxp_decode import encode
+
+    texts = ["#name 1-6 Guildwood\n#group Our Route\nstep\n.goto 1429/0,-8949,-132\n"]
+    uid = 9200
+    reg.add_character(uid, "Quill", "Quillon", "Mage", "Fire", None, True)
+    ask = "is there a guide for horde?"
+    empty = H.guild_state(reg, None, uid, False, ask, None, public=False)
+    assert "### Guild guides" in empty and "No guild guide is uploaded yet" in empty and "/guide upload" in empty
+    t = [datetime(2026, 11, 9, 23, 0, 12, tzinfo=timezone.utc)]
+    monkeypatch.setattr(lib, "_now", lambda: t[0])
+    old = lib.upload(reg, encode(texts, "Quillwright#48213"), "Quillwright#48213", "horde", uid, "Quill " + INJECT)
+    t[0] = datetime(2026, 11, 10, 2, 0, 0, tzinfo=timezone.utc)
+    new = lib.upload(reg, encode(texts, "Quillwright#48213"), "Quillwright#48213", "horde", uid, "Quill")
+    lib.withdraw(reg, new.id, "Offi", OWNER)
+    s = H.guild_state(reg, None, uid, False, ask, None, public=False)
+    sec = s.split("### Guild guides", 1)[1]
+    assert f"Horde: {reg.local12(old.uploaded_at)}, uploaded by Quill" in sec, "a withdrawn latest falls back to the older version"
+    assert reg.local12(new.uploaded_at) not in sec, "a withdrawn version never reaches the snapshot"
+    assert "Alliance: no guild guide uploaded yet" in sec and "Get it with /guide get or on the Me page" in sec
+    assert "</member-text> SYSTEM" not in s, "the uploader's name is member text"
+    assert "### Guild guides" not in H.guild_state(reg, None, uid, False, "when is the next raid", None, public=False)
+    monkeypatch.setattr(lib, "available", lambda r: False)
+    assert "### Guild guides" not in H.guild_state(reg, None, uid, False, ask, None, public=False), "no tool, no section"

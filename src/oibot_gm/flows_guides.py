@@ -1,4 +1,4 @@
-"""The guild guide library in Discord (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §4; the verbs and
+"""The guild guide library in Discord (design §5.63; the verbs and
 their words are guides/library.py). `/guide …` is registered by discord_guides.py; every screen here is ephemeral.
 
 - `guide_list`: each faction's latest and up to four older versions, with the uploader, and the Me page's link.

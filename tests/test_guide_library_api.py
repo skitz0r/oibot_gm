@@ -1,4 +1,4 @@
-"""The guild guide library on the site and MCP (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §5):
+"""The guild guide library on the site and MCP (design §5.63):
 GET /api/guides/library, a member's upload and download (never MCP: the string and the BattleTag stay out of
 transcripts), the officers' withdraw / restore with a preview (MCP needs the actor, D8), the `guides` topic on every
 write, one ops line per write and none for a download. D7: no BattleTag and no import string in a log record, an ops

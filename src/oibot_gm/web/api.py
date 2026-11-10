@@ -2606,7 +2606,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     from .api_guides import install_guides_api  # the leveling-guide tool on the Me page (design §5.55)
 
-    install_guides_api(app, bot, who=who, body=body, publish=publish, live_officer=live_officer)  # + the guild guide library (spec 2026-11-09)
+    install_guides_api(app, bot, who=who, body=body, publish=publish, live_officer=live_officer)  # + the guild guide library (design §5.63)
 
     from .api_loot import install_loot_api  # the loot council, history, precedents, the award log, items, wishlists (design §3.1)
 

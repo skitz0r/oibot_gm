@@ -1,7 +1,7 @@
 """The leveling-guide tool (design §5.55): a member unlocks the RestedXP guide issued to their own account — the import
 string plus the BattleTag it was issued to, which is the key — and gets a companion addon, an offline route explorer and
 readable text, for themselves alone; and may lock it to another Battle.net account of their own (reissue). The guild's
-own guides live in the library (library.py, the guide library spec of 2026-11-09): `from oibot_gm.guides import library` for its verbs. Pure functions
+own guides live in the library (library.py, design §5.63): `from oibot_gm.guides import library` for its verbs. Pure functions
 over text; the callers are the web routes (web/api_guides.py) and, for the re-issue, a DM (discord_bot.guide_convert).
 The game-specific tables (zone ids, continent rects, dungeon tags) are profile data: profiles/<version>/guides.yaml."""
 from .build import (  # noqa: F401

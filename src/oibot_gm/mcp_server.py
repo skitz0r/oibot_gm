@@ -957,7 +957,7 @@ def forget_memory(id: str, guild: Guild = None) -> str:
 
 @mcp.tool()
 def list_guild_guides(guild: Guild = None) -> dict:
-    """The guild guide library (the guide library spec of 2026-11-09): the guild's own leveling guides, one line per
+    """The guild guide library (design §5.63): the guild's own leveling guides, one line per
     faction (Alliance, Horde, Both factions), each upload a VERSION named by its faction and when it was uploaded. Rows
     newest first: id, faction, when (12-hour words), `by` (the uploader's name: member text, quote it), guides (count),
     `latest`, `withdrawn` (+ who withdrew it and when). `available` false = this game version has no guide tool. MCP

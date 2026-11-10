@@ -117,6 +117,13 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   **Issue for your other account** (for your own accounts only): RestedXP sells the guide per account, so if you play
   on another Battle.net account of your own, this locks the guide you bought to that account too and lets you run your
   purchase there — a new import string for the other account's BattleTag, as a file to download (or DM the bot, below).
+- **Guild guide** — a leveling guide the guild made itself, kept in the bot's library for every member (§3b): a member
+  uploads it once, and anyone gets it **locked to** their own BattleTag, ready for the RestedXP addon.
+- **Version** — one upload of a guild guide, named by its faction and when it was uploaded (*Horde · Mon 9 Nov 3:00 PM*).
+  There are no guide names: each faction (Alliance, Horde, Both factions) is one line of versions.
+- **Latest** — the newest version of a faction that is not withdrawn; it is the one offered first.
+- **Withdraw / restore** (officers) — **withdraw** takes a version out of members' reach (it is kept, and the latest
+  falls back to the one before); **restore** brings it back.
 
 ## 2. Channels
 
@@ -465,6 +472,53 @@ healers" — officers by default, and the note goes to the applicant) and over M
 the same code. A newcomer who tells the bot to register a character is refused with *"New here? Apply first"* and
 gets the **Apply to join** button on that reply. A declined applicant is never
 removed from the Discord server; they can stay and apply again later.
+
+## 3b. Guild guides
+
+The guild's own leveling guides, for every member (WoW: Forever only, like the *Leveling guide* tool of §2a). Someone in
+the guild builds a route with their own tools and exports it from RestedXP as an import string; they upload it once, and
+every member gets that guide **locked to** their own BattleTag, so the addon on their account imports it like a guide
+they bought. Each upload is a **version**, named by its faction — Alliance, Horde or Both factions — and when it was
+uploaded (*Horde · Mon 9 Nov 3:00 PM*); there are no guide names to type. The **latest** of a faction is its newest
+version that is not withdrawn. Every upload is kept.
+
+**No BattleTag is kept.** The uploader's BattleTag unlocks the string once and is dropped; the bot keeps only the
+unlocked guide, and locks it to each requester's BattleTag when they ask. Neither BattleTag is written down, logged, or put
+in an ops line, and the bot never asks for one in chat: you type yours only in a private pop-up or on the Me page.
+
+In Discord (every reply is private to you):
+
+- `/guide list` — each faction's latest and up to four older versions, with who uploaded them, and the Me page's link.
+- `/guide get` — pick the faction, then the version (latest first; withdrawn ones aren't offered), then type your
+  BattleTag in the pop-up. The bot DMs you the guide as a **.txt** file: *"Your guild guide (Horde · Mon 9 Nov 3:00 PM),
+  locked to Name#1234: import the attached string with RestedXP."* You asked for it, so this DM is one you act on. If your
+  DMs are closed to the bot, the file comes on the private reply instead. Nothing is written and no ops line is posted.
+- `/guide upload file: faction:` — attach the import string saved as a **.txt** file and pick the faction. The bot checks
+  that you belong to the guild and that the file is a .txt of a sensible size before it reads it, then asks in a pop-up
+  for the BattleTag the string was issued to, reads the file, and shows what happens: *"This becomes the latest Horde
+  guide for <guild>. Nobody gets a DM. An officer can withdraw it."* **Upload** keeps it (*Uploaded: Horde · …*) and the
+  ops channel gets one line. A wrong BattleTag answers *That BattleTag doesn't unlock this guide*.
+- `/guide withdraw` / `/guide restore` (officers, checked on every press) — pick a version, read what happens (*"The
+  Horde guide of Mon 9 Nov 3:00 PM is withdrawn and Quill gets a notice. Members get the one from Sun 8 Nov 12:00 PM as
+  the latest. You can restore it."*), confirm. The uploader sees the withdrawal as a notice on their Me page, never a DM
+  (none when they withdrew their own). One ops line each.
+
+On the site, **Me › Leveling guide** starts with two cards. **Guild guides** lists each faction's versions (when, who
+uploaded it, a *Latest* badge, how many guides it holds); type your BattleTag once in the field at the top (it is kept
+for this visit only) and press **Get it for my BattleTag** on any version: the file downloads. Officers also see
+withdrawn versions, dimmed with who withdrew them and when, and each row's **⋮** has **Withdraw…** or **Restore…** with
+the same sentences as Discord; an officer can still download a withdrawn version there. **Upload a guild guide** takes the
+import string (paste it, or pick the .txt file), the BattleTag it was issued to and the faction, shows the same sentence
+above **Upload**, and the list updates for everyone at once. With no upload yet the card says *No guild guide yet. Upload
+one below.*
+
+Limits: five uploads per member a day (the guild's day); an import string past the tool's size is refused as too big;
+two guides being locked at once is the most (*Other guides are being locked right now. Try again in a minute.*). Upload
+only guides the guild made itself (the Me page's upload card says so); every version shows who uploaded it, and an officer
+withdraws one that isn't the guild's. Plain text
+can't upload, get, withdraw or restore a guild guide (a BattleTag and an import string never reach the model); ask the bot
+*"is there a Horde guide?"* and it answers with each faction's latest and where to get it. Over MCP (§8b) the owner's
+tools list the library and withdraw or restore a version; they never upload or get one.
 
 ## 4. Raids, runs and the signup cycle
 
@@ -1033,6 +1087,8 @@ edits that new family and leaves the one it shared alone.
   number is typed; a long list ends "and N more — the Members page lists them all". `/roster back member:` is their
   *I'm back*: pick the absence, see which sheets re-open, confirm. Test puppets stay out of these lists, the absences
   card and the absences channel. Officers only, checked on every press: lose the officer role mid-screen and the next press is refused.
+- Guild guides: `/guide withdraw` and `/guide restore` take a version of the guild's own leveling guides out of members'
+  reach or bring it back (§3b); the uploader gets a notice on their Me page.
 - A roster from a signup list: before everyone has registered, an officer can register the people who signed up on
   Raid-Helper in one go. `scripts/raidhelper_roster.py --members event.json` turns the event's export into rows (each
   person's Discord id, display name, character, class and spec) and MCP `import_members` (§8b) writes them through the
@@ -1774,6 +1830,7 @@ news post says can make the review read or write another server.
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `set_professions` · `who_can_make` | replace one character's professions — the whole list, each `{id, skill, recipes: [{name}]}`; `[]` clears; the two-trade rule and the rest are checked as everywhere else · the registered recipes matching a name, each with its crafters, highest skill first — names only, nobody pinged |
+| `list_guild_guides` · `withdraw_guild_guide` · `restore_guild_guide` | the guild guide library (§3b): every version, newest first, with its faction, when, who uploaded it, `latest` and `withdrawn` · take one out of members' reach or bring it back — **a decision: needs `OIBOT_MCP_ACTOR`** (`preview=true` = the sentences, no actor). No tool uploads or gets a guide: a BattleTag and an import string must not land in a transcript |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
 | `import_members` | a roster from a signup list (§7): rows `{discord_id, name, character, cls, spec, offspec?, rank?}` — `scripts/raidhelper_roster.py --members event.json` writes them from a Raid-Helper export — register each person with the character as their main; `preview=true` lists what would be added and skipped, nothing written; a row's `rank` needs the actor (D8), without one they start as trial |
 | `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone (with runs open or locked, preview it, then add `timezone_runs`: `keep` or `move`), ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `public` (listed on the homepage and the public schedule, or not), `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
@@ -2320,4 +2377,6 @@ repository. Regulars are a list of who is expected, never a standing answer: the
 standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). A follow-on
 (§4) is set on the site, in plain text or over MCP, not in Discord's `/raid open` or schedule wizards (they show it); a
 follow-on of a follow-on, a "first raid only" answer on the sheet (leave after the lead instead) and a follow-on added to a
-run already open don't exist. If you ask for one of these, say so plainly.
+run already open don't exist. Guild guides (§3b): a version has no name or note of its own, a new version is not announced in any channel, two
+versions can't be compared, and the route explorer and companion addon of §2a are built from your own import string, not
+from a library version. If you ask for one of these, say so plainly.

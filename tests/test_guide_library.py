@@ -1,4 +1,4 @@
-"""The guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md): a member
+"""The guild guide library (design §5.63): a member
 uploads a guild-made guide unlocked once by their own BattleTag, the bot keeps the unlocked texts as a dated version per
 faction, and any member gets a version locked to their own BattleTag. No BattleTag and no import string is ever written
 (D7): the last tests grep the scratch data repo, its git log and the log records."""

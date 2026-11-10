@@ -8,7 +8,7 @@ string must not land in a transcript. POST /api/me/guide/reissue (addendum 2026-
 member's own other Battle.net account and answers the new string as a download: nothing written, nothing logged, the
 folder untouched; the same core answers a DM (discord_bot.guide_convert).
 
-The guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §5) lives under
+The guild guide library (design §5.63) lives under
 /api/guides/library: every member lists it, uploads a guild-made guide (unlocked once by their own BattleTag) and downloads
 a version locked to their own BattleTag; officers withdraw and restore versions (a preview first; from MCP the write is
 the named officer's, D8). Upload and download are never MCP: the string and the BattleTag stay out of transcripts. D7: no
@@ -135,7 +135,7 @@ def install_guides_api(app: FastAPI, bot, *, who, body, publish=None, live_offic
         path = built_file(v.reg, v.uid, name)
         return FileResponse(path, media_type=g.FILES[name][0], filename=name, headers={"Cache-Control": "no-store"})
 
-    # ------------------------------------------------------------ the guild guide library (spec 2026-11-09 §5)
+    # ------------------------------------------------------------ the guild guide library (design §5.63)
     def library_json(reg, officer: bool) -> dict:
         """What the Me page's library reads: the rows (members never see a withdrawn version), the faction lines, whether
         the reader may withdraw, and the confirm sentence above each faction's Upload."""

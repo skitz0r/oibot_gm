@@ -1,5 +1,5 @@
-"""/guide list|get|upload|withdraw|restore: the guild guide library's commands (spec
-docs/superpowers/specs/2026-11-09-guide-library-design.md §4). Each command resolves its guild (guild_routing.need) and
+"""/guide list|get|upload|withdraw|restore: the guild guide library's commands (design
+§5.63). Each command resolves its guild (guild_routing.need) and
 opens the flow in flows_guides.py; the attachment and the faction are Discord widgets, the BattleTag is typed only in the
 flows' private modal. Members list, get and upload; withdraw and restore are officers', decided live in the flow."""
 from __future__ import annotations

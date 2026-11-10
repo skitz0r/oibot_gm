@@ -4,7 +4,7 @@ No state is changed here — answers point at commands; officers' change request
 configops.
 
 The live snapshot (`guild_state`) is built in code and bounded (MAX_STATE_CHARS). It has fixed parts (settings, raids,
-live runs, the asker) and keyword-gated SECTIONS (status, loot — a member gets their own awards only —, who plays what (every member), who can make what (professions, every member), bank, absences,
+live runs, the asker) and keyword-gated SECTIONS (status, loot — a member gets their own awards only —, who plays what (every member), who can make what (professions, every member), guild guides (every member), bank, absences,
 auras, readiness, news, policy, applications, test bench), each with its own character cap. Officer data (other people's absence reasons,
 applications, ops, precedents, proposals, privilege) only ever reaches an officer's snapshot. Text people typed that
 is shown at length (news titles, applicants' answers, absence reasons, precedent reasons, commit subjects) sits inside
@@ -963,6 +963,29 @@ def _config(ask: Ask) -> list[str]:
     return ["### Effective configuration (in words; as /gm config show prints it)", *summary_text(config_summary(reg, None, audience)).splitlines()]
 
 
+GUIDE_WORDS = re.compile(r"\b(guides?|restedxp|rxp)\b")
+"""The guild guides section's gate: 'guide' as a word (the leveling-guide addon's names too)."""
+
+
+def _guild_guides(ask: Ask) -> list[str]:
+    """The guild guide library (every member, any channel; design §5.63): each faction's latest version — when, who
+    uploaded it (member text, unfenced) — and where to get one. A withdrawn version never appears; no BattleTag exists
+    to show. Nothing when the game version has no guide tool."""
+    from .guides import library
+
+    reg = ask.reg
+    if not library.available(reg):
+        return []
+    head = ("### Guild guides: the guild's own leveling guides, each faction's latest version · Get it with /guide get or on the Me page "
+            "(Leveling guide tab): the bot sends it locked to the BattleTag the member types in a private pop-up — never ask for a "
+            "BattleTag in chat · any member uploads one with /guide upload or on the Me page")
+    latest = {f: library.latest(reg, f) for f in library.FACTIONS}
+    if not any(latest.values()):
+        return [head, "No guild guide is uploaded yet. A member uploads one with /guide upload or on the Me page (Leveling guide tab)."]
+    return [head, *(f"{library.FACTION_WORDS[f]}: " + (f"{library.when(reg, v)}, uploaded by {_safe(v.by_name)}" if v else "no guild guide uploaded yet")
+                    for f, v in latest.items())]
+
+
 GENERIC = re.compile(r"\b(status|overview|what'?s (going on|up|new|happening)|summary|summari[sz]e|catch me up|anything i should know|state of (the )?guild)\b")
 
 # key -> (question keywords, builder, character cap, officer only). Order = priority when a generic question fills the budget.
@@ -975,6 +998,7 @@ SECTIONS: dict[str, tuple[re.Pattern, Callable[[Ask], list[str]], int, bool]] = 
     "loot": (re.compile(r"\b(loot|precedents?|ledger|award(ed|s)?|got|drops?|items?|council|gear|overrid\w*|overrode|overruled?)\b"), _loot, 2_500, False),  # members: their own
     "who": (re.compile(r"\b(list|who|whos|plays?|playing|class(es)?|specs?|heal(er|ers|s|ing)?|tank(s|ing)?|melee|ranged|dps|roles?|offspec|alts?|mains?|members?|characters?|ranks?)\b"), _who, 4_000, False),  # members: public-safe
     "professions": (professions.HELP_WORDS, professions.help_section, 3_000, False),
+    "guides": (GUIDE_WORDS, _guild_guides, 900, False),
     "bank": (re.compile(r"\b(list|who|healers?|tanks?|melee|ranged|dps|unconfirmed|confirm\w*|officers?|alts?|mains?|members?|bank|characters?|ranks?|privilege)\b"), _bank, 4_000, True),
     "policy": (re.compile(r"\b(polic(y|ies)|loot rules?|comp rules?|persona|standing instructions?)\b"), _policy, 3_000, True),
     "auras": (re.compile(r"\b(auras?|buffs?|stacks?|stacking|totems?|provides?|providers?|famil(y|ies)|blessings?)\b"), _auras, 4_000, False),

@@ -267,7 +267,7 @@ def test_appeals_have_their_discord_and_web_paths_and_written_mcp_exemptions(mcp
     assert not missing, "\n".join(missing)
 
 
-# the guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §4–6): not ops (no plain text: a
+# the guild guide library (design §5.63): not ops (no plain text: a
 # BattleTag and an import string must never reach a model), so their rows live here. Upload and get are the member's own
 # with their own BattleTag (configops.BY_DESIGN_ONLY guide_upload / guide_get: the Me page and /guide upload|get); MCP
 # lists, withdraws and restores (an officer's decision: D8, the actor header).

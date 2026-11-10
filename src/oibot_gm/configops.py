@@ -556,7 +556,7 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     # addon, explorer and text on the Me page alone; MCP's token is the owner's (the string must not land in a transcript)
     "leveling_guide": {"surface": "web", "path": "POST /api/me/guide", "reason": "a RestedXP import string is a ~1 MB paste with the member's own BattleTag as its key: the Me page's Leveling guide tab is the only place it is typed; Discord has no paste of that size and MCP's token is the owner's, so it reads the status but never builds. The re-issue to the member's own other account (POST /api/me/guide/reissue) also answers a DM, `convert guide from … to …` with the string as a .txt file (discord_bot.guide_convert, read in code); never MCP"},
     "member_import": {"surface": "web", "path": "POST /api/members/import", "reason": "a signup list (a Raid-Helper export turned into rows by scripts/raidhelper_roster.py) is a file imported with a preview and the skipped rows named (MCP import_members reads the same route); Discord has no file editor, and a person's own registration is /register everywhere"},
-    # the guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §6): no plain-text op, because a
+    # the guild guide library (design §5.63): no plain-text op, because a
     # BattleTag and an import string must never reach a model; never MCP, so neither lands in a transcript. Upload and get are
     # the Me page's and /guide upload|get's (flows_guides; a row names one surface, the Discord paths are in
     # tests/test_parity_matrix.py GUIDE_LIBRARY); withdraw / restore are officer verbs on every surface but plain text

@@ -1174,7 +1174,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     professions_group.command(name="list", description="A profession's crafters, highest skill first")(professions_list)
     tree.add_command(professions_group)
 
-    # ---------------- /guide (members; officers withdraw / restore): the guild guide library, spec 2026-11-09 §4
+    # ---------------- /guide (members; officers withdraw / restore): the guild guide library, design §5.63
     from .discord_guides import register_guide_commands
     register_guide_commands(tree, guilds)
 

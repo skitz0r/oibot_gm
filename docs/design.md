@@ -4554,3 +4554,86 @@ leaving early), `tests/test_frontend_source.py` (the Then rows, the Me buttons).
 leaving only); a follow-on of a follow-on; a per-member "first raid only" answer (D1 — leaving early covers it); copying the
 lead's groups onto the follow-on's board (a 20's groups say nothing about two 10s); a follow-on added to a run already open;
 the follow-on's shortfall line doesn't change the health card's colour.
+
+### 5.63 Guide library: the guild's own leveling guides, issued per member (built 2026-11-09)
+
+**Why.** The owner: *"Author uploads guide with date (version) — encrypted with their battletag, which they supply —
+alongside version and faction (A/H/Both). Other users can see the latest version of each and get an encrypted version for
+themselves, to use the existing guide addon with our custom route."* The guild builds its own RestedXP routes; §5.55's
+tool (and its re-issue to one's own other account) only ever handled one member's own purchase. Spec:
+`docs/superpowers/specs/2026-11-09-guide-library-design.md`; plan: `docs/superpowers/plans/2026-11-09-guide-library.md`.
+
+**Decisions (owner, 2026-11-09).** D1 Any member of the guild uploads. D2 A version is the upload's date and time plus its
+faction: no guide names, no typed label; the uploader is metadata. D3 One line per faction (Alliance, Horde, Both
+factions); **latest** = the newest version of a line not withdrawn; a member picks a line, then the latest or an older
+date. D4 Discord: slash commands with wizards, the BattleTag typed only in a modal. D5 The site: Me › Leveling guide lists,
+downloads and uploads. D6 Every upload is kept; officers withdraw (and restore) a version. D7 **No BattleTag is stored**:
+the uploader's tag unlocks the string once, the bot keeps the unlocked guide texts and locks them to each requester's tag on
+request; neither tag nor any import string is written, logged, committed or put in an ops line (the owner's "which we
+store" became this in the design they approved).
+
+**The words.** **Guild guide**, **version** ("Horde · Mon 9 Nov 3:00 PM"), **latest**, **withdraw / restore** (manual §1a,
+§3b). A guide is *locked to* a BattleTag and *unlocked* by it; never "encrypt", "decrypt", "key" or "plaintext" where a
+person reads.
+
+**The model.** `guides/library.py`, native guild state through `store.py`: `<guild>/guides/index.yaml` (`versions:
+[GuideVersion]`) and `<guild>/guides/<id>/guide-NNN.txt` (the unlocked texts, one file per guide, plain so git deltas one
+version against the next). `GuideVersion`: `id` `<faction>-<YYYYMMDD>-<HHMMSS>` UTC (a clash in the same second adds `-2`…;
+`_ID` validates every id a caller passes, so a crafted one is "not in the library", never a path), `faction`, `uploaded_at`,
+`by_id`, `by_name` (≤64, member text), `guides`, `sections` (the upload's section count, kept on every issue so it imports
+like the upload), `size`, `withdrawn_at/_by/_by_id`. Reads: `versions(faction, live_only)` newest first, `latest`, `get`,
+`rows(officer)` (members never see a withdrawn version). Writes, each one commit under a per-guild lock: `upload` (the
+§5.55 refusals — EMPTY_TEXT, TOO_BIG at `TEXT_MAX`, `validate_battletag`, `decode`'s WRONG_KEY — plus BAD_FACTION and
+`UPLOADS_PER_DAY = 5` per member on the guild's day, checked before the unlock and again under the lock), `withdraw` (a
+`guide` notice to the uploader — `NOTICE_KINDS` — unless they withdrew it themselves; never a DM), `restore`. `issue(reg,
+vid, tag, officer=)` = the texts locked to `tag` with the stored section count; a withdrawn version is refused to a member
+(WITHDRAWN), an officer may still get it. `decode` / `encode` run under the shared `reissue.SLOTS` (two at a time across the
+tool, the re-issue and the library; a third answers BUSY, never queues). `available(reg)` = the profile has the guide tool's
+tables; off → every surface answers `NO_TOOL`. `GUIDE_LISTENERS` → the web's `guides` topic. The confirm sentences
+(`upload_consequence`, `withdraw_consequence(by_id=)`, `restore_consequence`) are in `tests/test_confirm_readability.py`.
+
+**Surfaces.** Discord (`discord_guides.py` registers, `flows_guides.py` holds the wizards, all ephemeral): `/guide list`
+(each faction's latest and four older, uploader escaped, the Me page's link); `/guide get` (faction → version → the
+BattleTag modal → the .txt DMed — an act the member asked for, so a `DM_CALL_SITES` entry in `tests/test_member_inbox.py`;
+a refused DM puts the file on the private reply; no write, no ops line, no decide screen); `/guide upload file: faction:`
+(the attachment and a Choice are widgets under the Wizard rule; membership, the `.txt` name and the size from Discord's
+metadata checked before anything is read → the BattleTag modal → the file read → the decide screen with
+`upload_consequence` → one ops line); `/guide withdraw|restore` (officers, rights decided live on open and every press →
+version select → decide → one ops line). The site (`web/api_guides.py`): `GET /api/guides/library`, `POST
+/api/guides/library/upload`, `POST /api/guides/library/{id}/download` (a no-store attachment), `POST
+/api/guides/library/{id}/withdraw|restore` (`preview` → the sentences; live officer rights; a stale membership refused like
+every officer write). `frontend/src/components/GuideLibrary.tsx` heads Me › Leveling guide: a block per faction, **Get it
+for my BattleTag** (one tag field kept in component state for the visit), officers' ⋮ Withdraw… / Restore… through
+`useConfirm` with the server's sentences, **Upload a guild guide** (paste or .txt, the BattleTag, the faction, the server's
+sentence above Upload; `useDirty` while the box has text). MCP: `list_guild_guides`, `withdraw_guild_guide` /
+`restore_guild_guide` (D8: the actor; `preview` without). Help: the snapshot's `guides` section (every member, any channel,
+gated on "guide" as a word): each faction's latest with its uploader through `unfence`, and "Get it with /guide get or on the
+Me page". Plain text: none — `configops.BY_DESIGN_ONLY` `guide_upload` / `guide_get`, and withdraw / restore are not ops;
+their rows (Discord, web, MCP, the written MCP exemptions) are `GUIDE_LIBRARY` in `tests/test_parity_matrix.py`.
+
+**D7 in code.** The tag and the string live only in the call (the wizard object until its end; the upload route's body
+dict, cleared in a `finally`); never in a wizard title (the open-screen mirror keeps titles), a commit message (it names the id
+and the uploader), an ops line ("guild guide uploaded: Horde · …") or a log record: an unexpected failure is logged and
+alerted by the exception's TYPE alone, and the person reads `configops.GENERIC_ERROR`. `tests/test_guide_library.py` greps
+the scratch data repo, its git log and the captured log records for both tags and the string.
+
+**As built, against the spec.** An unknown or malformed version id answers 404 on the site (`NO_VERSION`), every other
+refusal 400. The site's withdraw / restore `preview` refuses early — an already-withdrawn version's preview says "Already
+withdrawn by …", a live one's restore preview says it isn't withdrawn — so nobody reads a sentence for a press that would
+fail. `/guide upload` reads the file only after the BattleTag modal (the metadata checks come first, the read last), so an
+abandoned wizard never read it. `/guide get` offers live versions only, officers included; an officer gets a withdrawn
+version on the site's download alone. The parity rows live in `tests/test_parity_matrix.py` `GUIDE_LIBRARY` (they are not
+ops). `UPLOADS_PER_DAY` is 5 and the decode / encode slots are the shared `SLOTS` of §5.55's re-issue.
+
+**Tests.** `tests/test_guide_library.py` (round trip with another tag and the section count, refusals, BUSY, the daily cap,
+id clash, latest skipping a withdrawn version, withdraw / restore and the notice, rows, sentences, the D7 grep),
+`tests/test_guide_library_api.py` (routes, MCP refusals, the actor, officer gates, no-store), `tests/test_guide_library_discord.py`
+(every wizard through `tests/wizard_harness.py`, the DM fallback, live officer rights), `tests/test_help.py` (the `guides`
+section), the readability harness, the copy lint and the parity matrix.
+
+**Not done.** Guide names or a note per version; announcing a new version in a channel; a diff between two versions; the
+route explorer and companion addon built from a library version (§5.55 builds from the member's own string only); real
+concurrency (two uploads in one second and an upload racing a withdraw are covered by the per-guild lock and the id clash
+in unit tests, not under load). A risk named, not solved: a member could upload a guide they bought rather than one the guild
+made — the guard is the upload's words (the Me page's card asks for "a guide the guild made"; the Discord upload and its
+confirm sentence don't say it) and the officers' withdraw (D6).

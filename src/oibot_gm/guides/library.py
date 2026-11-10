@@ -1,4 +1,4 @@
-"""The guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md): any member
+"""The guild guide library (design §5.63): any member
 uploads a leveling guide the guild made itself, unlocked once by the BattleTag it was locked to; the bot keeps the
 unlocked guide texts as a VERSION per faction line (Alliance, Horde, Both), named by when it was uploaded; any member gets
 a version locked to their own BattleTag. Officers withdraw and restore versions; every upload is kept.
