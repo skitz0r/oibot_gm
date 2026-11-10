@@ -283,6 +283,8 @@ def test_stdio_initialize_and_list_tools():
     name, tools = asyncio.run(asyncio.wait_for(go(), 60))
     assert name == "oibot_gm"
     assert {"guild_overview", "list_runs", "get_run", "set_answer", "lock_run", "plain_change", "test_bench"} <= set(tools)
+    # the guild guide library (spec 2026-11-09): list / withdraw / restore; never an upload or an issue (tests/test_guide_library_api.py)
+    assert {"list_guild_guides", "withdraw_guild_guide", "restore_guild_guide"} <= set(tools)
 
 
 def test_board_moves_merge_and_stale_whole_board_write_is_refused(client, reg, rs):

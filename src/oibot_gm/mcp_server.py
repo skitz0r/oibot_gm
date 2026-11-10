@@ -956,6 +956,44 @@ def forget_memory(id: str, guild: Guild = None) -> str:
 
 
 @mcp.tool()
+def list_guild_guides(guild: Guild = None) -> dict:
+    """The guild guide library (the guide library spec of 2026-11-09): the guild's own leveling guides, one line per
+    faction (Alliance, Horde, Both factions), each upload a VERSION named by its faction and when it was uploaded. Rows
+    newest first: id, faction, when (12-hour words), `by` (the uploader's name: member text, quote it), guides (count),
+    `latest`, `withdrawn` (+ who withdrew it and when). `available` false = this game version has no guide tool. MCP
+    lists and withdraws / restores, never uploads or fetches one: a guide is locked to a member's own BattleTag on the
+    Me page or with /guide, so neither the string nor a BattleTag lands in a transcript."""
+    d = api(guild).get("/api/guides/library")
+    return {"available": d.get("available", False), "rows": d.get("rows", []), "factions": d.get("factions", [])}
+
+
+def _guide_verb(verb: str, version: str, preview: bool, guild: str | None) -> str:
+    from urllib.parse import quote
+
+    data = api(guild).post(f"/api/guides/library/{quote(version, safe='')}/{verb}", {"preview": True} if preview else {}, actor=not preview)  # D8
+    if preview and isinstance(data, dict) and data.get("sentences"):
+        return " ".join(data["sentences"])
+    return msg(data)
+
+
+@mcp.tool()
+def withdraw_guild_guide(version: str, preview: bool = False, guild: Guild = None) -> str:
+    """Withdraw one guild guide version (an officer's decision: needs OIBOT_MCP_ACTOR = the officer's Discord id, sent as
+    X-Oibot-Actor; refused without it). Members stop seeing it and the line's latest falls back to the newest one left;
+    the uploader gets a notice on their Me page, never a DM. It is kept and can be restored. `version` = an id from
+    list_guild_guides. `preview=true`: the confirm sentences only (no actor needed) — read them to the person first."""
+    return _guide_verb("withdraw", version, preview, guild)
+
+
+@mcp.tool()
+def restore_guild_guide(version: str, preview: bool = False, guild: Guild = None) -> str:
+    """Restore a withdrawn guild guide version (an officer's decision: needs OIBOT_MCP_ACTOR, sent as X-Oibot-Actor).
+    It is back in members' reach and becomes the latest again when it is the newest of its line. `preview=true`: the
+    confirm sentences only (no actor needed)."""
+    return _guide_verb("restore", version, preview, guild)
+
+
+@mcp.tool()
 def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: dict[str, str] | None = None, set_channels: dict[str, str | None] | None = None,
                           dm: str | None = None, default: str | None = None, listen: dict[str, str] | None = None,
                           set_listen: dict[str, str | None] | None = None, remember: dict[str, str] | None = None,

@@ -265,3 +265,37 @@ def test_appeals_have_their_discord_and_web_paths_and_written_mcp_exemptions(mcp
         else:
             assert len(APPEALS_MCP_EXEMPT.get(action, "")) > 15, f"appeal {action}: no MCP tool — say why"
     assert not missing, "\n".join(missing)
+
+
+# the guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §5–6): not ops (no plain text: a
+# BattleTag and an import string must never reach a model), so their rows live here. Upload and get are the member's own
+# with their own BattleTag (configops.BY_DESIGN_ONLY guide_upload / guide_get); MCP lists, withdraws and restores (an
+# officer's decision: D8, the actor header). The Discord side (/guide list|get|upload|withdraw|restore) adds its column
+# when it is built.
+GUIDE_LIBRARY: dict[str, dict[str, str]] = {
+    "list": {"web": "GET /api/guides/library", "mcp": "list_guild_guides"},
+    "upload": {"web": "POST /api/guides/library/upload"},
+    "get": {"web": "POST /api/guides/library/{vid}/download"},
+    "withdraw": {"web": "POST /api/guides/library/{vid}/withdraw", "mcp": "withdraw_guild_guide"},
+    "restore": {"web": "POST /api/guides/library/{vid}/restore", "mcp": "restore_guild_guide"},
+}
+GUIDE_LIBRARY_MCP_EXEMPT = {
+    "upload": "the uploader's BattleTag unlocks the string once on the Me page or in Discord; MCP's token is the owner's and a transcript would keep both",
+    "get": "a version is locked to the requester's own BattleTag and handed to them alone; the string must not land in a transcript",
+}
+
+
+def test_the_guide_library_has_its_web_routes_mcp_tools_and_written_exemptions(mcp_tools, web_routes):
+    missing = []
+    for action, row in GUIDE_LIBRARY.items():
+        if row["web"] not in web_routes:
+            missing.append(f"guide {action}/web: {row['web']!r}")
+        if "mcp" in row:
+            assert action not in GUIDE_LIBRARY_MCP_EXEMPT, f"guide {action}: has an MCP tool AND an exemption"
+            if row["mcp"] not in mcp_tools:
+                missing.append(f"guide {action}/mcp: {row['mcp']!r}")
+        else:
+            assert len(GUIDE_LIBRARY_MCP_EXEMPT.get(action, "")) > 15, f"guide {action}: no MCP tool — say why"
+    assert not missing, "\n".join(missing)
+    assert {"guide_upload", "guide_get"} <= set(configops.BY_DESIGN_ONLY)
+    assert not any("guide" in t and ("upload" in t or "download" in t or "issue" in t) for t in mcp_tools), "MCP never uploads or fetches a guild guide"

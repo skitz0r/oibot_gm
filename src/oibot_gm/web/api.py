@@ -1319,7 +1319,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     subscribers: dict[asyncio.Queue, tuple[str, bool]] = {}  # queue -> (guild key, the page's viewer is an officer)
 
     def publish(topic: str, guild: str | None = None, *, officers: bool = False) -> None:
-        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy` | `listen` | `memory`. `guild` None = every
+        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy` | `listen` | `memory` | `guides`. `guild` None = every
         page (process-wide news: the agents' job status); otherwise only that guild's pages. `officers`: only pages an
         officer opened (the test feed: what it names is officers' business). Safe from worker threads."""
         def fan_out():
@@ -2606,7 +2606,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     from .api_guides import install_guides_api  # the leveling-guide tool on the Me page (design §5.55)
 
-    install_guides_api(app, bot, who=who, body=body)
+    install_guides_api(app, bot, who=who, body=body, publish=publish, live_officer=live_officer)  # + the guild guide library (spec 2026-11-09)
 
     from .api_loot import install_loot_api  # the loot council, history, precedents, the award log, items, wishlists (design §3.1)
 
