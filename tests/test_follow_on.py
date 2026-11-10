@@ -252,7 +252,10 @@ def test_a_refused_scheduled_open_never_stops_the_guilds_minute(reg, rs, monkeyp
     reg.config.signup_channel_id = 1111
     reg.set_schedule(LEAD, "tue", {"slots": "Mon 18:30, Tue 18:30, Wed 18:30, Thu 18:30, Fri 18:30, Sat 18:30, Sun 18:30",
                                    "follow": "barrow_deeps x2"}, "t")
-    now = reg.now_local()
+    # tomorrow noon, not the wall clock: within half an hour before the 6:30 PM slot the next slot would start before
+    # `later` and the scheduled open was never tried (the test failed every evening from 6:01 to 6:30 PM)
+    now = (reg.now_local() + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(reg, "now_local", lambda: now)
     _s, t = rc.upcoming(reg, LEAD, now, lead=True)[0]
     bot = NightBot(reg, rs)
     adhoc = rc.open_run(reg, rs, LEAD, t, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 2})
