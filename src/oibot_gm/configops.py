@@ -558,8 +558,9 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "member_import": {"surface": "web", "path": "POST /api/members/import", "reason": "a signup list (a Raid-Helper export turned into rows by scripts/raidhelper_roster.py) is a file imported with a preview and the skipped rows named (MCP import_members reads the same route); Discord has no file editor, and a person's own registration is /register everywhere"},
     # the guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §6): no plain-text op, because a
     # BattleTag and an import string must never reach a model; never MCP, so neither lands in a transcript. Upload and get are
-    # the Me page's (and /guide upload|get's once the Discord side is built); withdraw / restore are officer verbs on every
-    # surface but plain text (the site's routes, MCP withdraw_guild_guide / restore_guild_guide) and are not ops either
+    # the Me page's and /guide upload|get's (flows_guides; a row names one surface, the Discord paths are in
+    # tests/test_parity_matrix.py GUIDE_LIBRARY); withdraw / restore are officer verbs on every surface but plain text
+    # (/guide withdraw|restore, the site's routes, MCP withdraw_guild_guide / restore_guild_guide) and are not ops either
     "guide_upload": {"surface": "web", "path": "POST /api/guides/library/upload", "reason": "a guild guide is uploaded with the uploader's own BattleTag, which unlocks it once and is never kept: the Me page and /guide upload only — never plain text (no BattleTag or string reaches a model) and never MCP (none lands in a transcript)"},
     "guide_get": {"surface": "web", "path": "POST /api/guides/library/{vid}/download", "reason": "a guild guide is locked to the requester's own BattleTag on request: the Me page's download and /guide get's DM only — never plain text (no BattleTag reaches a model) and never MCP (the string would land in a transcript)"},
     # §5.61: what the bot remembers is read and forgotten in lists; Discord reads the setting and answers from the memories

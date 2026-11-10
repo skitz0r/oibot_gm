@@ -547,6 +547,7 @@ DM_CALL_SITES = {
     ("discord_bot.py", "on_guild_join"): "the host must act: the bot was added to a server that isn't a guild yet (claim it or remove the bot)",
     ("discord_bot.py", "claim_guild"): "the host's security alert: a new server claimed this bot (OIBOT_SUPERUSERS only)",
     ("discord_raid.py", "send_digest"): "an ask: a test run's puppet asks, batched into one DM to the tester who answers for them (D20)",
+    ("flows_guides.py", "submitted"): "an act the member asked for: /guide get DMs them the guild guide locked to their BattleTag (a refused DM puts the file on the private reply)",
 }
 
 

@@ -37,6 +37,7 @@ UPLOADS_PER_DAY = 5  # per member per guild, on the guild's day
 GUIDES_DIR = "guides"
 INDEX = "index.yaml"
 
+NO_TOOL = "There is no leveling-guide tool for this game version yet."  # every surface's answer when available() is off
 BAD_FACTION = "Pick Alliance, Horde or Both factions for the guide."
 DAILY_CAP = f"You've uploaded {UPLOADS_PER_DAY} guild guides today. Try again tomorrow."
 NO_VERSION = "That guild guide version isn't in the library."

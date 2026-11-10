@@ -63,6 +63,8 @@ MEMBER_PATHS = {"/register", "/apply", "/help", "/ask", "/roster overview", "/ro
 
 def gate_of(path: str) -> str:
     """Who may run a command — mirrors the checks in discord_registry/discord_raid/discord_policy."""
+    if path.startswith("/guide "):  # the guild guide library: members list, get and upload; officers withdraw / restore
+        return "officer" if path in ("/guide withdraw", "/guide restore") else "member"
     if path in MEMBER_PATHS or path.startswith("/me ") or path == "/gm change":  # /gm change: the plain-text permissions decide per op
         return "member"
     if path.startswith("/gm config") and path not in ("/gm config show", "/gm config plain"):  # plain: officers read it (D37)

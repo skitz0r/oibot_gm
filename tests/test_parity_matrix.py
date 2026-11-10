@@ -267,28 +267,35 @@ def test_appeals_have_their_discord_and_web_paths_and_written_mcp_exemptions(mcp
     assert not missing, "\n".join(missing)
 
 
-# the guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §5–6): not ops (no plain text: a
+# the guild guide library (spec docs/superpowers/specs/2026-11-09-guide-library-design.md §4–6): not ops (no plain text: a
 # BattleTag and an import string must never reach a model), so their rows live here. Upload and get are the member's own
-# with their own BattleTag (configops.BY_DESIGN_ONLY guide_upload / guide_get); MCP lists, withdraws and restores (an
-# officer's decision: D8, the actor header). The Discord side (/guide list|get|upload|withdraw|restore) adds its column
-# when it is built.
+# with their own BattleTag (configops.BY_DESIGN_ONLY guide_upload / guide_get: the Me page and /guide upload|get); MCP
+# lists, withdraws and restores (an officer's decision: D8, the actor header).
 GUIDE_LIBRARY: dict[str, dict[str, str]] = {
-    "list": {"web": "GET /api/guides/library", "mcp": "list_guild_guides"},
-    "upload": {"web": "POST /api/guides/library/upload"},
-    "get": {"web": "POST /api/guides/library/{vid}/download"},
-    "withdraw": {"web": "POST /api/guides/library/{vid}/withdraw", "mcp": "withdraw_guild_guide"},
-    "restore": {"web": "POST /api/guides/library/{vid}/restore", "mcp": "restore_guild_guide"},
+    "list": {"discord": "flow:guide_list", "web": "GET /api/guides/library", "mcp": "list_guild_guides"},
+    "list_command": {"discord": "slash:guide list"},
+    "upload": {"discord": "flow:guide_upload", "web": "POST /api/guides/library/upload"},
+    "upload_command": {"discord": "slash:guide upload"},
+    "get": {"discord": "flow:guide_get", "web": "POST /api/guides/library/{vid}/download"},
+    "get_command": {"discord": "slash:guide get"},
+    "withdraw": {"discord": "flow:guide_withdraw", "web": "POST /api/guides/library/{vid}/withdraw", "mcp": "withdraw_guild_guide"},
+    "withdraw_command": {"discord": "slash:guide withdraw"},
+    "restore": {"discord": "flow:guide_restore", "web": "POST /api/guides/library/{vid}/restore", "mcp": "restore_guild_guide"},
+    "restore_command": {"discord": "slash:guide restore"},
 }
 GUIDE_LIBRARY_MCP_EXEMPT = {
     "upload": "the uploader's BattleTag unlocks the string once on the Me page or in Discord; MCP's token is the owner's and a transcript would keep both",
     "get": "a version is locked to the requester's own BattleTag and handed to them alone; the string must not land in a transcript",
+    **{f"{a}_command": "the slash command is Discord's entry to the same flow" for a in ("list", "upload", "get", "withdraw", "restore")},
 }
 
 
-def test_the_guide_library_has_its_web_routes_mcp_tools_and_written_exemptions(mcp_tools, web_routes):
+def test_the_guide_library_has_its_discord_and_web_paths_mcp_tools_and_written_exemptions(mcp_tools, web_routes, slash_paths):
     missing = []
     for action, row in GUIDE_LIBRARY.items():
-        if row["web"] not in web_routes:
+        if not discord_path_exists(row["discord"], slash_paths):
+            missing.append(f"guide {action}/discord: {row['discord']!r}")
+        if "web" in row and row["web"] not in web_routes:
             missing.append(f"guide {action}/web: {row['web']!r}")
         if "mcp" in row:
             assert action not in GUIDE_LIBRARY_MCP_EXEMPT, f"guide {action}: has an MCP tool AND an exemption"

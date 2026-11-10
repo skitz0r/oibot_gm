@@ -32,9 +32,9 @@ from ..guides import library as lib
 
 log = logging.getLogger(__name__)
 
-NO_TOOL = "There is no leveling-guide tool for this game version yet."
+NO_TOOL = lib.NO_TOOL  # the library's words: /guide answers the same
 NOT_BUILT = "Nothing is built yet: paste your import string and BattleTag first."
-FROM_MCP = ("A guild guide is uploaded and fetched by a member on the Me page, locked to their own BattleTag; "
+FROM_MCP = ("A guild guide is uploaded and fetched by a member on the Me page or with /guide, locked to their own BattleTag; "
             "the import string and the BattleTag stay out of transcripts.")
 ACTOR_NEEDED = ("Withdrawing or restoring a guild guide is an officer's decision: from MCP it needs OIBOT_MCP_ACTOR set to "
                 "the officer's Discord id.")

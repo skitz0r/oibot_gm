@@ -35,11 +35,11 @@ class FakeResponse:
         self._done = True
         mid = next(_ids)
         self.itx._sent_id = mid
-        self.h._record(content, view, mid, embed)
+        self.h._record(content, view, mid, embed, kw)
 
     async def edit_message(self, *, content=None, embed=None, view=None, **kw):
         self._done = True
-        self.h._record(content, view, self.itx.message.id if self.itx.message else None, embed)
+        self.h._record(content, view, self.itx.message.id if self.itx.message else None, embed, kw)
 
     async def send_modal(self, modal):
         self._done = True
@@ -61,14 +61,14 @@ class FakeInteraction:
         self.followup = SimpleNamespace(send=self._followup)
 
     async def _followup(self, content=None, **kw):
-        self.h._record(content, kw.get("view"), None, kw.get("embed"))
+        self.h._record(content, kw.get("view"), None, kw.get("embed"), kw)
 
     async def original_response(self):
         return SimpleNamespace(id=self._sent_id or (self.message.id if self.message else next(_ids)))
 
     async def edit_original_response(self, *, content=None, embed=None, view=None, **kw):
         mid = self._sent_id or (self.message.id if self.message else None)
-        self.h._record(content, view, mid, embed)
+        self.h._record(content, view, mid, embed, kw)
 
 
 class Harness:
@@ -84,11 +84,13 @@ class Harness:
     async def _announce(self, reg, m, a, by, by_id=None):
         self.announced.append((m.display_name, a.start, a.end, by))
 
-    def _record(self, content, view, message_id, embed):
+    def _record(self, content, view, message_id, embed, kw=None):
         if view is not None:
             self._lint(view)
         assert len(content or "") <= 2000, f"message over Discord's 2000 characters: {len(content)}"
-        self.screens.append({"text": content or "", "view": view, "message_id": message_id, "embed": embed})
+        kw = kw or {}
+        files = ([kw["file"]] if kw.get("file") else []) + list(kw.get("files") or []) + list(kw.get("attachments") or [])
+        self.screens.append({"text": content or "", "view": view, "message_id": message_id, "embed": embed, "files": files})
 
     def _lint(self, obj) -> None:
         """Every modal and screen a flow produces must pass wizard.lint — what the Discord API would refuse."""

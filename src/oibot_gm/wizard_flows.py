@@ -2,6 +2,7 @@
 from . import flows_absence  # noqa: F401
 from . import flows_appeal  # noqa: F401
 from . import flows_config  # noqa: F401
+from . import flows_guides  # noqa: F401
 from . import flows_loot  # noqa: F401
 from . import flows_misc  # noqa: F401
 from . import flows_news  # noqa: F401
