@@ -496,8 +496,9 @@ In Discord (every reply is private to you):
   the server, or refused for another reason), the bot says *"Discord won't take this file, so get it on the Me page's
   Leveling guide tab"* with the link. The file is named for the guild's day of the upload. Nothing is written and no ops
   line is posted.
-- `/guide upload file: faction:` — attach the import string saved as a **.txt** file and pick the faction. The bot checks
-  that you belong to the guild and that the file is a .txt of a sensible size before it reads it, then asks in a pop-up
+- `/guide upload file: faction:` — attach the import string saved as a text file and pick the faction (a **.txt**, or the
+  file as the guide tools save it, with no ending at all). The bot checks
+  that you belong to the guild and that the file is text of a sensible size before it reads it, then asks in a pop-up
   for the BattleTag the string was issued to, reads the file, and shows what happens: *"This becomes the latest Horde
   guide for <guild>. Nobody gets a DM. An officer can withdraw it."* Under it, a small line: *Upload only a guide the guild
   made itself, never one bought from RestedXP.* **Upload** keeps it (*Uploaded: Horde · …*) and the

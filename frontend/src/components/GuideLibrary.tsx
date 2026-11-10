@@ -159,13 +159,13 @@ export function GuideLibrary() {
         <CardHeader title="Upload a guild guide" hint="it becomes the latest version for its faction" />
         <Stack p="md" gap="sm">
           <Text size="sm" c="dimmed">
-            Paste the <b>import string</b> of a guide the guild made, or pick the .txt file it came in, and the BattleTag it was issued to.
+            Paste the <b>import string</b> of a guide the guild made, or pick the file it came in, and the BattleTag it was issued to.
             The string is unlocked once with that BattleTag and dropped; only the guide is kept, for every member to get locked to their own BattleTag.
           </Text>
           <Textarea label="Import string" placeholder="78|…" autosize minRows={3} maxRows={6} value={text} disabled={uploading}
             onChange={(e) => setText(e.currentTarget.value)} styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)", fontSize: 12 } }} />
           <Group gap="sm" wrap="wrap">
-            <FileButton onChange={pick} accept=".txt,text/plain">{(props) => <Button size="xs" variant="default" disabled={uploading} {...props}>Pick a .txt file…</Button>}</FileButton>
+            <FileButton onChange={pick} >{(props) => <Button size="xs" variant="default" disabled={uploading} {...props}>Pick the file…</Button>}</FileButton>
             {text && <Button size="xs" variant="subtle" color="gray" disabled={uploading} onClick={() => setText("")}>Clear the box</Button>}
           </Group>
           <Group align="flex-end" gap="sm" wrap="wrap">

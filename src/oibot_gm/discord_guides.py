@@ -32,8 +32,8 @@ def register_guide_commands(tree: app_commands.CommandTree, guilds) -> None:
         if reg:
             await FLOWS["guide_get"](interaction, reg)
 
-    @group.command(name="upload", description="Upload a guild guide: the RestedXP import string as a .txt file")
-    @app_commands.describe(file="the import string saved as a .txt file", faction="which faction's line it belongs to")
+    @group.command(name="upload", description="Upload a guild guide: the RestedXP import string as a text file")
+    @app_commands.describe(file="the import string saved as a text file", faction="which faction's line it belongs to")
     @app_commands.choices(faction=FACTION_CHOICES)
     async def guide_upload(interaction: discord.Interaction, file: discord.Attachment, faction: app_commands.Choice[str]):
         reg, interaction = await need(interaction)

@@ -306,6 +306,13 @@ def test_upload_refuses_a_wrong_type_or_a_too_big_file_before_reading_it(people)
         assert h.text == words and att.reads == 0 and h.modal is None
 
 
+def test_upload_takes_a_file_with_no_extension_as_the_guide_tools_save_it():
+    """The owner's own file: 'Forever Leveling Guide - Horde!Name#1234(3)' has no .txt and Discord gives it no type."""
+    ok = lambda name, ct=None: flows_guides.is_text_file(types.SimpleNamespace(filename=name, content_type=ct))  # noqa: E731
+    assert ok("Forever Leveling Guide - Horde!Quillwright#1720(3)") and ok("route.TXT") and ok("route.rxp-export", "text/plain; charset=utf-8")
+    assert not ok("guide.pdf", "application/pdf") and not ok("guide.zip") and not ok("")
+
+
 def test_upload_from_someone_outside_the_guild_is_refused_before_reading(people, monkeypatch):
     reg = people
 

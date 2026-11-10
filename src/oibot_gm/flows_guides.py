@@ -7,7 +7,7 @@ their words are guides/library.py). `/guide …` is registered by discord_guides
   member asked: an act under the DM rule); closed DMs (Forbidden) put the file on the private reply; a file past the
   server's limit, any other refusal by Discord or a reply that can't carry it → too_big_for_discord (the Me page).
   Nothing is written, no ops line, no decide screen.
-- `guide_upload`: the attachment and the faction are widgets (the Wizard rule). Membership, the .txt name and the size
+- `guide_upload`: the attachment and the faction are widgets (the Wizard rule). Membership, the file kind (is_text_file) and the size
   from Discord's metadata are checked BEFORE the file is read; the BattleTag modal → the file read → the decide screen
   with library.upload_consequence → library.upload → one ops line.
 - `guide_withdraw` / `guide_restore`: officers, decided live (PRIV_LIVE) on open and on every press → a version select →
@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 
 import discord
 
@@ -38,8 +39,19 @@ SELECT_MAX = 25
 LIST_PER_LINE = 5  # the latest and up to four older versions per faction on /guide list
 EMPTY = "No guild guide yet. Upload one with /guide upload or on the Me page."
 GET_HINT = "Get one locked to your BattleTag with /guide get."
-NOT_TXT = "Attach the guide as a .txt file: the RestedXP import string saved as text."
-EMPTY_FILE = "That file is empty. Attach the RestedXP import string saved as a .txt file."
+NOT_TXT = "Attach the guide as a text file: the RestedXP import string saved as text."
+EMPTY_FILE = "That file is empty. Attach the RestedXP import string saved as a text file."
+_EXT = re.compile(r"\.([A-Za-z0-9]{1,5})$")
+
+
+def is_text_file(file) -> bool:
+    """A .txt, a file Discord calls text, or a name with no extension at all (the guide tools save the string as
+    'Guide - Horde!Name#1234', no .txt). Decided from the name and Discord's metadata, never by reading; the name is
+    never logged (it can carry a BattleTag)."""
+    name = (getattr(file, "filename", "") or "").strip()
+    if name.lower().endswith(".txt") or str(getattr(file, "content_type", "") or "").lower().startswith("text/"):
+        return True
+    return bool(name) and not _EXT.search(name)
 NOTHING_TO_WITHDRAW = "No guild guide is in members' reach to withdraw. Members upload them with /guide upload or on the Me page."
 NOTHING_TO_RESTORE = "No guild guide is withdrawn, so there is nothing to restore."
 OFFICERS_ONLY = "Officers only."
@@ -303,7 +315,7 @@ async def guide_upload(interaction: discord.Interaction, reg: Registry, *, file,
     if faction not in lib.FACTIONS:
         await _say(interaction, lib.BAD_FACTION)
         return
-    if not (getattr(file, "filename", "") or "").lower().endswith(".txt"):
+    if not is_text_file(file):
         await _say(interaction, NOT_TXT)
         return
     if (getattr(file, "size", 0) or 0) > TEXT_MAX:
