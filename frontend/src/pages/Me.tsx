@@ -17,6 +17,7 @@ import { AbsencesCard } from "../components/AbsencesCard";
 import { AttendanceCard } from "../components/AttendanceCard";
 import { MyApplication } from "../components/MyApplication";
 import { GuideTools } from "../components/GuideTools";
+import { GuideLibrary } from "../components/GuideLibrary";
 import { MyMemories } from "../components/MyMemories";
 
 
@@ -78,7 +79,7 @@ export function MePage({ meta }: { meta: Meta }) {
             <Tabs.Tab value="guide">Leveling guide</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="me">{record(me)}</Tabs.Panel>
-          <Tabs.Panel value="guide"><GuideTools meta={meta} /></Tabs.Panel>
+          <Tabs.Panel value="guide"><Stack gap="lg"><GuideLibrary /><GuideTools meta={meta} /></Stack></Tabs.Panel>
         </Tabs>
         {confirmDialog}
       </Stack>
