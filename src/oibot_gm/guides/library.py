@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from .build import EMPTY_TEXT, TEXT_MAX, TOO_BIG, validate_battletag
 from .reissue import SLOTS
-from .rxp_decode import GuideError, decode_sections, encode
+from .rxp_decode import GuideError, decode_sections, encode, trailer
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +77,7 @@ class GuideVersion(BaseModel):
     guides: int
     sections: int  # the uploaded string's section count (older records: the issue splits evenly by it)
     layout: list[int] = []  # the guide count of each section of the upload, in order: every issue keeps it exactly
+    base: int | None = None  # the number the upload ended with (`|40000`, the addon version it was made for): every issue ends with it
     size: int  # characters of guide text
     withdrawn_at: str | None = None
     withdrawn_by: str | None = None
@@ -268,7 +269,7 @@ def upload(reg, text: str, battletag: str, faction: str, by_id: int, by_name: st
             i += 1
             vid = f"{base}-{i}"
         v = GuideVersion(id=vid, faction=faction, uploaded_at=stamp.astimezone(timezone.utc).isoformat(timespec="seconds"), by_id=int(by_id),
-                         by_name=name, guides=len(texts), sections=len(layout), layout=layout, size=size)
+                         by_name=name, guides=len(texts), sections=len(layout), layout=layout, base=trailer(text), size=size)
         msg = f"{reg.key}: guild guide {vid} uploaded by {name}"
         with reg.store.batch(msg):
             for n, t in enumerate(texts, 1):
@@ -291,7 +292,7 @@ def issue(reg, vid: str, battletag: str, *, officer: bool = False) -> str:
     if not SLOTS.acquire(blocking=False):
         raise GuideError(BUSY)
     try:
-        return encode(_texts(reg, v), tag, sections=v.sections, layout=v.layout or None)
+        return encode(_texts(reg, v), tag, sections=v.sections, layout=v.layout or None, base=v.base)
     finally:
         SLOTS.release()
 

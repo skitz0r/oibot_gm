@@ -104,7 +104,19 @@ def decode_sections(text: str, battletag: str) -> list[list[str]]:
     return out
 
 
-def encode(guides: list[str], battletag: str, sections: int = 1, layout: list[int] | None = None) -> str:
+# the addon refuses a string that doesn't end with `|<number>`, the addon version the string was made for, and one whose
+# number is below its own `addon.version` (GuideLoader.lua ImportString: "Incomplete or invalid encoded string")
+BASE = 40000
+_TRAILER = re.compile(r"\|+(\d{1,9})\s*$")
+
+
+def trailer(text: str) -> int | None:
+    """The number an import string ends with (`…%|40000`), None when it has none: a re-lock keeps it."""
+    m = _TRAILER.search((text or "")[-64:])
+    return int(m.group(1)) if m else None
+
+
+def encode(guides: list[str], battletag: str, sections: int = 1, layout: list[int] | None = None, base: int | None = None) -> str:
     """The inverse of decode: guide texts → an import string the given BattleTag unlocks (fixtures, and reissue: the
     member's own guide for their own other account — never anyone else's). `sections` splits the guides evenly;
     `layout` = the guide count of each section, in order (the guide library's upload layout; ValueError unless every
@@ -123,4 +135,5 @@ def encode(guides: list[str], battletag: str, sections: int = 1, layout: list[in
         txt = b"\0".join(g.encode() for g in guides[i:i + n])
         i += n
         out.append(f"{a32(txt)}:{base64.b64encode(rc4(S, zlib.compress(txt, 9))).decode()}%")
+    out.append(f"|{max(BASE, int(base or 0))}")
     return "".join(out)

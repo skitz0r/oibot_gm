@@ -331,3 +331,20 @@ def test_the_withdraw_sentence_escapes_the_uploader_on_request(people, clock):
     s = lib.withdraw_consequence(reg, v, by_id=OFFICER, esc=lambda t: t.replace("_", "\\_").replace("*", "\\*"))
     assert "Qu\\_ill\\* gets a notice." in s
     assert "Qu_ill* gets a notice." in lib.withdraw_consequence(reg, v, by_id=OFFICER)
+
+
+def test_an_issued_string_ends_with_the_addons_version_trailer():
+    """The addon's ImportString refuses a string that doesn't end `%|<number>` with the number at least its own version
+    ("Incomplete or invalid encoded string"): every encode ends with it, and a re-lock keeps the upload's own number."""
+    import re
+
+    from oibot_gm.guides.rxp_decode import BASE, decode, encode, trailer
+    from oibot_gm.guides.reissue import reissue
+
+    s = encode(["step\n.goto 1,2\n", "step\n.goto 3,4\n"], "Quillwright#1234", sections=2)
+    assert re.search(r"%\|\d+$", s) and trailer(s) == BASE and re.match(r"^\d+\|\d+:", s)
+    assert decode(s, "Quillwright#1234") == ["step\n.goto 1,2\n", "step\n.goto 3,4\n"]
+    newer = s[: s.rindex("|")] + "|41135"
+    out = reissue(newer, "Quillwright#1234", "Otheracct#5678")
+    assert trailer(out) == 41135 and decode(out, "Otheracct#5678") == decode(s, "Quillwright#1234")
+    assert trailer("94|123:abcd%") is None

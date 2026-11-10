@@ -10,7 +10,7 @@ import threading
 from dataclasses import dataclass
 
 from .build import EMPTY_TEXT, TEXT_MAX, TOO_BIG, validate_battletag
-from .rxp_decode import _SECTION, GuideError, decode, encode
+from .rxp_decode import _SECTION, GuideError, decode, encode, trailer
 
 EMPTY_NEW_TAG = "Enter your other account's BattleTag (Name#1234)."
 SAME_TAG = "Those are the same BattleTag: the second one is your other account's."
@@ -35,7 +35,7 @@ def reissue(text: str, battletag: str, new_battletag: str) -> str:
         raise GuideError(SAME_TAG)
     guides = decode(text, tag)
     sections = sum(1 for _h, mode, _c in _SECTION.findall(text) if mode == ":")
-    return encode(guides, new, sections=max(1, sections))
+    return encode(guides, new, sections=max(1, sections), base=trailer(text))
 
 
 # at most two re-issues unpack at once, whoever asks (the DM path needs only server membership and has no per-member lock)

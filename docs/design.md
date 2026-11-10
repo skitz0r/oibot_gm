@@ -4651,3 +4651,9 @@ concurrency (two uploads in one second and an upload racing a withdraw are cover
 in unit tests, not under load). A risk named, not solved: a member could upload a guide they bought rather than one the guild
 made — the guard is the upload's words (the Me page's card asks for "a guide the guild made"; the Discord upload's decide screen
 carries the `UPLOAD_HINT` line under its confirm sentence) and the officers' withdraw (D6).
+
+**Addendum 2026-11-09 (first live issue):** the addon's `ImportString` refuses a string that doesn't end with
+`%|<number>` (the addon version it was made for, at least the addon's own `addon.version`, 40000 today) with
+*"Incomplete or invalid encoded string"*. `rxp_decode.encode` now always ends with it (`BASE`, or the source's own
+number: `trailer(text)`, kept by `reissue` and stored as `GuideVersion.base`); the re-issue of §5.55 had the same gap.
+The upload also takes a file with no extension (`flows_guides.is_text_file`), as the guild's tools save it.
