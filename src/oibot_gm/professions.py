@@ -80,7 +80,9 @@ def catalog(reg: Registry) -> list[CatalogEntry]:
 
 
 def who_can_make(reg: Registry, text: str) -> list[CatalogEntry]:
-    """Exact normalised name first; else every recipe whose words all appear in the text (whole words)."""
+    """Exact normalised name first; else every recipe whose words all appear in the text (whole words: a sentence that
+    names a recipe); else the text as PART of a name (a search box: every typed word starts a word of the recipe —
+    "ironfeather", "ironf", "armor kit")."""
     q = norm_recipe(text)
     if not q:
         return []
@@ -89,7 +91,10 @@ def who_can_make(reg: Registry, text: str) -> list[CatalogEntry]:
     if exact:
         return exact
     words = set(q.split())
-    return [e for e in cat if set(e.key.split()) <= words]
+    named = [e for e in cat if set(e.key.split()) <= words]
+    if named:
+        return named
+    return [e for e in cat if all(any(k.startswith(w) for k in e.key.split()) for w in words)]
 
 
 def crafters_of(reg: Registry, pid: str, min_skill: int = 0) -> list[Crafter]:

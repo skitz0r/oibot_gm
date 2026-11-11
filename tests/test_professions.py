@@ -117,6 +117,20 @@ def test_who_can_make_matches_exact_then_by_words(reg):
     assert pr.who_can_make(reg, "who can make a Gnomish Death Ray") == []
 
 
+def test_who_can_make_finds_a_recipe_from_part_of_its_name(reg):
+    """The 2026-11-11 report: the Professions page's search for "ironfeather" found nothing while Ironfeather Shoulders
+    and Ironfeather Breastplate were on record — a search box holds part of a name, even a word half typed."""
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 265, "recipes": [
+        {"name": "Ironfeather Shoulders"}, {"name": "Ironfeather Breastplate"}, {"name": "Forceful Rugged Armor Kit"}]}])
+    assert [e.name for e in pr.who_can_make(reg, "ironfeather")] == ["Ironfeather Breastplate", "Ironfeather Shoulders"]
+    assert [e.name for e in pr.who_can_make(reg, "ironf")] == ["Ironfeather Breastplate", "Ironfeather Shoulders"]
+    assert [e.name for e in pr.who_can_make(reg, "armor kit")] == ["Forceful Rugged Armor Kit"]
+    assert [e.name for e in pr.who_can_make(reg, "ironfeather sh")] == ["Ironfeather Shoulders"]
+    assert pr.who_can_make(reg, "who can make ironfeather gloves") == [], "a sentence naming no registered recipe still finds nothing"
+    assert [e.name for e in pr.who_can_make(reg, "who makes ironfeather shoulders?")] == ["Ironfeather Shoulders"], "a sentence still wins by whole words"
+
+
 def test_crafters_of_lists_a_profession_highest_first(reg):
     _real(reg)
     _give(reg, REAL_UID, REAL_LABEL, [{"id": "alchemy", "skill": 240}])

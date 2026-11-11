@@ -362,8 +362,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   guild's own list of recipes; the answer names its crafters, highest skill first, and only you see it. Nobody is
   pinged: ask them yourself. A recipe nobody has added yet says so, and how a crafter adds theirs. `/professions list`
   — pick a profession and see everyone who has it, highest skill first. The Professions page on the site shows the same.
-- **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name in the search
-  box and each matching recipe shows its crafters, highest skill first, with their skill — names only, nobody is
+- **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name, or part of it
+  ("ironfeather" finds every Ironfeather recipe), in the search box and each matching recipe shows its crafters, highest skill first, with their skill — names only, nobody is
   pinged. Below it, a tab per profession lists everyone who has it with a skill bar and their notable recipes. A
   recipe nobody has added says so, and that the crafter adds it on the Me page. Officers keep the list tidy: a
   recipe's **Rename…** fixes a misspelling on every record that holds it, and **Merge…** folds two spellings of the
