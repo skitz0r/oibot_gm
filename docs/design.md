@@ -4275,6 +4275,16 @@ These are the numbers to confirm with real usage logs.
 
 **Signup sheet layout (2026-09-21):** the sheet went back from layout components to an embed (`raid_views.sheet_message` → `(Embed, View)`), because embed inline fields are the only column layout Discord offers and the owner found Raid-Helper's class columns easier to scan than wrapped text lines. Open: one inline field per class (`<class icon> (n)`, members one per line with the spec icon), then Bench / No thanks rows; locked: one inline field per group (confirmation marks), *Not rostered*, Bench / No thanks; buttons in a classic persistent `View` under the embed (same `SignupButton` custom ids). Officer cards and DMs stay layout components. A sheet message posted in the component era cannot be edited into an embed (the V2 flag is permanent), so `refresh_sheet` re-posts it once. Guards: 1024 chars per column (`_column`), spec icons dropped when the embed would near 6000. The title of a live (open or locked) sheet is a deep link (`Embed.url` = `raid_views.me_url`: `/app/me?g=<key>#run-<key>`, the run's row on the member's own Me page, which scrolls to it — owner request 2026-11-05); a member link never points at the officers' board. `RaidMixin.sheets_restore` (on_ready, first boot only, after `loot_cards_restore`) redraws every live sheet of every guild in place, so a rendering change reaches the sheets already posted at the next restart — one `refresh_sheet` per sheet, failures logged.
 
+**A profession and its recipes in one request (fix, 2026-11-11).** A member wrote "I am 265 tribal LW with ironfeather
+shoulder/chest recipes". The request held a `profession` op and a `recipe_add` op; each was described against the record
+as it stood, so the recipe (no profession on record yet) got a `ProfessionPickView` beside the Apply card, and the Apply
+changed the character rev the picker had kept: "record changed since the question", the recipe lost. Now a request's
+changes are READ in order: `configops.after_op(reg, op)` returns a throw-away registry view with a profession op's rows
+set on a copy of the member (nothing written), and `handle_change`'s soundness loop, `diff_text` and the site's
+plain-text preview lines advance through it — the recipe's sentence is "… Leatherworking gains …", one card, no picker.
+The picker's rev guard is softer too: a changed record refuses only a pick that no longer fits (`_character_rows`
+refuses → `pick_changed`); a pick that still fits applies. Tests: `tests/test_parity_ops_chat.py`.
+
 ### 5.61 Chat memory: what the bot remembers people saying (built 2026-11-04)
 
 **Why.** Guild knowledge lives in chat and nowhere else: who can craft what, what a pattern costs, where it drops, when

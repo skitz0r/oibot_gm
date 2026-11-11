@@ -346,7 +346,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   *"Rhoz has no Leatherworking on record yet. Apply records Leatherworking on Rhoz and adds Green Dragonscale Cloak to
   the recipes Rhoz makes."*; when it can't guess, it asks *"Which profession makes Green Dragonscale Cloak?"* with a list
   of the professions to pick from — only you can pick, nothing changes until you do, and the list expires after ten
-  minutes. When two of the character's professions make
+  minutes. Say the profession and its recipes in one message ("I am 265 Leatherworking with the Ironfeather Shoulders
+  recipe") and both are on the one change it shows: no question. When two of the character's professions make
   things, the bot asks which one makes the recipe the same way (*"Which profession makes Elixir of Fortitude — Alchemy or
   Cooking?"*); say "… with alchemy" to skip the question. The change it shows before **Apply** is in sentences, like
   the editor's (*"Your Leatherworking gains Devilsaur Gauntlets."*). A character has at most two trade professions (Alchemy,

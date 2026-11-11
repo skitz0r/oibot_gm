@@ -1204,6 +1204,34 @@ CHARACTER_FIELDS = ("Say what to change on the character: add | spec | offspec |
                     "profession_remove | recipe_add | recipe_remove.")
 
 
+def after_op(reg: Registry, op: ConfigOp) -> Registry:
+    """The registry as `op` would leave it, for READING the next change of the same request (describe, the diff's
+    sentences) — never written, the live records untouched. Only a profession change on a character moves it (a recipe
+    said with its profession in one breath lands on that profession: "I am 265 LW with the ironfeather recipes" is one
+    card, not a card and a question — the 2026-11-11 report); every other op, and one that cannot apply, returns `reg`."""
+    if op.op != "character" or (op.field or "").strip().lower() not in PROFESSION_FIELDS:
+        return reg
+    import copy
+
+    from .registry import Profession
+
+    try:
+        uid, m = _character_member(reg, op)
+        if m is None:
+            return reg
+        rows, _ = _character_rows(reg, m, op)
+    except (RegistryError, ValueError):
+        return reg
+    m2 = m.model_copy(deep=True)
+    c = next((x for x in m2.characters if x.label == rows[0]["label"]), None)
+    if c is None:
+        return reg
+    c.professions = [Profession.model_validate(p) for p in rows[0]["professions"]]
+    view = copy.copy(reg)
+    view.members = {**reg.members, uid: m2}
+    return view
+
+
 def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
     """The character op as rows for `Registry.save_character_table` (the verb the Me and Members pages use) and a
     one-line description of the effect. `m` may be None only for a planned add by someone with no record yet."""

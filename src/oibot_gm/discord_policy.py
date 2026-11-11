@@ -460,9 +460,13 @@ class ProfessionPickView(PendingView):
             return
         try:
             _, m = configops._character_member(self.reg, op)
-            if self.rev is not None and m is not None and self.reg.characters_rev(m) != self.rev:
-                raise RegistryError(pick_changed(self.need.character))
-            rows, _ = configops._character_rows(self.reg, m, op)
+            changed = self.rev is not None and m is not None and self.reg.characters_rev(m) != self.rev
+            try:  # a record changed since the question refuses only a pick that no longer fits (the same request's Apply may have recorded the profession)
+                rows, _ = configops._character_rows(self.reg, m, op)
+            except RegistryError:
+                if changed:
+                    raise RegistryError(pick_changed(self.need.character)) from None
+                raise
             c = next(x for x in m.active() if x.label == rows[0]["label"])
             added = professions.added_with_recipe(c, rows)
             name = self.reg.profile.profession(pid).name
@@ -564,11 +568,12 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     # never a proposed change with an Apply button under it
     from .professions import NeedsProfession
 
-    sound, pick = [], None
+    sound, pick, view_reg = [], None, reg  # view_reg: the records as the changes before this one leave them (configops.after_op)
     for op in allowed:
         try:
-            configops.describe(reg, op, channel, strict=True, by_id=author.id)
+            configops.describe(view_reg, op, channel, strict=True, by_id=author.id)
             sound.append(op)
+            view_reg = configops.after_op(view_reg, op)
         except NeedsProfession as e:  # the recipe's profession is unclear: ask with a picker (one per reply), never a refusal
             if pick is None:
                 pick = (op, e)
@@ -626,7 +631,11 @@ async def diff_text(reg: Registry, allowed: list, refused: list[str], channel, *
     people and loot actions keep their describe() line (preview_line: a run about to open carries its <t:…:f> stamp); a
     profession change prints its confirm sentences, "your" for the asker (`by_id`)."""
     setup = [op for op in allowed if op.op in configops.PURE_OPS]
-    lines = [f"• {preview_line(reg, op, channel, by_id=by_id)}" for op in allowed if op.op not in configops.PURE_OPS]
+    lines, view_reg = [], reg  # each line reads the records as the changes before it leave them, as Apply will find them
+    for op in allowed:
+        if op.op not in configops.PURE_OPS:
+            lines.append(f"• {preview_line(view_reg, op, channel, by_id=by_id)}")
+            view_reg = configops.after_op(view_reg, op)
     if setup:
         d = await asyncio.to_thread(configops.describe_ops, reg, setup, None, channel)
         lines.append(d.as_discord())

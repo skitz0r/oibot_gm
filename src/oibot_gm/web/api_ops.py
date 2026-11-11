@@ -285,10 +285,11 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         allowed, refused = mcp_actor_rule(v, allowed, refused)
         req.ops = allowed
         ops = [op.model_dump(exclude_none=True) for op in req.ops]
-        desc = []
+        desc, view_reg = [], v.reg  # each line reads the records as the changes before it leave them (configops.after_op)
         for op in req.ops:
             try:
-                desc.append(configops.describe(v.reg, op, PLAIN_WEB, by_id=v.uid))
+                desc.append(configops.describe(view_reg, op, PLAIN_WEB, by_id=v.uid))
+                view_reg = configops.after_op(view_reg, op)
             except Exception as e:  # noqa: BLE001
                 desc.append(f"{op.op}: {e}")
         out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": [], "refused": refused}

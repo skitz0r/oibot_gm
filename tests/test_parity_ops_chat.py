@@ -339,6 +339,51 @@ def test_another_users_pick_is_refused_and_a_changed_record_is_said(reg):
     asyncio.run(go())
 
 
+def test_a_profession_and_its_recipe_in_one_request_are_one_card_and_no_picker(reg):
+    """The 2026-11-11 report: "I am 265 LW with ironfeather shoulder recipes" became an Apply card for the profession
+    AND a picker for the recipe; the Apply then made the picker refuse. Each change is read as the earlier ones leave
+    the record: the recipe lands on the profession the same request records."""
+    m, label = _bare_crafter(reg)
+    feed, log = Feed(), []
+    who = f"<@{m.discord_id}>"
+    ops = [ConfigOp(op="character", member=who, character=label, field="profession", value="Leatherworking 265"),
+           ConfigOp(op="character", member=who, character=label, field="recipe_add", value="Ironfeather Shoulders"),
+           ConfigOp(op="character", member=who, character=label, field="recipe_add", value="Ironfeather Breastplate")]
+
+    async def go():
+        it = interaction(m.discord_id, log, officer=True)
+        await discord_policy.handle_change(it, reg, None, None, feed, "i am 265 LW with ironfeather shoulder/chest recipes", bot=it.client,
+                                           channel=OPS_CH, req=ConfigRequest(kind="change", reply="", ops=ops))
+        assert len(log) == 1, "one reply: the card, no picker beside it"
+        kind, content, kw = log[0]
+        view, body = kw["view"], kw["embed"].description
+        assert isinstance(view, discord_policy.ConfigConfirmView)
+        assert "⛔" not in body and "Which profession" not in body and "no Leatherworking on record" not in body, body
+        assert "Leatherworking gains Ironfeather Shoulders." in body and "Leatherworking gains Ironfeather Breastplate." in body, body
+        await view.press_apply(interaction(m.discord_id, log, officer=True))
+    asyncio.run(go())
+    c = next(c for c in reg.members[m.discord_id].active() if c.label == label)
+    assert [(p.id, p.skill, [r.name for r in p.recipes]) for p in c.professions] == [("leatherworking", 265, ["Ironfeather Shoulders", "Ironfeather Breastplate"])]
+    assert "⛔" not in log[-1][1], log[-1]
+
+
+def test_a_pick_still_applies_when_the_record_changed_but_the_pick_fits(reg):
+    """The picker's guard: a record changed since the question refuses only a pick that no longer fits (the bot's own
+    Apply from the same request recorded the profession the person then picks)."""
+    m, label = _bare_crafter(reg)
+    feed, log = Feed(), []
+
+    async def go():
+        view = _pick_view(reg, m, label, feed)
+        reg.save_character_table(m.discord_id, [{"label": label, "professions": [{"id": "leatherworking", "skill": 265}]}], "t", officer=True)
+        await view.picked(interaction(m.discord_id, log), ["leatherworking"])
+    asyncio.run(go())
+    c = next(c for c in reg.members[m.discord_id].active() if c.label == label)
+    lw = next(p for p in c.professions if p.id == "leatherworking")
+    assert lw.skill == 265 and [r.name for r in lw.recipes] == ["Green Dragonscale Cloak"]
+    assert log[-1] == ("edit", f"{label}'s Leatherworking gains Green Dragonscale Cloak.", {"view": None, "embed": None})
+
+
 def test_the_picker_expires_like_the_confirm(reg):
     m, label = _bare_crafter(reg)
     edits = []
