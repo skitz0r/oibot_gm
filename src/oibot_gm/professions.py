@@ -132,10 +132,12 @@ def _rewrite(reg: Registry, old_key: str, new_name: str, by: str, by_id: int | N
     ("Six members' records now read …") — the Confirm rule's three sentences with the head."""
     new_key = norm_recipe(new_name)
     touched: dict[int, tuple] = {}
+    keep: set[tuple[str, str]] = set()  # the stored unmatched spellings, and the new one where an unmatched one is renamed
     for m, c in list(_rows(reg)):
         if not any(norm_recipe(r.name) == old_key for p in c.professions for r in p.recipes):
             continue
         entries = []
+        keep |= reg.stored_unmatched(c) | {(p.id, new_key) for p in c.professions for r in p.recipes if r.id is None and norm_recipe(r.name) == old_key}
         for p in c.professions:
             # a case-only rename keeps its key: the old entry IS the target, rewritten in place, never dropped
             has_new = new_key != old_key and any(norm_recipe(r.name) == new_key for r in p.recipes)
@@ -153,14 +155,14 @@ def _rewrite(reg: Registry, old_key: str, new_name: str, by: str, by_id: int | N
         touched.setdefault(m.discord_id, (m, []))[1].append({"label": c.label, "professions": entries})
     for m, rows in touched.values():
         for row in rows:
-            reg.check_professions(row["professions"])
+            reg.check_professions(row["professions"], keep_unmatched=keep)
     if len(touched) > 2:
         said = [f"{count_word(len(touched)).capitalize()} members' records now read {new_name}."]
     else:
         said = [f"{m.display_name}'s record now reads {new_name}." for m, _ in touched.values()]
     if not preview:
         for m, rows in touched.values():
-            reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)
+            reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id, keep_unmatched=frozenset(keep))
     return said
 
 
@@ -295,7 +297,7 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
                 raise RegistryError(f"{d.name} has no recipes.")
             if not any(p["id"] == d.id for p in cur):
                 if field == "recipe_add" and not takes:  # nothing on record makes things: record the profession with the recipe
-                    if d.id not in _fitting(reg, cur, name):  # a guess the character can't hold becomes the question, never a promise
+                    if d.id not in _fitting(reg, cur, name, reg.stored_unmatched(c)):  # a guess the character can't hold becomes the question, never a promise
                         raise _needs(reg, c, cur, name)
                     cur.append({"id": d.id, "skill": None, "recipes": [{"name": name, "id": None}]})
                     return [{"label": c.label, "professions": cur}], f"{c.label} · {d.name}: added with {name}"
@@ -327,7 +329,7 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
     raise ValueError(field)
 
 
-def _fitting(reg: Registry, cur: list[dict], recipe: str) -> list[str]:
+def _fitting(reg: Registry, cur: list[dict], recipe: str, keep=frozenset()) -> list[str]:
     """The professions that make things which this character could still take with the recipe (profile order): each
     candidate tried on the whole table — a character whose two trades are taken can only add Cooking or First Aid."""
     out = []
@@ -335,7 +337,7 @@ def _fitting(reg: Registry, cur: list[dict], recipe: str) -> list[str]:
         if not d.makes or any(p["id"] == d.id for p in cur):
             continue
         try:
-            reg.check_professions(cur + [{"id": d.id, "skill": None, "recipes": [{"name": recipe, "id": None}]}])
+            reg.check_professions(cur + [{"id": d.id, "skill": None, "recipes": [{"name": recipe, "id": None}]}], keep_unmatched=keep)
         except RegistryError:
             continue
         out.append(d.id)
@@ -345,7 +347,7 @@ def _fitting(reg: Registry, cur: list[dict], recipe: str) -> list[str]:
 def _needs(reg: Registry, c, cur: list[dict], recipe: str) -> RegistryError:
     """The question for a recipe on a character with no profession that makes things, offering only what fits; when
     nothing fits, the one refusal."""
-    fit = _fitting(reg, cur, recipe)
+    fit = _fitting(reg, cur, recipe, reg.stored_unmatched(c))
     if not fit:
         if reg.profile.has_recipe_list and not reg.profile.recipes_named(norm_recipe(recipe)):
             return RegistryError(f"{recipe} isn't a recipe in the game's list.")  # not a slot problem: no profession makes it

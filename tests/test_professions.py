@@ -268,11 +268,11 @@ def test_rewrite_validates_every_record_before_the_first_write(reg, monkeypatch)
     seen = []
     real = reg.check_professions
 
-    def refuse_second(entries):
+    def refuse_second(entries, **kw):
         seen.append(entries)
         if len(seen) == 2:
             raise RegistryError("A recipe name is up to 60 characters.")
-        return real(entries)
+        return real(entries, **kw)
     monkeypatch.setattr(reg, "check_professions", refuse_second)
     with pytest.raises(RegistryError):
         pr.rename_recipe(reg, "mooncloth bagg", "Mooncloth Bag", "Officer", by_id=OFFICER_UID)

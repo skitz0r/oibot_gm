@@ -434,7 +434,7 @@ def profession_consequence(reg: Registry, m, label: str, entries: list[dict], *,
     one sentence. Nothing about runs: professions touch no seat. Unchanged → refused."""
     v = _Voice(reg, m, by_id)
     c = _char(reg, m, label, v)
-    after = {p.id: p for p in reg.check_professions(entries)}
+    after = {p.id: p for p in reg.check_professions(entries, keep_unmatched=reg.stored_unmatched(c))}
     before = {p.id: p for p in c.professions}
     if {k: p.model_dump() for k, p in after.items()} == {k: p.model_dump() for k, p in before.items()}:
         raise RegistryError(f"{c.label}'s professions are already as given.")

@@ -173,3 +173,47 @@ def test_the_start_migrates_each_guild_and_says_so_once(reg):
     asyncio.run(OibotGM._recipes_migrate(bot))
     asyncio.run(OibotGM._recipes_migrate(bot))
     assert said == ["Recipes matched to the game's list: 1 matched, 1 not in the list."]
+
+
+def test_a_flagged_new_name_is_refused_on_a_members_own_save(reg):
+    """`unmatched: true` keeps only what the character already holds: a new name carrying the flag is an ordinary name."""
+    _real(reg)
+    _store_typed(reg, UID, LABEL, [Profession(id="leatherworking", skill=300, recipes=[Recipe(name="Devilsaur Gauntlet")])])
+    entries = reg.professions_entries(_char(reg))
+    entries[0]["recipes"].append({"name": "Gauntlets of Make Believe", "id": None, "unmatched": True})
+    with pytest.raises(RegistryError, match=r"^Gauntlets of Make Believe isn't a recipe in the game's list\.$"):
+        reg.save_character_table(UID, [{"label": LABEL, "professions": entries}], "Kestrel", by_id=UID)
+    with pytest.raises(RegistryError, match=r"isn't a recipe in the game's list\.$"):  # no character: nothing is kept
+        reg.check_professions([{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlet", "unmatched": True}]}])
+    # the stored one still survives the member's own save; the same flag under another profession keeps nothing
+    entries = reg.professions_entries(_char(reg))
+    reg.save_character_table(UID, [{"label": LABEL, "professions": entries}], "Kestrel", by_id=UID)
+    assert [(r.name, r.id) for r in _char(reg).professions[0].recipes] == [("Devilsaur Gauntlet", None)]
+    with pytest.raises(RegistryError, match="isn't a recipe in the game's list"):
+        reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "tailoring", "skill": 300, "recipes": [
+            {"name": "Devilsaur Gauntlet", "id": None, "unmatched": True}]}]}], "Kestrel", by_id=UID)
+
+
+def test_a_flagged_name_the_list_has_takes_its_id(reg):
+    _real(reg)
+    _store_typed(reg, UID, LABEL, [Profession(id="leatherworking", skill=300, recipes=[Recipe(name="devilsaur  gauntlets")])])
+    entries = reg.professions_entries(_char(reg))
+    assert entries[0]["recipes"][0]["unmatched"] is True
+    reg.save_character_table(UID, [{"label": LABEL, "professions": entries}], "Kestrel", by_id=UID)
+    assert [(r.name, r.id) for r in _char(reg).professions[0].recipes] == [("Devilsaur Gauntlets", 10789)]
+
+
+def test_a_failed_migration_write_leaves_memory_as_it_was(reg, monkeypatch):
+    _real(reg)
+    _store_typed(reg, UID, LABEL, [Profession(id="leatherworking", skill=300, recipes=[Recipe(name="Devilsaur Gauntlets")])])
+    before = reg.members[UID].model_dump()
+
+    def broken(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(reg.store, "write_text", broken)
+    with pytest.raises(OSError):
+        reg.migrate_recipes()
+    assert reg.members[UID].model_dump() == before, "the live record changes only after the write"
+    monkeypatch.undo()
+    assert reg.migrate_recipes() == {"matched": 1, "unmatched": 0}
+    assert [r.id for r in _char(reg).professions[0].recipes] == [10789]
