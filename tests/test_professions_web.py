@@ -36,6 +36,29 @@ def test_professions_page_reads_catalog_and_find(w):
     assert w.c.get("/api/professions", headers=as_user(w, OFFICER)).json()["officer"] is True
 
 
+def test_find_searches_the_whole_list_with_category_makes_and_reagents(w):
+    """armory link §4.4: the finder reads the game's list — a listed recipe nobody makes is a row with no crafters, a
+    typed recipe the list lacks still names its crafter, and a name the game lacks says so."""
+    m = crafter(w)
+    typed = typed_crafter(w, 1, "Bold Gloves")
+    h = as_user(w, m.discord_id)
+    d = w.c.get("/api/professions/find?q=ironfeather%20shoulders", headers=h).json()
+    [row] = d["recipes"]
+    assert row["name"] == "Ironfeather Shoulders" and row["crafters"] == [] and row["listed"] is True
+    assert row["category"] == "Leather Pauldrons" and row["makes"]["name"] == "Ironfeather Shoulders" and row["reagents"]
+    assert all({"id", "name", "quantity"} <= set(x) for x in row["reagents"])
+    assert d["message"] == "Nobody in the guild makes Ironfeather Shoulders yet."
+    d = w.c.get("/api/professions/find?q=mooncl", headers=h).json()
+    assert d["recipes"][0]["name"] == "Mooncloth Bag" and d["recipes"][0]["crafters"] and d["recipes"][0]["listed"] is True, "crafted first"
+    [row] = w.c.get("/api/professions/find?q=bold%20gloves", headers=h).json()["recipes"]
+    assert row["listed"] is False and row["category"] is None and row["makes"] is None and row["reagents"] == []
+    assert row["crafters"][0]["label"] == typed.main.label
+    d = w.c.get("/api/professions/find?q=thunderfury", headers=h).json()
+    assert d["recipes"] == [] and d["message"] == "That isn't a recipe in the game's list."
+    cat = w.c.get("/api/professions", headers=h).json()["recipes"]
+    assert {r["name"] for r in cat} == {"Mooncloth Bag", "Bold Gloves"}, "the page's catalog is still what somebody makes"
+
+
 def test_rename_and_merge_are_officers_only_and_preview_first(w):
     m = typed_crafter(w, 0, "Mooncloth Bag")
     typed_crafter(w, 1, "Mooncloth Bags")

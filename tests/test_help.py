@@ -550,7 +550,7 @@ def test_professions_section_answers_who_can_make_for_members(reg):
     reg.save_character_table(uid, [{"label": label, "professions": [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bag"}]}]}], "t", officer=True)
     s = H.guild_state(reg, None, uid, False, "anyone able to make a mooncloth bag?", None, public=False)
     assert "### Who can make what" in s and "Mooncloth Bag" in s and f"Tailoring: {label} (Kestrel, 300)" in s
-    assert f"- Mooncloth Bag [Tailoring]: {label} (300)" in s
+    assert f"- Mooncloth Bag [Tailoring · Bags]: {label} (300)" in s, "a listed recipe carries the game's category"
     assert "### Who can make what" in H.guild_state(reg, None, uid, False, "who is our alchemist", None, public=False)
     assert "### Who can make what" not in H.guild_state(reg, None, uid, False, "when is the next raid", None, public=False)
 

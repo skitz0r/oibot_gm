@@ -801,7 +801,9 @@ def set_professions(member: str, character: str, professions: list[dict], guild:
 
 @mcp.tool()
 def who_can_make(text: str, guild: Guild = None) -> str:
-    """Who can make a recipe: the registered recipes matching `text` with their crafters, highest skill first. Names only."""
+    """Who can make a recipe: searches the game's whole recipe list (exact name, the recipes a sentence names, or part of
+    a name) plus typed recipes somebody makes; one line per recipe with its crafters, highest skill first, or "Nobody in
+    the guild makes <name> yet." for a listed recipe nobody makes, or "That isn't a recipe in the game's list." Names only."""
     return msg(api(guild).get("/api/professions/find", q=text))
 
 

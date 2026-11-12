@@ -207,8 +207,12 @@ def test_professions_who_and_list_commands_exist_and_answer_from_the_catalog(reg
     assert {"leatherworking", "alchemy", "cooking"} <= choices and len(choices) <= 25
     _crafter(reg)
     auto = _cmd(tree, "professions who")._params["recipe"].autocomplete
-    got = asyncio.run(auto(_ix(reg), "devil"))
-    assert [c.value for c in got] == ["devilsaur gauntlets"] and got[0].name.startswith("Devilsaur Gauntlets")
+    got = asyncio.run(auto(_ix(reg), "devil"))  # the game's whole list, what somebody makes first; a listed recipe's value is its id
+    assert got[0].value == "#10789" and got[0].name == "Devilsaur Gauntlets · Leather Gauntlets · 1 crafter"
+    assert len(got) > 1 and all(c.name.endswith("nobody makes it yet") for c in got[1:]) and all(len(c.name) <= 100 for c in got)
+    twins = asyncio.run(auto(_ix(reg), "lesser arcane elixir"))
+    assert len(twins) == 2 and len({c.name for c in twins}) == 2, "same name, told apart by category"
+    assert [c.value for c in asyncio.run(auto(_ix(reg), ""))] == ["#10789"], "an empty box offers what somebody makes"
     assert asyncio.run(auto(_ix(reg), "xyz")) == []
 
 
@@ -222,9 +226,24 @@ def test_professions_who_names_the_crafters_and_refuses_an_unknown_recipe(reg):
     assert "Devilsaur Gauntlets" in text and "Thornwick" in text and "300" in text and "<@" not in text
     assert kw["ephemeral"] and kw["allowed_mentions"].to_dict()["parse"] == []
     ix = _ix(reg)
+    asyncio.run(who.callback(ix, recipe="#10789"))  # the autocomplete's value: that recipe
+    assert "Thornwick" in ix.response.sent[0][0]
+    ix = _ix(reg)
     asyncio.run(who.callback(ix, recipe="Thunderfury"))
     text, kw = ix.response.sent[0]
-    assert text == "Nobody has registered that recipe yet — crafters add theirs with /me professions." and kw["ephemeral"]
+    assert text == "That isn't a recipe in the game's list." and kw["ephemeral"]
+
+
+def test_professions_who_for_a_listed_recipe_nobody_makes(reg):
+    tree = _offline_tree(reg)
+    _crafter(reg)
+    ix = _ix(reg)
+    asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="#" + str(reg.profile.recipes_named("ironfeather shoulders")[0].id)))
+    text, kw = ix.response.sent[0]
+    assert text == "Nobody in the guild makes Ironfeather Shoulders yet. A crafter adds it with /me professions." and kw["ephemeral"]
+    ix = _ix(reg)
+    asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="ironfeather shoulders"))
+    assert ix.response.sent[0][0] == text, "typed, not picked: the same answer"
 
 
 def test_professions_list_shows_crafters_or_says_how_to_add_one(reg):
@@ -256,7 +275,11 @@ def test_professions_who_stays_under_discords_limit_and_says_how_many_more(reg):
     assert len(text) < 2000
     assert text.splitlines()[-1].startswith("…and ") and text.endswith("more — the Professions page has them all.")
     shown = sum(1 for line in text.splitlines() if line.startswith("• "))
-    assert int(text.splitlines()[-1].split()[1]) == 30 - shown
+    from oibot_gm import professions as pr
+    hits = pr.who_can_make(reg, "devilsaur gauntlets leggings ironfeather shoulders")
+    nobody = sum(1 for e in hits if not e.crafters)  # recipes of the game's list the text names that nobody makes: one line each, after the crafted
+    assert [bool(e.crafters) for e in hits[:3]] == [True] * 3
+    assert int(text.splitlines()[-1].split()[1]) == 30 + nobody - shown
 
 
 def test_professions_who_escapes_member_text_and_survives_a_profession_left_out_of_the_profile(reg):

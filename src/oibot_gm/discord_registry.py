@@ -921,15 +921,21 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         return [app_commands.Choice(name=f"{c.label} · {c.cls} {c.spec}"[:100], value=c.name or c.label) for c in m.active() if current.lower() in (c.name or c.label).lower()][:25]
 
     async def recipe_autocomplete(interaction: discord.Interaction, current: str):
-        """The guild's registered recipes (professions.catalog), filtered as the person types: the finder never reads free
-        text it has to guess at."""
+        """The finder's search (professions.search: the game's whole list and the typed recipes somebody makes, what
+        somebody makes first) as the person types; an empty box offers what somebody makes. A listed recipe's value is
+        '#<id>' (two same-name recipes stay two, told apart by category); a typed one's is its name key."""
         reg = guilds.for_interaction(interaction)
         if reg is None:
             return []
         from . import professions as pr
-        cur = (current or "").lower()
-        return [app_commands.Choice(name=f"{e.name} · {len(e.crafters)} crafter{'s' if len(e.crafters) != 1 else ''}"[:100], value=e.key[:100])
-                for e in pr.catalog(reg) if cur in e.name.lower()][:25]
+        hits = pr.search(reg, current) if (current or "").strip() else pr.catalog(reg)[:25]
+
+        def label(e) -> str:
+            n = len(e.crafters)
+            made = f"{n} crafter{'s' if n != 1 else ''}" if n else "nobody makes it yet"
+            where = e.category or (reg.profile.professions[e.profession].name if e.profession in reg.profile.professions else None)
+            return " · ".join(x for x in (e.name, where, made) if x)[:100]
+        return [app_commands.Choice(name=label(e), value=(f"#{e.id}" if e.recipe is not None else e.key)[:100]) for e in hits[:25]]
 
     async def instance_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
@@ -1139,14 +1145,19 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         from . import professions as pr
         hits = pr.who_can_make(reg, recipe)
         if not hits:
-            await interaction.response.send_message("Nobody has registered that recipe yet — crafters add theirs with /me professions.", ephemeral=True)
+            await interaction.response.send_message(pr.NOT_A_RECIPE if reg.profile.has_recipe_list
+                                                    else "Nobody has registered that recipe yet — crafters add theirs with /me professions.", ephemeral=True)
             return
         esc = discord.utils.escape_markdown
+        if len(hits) == 1 and not hits[0].crafters:  # a recipe of the game's list nobody makes: not the same answer as "not a recipe"
+            await interaction.response.send_message(f"{pr.nobody_sentence(esc(hits[0].name))} A crafter adds it with /me professions.", ephemeral=True,
+                                                    allowed_mentions=discord.AllowedMentions.none())
+            return
         blocks = []
         for e in hits:
             d = reg.profile.professions.get(e.profession)  # a recipe whose profession left the profile keeps no suffix
-            blocks.append((f"**{esc(e.name)}**" + (f" · {d.name}" if d else ""),
-                           [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" for c in e.crafters]))
+            blocks.append((f"**{esc(e.name)}**" + "".join(f" · {x}" for x in ((d.name if d else None), e.category) if x),
+                           [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" for c in e.crafters] or [pr.nobody_sentence(esc(e.name))]))
         footer = "Names only — ask them. Crafters add theirs with /me professions."
         await interaction.response.send_message(fit_lines(blocks, footer), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 

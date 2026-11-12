@@ -363,12 +363,15 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   when you change your main, and a retired character is no longer named as a crafter. Reading an addon's export of your
   professions is planned; nothing is imported yet. Anyone in the guild can then ask who can make a thing (§10a).
 - **Who can make a thing, in Discord**: `/professions who` — start typing the recipe's name and pick it from the
-  guild's own list of recipes; the answer names its crafters, highest skill first, and only you see it. Nobody is
-  pinged: ask them yourself. A recipe nobody has added yet says so, and how a crafter adds theirs. `/professions list`
+  game's whole list of recipes (the ones somebody in the guild makes come first; two recipes with one name are told
+  apart by their category); the answer names its crafters, highest skill first, and only you see it. Nobody is
+  pinged: ask them yourself. A recipe nobody makes yet says so (*"Nobody in the guild makes Ironfeather Shoulders
+  yet."*) and how a crafter adds theirs; a name the game doesn't have gets *"That isn't a recipe in the game's list."* `/professions list`
   — pick a profession and see everyone who has it, highest skill first. The Professions page on the site shows the same.
 - **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name, or part of it
-  ("ironfeather" finds every Ironfeather recipe), in the search box and each matching recipe shows its crafters, highest skill first, with their skill — names only, nobody is
-  pinged. Below it, a tab per profession lists everyone who has it with a skill bar and their notable recipes. A
+  ("ironfeather" finds every Ironfeather recipe), in the search box: it searches the game's whole list of recipes, the
+  ones somebody in the guild makes first, and each matching recipe shows its crafters, highest skill first, with their skill — names only, nobody is
+  pinged. A recipe the game's list doesn't have, typed before the bot knew the list, still names its crafter. Below it, a tab per profession lists everyone who has it with a skill bar and their notable recipes. A
   recipe nobody has added says so, and that the crafter adds it on the Me page. Officers keep the list tidy: a
   recipe's **Rename…** fixes a misspelling on every record that holds it, and **Merge…** folds two spellings of the
   same recipe into one (the same profession only). Both show the bot's own sentences first (*"Devilsaur Gauntlet is
@@ -2337,7 +2340,9 @@ the bot listens in).
 **Who can make what** is open to every member the same way: "who can make Devilsaur Gauntlets?", "any alchemists?",
 "who has the highest tailoring?" are answered from what members registered (§3 *Professions*) — each profession's crafters
 with their skill, and every notable recipe with who makes it — names only, nobody pinged. The question has to name a
-profession or a registered recipe. When nobody has registered a recipe, the bot says so and how a crafter adds it. Retired
+profession, a registered recipe or a recipe of the game's list (by its whole name, two words or more). A recipe of the
+game's list nobody makes gets *"Nobody in the guild makes … yet."* and how a crafter adds it; a name the game doesn't
+have gets *"That isn't a recipe in the game's list."* Retired
 characters, puppets and people who left the server are never named.
 
 Officers get more, only when the question is about it (a few keywords decide; "status", "overview" or "what's going

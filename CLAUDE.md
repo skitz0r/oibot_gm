@@ -332,9 +332,11 @@ src/oibot_gm/
                        the gate's ONE Jev request (decision · remember · relevance), judge() for the other paths, memory_block() = the <memory> data
                        block (unfenced), on_save = a channel turned Off forgets; remember_at() = the keep line (OIBOT_REMEMBER_AT raises it);
                        scripts/memory_probe.py = the spike's offline probe, scripts/listen_probe.py = the gate's retune check (bait ≥ 80 %, banter ≤ 15 %)
-  professions.py       professions (design §5.60): catalog(reg) = the recipe catalog DERIVED from the records (norm_recipe keys, the most
-                       used spelling, crafters highest skill first; never stored), who_can_make(reg, text) (exact name, else every recipe whose words all
-                       appear), crafters_of(reg, pid); visible = active character, not a puppet, not left; rename_recipe / merge_recipe (officers, preview
+  professions.py       professions (design §5.60): catalog(reg) = the recipe catalog DERIVED from the records (a listed recipe per id in the
+                       list's spelling, an unmatched one per norm_recipe key in the most used spelling, crafters highest skill first; never stored);
+                       search(reg, text, limit) = THE finder over the game's WHOLE list (indexed once per profile) + unmatched recipes with crafters, three
+                       tiers (exact, whole words, part of a name), made first; who_can_make reads it ('#<id>' = a picked recipe); nobody_sentence /
+                       NOT_A_RECIPE / answer_lines = its words; crafters_of(reg, pid); visible = active character, not a puppet, not left; rename_recipe / merge_recipe (officers, preview
                        sentences, the rewrite through save_character_table); op_rows = the plain-text `character` op's four profession fields → a table
                        row + its describe line (asks which profession when two could make it); HELP_WORDS / help_hit / help_section = the help section
                        (every member-typed name through unfence); rename / merge validate every touched record before the first write and fold past two members.

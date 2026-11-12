@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 
 from .llm.provider import unfence
-from .profiles import norm_recipe
+from .profiles import RecipeDef, norm_recipe
 from .registry import RECIPE_NAME_MAX, Registry, RegistryError
 
 COUNT_WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
@@ -43,10 +43,24 @@ def _by_skill(x) -> tuple:
 @dataclass
 class CatalogEntry:
     key: str         # norm_recipe(name)
-    name: str        # the spelling most crafters use (ties: the first alphabetically)
+    name: str        # the list's spelling; an unmatched typed recipe: the spelling most crafters use (ties: the first alphabetically)
     profession: str
-    crafters: list[Crafter] = field(default_factory=list)
+    crafters: list[Crafter] = field(default_factory=list)  # [] = a listed recipe nobody in the guild makes yet
     id: int | None = None
+    recipe: RecipeDef | None = None  # the game's list entry; None = a typed recipe the list doesn't have (or no list)
+
+    @property
+    def category(self) -> str | None:
+        return self.recipe.category if self.recipe else None
+
+
+NOT_A_RECIPE = "That isn't a recipe in the game's list."
+NOT_REGISTERED = "Nobody has registered that recipe yet."  # a version without the game's list
+
+
+def nobody_sentence(name: str) -> str:
+    """A recipe of the game's list that no visible character makes — a different answer from NOT_A_RECIPE."""
+    return f"Nobody in the guild makes {name} yet."
 
 
 def visible(reg: Registry, m, c) -> bool:
@@ -77,39 +91,140 @@ def migrated_line(res: dict) -> str:
 
 
 def catalog(reg: Registry) -> list[CatalogEntry]:
-    by_key: dict[str, CatalogEntry] = {}
-    spellings: dict[str, dict[str, int]] = {}
+    """The recipes somebody in the guild makes, by name. A recipe of the game's list is one entry per recipe id (two
+    same-name recipes stay two, told apart by category — R6) in the list's spelling; a typed recipe the list doesn't
+    have (or every recipe, for a version without a list) is one entry per norm_recipe name in its most used spelling."""
+    listed = reg.profile.recipes
+    by_key: dict[tuple, CatalogEntry] = {}
+    spellings: dict[tuple, dict[str, int]] = {}
     for m, c in _rows(reg):
         for p in c.professions:
             for r in p.recipes:
-                k = norm_recipe(r.name)
-                e = by_key.setdefault(k, CatalogEntry(key=k, name=r.name, profession=p.id, id=r.id))
+                d = listed.get(r.id) if r.id is not None else None
+                if d is not None:
+                    gk = ("id", d.id)
+                    e = by_key.setdefault(gk, CatalogEntry(key=d.key, name=d.name, profession=d.profession, id=d.id, recipe=d))
+                else:
+                    k = norm_recipe(r.name)
+                    gk = ("name", k)
+                    e = by_key.setdefault(gk, CatalogEntry(key=k, name=r.name, profession=p.id, id=r.id))
+                    spellings.setdefault(gk, {})[r.name] = spellings.get(gk, {}).get(r.name, 0) + 1
+                    if e.id is None and r.id:
+                        e.id = r.id
                 e.crafters.append(Crafter(c.label, m.display_name, m.discord_id, p.id, p.skill))
-                spellings.setdefault(k, {})[r.name] = spellings.get(k, {}).get(r.name, 0) + 1
-                if e.id is None and r.id:
-                    e.id = r.id
-    for e in by_key.values():
-        e.name = sorted(spellings[e.key].items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+    for gk, e in by_key.items():
+        if gk in spellings:
+            e.name = sorted(spellings[gk].items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
         e.crafters.sort(key=_by_skill)
-    return sorted(by_key.values(), key=lambda e: e.name.lower())
+    return sorted(by_key.values(), key=_order)
 
 
-def who_can_make(reg: Registry, text: str) -> list[CatalogEntry]:
-    """Exact normalised name first; else every recipe whose words all appear in the text (whole words: a sentence that
-    names a recipe); else the text as PART of a name (a search box: every typed word starts a word of the recipe —
-    "ironfeather", "ironf", "armor kit")."""
+def _order(e: CatalogEntry) -> tuple:
+    return (e.name.lower(), e.profession, e.category or "", e.id or 0)
+
+
+@dataclass(frozen=True)
+class _Index:
+    """The game's list prepared once per profile for the finder: every recipe with its key's words, and by exact key."""
+    recipes: dict  # the profile's dict, held so the cache entry is never matched to a new dict at a reused id()
+    rows: tuple    # ((RecipeDef, words tuple, words frozenset), …)
+    by_key: dict   # key → [RecipeDef]
+
+
+_INDEX: dict[int, _Index] = {}
+
+
+def _index(profile) -> _Index:
+    recipes = profile.recipes
+    ix = _INDEX.get(id(recipes))
+    if ix is None or ix.recipes is not recipes:
+        by_key: dict[str, list] = {}
+        for r in recipes.values():
+            by_key.setdefault(r.key, []).append(r)
+        ix = _Index(recipes, tuple((r, tuple(r.key.split()), frozenset(r.key.split())) for r in recipes.values()), by_key)
+        _INDEX[id(recipes)] = ix
+    return ix
+
+
+def _tiers(q: str, items, *, longest: bool = False):
+    """The finder's three tiers over (thing, words tuple, words set): the exact key; else every name whose words all
+    appear in the text (a sentence that names it — `longest`: a name inside another named one drops out, so "a mooncloth
+    bag" is the bag, not also Mooncloth); else every typed word starting a word of the name (a search box)."""
+    wl = q.split()
+    words = set(wl)
+    exact = [x for x, kw, _ in items if " ".join(kw) == q]
+    if exact:
+        return exact
+    named = [(x, ks) for x, _, ks in items if ks <= words]
+    if named:
+        return [x for x, ks in named if not (longest and any(ks < other for _, other in named))]
+    return [x for x, kw, _ in items if all(any(k.startswith(w) for k in kw) for w in wl)]
+
+
+def search(reg: Registry, text: str, limit: int | None = 25) -> list[CatalogEntry]:
+    """The finder (armory link §4.4): the three tiers of who_can_make over the game's WHOLE list plus the typed recipes
+    the list doesn't have that somebody makes. A listed recipe nobody makes is an entry with no crafters. Recipes
+    somebody makes first, then by name; at most `limit` (None = all). A version without a list searches the catalog
+    only, as before. The list's half is prepared once per profile (_index): fast enough for Discord's autocomplete."""
     q = norm_recipe(text)
     if not q:
         return []
     cat = catalog(reg)
-    exact = [e for e in cat if e.key == q]
-    if exact:
-        return exact
-    words = set(q.split())
-    named = [e for e in cat if set(e.key.split()) <= words]
-    if named:
-        return named
-    return [e for e in cat if all(any(k.startswith(w) for k in e.key.split()) for w in words)]
+    made = {e.id: e for e in cat if e.recipe is not None}
+    loose = [e for e in cat if e.recipe is None]
+    items = [(e, tuple(e.key.split()), frozenset(e.key.split())) for e in loose]
+    if reg.profile.has_recipe_list:
+        ix = _index(reg.profile)
+        if q in ix.by_key:  # the exact tier without walking the list
+            items += [(r, tuple(r.key.split()), frozenset(r.key.split())) for r in ix.by_key[q]]
+        else:
+            items += list(ix.rows)
+    hits = [x if isinstance(x, CatalogEntry) else made.get(x.id) or _listed_entry(x) for x in _tiers(q, items, longest=reg.profile.has_recipe_list)]
+    hits.sort(key=lambda e: (not e.crafters, *_order(e)))
+    return hits if limit is None else hits[:limit]
+
+
+def _listed_entry(d: RecipeDef) -> CatalogEntry:
+    return CatalogEntry(key=d.key, name=d.name, profession=d.profession, id=d.id, recipe=d)
+
+
+def entry_of(reg: Registry, rid: int) -> CatalogEntry | None:
+    """One recipe of the game's list by id, with its crafters (none: nobody makes it yet); None when the list lacks it."""
+    d = reg.profile.recipes.get(rid)
+    if d is None:
+        return None
+    return next((e for e in catalog(reg) if e.recipe is not None and e.id == rid), None) or _listed_entry(d)
+
+
+PICKED = re.compile(r"^#(\d+)$")
+"""The value of a recipe picked from the game's list in Discord's autocomplete: '#<recipe id>'."""
+
+
+def who_can_make(reg: Registry, text: str, limit: int | None = 25) -> list[CatalogEntry]:
+    """Who makes the recipe(s) a text names: search (exact name first; else every recipe whose words all appear in the
+    text — whole words: a sentence that names a recipe; else the text as PART of a name — a search box: every typed word
+    starts a word of the recipe: "ironfeather", "ironf", "armor kit"). A picked '#<id>' is that one recipe. A version
+    without the game's list returns every match, as before."""
+    if (m := PICKED.match((text or "").strip())) and reg.profile.has_recipe_list:
+        e = entry_of(reg, int(m.group(1)))
+        return [e] if e else []
+    return search(reg, text, limit if reg.profile.has_recipe_list else None)
+
+
+def where_words(reg: Registry, e: CatalogEntry) -> str:
+    """'Leatherworking · Leather Pauldrons' — the profession, and the game's category for a listed recipe (a profession
+    no longer in the profile: its id)."""
+    d = reg.profile.professions.get(e.profession)
+    return " · ".join(x for x in ((d.name if d else e.profession), e.category) if x)
+
+
+def answer_lines(reg: Registry, hits: list[CatalogEntry]) -> list[str]:
+    """The finder's answer in plain words (the site's `message`, MCP): one line per recipe with its crafters highest
+    skill first, nobody_sentence for a listed recipe nobody makes, NOT_A_RECIPE when the game's list has no such name."""
+    if not hits:
+        return [NOT_A_RECIPE if reg.profile.has_recipe_list else NOT_REGISTERED]
+    return [f"{e.name} ({where_words(reg, e)}): " + ", ".join(f"{c.label} ({c.member}, {skill_words(c.skill)})" for c in e.crafters)
+            if e.crafters else nobody_sentence(e.name) for e in hits]
 
 
 def crafters_of(reg: Registry, pid: str, min_skill: int = 0) -> list[Crafter]:
@@ -403,16 +518,28 @@ def help_hit(reg: Registry, q: str) -> bool:
         pat = rf"\b{re.escape(name)}\b" if " " in name else rf"\b{re.escape(name[:6])}"
         if name and re.search(pat, q):
             return True
-    return any(re.search(rf"\b{re.escape(e.key)}\b", q) for e in catalog(reg) if e.key)
+    if any(re.search(rf"\b{re.escape(e.key)}\b", q) for e in catalog(reg) if e.key):
+        return True
+    if reg.profile.has_recipe_list:  # a recipe of the game's list named by its whole words; a one-word name ("Corruption") is too common a word
+        words = set(q.split())
+        return any(len(kw) > 1 and ks <= words for _, kw, ks in _index(reg.profile).rows)
+    return False
+
+
+HELP_HITS = 10  # the question's recipes from the game's list in the help snapshot: never the whole list in a prompt
 
 
 def help_section(ask) -> list[str]:
     """The help snapshot's professions section (members' view, design §5.60): each profession's crafters with skill,
-    then the catalog with makers. Names only: the bot says who, never pings."""
+    then the catalog with makers, then (with the game's list) up to HELP_HITS recipes the question names, each with its
+    crafters or nobody_sentence. Names only: the bot says who, never pings."""
     reg = ask.reg
+    listed = reg.profile.has_recipe_list
     out = ["### Who can make what: professions with their crafters (highest skill first), then the notable recipes the guild has registered "
-           "and who makes them · a question about a recipe nobody registered: say so and that a crafter adds it on the Me page, with "
-           "/me professions or by saying 'I can make …' in the professions channel"]
+           "and who makes them" + (", then the recipes of the game's list the question names · a recipe the game's list doesn't have: "
+                                   f"say \"{NOT_A_RECIPE}\" · a listed recipe nobody makes: say so (\"{nobody_sentence('<name>')}\")" if listed
+                                   else " · a question about a recipe nobody registered: say so")
+           + " and that a crafter adds it on the Me page, with /me professions or by saying 'I can make …' in the professions channel"]
     def safe(text) -> str:  # member text (character, display and recipe names) can't open or close a block
         return unfence(text, "member-text").replace("\n", " ").strip()
 
@@ -422,5 +549,11 @@ def help_section(ask) -> list[str]:
     cat = catalog(reg)
     out.append(f"recipes registered ({len(cat)}):" if cat else "recipes registered: none yet")
     for e in cat[:80]:
-        out.append(f"- {safe(e.name)} [{reg.profile.profession(e.profession).name}]: " + ", ".join(f"{safe(c.label)} ({skill_words(c.skill)})" for c in e.crafters[:6]))
+        out.append(f"- {safe(e.name)} [{safe(where_words(reg, e))}]: " + ", ".join(f"{safe(c.label)} ({skill_words(c.skill)})" for c in e.crafters[:6]))
+    hits = search(reg, ask.question or "", HELP_HITS) if listed else []
+    if hits:
+        out.append("the question's recipes in the game's list:")
+        for e in hits:
+            out.append(f"  - {safe(e.name)} [{safe(where_words(reg, e))}]: " + (", ".join(f"{safe(c.label)} ({skill_words(c.skill)})" for c in e.crafters[:6])
+                                                                             if e.crafters else nobody_sentence(safe(e.name))))
     return out

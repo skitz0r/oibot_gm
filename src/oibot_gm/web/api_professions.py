@@ -20,7 +20,12 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
         return {"label": c.label, "member": c.member, "uid": str(c.uid), "skill": c.skill, "profession": c.profession, "cls": ch.cls if ch else None}
 
     def entry_json(reg, e: pr.CatalogEntry) -> dict:
-        return {"key": e.key, "name": e.name, "profession": e.profession, "id": e.id, "crafters": [crafter_json(reg, c) for c in e.crafters]}
+        """`listed` = a recipe of the game's list (then `category`, `makes` {id, name, quantity[, quantity_max]} or null for
+        an enchant, and `reagents` [{id, name, quantity}]); an unmatched typed recipe has null / [] there."""
+        d = e.recipe
+        return {"key": e.key, "name": e.name, "profession": e.profession, "id": e.id, "crafters": [crafter_json(reg, c) for c in e.crafters],
+                "listed": d is not None, "category": d.category if d else None, "makes": dict(d.makes) if d and d.makes else None,
+                "reagents": [dict(x) for x in d.reagents] if d else []}
 
     @app.get("/api/professions")
     async def professions_get(request: Request):
@@ -34,9 +39,12 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
 
     @app.get("/api/professions/find")
     async def professions_find(request: Request, q: str = ""):
-        """The finder: the registered recipes matching a typed name (professions.who_can_make)."""
+        """The finder (professions.who_can_make): the game's whole list and the typed recipes somebody makes, what somebody
+        makes first; a listed recipe nobody makes has no crafters. `message` = the answer in words (answer_lines: MCP
+        reads it); an empty `q` answers nothing."""
         v = await who(request)
-        return {"q": q, "recipes": [entry_json(v.reg, e) for e in pr.who_can_make(v.reg, q)]}
+        hits = pr.who_can_make(v.reg, q)
+        return {"q": q, "recipes": [entry_json(v.reg, e) for e in hits], "message": "\n".join(pr.answer_lines(v.reg, hits)) if q.strip() else ""}
 
     async def _maintain(v, d: dict, fn, *args):
         """An officer's rename / merge: `preview` answers the sentences and writes nothing; a write saves each member's

@@ -368,18 +368,20 @@ def test_professions_tools_go_through_the_site_routes():
     def handler(request):
         calls.append((request.method, request.url.path, dict(request.url.params), request.read()))
         if request.url.path == "/api/professions/find":
-            return httpx.Response(200, json={"q": request.url.params["q"], "recipes": [{"name": "Mooncloth Bag", "crafters": [{"label": "Rhoz", "skill": 300}]}]})
+            return httpx.Response(200, json={"q": request.url.params["q"], "recipes": [{"name": "Mooncloth Bag", "crafters": [{"label": "Rhoz", "skill": 300}]}],
+                                             "message": "Mooncloth Bag (Tailoring · Bags): Rhoz (Kessa, 300)"})
         if request.url.path == "/api/members/set":
             return httpx.Response(200, json={"message": "Rhoz saved"})
         return httpx.Response(404, json={"error": "no such route"})
 
     ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
     try:
-        assert "Mooncloth Bag" in ms.who_can_make("mooncloth bag")
+        assert ms.who_can_make("mooncloth bag") == "Mooncloth Bag (Tailoring · Bags): Rhoz (Kessa, 300)", "the finder's own answer lines"
         assert calls[0][:3] == ("GET", "/api/professions/find", {"q": "mooncloth bag"})
         assert ms.set_professions("Kessa", "Rhoz", [{"id": "tailoring", "skill": 300}]) == "Rhoz saved"
         assert calls[1][1] == "/api/members/set" and json.loads(calls[1][3]) == {"member": "Kessa", "character": "Rhoz", "professions": [{"id": "tailoring", "skill": 300}]}
-        names = {t.name for t in asyncio.run(ms.mcp.list_tools())}
-        assert {"set_professions", "who_can_make"} <= names
+        tools = {t.name: t for t in asyncio.run(ms.mcp.list_tools())}
+        assert {"set_professions", "who_can_make"} <= set(tools)
+        assert "game's whole recipe list" in tools["who_can_make"].description
     finally:
         ms.use(None)

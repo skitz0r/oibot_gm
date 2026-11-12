@@ -137,7 +137,9 @@ def test_who_can_make_matches_exact_then_by_words(reg):
     _give(reg, REAL_UID, REAL_LABEL, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bag"}, {"name": "Bottomless Bag"}]}])
     assert [e.name for e in pr.who_can_make(reg, "mooncloth bag")] == ["Mooncloth Bag"]
     assert [e.name for e in pr.who_can_make(reg, "anyone able to make a Mooncloth Bag? got the cloth")] == ["Mooncloth Bag"]
-    assert pr.who_can_make(reg, "who can make a Gnomish Death Ray") == []
+    ray = pr.who_can_make(reg, "who can make a Gnomish Death Ray")  # the game's list: a recipe nobody makes, not "no such recipe"
+    assert [(e.name, e.crafters) for e in ray] == [("Gnomish Death Ray", [])]
+    assert pr.who_can_make(reg, "who can make a Thunderfury") == []
 
 
 def test_who_can_make_finds_a_recipe_from_part_of_its_name(reg):
@@ -146,11 +148,14 @@ def test_who_can_make_finds_a_recipe_from_part_of_its_name(reg):
     _real(reg)
     _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 265, "recipes": [
         {"name": "Ironfeather Shoulders"}, {"name": "Ironfeather Breastplate"}, {"name": "Forceful Rugged Armor Kit"}]}])
-    assert [e.name for e in pr.who_can_make(reg, "ironfeather")] == ["Ironfeather Breastplate", "Ironfeather Shoulders"]
-    assert [e.name for e in pr.who_can_make(reg, "ironf")] == ["Ironfeather Breastplate", "Ironfeather Shoulders"]
-    assert [e.name for e in pr.who_can_make(reg, "armor kit")] == ["Forceful Rugged Armor Kit"]
+    # the game's whole list (armory link §4.4): what somebody makes first, then the listed recipes nobody makes
+    assert [e.name for e in pr.who_can_make(reg, "ironfeather")] == ["Ironfeather Breastplate", "Ironfeather Shoulders", "Ironfeather Leggings"]
+    half = [e.name for e in pr.who_can_make(reg, "ironf")]  # a word half typed: Ironforge's recipes too
+    assert half[:3] == ["Ironfeather Breastplate", "Ironfeather Shoulders", "Ironfeather Leggings"] and "Ironforge Breastplate" in half
+    kits = pr.who_can_make(reg, "armor kit")
+    assert kits[0].name == "Forceful Rugged Armor Kit" and kits[0].crafters and all(not e.crafters for e in kits[1:])
     assert [e.name for e in pr.who_can_make(reg, "ironfeather sh")] == ["Ironfeather Shoulders"]
-    assert pr.who_can_make(reg, "who can make ironfeather gloves") == [], "a sentence naming no registered recipe still finds nothing"
+    assert pr.who_can_make(reg, "who can make ironfeather gloves") == [], "a sentence naming no recipe of the game's still finds nothing"
     assert [e.name for e in pr.who_can_make(reg, "who makes ironfeather shoulders?")] == ["Ironfeather Shoulders"], "a sentence still wins by whole words"
 
 
@@ -167,13 +172,13 @@ def test_finders_skip_retired_puppets_and_departed(reg):
     flask = [{"id": "alchemy", "skill": 300, "recipes": [{"name": "Flask of the Titans"}]}]
     _give(reg, REAL_UID, REAL_LABEL, flask)
     reg.member_left(REAL_UID)  # Member.left_at: not in the server
-    assert pr.crafters_of(reg, "alchemy") == [] and pr.who_can_make(reg, "flask of the titans") == []
+    assert pr.crafters_of(reg, "alchemy") == [] and [e.crafters for e in pr.who_can_make(reg, "flask of the titans")] == [[]]
     _give(reg, UID, LABEL, flask)  # a test puppet
     reg.add_character(REAL2_UID, "Wren", "Hollowfen", "Hunter", "Survival", None, False)
     _give(reg, REAL2_UID, "Hollowfen", flask)
     assert [c.label for c in pr.crafters_of(reg, "alchemy")] == ["Hollowfen"], "the puppet is never named"
     reg.retire(REAL2_UID, "Hollowfen")
-    assert pr.crafters_of(reg, "alchemy") == [] and pr.catalog(reg) == [] and pr.who_can_make(reg, "flask of the titans") == []
+    assert pr.crafters_of(reg, "alchemy") == [] and pr.catalog(reg) == [] and [e.crafters for e in pr.who_can_make(reg, "flask of the titans")] == [[]]
 
 
 def test_rename_and_merge_rewrite_the_records(reg):
@@ -360,3 +365,100 @@ def test_profession_consequence_without_a_skill(reg):
     assert cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": None}], by_id=UID) == ["Your Leatherworking is recorded."]
     assert cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": None, "recipes": [{"name": "Devilsaur Gauntlets"}, {"name": "Hide of the Wild"}]}],
                                      by_id=OFFICER_UID) == [f"{m.display_name}'s Leatherworking is recorded with 2 notable recipes."]
+
+
+# ---- the finder over the game's whole list (armory link §4.4): a listed recipe nobody makes is a different answer from
+# a name the game doesn't have; same-name recipes are separate rows told apart by their category (R6)
+
+def test_search_finds_a_listed_recipe_nobody_makes(reg):
+    _real(reg)
+    hits = pr.search(reg, "Ironfeather Shoulders")
+    assert [(e.name, e.id, e.crafters) for e in hits] == [("Ironfeather Shoulders", hits[0].recipe.id, [])]
+    assert hits[0].recipe.category == "Leather Pauldrons" and hits[0].profession == "leatherworking"
+    assert pr.nobody_sentence(hits[0].name) == "Nobody in the guild makes Ironfeather Shoulders yet."
+    assert [e.name for e in pr.who_can_make(reg, "ironfeather shoulders")] == ["Ironfeather Shoulders"], "who_can_make reads search"
+    assert pr.search(reg, "Thunderfury") == [] and pr.who_can_make(reg, "Thunderfury") == []
+    assert pr.NOT_A_RECIPE == "That isn't a recipe in the game's list."
+    assert pr.answer_lines(reg, hits) == ["Nobody in the guild makes Ironfeather Shoulders yet."]
+    assert pr.answer_lines(reg, []) == [pr.NOT_A_RECIPE]
+
+
+def test_search_three_tiers_over_the_list(reg):
+    every = sorted(r.name for r in reg.profile.recipes.values() if any(w.startswith("ironfeather") for w in r.key.split()))
+    assert len(every) >= 3
+    assert [e.name for e in pr.search(reg, "ironfeather")] == every, "part of a name: every Ironfeather recipe"
+    assert [e.name for e in pr.search(reg, "ironf sh")] == ["Ironfeather Shoulders"], "each typed word starts a word"
+    assert [e.name for e in pr.search(reg, "ironfeather shoulders")] == ["Ironfeather Shoulders"], "exact first"
+    assert [e.name for e in pr.search(reg, "who makes ironfeather shoulders?")] == ["Ironfeather Shoulders"], "a sentence by whole words"
+    twins = pr.search(reg, "lesser arcane elixir")
+    assert len(twins) == 2 and {e.profession for e in twins} == {"alchemy"}
+    assert len({e.id for e in twins}) == 2 and len({e.recipe.category for e in twins}) == 2, "same name, two rows told apart by category"
+    assert len(pr.search(reg, "a", limit=25)) == 25 and len(pr.search(reg, "a", limit=5)) == 5
+
+
+def test_crafted_recipes_sort_first(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 280, "recipes": [{"name": "Ironfeather Shoulders"}]}])
+    hits = pr.search(reg, "ironfeather")
+    assert hits[0].name == "Ironfeather Shoulders" and [c.label for c in hits[0].crafters] == [REAL_LABEL]
+    assert all(not e.crafters for e in hits[1:]) and [e.name for e in hits[1:]] == sorted(e.name for e in hits[1:])
+    assert pr.answer_lines(reg, hits[:1]) == [f"Ironfeather Shoulders (Leatherworking · Leather Pauldrons): {REAL_LABEL} (Kestrel, 280)"]
+
+
+def test_an_unmatched_recipe_still_names_its_crafter(reg):
+    _real(reg)
+    _typed(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Bold Gloves"}]}])
+    for q in ("bold gloves", "bold", "who makes bold gloves?"):
+        hits = pr.search(reg, q)
+        e = next(e for e in hits if e.key == "bold gloves")
+        assert e.recipe is None and e.id is None and [c.label for c in e.crafters] == [REAL_LABEL], q
+    assert pr.answer_lines(reg, pr.search(reg, "bold gloves")) == [f"Bold Gloves (Leatherworking): {REAL_LABEL} (Kestrel, 300)"]
+
+
+def test_catalog_keys_listed_recipes_by_id(reg):
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "alchemy", "skill": 300, "recipes": [{"id": t.id} for t in reg.profile.recipes_named("lesser arcane elixir")]}])
+    cat = pr.catalog(reg)
+    assert [e.name for e in cat] == ["Lesser Arcane Elixir", "Lesser Arcane Elixir"] and len({e.id for e in cat}) == 2
+    assert all(e.recipe is not None and e.recipe.id == e.id for e in cat)
+
+
+def test_help_section_does_not_carry_the_whole_list(reg):
+    import types
+    assert len(reg.profile.recipes) > 2000
+    _real(reg)
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bag"}]}])
+    ask = types.SimpleNamespace(reg=reg, question="who can make ironfeather shoulders or a mooncloth bag?")
+    out = pr.help_section(ask)
+    assert len(out) < 150
+    text = "\n".join(out)
+    assert "Nobody in the guild makes Ironfeather Shoulders yet." in text and "Mooncloth Bag" in text
+    assert "Ironfeather Leggings" not in text, "only the question's recipes, never the whole list"
+    ask = types.SimpleNamespace(reg=reg, question="who can make ironfeather")  # a part of a name: at most ten hits
+    assert sum(1 for line in pr.help_section(ask) if line.startswith("  - ")) <= 10
+
+
+def test_help_hit_finds_a_listed_recipe_of_two_words_or_more(reg):
+    assert pr.help_hit(reg, "anyone got an arcane elixir for me?")
+    assert not pr.help_hit(reg, "my corruption ticks for nothing"), "a one-word recipe name is a common word"
+
+
+def test_search_is_fast_enough_for_autocomplete(reg):
+    import time
+    pr.search(reg, "warm up")
+    t = time.perf_counter()
+    for q in ("i", "iron", "ironfeather sh", "who can make a mooncloth bag please", "lesser arcane elixir", "zzz"):
+        pr.search(reg, q)
+    assert (time.perf_counter() - t) / 6 < 0.1
+
+
+def test_the_finder_without_a_recipe_list_is_unchanged(reg):
+    import dataclasses
+    reg.profile = dataclasses.replace(reg.profile, recipes={})
+    _real(reg)
+    assert pr.search(reg, "ironfeather") == [], "only what members typed"
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 265, "recipes": [{"name": "Ironfeather Shoulders"}, {"name": "Ironfeather Breastplate"}]}])
+    hits = pr.who_can_make(reg, "ironfeather")
+    assert [e.name for e in hits] == ["Ironfeather Breastplate", "Ironfeather Shoulders"] and all(e.recipe is None and e.id is None for e in hits)
+    assert pr.who_can_make(reg, "flask of the titans") == []
+    assert pr.answer_lines(reg, []) == ["Nobody has registered that recipe yet."]
