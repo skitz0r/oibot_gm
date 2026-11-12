@@ -59,10 +59,11 @@ class Token:
         self._lock = threading.Lock()
         self._value: str | None = None
         self._expires = 0.0
+        self._margin = 60.0
 
     def get(self) -> str:
         with self._lock:
-            if self._value and self._clock() < self._expires - 60:
+            if self._value and self._clock() < self._expires - self._margin:
                 return self._value
             env = os.environ if self._env is None else self._env
             if not credentials_set(env):
@@ -74,7 +75,8 @@ class Token:
                 ttl = int(d.get("expires_in", 3600))
             except (TypeError, ValueError):
                 ttl = 3600
-            self._value, self._expires = d["access_token"], self._clock() + ttl
+            # renewed a minute early, or at half its life when it lives two minutes or less
+            self._value, self._expires, self._margin = d["access_token"], self._clock() + ttl, min(60.0, ttl / 2)
             return self._value
 
     def drop(self, value: str) -> None:

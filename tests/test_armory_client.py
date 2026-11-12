@@ -300,6 +300,41 @@ def test_one_token_for_the_process():
         battlenet.Token(post=post, env={}).get()
 
 
+def test_a_short_lived_token_is_not_renewed_on_every_call():
+    posts = []
+
+    def post(cid, secret):
+        posts.append(1)
+        return {"access_token": f"t{len(posts)}", "expires_in": 30}
+
+    now = [0.0]
+    tok = battlenet.Token(post=post, clock=lambda: now[0], env={"BLIZZARD_CLIENT_ID": "id", "BLIZZARD_CLIENT_SECRET": "s"})
+    assert tok.get() == "t1" and tok.get() == "t1"
+    now[0] = 14
+    assert tok.get() == "t1"
+    now[0] = 15  # half its life gone: renewed
+    assert tok.get() == "t2" and len(posts) == 2
+
+
+def test_NOT_MODIFIED_is_truthy_so_unchanged_is_never_an_empty_roster():
+    assert bool(NOT_MODIFIED) is True and repr(NOT_MODIFIED) == "NOT_MODIFIED"
+
+
+def test_a_304_returns_its_own_last_modified():
+    newer = "Fri, 13 Nov 2026 08:00:00 GMT"
+    a, _ = client({f"{G}/roster": (304, b"", {"Last-Modified": newer})})
+    assert a.roster("lantern-wardens", since=STAMP) == (NOT_MODIFIED, newer)
+    a, _ = client({f"{G}/roster": (304, b"")})
+    assert a.roster("lantern-wardens", since=STAMP) == (NOT_MODIFIED, STAMP)  # no header: what was sent
+
+
+def test_a_garbage_created_timestamp_is_ArmoryShape():
+    for stamp in (10 ** 30, -(10 ** 30)):
+        a, _ = client({G: (200, fixture("guild") | {"created_timestamp": stamp})})
+        with pytest.raises(ArmoryShape):
+            a.guild("lantern-wardens")
+
+
 def test_the_recipe_importer_shares_the_token_and_the_limiter(monkeypatch):
     from oibot_gm.importers import blizzard
 

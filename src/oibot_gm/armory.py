@@ -26,7 +26,7 @@ from oibot_gm import battlenet
 HOST = "https://{region}.api.blizzard.com"
 LOCALE = "en_US"
 TIMEOUT = 20
-NOT_MODIFIED: Any = type("NotModified", (), {"__repr__": lambda self: "NOT_MODIFIED", "__bool__": lambda self: False})()
+NOT_MODIFIED: Any = type("NotModified", (), {"__repr__": lambda self: "NOT_MODIFIED"})()  # truthy: never reads as an empty answer
 """What a conditional read returns when the armory answers 304 (nothing changed since `since`)."""
 
 DOWN_WORDS = "The armory can't be reached right now. Try again in a few minutes."
@@ -81,6 +81,7 @@ class Reply:
 class Fetched:
     data: dict
     modified: str | None  # the Last-Modified header verbatim (send it back as `since`)
+    unchanged: bool = False  # a 304 to `since`: data is {} and modified is the 304's Last-Modified, else `since`
 
 
 @dataclass(frozen=True)
@@ -231,7 +232,7 @@ class Armory:
         return text.replace(token, "<token>") if token else text
 
     def _get(self, path: str, ns: str, since: str | None = None, missing: str = MISSING_WORDS) -> Fetched | Any:
-        """GET path → Fetched, or NOT_MODIFIED on a 304 to `since`. Raises ArmoryMissing / ArmoryDown / ArmoryShape /
+        """GET path → Fetched (`unchanged` on a 304 to `since`). Raises ArmoryMissing / ArmoryDown / ArmoryShape /
         ArmoryAccess, each raised outside any except block (no chained exception can carry a header)."""
         url = f"{HOST.format(region=self.region)}{path}?{urllib.parse.urlencode({'namespace': ns, 'locale': LOCALE})}"
         renewed = retried = False
@@ -265,7 +266,7 @@ class Armory:
             break
         modified = reply.headers.get("last-modified")
         if status == 304:
-            return NOT_MODIFIED
+            return Fetched({}, modified or since, unchanged=True)
         if status == 404:
             raise ArmoryMissing(missing, f"GET {path}: 404")
         if status == 429:
@@ -289,19 +290,23 @@ class Armory:
         d = self._get(path, self.profile_ns, missing=GUILD_MISSING_WORDS).data
         rs = _dict(d, "ruleset", path)
         rid = _int(rs, "id", path)
-        created = _int(d, "created_timestamp", path)
+        try:
+            created = datetime.fromtimestamp(_int(d, "created_timestamp", path) / 1000, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            created = None
+        _need(created is not None, path, "created_timestamp out of range")
         return GuildFacts(id=_int(d, "id", path), slug=_str(d, "slug", path), name=_str(d, "name", path),
                           faction=_str(_dict(d, "faction", path), "name", path),
                           kind=self.rulesets.get(rid) or _str(rs, "name", path), members=_int(d, "member_count", path),
-                          created=datetime.fromtimestamp(created / 1000, tz=timezone.utc))
+                          created=created)
 
     def roster(self, slug: str, since: str | None = None) -> tuple[list[RosterRow] | Any, str | None]:
-        """The guild's members → (rows, Last-Modified); (NOT_MODIFIED, Last-Modified or `since`) on a 304 to `since`.
-        The rank is not read."""
+        """The guild's members → (rows, Last-Modified); on a 304 to `since`: (NOT_MODIFIED, the 304's Last-Modified, else
+        `since`). The rank is not read."""
         path = f"/data/wow/guild/{_in_path(slug)}/roster"
         got = self._get(path, self.profile_ns, since, missing=GUILD_MISSING_WORDS)
-        if got is NOT_MODIFIED:
-            return NOT_MODIFIED, since
+        if got.unchanged:
+            return NOT_MODIFIED, got.modified
         rows = []
         for m in _list(got.data, "members", path):
             _need(isinstance(m, dict), path, "member")
@@ -316,7 +321,7 @@ class Armory:
         `since`. ArmoryMissing below level 10 or before the character's first logout."""
         path = f"/profile/wow/character/{_in_path(slug)}"
         got = self._get(path, self.profile_ns, since, missing=CHARACTER_MISSING_WORDS)
-        if got is NOT_MODIFIED:
+        if got.unchanged:  # the caller keeps its stored `modified` (== since, or the 304's own stamp: profiles share one time)
             return NOT_MODIFIED
         d = got.data
         g = d.get("guild")

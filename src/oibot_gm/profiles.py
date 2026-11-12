@@ -222,7 +222,7 @@ class GameProfile:
     profession_rules: dict[str, int] = field(default_factory=lambda: {"skill_cap": 300, "trade_slots": 2})
     recipe_seed: dict[str, dict[str, Any]] = field(default_factory=dict)  # normalised name → {id, name, profession, skill}
     recipes: dict[int, RecipeDef] = field(default_factory=dict)  # recipes.yaml: the game's recipe list by id; empty = typed recipes
-    armory: dict[str, Any] | None = None  # integrations.yaml `armory` {region, profile_namespace, static_namespace}; None = no armory
+    armory: dict[str, Any] | None = None  # integrations.yaml `armory` {region, profile_namespace, static_namespace, classes, rulesets}; None = no armory
     _spec_cache: dict[str, SpecInfo] = field(default_factory=dict)
 
     @classmethod
