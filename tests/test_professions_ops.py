@@ -16,7 +16,7 @@ def test_profession_field_upserts_and_keeps_recipes(reg):
     reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "leatherworking", "skill": 275, "recipes": [{"name": "Hide of the Wild"}]}]}], "t", officer=True)
     m = reg.members[UID]
     rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="profession", value="leatherworking 300"))
-    assert rows[0]["professions"][0] == {"id": "leatherworking", "skill": 300, "recipes": [{"name": "Hide of the Wild", "id": None}]}
+    assert rows[0]["professions"][0] == {"id": "leatherworking", "skill": 300, "recipes": [{"name": "Hide of the Wild", "id": 12355}]}
     assert line == f"{LABEL} · Leatherworking: 275 → 300"
     rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="profession", value="Skinning"))
     assert rows[0]["professions"][1]["id"] == "skinning" and rows[0]["professions"][1]["skill"] is None and line == f"{LABEL} · Skinning: added"
@@ -71,7 +71,7 @@ def test_recipe_remove_finds_the_profession_that_holds_it(reg):
         {"id": "cooking", "skill": 300, "recipes": [{"name": "Savory Deviate Delight"}]}]}], "t", officer=True)
     m = reg.members[UID]
     rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_remove", value="savory deviate delight"))
-    assert rows[0]["professions"][1]["recipes"] == [] and rows[0]["professions"][0]["recipes"] == [{"name": "Devilsaur Gauntlets", "id": None}]
+    assert rows[0]["professions"][1]["recipes"] == [] and rows[0]["professions"][0]["recipes"] == [{"name": "Devilsaur Gauntlets", "id": 10789}]
     assert line == f"{LABEL} · Cooking recipes: − Savory Deviate Delight"
 
 
@@ -127,20 +127,17 @@ def test_a_recipe_with_two_crafters_and_no_main_among_them_asks_which(reg):
 
 # ---- a recipe on a character with no profession that makes things: ask, then record both (design §5.60 follow-up)
 
-MAKERS = ["alchemy", "blacksmithing", "enchanting", "engineering", "leatherworking", "tailoring", "cooking", "first_aid"]
-
-
 def test_a_recipe_with_a_guess_on_a_bare_character_adds_the_profession_too(reg):
     reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "skinning", "skill": 200}]}], "t", officer=True)
     m = reg.members[UID]
-    op = _op(member=m.display_name, character=LABEL, field="recipe_add", value="Green Dragonscale Cloak", text="leatherworking")
+    op = _op(member=m.display_name, character=LABEL, field="recipe_add", value="Green Dragonscale Breastplate", text="leatherworking")
     rows, line = configops._character_rows(reg, m, op)
     assert rows == [{"label": LABEL, "professions": [{"id": "skinning", "skill": 200, "recipes": []},
-                                                     {"id": "leatherworking", "skill": None, "recipes": [{"name": "Green Dragonscale Cloak", "id": None}]}]}]
-    assert line == f"{LABEL} · Leatherworking: added with Green Dragonscale Cloak"
+                                                     {"id": "leatherworking", "skill": None, "recipes": [{"name": "Green Dragonscale Breastplate", "id": None}]}]}]
+    assert line == f"{LABEL} · Leatherworking: added with Green Dragonscale Breastplate"
     said = configops.describe(reg, op, configops.PLAIN_WEB, by_id=UID)
     assert said.split("\n") == [f"{LABEL} has no Leatherworking on record yet.",
-                                f"Apply records Leatherworking on {LABEL} and adds Green Dragonscale Cloak to the recipes {LABEL} makes.",
+                                f"Apply records Leatherworking on {LABEL} and adds Green Dragonscale Breastplate to the recipes {LABEL} makes.",
                                 f'Say the skill when you know it, like "{LABEL} is 300 Leatherworking".']
     reg.save_character_table(UID, rows, "t", officer=True)
     c = next(c for c in reg.members[UID].active() if c.label == LABEL)
@@ -148,14 +145,18 @@ def test_a_recipe_with_a_guess_on_a_bare_character_adds_the_profession_too(reg):
 
 
 def test_a_recipe_without_a_guess_on_a_bare_character_asks_which_profession(reg):
+    """With the game's list the question offers only the professions whose list holds the recipe (Radiant Gloves is a
+    Blacksmithing and a Tailoring recipe); a name no profession makes is refused, not asked."""
     m = reg.members[UID]
-    with pytest.raises(professions.NeedsProfession, match=r"^Which profession makes Green Dragonscale Cloak\?$") as e:
-        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Green Dragonscale Cloak"))
-    assert (e.value.character, e.value.recipe, e.value.candidates) == (LABEL, "Green Dragonscale Cloak", MAKERS)
+    with pytest.raises(professions.NeedsProfession, match=r"^Which profession makes Radiant Gloves\?$") as e:
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Radiant Gloves"))
+    assert (e.value.character, e.value.recipe, e.value.candidates) == (LABEL, "Radiant Gloves", ["blacksmithing", "tailoring"])
     with pytest.raises(professions.NeedsProfession):
-        configops.describe(reg, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Green Dragonscale Cloak"), strict=True)
-    assert configops.describe(reg, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Green Dragonscale Cloak")) == \
-        "Which profession makes Green Dragonscale Cloak?", "the web and MCP print the question alone"
+        configops.describe(reg, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Radiant Gloves"), strict=True)
+    assert configops.describe(reg, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Radiant Gloves")) == \
+        "Which profession makes Radiant Gloves?", "the web and MCP print the question alone"
+    with pytest.raises(RegistryError, match=r"^Green Dragonscale Cloak isn't a recipe in the game's list\.$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Green Dragonscale Cloak"))
 
 
 def test_the_preview_says_the_confirm_sentences_for_profession_fields(reg):
@@ -179,8 +180,10 @@ def test_only_professions_the_character_can_hold_are_offered(reg):
     reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "herbalism", "skill": 200}, {"id": "mining", "skill": 200}]}], "t", officer=True)
     m = reg.members[UID]
     for text in (None, "leatherworking"):
-        with pytest.raises(professions.NeedsProfession, match=r"^Which profession makes Green Dragonscale Cloak\?$") as e:
-            configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Green Dragonscale Cloak", text=text))
-        assert e.value.candidates == ["cooking", "first_aid"]
+        with pytest.raises(professions.NeedsProfession, match=r"^Which profession makes Spiced Wolf Meat\?$") as e:
+            configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Spiced Wolf Meat", text=text))
+        assert e.value.candidates == ["cooking"]
+    with pytest.raises(RegistryError, match="^A character has two trade professions — drop one first\\.$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Radiant Gloves"))
     rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_add", value="Spiced Wolf Meat", text="cooking"))
     assert line == f"{LABEL} · Cooking: added with Spiced Wolf Meat"

@@ -244,14 +244,14 @@ def test_professions_list_shows_crafters_or_says_how_to_add_one(reg):
 
 def test_professions_who_stays_under_discords_limit_and_says_how_many_more(reg):
     tree = _offline_tree(reg)
-    recipes = [{"name": "Devilsaur Gauntlets"}, {"name": "Devilsaur Leggings"}, {"name": "Devilsaur Armor"}]
+    recipes = [{"name": "Devilsaur Gauntlets"}, {"name": "Devilsaur Leggings"}, {"name": "Ironfeather Shoulders"}]
     for i in range(10):
         uid = 9200 + i
         label = "Crafterxxx" + "abcdefghij"[i]
         reg.add_character(uid, f"A rather long display name for crafter number {i:02d}", label, "Hunter", "Survival", None, True)
         reg.save_character_table(uid, [{"label": label, "professions": [{"id": "leatherworking", "skill": 300 - i, "recipes": recipes}]}], "t", officer=True)
     ix = _ix(reg)
-    asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="devilsaur gauntlets leggings armor"))
+    asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="devilsaur gauntlets leggings ironfeather shoulders"))
     text, kw = ix.response.sent[0]
     assert len(text) < 2000
     assert text.splitlines()[-1].startswith("…and ") and text.endswith("more — the Professions page has them all.")
@@ -262,7 +262,11 @@ def test_professions_who_stays_under_discords_limit_and_says_how_many_more(reg):
 def test_professions_who_escapes_member_text_and_survives_a_profession_left_out_of_the_profile(reg):
     tree = _offline_tree(reg)
     reg.add_character(9300, "Star*Man_", "Starman", "Hunter", "Survival", None, True)
-    reg.save_character_table(9300, [{"label": "Starman", "professions": [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Bold *Gloves*"}]}]}], "t", officer=True)
+    from oibot_gm.registry import Profession, Recipe
+
+    m = reg.members[9300]  # a recipe typed before the game's list (kept unmatched): member text the reply escapes
+    m.main.professions = [Profession(id="leatherworking", skill=300, recipes=[Recipe(name="Bold *Gloves*")])]
+    reg.save(m, "typed recipe")
     ix = _ix(reg)
     asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="bold gloves"))
     text, _ = ix.response.sent[0]

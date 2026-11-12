@@ -12,6 +12,16 @@ def crafter(w, n=0, recipe="Mooncloth Bag", skill=300):
     return w.reg.members[m.discord_id]
 
 
+def typed_crafter(w, n, recipe):
+    """A Tailoring recipe typed before the game's list (armory link §4.3: kept unmatched) — what rename / merge rewrite."""
+    from oibot_gm.registry import Profession, Recipe
+
+    m = member(w, n)
+    m.main.professions = [Profession(id="tailoring", skill=300, recipes=[Recipe(name=recipe)])]
+    w.reg.save(m, "typed recipe")
+    return w.reg.members[m.discord_id]
+
+
 def test_professions_page_reads_catalog_and_find(w):
     m = crafter(w)
     h = as_user(w, m.discord_id)
@@ -27,8 +37,8 @@ def test_professions_page_reads_catalog_and_find(w):
 
 
 def test_rename_and_merge_are_officers_only_and_preview_first(w):
-    m = crafter(w)
-    crafter(w, 1, recipe="Mooncloth Bags")
+    m = typed_crafter(w, 0, "Mooncloth Bag")
+    typed_crafter(w, 1, "Mooncloth Bags")
     mh = as_user(w, m.discord_id)
     assert w.c.post("/api/professions/rename", json={"key": "mooncloth bag", "name": "Mooncloth Satchel"}, headers=mh).status_code == 403
     oh = as_user(w, OFFICER)

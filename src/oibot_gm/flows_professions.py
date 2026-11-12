@@ -68,7 +68,7 @@ class ProfessionsWizard(MemberWizard):
         return self.reread()[1]
 
     def entries(self, c: RegisteredCharacter) -> list[dict]:
-        return [p.model_dump() for p in c.professions]
+        return self.reg.professions_entries(c)
 
     def name(self, pid: str) -> str:
         return self.reg.profile.profession(pid).name

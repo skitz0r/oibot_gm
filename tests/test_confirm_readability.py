@@ -678,9 +678,11 @@ def people_cases(reg, rs, runs, ms, dump):
     from oibot_gm import professions as pr
 
     crafters = ms[6:11]
-    for i, cm in enumerate(crafters):
-        reg.save_character_table(cm.discord_id, [{"label": cm.main.label, "professions": [{"id": "tailoring", "skill": 300, "recipes": [
-            {"name": "Moonclth Bag" if i == 0 else "Mooncloth Bagg"}]}]}], "t", officer=True)
+    from oibot_gm.registry import Profession, Recipe
+
+    for i, cm in enumerate(crafters):  # spellings typed before the game's list (kept unmatched): what rename / merge fix
+        cm.main.professions = [Profession(id="tailoring", skill=300, recipes=[Recipe(name="Moonclth Bag" if i == 0 else "Mooncloth Bagg")])]
+        reg.save(cm, "typed recipe")
     dump.add("rename_recipe", "four members", _said(pr.rename_recipe, reg, "mooncloth bagg", "Mooncloth Bag", "Officer", by_id=OFFICER_ID, preview=True))
     dump.add("merge_recipe", "four members", _said(pr.merge_recipe, reg, "mooncloth bagg", "moonclth bag", "Officer", by_id=OFFICER_ID, preview=True))
     dump.add("rename_recipe", "one member", _said(pr.rename_recipe, reg, "moonclth bag", "Mooncloth Bag", "Officer", by_id=OFFICER_ID, preview=True))
@@ -704,7 +706,7 @@ def people_cases(reg, rs, runs, ms, dump):
 
     for who, by in (("an officer", OFFICER_ID), ("own record", cm.discord_id)):
         dump.add("preview_sentences", f"a recipe with the profession guessed, {who}",
-                 _said(said_op(field="recipe_add", value="Green Dragonscale Cloak", text="leatherworking"), by))
+                 _said(said_op(field="recipe_add", value="Green Dragonscale Breastplate", text="leatherworking"), by))
         dump.add("preview_sentences", f"a profession with no skill said, {who}", _said(said_op(field="profession", value="leatherworking"), by))
         reg.save_character_table(cm.discord_id, [{"label": lab, "professions": [{"id": "leatherworking", "skill": None, "recipes": [{"name": "Hide of the Wild"}]}]}], "t", officer=True)
         dump.add("preview_sentences", f"a recipe on a profession on record, {who}", _said(said_op(field="recipe_add", value="Devilsaur Gauntlets"), by))
@@ -715,10 +717,10 @@ def people_cases(reg, rs, runs, ms, dump):
     dump.add("profession_consequence", "no skill said, with recipes, an officer", _said(cq.profession_consequence, reg, cm, lab,
              [{"id": "tailoring", "skill": None, "recipes": [{"name": "Mooncloth Bag"}, {"name": "Bottomless Bag"}]}], by_id=OFFICER_ID))
     dump.add("profession_consequence", "no skill said, own record", _said(cq.profession_consequence, reg, cm, lab, [{"id": "tailoring", "skill": None}], by_id=cm.discord_id))
-    dump.add("ProfessionPickView", "the question", discord_policy.pick_question("Green Dragonscale Cloak", lab).split("\n"))
+    dump.add("ProfessionPickView", "the question", discord_policy.pick_question("Green Dragonscale Breastplate", lab).split("\n"))
     dump.add("ProfessionPickView", "the question, both choices on record", discord_policy.pick_question("Savory Deviate Delight", lab, on_record=True).split("\n"))
-    dump.add("ProfessionPickView", "a profession recorded with the recipe", [discord_policy.pick_result(lab, "Leatherworking", "Green Dragonscale Cloak", added=True)])
-    dump.add("ProfessionPickView", "a recipe on a profession on record", [discord_policy.pick_result(lab, "Leatherworking", "Green Dragonscale Cloak", added=False)])
+    dump.add("ProfessionPickView", "a profession recorded with the recipe", [discord_policy.pick_result(lab, "Leatherworking", "Green Dragonscale Breastplate", added=True)])
+    dump.add("ProfessionPickView", "a recipe on a profession on record", [discord_policy.pick_result(lab, "Leatherworking", "Green Dragonscale Breastplate", added=False)])
     dump.add("ProfessionPickView", "the record changed", [discord_policy.pick_changed(lab)])
     # I'm back: an absence over the open sheet it answered No thanks, and one that touched no sheet
     ev = runs["open recurring"]

@@ -485,6 +485,20 @@ class ListenMixin:
         except Exception as e:  # noqa: BLE001 — a background pass only logs
             log.warning("memory: hourly vectors failed (%s)", type(e).__name__)
 
+    async def _recipes_migrate(self) -> None:
+        """At start, per guild in a thread: Registry.migrate_recipes (idempotent — a start that matches nothing writes
+        nothing and says nothing); a run that matched recipes writes one ops line."""
+        from . import professions
+
+        for reg in self.registries.ordered():
+            try:
+                res = await asyncio.to_thread(reg.migrate_recipes)
+            except Exception as e:  # noqa: BLE001 — a start never fails on it; the next start tries again
+                log.warning("recipes: migration of %s failed (%s)", reg.key, type(e).__name__)
+                continue
+            if res["matched"]:
+                await self.ops.emit(reg.config, "info", professions.migrated_line(res))
+
     def _memory_rebuild(self) -> None:
         """At start, in a thread: the index from the rows, then the model once (seconds) when any guild remembers."""
         if mem.MEMORIES is None:
@@ -1347,6 +1361,9 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             self._memory_booted = True
             self.__dict__["_memory_ticked"] = time.time()  # the rebuild fills missing vectors now: the hourly tick starts an hour on
             self.loop.create_task(asyncio.to_thread(self._memory_rebuild))
+        if not getattr(self, "_recipes_booted", False):  # armory link §4.3: typed recipes matched to the game's list, once a start
+            self._recipes_booted = True
+            self.loop.create_task(self._recipes_migrate())
         print(f"oibot_GM online as {self.user} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · loot sessions: {len(self.events)}")
         for err in self.registries.load_errors:  # a guild that didn't load has no ops channel to tell
             print(f"guild NOT loaded — {err}")

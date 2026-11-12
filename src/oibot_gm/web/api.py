@@ -610,7 +610,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return {"label": c.label, "name": c.name, "surname": c.surname, "cls": c.cls, "spec": c.spec, "offspec": c.offspec, "is_main": c.is_main,
                 "status": c.status, "rank": c.rank, "rosters": list((runs or {}).get(c.label, [])), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off,
                 "flex": list(c.flex), "regular_on": [reg.series_label(k) for k in c.rosters if ":" in k],
-                "professions": [p.model_dump() for p in c.professions]}
+                "professions": reg.professions_entries(c)}
 
     def regulars_json(reg, m) -> list[dict]:
         """A member's regular series: {series, label, character, cls, spec, role} (the Me page's My regular raids)."""

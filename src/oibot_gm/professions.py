@@ -61,6 +61,21 @@ def _rows(reg: Registry):
                 yield m, c
 
 
+def unmatched(reg: Registry) -> list[dict]:
+    """The typed recipes the game's list did not match (armory link §4.3: id empty = unmatched), visible characters only,
+    for the officers' fix: rows {uid, member, label, profession, name}. Empty for a version without a list."""
+    if not reg.profile.has_recipe_list:
+        return []
+    rows = [{"uid": m.discord_id, "member": m.display_name, "label": c.label, "profession": p.id, "name": r.name}
+            for m, c in _rows(reg) for p in c.professions for r in p.recipes if r.id is None]
+    return sorted(rows, key=lambda x: (x["member"].lower(), x["label"].lower(), x["profession"], x["name"].lower()))
+
+
+def migrated_line(res: dict) -> str:
+    """The ops line of a migration that matched something (Registry.migrate_recipes' result)."""
+    return f"Recipes matched to the game's list: {res['matched']} matched, {res['unmatched']} not in the list."
+
+
 def catalog(reg: Registry) -> list[CatalogEntry]:
     by_key: dict[str, CatalogEntry] = {}
     spellings: dict[str, dict[str, int]] = {}
@@ -126,13 +141,14 @@ def _rewrite(reg: Registry, old_key: str, new_name: str, by: str, by_id: int | N
             has_new = new_key != old_key and any(norm_recipe(r.name) == new_key for r in p.recipes)
             recipes = []
             for r in p.recipes:
+                # an unmatched (id-less) recipe round-trips as it is (armory link §4.2); a renamed one is matched anew
                 if norm_recipe(r.name) == old_key:
                     if has_new:  # a merge onto a spelling this record already holds: one entry stays
                         continue
-                    recipes.append({"name": new_name, "id": r.id})
+                    recipes.append({"name": new_name, "id": r.id, **_kept_unmatched(reg, p.id, new_name, r.id)})
                     has_new = True
                 else:
-                    recipes.append({"name": r.name, "id": r.id})
+                    recipes.append({"name": r.name, "id": r.id, **_kept_unmatched(reg, p.id, r.name, r.id)})
             entries.append({"id": p.id, "skill": p.skill, "recipes": recipes})
         touched.setdefault(m.discord_id, (m, []))[1].append({"label": c.label, "professions": entries})
     for m, rows in touched.values():
@@ -146,6 +162,13 @@ def _rewrite(reg: Registry, old_key: str, new_name: str, by: str, by_id: int | N
         for m, rows in touched.values():
             reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)
     return said
+
+
+def _kept_unmatched(reg: Registry, pid: str, name: str, rid: int | None) -> dict:
+    """{'unmatched': True} for an id-less recipe the list doesn't give this profession (kept as typed), else {}."""
+    if rid is not None or not reg.profile.has_recipe_list:
+        return {}
+    return {} if any(x.profession == pid for x in reg.profile.recipes_named(norm_recipe(name))) else {"unmatched": True}
 
 
 def rename_sentences(reg: Registry, key: str, new_name: str) -> list[str]:
@@ -246,7 +269,7 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
     `hint` (op.text) = the profession when the character has more than one that takes recipes — or, on a character with
     none that makes things, the profession to record WITH the recipe (the parser's guess or the picker's choice: shown
     and confirmed, never applied silently). No hint there → NeedsProfession (the bot asks which)."""
-    cur = [p.model_dump() for p in c.professions]
+    cur = reg.professions_entries(c)
     if field in ("profession", "profession_remove"):
         d, skill = _find_profession(reg, value)
         have = next((p for p in cur if p["id"] == d.id), None)
@@ -324,6 +347,8 @@ def _needs(reg: Registry, c, cur: list[dict], recipe: str) -> RegistryError:
     nothing fits, the one refusal."""
     fit = _fitting(reg, cur, recipe)
     if not fit:
+        if reg.profile.has_recipe_list and not reg.profile.recipes_named(norm_recipe(recipe)):
+            return RegistryError(f"{recipe} isn't a recipe in the game's list.")  # not a slot problem: no profession makes it
         return RegistryError("A character has two trade professions — drop one first.")
     return NeedsProfession(c.label, recipe, fit, f"Which profession makes {recipe}?")
 

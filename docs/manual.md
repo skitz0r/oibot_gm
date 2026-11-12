@@ -343,8 +343,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   Witherbark Boots" goes to your one character that makes things, else to your main, and the bot asks which only when
   two of your characters could hold it. If the character has no profession that makes things yet, the bot asks which
   one makes it, or offers its best guess, and records both when you confirm; say the skill later. Its guess shows as
-  *"Rhoz has no Leatherworking on record yet. Apply records Leatherworking on Rhoz and adds Green Dragonscale Cloak to
-  the recipes Rhoz makes."*; when it can't guess, it asks *"Which profession makes Green Dragonscale Cloak?"* with a list
+  *"Rhoz has no Leatherworking on record yet. Apply records Leatherworking on Rhoz and adds Green Dragonscale Breastplate to
+  the recipes Rhoz makes."*; when it can't guess, it asks *"Which profession makes Radiant Gloves?"* with a list
   of the professions to pick from — only you can pick, nothing changes until you do, and the list expires after ten
   minutes. Say the profession and its recipes in one message ("I am 265 Leatherworking with the Ironfeather Shoulders
   recipe") and both are on the one change it shows: no question. When two of the character's professions make
@@ -352,8 +352,12 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   Cooking?"*); say "… with alchemy" to skip the question. The change it shows before **Apply** is in sentences, like
   the editor's (*"Your Leatherworking gains Devilsaur Gauntlets."*). A character has at most two trade professions (Alchemy,
   Blacksmithing, Enchanting, Engineering, Leatherworking, Tailoring, Herbalism, Mining and Skinning count); Cooking,
-  First Aid and Fishing are free. Herbalism, Mining, Skinning and Fishing make nothing, so they take no recipes. A recipe
-  name is up to 60 characters and is kept as you wrote it. Officers do the same for anyone: on the Members page the
+  First Aid and Fishing are free. A recipe is one of the game's own recipes for that profession: the bot takes the
+  game's spelling, and refuses a name the game doesn't have (*"Devilsaur Gauntlet isn't a recipe in the game's list."*)
+  or one another profession makes (*"Devilsaur Gauntlets isn't a Tailoring recipe."*). The game's list gives a few
+  recipes to Mining (its smelting), Herbalism, Skinning and Fishing too. Recipes typed before the bot knew the game's
+  list were matched to it once, when the bot started; one the list doesn't have stays on the record as it was written,
+  still names its crafter, and every save keeps it. Officers do the same for anyone: on the Members page the
   character's ⋮ › **Professions…** opens the same editor, and the search box there finds recipe names too; in plain
   text, naming the character, where their changes act (§8c). Professions belong to the character: they stay with it
   when you change your main, and a retired character is no longer named as a crafter. Reading an addon's export of your

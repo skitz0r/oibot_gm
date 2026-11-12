@@ -2169,13 +2169,16 @@ class Registry:
         self.save(m, f"{m.display_name}: {c.label} flex {', '.join(new) or 'none'}")
         return c
 
-    def check_professions(self, entries: list[dict]) -> list[Profession]:
+    def check_professions(self, entries: list[dict], *, trusted: bool = False) -> list[Profession]:
         """Validate and normalise a character's whole professions list (design §5.60) — one sentence per refusal:
         a profile profession, skill 1..cap, at most trade_slots crafting+gathering, each profession once, recipe names
-        non-empty, ≤ RECIPE_NAME_MAX, one per normalised name, none on a profession that makes nothing (ProfessionDef.makes)."""
+        non-empty, ≤ RECIPE_NAME_MAX, one per normalised name, none on a profession that makes nothing (ProfessionDef.makes).
+        With the game's recipe list (armory link §4.2) a recipe's identity is its id: see _list_recipes. `trusted` (the
+        armory's own facts) skips the trade-slot, skill-cap and on-the-list checks."""
         from .profiles import norm_recipe
 
         prof = self.profile
+        listed = prof.has_recipe_list
         if not isinstance(entries, list):
             raise RegistryError("professions is a list")
         rules = prof.profession_rules
@@ -2200,8 +2203,11 @@ class Registry:
                     skill = int(raw)
                 except (TypeError, ValueError):
                     raise RegistryError(f"Skill is a number from 1 to {cap}.")
-                if not 1 <= skill <= cap:
+                if not (1 <= skill if trusted else 1 <= skill <= cap):
                     raise RegistryError(f"Skill is a number from 1 to {cap}.")
+            if listed:
+                out.append(Profession(id=pid, skill=skill, recipes=self._list_recipes(d, e.get("recipes") or [], trusted)))
+                continue
             recipes: list[Recipe] = []
             keys: set[str] = set()
             for r in e.get("recipes") or []:
@@ -2225,9 +2231,123 @@ class Registry:
             if recipes and not d.makes:
                 raise RegistryError("A gathering profession has no recipes." if d.group == "gathering" else f"{d.name} has no recipes.")
             out.append(Profession(id=pid, skill=skill, recipes=recipes))
-        if sum(1 for p in out if prof.profession(p.id).group in ("crafting", "gathering")) > slots:
+        if not trusted and sum(1 for p in out if prof.profession(p.id).group in ("crafting", "gathering")) > slots:
             raise RegistryError("A character has two trade professions — drop one first.")
         return out
+
+    def _list_recipes(self, d, given: list, trusted: bool) -> list[Recipe]:
+        """One profession's recipes against the game's list (armory link §4.2): an `id` must be on the list and of this
+        profession; a name alone is matched by norm_recipe within the profession (the lowest id of a name the profession
+        holds twice — R6) and takes the list's spelling; `unmatched: true` round-trips an already-stored id-less recipe
+        as it is. Dedupe by id (an unmatched one by its name). With the list, a profession has recipes when the list
+        gives it any (R7). `trusted` keeps an id or a name the list doesn't know."""
+        from .profiles import norm_recipe
+
+        prof = self.profile
+        recipes: list[Recipe] = []
+        ids: set[int] = set()
+        keys: set[str] = set()
+        for r in given:
+            raw = r if isinstance(r, dict) else {"name": r}
+            name = " ".join(str(raw.get("name") or "").split())
+            rid = raw.get("id")
+            try:
+                rid = int(rid) if rid else None
+            except (TypeError, ValueError):
+                raise RegistryError("A recipe's id is a number.")
+            if not name and rid is None:
+                raise RegistryError("A recipe needs a name.")
+            if len(name) > RECIPE_NAME_MAX and not trusted:
+                raise RegistryError(f"A recipe name is up to {RECIPE_NAME_MAX} characters.")
+            if rid is not None:
+                hit = prof.recipes.get(rid)
+                if hit is None and not trusted:
+                    raise RegistryError(f"{name or 'That recipe'} isn't a recipe in the game's list.")
+                if hit is not None and hit.profession != d.id and not trusted:
+                    raise RegistryError(f"{hit.name} isn't a {d.name} recipe.")
+                if hit is None and not name:
+                    raise RegistryError("A recipe needs a name.")
+                rec = Recipe(name=hit.name if hit else name, id=rid)
+            elif raw.get("unmatched") is True:
+                rec = Recipe(name=name, id=None)
+            else:
+                k = norm_recipe(name)
+                named = prof.recipes_named(k)
+                own = [x for x in named if x.profession == d.id]
+                if own:
+                    best = min(own, key=lambda x: x.id)
+                    rec = Recipe(name=best.name, id=best.id)
+                elif trusted:
+                    rec = Recipe(name=name, id=None)
+                elif named:
+                    raise RegistryError(f"{name} isn't a {d.name} recipe.")
+                else:
+                    raise RegistryError(f"{name} isn't a recipe in the game's list.")
+            if rec.id is not None:
+                if rec.id in ids:
+                    continue
+                ids.add(rec.id)
+            else:
+                k = norm_recipe(rec.name)
+                if k in keys:
+                    continue
+                keys.add(k)
+            recipes.append(rec)
+        if recipes and not trusted and not prof.recipes_of(d.id):
+            raise RegistryError("A gathering profession has no recipes." if d.group == "gathering" else f"{d.name} has no recipes.")
+        return recipes
+
+    def professions_entries(self, c: "RegisteredCharacter") -> list[dict]:
+        """A character's professions as check_professions entries — THE round trip for every surface that edits the
+        whole list (the wizards, plain text, the site): with the game's list, an id-less (unmatched) recipe carries
+        `unmatched: true` so a save keeps it as it is instead of refusing old data."""
+        out = [p.model_dump() for p in c.professions]
+        if self.profile.has_recipe_list:
+            for p in out:
+                for r in p["recipes"]:
+                    if r.get("id") is None:
+                        r["unmatched"] = True
+        return out
+
+    def migrate_recipes(self, by: str = "migration") -> dict:
+        """Armory link §4.3: every typed (id-less) recipe on record is matched to the game's list by norm_recipe within its
+        profession — it takes the list's id and spelling (the lowest id of a name the profession holds twice — R6). A
+        name the list gives only to another profession, or not at all, is kept as it is (unmatched). One commit for the
+        guild; a run that matches nothing writes nothing (it runs at every start). → {matched, unmatched}."""
+        from .profiles import norm_recipe
+
+        prof = self.profile
+        res = {"matched": 0, "unmatched": 0}
+        if not prof.has_recipe_list:
+            return res
+        with self.config_lock, self.store.batch(f"{self.key}: recipes matched to the game's list ({by})"):
+            for m in sorted(self.members.values(), key=lambda x: x.discord_id):
+                changed = False
+                for c in m.characters:
+                    for p in c.professions:
+                        kept: list[Recipe] = []
+                        ids = {r.id for r in p.recipes if r.id is not None}
+                        for r in p.recipes:
+                            if r.id is None:
+                                own = [x for x in prof.recipes_named(norm_recipe(r.name)) if x.profession == p.id]
+                                if own:
+                                    best = min(own, key=lambda x: x.id)
+                                    res["matched"] += 1
+                                    changed = True
+                                    if best.id in ids:
+                                        continue  # another spelling of a recipe already on the record: one stays
+                                    ids.add(best.id)
+                                    kept.append(Recipe(name=best.name, id=best.id))
+                                    continue
+                                res["unmatched"] += 1
+                            kept.append(r)
+                        p.recipes = kept
+                if changed:  # written quietly: a matched spelling is no change a person made, so no change-log line per member
+                    m.updated_at = now()
+                    self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
+                    self.store.commit(f"{self.key}: {m.display_name}: recipes matched to the game's list ({by})")
+                    self._snap[m.discord_id] = m.model_dump()
+        return res
 
     @_member_write
     def set_professions(self, discord_id: int, label: str, entries: list[dict]) -> RegisteredCharacter:
