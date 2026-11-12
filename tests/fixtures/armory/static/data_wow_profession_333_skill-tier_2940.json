@@ -1,0 +1,44 @@
+{
+ "_links": {
+  "self": {
+   "href": "https://us.api.blizzard.com/data/wow/profession/333/skill-tier/2940?namespace=static-1.60.1_70399-forever-us"
+  }
+ },
+ "id": 2940,
+ "name": "Enchanting",
+ "minimum_skill_level": 1,
+ "maximum_skill_level": 75,
+ "categories": [
+  {
+   "name": "Bracer Enchants",
+   "recipes": [
+    {
+     "key": {
+      "href": "https://us.api.blizzard.com/data/wow/recipe/4289?namespace=static-1.60.1_70399-forever-us"
+     },
+     "name": "Enchant Bracer - Inferior Stamina",
+     "id": 4289
+    },
+    {
+     "key": {
+      "href": "https://us.api.blizzard.com/data/wow/recipe/4293?namespace=static-1.60.1_70399-forever-us"
+     },
+     "name": "Enchant Bracer - Minor Deflect",
+     "id": 4293
+    }
+   ]
+  },
+  {
+   "name": "Runed Enchanting Rods",
+   "recipes": [
+    {
+     "key": {
+      "href": "https://us.api.blizzard.com/data/wow/recipe/4291?namespace=static-1.60.1_70399-forever-us"
+     },
+     "name": "Runed Copper Rod",
+     "id": 4291
+    }
+   ]
+  }
+ ]
+}

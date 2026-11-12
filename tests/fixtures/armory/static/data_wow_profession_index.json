@@ -1,0 +1,30 @@
+{
+ "_links": {
+  "self": {
+   "href": "https://us.api.blizzard.com/data/wow/profession/?namespace=static-1.60.1_70399-forever-us"
+  }
+ },
+ "professions": [
+  {
+   "key": {
+    "href": "https://us.api.blizzard.com/data/wow/profession/165?namespace=static-1.60.1_70399-forever-us"
+   },
+   "name": "Leatherworking",
+   "id": 165
+  },
+  {
+   "key": {
+    "href": "https://us.api.blizzard.com/data/wow/profession/333?namespace=static-1.60.1_70399-forever-us"
+   },
+   "name": "Enchanting",
+   "id": 333
+  },
+  {
+   "key": {
+    "href": "https://us.api.blizzard.com/data/wow/profession/2933?namespace=static-1.60.1_70399-forever-us"
+   },
+   "name": "Test Profession [DNT]",
+   "id": 2933
+  }
+ ]
+}

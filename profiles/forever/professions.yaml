@@ -1,19 +1,20 @@
 # profiles/forever/professions.yaml — the twelve WoW: Forever professions (design §5.60). Game data, never in code.
 # icon: a Blizzard render-CDN icon name, proxied by /img/icon/<name>.jpg like the class icons; the badge is the fallback.
+# blizzard_id: the game's profession id (scripts/import_recipes.py maps recipes.yaml by it; the armory reports by it).
 skill_cap: 300
 trade_slots: 2            # crafting + gathering together; secondary professions are free
 professions:
-  alchemy:        {name: Alchemy,        group: crafting,  icon: trade_alchemy}
-  blacksmithing:  {name: Blacksmithing,  group: crafting,  icon: trade_blacksmithing}
-  enchanting:     {name: Enchanting,     group: crafting,  icon: trade_engraving}
-  engineering:    {name: Engineering,    group: crafting,  icon: trade_engineering}
-  leatherworking: {name: Leatherworking, group: crafting,  icon: trade_leatherworking}
-  tailoring:      {name: Tailoring,      group: crafting,  icon: trade_tailoring}
-  herbalism:      {name: Herbalism,      group: gathering, icon: trade_herbalism}
-  mining:         {name: Mining,         group: gathering, icon: trade_mining}
-  skinning:       {name: Skinning,       group: gathering, icon: inv_misc_pelt_wolf_01}
-  cooking:        {name: Cooking,        group: secondary, icon: inv_misc_food_15}
-  first_aid:      {name: First Aid,      group: secondary, icon: spell_holy_sealofsacrifice}
-  fishing:        {name: Fishing,        group: secondary, icon: trade_fishing, recipes: false}   # makes nothing
+  alchemy:        {name: Alchemy,        group: crafting,  blizzard_id: 171, icon: trade_alchemy}
+  blacksmithing:  {name: Blacksmithing,  group: crafting,  blizzard_id: 164, icon: trade_blacksmithing}
+  enchanting:     {name: Enchanting,     group: crafting,  blizzard_id: 333, icon: trade_engraving}
+  engineering:    {name: Engineering,    group: crafting,  blizzard_id: 202, icon: trade_engineering}
+  leatherworking: {name: Leatherworking, group: crafting,  blizzard_id: 165, icon: trade_leatherworking}
+  tailoring:      {name: Tailoring,      group: crafting,  blizzard_id: 197, icon: trade_tailoring}
+  herbalism:      {name: Herbalism,      group: gathering, blizzard_id: 182, icon: trade_herbalism}
+  mining:         {name: Mining,         group: gathering, blizzard_id: 186, icon: trade_mining}
+  skinning:       {name: Skinning,       group: gathering, blizzard_id: 393, icon: inv_misc_pelt_wolf_01}
+  cooking:        {name: Cooking,        group: secondary, blizzard_id: 185, icon: inv_misc_food_15}
+  first_aid:      {name: First Aid,      group: secondary, blizzard_id: 129, icon: spell_holy_sealofsacrifice}
+  fishing:        {name: Fishing,        group: secondary, blizzard_id: 356, icon: trade_fishing, recipes: false}   # makes nothing
 # later, an addon export or a wago.tools seed: [{id: <game recipe id>, name: Devilsaur Gauntlets, profession: leatherworking, skill: 300}]
 recipes: []

@@ -1,0 +1,31 @@
+{
+ "_links": {
+  "self": {
+   "href": "https://us.api.blizzard.com/data/wow/recipe/4289?namespace=static-1.60.1_70399-forever-us"
+  }
+ },
+ "id": 4289,
+ "name": "Enchant Bracer - Inferior Stamina",
+ "description": "Permanently enchant bracers to increase the Stamina of the wearer by 2.",
+ "media": {
+  "key": {
+   "href": "https://us.api.blizzard.com/data/wow/media/recipe/4289?namespace=static-1.60.1_70399-forever-us"
+  },
+  "id": 4289
+ },
+ "reagents": [
+  {
+   "reagent": {
+    "key": {
+     "href": "https://us.api.blizzard.com/data/wow/item/247786?namespace=static-1.60.1_70399-forever-us"
+    },
+    "name": "Mote of Magic",
+    "id": 247786
+   },
+   "quantity": 1
+  }
+ ],
+ "crafted_quantity": {
+  "value": 1.0
+ }
+}

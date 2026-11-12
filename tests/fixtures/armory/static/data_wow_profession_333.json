@@ -1,0 +1,29 @@
+{
+ "_links": {
+  "self": {
+   "href": "https://us.api.blizzard.com/data/wow/profession/333?namespace=static-1.60.1_70399-forever-us"
+  }
+ },
+ "id": 333,
+ "name": "Enchanting",
+ "description": "Higher enchanting skill allows you to learn more powerful formulae.  Formulae can be found on trainers around the world as well as from quests and monsters.",
+ "type": {
+  "type": "PRIMARY",
+  "name": "Primary"
+ },
+ "media": {
+  "key": {
+   "href": "https://us.api.blizzard.com/data/wow/media/profession/333?namespace=static-1.60.1_70399-forever-us"
+  },
+  "id": 333
+ },
+ "skill_tiers": [
+  {
+   "key": {
+    "href": "https://us.api.blizzard.com/data/wow/profession/333/skill-tier/2940?namespace=static-1.60.1_70399-forever-us"
+   },
+   "name": "Enchanting",
+   "id": 2940
+  }
+ ]
+}

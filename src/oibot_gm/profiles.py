@@ -137,11 +137,44 @@ class ProfessionDef:
     group: str
     icon: str = ""
     recipes: bool = True
+    blizzard_id: int | None = None  # the game's profession id (the recipe list's importer and the armory map by it)
 
     @property
     def makes(self) -> bool:
         """THE rule for 'holds recipes': a gathering profession never does; a profession marked recipes: false doesn't."""
         return self.recipes and self.group != "gathering"
+
+
+@dataclass(frozen=True)
+class RecipeDef:
+    """One recipe of the game's list (recipes.yaml, armory link §4.1): Blizzard's id, its profession (the profile's id),
+    the game's category ("Leather Boots"), what it makes (None for an enchant) and its reagents."""
+    id: int
+    name: str
+    profession: str
+    category: str
+    makes: dict | None  # {id, name, quantity}
+    reagents: list[dict]  # [{id, name, quantity}]
+    key: str  # norm_recipe(name)
+
+
+_RECIPE_CACHE: dict[tuple[str, int], dict[int, RecipeDef]] = {}
+
+
+def load_recipes(path: Path) -> dict[int, RecipeDef]:
+    """recipes.yaml → {id: RecipeDef}; {} when the profile has no list. Parsed once per file version (it is large and
+    every profile load reads it)."""
+    if not path.exists():
+        return {}
+    stamp = (str(path), path.stat().st_mtime_ns)
+    if stamp not in _RECIPE_CACHE:
+        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+        doc = yaml.load(path.read_text(), Loader=loader) or {}  # noqa: S506 — a safe loader
+        _RECIPE_CACHE[stamp] = {int(r["id"]): RecipeDef(
+            id=int(r["id"]), name=str(r["name"]), profession=str(r["profession"]), category=str(r.get("category") or ""),
+            makes=dict(r["makes"]) if r.get("makes") else None, reagents=[dict(x) for x in (r.get("reagents") or [])],
+            key=norm_recipe(str(r["name"]))) for r in (doc.get("recipes") or [])}
+    return _RECIPE_CACHE[stamp]
 
 
 def norm_recipe(name: str) -> str:
@@ -188,6 +221,8 @@ class GameProfile:
     professions: dict[str, ProfessionDef] = field(default_factory=dict)  # professions.yaml (§5.60); empty = the version has none
     profession_rules: dict[str, int] = field(default_factory=lambda: {"skill_cap": 300, "trade_slots": 2})
     recipe_seed: dict[str, dict[str, Any]] = field(default_factory=dict)  # normalised name → {id, name, profession, skill}
+    recipes: dict[int, RecipeDef] = field(default_factory=dict)  # recipes.yaml: the game's recipe list by id; empty = typed recipes
+    armory: dict[str, Any] | None = None  # integrations.yaml `armory` {region, profile_namespace, static_namespace}; None = no armory
     _spec_cache: dict[str, SpecInfo] = field(default_factory=dict)
 
     @classmethod
@@ -212,11 +247,13 @@ class GameProfile:
         meta = y("profile.yaml") if (root / "profile.yaml").exists() else {}
         pdoc = (y("professions.yaml") or {}) if (root / "professions.yaml").exists() else {}
         professions = {pid: ProfessionDef(id=pid, name=str(d["name"]), group=str(d["group"]), icon=str(d.get("icon") or ""),
-                                             recipes=bool(d.get("recipes", True)))
+                                             recipes=bool(d.get("recipes", True)),
+                                             blizzard_id=int(d["blizzard_id"]) if d.get("blizzard_id") is not None else None)
                        for pid, d in (pdoc.get("professions") or {}).items()}
         rules = {"skill_cap": int(pdoc.get("skill_cap", 300)), "trade_slots": int(pdoc.get("trade_slots", 2))}
         seed = {norm_recipe(r["name"]): {"id": int(r["id"]), "name": str(r["name"]), "profession": str(r["profession"]), "skill": int(r.get("skill", 0))}
                 for r in (pdoc.get("recipes") or [])}
+        integ = (y("integrations.yaml") or {}) if (root / "integrations.yaml").exists() else {}
         return cls(
             name=c["profile"],
             label=str((meta or {}).get("label") or c["profile"].title()),
@@ -238,6 +275,8 @@ class GameProfile:
             professions=professions,
             profession_rules=rules,
             recipe_seed=seed,
+            recipes=load_recipes(root / "recipes.yaml"),
+            armory=dict(integ["armory"]) if integ.get("armory") else None,
         )
 
     def __post_init__(self):
@@ -292,6 +331,19 @@ class GameProfile:
 
     def professions_in(self, group: str) -> list[ProfessionDef]:
         return [d for d in self.professions.values() if d.group == group]
+
+    @property
+    def has_recipe_list(self) -> bool:
+        """THE gate of phase 1 (armory link §4.1): the version carries the game's recipe list."""
+        return bool(self.recipes)
+
+    def recipes_of(self, pid: str) -> list[RecipeDef]:
+        """A profession's recipes by the game's category, then name."""
+        return sorted((r for r in self.recipes.values() if r.profession == pid), key=lambda r: (r.category, r.name, r.id))
+
+    def recipes_named(self, key: str) -> list[RecipeDef]:
+        """Every recipe whose norm_recipe key is `key`, in every profession (one name can be two professions' recipes)."""
+        return sorted((r for r in self.recipes.values() if r.key == key), key=lambda r: (r.profession, r.id))
 
     def spec(self, cls: str, spec: str) -> SpecInfo:
         spec = self.spec_aliases.get(spec, spec)

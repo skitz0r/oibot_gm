@@ -1,0 +1,47 @@
+{
+ "_links": {
+  "self": {
+   "href": "https://us.api.blizzard.com/data/wow/recipe/4291?namespace=static-1.60.1_70399-forever-us"
+  }
+ },
+ "id": 4291,
+ "name": "Runed Copper Rod",
+ "media": {
+  "key": {
+   "href": "https://us.api.blizzard.com/data/wow/media/recipe/4291?namespace=static-1.60.1_70399-forever-us"
+  },
+  "id": 4291
+ },
+ "crafted_item": {
+  "key": {
+   "href": "https://us.api.blizzard.com/data/wow/item/6218?namespace=static-1.60.1_70399-forever-us"
+  },
+  "name": "Runed Copper Rod",
+  "id": 6218
+ },
+ "reagents": [
+  {
+   "reagent": {
+    "key": {
+     "href": "https://us.api.blizzard.com/data/wow/item/6217?namespace=static-1.60.1_70399-forever-us"
+    },
+    "name": "Copper Rod",
+    "id": 6217
+   },
+   "quantity": 1
+  },
+  {
+   "reagent": {
+    "key": {
+     "href": "https://us.api.blizzard.com/data/wow/item/247786?namespace=static-1.60.1_70399-forever-us"
+    },
+    "name": "Mote of Magic",
+    "id": 247786
+   },
+   "quantity": 1
+  }
+ ],
+ "crafted_quantity": {
+  "value": 1.0
+ }
+}

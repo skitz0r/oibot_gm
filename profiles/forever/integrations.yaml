@@ -1,6 +1,10 @@
-# Integrations for WoW: Forever — namespace unknown until launch. Candidates to try with `oibot items lookup`:
-# static-classic-forever-us, static-classicforever-us, static-forever-us
+# Integrations for WoW: Forever. The static namespace was probed live on 2026-11-11 (build 1.60.1_70399).
 wcl_host: null
-blizzard_namespace: static-classic-us
+blizzard_namespace: static-forever-us   # item lookups (`oibot items …`) and the recipe list (scripts/import_recipes.py)
 tmb_expansion_id: null
 wowhead_item_url: null   # no item database for Forever yet: cards show the name without a link
+# The Forever armory (armory link, spec §5/§9): no realms; {region} is filled from `region` (or a guild's own).
+armory:
+  region: us
+  profile_namespace: "profile-forever-{region}"
+  static_namespace: "static-forever-{region}"

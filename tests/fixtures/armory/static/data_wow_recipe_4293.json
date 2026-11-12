@@ -1,0 +1,31 @@
+{
+ "_links": {
+  "self": {
+   "href": "https://us.api.blizzard.com/data/wow/recipe/4293?namespace=static-1.60.1_70399-forever-us"
+  }
+ },
+ "id": 4293,
+ "name": "Enchant Bracer - Minor Deflect",
+ "description": "Permanently enchant bracers so that the defense skill of the wearer is increased by 3.",
+ "media": {
+  "key": {
+   "href": "https://us.api.blizzard.com/data/wow/media/recipe/4293?namespace=static-1.60.1_70399-forever-us"
+  },
+  "id": 4293
+ },
+ "reagents": [
+  {
+   "reagent": {
+    "key": {
+     "href": "https://us.api.blizzard.com/data/wow/item/10938?namespace=static-1.60.1_70399-forever-us"
+    },
+    "name": "Lesser Magic Essence",
+    "id": 10938
+   },
+   "quantity": 1
+  }
+ ],
+ "crafted_quantity": {
+  "value": 1.0
+ }
+}
