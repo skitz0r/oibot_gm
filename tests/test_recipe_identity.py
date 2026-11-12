@@ -203,6 +203,19 @@ def test_a_flagged_name_the_list_has_takes_its_id(reg):
     assert [(r.name, r.id) for r in _char(reg).professions[0].recipes] == [("Devilsaur Gauntlets", 10789)]
 
 
+def test_a_stored_unmatched_recipe_resent_without_the_flag_is_kept(reg):
+    """MCP set_professions and older clients send the record back without `unmatched: true`: the stored set is the
+    authority, the flag a convenience. A name that is not stored on the character is still refused."""
+    _real(reg)
+    _store_typed(reg, UID, LABEL, [Profession(id="leatherworking", skill=300, recipes=[Recipe(name="Devilsaur Gauntlet")])])
+    reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "leatherworking", "skill": 300, "recipes": [
+        {"name": "Devilsaur Gauntlet", "id": None}, {"name": "Hide of the Wild"}]}]}], "Kestrel", by_id=UID)
+    assert [(r.name, r.id) for r in _char(reg).professions[0].recipes] == [("Devilsaur Gauntlet", None), ("Hide of the Wild", 12355)]
+    with pytest.raises(RegistryError, match=r"^Gauntlets of Make Believe isn't a recipe in the game's list\.$"):
+        reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "leatherworking", "skill": 300, "recipes": [
+            {"name": "Devilsaur Gauntlet"}, {"name": "Gauntlets of Make Believe"}]}]}], "Kestrel", by_id=UID)
+
+
 def test_a_failed_migration_write_leaves_memory_as_it_was(reg, monkeypatch):
     _real(reg)
     _store_typed(reg, UID, LABEL, [Profession(id="leatherworking", skill=300, recipes=[Recipe(name="Devilsaur Gauntlets")])])

@@ -114,7 +114,7 @@ def _give(reg, uid, label, entries):
 
 def _typed(reg, uid, label, entries):
     """Recipes typed before the game's list (armory link §4.3: id empty = unmatched), written as the records on disk
-    hold them — what the officers' rename and merge rewrite."""
+    hold them."""
     from oibot_gm.registry import Profession, Recipe
 
     m = reg.members[uid]
@@ -181,42 +181,6 @@ def test_finders_skip_retired_puppets_and_departed(reg):
     assert pr.crafters_of(reg, "alchemy") == [] and pr.catalog(reg) == [] and [e.crafters for e in pr.who_can_make(reg, "flask of the titans")] == [[]]
 
 
-def test_rename_and_merge_rewrite_the_records(reg):
-    _real(reg)
-    _typed(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlet"}]}])
-    _typed(reg, REAL2_UID, REAL2_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlett"}]}])
-    said = pr.merge_recipe(reg, "devilsaur gauntlet", "devilsaur gauntlett", "Officer", by_id=OFFICER_UID, preview=True)
-    assert said == ["Devilsaur Gauntlet is merged into Devilsaur Gauntlett.", f"{reg.members[REAL_UID].display_name}'s record now reads Devilsaur Gauntlett."]
-    assert len(pr.catalog(reg)) == 2, "a preview writes nothing"
-    pr.merge_recipe(reg, "devilsaur gauntlet", "devilsaur gauntlett", "Officer", by_id=OFFICER_UID)
-    assert [e.name for e in pr.catalog(reg)] == ["Devilsaur Gauntlett"] and len(pr.catalog(reg)[0].crafters) == 2, \
-        "an unmatched spelling merged onto another stays unmatched"
-    pr.rename_recipe(reg, "devilsaur gauntlett", "Devilsaur Gauntlets", "Officer", by_id=OFFICER_UID)
-    assert [(e.name, e.id) for e in pr.catalog(reg)] == [("Devilsaur Gauntlets", 10789)], "renamed onto the game's list: its id"
-    with pytest.raises(RegistryError, match="Nobody has registered"):
-        pr.rename_recipe(reg, "nothing here", "X", "Officer", by_id=OFFICER_UID)
-
-
-def test_rename_saves_a_member_once_for_all_their_characters(reg):
-    _real(reg)
-    reg.add_character(REAL_UID, "Kestrel", "Hollowfen", "Hunter", "Survival", None, False)
-    bag = [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bagg"}]}]
-    _typed(reg, REAL_UID, REAL_LABEL, bag)
-    _typed(reg, REAL_UID, "Hollowfen", bag)
-    said = pr.rename_recipe(reg, "mooncloth bagg", "Mooncloth Bag", "Officer", by_id=OFFICER_UID)
-    assert said == ["Mooncloth Bagg is renamed Mooncloth Bag.", "Kestrel's record now reads Mooncloth Bag."], "one sentence per member"
-    names = {c.label: [r.name for p in c.professions for r in p.recipes] for c in reg.members[REAL_UID].active()}
-    assert names == {REAL_LABEL: ["Mooncloth Bag"], "Hollowfen": ["Mooncloth Bag"]}
-
-
-def test_rename_onto_another_recipe_is_refused(reg):
-    _real(reg)
-    _give(reg, REAL_UID, REAL_LABEL, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bag"}, {"name": "Bottomless Bag"}]}])
-    with pytest.raises(RegistryError, match="Bottomless Bag is already a recipe — merge into it instead."):
-        pr.rename_recipe(reg, "mooncloth bag", "bottomless  bag", "Officer", by_id=OFFICER_UID)
-    assert [e.name for e in pr.catalog(reg)] == ["Bottomless Bag", "Mooncloth Bag"]
-
-
 def test_profession_consequence_reads_aloud(reg):
     m = reg.members[UID]
     own = cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}, {"name": "Hide of the Wild"}]}], by_id=UID)
@@ -237,69 +201,6 @@ def test_profession_consequence_folds_three_or_more(reg):
     said = cq.profession_consequence(reg, m, LABEL, three, by_id=OFFICER_UID)
     assert said == [f"{m.display_name}'s Tailoring, Cooking and First Aid are recorded.",
                     f"{m.display_name}'s Alchemy, Herbalism and Fishing are removed from their record."]
-
-
-def _many(reg, n, recipe):
-    for i in range(n):
-        uid = 9200 + i
-        reg.add_character(uid, f"Crafter{i}", f"Stitcher{chr(97 + i)}", "Mage", "Frost", None, True)
-        _typed(reg, uid, f"Stitcher{chr(97 + i)}", [{"id": "tailoring", "skill": 300, "recipes": [{"name": recipe}]}])
-
-
-def test_rename_and_merge_fold_many_members_into_one_sentence(reg):
-    _many(reg, 6, "Mooncloth Bagg")
-    said = pr.rename_recipe(reg, "mooncloth bagg", "Mooncloth Bag", "Officer", by_id=OFFICER_UID, preview=True)
-    assert said == ["Mooncloth Bagg is renamed Mooncloth Bag.", "Six members' records now read Mooncloth Bag."]
-    reg.add_character(9300, "Odd", "Oddstitch", "Mage", "Frost", None, True)
-    _typed(reg, 9300, "Oddstitch", [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Moonclth Bag"}]}])
-    said = pr.merge_recipe(reg, "mooncloth bagg", "moonclth bag", "Officer", by_id=OFFICER_UID, preview=True)
-    assert said == ["Mooncloth Bagg is merged into Moonclth Bag.", "Six members' records now read Moonclth Bag."]
-    assert pr.count_word(13) == "13"
-
-
-def test_a_too_long_rename_is_refused_before_anything_is_written(reg):
-    _real(reg)
-    _typed(reg, REAL_UID, REAL_LABEL, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bagg"}]}])
-    for preview in (True, False):
-        with pytest.raises(RegistryError, match=r"^A recipe name is up to 60 characters\.$"):
-            pr.rename_recipe(reg, "mooncloth bagg", "M" * 61, "Officer", by_id=OFFICER_UID, preview=preview)
-    assert [e.name for e in pr.catalog(reg)] == ["Mooncloth Bagg"], "nothing is written"
-
-
-def test_rewrite_validates_every_record_before_the_first_write(reg, monkeypatch):
-    _real(reg)
-    for uid, label in ((REAL_UID, REAL_LABEL), (REAL2_UID, REAL2_LABEL)):
-        _typed(reg, uid, label, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth Bagg"}]}])
-    seen = []
-    real = reg.check_professions
-
-    def refuse_second(entries, **kw):
-        seen.append(entries)
-        if len(seen) == 2:
-            raise RegistryError("A recipe name is up to 60 characters.")
-        return real(entries, **kw)
-    monkeypatch.setattr(reg, "check_professions", refuse_second)
-    with pytest.raises(RegistryError):
-        pr.rename_recipe(reg, "mooncloth bagg", "Mooncloth Bag", "Officer", by_id=OFFICER_UID)
-    monkeypatch.undo()
-    assert [e.name for e in pr.catalog(reg)] == ["Mooncloth Bagg"], "no partial write"
-
-
-def test_a_case_only_rename_rewrites_the_spelling_in_place(reg):
-    _real(reg)
-    for uid, label in ((REAL_UID, REAL_LABEL), (REAL2_UID, REAL2_LABEL)):
-        _typed(reg, uid, label, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "mooncloth bag"}]}])
-    pr.rename_recipe(reg, "mooncloth bag", "Mooncloth Bag", "Officer", by_id=OFFICER_UID)
-    for uid in (REAL_UID, REAL2_UID):
-        assert [r.name for p in reg.members[uid].main.professions for r in p.recipes] == ["Mooncloth Bag"], "kept, never deleted"
-    assert [(e.name, len(e.crafters)) for e in pr.catalog(reg)] == [("Mooncloth Bag", 2)]
-
-
-def test_merge_onto_a_spelling_the_record_already_holds_keeps_one(reg):
-    _real(reg)
-    _typed(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlet"}, {"name": "Devilsaur Gauntlets"}]}])
-    pr.merge_recipe(reg, "devilsaur gauntlet", "devilsaur gauntlets", "Officer", by_id=OFFICER_UID)
-    assert [r.name for p in reg.members[REAL_UID].main.professions for r in p.recipes] == ["Devilsaur Gauntlets"]
 
 
 from oibot_gm.importers import professions as pimp
@@ -413,6 +314,22 @@ def test_an_unmatched_recipe_still_names_its_crafter(reg):
         e = next(e for e in hits if e.key == "bold gloves")
         assert e.recipe is None and e.id is None and [c.label for c in e.crafters] == [REAL_LABEL], q
     assert pr.answer_lines(reg, pr.search(reg, "bold gloves")) == [f"Bold Gloves (Leatherworking): {REAL_LABEL} (Kestrel, 300)"]
+
+
+def test_a_crafted_recipe_inside_a_longer_name_is_never_dropped(reg):
+    """'mooncloth for my mooncloth bag': Mooncloth drops out as part of the bag's name only while nobody makes it."""
+    _real(reg)
+    assert [e.name for e in pr.search(reg, "mooncloth for my mooncloth bag")] == ["Mooncloth Bag"]
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "tailoring", "skill": 300, "recipes": [{"name": "Mooncloth"}]}])
+    hits = pr.search(reg, "mooncloth for my mooncloth bag")
+    assert [(e.name, bool(e.crafters)) for e in hits] == [("Mooncloth", True), ("Mooncloth Bag", False)]
+
+
+def test_search_scoped_to_a_profession(reg):
+    assert {e.profession for e in pr.search(reg, "radiant gloves")} == {"blacksmithing", "tailoring"}
+    assert [(e.profession, e.id) for e in pr.search(reg, "radiant gloves", profession="tailoring")] == [("tailoring", 55533)]
+    assert pr.search(reg, "mooncloth", profession="leatherworking") == []
+    assert all(e.profession == "alchemy" for e in pr.search(reg, "elixir", None, profession="alchemy"))
 
 
 def test_catalog_keys_listed_recipes_by_id(reg):

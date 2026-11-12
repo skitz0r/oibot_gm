@@ -2240,9 +2240,10 @@ class Registry:
     def _list_recipes(self, d, given: list, trusted: bool, keep_unmatched=frozenset()) -> list[Recipe]:
         """One profession's recipes against the game's list (armory link §4.2): an `id` must be on the list and of this
         profession; a name alone is matched by norm_recipe within the profession (the lowest id of a name the profession
-        holds twice — R6) and takes the list's spelling; `unmatched: true` round-trips an id-less recipe as it is only
-        when it is already stored on the character (`keep_unmatched`) and the list doesn't have it — any other flagged
-        name is an ordinary name (matched, or refused). Dedupe by id (an unmatched one by its name). With the list, a profession has recipes when the list
+        holds twice — R6) and takes the list's spelling; an id-less name the list doesn't have round-trips as it is when
+        it is already stored on the character (`keep_unmatched` — the authority; the entry's `unmatched: true` flag is a
+        convenience, so MCP and older clients that leave it out are not refused); any other name is matched or refused.
+        Dedupe by id (an unmatched one by its name). With the list, a profession has recipes when the list
         gives it any (R7). `trusted` keeps an id or a name the list doesn't know."""
         from .profiles import norm_recipe
 
@@ -2278,7 +2279,7 @@ class Registry:
                 if own:
                     best = min(own, key=lambda x: x.id)
                     rec = Recipe(name=best.name, id=best.id)
-                elif raw.get("unmatched") is True and (d.id, k) in keep_unmatched:
+                elif (d.id, k) in keep_unmatched:
                     rec = Recipe(name=name, id=None)  # old data on this character: kept as it was
                 elif trusted:
                     rec = Recipe(name=name, id=None)
@@ -2364,13 +2365,13 @@ class Registry:
         return res
 
     @_member_write
-    def set_professions(self, discord_id: int, label: str, entries: list[dict], *, keep_unmatched: frozenset = frozenset()) -> RegisteredCharacter:
+    def set_professions(self, discord_id: int, label: str, entries: list[dict]) -> RegisteredCharacter:
         """Replace a character's professions with a validated list — the one setter; the table save calls it (like set_flex)."""
         m = self.member(discord_id)
         c = next((c for c in m.active() if c.matches(label)), None)
         if not c:
             raise RegistryError(f"You have no active character named {label}.")
-        new = self.check_professions(entries, keep_unmatched=self.stored_unmatched(c) | set(keep_unmatched))
+        new = self.check_professions(entries, keep_unmatched=self.stored_unmatched(c))
         if [p.model_dump() for p in new] == [p.model_dump() for p in c.professions]:
             return c
         c.professions, c.updated_at = new, now()
@@ -5117,7 +5118,7 @@ class Registry:
 
     # ---- the character table (Me page and the Members page save the same shape)
     def save_character_table(self, discord_id: int, rows: list[dict], by: str, *, officer: bool = False, by_id: int | None = None,
-                             rev: str | None = None, keep_unmatched: frozenset = frozenset()) -> list[str]:
+                             rev: str | None = None) -> list[str]:
         """One save for a member's table. Each row: {label?, cls, spec, offspec?, name?, surname?, main?: bool (or slot: "main"),
         rank?, confirm?: bool, flex?: [role, …] (extra roles; [] clears, absent keeps), delete?: bool, retire?: bool}. A row whose
         label matches an active character updates it (spec/offspec, a name for a planned one); an unknown row adds a
@@ -5126,17 +5127,16 @@ class Registry:
         that is the main after the save; on an alt only 'alt'. `rank` and `confirm` need `officer` (a member's own POST
         with a rank is refused — no self-promotion). `rev` = the characters_rev the editor loaded (stale → CharactersChanged).
         The whole table is applied to a COPY first, so a refusal on row N leaves nothing applied; then for real, one commit.
-        Returns the change lines. `keep_unmatched` (code only, never a request): extra (profession, recipe key) pairs that
-        may stay unmatched — the officers' rename of an unmatched spelling (professions._rewrite)."""
+        Returns the change lines."""
         with self.config_lock:  # web saves run in worker threads while Discord writes on the loop (design §2.4)
-            rows = self.check_character_table(discord_id, rows, by, officer=officer, by_id=by_id, rev=rev, keep_unmatched=keep_unmatched)
+            rows = self.check_character_table(discord_id, rows, by, officer=officer, by_id=by_id, rev=rev)
             m = self.members.get(discord_id)
             who = m.display_name if m else by
             with self.store.batch(f"{self.key}: {by} saved {who}'s characters"):
-                return self._apply_table(discord_id, rows, by, by_id, keep_unmatched)
+                return self._apply_table(discord_id, rows, by, by_id)
 
     def check_character_table(self, discord_id: int, rows: list[dict], by: str, *, officer: bool = False, by_id: int | None = None,
-                              rev: str | None = None, keep_unmatched: frozenset = frozenset()) -> list[dict]:
+                              rev: str | None = None) -> list[dict]:
         """Everything save_character_table refuses, without writing: the rev, a puppet, a member's rank or confirm, and
         the whole table applied to a copy (the previews call it, so a {preview: true} that answers is a save that works).
         Returns the rows as they will be applied."""
@@ -5149,7 +5149,7 @@ class Registry:
                 if why:
                     raise RegistryError(why)
             rows = self._table_rows(m, rows, officer)
-            self._table_shadow(discord_id)._apply_table(discord_id, rows, by, by_id, keep_unmatched)  # a refusal raises here, nothing written
+            self._table_shadow(discord_id)._apply_table(discord_id, rows, by, by_id)  # a refusal raises here, nothing written
             return rows
 
     @staticmethod
@@ -5185,7 +5185,7 @@ class Registry:
         sh.save = save  # type: ignore[method-assign]
         return sh
 
-    def _apply_table(self, discord_id: int, rows: list[dict], by: str, by_id: int | None, keep_unmatched: frozenset = frozenset()) -> list[str]:
+    def _apply_table(self, discord_id: int, rows: list[dict], by: str, by_id: int | None) -> list[str]:
         m = self.members.get(discord_id)
         who = m.display_name if m else by
         done: list[str] = []
@@ -5243,7 +5243,7 @@ class Registry:
                     done.append(f"{cur.label}: flex {', '.join(cur.flex) or 'none'}")
             if row.get("professions") is not None:  # the whole list replaces (design §5.60); absent keeps
                 before = [p.model_dump() for p in cur.professions]
-                cur = self.set_professions(discord_id, cur.label, row["professions"], keep_unmatched=keep_unmatched)
+                cur = self.set_professions(discord_id, cur.label, row["professions"])
                 if [p.model_dump() for p in cur.professions] != before:
                     done.append(f"{cur.label}: professions {self.professions_summary(cur)}")
             if is_main:

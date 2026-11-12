@@ -219,6 +219,14 @@ def test_single_surface_features_are_written_down_with_a_living_path(web_routes,
             assert row["path"] in web_routes, f"{feature}: {row['path']!r} is not a declared route"
 
 
+def test_recipe_rename_and_merge_are_retired_and_the_unmatched_fix_is_web_only(mcp_tools, web_routes):
+    """armory link C7: recipe names are the game's, so Rename… / Merge… are gone from every surface; the officers' fix
+    for a recipe typed before the list (§4.3) lives beside the list of them on the Professions page."""
+    assert not {"POST /api/professions/rename", "POST /api/professions/merge"} & web_routes
+    assert not {"rename_recipe", "merge_recipe"} & mcp_tools
+    assert configops.BY_DESIGN_ONLY["recipe_fix"]["path"] == "POST /api/professions/unmatched"
+
+
 def test_every_test_bench_action_is_on_every_surface(mcp_tools, web_routes, slash_paths):
     """Both halves of the test bench on both surfaces (B9): each action of the `test` op has its Discord path, its web
     route and the MCP tool; the feed is web + MCP by design (Discord's side of a rehearsal is the cards and the digest)."""

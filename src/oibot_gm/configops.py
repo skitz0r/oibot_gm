@@ -566,6 +566,9 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     # §5.61: what the bot remembers is read and forgotten in lists; Discord reads the setting and answers from the memories
     "memories_list": {"surface": "web", "path": "GET /api/memories", "reason": "what the bot remembers is a searchable list with a Forget on every row: the Ops page's Memory tab (design §5.61); Discord reads the setting in /gm config plain and answers from the memories"},
     "my_memories": {"surface": "web", "path": "POST /api/me/memories/{key}/forget", "reason": "a member's own memories are a list on their Me page with Forget on each (design §5.61); a DM command would list prose nobody can skim"},
+    # armory link §4.3: recipes typed before the game's list that it doesn't have are fixed where they are listed; the
+    # officers' Rename… / Merge… of recipes are retired (C7) on every surface — a recipe's name is the game's
+    "recipe_fix": {"surface": "web", "path": "POST /api/professions/unmatched", "reason": "the recipes typed before the game's list that it doesn't have are a list on the Professions page, each with Pick the recipe… (a search over the list) and Remove beside it; a one-off clean-up of old data needs no second editor, and a member's own editor already removes one"},
 }
 
 

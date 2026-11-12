@@ -793,9 +793,10 @@ def set_member(member: str, character: str | None = None, rank: str | None = Non
 
 @mcp.tool()
 def set_professions(member: str, character: str, professions: list[dict], guild: Guild = None) -> str:
-    """Replace one character's professions (design §5.60): professions = [{id: leatherworking, skill: 300, recipes: [{name: "Devilsaur Gauntlets"}]}, …]
-    — the whole list; [] clears; skill null = not said yet (recorded without a number). Two trade professions at most; a gathering one has no
-    recipes. The owner's token writes it (no actor needed)."""
+    """Replace one character's professions (design §5.60): professions = [{id: leatherworking, skill: 300, recipes: [{id: 10789} or {name: "Devilsaur Gauntlets"}]}, …]
+    — the whole list; [] clears; skill null = not said yet (recorded without a number). Two trade professions at most. A recipe is one of the
+    game's list for that profession (a name is looked up there); a recipe the character already holds that the list doesn't have (typed
+    before it) is kept when sent back as it reads. The owner's token writes it (no actor needed)."""
     return msg(api(guild).post("/api/members/set", {"member": member, "character": character, "professions": professions}))
 
 
@@ -803,7 +804,8 @@ def set_professions(member: str, character: str, professions: list[dict], guild:
 def who_can_make(text: str, guild: Guild = None) -> str:
     """Who can make a recipe: searches the game's whole recipe list (exact name, the recipes a sentence names, or part of
     a name) plus typed recipes somebody makes; one line per recipe with its crafters, highest skill first, or "Nobody in
-    the guild makes <name> yet." for a listed recipe nobody makes, or "That isn't a recipe in the game's list." Names only."""
+    the guild makes <name> yet." for a listed recipe nobody makes, or "That isn't a recipe in the game's list." The first
+    25 recipes, then "And N more recipes match." Names only."""
     return msg(api(guild).get("/api/professions/find", q=text))
 
 

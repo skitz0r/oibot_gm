@@ -331,7 +331,11 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   notable recipes. **Save** first shows the bot's own sentences (*"Your Alchemy is recorded at 300."*), then writes.
   In Discord, `/me professions` does the same: pick the character (skipped when you have one), and it lists that
   character's professions with **Add profession…**, **Change skill…**, **Add recipe…** and **Remove…**. The profession
-  and the skill are picked from lists (the skill list starts with **Not said yet**); only a recipe's name is typed. Each ends on one confirm screen with the same
+  and the skill are picked from lists (the skill list starts with **Not said yet**). **Add recipe…** asks for part of the
+  recipe's name ("devilsaur", "ironfeather sh") and lists the matching recipes of that profession from the game's own
+  list to pick from (two recipes with one name are told apart by their category; past 25 matches it says how many and
+  asks you to narrow it); a name the list doesn't have gets *"That isn't a recipe in the game's list."* with
+  **Search again…**. Each ends on one confirm screen with the same
   sentences (*"Your Leatherworking is recorded at 300 with 1 notable recipe."*), and nothing changes before **Do it**.
   When both trades are taken it says so (*"Two trades are taken. Cooking, First Aid and Fishing are open."*) and offers
   only those.
@@ -340,16 +344,17 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   sets the skill), "I just
   learned Devilsaur Gauntlets on Rhoz", "take Devilsaur Gauntlets off Rhoz", "remove enchanting from Jonnie". It shows the
   change and waits for your **Apply**, like any change to your record. You need not name the character: "I can make
-  Witherbark Boots" goes to your one character that makes things, else to your main, and the bot asks which only when
-  two of your characters could hold it. If the character has no profession that makes things yet, the bot asks which
-  one makes it, or offers its best guess, and records both when you confirm; say the skill later. Its guess shows as
-  *"Rhoz has no Leatherworking on record yet. Apply records Leatherworking on Rhoz and adds Green Dragonscale Breastplate to
-  the recipes Rhoz makes."*; when it can't guess, it asks *"Which profession makes Radiant Gloves?"* with a list
-  of the professions to pick from — only you can pick, nothing changes until you do, and the list expires after ten
-  minutes. Say the profession and its recipes in one message ("I am 265 Leatherworking with the Ironfeather Shoulders
-  recipe") and both are on the one change it shows: no question. When two of the character's professions make
-  things, the bot asks which one makes the recipe the same way (*"Which profession makes Elixir of Fortitude — Alchemy or
-  Cooking?"*); say "… with alchemy" to skip the question. The change it shows before **Apply** is in sentences, like
+  Ironfeather Shoulders" goes to your one character that makes things, else to your main, and the bot asks which only when
+  two of your characters could hold it. The bot looks the recipe up in the game's list, so it knows which profession
+  makes it: the whole name in any case, or enough of it ("ironf shoulders"); when part of a name fits several recipes
+  it names up to five (*"Did you mean Devilsaur Gauntlets or Devilsaur Leggings?"*) and changes nothing. If the
+  character doesn't have that profession yet and could still take it, the change records both, and says so before
+  you confirm (*"Rhoz has no Leatherworking on record yet. Apply records Leatherworking on Rhoz and adds Green Dragonscale
+  Breastplate to the recipes Rhoz makes."*); say the skill later. The bot asks only when the game has a recipe of that
+  name in two professions the character holds, or could take (*"Which profession makes Radiant Gloves?"*), with a
+  list of the professions to pick from — only you can pick, nothing changes until you do, and the list expires after ten
+  minutes; say "… with tailoring" to skip the question. Say the profession and its recipes in one message ("I am 265
+  Leatherworking with the Ironfeather Shoulders recipe") and both are on the one change it shows: no question. The change it shows before **Apply** is in sentences, like
   the editor's (*"Your Leatherworking gains Devilsaur Gauntlets."*). A character has at most two trade professions (Alchemy,
   Blacksmithing, Enchanting, Engineering, Leatherworking, Tailoring, Herbalism, Mining and Skinning count); Cooking,
   First Aid and Fishing are free. A recipe is one of the game's own recipes for that profession: the bot takes the
@@ -357,7 +362,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   or one another profession makes (*"Devilsaur Gauntlets isn't a Tailoring recipe."*). The game's list gives a few
   recipes to Mining (its smelting), Herbalism, Skinning and Fishing too. Recipes typed before the bot knew the game's
   list were matched to it once, when the bot started; one the list doesn't have stays on the record as it was written,
-  still names its crafter, and every save keeps it. Officers do the same for anyone: on the Members page the
+  still names its crafter, and every save keeps it until an officer fixes it on the Professions page. Officers do the same for anyone: on the Members page the
   character's ⋮ › **Professions…** opens the same editor, and the search box there finds recipe names too; in plain
   text, naming the character, where their changes act (§8c). Professions belong to the character: they stay with it
   when you change your main, and a retired character is no longer named as a crafter. Reading an addon's export of your
@@ -372,10 +377,11 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   ("ironfeather" finds every Ironfeather recipe), in the search box: it searches the game's whole list of recipes, the
   ones somebody in the guild makes first, and each matching recipe shows its crafters, highest skill first, with their skill — names only, nobody is
   pinged. A recipe the game's list doesn't have, typed before the bot knew the list, still names its crafter. Below it, a tab per profession lists everyone who has it with a skill bar and their notable recipes. A
-  recipe nobody has added says so, and that the crafter adds it on the Me page. Officers keep the list tidy: a
-  recipe's **Rename…** fixes a misspelling on every record that holds it, and **Merge…** folds two spellings of the
-  same recipe into one (the same profession only). Both show the bot's own sentences first (*"Devilsaur Gauntlet is
-  merged into Devilsaur Gauntlets."*) and change nothing before you confirm. On a phone the search comes first, each
+  recipe nobody has added says so, and that the crafter adds it on the Me page. Recipe names are the game's, so there
+  is nothing to rename or merge. Officers see the recipes typed before the bot knew the game's list that the list
+  doesn't have (*"3 recipes are not in the game's list"*), each with **Pick the recipe…** (search the list, pick the
+  one it meant) and **Remove**. Both show the bot's own sentence first (*"Rhoz's Leatherworking lists Devilsaur
+  Gauntlets in place of Devilsaur Gauntlet."*) and change nothing before you confirm. On a phone the search comes first, each
   recipe is a card and the tabs scroll sideways.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
@@ -1847,7 +1853,7 @@ news post says can make the review read or write another server.
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, limits, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
-| `set_professions` · `who_can_make` | replace one character's professions — the whole list, each `{id, skill, recipes: [{name}]}`; `[]` clears; the two-trade rule and the rest are checked as everywhere else · the registered recipes matching a name, each with its crafters, highest skill first — names only, nobody pinged |
+| `set_professions` · `who_can_make` | replace one character's professions — the whole list, each `{id, skill, recipes: [{id} or {name}]}` (a name is looked up in the game's list; a recipe the character already holds that the list doesn't have is kept as it is); `[]` clears; the two-trade rule and the rest are checked as everywhere else · the game's recipes matching a name (and typed ones somebody makes), each with its crafters, highest skill first, the first 25 and how many more — names only, nobody pinged |
 | `list_guild_guides` · `withdraw_guild_guide` · `restore_guild_guide` | the guild guide library (§3b): every version, newest first, with its faction, when, who uploaded it, `latest` and `withdrawn` · take one out of members' reach or bring it back — **a decision: needs `OIBOT_MCP_ACTOR`** (`preview=true` = the sentences, no actor). No tool uploads or gets a guide: a BattleTag and an import string must not land in a transcript |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
 | `import_members` | a roster from a signup list (§7): rows `{discord_id, name, character, cls, spec, offspec?, rank?}` — `scripts/raidhelper_roster.py --members event.json` writes them from a Raid-Helper export — register each person with the character as their main; `preview=true` lists what would be added and skipped, nothing written; a row's `rank` needs the actor (D8), without one they start as trial |

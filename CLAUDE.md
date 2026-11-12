@@ -334,12 +334,16 @@ src/oibot_gm/
                        scripts/memory_probe.py = the spike's offline probe, scripts/listen_probe.py = the gate's retune check (bait ≥ 80 %, banter ≤ 15 %)
   professions.py       professions (design §5.60): catalog(reg) = the recipe catalog DERIVED from the records (a listed recipe per id in the
                        list's spelling, an unmatched one per norm_recipe key in the most used spelling, crafters highest skill first; never stored);
-                       search(reg, text, limit) = THE finder over the game's WHOLE list (indexed once per profile) + unmatched recipes with crafters, three
-                       tiers (exact, whole words, part of a name), made first; who_can_make reads it ('#<id>' = a picked recipe); nobody_sentence /
-                       NOT_A_RECIPE / answer_lines = its words; crafters_of(reg, pid); visible = active character, not a puppet, not left; rename_recipe / merge_recipe (officers, preview
-                       sentences, the rewrite through save_character_table); op_rows = the plain-text `character` op's four profession fields → a table
-                       row + its describe line (asks which profession when two could make it); HELP_WORDS / help_hit / help_section = the help section
-                       (every member-typed name through unfence); rename / merge validate every touched record before the first write and fold past two members.
+                       search(reg, text, limit, profession=) = THE finder over the game's WHOLE list (indexed once per profile) + unmatched recipes with crafters,
+                       three tiers (exact, whole words, part of a name; a crafted recipe never drops out as part of a longer name), made first; limit None =
+                       every match (the total); list_hits = the list alone through the same tiers (the wizard's select, plain text); who_can_make reads
+                       search ('#<id>' = a picked recipe); nobody_sentence / NOT_A_RECIPE / answer_lines (+ more_sentence) = its words; crafters_of(reg, pid);
+                       visible = active character, not a puppet, not left; has_recipes(reg, pid) (the list's, R7, else ProfessionDef.makes);
+                       op_rows = the plain-text `character` op's four profession fields → a table row + its describe line (with the list a recipe_add
+                       resolves against it: did_you_mean for several names, NeedsProfession only for two listed professions, one candidate never asked);
+                       fix_unmatched(reg, uid, label, pid, name, recipe_id|None, by, by_id=, preview=) = the officers' fix for a recipe typed before the
+                       list (Pick the recipe… / Remove; rename / merge are retired, armory link C7); HELP_WORDS / help_hit / help_section = the help section
+                       (every member-typed name through unfence).
                        Names only: nothing pings, DMs, tracks a request or reads a website. Game data: profiles/<v>/professions.yaml (GameProfile.professions,
                        profession_rules, ProfessionDef.makes); the confirm words: consequences.profession_consequence (verb "professions")
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
@@ -364,7 +368,7 @@ src/oibot_gm/
                        (/gm config channels: ChannelSelect / — not set — → draft → Review → apply_ops), ChannelSetWizard (the eight shortcuts' one confirm),
                        OfficersWizard (/gm config officers: RoleSelect, Map <legacy name>…), CompanionsWizard (/gm config companion: the hub → Issue… label
                        modal → member picker → decide → the DM; Revoke… → decide)) · flows_roster (MemberWizard/CharWizard: /me char, /roster char|rank|set-main) · flows_register (incl. the Discord application: picks → names → schedules → the guild's
-                       questions five per modal → review) · flows_recruit (/gm config recruitment) · flows_wishlist (/me wishlist) · flows_professions (§5.60: /me professions + /roster professions = one hub per character — Add profession… / Change skill… / Add recipe… / Remove…, skill in 17 preset steps, every write on the decide screen with profession_consequence — and /professions who|list, ephemeral, no model) · flows_guides (§5.63: /guide list · get = faction → version → BattleTag modal → the .txt DMed, a refused DM = the private reply · upload = the file read after the modal → decide · withdraw|restore, officers live) · flows_misc · flows_news (the proposal decide screen) · flows_loot · flows_test (/gm test compose|comp, the digest's TestAnswerButton). Commands and card buttons call FLOWS[name].
+                       questions five per modal → review) · flows_recruit (/gm config recruitment) · flows_wishlist (/me wishlist) · flows_professions (§5.60: /me professions + /roster professions = one hub per character — Add profession… / Change skill… / Add recipe… (with the game's list: part of the name → a select of that profession's recipes, value = the recipe id) / Remove…, skill in 17 preset steps, every write on the decide screen with profession_consequence — and /professions who|list, ephemeral, no model) · flows_guides (§5.63: /guide list · get = faction → version → BattleTag modal → the .txt DMed, a refused DM = the private reply · upload = the file read after the modal → decide · withdraw|restore, officers live) · flows_misc · flows_news (the proposal decide screen) · flows_loot · flows_test (/gm test compose|comp, the digest's TestAnswerButton). Commands and card buttons call FLOWS[name].
                        tests/wizard_harness.py drives a flow end to end with fake interactions and lints every screen
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id; schedule_set field = <schedule id>.<setting>), describe() diff,
                        apply() via the same code paths as commands, apply_async(bot=) for card-posting channels and announced absences; request text in <request>;
@@ -503,8 +507,8 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        always the session's own uid; /api/meta.guides = the version has the tool. The library (§5.63): GET /api/guides/library,
                        POST …/upload and …/{id}/download (members, never MCP), …/{id}/withdraw|restore (officers live, `preview` → sentences, MCP actor)
   web/api_professions.py  install_professions_api (called from api.py; design §5.60): GET /api/professions (every member: each profession's
-                       crafters + the catalog; `officer`), GET /api/professions/find?q= (who_can_make), POST /api/professions/rename|merge (officers;
-                       `preview` → the sentences, then the write). A character's professions are written by /api/members/set `professions` (officers,
+                       crafters + the catalog; `officer`; officers' `unmatched`), GET /api/professions/find?q=&profession= (who_can_make; 25 rows + `total`),
+                       POST /api/professions/unmatched (officers; `preview` → the sentences, then fix_unmatched's write). A character's professions are written by /api/members/set `professions` (officers,
                        the one-member route; MCP set_professions) and read on every character row and /api/meta.professions
   web/api_memory.py    install_memory_api (design §5.61): GET /api/memories (officers: search, channel, member, paging), POST
                        /api/memories/{key}/forget (officers; MCP needs the actor), POST /api/me/memories/{key}/forget (own words only, never MCP)

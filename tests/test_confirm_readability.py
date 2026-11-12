@@ -674,19 +674,26 @@ def people_cases(reg, rs, runs, ms, dump):
     dump.add("confirm_consequence", "a planned character, an officer", _said(cq.confirm_consequence, reg, reg.members[REAL + 61], "Priest (Holy)", by_id=OFFICER_ID), {"Priest"})
     nomain = SimpleNamespace(discord_id=REAL + 62, display_name="Nomain", main=None, rank=None, dm_opt_out=False)
     dump.add("rank_consequence", "no main yet, an officer", _said(cq.rank_consequence, reg, nomain, "core", by_id=OFFICER_ID), {"Nomain"})
-    # professions: an officer's rename / merge of a recipe several members hold (folded past two members)
+    # professions: an officer's fix of a recipe typed before the game's list (armory link §4.3): pick it, or remove it
     from oibot_gm import professions as pr
 
     crafters = ms[6:11]
     from oibot_gm.registry import Profession, Recipe
 
-    for i, cm in enumerate(crafters):  # spellings typed before the game's list (kept unmatched): what rename / merge fix
+    for i, cm in enumerate(crafters):  # spellings typed before the game's list (kept unmatched): what the fix is for
         cm.main.professions = [Profession(id="tailoring", skill=300, recipes=[Recipe(name="Moonclth Bag" if i == 0 else "Mooncloth Bagg")])]
         reg.save(cm, "typed recipe")
-    dump.add("rename_recipe", "four members", _said(pr.rename_recipe, reg, "mooncloth bagg", "Mooncloth Bag", "Officer", by_id=OFFICER_ID, preview=True))
-    dump.add("merge_recipe", "four members", _said(pr.merge_recipe, reg, "mooncloth bagg", "moonclth bag", "Officer", by_id=OFFICER_ID, preview=True))
-    dump.add("rename_recipe", "one member", _said(pr.rename_recipe, reg, "moonclth bag", "Mooncloth Bag", "Officer", by_id=OFFICER_ID, preview=True))
-    dump.add("rename_recipe", "too long", _said(pr.rename_recipe, reg, "mooncloth bagg", "M" * 61, "Officer", by_id=OFFICER_ID, preview=True))
+    fixed = crafters[0]
+
+    def fix(name, rid):
+        return _said(pr.fix_unmatched, reg, fixed.discord_id, fixed.main.label, "tailoring", name, rid, "Officer", by_id=OFFICER_ID, preview=True)
+
+    dump.add("fix_unmatched", "the recipe picked", fix("Moonclth Bag", 10431))
+    dump.add("fix_unmatched", "removed", fix("Moonclth Bag", None))
+    dump.add("fix_unmatched", "no longer on the record", fix("Mooncloth Bagg", None))
+    dump.add("fix_unmatched", "another profession's recipe", fix("Moonclth Bag", 10789))
+    fixed.main.professions[0].recipes.append(Recipe(name="Mooncloth Bag", id=10431))
+    dump.add("fix_unmatched", "the record already lists it", fix("Moonclth Bag", 10431))
     for cm in crafters:
         reg.save_character_table(cm.discord_id, [{"label": cm.main.label, "professions": []}], "t", officer=True)
     # the plain-text previews of the four profession fields, and the picker's question and result (design §5.60 follow-up)

@@ -933,6 +933,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         def label(e) -> str:
             n = len(e.crafters)
             made = f"{n} crafter{'s' if n != 1 else ''}" if n else "nobody makes it yet"
+            if not reg.profile.has_recipe_list:  # a version without the list: the label as it always read
+                return f"{e.name} · {made}"[:100]
             where = e.category or (reg.profile.professions[e.profession].name if e.profession in reg.profile.professions else None)
             return " · ".join(x for x in (e.name, where, made) if x)[:100]
         return [app_commands.Choice(name=label(e), value=(f"#{e.id}" if e.recipe is not None else e.key)[:100]) for e in hits[:25]]
@@ -1143,7 +1145,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not reg:
             return
         from . import professions as pr
-        hits = pr.who_can_make(reg, recipe)
+        hits = pr.who_can_make(reg, recipe, None)  # every match: fit_lines shows what fits and counts the rest
         if not hits:
             await interaction.response.send_message(pr.NOT_A_RECIPE if reg.profile.has_recipe_list
                                                     else "Nobody has registered that recipe yet — crafters add theirs with /me professions.", ephemeral=True)

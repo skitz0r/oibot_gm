@@ -1,5 +1,5 @@
 """The Professions page's routes over HTTP (design §5.60): the catalog and each profession's crafters for every member,
-the finder, the officers' rename / merge (preview first), and the one-member route taking a character's professions
+the finder, the officers' fix for typed recipes the game's list lacks (preview first), and the one-member route taking a character's professions
 with the confirm sentences on preview. The finders hide test puppets, so these use real members."""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def crafter(w, n=0, recipe="Mooncloth Bag", skill=300):
 
 
 def typed_crafter(w, n, recipe):
-    """A Tailoring recipe typed before the game's list (armory link §4.3: kept unmatched) — what rename / merge rewrite."""
+    """A Tailoring recipe typed before the game's list (armory link §4.3: kept unmatched) — what the officers fix."""
     from oibot_gm.registry import Profession, Recipe
 
     m = member(w, n)
@@ -59,24 +59,44 @@ def test_find_searches_the_whole_list_with_category_makes_and_reagents(w):
     assert {r["name"] for r in cat} == {"Mooncloth Bag", "Bold Gloves"}, "the page's catalog is still what somebody makes"
 
 
-def test_rename_and_merge_are_officers_only_and_preview_first(w):
-    m = typed_crafter(w, 0, "Mooncloth Bag")
-    typed_crafter(w, 1, "Mooncloth Bags")
-    mh = as_user(w, m.discord_id)
-    assert w.c.post("/api/professions/rename", json={"key": "mooncloth bag", "name": "Mooncloth Satchel"}, headers=mh).status_code == 403
+def test_rename_and_merge_routes_are_gone(w):
+    """armory link C7: recipe names are the game's; Rename… and Merge… are retired."""
+    typed_crafter(w, 0, "Mooncloth Bagg")
     oh = as_user(w, OFFICER)
-    p = w.c.post("/api/professions/rename", json={"key": "mooncloth bag", "name": "Mooncloth Satchel", "preview": True}, headers=oh).json()
-    assert p["sentences"][0] == "Mooncloth Bag is renamed Mooncloth Satchel."
-    assert w.reg.members[m.discord_id].main.professions[0].recipes[0].name == "Mooncloth Bag", "a preview writes nothing"
-    assert w.c.post("/api/professions/rename", json={"key": "mooncloth bag", "name": "Mooncloth Satchel"}, headers=oh).status_code == 200
-    assert w.c.get("/api/professions/find?q=mooncloth%20satchel", headers=oh).json()["recipes"]
-    r = w.c.post("/api/professions/rename", json={"key": "mooncloth satchel", "name": "Mooncloth Bags"}, headers=oh)
-    assert r.status_code == 400 and r.json()["error"] == "Mooncloth Bags is already a recipe — merge into it instead."
-    p = w.c.post("/api/professions/merge", json={"key": "mooncloth satchel", "into": "mooncloth bags", "preview": True}, headers=oh).json()
-    assert p["sentences"][0] == "Mooncloth Satchel is merged into Mooncloth Bags." and p["message"] == p["sentences"][0]
-    assert w.c.post("/api/professions/merge", json={"key": "mooncloth satchel", "into": "mooncloth bags"}, headers=oh).status_code == 200
-    cat = w.c.get("/api/professions", headers=oh).json()["recipes"]
-    assert [(e["name"], len(e["crafters"])) for e in cat] == [("Mooncloth Bags", 2)]
+    for path in ("/api/professions/rename", "/api/professions/merge"):
+        assert w.c.post(path, json={"key": "mooncloth bagg", "name": "Mooncloth Bag", "into": "mooncloth bag", "preview": True}, headers=oh).status_code == 404
+    assert not {"rename", "merge"} & set(w.c.get("/api/professions", headers=oh).json())
+
+
+def test_unmatched_recipes_are_fixed_by_officers_preview_first(w):
+    """§4.3: officers see the typed recipes the game's list doesn't have and pick the recipe or remove it."""
+    m = typed_crafter(w, 0, "Mooncloth Bagg")
+    mh = as_user(w, m.discord_id)
+    assert w.c.get("/api/professions", headers=mh).json()["unmatched"] == [], "members don't get the fix list"
+    body = {"uid": str(m.discord_id), "label": m.main.label, "profession": "tailoring", "name": "Mooncloth Bagg", "recipe_id": 10431}
+    assert w.c.post("/api/professions/unmatched", json=body, headers=mh).status_code == 403
+    oh = as_user(w, OFFICER)
+    d = w.c.get("/api/professions", headers=oh).json()
+    assert d["unmatched"] == [{"uid": str(m.discord_id), "member": m.display_name, "label": m.main.label, "profession": "tailoring", "name": "Mooncloth Bagg"}]
+    p = w.c.post("/api/professions/unmatched", json={**body, "preview": True}, headers=oh).json()
+    assert p == {"sentences": [f"{m.main.label}'s Tailoring lists Mooncloth Bag in place of Mooncloth Bagg."], "message": p["sentences"][0]}
+    assert w.reg.members[m.discord_id].main.professions[0].recipes[0].id is None, "a preview writes nothing"
+    assert w.c.post("/api/professions/unmatched", json=body, headers=oh).status_code == 200
+    assert [(r.id, r.name) for r in w.reg.members[m.discord_id].main.professions[0].recipes] == [(10431, "Mooncloth Bag")]
+    assert w.c.get("/api/professions", headers=oh).json()["unmatched"] == []
+    r = w.c.post("/api/professions/unmatched", json={**body, "recipe_id": None}, headers=oh)
+    assert r.status_code == 400 and r.json()["error"] == f"{m.main.label}'s Tailoring no longer lists Mooncloth Bagg."
+
+
+def test_find_scopes_to_a_profession_and_counts_every_match(w):
+    m = crafter(w)
+    h = as_user(w, m.discord_id)
+    d = w.c.get("/api/professions/find?q=radiant%20gloves&profession=tailoring", headers=h).json()
+    assert [(r["profession"], r["id"]) for r in d["recipes"]] == [("tailoring", 55533)] and d["total"] == 1
+    d = w.c.get("/api/professions/find?q=a", headers=h).json()
+    assert len(d["recipes"]) == 25 and d["total"] > 100
+    assert d["message"].splitlines()[-1] == f"And {d['total'] - 25} more recipes match."
+    assert w.c.get("/api/professions/find?q=", headers=h).json() == {"q": "", "recipes": [], "total": 0, "message": ""}
 
 
 def test_members_set_takes_professions_with_the_confirm_sentences(w):

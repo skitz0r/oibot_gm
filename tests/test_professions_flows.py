@@ -25,7 +25,15 @@ def _char(reg, uid, label):
     return next(c for c in reg.members[uid].active() if c.label == label)
 
 
+def _no_list(reg):
+    """A version without the game's list: typed recipes, as before the armory link."""
+    import dataclasses
+    reg.profile = dataclasses.replace(reg.profile, recipes={})
+
+
 def test_me_professions_adds_a_profession_a_skill_and_a_recipe(reg):
+    """Without the game's list the recipe is typed, as before."""
+    _no_list(reg)
     h = _as(reg, UID)
 
     async def go():
@@ -41,6 +49,7 @@ def test_me_professions_adds_a_profession_a_skill_and_a_recipe(reg):
         assert "Leatherworking 300" in h.text
         await h.press("Add recipe…")
         assert h.modal.title == "Leatherworking: add a recipe", "never 'A Alchemy recipe'"
+        assert [f.label for f in h.modal._fields] == ["The recipe's name"]
         await h.submit(h.modal, recipe="Devilsaur Gauntlets")
         assert "Your Leatherworking is recorded at 300 with 1 notable recipe." in h.text
         await h.press("Do it")
@@ -48,6 +57,55 @@ def test_me_professions_adds_a_profession_a_skill_and_a_recipe(reg):
     asyncio.run(go())
     c = _char(reg, UID, LABEL)
     assert c.professions[0].skill == 300 and c.professions[0].recipes[0].name == "Devilsaur Gauntlets"
+
+
+def test_add_recipe_searches_the_list_within_the_profession(reg):
+    """armory link §4.4: Add recipe… = part of the name (prose) → a select of the list's recipes of THAT profession
+    (value = the recipe id, the category tells twins apart) → the decide screen; no hit → NOT_A_RECIPE on the same
+    screen with Search again…."""
+    _give(reg, UID, LABEL, [{"id": "leatherworking", "skill": 300}, {"id": "alchemy", "skill": 300}])
+    h = _as(reg, UID)
+
+    async def go():
+        await FLOWS["me_professions"](h.command(), reg)
+        await h.press("Add recipe…")
+        await h.pick("Which profession makes it?", "leatherworking")
+        assert h.modal.title == "Leatherworking: add a recipe" and [f.label for f in h.modal._fields] == ["Part of the recipe's name"]
+        await h.submit(h.modal, recipe="mooncloth")  # a Tailoring recipe: not in this profession
+        assert "That isn't a recipe in the game's list." in h.text and "Search again…" in h.buttons() and "Back" in h.buttons()
+        await h.press("Search again…")
+        await h.submit(h.modal, recipe="devilsaur")
+        sel = next(s for s in h._items() if isinstance(s, discord.ui.Select) and s.placeholder == "Pick the recipe")
+        assert [(o.value, o.label, o.description) for o in sel.options] == [("10789", "Devilsaur Gauntlets", "Leather Gauntlets"),
+                                                                             ("10798", "Devilsaur Leggings", "Leather Legguards")]
+        await h.pick("Pick the recipe", "10789")
+        assert "Your Leatherworking is recorded at 300 with 1 notable recipe." in h.text and h.buttons() == ["Do it", "Back"]
+        await h.press("Do it")
+        assert "✅" in h.text
+        await FLOWS["me_professions"](h.command(), reg)
+        await h.press("Add recipe…")
+        await h.pick("Which profession makes it?", "alchemy")
+        await h.submit(h.modal, recipe="lesser arcane elixir")
+        sel = next(s for s in h._items() if isinstance(s, discord.ui.Select) and s.placeholder == "Pick the recipe")
+        assert len(sel.options) == 2 and len({o.label for o in sel.options}) == 1 and len({o.description for o in sel.options}) == 2, "twins told apart by category"
+    asyncio.run(go())
+    c = _char(reg, UID, LABEL)
+    assert [(r.id, r.name) for r in c.professions[0].recipes] == [(10789, "Devilsaur Gauntlets")]
+
+
+def test_add_recipe_says_how_many_match_past_a_select(reg):
+    _give(reg, UID, LABEL, [{"id": "tailoring", "skill": 300}])
+    h = _as(reg, UID)
+
+    async def go():
+        await FLOWS["me_professions"](h.command(), reg)
+        await h.press("Add recipe…")
+        await h.submit(h.modal, recipe="robe")
+        sel = next(s for s in h._items() if isinstance(s, discord.ui.Select) and s.placeholder == "Pick the recipe")
+        assert len(sel.options) == 25
+        n = sum(1 for r in reg.profile.recipes_of("tailoring") if any(w.startswith("robe") for w in r.key.split()))
+        assert n > 25 and f"{n} recipes match. The first 25 are listed. Search again to narrow it down." in h.text
+    asyncio.run(go())
 
 
 def test_a_full_trade_list_offers_only_secondary_professions(reg):
@@ -98,7 +156,9 @@ def test_add_recipe_asks_which_profession_and_refuses_a_gatherer_only_character(
 
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
-        assert "Add recipe…" not in h.buttons()  # nothing on the record makes things
+        assert "Add recipe…" in h.buttons(), "R7: the game's list gives Mining its smelting"
+        await h.press("Add recipe…")
+        assert set(_options(h, "Which profession makes it?")) == {"mining", "fishing"}
     asyncio.run(go())
     _give(reg, UID, LABEL, [{"id": "alchemy", "skill": 300}, {"id": "cooking", "skill": 300}])
 
@@ -108,8 +168,16 @@ def test_add_recipe_asks_which_profession_and_refuses_a_gatherer_only_character(
         assert set(_options(h, "Which profession makes it?")) == {"alchemy", "cooking"}
         await h.pick("Which profession makes it?", "cooking")
         await h.submit(h.modal, recipe="Smoked Desert Dumplings")
+        await h.pick("Pick the recipe", "13056")
         assert "Your Cooking is recorded at 300 with 1 notable recipe." in h.text
     asyncio.run(go2())
+    _no_list(reg)
+    _give(reg, UID, LABEL, [{"id": "mining", "skill": 300}, {"id": "fishing", "skill": 10}])
+
+    async def go3():
+        await FLOWS["me_professions"](h.command(), reg)
+        assert "Add recipe…" not in h.buttons()  # without a list: nothing on the record makes things
+    asyncio.run(go3())
 
 
 def test_roster_professions_is_the_officers_form(reg, monkeypatch):
@@ -280,6 +348,32 @@ def test_professions_who_stays_under_discords_limit_and_says_how_many_more(reg):
     nobody = sum(1 for e in hits if not e.crafters)  # recipes of the game's list the text names that nobody makes: one line each, after the crafted
     assert [bool(e.crafters) for e in hits[:3]] == [True] * 3
     assert int(text.splitlines()[-1].split()[1]) == 30 + nobody - shown
+
+
+def test_professions_who_counts_every_match_past_the_first_25(reg):
+    """A part of a name that matches hundreds of recipes: the closing line counts all of them, not only the 25 the
+    finder used to stop at."""
+    tree = _offline_tree(reg)
+    _crafter(reg)
+    ix = _ix(reg)
+    asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="a"))
+    text, _ = ix.response.sent[0]
+    lines = text.splitlines()
+    from oibot_gm import professions as pr
+    hits = pr.who_can_make(reg, "a", None)
+    assert len(hits) > 100
+    units = sum(max(1, len(e.crafters)) for e in hits)
+    shown = sum(1 for line in lines[:-2] if not line.startswith("**"))
+    assert lines[-1].startswith("…and ") and int(lines[-1].split()[1]) == units - shown
+
+
+def test_autocomplete_label_without_a_list_is_unchanged(reg):
+    _no_list(reg)
+    tree = _offline_tree(reg)
+    _crafter(reg)
+    auto = _cmd(tree, "professions who")._params["recipe"].autocomplete
+    got = asyncio.run(auto(_ix(reg), "devil"))
+    assert [(c.name, c.value) for c in got] == [("Devilsaur Gauntlets · 1 crafter", "devilsaur gauntlets")]
 
 
 def test_professions_who_escapes_member_text_and_survives_a_profession_left_out_of_the_profile(reg):

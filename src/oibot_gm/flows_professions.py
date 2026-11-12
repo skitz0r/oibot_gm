@@ -1,19 +1,23 @@
 """/me professions · /roster professions (design §5.60): a hub per character — its professions, skills and notable
 recipes — with Add profession… · Change skill… · Add recipe… · Remove…, each ending on THE decide screen with
 consequences.profession_consequence's sentences, written as a one-row table through MemberWizard.save_rows (THE
-character verb). Profession and skill are selects (the Wizard rule: a number is a preset select); a recipe's name is
-one prose field, validated by Registry.check_professions, never parsed. Never a DM."""
+character verb). Profession and skill are selects (the Wizard rule: a number is a preset select). With the game's
+recipe list (armory link §4.4) Add recipe… is a search: part of the name (prose, validated against the list, never
+parsed) → a select of that profession's recipes → the decide screen; without a list a recipe's name is one prose field,
+validated by Registry.check_professions. Never a DM."""
 from __future__ import annotations
 
 import discord
 
 from . import consequences as cq
+from . import professions as pr
 from .flows_roster import MemberWizard, _ico, _stop_at_entry
 from .professions import SKILL_UNSAID
 from .registry import RECIPE_NAME_MAX, RegisteredCharacter, Registry, RegistryError
-from .wizard import Field, Form, Opt, flow
+from .wizard import MAX_OPTIONS, Field, Form, Opt, flow
 
 NUMBER_WORDS = {1: "One", 2: "Two", 3: "Three", 4: "Four"}
+PICK_MAX = MAX_OPTIONS  # one select's worth of recipes
 NOT_SAID = "unsaid"  # the skill select's first option: the skill is not said yet (recorded as None)
 
 
@@ -82,7 +86,7 @@ class ProfessionsWizard(MemberWizard):
         return [d for d in self.reg.profile.professions.values() if d.id not in have and not (full and d.group != "secondary")]
 
     def makers(self, c: RegisteredCharacter):
-        return [p for p in c.professions if self.reg.profile.profession(p.id).makes]
+        return [p for p in c.professions if pr.has_recipes(self.reg, p.id)]
 
     # ---- the hub
     async def hub(self, interaction: discord.Interaction) -> None:
@@ -176,7 +180,10 @@ class ProfessionsWizard(MemberWizard):
         await self.recipe_form(interaction)
 
     async def recipe_form(self, interaction: discord.Interaction) -> None:
-        field = Field("recipe", "The recipe's name", description="Kept as you write it, like Devilsaur Gauntlets.", max_length=RECIPE_NAME_MAX)
+        if self.reg.profile.has_recipe_list:  # a search over the game's list: prose validated against it, never parsed
+            field = Field("recipe", "Part of the recipe's name", description="Like devilsaur or ironfeather sh. You pick the recipe next.", max_length=RECIPE_NAME_MAX)
+        else:
+            field = Field("recipe", "The recipe's name", description="Kept as you write it, like Devilsaur Gauntlets.", max_length=RECIPE_NAME_MAX)
         await self.open_form(interaction, Form(f"{self.name(self.draft['pid'])}: add a recipe", [field], self.recipe_typed))
 
     async def recipe_typed(self, interaction: discord.Interaction, values: dict[str, str]) -> None:
@@ -193,7 +200,37 @@ class ProfessionsWizard(MemberWizard):
         if hit is None:
             await self.refuse(interaction, f"{self.name(self.draft['pid'])} is no longer on {c.label}'s record.", self.hub, "Back")
             return
+        if self.reg.profile.has_recipe_list:
+            await self.recipe_hits(interaction, values.get("recipe", ""))
+            return
         hit["recipes"].append({"name": values.get("recipe", ""), "id": None})
+        await self.review(interaction, entries)
+
+    async def recipe_hits(self, interaction: discord.Interaction, text: str) -> None:
+        """The search's answer: up to PICK_MAX recipes of THIS profession from the game's list (the value is the recipe
+        id; the category tells same-name recipes apart — R6), or NOT_A_RECIPE on the same screen with Search again…."""
+        pid = self.draft["pid"]
+        hits = pr.list_hits(self.reg, text, profession=pid)
+        again = self.button("Search again…", self.recipe_form, discord.ButtonStyle.primary)
+        if not hits:
+            await self.show(interaction, pr.NOT_A_RECIPE + f" Search {self.name(pid)}'s recipes again, by part of the name.",
+                            again, self.button("Back", self.hub), self.button("Cancel", self.cancel))
+            return
+        text = f"Which {self.name(pid)} recipe?"
+        if len(hits) > PICK_MAX:
+            text += f" {len(hits)} recipes match. The first {PICK_MAX} are listed. Search again to narrow it down."
+        opts = [Opt(str(r.id), r.name, r.category or None) for r in hits[:PICK_MAX]]
+        await self.show(interaction, text, self.select("Pick the recipe", opts, self.recipe_picked), again,
+                        self.button("Back", self.hub), self.button("Cancel", self.cancel))
+
+    async def recipe_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        c = self.char()
+        entries = self.entries(c)
+        hit = next((e for e in entries if e["id"] == self.draft["pid"]), None)
+        if hit is None:
+            await self.refuse(interaction, f"{self.name(self.draft['pid'])} is no longer on {c.label}'s record.", self.hub, "Back")
+            return
+        hit["recipes"].append({"id": int(values[0])})
         await self.review(interaction, entries)
 
     # ---- remove a profession or one recipe

@@ -3904,10 +3904,9 @@ kept once.
 (`profiles.norm_recipe`: lower case, punctuation and double spaces folded, a trailing "s" kept — "Gauntlet" and
 "Gauntlets" stay two until an officer merges them), the spelling most crafters use, the profession, the crafters highest
 skill first. `who_can_make(reg, text)`: the exact normalised name, else every recipe whose words all appear in the text.
-`crafters_of(reg, pid)`. Both skip retired characters, test puppets and members who left (`visible`). Officers'
-`rename_recipe` / `merge_recipe` (same profession only) preview their sentences ("Devilsaur Gauntlet is merged into
-Devilsaur Gauntlets." · "Mira's record now reads Devilsaur Gauntlets.") and then rewrite every record holding the name, one
-table save per member. The confirm words for a character's professions are `consequences.profession_consequence` (people
+`crafters_of(reg, pid)`. Both skip retired characters, test puppets and members who left (`visible`). (The officers'
+`rename_recipe` / `merge_recipe` were retired by the armory link, C7: with the game's recipe list a recipe's name is the
+game's; `fix_unmatched` picks the listed recipe for, or removes, one typed before the list.) The confirm words for a character's professions are `consequences.profession_consequence` (people
 verb `professions`), linted by tests/test_confirm_readability.py. The import boundary
 (`importers/professions.py`: `detect`, `parse`, `FORMATS`) recognises nothing yet; no paste box shows until it does.
 
@@ -3964,8 +3963,8 @@ and "enchant", and `listen_state` adds the profile's profession names (game data
 with Apply, a question an answer.
 
 **Site and MCP routes** (`web/api_professions.py`): `GET /api/professions` (every member: each profession with its
-crafters, the catalog, `officer`), `GET /api/professions/find?q=`, `POST /api/professions/rename|merge` (officers,
-`preview` first). `POST /api/members/set` takes `professions` (a character's whole list, `[]` clears; preview = the
+crafters, the catalog, `officer`, `unmatched` for officers), `GET /api/professions/find?q=&profession=` (`total`),
+`POST /api/professions/unmatched` (officers, `preview` first; rename / merge retired by the armory link). `POST /api/members/set` takes `professions` (a character's whole list, `[]` clears; preview = the
 sentences). Character rows and `/api/meta.professions` (the list, skill cap, trade slots) carry them. MCP:
 `set_professions(member, character, professions)` over `/api/members/set`, `who_can_make(text)` over the finder;
 `plain_change` already covers the op.
@@ -3985,8 +3984,7 @@ sentences). Character rows and `/api/meta.professions` (the list, skill cap, tra
    `POST /api/members/set` `professions`); Members' search also matches recipe names. The Professions page
    (`pages/Professions.tsx` + `professions.module.css`, every member): the finder (a typed recipe name → each match with
    its crafters, highest skill first, names only), a tab per profession (crafters with a skill bar and their notable
-   recipes), and officers' **Rename…** / **Merge…** on a recipe, each previewing `rename_recipe` / `merge_recipe`'s
-   sentences before the write. On a phone the search comes first, hits are cards and the tabs scroll sideways.
+   recipes), and (until the armory link retired them) officers' **Rename…** / **Merge…** on a recipe. On a phone the search comes first, hits are cards and the tabs scroll sideways.
 4. Discord (`flows_professions.py`). **Built 2026-10-30:** `/me professions` and `/roster professions` (the officers'
    form): one hub per character with Add profession…, Change skill…, Add recipe… and Remove…; profession and skill are
    selects — the skill in 17 steps: 1, 25 to 275 by 25, then 280 to 300 by 5 —, a recipe's name is one prose modal

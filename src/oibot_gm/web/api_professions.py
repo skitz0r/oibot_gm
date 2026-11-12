@@ -1,5 +1,6 @@
-"""The Professions page's routes (design §5.60): the catalog and the crafters per profession for every member, the
-finder, and the officers' rename / merge (preview first, then the write through professions.py → the table verb)."""
+"""The Professions page's routes (design §5.60, armory link §4.3–4.4): the catalog and the crafters per profession for
+every member, the finder over the game's whole list, and the officers' fix for recipes typed before the list (preview
+first, then the write through professions.fix_unmatched → the table verb)."""
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +11,8 @@ from fastapi.responses import JSONResponse
 from .. import ops as ops_mod
 from .. import professions as pr
 from ..registry import RegistryError
+
+FIND_LIMIT = 25  # rows the finder returns; `total` counts every match
 
 
 def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> None:
@@ -30,31 +33,46 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
     @app.get("/api/professions")
     async def professions_get(request: Request):
         """Every member reads the catalog: each profession with its crafters (highest skill first) and every registered
-        recipe with its makers. `officer` = the reader may rename or merge."""
+        recipe with its makers. `officer` = the reader may fix recipes typed before the game's list; `unmatched` = those
+        recipes ({uid, member, label, profession, name}; [] for a member and for a version without the list)."""
         v = await who(request)
         reg = v.reg
         return {"professions": [{"id": d.id, "name": d.name, "group": d.group, "icon": d.icon, "crafters": [crafter_json(reg, c) for c in pr.crafters_of(reg, d.id)]}
                                 for d in reg.profile.professions.values()],
-                "recipes": [entry_json(reg, e) for e in pr.catalog(reg)], "officer": bool(v.officer)}
+                "recipes": [entry_json(reg, e) for e in pr.catalog(reg)], "officer": bool(v.officer),
+                "unmatched": [{**r, "uid": str(r["uid"])} for r in pr.unmatched(reg)] if v.officer else []}
 
     @app.get("/api/professions/find")
-    async def professions_find(request: Request, q: str = ""):
+    async def professions_find(request: Request, q: str = "", profession: str = ""):
         """The finder (professions.who_can_make): the game's whole list and the typed recipes somebody makes, what somebody
-        makes first; a listed recipe nobody makes has no crafters. `message` = the answer in words (answer_lines: MCP
-        reads it); an empty `q` answers nothing."""
+        makes first; a listed recipe nobody makes has no crafters. `profession` = that profession's recipes only (the
+        editor's search, Pick the recipe…). At most FIND_LIMIT rows; `total` = every match. `message` = the answer in
+        words (answer_lines: MCP reads it); an empty `q` answers nothing."""
         v = await who(request)
-        hits = pr.who_can_make(v.reg, q)
-        return {"q": q, "recipes": [entry_json(v.reg, e) for e in hits], "message": "\n".join(pr.answer_lines(v.reg, hits)) if q.strip() else ""}
+        hits = pr.who_can_make(v.reg, q, None, profession=profession.strip() or None)
+        shown = hits[:FIND_LIMIT]
+        return {"q": q, "recipes": [entry_json(v.reg, e) for e in shown], "total": len(hits),
+                "message": "\n".join(pr.answer_lines(v.reg, shown, len(hits))) if q.strip() else ""}
 
-    async def _maintain(v, d: dict, fn, *args):
-        """An officer's rename / merge: `preview` answers the sentences and writes nothing; a write saves each member's
-        record once (the table verb) and writes one audit line, the head sentence."""
+    @app.post("/api/professions/unmatched")
+    async def professions_unmatched(request: Request):
+        """Officers: {uid, label, profession, name, recipe_id (null = Remove), preview?} — a recipe typed before the game's
+        list takes the picked recipe's place, or comes off. `preview` answers the sentences and writes nothing; a write
+        saves the member's record once (the table verb) and writes one audit line."""
+        v, d = await body(request, officer=True)
+        try:
+            uid = int(str(d.get("uid") or "0"))
+            rid = d.get("recipe_id")
+            rid = int(rid) if rid not in (None, "") else None
+        except (TypeError, ValueError):
+            return JSONResponse({"error": pr.NOT_A_RECIPE}, status_code=400)
+        args = (v.reg, uid, str(d.get("label") or ""), str(d.get("profession") or ""), str(d.get("name") or ""), rid, v.name)
         preview = bool(d.get("preview"))
         try:
             if preview:
-                said = fn(v.reg, *args, v.name, by_id=v.uid, preview=True)
-            else:  # one git commit per member holding the recipe: off the event loop
-                said = await asyncio.to_thread(fn, v.reg, *args, v.name, by_id=v.uid, preview=False)
+                said = pr.fix_unmatched(*args, by_id=v.uid, preview=True)
+            else:  # a git commit: off the event loop
+                said = await asyncio.to_thread(pr.fix_unmatched, *args, by_id=v.uid, preview=False)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         if not preview:
@@ -62,15 +80,3 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
             if publish is not None:
                 publish("member", v.reg.key)  # an open Professions / Members / Me page reloads
         return {"sentences": said, "message": said[0]}
-
-    @app.post("/api/professions/rename")
-    async def professions_rename(request: Request):
-        """Officers: {key, name, preview?} — one recipe's spelling on every record that holds it."""
-        v, d = await body(request, officer=True)
-        return await _maintain(v, d, pr.rename_recipe, str(d.get("key") or ""), str(d.get("name") or ""))
-
-    @app.post("/api/professions/merge")
-    async def professions_merge(request: Request):
-        """Officers: {key, into, preview?} — two spellings of one recipe become the other's (same profession only)."""
-        v, d = await body(request, officer=True)
-        return await _maintain(v, d, pr.merge_recipe, str(d.get("key") or ""), str(d.get("into") or ""))
