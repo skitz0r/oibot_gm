@@ -617,7 +617,7 @@ def armory_guild_consequence(reg: Registry, facts) -> list[str]:
         change = f"It replaces {old.name}, and every character keeps its link."
     else:
         change = "The bot then reads its roster to show who is in the guild."
-    return [found, change, "Nobody gets a DM, and you can change or unlink it at any time."]
+    return [found, change, "You can change or unlink it at any time."]
 
 
 def armory_guild_clear_consequence(reg: Registry) -> list[str]:
@@ -627,7 +627,7 @@ def armory_guild_clear_consequence(reg: Registry) -> list[str]:
         return ["No guild is linked to this server."]
     return [f"{old.name} stops being this server's guild in the armory.",
             "Every character keeps its link, and who is in the guild stops being known.",
-            "Nobody gets a DM, and you can link a guild again at any time."]
+            "You can link a guild again at any time."]
 
 
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",

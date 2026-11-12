@@ -1111,26 +1111,30 @@ def armory_guild(guild: Guild = None) -> dict:
 
 
 @mcp.tool()
-def set_armory_guild(name: str | None = None, guild_id: int | None = None, clear: bool = False, preview: bool = False, guild: Guild = None) -> str:
+def set_armory_guild(name: str | None = None, guild_id: int | None = None, rev: str | None = None, clear: bool = False, preview: bool = False,
+                     guild: Guild = None) -> str:
     """Link this server to its guild in the game (the OWNER's decision: needs OIBOT_MCP_ACTOR = the owner's Discord id,
     sent as X-Oibot-Actor; refused without it or for an officer). `name` = the guild's name as spelled in the game. ALWAYS
-    `preview=true` first: it answers what the armory found (name, faction, kind, members, created, its id) — a stranger's
-    guild can share the name — read it to the person, then link with the same `name` and that `guild_id` (refused if the
-    name now finds another guild). `clear=true` unlinks (every character keeps its link); with `preview=true` the
-    sentences only. A preview needs no actor and changes nothing."""
+    `preview=true` first: it answers what the armory found (name, faction, kind, members, created), its `guild_id` and the
+    settings `rev` — a stranger's guild can share the name — read it to the person, then link with the same `name`, that
+    `guild_id` and that `rev` (refused if the name now finds another guild, or the owner's settings changed meanwhile).
+    `clear=true` unlinks (every character keeps its link): preview first too, then pass its `rev`. A preview needs no actor
+    and changes nothing."""
+    if not preview and not rev:
+        raise ToolError("Preview first (preview=true) and pass the rev it shows, so a change made meanwhile is not overwritten.")
     if clear:
-        data = api(guild).post("/api/admin/armory", {"clear": True, "preview": preview}, actor=not preview)
+        body = {"clear": True, "preview": True} if preview else {"clear": True, "rev": rev}
     else:
         if not (name or "").strip():
             raise ToolError("name: the guild's name as spelled in the game")
         if not preview and guild_id is None:
             raise ToolError("Preview first (preview=true) and pass the guild_id it shows: a stranger's guild can share the name.")
-        body = {"name": name, "preview": preview} if preview else {"name": name, "guild_id": guild_id}
-        data = api(guild).post("/api/admin/armory", body, actor=not preview)
+        body = {"name": name, "preview": True} if preview else {"name": name, "guild_id": guild_id, "rev": rev}
+    data = api(guild).post("/api/admin/armory", body, actor=not preview)
     if preview and isinstance(data, dict):
         found = data.get("found")
-        head = f"Found guild id {found['guild_id']}. " if found else ""
-        return head + " ".join(data.get("sentences") or [])
+        then = (f"To link it: guild_id={found['guild_id']}, rev={data.get('rev')}." if found else f"To unlink: clear=true, rev={data.get('rev')}.")
+        return " ".join(data.get("sentences") or []) + " " + then
     return msg(data)
 
 

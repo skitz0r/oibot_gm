@@ -1382,7 +1382,7 @@ the faction, the kind of guild (PvP, Normal, Roleplay or Roleplay PvP), how many
 - **On the site:** Config › **Settings**, the card *The guild in the armory* (officers read it): type the name, **Look
   it up**, read what was found, **Link this guild** (it confirms with the same sentences); **Unlink…** when one is linked.
 - **From Claude Code (MCP):** `armory_guild` reads it; `set_armory_guild` with `preview=true` says what the armory found
-  (and the guild's id), then links with that `guild_id` — the owner's decision, so it needs `OIBOT_MCP_ACTOR` set to the
+  (and the guild's id), then links with that `guild_id` and the `rev` it shows — the owner's decision, so it needs `OIBOT_MCP_ACTOR` set to the
   owner's Discord id.
 
 Nobody is DMed; the ops channel gets one line naming the guild. **Unlinking** keeps every character's own link; only
@@ -1862,7 +1862,7 @@ news post says can make the review read or write another server.
 | `list_guilds` | every server the bot serves, and which one a tool uses when `guild` is left out; `detached` = parked guilds (the bot was removed from their server — never a target) |
 | `setup_status` | the Config page's Setup checklist (each row ok / warn / bad with what was tested), the invite's state, and the Host card (invite link, servers that aren't guilds, parked guilds, the summary's Host lines as `facts`) |
 | `left_members` · `remove_record` | members who left the Discord server · remove one's record (officers; refused while they're in the server or hold a live seat) |
-| `armory_guild` · `set_armory_guild` | the guild in the game this server is linked to · link it (`preview=true` first: what the armory found and its id; then the same `name` with that `guild_id` — **needs `OIBOT_MCP_ACTOR`**, the owner's id) or unlink it (`clear=true`) — §8 |
+| `armory_guild` · `set_armory_guild` | the guild in the game this server is linked to · link it (`preview=true` first: what the armory found and its id; then the same `name` with that `guild_id` and `rev` — **needs `OIBOT_MCP_ACTOR`**, the owner's id) or unlink it (`clear=true`) — §8 |
 | `list_companions` · `revoke_companion` | the loot-companion tokens (label, connected or not, last seen, who issued it — never a value) · revoke one by label or id (`preview=true` says what it does first). Issuing is not a tool: a token is issued on the site or with `/gm config companion` (§8) |
 | `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), each raid's week, live runs, test bench, and `summary`: the configuration in words by section (as `config_summary`) |
 | `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (recurring or ad hoc and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |

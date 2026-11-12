@@ -19,8 +19,8 @@ OPS-01/S-01/S-05/S-06, §3.3 D).
   the guild's loot-companion tokens through SetupMixin.issue_companion / revoke_companion — the value is in the issue
   reply's body ONCE (no-store) and nowhere else (stored hashed, never logged); MCP lists and revokes but never issues.
 - `GET /api/admin/armory` (officers read) + `POST /api/admin/armory` (owner; armory link §5.1): the server's guild in the
-  armory. `{name, preview}` → the lookup's facts + the confirm sentences; `{name, guild_id?, rev?}` links it (a guild_id
-  that isn't what the name answers now → 409); `{clear, preview?, rev?}` unlinks. From MCP a write needs the actor (D8),
+  armory. `{name, preview}` → the lookup's facts + the confirm sentences; `{name, guild_id, rev?}` links it (guild_id from the
+  preview, required → 400 without it; another id than the name answers now → 409); `{clear, preview?, rev?}` unlinks. From MCP a write needs the actor (D8),
   who must be the owner. 404 where the guild's version has no armory (or the host has no Blizzard keys).
 """
 from __future__ import annotations
@@ -300,7 +300,7 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
             if preview:
                 if reg.config.armory is None:
                     return JSONResponse({"error": "No guild is linked to this server."}, status_code=400)
-                return {"preview": True, "sentences": armory_guild_clear_consequence(reg)}
+                return {"preview": True, "sentences": armory_guild_clear_consequence(reg), "rev": reg.config_rev("settings")}
             old = reg.config.armory
             try:
                 await asyncio.to_thread(lambda: reg.clear_armory_guild(v.name, by_id=v.uid, rev=rev))
@@ -315,11 +315,13 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
         except armory.ArmoryError as e:
             return JSONResponse({"error": e.words}, status_code=400)
         if preview:
-            return {"preview": True, "sentences": armory_guild_consequence(reg, facts),
+            return {"preview": True, "sentences": armory_guild_consequence(reg, facts), "rev": reg.config_rev("settings"),
                     "found": {"name": facts.name, "faction": facts.faction, "kind": facts.kind, "members": facts.members, "guild_id": facts.id,
                               "created_label": armory_created_words(reg, facts)}}
         want = d.get("guild_id")
-        if want is not None and str(want) != str(facts.id):
+        if want is None:  # D1: the guild linked is the one the owner read in a preview, never a fresh unseen lookup
+            return JSONResponse({"error": "Look the guild up first, then link the one it found."}, status_code=400)
+        if str(want) != str(facts.id):
             return JSONResponse({"error": "That name now finds a different guild in the armory. Look it up again before linking."}, status_code=409)
         try:
             await asyncio.to_thread(lambda: reg.set_armory_guild(facts, v.name, by_id=v.uid, rev=rev))

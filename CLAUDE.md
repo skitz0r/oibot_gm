@@ -445,7 +445,7 @@ src/oibot_gm/
                        retire_precedent, tier_item, set_wishlist, import_wishlists, import_ledger's apply) send X-Oibot-Actor = OIBOT_MCP_ACTOR (D8; app.py
                        mcp_actor validates it); §5.48: import_ledger (csv | path, preview → rev), import_batches / undo_import (void rows per batch, actor), loot_weights / set_loot_weights (owner, ops_change), distil.
                        list_companions / revoke_companion (§5.50: never a value; no issue tool — a token must not land in a transcript).
-                       armory_guild (read) / set_armory_guild (§5.1: preview → what the armory found + its id; the link carries that guild_id; actor = the owner).
+                       armory_guild (read) / set_armory_guild (§5.1: preview → what the armory found + its guild_id and the settings rev; the link / unlink carries them; actor = the owner).
                        list_guild_guides / withdraw_guild_guide / restore_guild_guide (§5.63: actor; no upload or get tool — no BattleTag in a transcript).
                        Setup tools (raid_set, schedule_*, raid_reset, aura_*, family_set, set_channel, set_config, set_recruitment, set_plain_permissions) send
                        TYPED changes through ops_change(guild, changes, preview) → POST /api/ops/change (`confirmed`; preview=True returns the Described lines);
@@ -537,7 +537,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        (v.stale_write → api.who 503 STALE_OFFICER). Companion tokens (§5.50, owner): GET /api/companions (rows, never a value),
                        POST /api/companions/issue (the value in that body ONCE, no-store; refused for MCP), POST /api/companions/revoke.
                        The server's guild (armory link §5.1): GET /api/admin/armory (officers read) + POST (owner: {name, preview} → found + sentences;
-                       {name, guild_id, rev} → linked, another id now → 409; {clear, preview?, rev?}; MCP writes need the owner as actor; 404 where
+                       {name, guild_id, rev} → linked (no guild_id → 400: the previewed guild only), another id now → 409; {clear, preview?, rev?}; MCP writes need the owner as actor; 404 where
                        armory.available is false — /api/meta.armory is that flag); one ops.audited line per write naming the guild
   guides/              the leveling-guide tool (design §5.55): rxp_decode (decode / encode an RXPGuides import string: RC4 keyed from the BattleTag +
                        zlib + Adler-32; GuideError = the refusal in words), rxp_md (Markdown per guide group), rxp_json (GuideGame from

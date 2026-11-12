@@ -249,7 +249,7 @@ def test_the_site_previews_links_and_unlinks(reg, rs, armory_on, env):
     p = c.post("/api/admin/armory", json={"name": "Lantern Wardens", "preview": True}, headers=h).json()
     assert p["preview"] and p["found"]["name"] == "Lantern Wardens" and p["found"]["members"] == 8 and p["found"]["kind"] == "Normal"
     assert "2026" in p["found"]["created_label"] and p["found"]["guild_id"] == 418362
-    assert p["sentences"] == cq.armory_guild_consequence(reg, facts()) and reg.config.armory is None
+    assert p["sentences"] == cq.armory_guild_consequence(reg, facts()) and reg.config.armory is None and p["rev"] == d["rev"]
     # a guild id that isn't the one previewed is refused (the name now answers with another guild)
     r = c.post("/api/admin/armory", json={"name": "Lantern Wardens", "guild_id": 5, "rev": d["rev"]}, headers=h)
     assert r.status_code == 409 and reg.config.armory is None
@@ -280,20 +280,31 @@ def test_mcp_previews_with_the_token_and_links_only_with_the_owner_as_actor(reg,
     try:
         assert "no guild linked yet" in ms.armory_guild()["words"]
         p = ms.set_armory_guild("Lantern Wardens", preview=True)
-        assert "Lantern Wardens is a Horde Normal guild" in p and "418362" in p and reg.config.armory is None
+        rev = reg.config_rev("settings")
+        assert "Lantern Wardens is a Horde Normal guild" in p and "guild_id=418362" in p and f"rev={rev}" in p and reg.config.armory is None
+        with pytest.raises(ms.ToolError, match="Preview first"):
+            ms.set_armory_guild("Lantern Wardens", guild_id=418362)  # no rev
         monkeypatch.delenv(ms.ACTOR_ENV, raising=False)
         with pytest.raises(ms.ToolError, match="OIBOT_MCP_ACTOR"):
-            ms.set_armory_guild("Lantern Wardens", guild_id=418362)
+            ms.set_armory_guild("Lantern Wardens", guild_id=418362, rev=rev)
         monkeypatch.setenv(ms.ACTOR_ENV, str(OFFICER))
         with pytest.raises(ms.ToolError, match="Owner only"):
-            ms.set_armory_guild("Lantern Wardens", guild_id=418362)
+            ms.set_armory_guild("Lantern Wardens", guild_id=418362, rev=rev)
         assert reg.config.armory is None
         monkeypatch.setenv(ms.ACTOR_ENV, str(OWNER))
-        assert "Lantern Wardens" in ms.set_armory_guild("Lantern Wardens", guild_id=418362)
+        reg.set_error_dms([], "Other owner")  # another owner's settings change after the preview: the stale rev is refused
+        with pytest.raises(ms.ToolError, match="changed since you looked"):
+            ms.set_armory_guild("Lantern Wardens", guild_id=418362, rev=rev)
+        assert reg.config.armory is None
+        rev = reg.config_rev("settings")
+        assert "Lantern Wardens" in ms.set_armory_guild("Lantern Wardens", guild_id=418362, rev=rev)
         assert reg.config.armory.guild_id == 418362
         assert ms.armory_guild()["linked"]["name"] == "Lantern Wardens"
-        assert "Every character keeps its link" in ms.set_armory_guild(clear=True, preview=True)
-        ms.set_armory_guild(clear=True)
+        u = ms.set_armory_guild(clear=True, preview=True)
+        assert "Every character keeps its link" in u and f"rev={reg.config_rev('settings')}" in u
+        with pytest.raises(ms.ToolError, match="Preview first"):
+            ms.set_armory_guild(clear=True)
+        ms.set_armory_guild(clear=True, rev=reg.config_rev("settings"))
         assert reg.config.armory is None
     finally:
         ms.use(None)
@@ -326,3 +337,15 @@ def test_the_armory_command_fits_discords_limits(reg):
     config = next(c for c in gm.commands if c.name == "config")
     cmd = next(c for c in config.commands if c.name == "armory")
     assert len(cmd.description) <= 100 and not cmd.parameters, "the guild's name is typed in the wizard's box, never an argument"
+
+
+def test_a_link_without_the_previewed_guild_id_is_refused(reg, rs, armory_on, env):
+    """D1 (review, fix round 1): the route never links what a name finds at write time unseen — a link names the
+    guild_id its preview showed, else one plain sentence and nothing written."""
+    bot = WebLootBot(reg, rs)
+    c = TestClient(web.create_app(bot))
+    h = as_user(c, OWNER)
+    rev = reg.config_rev("settings")
+    r = c.post("/api/admin/armory", json={"name": "Lantern Wardens", "rev": rev}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == "Look the guild up first, then link the one it found."
+    assert reg.config.armory is None and not bot.ops.lines

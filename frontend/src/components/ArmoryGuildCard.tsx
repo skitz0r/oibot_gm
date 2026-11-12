@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Card, Code, Group, Stack, Table, Text, TextInput } from "@mantine/core";
 import { api } from "../api";
 import { CardHeader, fail, ok } from "./Page";
@@ -14,6 +14,8 @@ interface ArmoryState {
 interface Found {
   found: { name: string; faction: string; kind: string; members: number; guild_id: number; created_label: string };
   sentences: string[];
+  /** the name this answer is for (set here, not by the server): an answer for a name no longer in the box is dropped */
+  query: string;
 }
 
 /** Config › Settings (owner edits, officers read; shown only when /api/meta.armory): link this server to its guild in the
@@ -26,24 +28,40 @@ export function ArmoryGuildCard() {
   const [name, setName] = useState("");
   const [found, setFound] = useState<Found | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [ask, confirmDialog] = useConfirm();
+  const typed = useRef("");  // the box as it is now: a lookup that answers after the name changed is ignored
+  typed.current = name.trim();
   useDirty("armory", name.trim() !== "" || found !== null);
-  const load = () => api.get<ArmoryState>("/api/admin/armory").then(setD).catch(fail);
+  const load = () => api.get<ArmoryState>("/api/admin/armory").then((r) => { setD(r); setLoadFailed(false); }).catch((e) => { setLoadFailed(true); fail(e); });
   useEffect(() => { load(); }, []);
-  if (!d) return <Card><Text c="dimmed" p="md">Loading…</Text></Card>;
+  if (!d) {
+    return (
+      <Card>
+        {loadFailed ? (
+          <Group p="md" gap="sm" justify="space-between" wrap="wrap">
+            <Text size="sm">The guild in the armory couldn't be loaded. Reload to try again.</Text>
+            <Button size="xs" variant="light" onClick={() => load()}>Reload</Button>
+          </Group>
+        ) : <Text c="dimmed" p="md">Loading…</Text>}
+      </Card>
+    );
+  }
 
   async function lookUp() {
+    const query = name.trim();
     setBusy(true);
     try {
-      setFound(await api.post<Found>("/api/admin/armory", { name: name.trim(), preview: true }));
-    } catch (e) { setFound(null); fail(e); } finally { setBusy(false); }
+      const r = await api.post<Omit<Found, "query">>("/api/admin/armory", { name: query, preview: true });
+      if (typed.current === query) setFound({ ...r, query });
+    } catch (e) { if (typed.current === query) { setFound(null); fail(e); } } finally { setBusy(false); }
   }
 
   async function link() {
     if (!found || !d) return;
     if (!(await ask({ title: `Link ${found.found.name}?`, message: found.sentences.join(" "), confirmLabel: "Link this guild" }))) return;
     try {
-      const r = await api.post<ArmoryState & { message: string }>("/api/admin/armory", { name: name.trim(), guild_id: found.found.guild_id, rev: d.rev });
+      const r = await api.post<ArmoryState & { message: string }>("/api/admin/armory", { name: found.query, guild_id: found.found.guild_id, rev: d.rev });
       setD(r); setFound(null); setName("");
       ok(r.message);
     } catch (e) { fail(e); await load(); }
