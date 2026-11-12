@@ -366,6 +366,19 @@ def _retry_after(v: str | None) -> float | None:
 # ------------------------------------------------------------------ per guild
 
 
+GUILD_NAME_MAX = 40  # the owner's typed guild name (prose: the armory's own answer is what is stored)
+
+
+def find_guild(reg, name: str) -> GuildFacts:
+    """The guild the owner typed the name of (spec §5.1), looked up in the guild's armory. BLOCKS: callers use
+    asyncio.to_thread. A name with no letters or digits, or longer than any guild name, is ArmoryMissing."""
+    name = " ".join(str(name or "").split())
+    slug = guild_slug(name)
+    if not slug or len(name) > GUILD_NAME_MAX:
+        raise ArmoryMissing(GUILD_MISSING_WORDS, "no guild address from the typed name")
+    return client_for(reg).guild(slug)
+
+
 def available(reg) -> bool:
     """The guild's game version has an armory (integrations.yaml) and the host's credentials are in .env."""
     return bool(reg.profile.armory) and battlenet.credentials_set()

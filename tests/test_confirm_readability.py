@@ -529,6 +529,24 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     for state in ("live", "disconnected", None):
         dump.add("revoke_consequence", str(state), feed.revoke_consequence(reg, rec, {"state": state, "characters": ["Ashgrove"]} if state else None))
 
+    # ---- the server's guild in the armory (armory link §5.1)
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    from oibot_gm.armory import GuildFacts
+
+    born = _dt(2026, 10, 26, 18, 0, tzinfo=_tz.utc)
+    wardens = GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", members=8, created=born)
+    hall = GuildFacts(id=999001, slug="the-long-hall-of-ash", name="The Long Hall of Ash", faction="Alliance", kind="Roleplay PvP", members=1, created=born)
+    guild_names = {"Lantern", "The"}
+    dump.add("armory_guild_consequence", "nothing linked yet", cq.armory_guild_consequence(reg, wardens), guild_names)
+    dump.add("armory_guild_clear_consequence", "nothing linked", cq.armory_guild_clear_consequence(reg), guild_names)
+    reg.set_armory_guild(wardens, "Owner", by_id=OWNER)
+    dump.add("armory_guild_consequence", "the same guild again", cq.armory_guild_consequence(reg, wardens), guild_names)
+    dump.add("armory_guild_consequence", "another guild, a long name, one member", cq.armory_guild_consequence(reg, hall), guild_names)
+    dump.add("armory_guild_clear_consequence", "a guild linked", cq.armory_guild_clear_consequence(reg), guild_names)
+    reg.clear_armory_guild("Owner", by_id=OWNER)
+
     # ---- appeals
     from oibot_gm import appeals
 

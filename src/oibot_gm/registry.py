@@ -355,6 +355,20 @@ def is_superuser(uid) -> bool:
         return False
 
 
+class ArmoryGuild(BaseModel):
+    """The in-game guild this Discord server is linked to (armory link, spec §5.1 D1): what the owner's lookup found and
+    confirmed. `guild_id` is the armory's own id — a name can later answer with a stranger's guild, the id can't; `slug`
+    is the address the name gave. Set by Registry.set_armory_guild (owner only), cleared by clear_armory_guild."""
+
+    region: str
+    guild_id: int
+    slug: str
+    name: str
+    faction: str  # "Horde" | "Alliance" (the armory's word)
+    linked_by: str
+    linked_at: str  # UTC ISO
+
+
 class GuildConfig(BaseModel):
     key: str
     name: str
@@ -409,6 +423,9 @@ class GuildConfig(BaseModel):
     # companion tokens (design §5.50): HASHED, issued and revoked by the owner (Registry.issue_feed_token / revoke_feed_token);
     # read by the feed listener at every hello and frame, so an issue or a revoke takes effect without a restart
     feed_tokens: list[FeedToken] = Field(default_factory=list)
+    # the in-game guild this server is linked to (armory link §5.1): None = none (a version with no armory, or never linked).
+    # Part of the `settings` rev; the owner sets it with /gm config armory, Config › Settings or MCP (set_armory_guild)
+    armory: Optional[ArmoryGuild] = None
 
     def __init__(self, **data):
         if "raid_teams" in data and not data.get("rosters"):
@@ -1429,6 +1446,55 @@ class Registry:
             saved[tid] = datetime.now(timezone.utc).timestamp()
             self.save_config(f"companion token “{rec.label}” ({rec.id}) seen", notify=False)
             return True
+
+    # ---- the server's in-game guild (armory link, spec §5.1): owner only, one settings commit each
+    def armory_guild_words(self) -> str:
+        """The link as a person reads it: 'Lantern Wardens · Horde · linked by Ana on Thu 12 Nov 2026', or what is missing
+        and how to fill it."""
+        a = self.config.armory
+        if a is None:
+            return "no guild linked yet — the owner links one with /gm config armory or on the Config page's Settings"
+        return f"{a.name} · {a.faction} · linked by {a.linked_by} on {self.local12(a.linked_at, '%a %d %b %Y')}"
+
+    def _armory_owner(self, by_id) -> None:
+        if not self.is_owner_id(by_id):
+            raise RegistryError("Only the owner links this server to its guild in the game.")
+
+    @_config_verb("settings")
+    def set_armory_guild(self, facts, by: str, *, by_id) -> str:
+        """Link this server to the guild the owner's lookup found (`facts`: armory.GuildFacts — its id, address, name and
+        faction are stored, never re-typed). Owner only (is_owner_id); a version with no armory is refused. Re-linking the
+        same guild refreshes its name and faction; another guild replaces it. Character links are not touched. One commit;
+        the caller writes the audit line."""
+        self._armory_owner(by_id)
+        prof = self.profile.armory or {}
+        if not prof:
+            raise RegistryError("This game version has no armory.")
+        old = self.config.armory
+        self.config.armory = ArmoryGuild(region=str(prof.get("region") or ""), guild_id=int(facts.id), slug=str(facts.slug), name=str(facts.name),
+                                         faction=str(facts.faction), linked_by=str(by or "?"), linked_at=now())
+        try:
+            self.save_config(f"armory guild → {facts.name} ({facts.faction}, id {facts.id}) (by {by})")
+        except Exception:
+            self.config.armory = old
+            raise
+        return f"linked to {facts.name} in the armory"
+
+    @_config_verb("settings")
+    def clear_armory_guild(self, by: str, *, by_id) -> str:
+        """Unlink the server's guild. Owner only; refused when none is linked. Every character keeps its own link; only
+        "in the guild" stops being known. One commit; the caller writes the audit line."""
+        self._armory_owner(by_id)
+        old = self.config.armory
+        if old is None:
+            raise RegistryError("No guild is linked to this server.")
+        self.config.armory = None
+        try:
+            self.save_config(f"armory guild {old.name} (id {old.guild_id}) unlinked (by {by})")
+        except Exception:
+            self.config.armory = old
+            raise
+        return f"{old.name} is no longer linked"
 
     # ---- detached guilds (design §3.5 S-05/S-06): the bot was removed from the server
     def set_detached(self, at: str | None, by: str) -> None:

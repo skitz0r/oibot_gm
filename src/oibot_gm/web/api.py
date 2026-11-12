@@ -23,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from .. import consequences as cq
+from .. import armory as armory_mod
 from .. import professions as professions_mod
 from .. import guild_routing
 from ..consequences import consequence as consequence_lines, consequences_json, regular_remove as regular_remove_lines
@@ -524,6 +525,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "discord": {"ready": discord_ready(bot, reg), "stale": bool(getattr(v, "stale", False))},
             # §5.55: the Me page shows its Leveling guide tab when the game version has guides.yaml (zone tables for the explorer)
             "guides": bool((getattr(reg.profile, "guides", None) or {}).get("zones")),
+            # armory link §5.1: the version has an armory and the host its Blizzard keys — Config › Settings shows the guild card
+            "armory": armory_mod.available(reg),
         }
 
     @app.get("/api/meta")

@@ -1102,6 +1102,39 @@ def list_companions(guild: Guild = None) -> dict:
 
 
 @mcp.tool()
+def armory_guild(guild: Guild = None) -> dict:
+    """The guild in the game this Discord server is linked to (armory link): `linked` {name, faction, guild_id, region,
+    linked_by, linked_label} or null, `words` (the link in a sentence, or how to make one). Refused where the game
+    version has no armory or the host has no Blizzard keys."""
+    d = api(guild).get("/api/admin/armory")
+    return {k: d.get(k) for k in ("linked", "words")}
+
+
+@mcp.tool()
+def set_armory_guild(name: str | None = None, guild_id: int | None = None, clear: bool = False, preview: bool = False, guild: Guild = None) -> str:
+    """Link this server to its guild in the game (the OWNER's decision: needs OIBOT_MCP_ACTOR = the owner's Discord id,
+    sent as X-Oibot-Actor; refused without it or for an officer). `name` = the guild's name as spelled in the game. ALWAYS
+    `preview=true` first: it answers what the armory found (name, faction, kind, members, created, its id) — a stranger's
+    guild can share the name — read it to the person, then link with the same `name` and that `guild_id` (refused if the
+    name now finds another guild). `clear=true` unlinks (every character keeps its link); with `preview=true` the
+    sentences only. A preview needs no actor and changes nothing."""
+    if clear:
+        data = api(guild).post("/api/admin/armory", {"clear": True, "preview": preview}, actor=not preview)
+    else:
+        if not (name or "").strip():
+            raise ToolError("name: the guild's name as spelled in the game")
+        if not preview and guild_id is None:
+            raise ToolError("Preview first (preview=true) and pass the guild_id it shows: a stranger's guild can share the name.")
+        body = {"name": name, "preview": preview} if preview else {"name": name, "guild_id": guild_id}
+        data = api(guild).post("/api/admin/armory", body, actor=not preview)
+    if preview and isinstance(data, dict):
+        found = data.get("found")
+        head = f"Found guild id {found['guild_id']}. " if found else ""
+        return head + " ".join(data.get("sentences") or [])
+    return msg(data)
+
+
+@mcp.tool()
 def revoke_companion(token: str, preview: bool = False, guild: Guild = None) -> str:
     """Revoke a loot-companion token (owner): `token` = its id (ft-…) or its label from list_companions. The companion
     using it is cut off at its next message — no restart; whoever runs it needs a new token. `preview=True`: the

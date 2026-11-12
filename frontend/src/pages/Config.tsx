@@ -14,6 +14,7 @@ import { ChannelsCard } from "../components/ChannelsCard";
 import { SetupCard } from "../components/SetupCard";
 import { CompanionsCard } from "../components/CompanionsCard";
 import { LootWeightsCard } from "../components/LootWeightsCard";
+import { ArmoryGuildCard } from "../components/ArmoryGuildCard";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -91,8 +92,11 @@ export function ConfigPage({ meta }: { meta: Meta }) {
         </Tabs.Panel>
 
         <Tabs.Panel value="settings" pt="md">
-          <SettingsCard meta={meta} data={data} draft={draft} setDraft={setDraft} stale={stale}
-            onReload={async () => { setStale(false); await load(); }} onSaved={async () => { setDraft(null); setStale(false); await load(); }} />
+          <Stack gap="lg">
+            <SettingsCard meta={meta} data={data} draft={draft} setDraft={setDraft} stale={stale}
+              onReload={async () => { setStale(false); await load(); }} onSaved={async () => { setDraft(null); setStale(false); await load(); }} />
+            {meta.armory && <ArmoryGuildCard />}
+          </Stack>
         </Tabs.Panel>
 
         <Tabs.Panel value="channels" pt="md">

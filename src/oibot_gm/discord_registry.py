@@ -1429,6 +1429,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["companion"](interaction, reg)
 
+    @config.command(name="armory", description="Owner: link this server to its guild in the game, as the armory shows it")
+    async def cfg_armory(interaction: discord.Interaction):
+        reg, interaction = await need(interaction)
+        if reg:
+            await FLOWS["armory_guild"](interaction, reg)
+
     @config.command(name="officer-role", description="Owner: add or remove a Discord role that counts as officer")
     async def cfg_role(interaction: discord.Interaction, role: discord.Role, remove: bool = False):
         reg, interaction = await need(interaction)

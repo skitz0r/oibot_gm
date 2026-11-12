@@ -18,6 +18,10 @@ OPS-01/S-01/S-05/S-06, §3.3 D).
 - `GET /api/companions` + `POST /api/companions/issue {label}` + `POST /api/companions/revoke {id}` (owner; design §5.50):
   the guild's loot-companion tokens through SetupMixin.issue_companion / revoke_companion — the value is in the issue
   reply's body ONCE (no-store) and nowhere else (stored hashed, never logged); MCP lists and revokes but never issues.
+- `GET /api/admin/armory` (officers read) + `POST /api/admin/armory` (owner; armory link §5.1): the server's guild in the
+  armory. `{name, preview}` → the lookup's facts + the confirm sentences; `{name, guild_id?, rev?}` links it (a guild_id
+  that isn't what the name answers now → 409); `{clear, preview?, rev?}` unlinks. From MCP a write needs the actor (D8),
+  who must be the owner. 404 where the guild's version has no armory (or the host has no Blizzard keys).
 """
 from __future__ import annotations
 
@@ -243,3 +247,85 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line, **companions_state(v.reg)}
+
+    # ---- the server's guild in the armory (armory link §5.1): officers read, the owner links / unlinks
+    armory_actor = ("Linking the server to its guild is the owner's decision: from MCP it needs OIBOT_MCP_ACTOR set to the "
+                    "owner's Discord id.")
+
+    def armory_state(v) -> dict:
+        from ..armory import GUILD_NAME_MAX
+        from ..consequences import armory_guild_clear_consequence
+
+        reg = v.reg
+        a = reg.config.armory
+        linked = None if a is None else {"name": a.name, "faction": a.faction, "guild_id": a.guild_id, "region": a.region, "linked_by": a.linked_by,
+                                         "linked_label": reg.local12(a.linked_at, "%a %d %b %Y")}
+        return {"linked": linked, "words": reg.armory_guild_words(), "clear_sentences": armory_guild_clear_consequence(reg) if a is not None else [],
+                "rev": reg.config_rev("settings"), "owner": bool(v.owner), "name_max": GUILD_NAME_MAX}
+
+    def armory_or_404(reg) -> None:
+        from .. import armory
+
+        if not armory.available(reg):
+            raise HTTPException(404, armory.NO_ARMORY_WORDS if not reg.profile.armory else armory.ACCESS_WORDS)
+
+    @app.get("/api/admin/armory")
+    async def armory_get(request: Request):
+        """Officers read, the owner edits: the guild this server is linked to in the armory (or what is missing)."""
+        v = await who(request)
+        if not (v.officer or v.owner):
+            raise HTTPException(403, "Officers only.")
+        armory_or_404(v.reg)
+        return armory_state(v)
+
+    @app.post("/api/admin/armory")
+    async def armory_set(request: Request):
+        """Owner: `{name, preview: true}` → {found, sentences} (nothing written); `{name, guild_id, rev}` → linked;
+        `{clear: true, preview?}` → the unlink's sentences, or unlinked. One audit line per write, naming the guild."""
+        import asyncio
+
+        from .. import armory
+        from ..consequences import armory_created_words, armory_guild_clear_consequence, armory_guild_consequence
+        from ..registry import ConfigChanged
+
+        v, d = await body(request)
+        need_owner(v)  # the owner (or a host superuser): owner rights come from the id, not the officer roles
+        reg = v.reg
+        armory_or_404(reg)
+        preview = bool(d.get("preview"))
+        if not preview and v.via == "mcp" and not getattr(v, "actor", None):
+            raise HTTPException(403, armory_actor)
+        rev = d.get("rev") or None
+        if d.get("clear"):
+            if preview:
+                if reg.config.armory is None:
+                    return JSONResponse({"error": "No guild is linked to this server."}, status_code=400)
+                return {"preview": True, "sentences": armory_guild_clear_consequence(reg)}
+            old = reg.config.armory
+            try:
+                await asyncio.to_thread(lambda: reg.clear_armory_guild(v.name, by_id=v.uid, rev=rev))
+            except ConfigChanged as e:
+                return JSONResponse({"error": str(e)}, status_code=409)
+            except RegistryError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            await ops_mod.audited(bot.ops, reg, v.name, f"unlinked the armory guild {old.name} (id {old.guild_id})", via=v.via, by_id=v.uid)
+            return {"message": f"{old.name} is no longer linked.", **armory_state(v)}
+        try:
+            facts = await asyncio.to_thread(armory.find_guild, reg, str(d.get("name") or ""))
+        except armory.ArmoryError as e:
+            return JSONResponse({"error": e.words}, status_code=400)
+        if preview:
+            return {"preview": True, "sentences": armory_guild_consequence(reg, facts),
+                    "found": {"name": facts.name, "faction": facts.faction, "kind": facts.kind, "members": facts.members, "guild_id": facts.id,
+                              "created_label": armory_created_words(reg, facts)}}
+        want = d.get("guild_id")
+        if want is not None and str(want) != str(facts.id):
+            return JSONResponse({"error": "That name now finds a different guild in the armory. Look it up again before linking."}, status_code=409)
+        try:
+            await asyncio.to_thread(lambda: reg.set_armory_guild(facts, v.name, by_id=v.uid, rev=rev))
+        except ConfigChanged as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await ops_mod.audited(bot.ops, reg, v.name, f"linked the server to the armory guild {facts.name} ({facts.faction}, id {facts.id})", via=v.via, by_id=v.uid)
+        return {"message": f"Linked to {facts.name} in the armory.", **armory_state(v)}

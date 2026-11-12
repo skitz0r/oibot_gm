@@ -596,8 +596,42 @@ def memory_shared_consequence(reg, cid) -> str:
     return f"What is said in <#{cid}> can then be repeated to any member in any channel."
 
 
+def armory_created_words(reg: Registry, facts) -> str:
+    """The day a guild was created, in the guild's zone and in words ('Mon 26 Oct 2026'), never ISO."""
+    return reg.local12(facts.created, "%a %d %b %Y")
+
+
+def armory_guild_consequence(reg: Registry, facts) -> list[str]:
+    """The confirm before linking the server to the guild a lookup found (armory link §5.1, D1): what was found — name,
+    faction, kind, members, created — so a stranger's guild of the same name is seen before the press, then what changes,
+    who is told and what can be undone."""
+    faction = str(facts.faction)
+    article = "an" if faction[:1].upper() in "AEIOU" else "a"
+    n = int(facts.members)
+    found = (f"{facts.name} is {article} {faction} {facts.kind} guild with {n} member{'' if n == 1 else 's'}, "
+             f"created {armory_created_words(reg, facts)}.")
+    old = reg.config.armory
+    if old is not None and int(old.guild_id) == int(facts.id):
+        change = "It is already linked, so only its name and faction are refreshed."
+    elif old is not None:
+        change = f"It replaces {old.name}, and every character keeps its link."
+    else:
+        change = "The bot then reads its roster to show who is in the guild."
+    return [found, change, "Nobody gets a DM, and you can change or unlink it at any time."]
+
+
+def armory_guild_clear_consequence(reg: Registry) -> list[str]:
+    """The confirm before unlinking the server's guild (§5.1): every character keeps its link; only "in the guild" goes."""
+    old = reg.config.armory
+    if old is None:
+        return ["No guild is linked to this server."]
+    return [f"{old.name} stops being this server's guild in the armory.",
+            "Every character keeps its link, and who is in the guild stops being known.",
+            "Nobody gets a DM, and you can link a guild again at any time."]
+
+
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
-           "VERBS", "absence_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
+           "VERBS", "absence_consequence", "armory_created_words", "armory_guild_clear_consequence", "armory_guild_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
            "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "people_consequence", "profession_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 

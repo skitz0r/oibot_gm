@@ -568,6 +568,9 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "my_memories": {"surface": "web", "path": "POST /api/me/memories/{key}/forget", "reason": "a member's own memories are a list on their Me page with Forget on each (design §5.61); a DM command would list prose nobody can skim"},
     # armory link §4.3: recipes typed before the game's list that it doesn't have are fixed where they are listed; the
     # officers' Rename… / Merge… of recipes are retired (C7) on every surface — a recipe's name is the game's
+    # armory link §5.1: the server's guild in the game is linked by the owner after a lookup whose findings they read first
+    # (/gm config armory, Config › Settings, MCP armory_guild / set_armory_guild with the actor — tests/test_armory_guild.py)
+    "armory_guild": {"surface": "web", "path": "POST /api/admin/armory", "reason": "linking the server to its guild in the game is never plain text: a name can answer with a stranger's guild, so the owner reads what the lookup found before pressing — on Config › Settings, with /gm config armory or through MCP's preview then set_armory_guild with the owner as the actor"},
     "recipe_fix": {"surface": "web", "path": "POST /api/professions/unmatched", "reason": "the recipes typed before the game's list that it doesn't have are a list on the Professions page, each with Pick the recipe… (a search over the list) and Remove beside it; a one-off clean-up of old data needs no second editor, and a member's own editor already removes one"},
 }
 
@@ -3454,6 +3457,8 @@ def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[S
              f"Who may ask the bot questions: {cfg.ask_audience}"]
     if cfg.about:
         guild.append(f"About: {cfg.about[:200]}{'…' if len(cfg.about) > 200 else ''}")
+    if reg.profile.armory or cfg.armory is not None:  # a version with no armory has no such line (armory link §5.1)
+        guild.append(f"Guild in the armory: {reg.armory_guild_words()}")
     out.append(SummarySection(key="guild", title="Guild", lines=guild))
     seen: set[str] | None = None
     if bot is not None and getattr(bot, "guild_channels", None) is not None:

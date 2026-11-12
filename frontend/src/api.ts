@@ -108,6 +108,8 @@ export interface Meta {
   discord?: { ready: boolean; stale: boolean };
   /** §5.55: the game version has the leveling-guide tool's tables (profiles/<version>/guides.yaml) — the Me page shows its Leveling guide tab */
   guides?: boolean;
+  /** armory link §5.1: the game version has an armory and the host its Blizzard keys — Config › Settings shows the guild card */
+  armory?: boolean;
   /** §5.60: the version's professions (empty list = none: render nothing), the skill cap and how many trades (crafting +
    *  gathering) a character may hold */
   professions?: { list: { id: string; name: string; group: string; icon: string; makes: boolean }[]; skill_cap: number; trade_slots: number;

@@ -2553,5 +2553,113 @@ async def open_companion(interaction: discord.Interaction, reg: Registry, **_see
     await CompanionsWizard(reg, interaction.user.id).start(interaction)
 
 
-__all__ = ["MultiForm", "RaidConfigWizard", "CompanionsWizard", "open_companion", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "OwnerTransferWizard", "open_raid_config", "open_aura",
+# ---------------------------------------------------------------- the server's guild in the armory (armory link §5.1)
+
+class ArmoryGuildWizard(OwnerWizard):
+    """`/gm config armory` (owner): link this server to its in-game guild. Unlinked: the command opens the name box at once
+    (prose — validated by the lookup, never parsed) → the lookup in a thread behind `working` → THE decide screen
+    (consequences.armory_guild_consequence: what was found, so a stranger's guild of the same name is seen first) →
+    Registry.set_armory_guild. Linked: what is linked, with **Change…** (the same box) and **Unlink…** (decide with
+    armory_guild_clear_consequence). Owner-only presses, re-checked on every press and on the box's submit; nothing is
+    written before the press. The site's Config › Settings card and MCP set_armory_guild are the same verbs."""
+
+    def __init__(self, reg: Registry, owner_id: int):
+        super().__init__(reg, owner_id, title="The guild in the armory", guard=_owner_guard(reg))
+        self.rev = reg.config_rev("settings")
+
+    def form(self) -> Form:
+        from .armory import GUILD_NAME_MAX
+
+        return Form("The guild in the armory", [Field("name", "The guild's name in the game", max_length=GUILD_NAME_MAX,
+                                                      description="as it is spelled in the game; the bot looks it up and shows what it finds")],
+                    self.named)
+
+    async def start(self, i: discord.Interaction) -> None:
+        if self.reg.config.armory is None:
+            await self.open_form(i, self.form())
+            return
+        await self.hub(i)
+
+    async def hub(self, i: discord.Interaction, note: str = "") -> None:
+        words = discord.utils.escape_markdown(self.reg.armory_guild_words())
+        await self.show(i, f"This server's guild in the armory: {words}." + (f"\n\n{note}" if note else ""),
+                        self.button("Change…", self.change, discord.ButtonStyle.primary), self.button("Unlink…", self.unlink_decide),
+                        self.button("Done", self.done))
+
+    async def done(self, i: discord.Interaction) -> None:
+        await self.finish(i, "Done.")
+
+    async def change(self, i: discord.Interaction) -> None:
+        await self.open_form(i, self.form())
+
+    async def named(self, si: discord.Interaction, values: dict[str, str]) -> None:
+        import asyncio
+
+        from . import armory
+        from .consequences import armory_guild_consequence
+
+        if si.user.id != self.owner_id or (await self.guard(si)):
+            await si.response.send_message("Owner only.", ephemeral=True)
+            return
+        name = " ".join((values.get("name") or "").split())
+        await self.working(si, "Looking the guild up in the armory…")
+        try:
+            facts = await asyncio.to_thread(armory.find_guild, self.reg, name)
+        except armory.ArmoryError as e:
+            await self.refuse(si, e.words, self.change, "Try another name")
+            return
+        self.draft["facts"] = facts
+        text = discord.utils.escape_markdown(" ".join(armory_guild_consequence(self.reg, facts)))
+        await self.decide(si, text, do=self.link, do_label="Link this guild")
+
+    async def link(self, i: discord.Interaction, _note: str | None) -> None:
+        import asyncio
+
+        from . import ops as ops_mod
+
+        facts = self.draft["facts"]
+        try:
+            await asyncio.to_thread(lambda: self.reg.set_armory_guild(facts, i.user.display_name, by_id=i.user.id, rev=self.rev))
+        except RegistryError as e:
+            await self.finish(i, f"❌ {e}")
+            return
+        await ops_mod.audited(i.client.ops, self.reg, i.user.display_name, f"linked the server to the armory guild {facts.name} ({facts.faction}, id {facts.id})",
+                              via="discord", by_id=i.user.id)
+        await self.finish(i, f"✅ Linked to **{discord.utils.escape_markdown(facts.name)}** in the armory.")
+
+    async def unlink_decide(self, i: discord.Interaction) -> None:
+        from .consequences import armory_guild_clear_consequence
+
+        text = discord.utils.escape_markdown(" ".join(armory_guild_clear_consequence(self.reg)))
+        await self.decide(i, text, do=self.unlink, do_label="Unlink", danger=True)
+
+    async def unlink(self, i: discord.Interaction, _note: str | None) -> None:
+        import asyncio
+
+        from . import ops as ops_mod
+
+        old = self.reg.config.armory
+        try:
+            await asyncio.to_thread(lambda: self.reg.clear_armory_guild(i.user.display_name, by_id=i.user.id, rev=self.rev))
+        except RegistryError as e:
+            await self.finish(i, f"❌ {e}")
+            return
+        await ops_mod.audited(i.client.ops, self.reg, i.user.display_name, f"unlinked the armory guild {old.name} (id {old.guild_id})", via="discord", by_id=i.user.id)
+        await self.finish(i, f"✅ {discord.utils.escape_markdown(old.name)} is no longer linked.")
+
+
+@flow("armory_guild")
+async def open_armory_guild(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """`/gm config armory`: the owner links the server to its guild in the game (or changes / unlinks it)."""
+    from . import armory
+
+    if not await _owner_or_refuse(interaction, reg):
+        return
+    if not armory.available(reg):
+        await interaction.response.send_message(armory.NO_ARMORY_WORDS if not reg.profile.armory else armory.ACCESS_WORDS, ephemeral=True)
+        return
+    await ArmoryGuildWizard(reg, interaction.user.id).start(interaction)
+
+
+__all__ = ["MultiForm", "ArmoryGuildWizard", "open_armory_guild", "RaidConfigWizard", "CompanionsWizard", "open_companion", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "OwnerTransferWizard", "open_raid_config", "open_aura",
            "open_timezone", "open_about", "open_guild_claim", "open_owner_transfer", "ChannelsWizard", "ChannelSetWizard", "OfficersWizard", "open_channels", "open_channel_set", "open_officers", "claim_refusal", "next_runs", "hours_words", "tz_cities"]
