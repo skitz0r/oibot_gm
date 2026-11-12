@@ -334,7 +334,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   and the skill are picked from lists (the skill list starts with **Not said yet**). **Add recipe…** asks for part of the
   recipe's name ("devilsaur", "ironfeather sh") and lists the matching recipes of that profession from the game's own
   list to pick from (two recipes with one name are told apart by their category; past 25 matches it says how many and
-  asks you to narrow it); a name the list doesn't have gets *"That isn't a recipe in the game's list."* with
+  asks you to narrow it; recipes the character already has are left out); a name the list doesn't have gets *"That isn't a recipe in the game's list."* with
   **Search again…**. Each ends on one confirm screen with the same
   sentences (*"Your Leatherworking is recorded at 300 with 1 notable recipe."*), and nothing changes before **Do it**.
   When both trades are taken it says so (*"Two trades are taken. Cooking, First Aid and Fishing are open."*) and offers
@@ -347,7 +347,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   Ironfeather Shoulders" goes to your one character that makes things, else to your main, and the bot asks which only when
   two of your characters could hold it. The bot looks the recipe up in the game's list, so it knows which profession
   makes it: the whole name in any case, or enough of it ("ironf shoulders"); when part of a name fits several recipes
-  it names up to five (*"Did you mean Devilsaur Gauntlets or Devilsaur Leggings?"*) and changes nothing. If the
+  it names up to five (*"Did you mean Devilsaur Gauntlets or Devilsaur Leggings?"*) and changes nothing. Taking a
+  recipe off works the same way over the recipes that character has ("I can't make ironfeather any more"). If the
   character doesn't have that profession yet and could still take it, the change records both, and says so before
   you confirm (*"Rhoz has no Leatherworking on record yet. Apply records Leatherworking on Rhoz and adds Green Dragonscale
   Breastplate to the recipes Rhoz makes."*); say the skill later. The bot asks only when the game has a recipe of that

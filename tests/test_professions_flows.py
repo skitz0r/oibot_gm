@@ -93,6 +93,22 @@ def test_add_recipe_searches_the_list_within_the_profession(reg):
     assert [(r.id, r.name) for r in c.professions[0].recipes] == [(10789, "Devilsaur Gauntlets")]
 
 
+def test_add_recipe_leaves_out_what_the_character_already_has(reg):
+    _give(reg, UID, LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}]}])
+    h = _as(reg, UID)
+
+    async def go():
+        await FLOWS["me_professions"](h.command(), reg)
+        await h.press("Add recipe…")
+        await h.submit(h.modal, recipe="devilsaur")
+        assert _options(h, "Pick the recipe") == ["10798"], "Devilsaur Gauntlets is already on the record"
+        await h.press("Search again…")
+        await h.submit(h.modal, recipe="devilsaur gauntlets")
+        assert f"{LABEL} already has every Leatherworking recipe that matches. Search again for another one." in h.text
+        assert "Search again…" in h.buttons() and "Pick the recipe" not in h.selects()
+    asyncio.run(go())
+
+
 def test_add_recipe_says_how_many_match_past_a_select(reg):
     _give(reg, UID, LABEL, [{"id": "tailoring", "skill": 300}])
     h = _as(reg, UID)

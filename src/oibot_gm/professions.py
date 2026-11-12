@@ -258,10 +258,18 @@ def fix_unmatched(reg: Registry, uid: int, label: str, pid: str, name: str, reci
                   by_id: int | None = None, preview: bool = False) -> list[str]:
     """The officers' fix for a recipe typed before the game's list that the list doesn't have (armory link §4.3): Pick
     the recipe… (`recipe_id`, a recipe of that profession on the list) takes its place, in place; None = Remove. One
-    table save (THE character verb); `preview` = the sentences only. Officers only: the route checks the reader."""
+    table save (THE character verb); `preview` = the sentences only, after the same refusals the write runs
+    (check_character_table). Read and written under config_lock, the save carrying the record's rev as read: a change
+    landing in between is refused (CharactersChanged), never overwritten. Officers only: the route checks the reader."""
     if not reg.profile.has_recipe_list:
         raise RegistryError("This game version has no recipe list.")
+    with reg.config_lock:
+        return _fix_unmatched(reg, uid, label, pid, name, recipe_id, by, by_id, preview)
+
+
+def _fix_unmatched(reg: Registry, uid, label, pid, name, recipe_id, by, by_id, preview) -> list[str]:
     m = reg.members.get(int(uid))
+    rev = reg.characters_rev(m) if m else None
     c = next((x for x in m.active() if x.label == label), None) if m else None
     if c is None:
         raise RegistryError(f"{label} is no longer on the record.")
@@ -287,9 +295,11 @@ def fix_unmatched(reg: Registry, uid: int, label: str, pid: str, name: str, reci
         else:
             p["recipes"] = [{"id": d.id, "name": d.name} if r is old else r for r in p["recipes"]]
             said = [f"{label}'s {pname} lists {d.name} in place of {old['name']}."]
-    reg.check_professions(entries, keep_unmatched=reg.stored_unmatched(c))
-    if not preview:
-        reg.save_character_table(m.discord_id, [{"label": c.label, "professions": entries}], by, officer=True, by_id=by_id)
+    rows = [{"label": c.label, "professions": entries}]
+    if preview:
+        reg.check_character_table(m.discord_id, rows, by, officer=True, by_id=by_id, rev=rev)
+    else:
+        reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id, rev=rev)
     return said
 
 
@@ -418,6 +428,36 @@ def _recipe_add_listed(reg: Registry, c, cur: list[dict], name: str, hint: str |
     return _added(c, cur, fit[0], {"id": r.id, "name": r.name}, reg)
 
 
+def _recipe_remove_listed(reg: Registry, c, cur: list[dict], name: str, hint: str | None) -> tuple[list[dict], str]:
+    """recipe_remove with the game's list: the typed words go through the finder's three tiers over the recipes THIS
+    character holds (a listed one by its list name, an unmatched one by its typed key). One recipe → it comes off (a
+    name the profession holds twice comes off whole); several → did_you_mean; one name in two professions → the
+    question; none → "has no … on record". `hint` = the profession that holds it."""
+    profs = cur
+    if hint:
+        d, _ = _find_profession(reg, hint)
+        profs = [p for p in cur if p["id"] == d.id]
+        if not profs:
+            raise RegistryError(f"{c.label} has no {d.name} on record.")
+    items = []
+    for p in profs:
+        for r in p["recipes"]:
+            k = norm_recipe(r["name"])
+            items.append(((p["id"], k, r["name"]), tuple(k.split()), frozenset(k.split())))
+    hits = _tiers(norm_recipe(name), items, longest=True)
+    if not hits:
+        raise RegistryError(f"{c.label} has no {name} on record.")
+    if len({k for _, k, _ in hits}) > 1:
+        raise RegistryError(did_you_mean(list(dict.fromkeys(n for _, _, n in hits))))
+    pids = [pid for pid in dict.fromkeys(pid for pid, _, _ in hits)]
+    if len(pids) > 1:
+        raise RegistryError(f"Which profession makes {hits[0][2]} — {' or '.join(reg.profile.profession(x).name for x in pids)}?")
+    pid, k, shown = hits[0]
+    p = next(p for p in cur if p["id"] == pid)
+    p["recipes"] = [r for r in p["recipes"] if norm_recipe(r["name"]) != k]
+    return [{"label": c.label, "professions": cur}], f"{c.label} · {reg.profile.profession(pid).name} recipes: − {shown}"
+
+
 def _fits(reg: Registry, cur: list[dict], entry: dict, keep) -> bool:
     try:
         reg.check_professions(cur + [entry], keep_unmatched=keep)
@@ -454,6 +494,8 @@ def op_rows(reg: Registry, c, field: str, value: str, hint: str | None) -> tuple
             raise RegistryError("A recipe needs a name.")
         if field == "recipe_add" and reg.profile.has_recipe_list:
             return _recipe_add_listed(reg, c, cur, name, hint)
+        if field == "recipe_remove" and reg.profile.has_recipe_list:
+            return _recipe_remove_listed(reg, c, cur, name, hint)
         k = norm_recipe(name)
         takes = [p for p in cur if has_recipes(reg, p["id"])]
         if hint:

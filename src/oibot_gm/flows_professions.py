@@ -210,11 +210,15 @@ class ProfessionsWizard(MemberWizard):
         """The search's answer: up to PICK_MAX recipes of THIS profession from the game's list (the value is the recipe
         id; the category tells same-name recipes apart — R6), or NOT_A_RECIPE on the same screen with Search again…."""
         pid = self.draft["pid"]
-        hits = pr.list_hits(self.reg, text, profession=pid)
+        found = pr.list_hits(self.reg, text, profession=pid)
+        c = self.char()
+        held = {r.id for p in c.professions if p.id == pid for r in p.recipes if r.id is not None}
+        hits = [r for r in found if r.id not in held]  # what the character already has is not offered again
         again = self.button("Search again…", self.recipe_form, discord.ButtonStyle.primary)
         if not hits:
-            await self.show(interaction, pr.NOT_A_RECIPE + f" Search {self.name(pid)}'s recipes again, by part of the name.",
-                            again, self.button("Back", self.hub), self.button("Cancel", self.cancel))
+            said = (f"{c.label} already has every {self.name(pid)} recipe that matches. Search again for another one." if found
+                    else pr.NOT_A_RECIPE + f" Search {self.name(pid)}'s recipes again, by part of the name.")
+            await self.show(interaction, said, again, self.button("Back", self.hub), self.button("Cancel", self.cancel))
             return
         text = f"Which {self.name(pid)} recipe?"
         if len(hits) > PICK_MAX:

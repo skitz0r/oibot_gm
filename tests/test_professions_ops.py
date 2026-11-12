@@ -244,6 +244,29 @@ def test_plain_text_ambiguous_name_lists_candidates(reg):
     assert said.startswith("Did you mean ") and 2 <= len(names) <= 5 and all(n.startswith("Ironfeather ") for n in names), said
 
 
+def test_plain_text_recipe_remove_resolves_against_the_characters_recipes(reg):
+    """'I can't make ironfeather any more': part of a name, matched against what THIS character holds (listed by id, an
+    unmatched one by its typed key) through the same three tiers."""
+    from oibot_gm.registry import Profession, Recipe
+
+    reg.save_character_table(UID, [{"label": LABEL, "professions": [{"id": "leatherworking", "skill": 300, "recipes": [
+        {"name": "Ironfeather Shoulders"}, {"name": "Devilsaur Gauntlets"}, {"name": "Devilsaur Leggings"}]}]}], "t", officer=True)
+    m = reg.members[UID]
+    rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_remove", value="ironfeather"))
+    assert line == f"{LABEL} · Leatherworking recipes: − Ironfeather Shoulders"
+    assert [r["name"] for r in rows[0]["professions"][0]["recipes"]] == ["Devilsaur Gauntlets", "Devilsaur Leggings"]
+    with pytest.raises(RegistryError, match=r"^Did you mean Devilsaur Gauntlets or Devilsaur Leggings\?$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_remove", value="devilsaur"))
+    with pytest.raises(RegistryError, match=f"^{LABEL} has no Mooncloth Bag on record\\.$"):
+        configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_remove", value="Mooncloth Bag"))
+    # an unmatched typed recipe is found by its words too
+    c = next(x for x in m.active() if x.label == LABEL)
+    c.professions = [Profession(id="leatherworking", skill=300, recipes=[Recipe(name="Bold Gloves"), Recipe(name="Devilsaur Gauntlets", id=10789)])]
+    reg.save(m, "typed")
+    rows, line = configops._character_rows(reg, m, _op(member=m.display_name, character=LABEL, field="recipe_remove", value="bold"))
+    assert line == f"{LABEL} · Leatherworking recipes: − Bold Gloves" and rows[0]["professions"][0]["recipes"] == [{"name": "Devilsaur Gauntlets", "id": 10789}]
+
+
 def test_plain_text_recipes_without_a_list_are_unchanged(reg):
     """A version without the game's list keeps typed recipes: the name as written, the question when two professions
     on record make things, a profession that makes nothing refused."""
@@ -297,6 +320,38 @@ def test_fix_unmatched_pick_and_remove(reg):
     said = professions.fix_unmatched(reg, 9100, "Thornwick", "leatherworking", "Devilsaur Gauntlet", 10789, "Officer", by_id=OWNER)
     assert said == ["Thornwick's Leatherworking already lists Devilsaur Gauntlets, so Devilsaur Gauntlet comes off."]
     assert [(r.id, r.name) for r in reg.members[9100].main.professions[0].recipes] == [(10789, "Devilsaur Gauntlets")]
+
+
+def test_fix_unmatched_never_overwrites_a_change_between_read_and_write(reg, monkeypatch):
+    from oibot_gm.registry import CharactersChanged
+
+    reg.add_character(9100, "Kestrel", "Thornwick", "Hunter", "Survival", None, True)
+    _typed(reg, 9100, "Thornwick", "leatherworking", ["Bold Gloves"])
+    real = reg.professions_entries
+
+    def member_saves_meanwhile(c):
+        out = real(c)
+        reg.save_character_table(9100, [{"label": "Thornwick", "professions": [{"id": "leatherworking", "skill": 300, "recipes": [
+            {"name": "Bold Gloves"}, {"name": "Hide of the Wild"}]}]}], "Kestrel", by_id=9100)
+        return out
+    monkeypatch.setattr(reg, "professions_entries", member_saves_meanwhile)
+    with pytest.raises(CharactersChanged):
+        professions.fix_unmatched(reg, 9100, "Thornwick", "leatherworking", "Bold Gloves", None, "Officer", by_id=OWNER)
+    assert [r.name for r in reg.members[9100].main.professions[0].recipes] == ["Bold Gloves", "Hide of the Wild"], "the member's save stands"
+
+
+def test_fix_unmatched_preview_runs_the_writes_refusals(reg, monkeypatch):
+    reg.add_character(9100, "Kestrel", "Thornwick", "Hunter", "Survival", None, True)
+    _typed(reg, 9100, "Thornwick", "leatherworking", ["Bold Gloves"])
+    seen = []
+
+    def refuse(*a, **k):
+        seen.append(k.get("rev"))
+        raise RegistryError("Another officer's rehearsal character is theirs to change.")
+    monkeypatch.setattr(reg, "check_character_table", refuse)
+    with pytest.raises(RegistryError, match="rehearsal"):
+        professions.fix_unmatched(reg, 9100, "Thornwick", "leatherworking", "Bold Gloves", None, "Officer", by_id=OWNER, preview=True)
+    assert seen and seen[0] is not None, "the preview checks the table at the rev it read"
 
 
 def test_fix_unmatched_needs_a_list(reg):
