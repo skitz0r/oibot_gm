@@ -2120,13 +2120,13 @@ class Registry:
         return m
 
     @_member_write
-    def rename_character(self, discord_id: int, label: str, name: str, surname: str | None, by: str, *, by_id: int | None = None,
-                         officer: bool = False, rs=None, relabelled: list | None = None) -> RegisteredCharacter:
+    def rename_character(self, discord_id: int, label: str, name: str, surname: str | None, by: str, *, rs, by_id: int | None = None,
+                         officer: bool = False, relabelled: list | None = None) -> RegisteredCharacter:
         """THE character rename (armory link, design §5.2 "The name.", C9): `label` (any name the character answers to)
         becomes `name surname`. The old label joins `former_names` (never twice; a name taken back leaves the list), so the
         ledger, award ids, appeals and finished runs keep the old name and still find the character (same_character).
         In one commit: the member file, and every LIVE run (open or locked) in `rs` (a raidcycle.RaidStore — the running
-        bot's, so its runs in memory move too; default a fresh one read from the store) that names the old label for this
+        bot's, REQUIRED so its runs in memory move too — offline, a RaidStore over the same store) that names the old label for this
         member — signup, seats, fill asks, callouts — plus their placement asks on those runs. `relabelled` (a list) gets
         the run keys changed: the sheets a caller redraws. Refused, with nothing written: a full name another record
         holds now (to an officer naming the holder, else "ask an officer"), a test puppet in rehearsal (puppet_refusal),
@@ -2152,7 +2152,6 @@ class Registry:
                                 else "That name is already registered here. Ask an officer.")
         from . import raidcycle as rc
 
-        rs = rs if rs is not None else rc.RaidStore(self.store, self.key)
         old = c.label
         line = f"{m.display_name}: {old} is now {full} (by {by})"
         with self.store.batch(f"{self.key}: {line}"):
@@ -2197,37 +2196,39 @@ class Registry:
         return next(((m, c) for m in self.members.values() for c in m.characters if c.name and self.same_character(c, label, former=False)), None)
 
     def find_full(self, label: str | None) -> tuple[Member, RegisteredCharacter] | None:
-        """A named character by its full name: the current holder, else the one character that had it before a rename;
-        two characters that both had it raise (name the one meant by its name now)."""
+        """A named character by its full name: the current holder, else the one character that had it before a rename.
+        Never raises: a name nobody holds now that two characters both had is nobody (None) — the alias isn't unique."""
         hit = self.holder_of(label)
         if hit is not None:
             return hit
         was = [(m, c) for m in self.members.values() for c in m.characters if c.name and self.same_character(c, label)]
-        if len(was) > 1:
-            raise RegistryError(f"More than one character was called {str(label).strip()}: " + ", ".join(f"{c.label} ({m.display_name})" for m, c in was)
-                                + ". Use the name it has now.")
-        return was[0] if was else None
+        return was[0] if len(was) == 1 else None
 
     def award_holder(self, a) -> tuple[Member, RegisteredCharacter | None] | None:
-        """(member, character) an award belongs to: its Discord id's member and that member's character by the recorded
-        name (current first, then former; None when the character is gone); a row with no id by the full name, a current
-        name first. None: nobody registered (a sub, a guest, a disenchant, an ambiguous former name)."""
+        """(member, character) an award belongs to. A row with a Discord id is decided by the id: that member, and their
+        character by the recorded name (current first, then former; None when the character is gone) — never another
+        member's, whatever the name. A row with no id by the full name, a current name first. None: nobody registered
+        (a sub, a guest, a disenchant, a former name two characters had)."""
         if a.discord_id is not None:
             m = self.members.get(a.discord_id)
             return (m, self.own_character(m.characters, a.raider)) if m is not None else None
-        try:
-            return self.find_full(a.raider)
-        except RegistryError:
-            return None
+        return self.find_full(a.raider)
+
+    def award_is_for(self, a, name: str | None) -> bool:
+        """Whether award `a` went to the character `name` names (a full name now, else a former one): decided by the
+        award's holder when it resolves to a character (award_holder: the id first), else by the name as recorded."""
+        h = self.award_holder(a)
+        if h is not None and h[1] is not None:
+            t = self.find_full(name)
+            return t is not None and t[1] is h[1]
+        return bool(str(name or "").strip()) and str(a.raider or "").strip().lower() == str(name or "").strip().lower()
 
     def same_name(self, a: str | None, b: str | None) -> bool:
-        """Whether two recorded names are the same character (one the old name, one the new) — or simply equal."""
+        """Whether two recorded names (with no id behind them) are the same character — one the old name, one the new —
+        or simply equal."""
         if str(a or "").strip().lower() == str(b or "").strip().lower():
             return bool(str(a or "").strip())
-        try:
-            ha, hb = self.find_full(a), self.find_full(b)
-        except RegistryError:
-            return False
+        ha, hb = self.find_full(a), self.find_full(b)
         return ha is not None and hb is not None and ha[1] is hb[1]
 
     def find(self, name: str, *, former: bool = True) -> tuple[Member, RegisteredCharacter] | None:
@@ -2801,18 +2802,26 @@ class Registry:
             its member and name now, else the name as written."""
             return f"#{m.discord_id}:{c.label.lower()}" if m is not None and c is not None else raw
 
+        def found(name: str):
+            try:
+                return self.find(name)
+            except RegistryError:  # a first name two characters share: the name as written
+                return None
+
+        def held_by(a):
+            """The ledger side, resolved as the file side is: a row with an id by its member (award_holder), an id-less
+            row by `find` — the same lookup a file row gets, first names included."""
+            return self.award_holder(a) if a.discord_id is not None else found(a.raider)
+
         for i, a in enumerate(awards):
             if a.void:
                 continue  # a voided award (an undone import, a corrected one) no longer holds the row: the fixed file imports
             held_day[i] = a.received
-            for p in self._award_pairs([who(*(self.award_holder(a) or (None, None)), a.raider)], a.item_id, a.item_name):
+            for p in self._award_pairs([who(*(held_by(a) or (None, None)), a.raider)], a.item_id, a.item_name):
                 index.setdefault(p, []).append(i)
         prepared = []
         for r in rows:
-            try:
-                hit = self.find(r.raider)
-            except RegistryError:
-                hit = None
+            hit = found(r.raider)
             m, c = hit if hit else (None, None)
             names = [who(m, c, r.raider)]
             prepared.append((r, hit, m, c, self._award_pairs(names, r.item_id, r.item_name), self.import_day(r), getattr(r, "received_at", None) is not None))

@@ -118,15 +118,18 @@ def _history(reg, live: list[LootAward]) -> Callable[[Player, str], list[LootAwa
         m = reg.members.get(p.discord_id) if p.discord_id is not None else None
         if m is not None:
             c = reg.own_character(m.characters, who)
-        else:
-            try:  # a full name only: a pug who shares a registered character's first name never inherits its history
-                hit = reg.find_full(who)
-            except Exception:  # noqa: BLE001 — an ambiguous former name is matched as written
-                hit = None
+        else:  # a full name only: a pug who shares a registered character's first name never inherits its history
+            hit = reg.find_full(who)
             c = hit[1] if hit else None
-        if c is None:
-            return [a for a in live if a.raider == who]
-        return [a for a in live if a.raider == who or ((h := holder(a)) is not None and h[1] is c)]
+
+        def theirs(a: LootAward) -> bool:
+            h = holder(a)
+            if h is not None and h[1] is not None:  # a resolved award is decided by its holder only (the id first)
+                return h[1] is c
+            if a.discord_id is not None and p.discord_id is not None and a.discord_id != p.discord_id:
+                return False  # someone else's award (a character since gone): never by name
+            return a.raider == who  # unresolved: a sub or guest stored by name
+        return [a for a in live if theirs(a)]
     return mine
 
 

@@ -75,11 +75,11 @@ def test_new_fields_default_and_an_old_member_file_loads_unchanged(reg):
 
 # ---------------------------------------------------------------- the verb
 
-def test_rename_keeps_the_old_name_as_an_alias(reg):
+def test_rename_keeps_the_old_name_as_an_alias(reg, rs):
     m, c = tessa(reg)
     rev = reg.characters_rev(m)
     n = commits(reg)
-    got = reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA)
+    got = reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA, rs=rs)
     assert got is reg.members[TESSA].characters[0] and got.label == "Bram Ashby" and got.former_names == ["Bram Kettle"]
     assert got.matches("Bram Kettle") and got.matches("bram ashby") and got.matches("Bram")
     assert reg.characters_rev(reg.members[TESSA]) != rev and commits(reg) == n + 1
@@ -87,24 +87,26 @@ def test_rename_keeps_the_old_name_as_an_alias(reg):
     assert (stored["name"], stored["surname"], stored["former_names"]) == ("Bram", "Ashby", ["Bram Kettle"])
     # the same name (any case) is no change and no write
     n = commits(reg)
-    assert reg.rename_character(TESSA, "Bram Ashby", "bram", "ASHBY", "Tessa", by_id=TESSA).former_names == ["Bram Kettle"]
+    assert reg.rename_character(TESSA, "Bram Ashby", "bram", "ASHBY", "Tessa", by_id=TESSA, rs=rs).former_names == ["Bram Kettle"]
     assert commits(reg) == n
     # renamed by a former name; then back: the alias list never grows a duplicate and drops the name taken back
-    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Moss", "Tessa", by_id=TESSA)
+    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Moss", "Tessa", by_id=TESSA, rs=rs)
     assert c.label == "Bram Moss" and c.former_names == ["Bram Kettle", "Bram Ashby"]
-    reg.rename_character(TESSA, "Bram Moss", "Bram", "Kettle", "Tessa", by_id=TESSA)
+    reg.rename_character(TESSA, "Bram Moss", "Bram", "Kettle", "Tessa", by_id=TESSA, rs=rs)
     assert c.label == "Bram Kettle" and c.former_names == ["Bram Ashby", "Bram Moss"]
-    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA)
+    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA, rs=rs)
     assert c.former_names == ["Bram Moss", "Bram Kettle"]
     with pytest.raises(RegistryError):
-        reg.rename_character(TESSA, "Nobody Here", "Bram", "Vale", "Tessa", by_id=TESSA)
+        reg.rename_character(TESSA, "Nobody Here", "Bram", "Vale", "Tessa", by_id=TESSA, rs=rs)
     with pytest.raises(RegistryError):
-        reg.rename_character(TESSA, "Bram Ashby", "B4d", None, "Tessa", by_id=TESSA)
+        reg.rename_character(TESSA, "Bram Ashby", "B4d", None, "Tessa", by_id=TESSA, rs=rs)
+    with pytest.raises(TypeError):  # the run store is required: a caller can't forget the bot's (its runs in memory)
+        reg.rename_character(TESSA, "Bram Ashby", "Bram", "Vale", "Tessa", by_id=TESSA)
 
 
-def test_find_answers_to_a_former_name(reg):
+def test_find_answers_to_a_former_name(reg, rs):
     tessa(reg)
-    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA)
+    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA, rs=rs)
     m, c = reg.find("Bram Kettle")
     assert m.discord_id == TESSA and c.label == "Bram Ashby"
     assert reg.find("bram ashby")[1] is c and reg.find("Bram")[1] is c
@@ -113,14 +115,29 @@ def test_find_answers_to_a_former_name(reg):
     assert reg.set_flex(TESSA, "Bram Kettle", ["tank"]) is c, "a member's own verbs answer to the old name too"
 
 
-def test_a_current_name_beats_anothers_former_name(reg):
-    tessa(reg)
-    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA)
+def test_a_current_name_beats_anothers_former_name(reg, rs):
+    from test_loot_verbs import tiered_item
+
+    _, bram = tessa(reg)
+    award_row(reg, "Bram Kettle", uid=TESSA)  # Tessa's award under the old name
+    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA, rs=rs)
     _, orlas = reg.add_character(ORLA, "Orla", "Bram", "Mage", "Fire", None, True, surname="Kettle")  # a former name never blocks a new one
     assert reg.find("Bram Kettle") == (reg.members[ORLA], orlas)
+    # an award with a Discord id stays its member's: Orla, who never received anything, gets no loot history from it
+    ctx = RegistryLootContext(reg, reg.store, None)
+    (aw0,) = ctx.ledger
+    assert reg.award_is_for(aw0, "Bram Ashby") and not reg.award_is_for(aw0, "Bram Kettle"), "the companion's compare (by the holder)"
+    item = tiered_item(reg)
+
+    def power(uid, c):
+        p = Player(signup_name=str(uid), pos=1, discord_id=uid, status="signed", cls=c.cls, spec=c.spec, role=reg.profile.spec(c.cls, c.spec).role,
+                   character=c.label)
+        (x,) = scoring.candidates(reg.profile, item, [p], ctx.ledger, {}, date(2026, 12, 12), reg=reg)
+        return x.recent_power
+    assert power(ORLA, orlas) == 0 and power(TESSA, bram) == 0.75
     # a member's own two characters: one's former name is the other's current name — the current one answers
     _, cinder = reg.add_character(TESSA, "Tessa", "Cinder", "Priest", "Holy", None, False, surname="Vale")
-    reg.rename_character(TESSA, "Cinder Vale", "Cinder", "Moss", "Tessa", by_id=TESSA)
+    reg.rename_character(TESSA, "Cinder Vale", "Cinder", "Moss", "Tessa", by_id=TESSA, rs=rs)
     _, again = reg.add_character(TESSA, "Tessa", "Cinder", "Mage", "Frost", None, False, surname="Vale")
     assert reg.find("Cinder Vale")[1] is again and reg.find("Cinder Moss")[1] is cinder
     m = reg.members[TESSA]
@@ -142,18 +159,18 @@ def test_a_taken_name_is_refused_with_no_partial_write(reg, rs):
     member_file = (reg.store.root / reg.key / "members" / f"{TESSA}.json").read_text()
     n = commits(reg)
     with pytest.raises(RegistryError) as e:
-        reg.rename_character(TESSA, "Bram Kettle", "wren", "hollow", "Officer", by_id=1, officer=True)
+        reg.rename_character(TESSA, "Bram Kettle", "wren", "hollow", "Officer", by_id=1, officer=True, rs=rs)
     assert str(e.value) == "Wren Hollow is registered to Orla. Move it or retire it first."
     with pytest.raises(RegistryError) as e:
-        reg.rename_character(TESSA, "Bram Kettle", "Wren", "Hollow", "Tessa", by_id=TESSA)
+        reg.rename_character(TESSA, "Bram Kettle", "Wren", "Hollow", "Tessa", by_id=TESSA, rs=rs)
     assert str(e.value) == "That name is already registered here. Ask an officer."
     _, own = reg.add_character(TESSA, "Tessa", "Sorrel", "Priest", "Holy", None, False)
     with pytest.raises(RegistryError, match="registered to Tessa"):
-        reg.rename_character(TESSA, "Bram Kettle", "Sorrel", None, "Officer", by_id=1, officer=True)
+        reg.rename_character(TESSA, "Bram Kettle", "Sorrel", None, "Officer", by_id=1, officer=True, rs=rs)
     member_file = (reg.store.root / reg.key / "members" / f"{TESSA}.json").read_text()
     n = commits(reg)
     with pytest.raises(RegistryError):
-        reg.rename_character(TESSA, "Bram Kettle", "Wren", "Hollow", "Tessa", by_id=TESSA)
+        reg.rename_character(TESSA, "Bram Kettle", "Wren", "Hollow", "Tessa", by_id=TESSA, rs=rs)
     assert c.label == "Bram Kettle" and c.former_names == [] and commits(reg) == n
     assert (reg.store.root / ev.rel_path(reg.key)).read_text() == run_file
     assert (reg.store.root / reg.key / "members" / f"{TESSA}.json").read_text() == member_file
@@ -243,14 +260,14 @@ def test_past_awards_still_belong_to_the_character(reg, env):  # noqa: F811
     assert c.get("/api/me/loot", headers=as_user(c, other.discord_id)).json()["rows"] == []
 
 
-def test_an_appeal_on_an_old_award_still_opens(reg):
+def test_an_appeal_on_an_old_award_still_opens(reg, rs):
     m = reg.test_members()[0]
     old = m.main.label
     award_row(reg, old, uid=m.discord_id, iid="r1-d7")
     ctx = RegistryLootContext(reg, reg.store, None)
     (aw,) = ctx.ledger
     aid = appeals.ledger_ids(ctx.ledger)[id(aw)]
-    reg.rename_character(m.discord_id, old, "Bramble", None, "Officer", by_id=None, officer=True)
+    reg.rename_character(m.discord_id, old, "Bramble", None, "Officer", by_id=None, officer=True, rs=rs)
     ctx.reload()
     hit = appeals.find_award(reg, ctx, m.discord_id, aid)
     assert hit.import_id == "r1-d7" and appeals.ledger_ids(ctx.ledger)[id(hit)] == aid, "award ids stay as they are"
@@ -258,12 +275,12 @@ def test_an_appeal_on_an_old_award_still_opens(reg):
     assert ap.id == aid and ap.character == "Bramble"
 
 
-def test_import_dedupe_sees_through_a_rename(reg):
+def test_import_dedupe_sees_through_a_rename(reg, rs):
     from oibot_gm.importers import ledger_csv
 
     tessa(reg)
     award_row(reg, "Bram Kettle", uid=TESSA)
-    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA)
+    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA, rs=rs)
     for name in ("Bram Ashby", "Bram Kettle", "bram kettle"):
         rows = ledger_csv.parse(f"character,item,received\n{name},Robe of Tests,2026-12-09\n").rows
         rep = reg.import_awards(rows, "Officer", preview=True)
@@ -309,3 +326,57 @@ def test_the_companion_routes_loot_by_the_new_and_the_old_name(reg, rs):
     out = run(bot.handle_feed_event({"type": "loot", "recipient": "Brambleton", "item_name": "Shard of Doom", "idem": "x1"},
                                     Companion("Brambleton", "c", "", "peer")))
     assert out["result"] == "confirmed", out
+
+
+# ---------------------------------------------------------------- fix round 1: a name two records answer to
+
+def test_a_full_name_two_characters_had_is_nobody_and_never_raises(reg, rs):
+    tessa(reg)
+    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Ashby", "Tessa", by_id=TESSA, rs=rs)
+    reg.add_character(ORLA, "Orla", "Bram", "Mage", "Fire", None, True, surname="Kettle")
+    reg.rename_character(ORLA, "Bram Kettle", "Bram", "Moss", "Orla", by_id=ORLA, rs=rs)
+    assert reg.find_full("Bram Kettle") is None and reg.find("Bram Kettle") is None, "an alias two characters had: nobody, no error"
+    aw = LootAward(raider="Bram Kettle", item_id=0, item_name="Robe", tier="S", total_weight=1, offspec=False, received=date(2026, 12, 1),
+                   instance="x", boss="b", discord_id=None)
+    assert reg.award_holder(aw) is None and not reg.same_name("Bram Kettle", "Bram Moss")
+    with pytest.raises(RegistryError, match="More than one character is called"):
+        reg.find("Bram")  # an ambiguous first name still refuses, as before
+
+
+def test_import_dedupe_still_matches_a_first_name_row_of_a_character_never_renamed(reg, rs):
+    from oibot_gm.importers import ledger_csv
+
+    award_row(reg, "Bram", uid=None)  # history imported before the member registered
+    tessa(reg)
+    rows = ledger_csv.parse("character,item,received\nBram,Robe of Tests,2026-12-09\n").rows
+    rep = reg.import_awards(rows, "Officer", preview=True)
+    assert (rep["new"], rep["duplicates"]) == (0, 1)
+    rows = ledger_csv.parse("character,item,received\nBram Kettle,Robe of Tests,2026-12-09\n").rows
+    assert reg.import_awards(rows, "Officer", preview=True)["duplicates"] == 1
+
+
+def test_after_a_collision_an_award_with_an_id_is_shown_as_its_members(reg, rs, env):  # noqa: F811
+    from fastapi.testclient import TestClient
+    from test_loot_web import OFFICER, WebLootBot, as_user
+
+    from oibot_gm.help import Ask, _loot
+    from oibot_gm.web import app as web
+
+    a, b = reg.test_members()[0], reg.test_members()[1]
+    old = a.main.label
+    award_row(reg, old, uid=a.discord_id)
+    reg.rename_character(a.discord_id, old, "Bramble", None, "Officer", by_id=None, officer=True, rs=rs)
+    cls = "Mage" if a.main.cls != "Mage" else "Priest"
+    spec = next(iter(reg.profile.classes[cls]))
+    reg.add_character(b.discord_id, b.display_name, old, cls, spec, None, False)  # b's alt now holds a's old name
+    bot = WebLootBot(reg, rs)
+    c = TestClient(web.create_app(bot))
+    (row,) = c.get("/api/loot/log", headers=as_user(c, OFFICER)).json()["rows"]
+    assert row["character"] == old and row["cls"] == a.main.cls, "class from the award's member, not from whoever holds the name now"
+    assert c.get("/api/loot/log", params={"member": b.display_name}, headers=as_user(c, OFFICER)).json()["rows"] == []
+    assert len(c.get("/api/loot/log", params={"member": a.display_name}, headers=as_user(c, OFFICER)).json()["rows"]) == 1
+    assert not c.get("/api/loot/log", headers=as_user(c, b.discord_id)).json()["rows"][0]["mine"]
+    assert c.get("/api/loot/log", headers=as_user(c, a.discord_id)).json()["rows"][0]["mine"]
+    assert c.get("/api/me/loot", headers=as_user(c, b.discord_id)).json()["rows"] == []
+    lines = _loot(Ask(reg, rs, OFFICER, True, f"what loot did {b.display_name} get"))
+    assert any("for the member(s) named: 0 award(s)" in x for x in lines), lines

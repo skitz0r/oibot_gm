@@ -799,7 +799,7 @@ class LootMixin:
             if any(i.startswith(base + "-c") for i in ctx.import_ids):
                 continue
             rows = [a for a in ctx.ledger if a.import_id == base and not a.void]
-            if rows and rows[-1].raider.lower() == str(cf.get("in_game") or "").lower():
+            if rows and reg.award_is_for(rows[-1], str(cf.get("in_game") or "")):  # by the award's holder (its id), §5.2
                 continue
             out.append({**cf, "session": sid, "run": _run_of(sid), "ended": ended})
         return out
@@ -859,14 +859,14 @@ class LootMixin:
                 who, uid, _ = ls.recipient_of(reg, [], who_in)
                 spec = None
                 m = reg.members.get(uid) if uid is not None else None
-                c = next((c for c in (m.characters if m else []) if c.label.lower() == who.lower()), None)
+                c = reg.own_character(m.characters, who) if m else None
                 try:
                     spec = ctx.profile.spec(c.cls, c.spec) if c else None
                 except KeyError:
                     spec = None
                 item = ctx.item(aw.item_id or None, aw.item_name)
                 tier, weight = scoring.weight_for(ctx.profile, item, spec, ctx.loot_cfg) if item is not None else ("?", float(ctx.loot_cfg.get("untiered_weight", 0.5)))
-            if who.lower() == aw.raider.lower():
+            if who.lower() == aw.raider.lower() or (who != DISENCHANT and reg.award_is_for(aw, who)):  # its new or old name (§5.2)
                 raise RegistryError(f"It is already recorded to {aw.raider}.")
             n = 1 + sum(1 for i in ctx.import_ids if i.startswith(base + "-c"))
             new = aw.model_copy(update={"raider": who, "discord_id": uid, "tier": tier, "total_weight": weight, "offspec": False, "source": "correct",
@@ -927,7 +927,7 @@ class LootMixin:
             ctx = self.loot_ctx(session)
             roster = self.loot_roster(session)
             who = DISENCHANT if who_in.lower() in ("disenchant", DISENCHANT) else ls.recipient_of(reg, roster, who_in)[0]
-            if who.lower() == aw.raider.lower():
+            if who.lower() == aw.raider.lower() or (who != DISENCHANT and reg.award_is_for(aw, who)):  # its new or old name (§5.2)
                 raise RegistryError(f"It is already recorded to {aw.raider}.")
             n = 1 + sum(1 for a in session.awards if a.drop_id == drop_id and a.source == "correct")
             new = ls.make_award(ctx, session, d, who, roster, source="correct", by=by, bot_pick=aw.bot_pick, reg=reg)

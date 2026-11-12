@@ -229,9 +229,12 @@ src/oibot_gm/
                        same_character(c, label, former=) = THE by-name predicate (the label now or a former one); own_character(chars, ref) = one member's
                        (a current name → a first name → a former name); holder_of = who holds a full name NOW (the taken-name check: a former name never
                        blocks — find(full, former=False) at register / apply / add / name / import); find_full = a full name now, else a former one (two
-                       characters that had it → refused); find and matches answer to a former name (a current name wins); award_holder(a) = whose an award is (its id's member, else the full name) —
-                       My loot, received marks, scoring's history, the loot log, reweight, the import dedupe read it; same_name(a, b) = the companion's
-                       compare. rename_character(uid, label, name, surname, by, *, by_id, officer, rs, relabelled) = THE character rename: refused with
+                       characters that had it → None, never raises); find and matches answer to a former name (a current name wins); award_holder(a) =
+                       whose an award is — an award WITH a Discord id is decided by the id, never by its name; an id-less row by the full name — My loot,
+                       received marks, scoring's history, the loot log (member filter, class, `mine`), help, reweight read it (the import dedupe resolves
+                       an id-less ledger row with `find`, as its file rows); award_is_for(a, name) = the companion's / correct's / a conflict's compare;
+                       same_name(a, b) = two id-less names. rename_character(uid, label, name, surname, by, *, rs (REQUIRED: the bot's RaidStore), by_id,
+                       officer, relabelled) = THE character rename: refused with
                        nothing written for a name another record holds ("<Name> is registered to <member>. Move it or retire it first." / "That name is
                        already registered here. Ask an officer."); the old label → former_names (a name taken back leaves it); ONE commit = the member +
                        every live run's labels (rc.relabel_runs: signup, seats, fill asks, callouts; `relabelled` gets the keys to redraw) + their

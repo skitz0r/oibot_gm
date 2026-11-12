@@ -526,32 +526,31 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         return {"message": line}
 
     # ------------------------------------------------------------ the award log (members, logged in — D2)
-    def char_index(reg) -> dict[str, tuple]:
-        """name → (discord id, class, spec): every current name first, then the names characters had before a rename
-        (design §5.2: a current name wins), so an award under an old name still finds its character."""
-        out = {}
-        for m in reg.members.values():
-            for c in m.characters:
-                out.setdefault(c.label.lower(), (m.discord_id, c.cls, c.spec))
-        for m in reg.members.values():
-            for c in m.characters:
-                for f in c.former_names:
-                    out.setdefault(f.lower(), (m.discord_id, c.cls, c.spec))
-        return out
+    def owner(reg, a, memo: dict):
+        """Whose award `a` is (Registry.award_holder: an award with a Discord id by the id, never by its name; an id-less
+        row by the full name, a current name first — design §5.2), read once per award per request."""
+        if id(a) not in memo:
+            memo[id(a)] = reg.award_holder(a)
+        return memo[id(a)]
 
-    def names_of(chars: dict, uid) -> set[str]:
-        """The names (now and before a rename) that are this member's in char_index — what an award recorded without a
-        Discord id is matched by."""
-        return {k for k, (u, _c, _s) in chars.items() if uid is not None and u == uid}
+    def is_members(reg, a, uid, memo: dict) -> bool:
+        """The award is member `uid`'s: by its Discord id; an id-less row by whose character the name is."""
+        if uid is None:
+            return False
+        if a.discord_id is not None:
+            return a.discord_id == uid
+        h = owner(reg, a, memo)
+        return h is not None and h[0].discord_id == uid
 
-    def log_row(reg, a, chars, officer: bool, scores: bool, ctx, viewer_uid: int | None, mine_names: set[str]) -> dict:
+    def log_row(reg, a, memo: dict, officer: bool, scores: bool, ctx, viewer_uid: int | None) -> dict:
         it = reg.item(a.item_id or None, a.item_name)
         name = a.item_name or (it.name if it is not None else f"item {a.item_id}")
-        uid, cls, spec = chars.get(a.raider.lower(), (a.discord_id, None, None))
+        h = owner(reg, a, memo)
+        c = h[1] if h is not None else None
+        cls, spec = (c.cls, c.spec) if c is not None else (None, None)
         row = {"item": name, "item_id": a.item_id, "key": item_key(a.item_id, name), "character": "disenchant" if a.raider == DISENCHANT else a.raider,
                "disenchant": a.raider == DISENCHANT, "cls": cls, "spec": spec, "boss": a.boss, "instance": a.instance, "received": a.received.isoformat(),
-               "date_label": day(reg, a.received.isoformat()), "offspec": a.offspec,
-               "mine": bool(viewer_uid is not None and (a.discord_id == viewer_uid or (a.discord_id is None and a.raider.lower() in mine_names)))}
+               "date_label": day(reg, a.received.isoformat()), "offspec": a.offspec, "mine": is_members(reg, a, viewer_uid, memo)}
         if officer and scores:
             prec = ctx.precedent_for(a.import_id) if a.import_id else None
             row.update({"tier": a.tier, "weight": a.total_weight, "source": a.source, "bot": a.bot_pick, "by": a.by, "import_id": a.import_id,
@@ -566,14 +565,12 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         v = await who(request)
         reg = v.reg
         ctx = ctx_of(reg)
-        chars = char_index(reg)
-        mine = names_of(chars, v.uid if v.member else None)
+        memo: dict = {}
         rows = sorted(ctx.ledger, key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
         if member:
             m = resolve_member(reg, member)
-            names = names_of(chars, m.discord_id)
-            rows = [a for a in rows if a.discord_id == m.discord_id or a.raider.lower() in names]
-        out = [log_row(reg, a, chars, v.officer, scores, ctx, v.uid, mine) for a in rows[:max(1, min(int(limit), 1000))]]
+            rows = [a for a in rows if is_members(reg, a, m.discord_id, memo)]
+        out = [log_row(reg, a, memo, v.officer, scores, ctx, v.uid) for a in rows[:max(1, min(int(limit), 1000))]]
         return {"rows": out, "scores": bool(v.officer and scores), "officer": v.officer}
 
     @app.get("/api/me/loot")
@@ -585,9 +582,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         v = await who(request)
         reg = v.reg
         ctx = ctx_of(reg)
-        chars = char_index(reg)
-        mine = names_of(chars, v.uid if v.member else None)
-        rows = [a for a in ctx.ledger if a.discord_id == v.uid or (a.discord_id is None and a.raider.lower() in mine)]
+        memo: dict = {}
+        rows = [a for a in ctx.ledger if is_members(reg, a, v.uid, memo)]
         rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
         needle = " ".join(str(q or "").split()).lower()[:60]
         if needle:  # the member's own awards only — a search never widens what they see
@@ -599,7 +595,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         for a in rows[start:start + size]:
             aid = ids[id(a)]
             ap = asked.get(aid)
-            out.append({**log_row(reg, a, chars, False, False, ctx, v.uid, mine), "award": aid, "appeal": member_appeal_json(reg, ap) if ap else None})
+            out.append({**log_row(reg, a, memo, False, False, ctx, v.uid), "award": aid, "appeal": member_appeal_json(reg, ap) if ap else None})
         # my questions to the council (L32), newest first — also those about an award corrected since (no longer a row above)
         mine_q = sorted(asked.values(), key=lambda ap: ap.created_at, reverse=True)
         return {"rows": out, "total": len(rows), "more": start + size < len(rows), "appeals": [member_appeal_json(reg, ap) for ap in mine_q],
@@ -613,9 +609,10 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
                 "outcome": ap.outcome, "outcome_label": appeals.OUTCOME_LABELS.get(ap.outcome or "") if ap.outcome else None,
                 "state_text": appeals.state_words(reg, ap)}
 
-    def officer_appeal_json(reg, ap, ctx, chars=None, awards=None) -> dict:
-        chars = chars if chars is not None else char_index(reg)
-        _uid, cls, spec = chars.get(ap.character.lower(), (None, None, None))
+    def officer_appeal_json(reg, ap, ctx, awards=None) -> dict:
+        am = reg.members.get(ap.member_id)  # the asker's own character by the name on the appeal (now or before a rename)
+        ac = reg.own_character(am.characters, ap.character) if am is not None else None
+        cls, spec = (ac.cls, ac.spec) if ac is not None else (None, None)
         gid = reg.config.discord_guild_id
         link = f"https://discord.com/channels/{gid}/{ap.thread_id or ap.channel_id}" + ("" if ap.thread_id else f"/{ap.message_id}") if (ap.thread_id or ap.message_id) else None
         out = {**member_appeal_json(reg, ap), "member": ap.member_name, "member_id": str(ap.member_id), "cls": cls, "spec": spec, "item_id": ap.item_id,
@@ -656,8 +653,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             rows = appeals.store_of(reg).all()
             open_ = sorted([ap for ap in rows if ap.state == "open"], key=lambda ap: ap.created_at)
             done = sorted([ap for ap in rows if ap.state != "open"], key=lambda ap: ap.resolved_at or ap.created_at, reverse=True)[:max(1, min(int(limit), 500))]
-            chars, awards = char_index(reg), appeals.all_awards(reg)
-            return {"open": [officer_appeal_json(reg, ap, ctx, chars, awards) for ap in open_], "resolved": [officer_appeal_json(reg, ap, ctx, chars, awards) for ap in done],
+            awards = appeals.all_awards(reg)
+            return {"open": [officer_appeal_json(reg, ap, ctx, awards) for ap in open_], "resolved": [officer_appeal_json(reg, ap, ctx, awards) for ap in done],
                     "outcomes": [{"value": k, "label": appeals.OUTCOME_LABELS[k], "text": t} for k, t in appeals.OUTCOMES.items()], "note_max": appeals.NOTE_MAX}
 
         return await asyncio.to_thread(build)
