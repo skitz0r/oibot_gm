@@ -547,6 +547,32 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     dump.add("armory_guild_clear_consequence", "a guild linked", cq.armory_guild_clear_consequence(reg), guild_names)
     reg.clear_armory_guild("Owner", by_id=OWNER)
 
+    # ---- a character's armory link (armory link §5.2): link, unlink, the "keep professions by hand" switch, refusals
+    from oibot_gm import discord_armory
+    from oibot_gm.discord_armory import Found
+
+    am = ms[0]
+    ac = am.main
+    same = Found(id=700101, slug="x", name=ac.name, surname=ac.surname, cls=ac.cls, level=60, source="profile")
+    other = Found(id=700102, slug="x", name="Bram", surname="Kettle", cls="Warrior", level=60, source="profile")
+    low = Found(id=700105, slug="x", name="Pip", surname="Wobble", cls=None, level=1, source="roster")
+    low_same = Found(id=700105, slug="x", name=ac.name, surname=ac.surname, cls="Rogue", level=7, source="roster")
+    link_names = {"Bram", "Pip"}
+    for who, by in (("own", am.discord_id), ("an officer", OFFICER_ID)):
+        dump.add("armory_link_consequence", f"{who}, a new name", cq.armory_link_consequence(reg, am, ac, other, by), link_names)
+        dump.add("armory_link_consequence", f"{who}, the same name", cq.armory_link_consequence(reg, am, ac, same, by), link_names)
+        dump.add("armory_link_consequence", f"{who}, below level 10, no class", cq.armory_link_consequence(reg, am, ac, low, by), link_names)
+        dump.add("armory_link_consequence", f"{who}, below level 10, the same name", cq.armory_link_consequence(reg, am, ac, low_same, by), link_names)
+        dump.add("armory_unlink_consequence", who, cq.armory_unlink_consequence(reg, am, ac, by), link_names)
+    for on in (True, False):
+        dump.add("profession_sync_consequence", f"on={on}", cq.profession_sync_consequence(on, ac.label), link_names)
+        dump.add("profession_sync_consequence", f"on={on}, no name", cq.profession_sync_consequence(on), link_names)
+    for text in (discord_armory.NOT_FOUND, discord_armory.SYNC_LIMITED, *discord_armory.OFFICER_ONLY.values(),
+                 "That armory character is already linked here. Ask an officer.",
+                 "Bram Kettle in the armory is linked to Bramble's Bram Kettle. Unlink it there first.",
+                 "Bram Kettle's professions come from the armory, so turn on Keep professions by hand to edit them."):
+        dump.add("armory refusal", text[:24], [text], link_names)
+
     # ---- appeals
     from oibot_gm import appeals
 

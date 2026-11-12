@@ -146,7 +146,14 @@ class RaidSchedulerMixin:
         await self.ops.emit(reg.config, "info", f"{ev.key}: closed")
 
     async def scheduler_tick_guild(self, reg) -> None:
-        """One guild's minute: open on cadence → health → lock → expire → fill → close."""
+        """One guild's minute: the armory's check (a background task when due) → open on cadence → health → lock → expire →
+        fill → close."""
+        try:  # armory link §5.3: hourly character checks, the roster every three hours — never waits here for the armory
+            from . import discord_armory
+
+            await discord_armory.armory_tick(self, reg)
+        except Exception:  # noqa: BLE001 — the armory never stops a guild's minute
+            log.exception("armory tick failed for %s", reg.key)
         # (guild key, run key) whose "nobody left to ask" line went out: two guilds can hold runs with the same key
         exhausted_posted: set[tuple[str, str]] = self.__dict__.setdefault("_fill_exhausted_posted", set())
         cfg = reg.config

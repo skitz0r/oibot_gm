@@ -70,6 +70,9 @@ src/oibot_gm/
                        absence_consequence = Add the absence's words (the absence previews' `sentences`, Me and Members)
                        The server's guild (armory link §5.1): armory_guild_consequence(reg, facts) = what the lookup found (name, faction, kind,
                        members, created — armory_created_words, never ISO) then what changes; armory_guild_clear_consequence (every character keeps its link)
+                       A character's link (§5.2): armory_link_consequence(reg, m, c, found, by_id) (what the armory or the roster shows, the name and the
+                       professions it takes — from level 10 when found on the roster), armory_unlink_consequence(reg, m, c, by_id) (kept by hand from now
+                       on), profession_sync_consequence(on, label) (on: the hand edits are replaced and can't be brought back)
   inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
@@ -105,6 +108,20 @@ src/oibot_gm/
                        ArmoryDown(retry_after) / ArmoryAccess, `.words` = the sentence; NOT_MODIFIED on a 304; address / guild_slug; available(reg),
                        client_for(reg) (class / ruleset tables from integrations.yaml `armory`); the rank is never read (D7), no token in any error;
                        find_guild(reg, name) = the owner's typed guild name → GuildFacts (BLOCKING; no letters / > GUILD_NAME_MAX → ArmoryMissing)
+  discord_armory.py    a character's armory link and its check (armory link §5.2/§5.3), module functions taking the client (bare test clients
+                       work): find_for_link(bot, reg, name, surname) → Found{id, slug, name, surname, cls, level, source profile|roster, guild_id,
+                       modified} (profile first, else the linked guild's roster; RegistryError NOT_FOUND); link_character / unlink_character /
+                       set_profession_sync(…, by, *, by_id, via, preview) (own character or an officer, PRIV_LIVE; preview = the consequences'
+                       sentences; the rename + link = ONE commit on the loop under the member's runs' board locks with the bot's RaidStore, sheets
+                       redrawn; one ops.audited line); sync_character(…, force=, by_id=) → unchanged|updated|missing|limited (Sync now: unconditional,
+                       5 min per character, SYNC_LIMITED); sync_guild (hourly; the first ArmoryDown/Access/Shape stops it, one ops warn per guild per
+                       hour); roster_refresh(force=) (3 h, conditional; the stored guild_id checked — a stranger warns once; out/armory/<key>/roster.json,
+                       never the data repo); roster_snapshot / unclaimed / flags (class | missing after 24 h | outside) / in_guild / last_checked /
+                       updated_words read memory + the snapshot; armory_tick(bot, reg) = the scheduler's hook (one background task per guild when due;
+                       off where armory.available is false). A 404 → the roster (below level 10, or renamed: re-pointed by id + rename_character) else
+                       missing_since once, never an unlink; a recipe id the list lacks is kept and told to ops once (out/armory/<key>/recipes_reported.json).
+                       In memory per guild key: last check / Last-Modified per armory id, Sync now's limit, the warn throttle; one asyncio lock per guild.
+                       No DM, no notice — ever
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
   loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
                        Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),
@@ -231,7 +248,7 @@ src/oibot_gm/
                        migrate_recipes = the once-per-start match of typed recipes to the list (one commit per guild, nothing when nothing matches;
                        discord_bot runs it per guild at ready in a thread → professions.migrated_line, one ops line)
                        Character names (armory link, spec §5.2, C9): RegisteredCharacter.armory (ArmoryLink {id, slug, linked_by, linked_at, checked_at,
-                       modified, level, cls, in_guild, missing_since}; nothing sets it yet) / profession_sync / former_names (old labels, oldest first);
+                       modified, level, cls, in_guild, missing_since}; written only by the verbs below) / profession_sync / former_names (old labels, oldest first);
                        same_character(c, label, former=) = THE by-name predicate (the label now or a former one); own_character(chars, ref) = one member's
                        (a current name → a first name → a former name); holder_of = who holds a full name NOW (the taken-name check: a former name never
                        blocks — find(full, former=False) at register / apply / add / name / import); find_full = a full name now, else a former one (two
@@ -245,6 +262,14 @@ src/oibot_gm/
                        already registered here. Ask an officer."); the old label → former_names (a name taken back leaves it); ONE commit = the member +
                        every live run's labels (rc.relabel_runs: signup, seats, fill asks, callouts; `relabelled` gets the keys to redraw) + their
                        placement asks; the ledger, award ids, appeals and finished / cancelled runs keep the old name; the same name = no write
+                       The link's writes (§5.2/§5.3, one commit each, under the member-write lock): armory_holder(id) (one claim per armory character per
+                       guild: an ACTIVE character), armory_linked() (what the hourly check reads: no puppets, nobody who left, no retired character),
+                       armory_character(uid, id) (found by the link, never a name), link_refusal(uid, label, id, name, surname, by_id=, officer=) (puppet /
+                       already linked / another's claim — names the holder to an officer only / a taken name), link_armory(uid, label, link, by,
+                       professions=) (profession_sync back on; the caller renames first in the same batch), unlink_armory (professions stay, kept by
+                       hand), set_profession_sync(uid, label, on, by) → changed?, armory_update(uid, id, changes, professions=, ride=) = THE check's write
+                       (nothing differs → no write; `ride` = Last-Modified / checked_at stored only with a commit; save_quiet "<member>: <label> updated
+                       from the armory"). set_professions refuses a CHANGED list on a linked, sync-on character in one sentence (R2; unchanged passes)
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|loot-ask|plan main|alt|char [action]|professions|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me loot-ask = flows_appeal, a question about one of your own awards;
@@ -331,7 +356,7 @@ src/oibot_gm/
                        Reopen; lock_decide = THE lock screen with Preview lock, cancel_decide = THE cancel screen, end_decide), LootButton `loot.<gk>:<session>:<drop|->:<action>[:<arg>]`,
                        LootPick `lootpick.<gk>:…`, LootStartButton `lootstart.<gk>:open`; constructors take the guild key first (`raid.<gk>:…` ids; old ids still match,
                        g=None → guild_routing.resolve_button + each button's legacy matcher); raid_views ⇄ raid_buttons import each other at the bottom
-  raid_scheduler.py    RaidSchedulerMixin: the minute loop (open on cadence → health → lock → expire → fill → close), calls RaidMixin
+  raid_scheduler.py    RaidSchedulerMixin: the minute loop (discord_armory.armory_tick → open on cadence → health → lock → expire → fill → close), calls RaidMixin
   raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|loot|distribute|end|set|cancel|list|out|fill
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json (compiled_at, text_sha, confirmed_by), confirmed by an officer;
                        the waiting edit ON DISK (<doc>.pending.json, one commit with the draft; PENDING = a rev cache only); policy_state = Written vs

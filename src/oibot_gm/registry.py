@@ -2317,6 +2317,136 @@ class Registry:
                     return m, c
         return None
 
+    # ---- a character's armory link (armory link, design §5.2 / §5.3): the Registry half — one verb per fact, each one
+    # commit under the member-write lock; discord_armory.py does the reading, the rights and the Discord side. The armory
+    # never creates a record (D2): every verb here acts on a character somebody registered.
+    def armory_holder(self, armory_id: int) -> tuple[Member, RegisteredCharacter] | None:
+        """Who in this guild holds the link to armory character `armory_id` (one claim per armory character per guild):
+        an ACTIVE character of any member, else None. A retired character's old link claims nothing."""
+        aid = int(armory_id)
+        return next(((m, c) for m in self.members.values() for c in m.characters
+                     if c.status == "active" and c.armory is not None and c.armory.id == aid), None)
+
+    def armory_linked(self) -> list[tuple[Member, RegisteredCharacter]]:
+        """What the hourly check reads: every active, linked character of a real member still in the server — puppets,
+        members who left and retired characters are never checked."""
+        return [(m, c) for m in sorted(self.members.values(), key=lambda x: x.discord_id) if not m.test and not m.left_at
+                for c in m.characters if c.status == "active" and c.armory is not None]
+
+    def armory_character(self, discord_id: int, armory_id: int) -> RegisteredCharacter | None:
+        """The member's active character linked to `armory_id` (the check finds its character by the link, never by a
+        name that may have changed while the armory was asked)."""
+        m = self.members.get(discord_id)
+        return next((c for c in (m.characters if m else []) if c.status == "active" and c.armory is not None
+                     and c.armory.id == int(armory_id)), None)
+
+    def _linkable(self, discord_id: int, label: str, by_id: int | None) -> tuple[Member, RegisteredCharacter]:
+        m = self.members.get(discord_id)
+        if m is None:
+            raise RegistryError("They have no registered characters yet.")
+        why = self.puppet_refusal(m, by_id)
+        if why:
+            raise RegistryError(why)
+        c = self.own_character([x for x in m.active() if x.name], label)
+        if c is None:
+            raise RegistryError(f"{m.display_name} has no character named {str(label or '').strip() or '?'}.")
+        return m, c
+
+    def link_refusal(self, discord_id: int, label: str, armory_id: int, name: str, surname: str | None, *, by_id: int | None = None,
+                     officer: bool = False) -> str | None:
+        """Why linking the member's character `label` to armory character `armory_id` (named `name surname` there) is
+        refused, else None — nothing written. One sentence: a puppet in rehearsal, no such character, already linked to it,
+        another record's claim (naming the holder to an officer, "ask an officer" to a member — spec §5.2 "One claim"),
+        or a name another record holds now (the rename's own refusal)."""
+        try:
+            m, c = self._linkable(discord_id, label, by_id)
+        except RegistryError as e:
+            return str(e)
+        full = f"{name} {surname}" if surname else name
+        if c.armory is not None and c.armory.id == int(armory_id):
+            return f"{c.label} is already linked to that armory character."
+        hit = self.armory_holder(armory_id)
+        if hit is not None and hit[1] is not c:
+            return (f"{full} in the armory is linked to {hit[0].display_name}'s {hit[1].label}. Unlink it there first." if officer
+                    else "That armory character is already linked here. Ask an officer.")
+        taken = self.holder_of(full)
+        if taken is not None and taken[1] is not c:
+            return (f"{full} is registered to {taken[0].display_name}. Move it or retire it first." if officer
+                    else "That name is already registered here. Ask an officer.")
+        return None
+
+    @_member_write
+    def link_armory(self, discord_id: int, label: str, link: "ArmoryLink", by: str, *, professions: list[Profession] | None = None,
+                    by_id: int | None = None, officer: bool = False) -> RegisteredCharacter:
+        """THE link write (spec §5.2): the character takes `link` (its armory id, address and the first check's facts) and
+        professions follow the armory again (`profession_sync` on); `professions` (already validated by
+        check_professions(trusted=True)) replace the whole list — None keeps it (nothing to read below level 10). The
+        name is the caller's: rename_character first, in the same store.batch. Refused as link_refusal says. One commit."""
+        m, c = self._linkable(discord_id, label, by_id)
+        why = self.link_refusal(discord_id, c.label, link.id, c.name, c.surname, by_id=by_id, officer=officer)
+        if why:
+            raise RegistryError(why)
+        c.armory, c.profession_sync, c.updated_at = link.model_copy(), True, now()
+        if professions is not None:
+            c.professions = [p.model_copy(deep=True) for p in professions]
+        self.save(m, f"{m.display_name}: {c.label} linked to the armory (by {by})")
+        return c
+
+    @_member_write
+    def unlink_armory(self, discord_id: int, label: str, by: str, *, by_id: int | None = None) -> RegisteredCharacter:
+        """THE unlink (spec §5.2 "Unlink"): the record stays as it last was and its professions are kept by hand from now
+        on. Refused for a character that isn't linked. One commit."""
+        m, c = self._linkable(discord_id, label, by_id)
+        if c.armory is None:
+            raise RegistryError(f"{c.label} isn't linked to the armory.")
+        c.armory, c.profession_sync, c.updated_at = None, True, now()
+        self.save(m, f"{m.display_name}: {c.label} unlinked from the armory (by {by})")
+        return c
+
+    @_member_write
+    def set_profession_sync(self, discord_id: int, label: str, on: bool, by: str, *, by_id: int | None = None) -> bool:
+        """THE switch (D5): `on` = the linked character's professions follow the armory; off = kept by hand (edited from
+        the game's list, every hand-entry check). An unlinked character is always kept by hand: refused. The same value is
+        no write → False; a change is one commit → True. Turning it on replaces nothing here: the caller's next check does."""
+        m, c = self._linkable(discord_id, label, by_id)
+        if c.armory is None:
+            raise RegistryError(f"{c.label} isn't linked to the armory.")
+        if c.profession_sync == bool(on):
+            return False
+        c.profession_sync, c.updated_at = bool(on), now()
+        self.save(m, f"{m.display_name}: {c.label} professions " + ("follow the armory" if on else "kept by hand") + f" (by {by})")
+        return True
+
+    @_member_write
+    def armory_update(self, discord_id: int, armory_id: int, changes: dict, *, professions: list[Profession] | None = None,
+                      ride: dict | None = None) -> bool:
+        """THE write of a check (spec §5.3): `changes` = ArmoryLink fields the armory says now (level, cls, in_guild, slug,
+        missing_since), `professions` = the armory's whole validated list (applied only while profession_sync is still on),
+        `ride` = fields stored only when something else differs (the armory's Last-Modified: a logout alone writes
+        nothing; checked_at, now by default). The character is found by its link (`armory_id`), never by a name. Nothing differs → no write, False.
+        Else ONE commit "<member>: <label> updated from the armory" — written quietly (save_quiet: no change-log line; the
+        site's event stream still hears it) — with checked_at = now; characters_rev moves. Never a notice, never a DM."""
+        m = self.members.get(discord_id)
+        c = self.armory_character(discord_id, armory_id)
+        if m is None or c is None:
+            return False
+        old = c.armory
+        new = old.model_copy(update=dict(changes))
+        differs = new.model_dump(exclude={"checked_at"}) != old.model_dump(exclude={"checked_at"})
+        profs = professions if professions is not None and c.profession_sync else None
+        if profs is not None and [p.model_dump() for p in profs] != [p.model_dump() for p in c.professions]:
+            differs = True
+        else:
+            profs = None
+        if not differs:
+            return False
+        c.armory = new.model_copy(update={"checked_at": now(), **(ride or {})})
+        if profs is not None:
+            c.professions = [p.model_copy(deep=True) for p in profs]
+        c.updated_at = now()
+        self.save_quiet(m, f"{m.display_name}: {c.label} updated from the armory")
+        return True
+
     def find_unique(self, name: str) -> tuple[Member, RegisteredCharacter] | None:
         """`find` for a WRITE that names a character without its member (plain text's rank / confirm, the site's bare
         confirm): a planned label ('Priest (Holy)') is shared by everyone who plans that spec, so when more than one
@@ -2574,6 +2704,17 @@ class Registry:
         c = self.own_character(m.active(), label)
         if not c:
             raise RegistryError(f"You have no active character named {label}.")
+        if c.armory is not None and c.profession_sync:
+            # a synced fact is never also editable (spec §5.3, R2): the stored list (the armory's, unchecked by hand rules)
+            # may ride along unchanged with another edit of the row; any change is refused
+            try:
+                same = [p.model_dump() for p in self.check_professions(entries, trusted=True, keep_unmatched=self.stored_unmatched(c))] \
+                    == [p.model_dump() for p in c.professions]
+            except RegistryError:
+                same = False
+            if same:
+                return c
+            raise RegistryError(f"{c.label}'s professions come from the armory, so turn on Keep professions by hand to edit them.")
         new = self.check_professions(entries, keep_unmatched=self.stored_unmatched(c))
         if [p.model_dump() for p in new] == [p.model_dump() for p in c.professions]:
             return c

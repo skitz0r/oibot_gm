@@ -630,8 +630,57 @@ def armory_guild_clear_consequence(reg: Registry) -> list[str]:
             "You can link a guild again at any time."]
 
 
+
+# ---- a character's armory link (armory link §5.2): the link, the unlink and the "keep professions by hand" switch
+def _whose(m, by_id, *, start: bool) -> str:
+    """"Your" / "your" on your own character, else "<name>'s" (the person named once; later sentences say "they")."""
+    if by_id is not None and int(by_id) == int(m.discord_id):
+        return "Your" if start else "your"
+    return f"{m.display_name}'s"
+
+
+def armory_link_consequence(reg: Registry, m, c, found, by_id) -> list[str]:
+    """The confirm before linking `c` (member `m`'s character) to the armory character a lookup found (`found`:
+    discord_armory.Found): what the armory shows, that the record takes that name and its professions from the armory,
+    then who sees it and what can be undone. Found on the guild's roster (below level 10) the professions follow from
+    level 10, when the armory first shows them."""
+    full = f"{found.name} {found.surname}" if found.surname else found.name
+    what = f"a level {int(found.level)} {found.cls}" if found.cls else f"a level {int(found.level)} character"
+    seen = (f"The guild's roster shows {full}, {what}." if found.source == "roster" else f"The armory shows {full}, {what}.")
+    own = by_id is not None and int(by_id) == int(m.discord_id)
+    who = _whose(m, by_id, start=True)
+    if found.source == "roster":
+        change = (f"{who} {c.label} takes that name, and its professions follow the armory from level 10." if full != c.label
+                  else f"{who} {c.label} follows the armory, and its professions follow it from level 10.")
+    else:
+        change = (f"{who} {c.label} takes that name, and the armory's professions replace its own." if full != c.label
+                  else f"The armory's professions replace those on {_whose(m, by_id, start=False)} {c.label}.")
+    told = "You can unlink it at any time." if own else "They see the link on their Me page, and you can unlink it at any time."
+    return [seen, change, told]
+
+
+def armory_unlink_consequence(reg: Registry, m, c, by_id) -> list[str]:
+    """The confirm before unlinking `c` (spec §5.2 "Unlink"): the record keeps what it last had, its professions are
+    kept by hand from now on."""
+    return [f"{_whose(m, by_id, start=True)} {c.label} stops following the armory.",
+            "Its professions stay as they are and are kept by hand from now on.",
+            "You can link it again at any time."]
+
+
+def profession_sync_consequence(on: bool, label: str | None = None) -> list[str]:
+    """The confirm of the switch (D5): off = kept by hand, edited from the game's list; on = the armory's professions
+    replace the hand edits now, and those can't be brought back."""
+    name = label or "This character"
+    if not on:
+        return [f"{name}'s professions are kept by hand from now on.",
+                "The armory stops changing them, and you edit them from the game's list.",
+                "You can let the armory keep them again at any time."]
+    return [f"The armory's professions replace the hand edits on {label or 'this character'}.",
+            "Each update from the armory keeps them current after that.",
+            "The hand edits can't be brought back."]
+
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
-           "VERBS", "absence_consequence", "armory_created_words", "armory_guild_clear_consequence", "armory_guild_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
-           "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "people_consequence", "profession_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
+           "VERBS", "absence_consequence", "armory_created_words", "armory_link_consequence", "armory_unlink_consequence", "armory_guild_clear_consequence", "armory_guild_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
+           "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "people_consequence", "profession_consequence", "profession_sync_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 
