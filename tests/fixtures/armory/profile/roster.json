@@ -1,0 +1,165 @@
+{
+  "guild": {
+    "name": "Lantern Wardens",
+    "id": 418362,
+    "faction": {
+      "type": "HORDE",
+      "name": "Horde"
+    },
+    "slug": "lantern-wardens"
+  },
+  "members": [
+    {
+      "character": {
+        "name": "Bram",
+        "id": 700101,
+        "level": 60,
+        "playable_class": {
+          "id": 1
+        },
+        "playable_race": {
+          "id": 2
+        },
+        "faction": {
+          "type": "HORDE"
+        },
+        "surname": "Kettle",
+        "slug": "bram-kettle"
+      },
+      "rank": 1
+    },
+    {
+      "character": {
+        "name": "Bram",
+        "id": 700102,
+        "level": 42,
+        "playable_class": {
+          "id": 5
+        },
+        "playable_race": {
+          "id": 5
+        },
+        "faction": {
+          "type": "HORDE"
+        },
+        "surname": "Ashvale",
+        "slug": "bram-ashvale"
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "name": "Tamsin",
+        "id": 700103,
+        "level": 60,
+        "playable_class": {
+          "id": 11
+        },
+        "playable_race": {
+          "id": 6
+        },
+        "faction": {
+          "type": "HORDE"
+        },
+        "surname": "Pell",
+        "slug": "tamsin-pell"
+      },
+      "rank": 2
+    },
+    {
+      "character": {
+        "name": "Ébba",
+        "id": 700104,
+        "level": 23,
+        "playable_class": {
+          "id": 8
+        },
+        "playable_race": {
+          "id": 5
+        },
+        "faction": {
+          "type": "HORDE"
+        },
+        "surname": "Thistle",
+        "slug": "ébba-thistle"
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "name": "Pip",
+        "id": 700105,
+        "level": 1,
+        "playable_class": {
+          "id": 4
+        },
+        "playable_race": {
+          "id": 2
+        },
+        "faction": {
+          "type": "HORDE"
+        },
+        "surname": "Wobble",
+        "slug": "pip-wobble"
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "name": "Korrin",
+        "id": 700106,
+        "level": 55,
+        "playable_class": {
+          "id": 7
+        },
+        "playable_race": {
+          "id": 8
+        },
+        "faction": {
+          "type": "HORDE"
+        },
+        "surname": "Dask",
+        "slug": "korrin-dask"
+      },
+      "rank": 3
+    },
+    {
+      "character": {
+        "name": "Vell",
+        "id": 700107,
+        "level": 31,
+        "playable_class": {
+          "id": 9
+        },
+        "playable_race": {
+          "id": 5
+        },
+        "faction": {
+          "type": "HORDE"
+        },
+        "surname": "Marrow",
+        "slug": "vell-marrow"
+      },
+      "rank": 4
+    },
+    {
+      "character": {
+        "name": "Odo",
+        "id": 700108,
+        "level": 12,
+        "playable_class": {
+          "id": 3
+        },
+        "playable_race": {
+          "id": 6
+        },
+        "faction": {
+          "type": "HORDE"
+        },
+        "surname": "Brack",
+        "slug": "odo-brack"
+      },
+      "rank": 4
+    }
+  ]
+}

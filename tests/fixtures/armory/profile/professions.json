@@ -1,0 +1,136 @@
+{
+  "character": {
+    "name": "Tamsin",
+    "id": 700103,
+    "surname": "Pell",
+    "slug": "tamsin-pell"
+  },
+  "primaries": [
+    {
+      "profession": {
+        "name": "Leatherworking",
+        "id": 165
+      },
+      "tiers": [
+        {
+          "skill_points": 300,
+          "max_skill_points": 300,
+          "tier": {
+            "name": "Leatherworking",
+            "id": 2945
+          },
+          "known_recipes": [
+            {
+              "name": "Forceful Medium Armor Kit",
+              "id": 55184
+            },
+            {
+              "name": "Ironfeather Breastplate",
+              "id": 10790
+            },
+            {
+              "name": "Light Armor Kit",
+              "id": 1356
+            },
+            {
+              "name": "Cured Thick Hide",
+              "id": 5666
+            },
+            {
+              "name": "Gleaming Spindle Wrap",
+              "id": 999001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profession": {
+        "name": "Enchanting",
+        "id": 333
+      },
+      "tiers": [
+        {
+          "skill_points": 157,
+          "max_skill_points": 225,
+          "tier": {
+            "name": "Enchanting",
+            "id": 2940
+          },
+          "known_recipes": [
+            {
+              "name": "Enchant Cloak - Lesser Fire Resistance",
+              "id": 4401
+            },
+            {
+              "name": "Enchant Bracer - Lesser Intellect",
+              "id": 7500
+            },
+            {
+              "name": "Enchant Chest - Inferior Stamina",
+              "id": 4290
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "secondaries": [
+    {
+      "profession": {
+        "name": "Cooking",
+        "id": 185
+      },
+      "tiers": [
+        {
+          "skill_points": 26,
+          "max_skill_points": 75,
+          "tier": {
+            "name": "Cooking",
+            "id": 2939
+          },
+          "known_recipes": [
+            {
+              "name": "Herb Baked Egg",
+              "id": 4786
+            },
+            {
+              "name": "Roasted Boar Meat",
+              "id": 1537
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profession": {
+        "name": "First Aid",
+        "id": 129
+      },
+      "tiers": [
+        {
+          "skill_points": 293,
+          "max_skill_points": 300,
+          "tier": {
+            "name": "First Aid",
+            "id": 2942
+          },
+          "known_recipes": [
+            {
+              "name": "Anti-Venom",
+              "id": 4417
+            },
+            {
+              "name": "Heavy Linen Bandage",
+              "id": 1839
+            },
+            {
+              "name": "Greater Healing Potion",
+              "id": 54194
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

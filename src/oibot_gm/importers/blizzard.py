@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -16,19 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-MAX_PER_SECOND = 10  # every network request of the process, whichever client sends it
+from oibot_gm import battlenet
+from oibot_gm.battlenet import MAX_PER_SECOND  # noqa: F401  (every network request of the process, whichever client sends it)
+
 RETRIES = 3  # a 5xx or 429 is tried again after 1, 2, 4 s
-_PACE = threading.Lock()
-_LAST = [0.0]
 
 
 def _pace() -> None:
-    """At most MAX_PER_SECOND requests a second to Blizzard across the process."""
-    with _PACE:
-        wait = _LAST[0] + 1.0 / MAX_PER_SECOND - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-        _LAST[0] = time.monotonic()
+    """At most MAX_PER_SECOND requests a second to Blizzard across the process (battlenet.LIMITER, shared with the armory)."""
+    battlenet.LIMITER.acquire()
 
 INVENTORY_TO_SLOT = {
     "HEAD": "head", "NECK": "neck", "SHOULDER": "shoulders", "CHEST": "chest", "ROBE": "chest", "WAIST": "waist", "LEGS": "legs",
@@ -65,21 +60,10 @@ class Blizzard:
             raise RuntimeError("BLIZZARD_CLIENT_ID / BLIZZARD_CLIENT_SECRET missing from .env (create a client at develop.battle.net/access/clients)")
         self.region, self.namespace, self.locale = region, namespace, locale
         self.cache_dir = cache_dir
-        self._token: str | None = None
-        self._token_exp = 0.0
 
     def token(self) -> str:
-        if self._token and time.time() < self._token_exp - 60:
-            return self._token
-        data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode()
-        req = urllib.request.Request(f"https://oauth.battle.net/token", data=data)
-        import base64
-
-        req.add_header("Authorization", "Basic " + base64.b64encode(f"{self.cid}:{self.secret}".encode()).decode())
-        with urllib.request.urlopen(req, timeout=20) as r:
-            d = json.load(r)
-        self._token, self._token_exp = d["access_token"], time.time() + int(d.get("expires_in", 3600))
-        return self._token
+        """The process's one token (battlenet.TOKEN, shared with the armory)."""
+        return battlenet.TOKEN.get()
 
     def get(self, path: str, namespace: str | None = None) -> dict:
         ns = namespace or self.namespace

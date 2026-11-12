@@ -1,0 +1,32 @@
+{
+  "id": 700103,
+  "name": "Tamsin",
+  "surname": "Pell",
+  "faction": {
+    "type": "HORDE",
+    "name": "Horde"
+  },
+  "race": {
+    "name": "Tauren",
+    "id": 6
+  },
+  "character_class": {
+    "name": "Druid",
+    "id": 11
+  },
+  "guild": {
+    "name": "Lantern Wardens",
+    "id": 418362,
+    "faction": {
+      "type": "HORDE",
+      "name": "Horde"
+    },
+    "slug": "lantern-wardens"
+  },
+  "level": 60,
+  "last_login_timestamp": 1794400000000,
+  "ruleset": {
+    "name": "Normal",
+    "id": 2
+  }
+}

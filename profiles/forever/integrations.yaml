@@ -8,3 +8,7 @@ armory:
   region: us
   profile_namespace: "profile-forever-{region}"
   static_namespace: "static-forever-{region}"
+  # The armory's playable-class ids → this profile's class keys (classes.yaml). An id missing here reads as no class.
+  classes: {1: Warrior, 2: Paladin, 3: Hunter, 4: Rogue, 5: Priest, 7: Shaman, 8: Mage, 9: Warlock, 11: Druid}
+  # The armory's ruleset ids → what kind of guild it is (shown on the owner's link screen).
+  rulesets: {1: PvP, 2: Normal, 3: Roleplay, 15: Roleplay PvP}

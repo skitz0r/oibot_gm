@@ -1,0 +1,16 @@
+{
+  "id": 418362,
+  "name": "Lantern Wardens",
+  "faction": {
+    "type": "HORDE",
+    "name": "Horde"
+  },
+  "achievement_points": 0,
+  "member_count": 8,
+  "created_timestamp": 1793012345000,
+  "slug": "lantern-wardens",
+  "ruleset": {
+    "name": "Normal",
+    "id": 2
+  }
+}

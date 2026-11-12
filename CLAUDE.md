@@ -96,6 +96,12 @@ src/oibot_gm/
                        append; an apply is refused while a council of the guild is live (live_council_refusal)
                        professions.py (§5.60) = THE professions import boundary: detect / parse / FORMATS → rows {character, profession, skill, recipes};
                        EMPTY — no format is read yet (no paste box); a format = one parser here + the Me page's box
+  battlenet.py         what every Blizzard client shares (armory link §5.3): TOKEN (one client-credentials token, thread-safe, drop on a 401)
+                       and LIMITER (≤ 10 requests in any second, process-wide); importers/blizzard.py and armory.py both use them
+  armory.py            THE armory boundary (armory link §5.3/§9): Armory(region, profile_ns, static_ns, fetch=) guild / roster(since=) /
+                       character(since=) / professions — BLOCKING (callers asyncio.to_thread), every answer validated (ArmoryShape), ArmoryMissing /
+                       ArmoryDown(retry_after) / ArmoryAccess, `.words` = the sentence; NOT_MODIFIED on a 304; address / guild_slug; available(reg),
+                       client_for(reg) (class / ruleset tables from integrations.yaml `armory`); the rank is never read (D7), no token in any error
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
   loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
                        Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),

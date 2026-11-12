@@ -110,7 +110,8 @@ def test_profile_loads_the_list():
     lw = p.recipes_of("leatherworking")
     assert lw == sorted(lw, key=lambda r: (r.category, r.name))
     assert p.profession("leatherworking").blizzard_id == 165
-    assert p.armory == {"region": "us", "profile_namespace": "profile-forever-{region}", "static_namespace": "static-forever-{region}"}
+    assert {k: p.armory[k] for k in ("region", "profile_namespace", "static_namespace")} == {
+        "region": "us", "profile_namespace": "profile-forever-{region}", "static_namespace": "static-forever-{region}"}
 
 
 def test_tbc_has_no_list():
