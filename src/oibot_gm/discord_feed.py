@@ -204,8 +204,16 @@ class FeedMixin:
         return False
 
     def _seats_character(self, session, name: str) -> bool:
+        """Whether the council's run seats the companion's character: by its name or signup name, or — a companion
+        still started with a name the character had before a rename — the seat of that same character (design §5.2)."""
         low = str(name or "").strip().lower()
-        return bool(low) and any((p.character or "").lower() == low or p.signup_name.lower() == low for p in self.loot_roster(session))
+        if not low:
+            return False
+        roster = self.loot_roster(session)
+        if any((p.character or "").lower() == low or p.signup_name.lower() == low for p in roster):
+            return True
+        reg = self.loot_reg(session)
+        return reg is not None and any(reg.same_name(p.character, low) for p in roster if p.character)
 
     # ---- "Bind companion…" (design §3.1 L10): a companion several live councils could take is bound by an officer on a
     # council card; in memory (a restart forgets it — the card offers the select again on the companion's next event)
@@ -498,24 +506,26 @@ class FeedMixin:
         """_feed_loot's choice and write (the caller holds the session lock): {result, drop, who, …}."""
         from .discord_loot import NOBODY
 
-        low = who.lower()
+        def same(name) -> bool:  # the recipient by the name the council recorded, or one the character had or has since (§5.2)
+            return reg.same_name(name, who) if reg is not None else str(name or "").lower() == who.lower()
+
         open_ = [d for d in drops if not raid.awarded(d.drop_id)]
-        hit = next((d for d in open_ if (p := raid.pending(d.drop_id)) is not None and p.to != NOBODY and p.to.lower() == low), None) or next(
-            (d for d in open_ if (p := raid.pending(d.drop_id)) is not None and p.override and p.award_to.lower() == low), None)
+        hit = next((d for d in open_ if (p := raid.pending(d.drop_id)) is not None and p.to != NOBODY and same(p.to)), None) or next(
+            (d for d in open_ if (p := raid.pending(d.drop_id)) is not None and p.override and same(p.award_to)), None)
         if hit is not None:  # 1. the pick the council made (or the bot's, an override not followed) — confirmed
             prop = raid.pending(hit.drop_id)
-            if prop.override and prop.award_to.lower() == low:
+            if prop.override and same(prop.award_to):
                 prop.override = None  # the master looter gave it to the bot's pick after all: no override happened, no precedent
             hit.seen_in_game = True
             return {"result": "confirmed", "drop": hit, "who": who, "awards": self._record(reg, raid, [prop], by, None)}
-        mine = next((d for d in drops if (a := raid.awarded(d.drop_id)) is not None and a.raider.lower() == low and not d.seen_in_game), None)
+        mine = next((d for d in drops if (a := raid.awarded(d.drop_id)) is not None and same(a.raider) and not d.seen_in_game), None)
         if mine is not None:  # 2. an officer recorded this copy to them before the game did
             mine.seen_in_game = True
             raid.save(f"{raid.guild}: loot {raid.id}: {mine.item_name} → {who} seen in game (already recorded)")
             return {"result": "already_recorded", "drop": mine, "who": who}
         target = next((d for d in open_ if raid.pending(d.drop_id)), None) or (open_[0] if open_ else None)
         if target is None:  # 4. every copy is recorded already
-            if any((a := raid.awarded(d.drop_id)) is not None and a.raider.lower() == low for d in drops):
+            if any((a := raid.awarded(d.drop_id)) is not None and same(a.raider) for d in drops):
                 return {"result": "already_recorded", "drop": None, "who": who}
             d = next((d for d in reversed(drops) if not d.seen_in_game), drops[-1])
             a = raid.awarded(d.drop_id)

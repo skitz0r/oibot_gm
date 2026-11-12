@@ -171,15 +171,8 @@ class RegistryLootContext:
         n = 0
         for a in self.awards_of_item(item):
             spec = None
-            m = self.reg.members.get(a.discord_id) if a.discord_id else None
-            hit = None
-            if m is None:
-                try:
-                    hit = self.reg.find(a.raider)
-                except RegistryError:
-                    hit = None
-                m = hit[0] if hit else None
-            c = next((c for c in (m.characters if m else []) if c.label.lower() == a.raider.lower()), None)
+            hit = self.reg.award_holder(a)  # the character, under the name it had then or has now (design §5.2)
+            c = hit[1] if hit else None
             if c is not None:
                 try:
                     spec = self.profile.spec(c.cls, c.spec)

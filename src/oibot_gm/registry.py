@@ -90,6 +90,22 @@ class Profession(BaseModel):
     recipes: list[Recipe] = Field(default_factory=list)
 
 
+class ArmoryLink(BaseModel):
+    """A character's link to its armory profile (armory link, design §5.2): the armory's character id and the name the
+    armory knows it by, who linked it and when, and what the last check read. Nothing sets it yet (the link is the
+    next step); `cls` is what the armory says, never written onto the character (a difference is a flag officers see)."""
+    id: int
+    slug: str
+    linked_by: str
+    linked_at: str
+    checked_at: Optional[str] = None
+    modified: Optional[str] = None  # the armory's Last-Modified, for the next conditional request
+    level: Optional[int] = None
+    cls: Optional[str] = None
+    in_guild: Optional[bool] = None
+    missing_since: Optional[str] = None  # the armory stopped finding it (never unlinks by itself)
+
+
 class RegisteredCharacter(BaseModel):
     name: Optional[str] = None  # first name; None until the character exists (pre-launch "planned")
     surname: Optional[str] = None  # WoW: Forever names are first + last
@@ -108,6 +124,11 @@ class RegisteredCharacter(BaseModel):
     updated_at: str = Field(default_factory=now)
     note: Optional[str] = None  # officer-only
     wishlist: list[WishlistEntry] = Field(default_factory=list)  # ranked wanted items (Registry.set_wishlist; cap WISHLIST_MAX)
+    armory: Optional[ArmoryLink] = None  # armory link (design §5.2); None = not linked
+    profession_sync: bool = True  # a linked character's professions come from the armory; False = kept by hand
+    # the labels it had before a rename (Registry.rename_character, oldest first): history keeps the old name, and every
+    # lookup by name still answers to it (Registry.same_character) — a current name of another character wins
+    former_names: list[str] = Field(default_factory=list)
 
     @property
     def label(self) -> str:
@@ -116,8 +137,10 @@ class RegisteredCharacter(BaseModel):
         return f"{self.cls} ({self.spec})"
 
     def matches(self, ref: str) -> bool:
+        """The full name (or a former one) or the first name; within one member prefer Registry.own_character, which
+        tries a current name before a former one."""
         r = ref.strip().lower()
-        return bool(r) and (self.label.lower() == r or (self.name or "").lower() == r)
+        return bool(r) and (Registry.same_character(self, r) or (self.name or "").lower() == r)
 
 
 class Absence(BaseModel):
@@ -1888,7 +1911,7 @@ class Registry:
         spec = self.validate_spec(cls, spec)
         offspec = self.validate_spec(cls, offspec) if offspec else None
         full = f"{name} {surname}" if surname else name
-        if self.find(full):
+        if self.find(full, former=False):
             raise RegistryError(f"{full} is already registered to a member.")
         answers = self.check_answers(answers or [])
         known = {f"{rid}:{sc['id']}" for rid in self.profile.raids for sc in self.schedules(rid)}
@@ -2096,11 +2119,124 @@ class Registry:
         self.save(m, f"{old} is now {name} (by {by})")
         return m
 
-    def find(self, name: str) -> tuple[Member, RegisteredCharacter] | None:
-        """By character name; planned (unnamed) characters match by their label, e.g. 'Shaman (Enhancement)'."""
+    @_member_write
+    def rename_character(self, discord_id: int, label: str, name: str, surname: str | None, by: str, *, by_id: int | None = None,
+                         officer: bool = False, rs=None, relabelled: list | None = None) -> RegisteredCharacter:
+        """THE character rename (armory link, design §5.2 "The name.", C9): `label` (any name the character answers to)
+        becomes `name surname`. The old label joins `former_names` (never twice; a name taken back leaves the list), so the
+        ledger, award ids, appeals and finished runs keep the old name and still find the character (same_character).
+        In one commit: the member file, and every LIVE run (open or locked) in `rs` (a raidcycle.RaidStore — the running
+        bot's, so its runs in memory move too; default a fresh one read from the store) that names the old label for this
+        member — signup, seats, fill asks, callouts — plus their placement asks on those runs. `relabelled` (a list) gets
+        the run keys changed: the sheets a caller redraws. Refused, with nothing written: a full name another record
+        holds now (to an officer naming the holder, else "ask an officer"), a test puppet in rehearsal (puppet_refusal),
+        an invalid name. The same name is no change and no write. Rights are the caller's: `officer` only picks the
+        refusal's words."""
+        m = self.members.get(discord_id)
+        if m is None:
+            raise RegistryError("They have no registered characters yet.")
+        why = self.puppet_refusal(m, by_id)
+        if why:
+            raise RegistryError(why)
+        c = self.own_character([x for x in m.characters if x.name], label)
+        if c is None:
+            raise RegistryError(f"{m.display_name} has no character named {str(label or '').strip() or '?'}.")
+        name = self.normalise_name(name)
+        surname = self.normalise_name(surname) if surname else None
+        full = f"{name} {surname}" if surname else name
+        if full == c.label:
+            return c
+        hit = self.holder_of(full)
+        if hit is not None and hit[1] is not c:
+            raise RegistryError(f"{full} is registered to {hit[0].display_name}. Move it or retire it first." if officer
+                                else "That name is already registered here. Ask an officer.")
+        from . import raidcycle as rc
+
+        rs = rs if rs is not None else rc.RaidStore(self.store, self.key)
+        old = c.label
+        line = f"{m.display_name}: {old} is now {full} (by {by})"
+        with self.store.batch(f"{self.key}: {line}"):
+            c.former_names = [f for f in c.former_names if f.lower() not in (full.lower(), old.lower())] + [old]
+            c.name, c.surname, c.updated_at = name, surname, now()
+            teams = {ev.team for ev in rs.live()}
+            for a in m.placement_asks:
+                if a.get("roster") in teams and str(a.get("character") or "").lower() == old.lower():
+                    a["character"] = full
+            self.save(m, line)
+            keys = rc.relabel_runs(rs, discord_id, old, full, by)
+        if relabelled is not None:
+            relabelled.extend(keys)
+        return c
+
+    # ---- a character's names (armory link, design §5.2 "The name."): a rename keeps the old label as an alias, history
+    # is never rewritten. same_character is THE predicate every by-name lookup goes through; a CURRENT name always beats
+    # another character's former one.
+    @staticmethod
+    def same_character(c: RegisteredCharacter | None, label: str | None, *, former: bool = True) -> bool:
+        """Whether `label` names `c`: its full name now, or (`former`) one it had before a rename. Case and outer spaces
+        aside; a first name alone is not a label (find and matches read first names)."""
+        n = str(label or "").strip().lower()
+        if c is None or not n:
+            return False
+        return c.label.lower() == n or (former and any(f.lower() == n for f in c.former_names))
+
+    def own_character(self, chars, ref: str | None) -> RegisteredCharacter | None:
+        """One member's character `ref` names, among `chars`: a current full name, then a first name, then a former name
+        — so a member whose one character once had the other's name always gets the one that has it now."""
+        pool = [c for c in chars or [] if c is not None]
+        r = str(ref or "").strip().lower()
+        if not r:
+            return None
+        return (next((c for c in pool if self.same_character(c, r, former=False)), None)
+                or next((c for c in pool if (c.name or "").lower() == r), None)
+                or next((c for c in pool if self.same_character(c, r)), None))
+
+    def holder_of(self, label: str | None) -> tuple[Member, RegisteredCharacter] | None:
+        """Who holds `label` as a CURRENT full name (a former name holds nothing): the taken-name check of every verb
+        that names a character."""
+        return next(((m, c) for m in self.members.values() for c in m.characters if c.name and self.same_character(c, label, former=False)), None)
+
+    def find_full(self, label: str | None) -> tuple[Member, RegisteredCharacter] | None:
+        """A named character by its full name: the current holder, else the one character that had it before a rename;
+        two characters that both had it raise (name the one meant by its name now)."""
+        hit = self.holder_of(label)
+        if hit is not None:
+            return hit
+        was = [(m, c) for m in self.members.values() for c in m.characters if c.name and self.same_character(c, label)]
+        if len(was) > 1:
+            raise RegistryError(f"More than one character was called {str(label).strip()}: " + ", ".join(f"{c.label} ({m.display_name})" for m, c in was)
+                                + ". Use the name it has now.")
+        return was[0] if was else None
+
+    def award_holder(self, a) -> tuple[Member, RegisteredCharacter | None] | None:
+        """(member, character) an award belongs to: its Discord id's member and that member's character by the recorded
+        name (current first, then former; None when the character is gone); a row with no id by the full name, a current
+        name first. None: nobody registered (a sub, a guest, a disenchant, an ambiguous former name)."""
+        if a.discord_id is not None:
+            m = self.members.get(a.discord_id)
+            return (m, self.own_character(m.characters, a.raider)) if m is not None else None
+        try:
+            return self.find_full(a.raider)
+        except RegistryError:
+            return None
+
+    def same_name(self, a: str | None, b: str | None) -> bool:
+        """Whether two recorded names are the same character (one the old name, one the new) — or simply equal."""
+        if str(a or "").strip().lower() == str(b or "").strip().lower():
+            return bool(str(a or "").strip())
+        try:
+            ha, hb = self.find_full(a), self.find_full(b)
+        except RegistryError:
+            return False
+        return ha is not None and hb is not None and ha[1] is hb[1]
+
+    def find(self, name: str, *, former: bool = True) -> tuple[Member, RegisteredCharacter] | None:
+        """By character name: a full name now, then (`former`) one it had before a rename (a current name wins), then a
+        first name; planned (unnamed) characters match by their label, e.g. 'Shaman (Enhancement)'. The taken-name
+        checks pass former=False: a former name never blocks a new character."""
         n = name.strip().lower()
         named = [(m, c) for m in self.members.values() for c in m.characters if c.name]
-        exact = next(((m, c) for m, c in named if c.label.lower() == n), None)  # a full name is unique
+        exact = self.find_full(n) if former else self.holder_of(n)  # a full name is unique
         if exact:
             return exact
         first = [(m, c) for m, c in named if c.name.lower() == n]
@@ -2158,7 +2294,7 @@ class Registry:
         if any(r not in ROLES for r in roles):
             raise RegistryError(f"Roles are {', '.join(ROLES)}.")
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.matches(label)), None)
+        c = self.own_character(m.active(), label)
         if not c:
             raise RegistryError(f"You have no active character named {label}.")
         own = {self.profile.spec(c.cls, c.spec).role} | ({self.profile.spec(c.cls, c.offspec).role} if c.offspec else set())
@@ -2368,7 +2504,7 @@ class Registry:
     def set_professions(self, discord_id: int, label: str, entries: list[dict]) -> RegisteredCharacter:
         """Replace a character's professions with a validated list — the one setter; the table save calls it (like set_flex)."""
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.matches(label)), None)
+        c = self.own_character(m.active(), label)
         if not c:
             raise RegistryError(f"You have no active character named {label}.")
         new = self.check_professions(entries, keep_unmatched=self.stored_unmatched(c))
@@ -2400,7 +2536,7 @@ class Registry:
         name = self.normalise_name(name)
         surname = self.normalise_name(surname) if surname else None
         full = f"{name} {surname}" if surname else name
-        if self.find(full):
+        if self.find(full, former=False):
             raise RegistryError(f"{full} is already registered.")
         m = self.member(discord_id)
         c = next((c for c in m.planned() if c.matches(label)), None) if label else next((c for c in m.planned() if c.is_main == (slot == "main")), None)
@@ -2660,11 +2796,16 @@ class Registry:
         awards, _ = fold_ledger(ledger_rows)
         index: dict[tuple[str, str], list[int]] = {}
         held_day: dict[int, object] = {}
+        def who(m, c, raw: str) -> str:
+            """The character an award names, the same before and after a rename (design §5.2): a registered character by
+            its member and name now, else the name as written."""
+            return f"#{m.discord_id}:{c.label.lower()}" if m is not None and c is not None else raw
+
         for i, a in enumerate(awards):
             if a.void:
                 continue  # a voided award (an undone import, a corrected one) no longer holds the row: the fixed file imports
             held_day[i] = a.received
-            for p in self._award_pairs([a.raider], a.item_id, a.item_name):
+            for p in self._award_pairs([who(*(self.award_holder(a) or (None, None)), a.raider)], a.item_id, a.item_name):
                 index.setdefault(p, []).append(i)
         prepared = []
         for r in rows:
@@ -2673,7 +2814,7 @@ class Registry:
             except RegistryError:
                 hit = None
             m, c = hit if hit else (None, None)
-            names = [r.raider] + ([c.label] if c is not None else [])
+            names = [who(m, c, r.raider)]
             prepared.append((r, hit, m, c, self._award_pairs(names, r.item_id, r.item_name), self.import_day(r), getattr(r, "received_at", None) is not None))
         used: set[int] = set()
         matched: dict[int, int] = {}  # file row position → ledger award position
@@ -3147,7 +3288,7 @@ class Registry:
             raise RegistryError("You have no registered characters yet. Use /register first.")
         r = str(ref or "").strip()
         if r:
-            c = next((c for c in chars if c.label == r), None) or next((c for c in chars if c.matches(r)), None)
+            c = (next((c for c in chars if c.label == r), None) or self.own_character(chars, r))
             if c is None:
                 raise RegistryError(f"{r} isn't one of {m.display_name}'s characters ({', '.join(c.label for c in chars)}).")
             return m, c
@@ -4439,7 +4580,7 @@ class Registry:
         spec = self.validate_spec(cls, spec)
         offspec = self.validate_spec(cls, offspec) if offspec else None
         full = f"{name} {surname}" if surname else name
-        hit = self.find(full)
+        hit = self.find(full, former=False)
         if hit:
             owner, _ = hit
             raise RegistryError(f"{full} is already registered" + (" to you." if owner.discord_id == discord_id else f" to {owner.display_name}. Ask an officer if that's wrong."))
@@ -4509,7 +4650,7 @@ class Registry:
                     raise RegistryError("a test puppet")
                 if m is not None and m.active():
                     raise RegistryError(f"already registered as {', '.join(c.label for c in m.active())}")
-                hit = self.find(character)
+                hit = self.find(character, former=False)
                 if hit:
                     raise RegistryError(f"{character} is already registered to {hit[0].display_name}")
                 if character.lower() in seen_names:
@@ -4534,7 +4675,7 @@ class Registry:
     @_member_write
     def set_main(self, discord_id: int, name: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.matches(name)), None)
+        c = self.own_character(m.active(), name)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         old = m.main
@@ -4552,7 +4693,7 @@ class Registry:
     @_member_write
     def set_spec(self, discord_id: int, name: str, spec: str, offspec: str | None) -> RegisteredCharacter:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.matches(name)), None)
+        c = self.own_character(m.active(), name)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         c.spec = self.validate_spec(c.cls, spec)
@@ -4565,7 +4706,7 @@ class Registry:
     def delete_character(self, discord_id: int, label: str) -> RegisteredCharacter:
         """Remove a character outright (roster placements go with it); the next character becomes main if needed."""
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.matches(label)), None)
+        c = self.own_character(m.active(), label)
         if not c:
             raise RegistryError(f"You have no active character named {label}.")
         rank = member_rank(m)
@@ -4581,7 +4722,7 @@ class Registry:
     @_member_write
     def retire(self, discord_id: int, name: str) -> RegisteredCharacter:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.matches(name)), None)
+        c = self.own_character(m.active(), name)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         rank = member_rank(m)
@@ -4616,7 +4757,7 @@ class Registry:
         if m is None:
             raise RegistryError("They have no registered characters yet.")
         ref = str(label or "").strip()
-        c = next((c for c in m.active() if c.label == ref), None) or next((c for c in m.active() if c.matches(ref)), None)
+        c = next((c for c in m.active() if c.label == ref), None) or self.own_character(m.active(), ref)
         if c is None:
             raise RegistryError(f"{m.display_name} has no active character named {ref or '?'} (theirs: {', '.join(x.label for x in m.active()) or 'none'}).")
         return m, c
@@ -4760,7 +4901,7 @@ class Registry:
             raise RegistryError("they have no registered characters yet — they register first")
         if m.test:
             raise RegistryError(f"{m.display_name} is a test puppet: a test run treats every puppet as a regular already")
-        c = next((c for c in m.active() if c.matches(character)), None) if character else m.main
+        c = self.own_character(m.active(), character) if character else m.main
         if not c:
             raise RegistryError(f"{m.display_name} has no {'character named ' + character if character else 'main'} yet")
         before = next((x for x in m.active() if key in x.rosters), None)

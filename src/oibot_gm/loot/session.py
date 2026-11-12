@@ -487,7 +487,7 @@ def provisional_awards(ctx, session: LootSession, roster: list[Player], exclude:
         if d is None:
             continue
         item = drop_item(ctx, d)
-        cands = scoring.candidates(ctx.profile, item, roster, base + out, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=att)
+        cands = scoring.candidates(ctx.profile, item, roster, base + out, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=att, reg=getattr(ctx, "reg", None))
         a = _award(item, cands, p.to, raid_date, session.raid_name, d.boss, d.drop_id)
         if a:
             out.append(a)
@@ -509,7 +509,7 @@ def plan(ctx, session: LootSession, roster: list[Player], drop_ids: list[str]) -
     cfg, lookup, att = ctx.loot_cfg, ctx.items, attendance_of(ctx)
 
     def cands_for(did: str, extra: list[LootAward]):
-        return scoring.candidates(ctx.profile, items[did], roster, base + extra, ctx.wishlists, raid_date, cfg=cfg, items=lookup, attendance=att)
+        return scoring.candidates(ctx.profile, items[did], roster, base + extra, ctx.wishlists, raid_date, cfg=cfg, items=lookup, attendance=att, reg=getattr(ctx, "reg", None))
 
     impact = {did: max((c.upgrade_value for c in cands_for(did, []) if not c.already_has), default=0.0) for did in kill_order}
     mode = (cfg.get("distribution") or {}).get("order", "impact")
@@ -599,7 +599,7 @@ def run_distribution(ctx, snap: LootSession, roster: list[Player], drop_ids: lis
     att = attendance_of(ctx)  # one lookup for the pass (each member read once)
     for p in sorted(results, key=lambda p: p.order):
         item, d = items[p.drop_id], snap.drop(p.drop_id)
-        fresh = scoring.candidates(ctx.profile, item, roster, pl["base"] + actual, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=att)
+        fresh = scoring.candidates(ctx.profile, item, roster, pl["base"] + actual, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=att, reg=getattr(ctx, "reg", None))
         top = next((c for c in fresh if not c.already_has), None)
         if top and not p.override and p.award_to != top.character and not p.result.recommendation.deviates_from_score:
             rank = next((i for i, c in enumerate(fresh, 1) if c.character == p.award_to), None)
@@ -672,7 +672,8 @@ def recipient_of(reg, roster: list[Player], name: str) -> tuple[str, Optional[in
             hit = None
         if hit:
             m, c = hit
-            return c.label, m.discord_id, None
+            seat = next((p for p in roster if p.discord_id == m.discord_id and reg.same_character(c, p.character)), None)
+            return c.label, m.discord_id, seat  # a name it had before a rename finds tonight's seat too (design §5.2)
     return n, None, None
 
 
@@ -684,7 +685,7 @@ def make_award(ctx, session: LootSession, d: Drop, to: str, roster: list[Player]
     item = drop_item(ctx, d)
     raid_date = date.fromisoformat(session.date)
     if cands is None:
-        cands = scoring.candidates(ctx.profile, item, roster, base_awards(ctx, session), ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=attendance_of(ctx))
+        cands = scoring.candidates(ctx.profile, item, roster, base_awards(ctx, session), ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=attendance_of(ctx), reg=getattr(ctx, "reg", None))
     who, uid, seat = recipient_of(reg, roster, to) if to != DISENCHANT else (DISENCHANT, None, None)
     c = next((c for c in cands if c.character.lower() == who.lower()), None)
     if to == DISENCHANT:
@@ -700,7 +701,7 @@ def make_award(ctx, session: LootSession, d: Drop, to: str, roster: list[Player]
                 spec = None
         elif reg is not None and uid is not None:
             m = reg.members.get(uid)
-            c = next((c for c in (m.characters if m else []) if c.label.lower() == who.lower()), None)
+            c = reg.own_character(m.characters, who) if m else None
             try:
                 spec = ctx.profile.spec(c.cls, c.spec) if c else None
             except KeyError:

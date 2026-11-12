@@ -309,7 +309,7 @@ def record_open(reg: Registry, m, award, text: str, *, via: str, aid: str | None
         old = st.get(aid)
         if old is not None:
             raise AppealError(f"You've already asked about this award ({state_words(reg, old)}). One question per award.")
-        c = next((c for c in m.characters if c.label.lower() == award.raider.lower()), None)
+        c = reg.own_character(m.characters, award.raider)  # by its name now, or one it had before a rename (design §5.2)
         ap = Appeal(id=aid, award_ref=award_ref(award), member_id=m.discord_id, member_name=m.display_name, character=c.label if c else award.raider,
                     item=award.item_name or f"item {award.item_id}", item_id=award.item_id or 0, boss=award.boss or None, instance=award.instance or None,
                     received=award.received.isoformat(), offspec=bool(award.offspec), text=text, created_at=now(), via=via or "discord")

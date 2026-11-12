@@ -224,6 +224,18 @@ src/oibot_gm/
                        list gives the profession any (R7); dedupe by id; trusted=True (phase 2's sync) skips slots, cap and the list.
                        migrate_recipes = the once-per-start match of typed recipes to the list (one commit per guild, nothing when nothing matches;
                        discord_bot runs it per guild at ready in a thread → professions.migrated_line, one ops line)
+                       Character names (armory link, spec §5.2, C9): RegisteredCharacter.armory (ArmoryLink {id, slug, linked_by, linked_at, checked_at,
+                       modified, level, cls, in_guild, missing_since}; nothing sets it yet) / profession_sync / former_names (old labels, oldest first);
+                       same_character(c, label, former=) = THE by-name predicate (the label now or a former one); own_character(chars, ref) = one member's
+                       (a current name → a first name → a former name); holder_of = who holds a full name NOW (the taken-name check: a former name never
+                       blocks — find(full, former=False) at register / apply / add / name / import); find_full = a full name now, else a former one (two
+                       characters that had it → refused); find and matches answer to a former name (a current name wins); award_holder(a) = whose an award is (its id's member, else the full name) —
+                       My loot, received marks, scoring's history, the loot log, reweight, the import dedupe read it; same_name(a, b) = the companion's
+                       compare. rename_character(uid, label, name, surname, by, *, by_id, officer, rs, relabelled) = THE character rename: refused with
+                       nothing written for a name another record holds ("<Name> is registered to <member>. Move it or retire it first." / "That name is
+                       already registered here. Ask an officer."); the old label → former_names (a name taken back leaves it); ONE commit = the member +
+                       every live run's labels (rc.relabel_runs: signup, seats, fill asks, callouts; `relabelled` gets the keys to redraw) + their
+                       placement asks; the ledger, award ids, appeals and finished / cancelled runs keep the old name; the same name = no write
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|loot-ask|plan main|alt|char [action]|professions|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me loot-ask = flows_appeal, a question about one of your own awards;
@@ -276,7 +288,8 @@ src/oibot_gm/
                        split_reason / split_reason_text: why the joiners make fewer runs than the headcount (what the next run is short, in code);
                        leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run.
                        People (§5.41): character_changes / character_effects / character_preview / after_character_change (a respec rewrites the
-                       sheet answers; a retired / deleted / respecced seat is freed — a role flip on a locked RECURRING run keeps it); join_while_away.
+                       sheet answers; a retired / deleted / respecced seat is freed — a role flip on a locked RECURRING run keeps it); join_while_away;
+                       relabel_runs(rs, uid, old, new) = a renamed character's label in every LIVE run (Registry.rename_character's batch)
                        Raid night (design §5.39): expire_confirmations expires only a held ask (locked runs only); unasked_seats (the lock's recovery: only
                        RaidEvent.lock_seats, the seats at the flip — never a fill-seated or later seat; legacy_lock_sent = a pre-field run is stamped); cancel_effects;
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;

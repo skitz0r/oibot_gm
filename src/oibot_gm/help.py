@@ -730,7 +730,8 @@ def _loot(ask: Ask) -> list[str]:
     out.append("last awards (newest last):")
     out += _block("ledger", [l_line(a) for a in ledger[-10:]]) or ["  none"]
     named = mentioned_members(reg, ask.question)
-    names = {n.lower() for m in named for n in [m.display_name] + [c.name for c in m.characters if c.name] + [c.label for c in m.characters if c.name]}
+    names = {n.lower() for m in named for n in [m.display_name] + [c.name for c in m.characters if c.name] + [c.label for c in m.characters if c.name]
+             + [f for c in m.characters for f in c.former_names]}  # an award or precedent under a name before a rename (design §5.2)
     if names:
         ids = {m.discord_id for m in named}
         mine_l = [a for a in ledger if a.discord_id in ids or a.raider.lower() in names]

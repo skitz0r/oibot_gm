@@ -501,7 +501,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             rows = [p for p in rows if p.get("status", "active") == status]
         if member:
             m = resolve_member(reg, member)
-            names = {m.display_name.lower(), *(c.label.lower() for c in m.characters), *((c.name or "").lower() for c in m.characters if c.name)}
+            names = {m.display_name.lower(), *(c.label.lower() for c in m.characters), *((c.name or "").lower() for c in m.characters if c.name),
+                     *(f.lower() for c in m.characters for f in c.former_names)}  # a precedent names the character as it was then
             rows = [p for p in rows if str(p.get("human") or "").lower() in names or str(p.get("bot") or "").lower() in names]
         out = [{**p, "date_label": day(reg, p.get("date")), "at_label": clock(reg, p.get("at")), "status": p.get("status", "active"),
                 "status_at_label": clock(reg, p.get("status_at"))} for p in rows[:max(1, min(int(limit), 500))]]
@@ -526,11 +527,22 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
 
     # ------------------------------------------------------------ the award log (members, logged in — D2)
     def char_index(reg) -> dict[str, tuple]:
+        """name → (discord id, class, spec): every current name first, then the names characters had before a rename
+        (design §5.2: a current name wins), so an award under an old name still finds its character."""
         out = {}
         for m in reg.members.values():
             for c in m.characters:
                 out.setdefault(c.label.lower(), (m.discord_id, c.cls, c.spec))
+        for m in reg.members.values():
+            for c in m.characters:
+                for f in c.former_names:
+                    out.setdefault(f.lower(), (m.discord_id, c.cls, c.spec))
         return out
+
+    def names_of(chars: dict, uid) -> set[str]:
+        """The names (now and before a rename) that are this member's in char_index — what an award recorded without a
+        Discord id is matched by."""
+        return {k for k, (u, _c, _s) in chars.items() if uid is not None and u == uid}
 
     def log_row(reg, a, chars, officer: bool, scores: bool, ctx, viewer_uid: int | None, mine_names: set[str]) -> dict:
         it = reg.item(a.item_id or None, a.item_name)
@@ -555,11 +567,11 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         reg = v.reg
         ctx = ctx_of(reg)
         chars = char_index(reg)
-        mine = {c.label.lower() for c in (v.member.characters if v.member else [])}
+        mine = names_of(chars, v.uid if v.member else None)
         rows = sorted(ctx.ledger, key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
         if member:
             m = resolve_member(reg, member)
-            names = {c.label.lower() for c in m.characters}
+            names = names_of(chars, m.discord_id)
             rows = [a for a in rows if a.discord_id == m.discord_id or a.raider.lower() in names]
         out = [log_row(reg, a, chars, v.officer, scores, ctx, v.uid, mine) for a in rows[:max(1, min(int(limit), 1000))]]
         return {"rows": out, "scores": bool(v.officer and scores), "officer": v.officer}
@@ -573,8 +585,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         v = await who(request)
         reg = v.reg
         ctx = ctx_of(reg)
-        mine = {c.label.lower() for c in (v.member.characters if v.member else [])}
         chars = char_index(reg)
+        mine = names_of(chars, v.uid if v.member else None)
         rows = [a for a in ctx.ledger if a.discord_id == v.uid or (a.discord_id is None and a.raider.lower() in mine)]
         rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
         needle = " ".join(str(q or "").split()).lower()[:60]

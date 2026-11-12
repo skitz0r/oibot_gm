@@ -488,11 +488,11 @@ async def apply_async(reg: Registry, op, by: str, bot, by_id: int | None, via: s
 
 def member_awards(reg: Registry, ctx, m, limit: int = 50) -> list:
     """A member's live awards, newest first: by Discord id, and by character name for rows recorded without one (a
-    sub stored by name who registered later). What My loot shows — never anyone else's."""
+    sub stored by name who registered later; a name the character had before a rename counts, a current name of
+    someone else's character wins — Registry.award_holder, design §5.2). What My loot shows — never anyone else's."""
     if m is None:
         return []
-    labels = {c.label.lower() for c in m.characters}
-    rows = [a for a in ctx.ledger if a.discord_id == m.discord_id or (a.discord_id is None and a.raider.lower() in labels)]
+    rows = [a for a in ctx.ledger if a.discord_id == m.discord_id or (a.discord_id is None and (h := reg.award_holder(a)) is not None and h[0] is m)]
     rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
     return rows[:max(0, int(limit))]
 
@@ -506,8 +506,7 @@ def loot_block(reg: Registry, awards, ico=None) -> str:
     for a in awards:
         icon = ""
         if ico is not None:
-            c = next((c for mm in ([reg.members[a.discord_id]] if a.discord_id in reg.members else reg.members.values())
-                      for c in mm.characters if c.label.lower() == a.raider.lower()), None)
+            c = (reg.award_holder(a) or (None, None))[1]
             icon = (ico("spec", f"{c.cls}:{c.spec}") + " ") if c is not None and ico("spec", f"{c.cls}:{c.spec}") else ""
         stamp = int(datetime.combine(a.received, time(12), tzinfo=reg.tz).timestamp())
         out.append(f"{icon}{a.raider} · {a.item_name or a.item_id} · <t:{stamp}:d> · {'OS' if a.offspec else 'MS'}")
@@ -533,15 +532,19 @@ def received_map(reg: Registry, ctx, m) -> dict[tuple[str, str], str]:
     from .registry import item_key
 
     out: dict[tuple[str, str], str] = {}
-    labels = {c.label.lower() for c in m.characters} if m else set()
-    for a in ctx.ledger:
-        if a.raider.lower() in labels and (a.discord_id in (None, m.discord_id)):
-            it = reg.item(a.item_id or None, a.item_name)
-            keys = {item_key(a.item_id, a.item_name or "")} | ({item_key(it.id, it.name)} if it is not None else set()) | {"n:" + (a.item_name or "").lower()}
-            for k in keys:
-                prev = out.get((a.raider.lower(), k))
-                if prev is None or a.received.isoformat() > prev:
-                    out[(a.raider.lower(), k)] = a.received.isoformat()
+    for a in (ctx.ledger if m else []):
+        if a.discord_id not in (None, m.discord_id):
+            continue
+        h = reg.award_holder(a)  # keyed by the character's name NOW: an award under a former name marks it too (design §5.2)
+        if h is None or h[0] is not m or h[1] is None:
+            continue
+        who = h[1].label.lower()
+        it = reg.item(a.item_id or None, a.item_name)
+        keys = {item_key(a.item_id, a.item_name or "")} | ({item_key(it.id, it.name)} if it is not None else set()) | {"n:" + (a.item_name or "").lower()}
+        for k in keys:
+            prev = out.get((who, k))
+            if prev is None or a.received.isoformat() > prev:
+                out[(who, k)] = a.received.isoformat()
     return out
 
 

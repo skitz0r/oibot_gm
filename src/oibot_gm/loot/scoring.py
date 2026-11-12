@@ -101,6 +101,35 @@ def attendance_lookup(reg) -> Callable[[Player], Optional[tuple[int, int]]]:
     return look
 
 
+def _history(reg, live: list[LootAward]) -> Callable[[Player, str], list[LootAward]]:
+    """(Player, its name) → the awards it received: by the name as recorded, and — with a registry — every award of
+    the same character under a name it had before a rename (design §5.2: history keeps the old name, the loot divisor
+    still counts it). Each award's holder is read once per call."""
+    if reg is None or not hasattr(reg, "award_holder"):
+        return lambda p, who: [a for a in live if a.raider == who]
+    held: dict[int, object] = {}
+
+    def holder(a):
+        if id(a) not in held:
+            held[id(a)] = reg.award_holder(a)
+        return held[id(a)]
+
+    def mine(p: Player, who: str) -> list[LootAward]:
+        m = reg.members.get(p.discord_id) if p.discord_id is not None else None
+        if m is not None:
+            c = reg.own_character(m.characters, who)
+        else:
+            try:  # a full name only: a pug who shares a registered character's first name never inherits its history
+                hit = reg.find_full(who)
+            except Exception:  # noqa: BLE001 — an ambiguous former name is matched as written
+                hit = None
+            c = hit[1] if hit else None
+        if c is None:
+            return [a for a in live if a.raider == who]
+        return [a for a in live if a.raider == who or ((h := holder(a)) is not None and h[1] is c)]
+    return mine
+
+
 def candidates(
     profile: GameProfile,
     item: Item,
@@ -130,6 +159,7 @@ def candidates(
     slot_window = timedelta(days=slot_cfg["window_days"])
     out: list[Candidate] = []
     live = [a for a in awards if not a.void]
+    history = _history(reg, live)
     for p in roster:
         try:
             spec = profile.spec(p.cls, p.spec)
@@ -152,7 +182,7 @@ def candidates(
         else:
             tier = "?"
             upgrade = float(cfg.get("untiered_weight", UNTIERED_WEIGHT))
-        hist = [a for a in live if a.raider == who]
+        hist = history(p, who)
         already = any(same_item(a, item) for a in hist)
         recent = [a for a in hist if raid_date - window <= a.received <= raid_date]
         recent_power = sum(a.total_weight for a in recent)

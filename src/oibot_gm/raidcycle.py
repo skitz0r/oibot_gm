@@ -923,6 +923,31 @@ class RaidStore:
         return next((e for e in self.events.values() if e.message_id == message_id), None)
 
 
+def relabel_runs(rs: RaidStore, uid: int, old: str, new: str, by: str = "") -> list[str]:
+    """A character renamed (Registry.rename_character, design §5.2): every LIVE run (open or locked) that names `old`
+    for member `uid` — their signup, seats (selected and benched), fill asks, callouts — now names `new`; each changed
+    run saved once (the caller's store.batch makes it one commit with the member file). Finished and cancelled runs keep
+    the name they were played under. Returns the run keys changed."""
+    low = old.strip().lower()
+    out = []
+    for ev in rs.live():
+        hits = []
+        sg = ev.signups.get(str(uid))
+        if sg is not None and sg.character.lower() == low:
+            hits.append(sg)
+        hits += [p for r in ev.rosters for p in r.selected + r.benched if (p.character or "").lower() == low and player_uid(ev, p) == uid]
+        hits += [a for a in ev.fill_asks if a.discord_id == uid and a.character.lower() == low]
+        hits += [co for co in ev.callouts if co.discord_id == uid and co.character.lower() == low]
+        if not hits:
+            continue
+        for x in hits:
+            x.character = new
+        ev.log.append(f"{old} is now {new}" + (f" (by {by})" if by else ""))
+        rs.save(ev, f"{old} is now {new}")
+        out.append(ev.key)
+    return out
+
+
 def stamp_log(ev: RaidEvent) -> None:
     """Every log line gets a stamp the first time the run is saved after it was written (lines are appended right
     before a save, so the save time is the line's time). `ev.log_at` follows `ev.log` index for index; a line removed
