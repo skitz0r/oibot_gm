@@ -93,7 +93,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
       <TextInput leftSection={<IconSearch size={16} />} placeholder="part of a recipe's name, like ironfeather" value={q} aria-label="Search a recipe"
         onChange={(e) => setQ(e.currentTarget.value)} maw={520} />
       <Card>
-        <CardHeader title={found === null ? "Type a recipe's name to see who makes it" : `${plural(found.total, "recipe matches", "recipes match")} "${q.trim()}"`} />
+        <CardHeader title={found === null ? "Type a recipe's name to see who makes it" : `${plural(found.total, "recipe matches", "recipes match")} "${found.q.trim()}"`} />
         {found !== null && found.recipes.length === 0 && (
           <Text size="sm" c="dimmed" px="md" py="sm">{found.message}{fromList ? "" : ` ${ADD_HOW}`}</Text>
         )}

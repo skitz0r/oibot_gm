@@ -486,7 +486,14 @@ def test_professions_editor_picks_from_the_game_list():
     picker = (SRC / "components" / "RecipePicker.tsx").read_text()
     assert "/api/professions/find?q=" in picker and "&profession=" in picker and "r.category" in picker
     assert "value: String(r.id)" in picker, "a pick is the recipe's id (twins share a name)"
-    assert "found?.message" in picker and "found.more" in picker
+    assert "current?.message" in picker and "current.more" in picker
+    # task 5 review: Mantine's Select resets a controlled search to "" on mount (value={null}); the picker ignores an empty
+    # reset until the person has typed, so Pick the recipe… opens on the typed name (`initial`)
+    assert "useState(initial || \"\")" in picker and "if (!v && !typed.current) return;" in picker and "onSearchChange={onSearch}" in picker
+    # an answer counts only for the (profession, query) on screen; a failed search says so instead of "Searching…" forever
+    assert "`${profession}\\n${search.trim()}`" in picker and "found.key === key" in picker and "failed ? SEARCH_FAILED" in picker
+    page = (SRC / "pages" / "Professions.tsx").read_text()
+    assert '"${found.q.trim()}"' in page, "the search card's title names the query its count answers"
     line = (SRC / "components" / "ProfessionLine.tsx").read_text()
     assert "r.unmatched" in line and "not in the game's list" in line
 
