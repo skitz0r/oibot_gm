@@ -24,11 +24,12 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
 
     def entry_json(reg, e: pr.CatalogEntry) -> dict:
         """`listed` = a recipe of the game's list (then `category`, `makes` {id, name, quantity[, quantity_max]} or null for
-        an enchant, and `reagents` [{id, name, quantity}]); an unmatched typed recipe has null / [] there."""
+        an enchant, and `reagents` [{id, name, quantity}]); an unmatched typed recipe has null / [] there. `nobody` = the
+        sentence the page prints for a listed recipe nobody makes (professions.nobody_sentence), else ""."""
         d = e.recipe
         return {"key": e.key, "name": e.name, "profession": e.profession, "id": e.id, "crafters": [crafter_json(reg, c) for c in e.crafters],
                 "listed": d is not None, "category": d.category if d else None, "makes": dict(d.makes) if d and d.makes else None,
-                "reagents": [dict(x) for x in d.reagents] if d else []}
+                "reagents": [dict(x) for x in d.reagents] if d else [], "nobody": pr.nobody_sentence(e.name) if not e.crafters else ""}
 
     @app.get("/api/professions")
     async def professions_get(request: Request):
@@ -47,12 +48,14 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
         """The finder (professions.who_can_make): the game's whole list and the typed recipes somebody makes, what somebody
         makes first; a listed recipe nobody makes has no crafters. `profession` = that profession's recipes only (the
         editor's search, Pick the recipe…). At most FIND_LIMIT rows; `total` = every match. `message` = the answer in
-        words (answer_lines: MCP reads it); an empty `q` answers nothing."""
+        words (answer_lines: MCP reads it); `more` = its last sentence alone when rows are left out (more_sentence), else "";
+        an empty `q` answers nothing."""
         v = await who(request)
         hits = pr.who_can_make(v.reg, q, None, profession=profession.strip() or None)
         shown = hits[:FIND_LIMIT]
         return {"q": q, "recipes": [entry_json(v.reg, e) for e in shown], "total": len(hits),
-                "message": "\n".join(pr.answer_lines(v.reg, shown, len(hits))) if q.strip() else ""}
+                "message": "\n".join(pr.answer_lines(v.reg, shown, len(hits))) if q.strip() else "",
+                "more": pr.more_sentence(len(hits) - len(shown)) if len(hits) > len(shown) else ""}
 
     @app.post("/api/professions/unmatched")
     async def professions_unmatched(request: Request):

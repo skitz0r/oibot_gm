@@ -3905,7 +3905,7 @@ kept once.
 "Gauntlets" stay two until an officer merges them), the spelling most crafters use, the profession, the crafters highest
 skill first. `who_can_make(reg, text)`: the exact normalised name, else every recipe whose words all appear in the text.
 `crafters_of(reg, pid)`. Both skip retired characters, test puppets and members who left (`visible`). (The officers'
-`rename_recipe` / `merge_recipe` were retired by the armory link, C7: with the game's recipe list a recipe's name is the
+`rename_recipe` / `merge_recipe` were retired by the armory link, §5.64 C7: with the game's recipe list a recipe's name is the
 game's; `fix_unmatched` picks the listed recipe for, or removes, one typed before the list.) The confirm words for a character's professions are `consequences.profession_consequence` (people
 verb `professions`), linted by tests/test_confirm_readability.py. The import boundary
 (`importers/professions.py`: `detect`, `parse`, `FORMATS`) recognises nothing yet; no paste box shows until it does.
@@ -3985,6 +3985,7 @@ sentences). Character rows and `/api/meta.professions` (the list, skill cap, tra
    (`pages/Professions.tsx` + `professions.module.css`, every member): the finder (a typed recipe name → each match with
    its crafters, highest skill first, names only), a tab per profession (crafters with a skill bar and their notable
    recipes), and (until the armory link retired them) officers' **Rename…** / **Merge…** on a recipe. On a phone the search comes first, hits are cards and the tabs scroll sideways.
+   Rebuilt on the game's recipe list by §5.64 (category, makes, reagents, What the guild makes, the officers' fix).
 4. Discord (`flows_professions.py`). **Built 2026-10-30:** `/me professions` and `/roster professions` (the officers'
    form): one hub per character with Add profession…, Change skill…, Add recipe… and Remove…; profession and skill are
    selects — the skill in 17 steps: 1, 25 to 275 by 25, then 280 to 300 by 5 —, a recipe's name is one prose modal
@@ -4665,3 +4666,110 @@ carries the `UPLOAD_HINT` line under its confirm sentence) and the officers' wit
 *"Incomplete or invalid encoded string"*. `rxp_decode.encode` now always ends with it (`BASE`, or the source's own
 number: `trailer(text)`, kept by `reissue` and stored as `GuideVersion.base`); the re-issue of §5.55 had the same gap.
 The upload also takes a file with no extension (`flows_guides.is_text_file`), as the guild's tools save it.
+
+### 5.64 Armory link, phase 1: recipes as game data (built 2026-11-12)
+
+**Why.** WoW: Forever launched on 2026-11-04 with Blizzard's API live for it. The bot's recipe catalog (§5.60) was whatever
+members happened to type: one record said Leatherworking 265 with three recipes while the armory says 300 with 103, and
+"Gauntlet" / "Gauntlets" stayed two recipes until an officer merged them. Phase 1 makes the recipe list game data; phase 2
+(below, planned) links characters to the armory. Spec: `docs/superpowers/specs/2026-11-12-armory-link-design.md` §4;
+plan: `docs/superpowers/plans/2026-11-12-armory-link.md`.
+
+**Decisions.** The owner's **D6**: recipes are game data — the definitive list replaces the catalog derived from typed
+names. The designer's calls the owner saw and did not overrule: **C6** hand entry picks from the real list, so free-typed
+names are no longer stored; **C7** the officers' Rename… / Merge… of recipes are retired (a recipe's name is the game's).
+Designer's rulings taken while building, each with what it costs if wrong:
+- **R1** `recipes.yaml` supersedes `professions.yaml`'s `recipe_seed` for a version with a list; the seed stays for one
+  without. If wrong, a dead seed path lingers.
+- **R6** 66 recipe names occur twice within one profession (the original and a Season of Discovery twin, different ids),
+  and 3 names in two professions (Radiant Gloves, Gordok Ogre Suit, Synthetic Gordok Ogre Suit). Where a NAME must become
+  one recipe without a person choosing (the migration, plain text), the lowest id of that name within the profession wins;
+  wherever a person picks (a Discord select, the site's search), same-name recipes are separate rows told apart by their
+  category. No category name is special-cased in code. If wrong, a hand-entered recipe points at the twin until an officer
+  or (phase 2) the armory corrects it.
+- **R7** the list gives recipes to Mining (17 smelts), Skinning, Herbalism and Fishing (3 each), although
+  `ProfessionDef.makes` says gathering trades and Fishing make nothing. With a list, "this profession has recipes" is read
+  from the list (`professions.has_recipes`, `/api/meta.professions.list[].makes`); `makes` keeps deciding without one. If
+  wrong, gathering characters can record recipes the guild did not mean to track.
+
+**The words.** *The game's list*, *not in the game's list* (never "unmatched" where a person reads), *Pick the recipe…*,
+*Remove*, *Nobody in the guild makes X yet.* (a listed recipe with no crafter) against *That isn't a recipe in the game's
+list.* (a name the list lacks).
+
+**The list.** `profiles/forever/recipes.yaml` (Game version is data): 2,493 recipes across 12 professions at build
+1.60.1_70399, each `{id, name, profession, category, makes {id, name, quantity[, quantity_max]} | null, reagents [{id, name,
+quantity}]}`; 183 make no item (enchants). `scripts/import_recipes.py --profile forever [--region us]` regenerates it from
+`static-forever-<region>` through `importers/blizzard.py` `recipe_rows` (index → profession → skill tier → recipe, every
+response validated, the test profession dropped, ≤ 10 requests a second with 5xx / 429 retried); the operator runs it after
+a game build, reviews the diff and commits it. The bot never fetches the list at run time. `profiles.py` loads it once per
+file version (`RecipeDef`, `GameProfile.recipes`, `recipes_of`, `recipes_named`) and `GameProfile.has_recipe_list` is THE
+gate: tbc has no file and every behaviour below is exactly as before there (tests prove it per surface).
+
+**The record.** `Recipe.id` is the recipe's identity; `name` is a display copy in the list's spelling.
+`Registry.check_professions` (its `_list_recipes`) refuses an id the list lacks or one of another profession, resolves a
+name alone within its profession (R6), and refuses a name the list lacks — unless that id-less name is already stored on
+the character (`stored_unmatched`): old data round-trips untouched, and `professions_entries` marks it `unmatched: true` for
+every surface that edits the whole list. Dedupe is by id. `trusted=True` (phase 2's sync) skips the slot, cap and list checks.
+
+**The migration.** `Registry.migrate_recipes` matches every typed recipe to the list by `norm_recipe`, within its profession
+first, and gives it the id and the list's spelling; what does not match stays as written (id empty — no new field). It runs
+once per start per guild in a thread (`discord_bot._recipes_migrate`), one commit per guild, nothing when nothing matches,
+one ops line (`professions.migrated_line`) when something did.
+
+**The finder.** `professions.search` = the three tiers of §5.60 (exact, whole words in a sentence, part of a name) over the
+game's WHOLE list (indexed once per profile) plus the typed recipes the list lacks that somebody makes; recipes somebody makes
+first; `profession=` scopes it; `limit=None` gives the total for "And N more recipes match." (`more_sentence`). `catalog`
+keeps one entry per listed recipe id (twins stay two). `who_can_make` reads it (a picked `#<id>` is one recipe);
+`answer_lines` / `nobody_sentence` / `NOT_A_RECIPE` are the words on every surface — `/professions who` (autocomplete over the
+list), the site, MCP `who_can_make`, the help section (a question naming a listed recipe, at most 10 rows).
+
+**Entry.**
+- Discord **Add recipe…** (`flows_professions`): part of the name in a prose modal, then a select of that profession's
+  recipes (value = id, category as the description, the character's own left out, past 25 it says how many); no hit =
+  `NOT_A_RECIPE` with **Search again…**.
+- Plain text (`professions.op_rows`): `recipe_add` resolves against the list and the character's professions — did-you-mean
+  for several names, `NeedsProfession` only for one name in two listed professions, one candidate never asked, a fitting
+  profession the character lacks recorded with the recipe and said before Apply; `recipe_remove` resolves over the
+  character's own recipes the same way.
+- The site's editor (`ProfessionsEditor.tsx` + `RecipePicker.tsx`, Me and Members): with `meta.professions.recipe_list` the
+  Add box searches `GET /api/professions/find?profession=` and a pick sets the id (twins by category, held ones left out, the
+  server's empty and "more" sentences); a recipe not in the game's list is marked **?** and sent back untouched; changing a
+  row's profession clears its recipes. Without a list the typed box stays. Save prints only the server's preview sentences.
+- Retired (C7): `rename_recipe`, `merge_recipe`, their sentences and `POST /api/professions/rename|merge` (404 now), the
+  page's buttons; MCP never had tools for them and the parity matrix asserts they stay absent.
+
+**The officers' fix.** `professions.unmatched(reg)` lists the recipes typed before the list that it lacks (visible
+characters only, none without a list) → `GET /api/professions` `unmatched` (officers). `professions.fix_unmatched` = **Pick
+the recipe…** (a recipe of that profession takes its place in place, or the typed one comes off when the character already
+has it) or **Remove**, one `save_character_table` under `config_lock` at the record's rev (a change in between is refused,
+never overwritten); `POST /api/professions/unmatched` previews the sentences first (*"Rhoz's Leatherworking lists Devilsaur
+Gauntlets in place of Devilsaur Gauntlet."*), then writes with one audit line. Web only: `configops.BY_DESIGN_ONLY["recipe_fix"]`.
+
+**The page** (`pages/Professions.tsx`). The search box searches the list; each hit shows its profession's icon, the game's
+category, what it makes, its reagents and its crafters highest skill first, or the server's `nobody` sentence with how a
+crafter adds it; the empty answer is the server's `message`, the tail its `more`. Officers get a card *"N recipes are not in
+the game's list"* with Pick the recipe… (a `RecipePicker` over that profession, starting from the typed name) and Remove, each
+through `useConfirm` with the preview's sentences. A tab per profession: the crafters with a skill bar, then (with the list)
+**What the guild makes** grouped by the game's category, recipes not in the list last under their own heading; without the
+list, each crafter's typed recipes as chips as before. Below `sm` the hits, fix rows and made recipes are cards or stack.
+
+**Tests.** `tests/test_recipe_list.py` (the importer on recorded responses under `tests/fixtures/armory/static/`, the loader,
+twins), `tests/test_recipe_identity.py` (the check, the round trip, the migration, tbc unchanged), `tests/test_professions.py`
+(search, list_hits, scoping, totals), `tests/test_professions_ops.py` (plain text add / remove, fix_unmatched),
+`tests/test_professions_flows.py` (Add recipe… search → select → decide, past 25, held left out), `tests/test_professions_web.py`
+(the routes, `nobody` / `more`, meta's `recipe_list` and R7 `makes` with and without a list), `tests/test_parity_ops_chat.py`,
+`tests/test_parity_matrix.py`, `tests/test_confirm_readability.py` (fix_unmatched's sentences), `tests/test_frontend_source.py`
+(the page and the editor by their shape) and the copy lint.
+
+**Not done.** The recipe cache of `import_recipes.py` is not keyed by game build (delete `out/blizzard_cache` before a re-run
+after a new build); the importer's token request is not paced. A chip on a character does not show its category, so two
+same-name twins on one character read alike outside the editor's picker.
+
+**Phase 2 — linking and the sync (planned).** Spec §5: a server links to one in-game guild or none (`GuildConfig.armory`, owner
+only, confirmed by what the lookup found, the stored guild id checked on every roster read); a registered character MAY be
+linked to its armory character (D2 one record — the armory never creates one; D3 never gated on guild membership; linking
+adopts the armory's name, the old name kept as an alias); a linked character's professions follow the armory hourly through
+a conditional request (D4 overwritten, D5 a per-character switch, "Kept by hand" when off), level and "in the guild" too,
+never spec, main, rank or absences; a sure first-name-and-class match is proposed for the officers' one confirm (D8); the
+Members page shows the map and the guild characters nobody claimed, and officers move a character to another member (D9). No
+DM and no notice for any sync. Gated on the profile naming an armory (`integrations.yaml`); tbc: off.

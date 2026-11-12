@@ -1,15 +1,19 @@
-/* The Professions page (design §5.60): the finder's hits as rows under one card, each profession's crafters as a grid —
-   who · skill bar · notable recipes. Below the sm breakpoint the search comes first, every hit is a card of its own,
-   a crafter stacks (who, then the bar, then the chips), the tabs scroll sideways and every control is 44 px. */
+/* The Professions page (design §5.60, §5.64): the finder's hits as rows under one card, the officers' recipes not in the
+   game's list as rows (who · recipe · Pick the recipe… / Remove), each profession's crafters as a grid — who · skill bar ·
+   notable recipes (without the game's list) — and, with the list, what the guild makes grouped by category. Below the sm
+   breakpoint the search comes first, every hit and every fix row is a card of its own, a crafter stacks (who, then the
+   bar, then the chips), a made recipe stacks over its crafters, the tabs scroll sideways and every control is 44 px. */
 .hits { display: flex; flex-direction: column; }
 .hit { padding: 10px 16px; border-bottom: 1px solid var(--mantine-color-slate-6); }
 .hit:last-child { border-bottom: none; }
 .crafter { min-width: 0; }
 .who { min-width: 0; }
+.what { min-width: 0; flex: 1; }
 .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crafters { display: flex; flex-direction: column; }
 .craftRow { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(140px, 1fr) minmax(0, 2fr); gap: 6px 16px; align-items: center;
             padding: 10px 16px; border-bottom: 1px solid var(--mantine-color-slate-6); }
+.craftRowShort { grid-template-columns: minmax(160px, 1.2fr) minmax(140px, 1fr); }
 .craftRow:last-child { border-bottom: none; }
 .craftRow > * { min-width: 0; }
 .skill { min-width: 0; }
@@ -17,10 +21,29 @@
 .tabs { scrollbar-width: thin; }
 .tabs :global(.mantine-Tabs-tab) { flex-shrink: 0; }
 
+.fixes { display: flex; flex-direction: column; }
+.fixRow { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 1.5fr) auto; gap: 6px 16px; align-items: center;
+          padding: 10px 16px; border-bottom: 1px solid var(--mantine-color-slate-6); }
+.fixRow:last-child { border-bottom: none; }
+.fixRow > * { min-width: 0; }
+.fixActions { justify-content: flex-end; }
+
+.group { padding: 10px 16px 4px; border-bottom: 1px solid var(--mantine-color-slate-6); }
+.group:last-child { border-bottom: none; }
+.groupHead { margin-bottom: 4px; letter-spacing: 0.04em; }
+.makeRow { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); gap: 4px 16px; align-items: center; padding: 6px 0; }
+.makeRow > * { min-width: 0; }
+
 @media (max-width: 48em) {
   .hit { margin: 10px 12px; border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; padding: 10px 12px; }
   .hit:last-child { border-bottom: 1px solid var(--mantine-color-slate-5); }
-  .craftRow { grid-template-columns: minmax(0, 1fr); padding: 10px 12px; }
+  .craftRow, .craftRowShort { grid-template-columns: minmax(0, 1fr); padding: 10px 12px; }
+  .fixRow { grid-template-columns: minmax(0, 1fr); margin: 10px 12px; border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; padding: 10px 12px; }
+  .fixRow:last-child { border-bottom: 1px solid var(--mantine-color-slate-5); }
+  .fixActions { justify-content: flex-start; flex-wrap: wrap; }
+  .group { padding: 10px 12px 4px; }
+  .makeRow { grid-template-columns: minmax(0, 1fr); }
+  .name { white-space: normal; }
   .touch :global(.mantine-Button-root),
   .touch :global(.mantine-ActionIcon-root) { min-height: 44px; min-width: 44px; }
   .touch :global(.mantine-Tabs-tab),

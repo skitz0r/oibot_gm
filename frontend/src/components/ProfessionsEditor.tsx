@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput, Select, Stack, Text, TextInput } from "@mantine/core";
-import { IconPlus, IconTrash, IconX } from "@tabler/icons-react";
+import { IconPlus, IconQuestionMark, IconTrash, IconX } from "@tabler/icons-react";
 import type { Meta, PeoplePreview, Profession, TableSaved } from "../api";
 import { useDirty } from "../hooks/useDirty";
 import { useConfirm } from "./ConfirmModal";
 import { GameIcon } from "./Icons";
 import { ok } from "./Page";
+import { RecipePicker } from "./RecipePicker";
 
 type Saved = PeoplePreview | TableSaved;
 /** A row being edited: the skill box's raw text while typing (a cleared box stays empty), a number or null again on Save. */
@@ -26,7 +27,11 @@ function listWords(names: string[]): string {
 
 /** One character's professions edited in place (design §5.60): a row per profession — the profession picked from a grouped
  *  list (a trade already taken is greyed once `trade_slots` are full), its skill as a number 1..`skill_cap` (empty = not said yet, sent as null), its notable
- *  recipes as chips with an Add box only where the profession `makes` things (a gathering trade and Fishing have none). Save asks the server first (`onSave(entries, { preview: true })`) and
+ *  recipes as chips with an Add box only where the profession `makes` things (the server's word: with the game's list, any
+ *  profession the list gives recipes — R7; without, a gathering trade and Fishing have none). With the game's list
+ *  (`meta.professions.recipe_list`, design §5.64) the Add box is a search over that profession's recipes (RecipePicker:
+ *  a pick sets the recipe's id; twins told apart by category), and a recipe typed before the list that the list lacks
+ *  arrives `unmatched: true`, is marked, and goes back untouched; without the list a recipe is typed. Save asks the server first (`onSave(entries, { preview: true })`) and
  *  the confirm prints ONLY its `sentences`; then `{ preview: false }` writes. A refusal is the server's one sentence,
  *  shown in place; the draft is kept. */
 export function ProfessionsEditor({ meta, label, professions, onSave, onCancel, onSaved }: {
@@ -36,6 +41,7 @@ export function ProfessionsEditor({ meta, label, professions, onSave, onCancel, 
   const defs = meta.professions?.list || [];
   const cap = meta.professions?.skill_cap || 300;
   const slots = meta.professions?.trade_slots ?? 2;
+  const fromList = !!meta.professions?.recipe_list;  // recipes are picked from the game's list (§5.64), not typed
   const [draft, setDraft] = useState<DraftRow[]>(() => (professions || []).map((p) => ({ ...p, skill: p.skill ?? "", recipes: p.recipes.map((r) => ({ ...r })) })));
   const [typed, setTyped] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +108,7 @@ export function ProfessionsEditor({ meta, label, professions, onSave, onCancel, 
               <Group gap="sm" wrap="wrap" align="flex-end">
                 <GameIcon meta={meta} kind="profession" id={p.id} size={30} title={d?.name || p.id} />
                 <Select label="Profession" size="sm" w={{ base: "100%", xs: 200 }} data={options(i)} value={p.id} allowDeselect={false}
-                  onChange={(v) => v && upd(i, { id: v, recipes: def(v)?.makes ? p.recipes : [] })} />
+                  onChange={(v) => v && upd(i, { id: v, recipes: def(v)?.makes && !fromList ? p.recipes : [] })} />
                 <NumberInput label={`Skill, 1 to ${cap}`} description="leave empty if you don't know" size="sm" w={170} min={1} max={cap} clampBehavior="none" allowDecimal={false} allowNegative={false}
                   value={p.skill} onChange={(v) => upd(i, { skill: v })} />
                 <ActionIcon variant="subtle" color="red" size="lg" aria-label={`Remove ${d?.name || p.id}`} onClick={() => { setError(null); setDraft(draft.filter((_, j) => j !== i)); }}>
@@ -112,19 +118,38 @@ export function ProfessionsEditor({ meta, label, professions, onSave, onCancel, 
               {!d?.makes ? (
                 <Text size="xs" c="dimmed">{d?.group === "gathering" ? "A gathering trade has no recipes." : `${d?.name || p.id} has no recipes.`}</Text>
               ) : (
-                <Group gap={6} wrap="wrap" align="center">
-                  {p.recipes.map((r) => (
-                    <Badge key={r.name} variant="outline" color="gray" radius="xl" tt="none" fw={500} pr={3}
-                      rightSection={<ActionIcon size="xs" variant="transparent" color="gray" aria-label={`Remove ${r.name}`}
-                        onClick={() => upd(i, { recipes: p.recipes.filter((x) => x.name !== r.name) })}><IconX size={11} /></ActionIcon>}>
-                      {r.name}
-                    </Badge>
-                  ))}
-                  <TextInput size="xs" w={{ base: "100%", xs: 220 }} placeholder="A notable recipe, e.g. Mooncloth Bag" aria-label={`Add a recipe to ${d?.name || p.id}`}
-                    maxLength={RECIPE_MAX} value={typed[i] || ""} onChange={(e) => setTyped({ ...typed, [i]: e.currentTarget.value })}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addRecipe(i); } }} />
-                  <Button size="xs" variant="subtle" leftSection={<IconPlus size={13} />} disabled={!(typed[i] || "").trim()} onClick={() => addRecipe(i)}>Add</Button>
-                </Group>
+                <Stack gap={6}>
+                  <Group gap={6} wrap="wrap" align="center">
+                    {p.recipes.map((r, k) => {
+                      const off = r.unmatched || (fromList && r.id == null);  // typed before the game's list, and the list lacks it
+                      return (
+                        <Badge key={r.id ?? `n:${r.name}`} variant="outline" color={off ? "yellow" : "gray"} radius="xl" tt="none" fw={500} pr={3}
+                          leftSection={off ? <IconQuestionMark size={11} aria-label="not in the game's list" /> : undefined}
+                          title={off ? "Not in the game's list. Saving keeps it as it is; an officer fixes it on the Professions page." : undefined}
+                          rightSection={<ActionIcon size="xs" variant="transparent" color="gray" aria-label={`Remove ${r.name}`}
+                            onClick={() => upd(i, { recipes: p.recipes.filter((_, x) => x !== k) })}><IconX size={11} /></ActionIcon>}>
+                          {r.name}
+                        </Badge>
+                      );
+                    })}
+                    {!fromList && (
+                      <>
+                        <TextInput size="xs" w={{ base: "100%", xs: 220 }} placeholder="A notable recipe, e.g. Mooncloth Bag" aria-label={`Add a recipe to ${d?.name || p.id}`}
+                          maxLength={RECIPE_MAX} value={typed[i] || ""} onChange={(e) => setTyped({ ...typed, [i]: e.currentTarget.value })}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addRecipe(i); } }} />
+                        <Button size="xs" variant="subtle" leftSection={<IconPlus size={13} />} disabled={!(typed[i] || "").trim()} onClick={() => addRecipe(i)}>Add</Button>
+                      </>
+                    )}
+                  </Group>
+                  {fromList && p.recipes.some((r) => r.unmatched || r.id == null) && (
+                    <Text size="xs" c="dimmed">Recipes marked ? are not in the game's list. Saving keeps them as they are, and an officer fixes them on the Professions page.</Text>
+                  )}
+                  {fromList && (
+                    <RecipePicker profession={p.id} ariaLabel={`Add a ${d?.name || p.id} recipe`} w={{ base: "100%", xs: 320 }}
+                      held={(r) => p.recipes.some((x) => x.id === r.id)} heldSentence={`${label} already has every ${d?.name || p.id} recipe that matches.`}
+                      onPick={(r) => upd(i, { recipes: [...p.recipes, { id: r.id, name: r.name }] })} />
+                  )}
+                </Stack>
               )}
             </Stack>
           );

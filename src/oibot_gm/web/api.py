@@ -23,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from .. import consequences as cq
+from .. import professions as professions_mod
 from .. import guild_routing
 from ..consequences import consequence as consequence_lines, consequences_json, regular_remove as regular_remove_lines
 from ..presets import DURATIONS, PRESETS
@@ -499,9 +500,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "statuses": list(rc.STATUSES), "split_policies": list(SPLIT_POLICIES), "roles": list(ROLES),
             "group_caps": {"tank": int(grouping.get("tank_max_per_group", 2)), "healer": int(grouping.get("healer_max_per_group", 3))},
             "class_colours": dict(render.CLASS),
-            # professions (design §5.60): the version's list (empty when it has none), the skill cap and the trade slots
-            "professions": {"list": [{"id": d.id, "name": d.name, "group": d.group, "icon": d.icon, "makes": d.makes} for d in reg.profile.professions.values()],
-                            "skill_cap": reg.profile.profession_rules["skill_cap"], "trade_slots": reg.profile.profession_rules["trade_slots"]},
+            # professions (design §5.60): the version's list (empty when it has none), the skill cap and the trade slots;
+            # `makes` = the profession holds recipes (professions.has_recipes: the game's list where the version has one —
+            # R7, Mining's smelting — else ProfessionDef.makes); `recipe_list` = recipes are picked from the game's list (§5.64)
+            "professions": {"list": [{"id": d.id, "name": d.name, "group": d.group, "icon": d.icon, "makes": professions_mod.has_recipes(reg, d.id)}
+                                     for d in reg.profile.professions.values()],
+                            "skill_cap": reg.profile.profession_rules["skill_cap"], "trade_slots": reg.profile.profession_rules["trade_slots"],
+                            "recipe_list": reg.profile.has_recipe_list},
             "started_at": float(getattr(bot, "started_at", STARTED)),
             # absences: the Discord wizard's For how long list (presets.DURATIONS) and the verb's caps, so the web modals can't drift
             "durations": [{"days": d, "label": label} for d, label in DURATIONS], "max_absence_days": MAX_ABSENCE_DAYS, "absence_reason_max": ABSENCE_REASON_MAX,
@@ -2596,7 +2601,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     install_me_api(app, bot, who=who, body=body, find_live=find_live, resolve_member=resolve_member)
 
-    from .api_professions import install_professions_api  # the Professions page: catalog, finder, rename / merge (design §5.60)
+    from .api_professions import install_professions_api  # the Professions page: catalog, finder, the officers' fix (design §5.60, §5.64)
 
     install_professions_api(app, bot, who=who, body=body, publish=publish)
 

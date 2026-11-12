@@ -110,7 +110,9 @@ export interface Meta {
   guides?: boolean;
   /** §5.60: the version's professions (empty list = none: render nothing), the skill cap and how many trades (crafting +
    *  gathering) a character may hold */
-  professions?: { list: { id: string; name: string; group: string; icon: string; makes: boolean }[]; skill_cap: number; trade_slots: number };
+  professions?: { list: { id: string; name: string; group: string; icon: string; makes: boolean }[]; skill_cap: number; trade_slots: number;
+    /** §5.64: recipes are picked from the game's list (the editor searches it; `makes` then comes from the list — R7) */
+    recipe_list?: boolean };
   /** The run's vocabulary, defined once in Python (design §5.56 phase 2) — a page never keeps its own copy: the state words
    *  (open · locked · done · cancelled), the run verbs' labels (raid_buttons.RUN_WORDS — the Discord buttons' own), the
    *  confirmation marks with their words (constants.MARK / MARK_WORDS; "waiting" = no answer yet), how an ask reaches
@@ -131,18 +133,34 @@ export interface GuideStatus {
   built_when?: string; guides?: number; steps?: number; starter?: number; range?: string; sizes?: Record<string, number>;
   groups?: { group: string; guides: number; steps: number; lo: number; hi: number; zones: string[]; dungeons: string[]; km: number; starter: boolean }[];
 }
-/** A notable recipe on a character's profession (design §5.60): `id` = the item id once known, else null. */
-export interface Recipe { name: string; id: number | null }
+/** A recipe on a character's profession (design §5.60, §5.64): `id` = the game's recipe id (with the game's list); null =
+ *  typed before the list and not on it — then `unmatched: true`, which a save sends back untouched. */
+export interface Recipe { name: string; id: number | null; unmatched?: boolean }
 /** One profession on a character: a profile profession id, its skill (1..meta.professions.skill_cap; null = not said yet),
  *  notable recipes. */
 export interface Profession { id: string; skill: number | null; recipes: Recipe[] }
 /** The Professions page (GET /api/professions, design §5.60): one crafter = a character holding a profession; `cls` = its
  *  class (icon and colour), `member` = the display name (a name, never a ping). */
 export interface Crafter { label: string; member: string; uid: string; skill: number | null; profession: string; cls: string | null }
-/** A registered recipe and its makers (highest skill first); `key` = the normalised name rename / merge take. */
-export interface CatalogRecipe { key: string; name: string; profession: string; id: number | null; crafters: Crafter[] }
-/** Every profession with its crafters, every registered recipe, and `officer` = the reader may rename or merge. */
-export interface ProfessionsData { professions: { id: string; name: string; group: string; icon: string; crafters: Crafter[] }[]; recipes: CatalogRecipe[]; officer: boolean }
+/** A recipe and its makers (highest skill first; none = nobody makes it yet, then `nobody` is the server's sentence).
+ *  `listed` = on the game's list: `category`, what it `makes` (null for an enchant) and its `reagents`; a recipe typed
+ *  before the list that the list lacks has null / [] there. */
+export interface CatalogRecipe {
+  key: string; name: string; profession: string; id: number | null; crafters: Crafter[];
+  listed?: boolean; category?: string | null; makes?: { id: number; name: string; quantity: number; quantity_max?: number } | null;
+  reagents?: { id: number; name: string; quantity: number }[]; nobody?: string;
+}
+/** GET /api/professions/find: at most 25 rows; `total` = every match; `message` = the answer in words (the empty
+ *  answer's sentence); `more` = how many more match, as a sentence ("" when none are left out). */
+export interface FindResult { q: string; recipes: CatalogRecipe[]; total: number; message: string; more?: string }
+/** A recipe typed before the game's list that the list lacks (officers fix it: Pick the recipe… / Remove). */
+export interface UnlistedRecipe { uid: string; member: string; label: string; profession: string; name: string }
+/** Every profession with its crafters, every recipe somebody makes, `officer` = the reader may fix the recipes not in the
+ *  game's list, and those recipes (`unmatched`, officers only). */
+export interface ProfessionsData {
+  professions: { id: string; name: string; group: string; icon: string; crafters: Crafter[] }[]; recipes: CatalogRecipe[]; officer: boolean;
+  unmatched?: UnlistedRecipe[];
+}
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
 export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[]; professions?: Profession[] }
 export interface Absence { start: string; end: string; reason: string | null; span?: string }  // `span` = the days in words (the clock rule); start/end stay ISO for the clear call

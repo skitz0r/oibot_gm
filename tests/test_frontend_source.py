@@ -452,9 +452,43 @@ def test_professions_page_is_the_finder_with_officer_maintenance():
     app = (SRC / "App.tsx").read_text()
     assert 'path="/professions"' in app and '{ to: "/professions", label: "Professions"' in app
     assert "/api/professions/find" in src and "Who can make what" in src
-    assert "Rename…" in src and "Merge…" in src and "officer" in src
     assert "Nobody has registered" in src and "no notable recipes registered — the crafter adds them on the Me page" in src
     assert 'useLive(load, ["member", "config"])' in src
+    # armory link §4.3–4.4 / design §5.64: recipes are the game's — Rename… / Merge… are retired, the page prints the server's
+    # sentences (the empty answer, "Nobody in the guild makes … yet.", "And N more recipes match.") and never composes them
+    assert "Rename…" not in src and "Merge…" not in src and "/api/professions/rename" not in src and "/api/professions/merge" not in src
+    assert "registered by" not in src and "No registered recipe matches" not in src
+    assert "found.message" in src and "r.nobody" in src and "found.more" in src
+    assert "r.category" in src and "makesWords(r.makes)" in src and "r.reagents" in src
+    # officers' card: the recipes not in the game's list, Pick the recipe… (a search of that profession) / Remove, preview first
+    assert "not in the game's list" in src and "Pick the recipe…" in src and ">Remove<" in src
+    assert '"/api/professions/unmatched", { ...payload, preview: true }' in src and "p.sentences" in src and "useConfirm" in src
+    assert "<RecipePicker profession={pick.profession}" in src
+    # the tabs: with the game's list, what the guild makes grouped by category
+    assert "<GuildMakes" in src and "What the guild makes" in src
+    from test_copy import tsx_strings  # the copy lint's own extractor of what a person reads
+    for f in ("pages/Professions.tsx", "components/ProfessionsEditor.tsx", "components/RecipePicker.tsx", "components/ProfessionLine.tsx"):
+        reads = [s for _, s in tsx_strings(SRC / f)]
+        assert not [x for x in reads if re.search(r"\b(?:unmatched|sync|slug)\b", x, re.I)], f  # the Copy rule: "not in the game's list"
+    css = (SRC / "pages" / "professions.module.css").read_text()
+    phone = css.split("@media (max-width: 48em)", 1)[1]
+    assert ".fixRow { grid-template-columns: minmax(0, 1fr);" in phone and "border-radius: 8px" in phone and ".makeRow { grid-template-columns: minmax(0, 1fr); }" in phone
+
+
+def test_professions_editor_picks_from_the_game_list():
+    """design §5.64: with the game's list (meta.professions.recipe_list) the editor's Add box is a search over THAT profession's
+    recipes (RecipePicker → /api/professions/find?profession=), a pick sets the recipe's id, twins are told apart by
+    category; a recipe the list lacks arrives unmatched, is marked, and goes back untouched; without the list it is typed."""
+    ed = (SRC / "components" / "ProfessionsEditor.tsx").read_text()
+    assert "meta.professions?.recipe_list" in ed and "<RecipePicker profession={p.id}" in ed and "{ id: r.id, name: r.name }" in ed
+    assert "{!fromList && (" in ed and "<TextInput" in ed, "without the list the typed entry stays"
+    assert "r.unmatched" in ed and "not in the game's list" in ed and "useDirty(" in ed
+    picker = (SRC / "components" / "RecipePicker.tsx").read_text()
+    assert "/api/professions/find?q=" in picker and "&profession=" in picker and "r.category" in picker
+    assert "value: String(r.id)" in picker, "a pick is the recipe's id (twins share a name)"
+    assert "found?.message" in picker and "found.more" in picker
+    line = (SRC / "components" / "ProfessionLine.tsx").read_text()
+    assert "r.unmatched" in line and "not in the game's list" in line
 
 
 def test_memory_surfaces_read_by_their_shape():

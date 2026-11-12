@@ -328,7 +328,12 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   yet), then the recipes. The character's ⋮ has
   **Professions…**, which edits that character's professions in place: pick a profession, type its skill (leave the box
   empty if you don't know it), add or remove
-  notable recipes. **Save** first shows the bot's own sentences (*"Your Alchemy is recorded at 300."*), then writes.
+  notable recipes. A recipe is added by searching the game's own recipes of that profession: type part of its name
+  ("ironfeather") and pick it from the matches — two recipes with one name are told apart by their category, recipes
+  the character already has are left out, and past 25 matches it says how many more and asks you to type more of the
+  name. A recipe typed before the bot knew the game's list that the list doesn't have is marked with a **?**; saving
+  keeps it as it is, and an officer fixes it on the Professions page. Changing a row's profession clears its recipes.
+  **Save** first shows the bot's own sentences (*"Your Alchemy is recorded at 300."*), then writes.
   In Discord, `/me professions` does the same: pick the character (skipped when you have one), and it lists that
   character's professions with **Add profession…**, **Change skill…**, **Add recipe…** and **Remove…**. The profession
   and the skill are picked from lists (the skill list starts with **Not said yet**). **Add recipe…** asks for part of the
@@ -376,14 +381,22 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   — pick a profession and see everyone who has it, highest skill first. The Professions page on the site shows the same.
 - **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name, or part of it
   ("ironfeather" finds every Ironfeather recipe), in the search box: it searches the game's whole list of recipes, the
-  ones somebody in the guild makes first, and each matching recipe shows its crafters, highest skill first, with their skill — names only, nobody is
-  pinged. A recipe the game's list doesn't have, typed before the bot knew the list, still names its crafter. Below it, a tab per profession lists everyone who has it with a skill bar and their notable recipes. A
-  recipe nobody has added says so, and that the crafter adds it on the Me page. Recipe names are the game's, so there
+  ones somebody in the guild makes first. Each matching recipe shows its profession's icon, the game's category
+  ("Leather Pauldrons"), what it makes and its reagents, then its crafters, highest skill first, with their skill — names only, nobody is
+  pinged. A recipe nobody makes yet says so (*"Nobody in the guild makes Ironfeather Shoulders yet."*) and that a crafter
+  adds it on the Me page or with `/me professions`; a name the game doesn't have gets *"That isn't a recipe in the game's
+  list."*; past 25 matches it says how many more (*"And 12 more recipes match."*). A recipe the game's list doesn't have,
+  typed before the bot knew the list, still names its crafter and is marked *Not in the game's list*. Below it, a tab per
+  profession lists everyone who has it with a skill bar, then **What the guild makes**: every recipe of that profession
+  somebody has, grouped by the game's category, each with its crafters (recipes not in the game's list last, under their
+  own heading). A profession nobody has added a recipe for says so, and that a crafter adds theirs on the Me page or with
+  `/me professions`. Recipe names are the game's, so there
   is nothing to rename or merge. Officers see the recipes typed before the bot knew the game's list that the list
-  doesn't have (*"3 recipes are not in the game's list"*), each with **Pick the recipe…** (search the list, pick the
-  one it meant) and **Remove**. Both show the bot's own sentence first (*"Rhoz's Leatherworking lists Devilsaur
+  doesn't have (*"3 recipes are not in the game's list"*), each with who has it, **Pick the recipe…** (search that
+  profession's recipes in the game's list, starting from the typed name, and pick the one it meant) and **Remove**. Both
+  show the bot's own sentence first (*"Rhoz's Leatherworking lists Devilsaur
   Gauntlets in place of Devilsaur Gauntlet."*) and change nothing before you confirm. On a phone the search comes first, each
-  recipe is a card and the tabs scroll sideways.
+  recipe and each of the officers' rows is a card, a made recipe stacks over its crafters and the tabs scroll sideways.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
   owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.

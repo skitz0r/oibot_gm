@@ -1,18 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { Badge, Button, Card, Group, Modal, Progress, Select, Stack, Tabs, Text, TextInput } from "@mantine/core";
+import { Badge, Button, Card, Group, Modal, Progress, Stack, Tabs, Text, TextInput } from "@mantine/core";
 import { IconSearch } from "@tabler/icons-react";
-import { api, ApiError, type CatalogRecipe, type Crafter, type Meta, type ProfessionsData } from "../api";
+import { api, type CatalogRecipe, type Crafter, type FindResult, type Meta, type ProfessionsData, type UnlistedRecipe } from "../api";
 import { GameIcon } from "../components/Icons";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
+import { RecipePicker } from "../components/RecipePicker";
 import { useLive } from "../hooks/useLive";
 import { classColour } from "../theme";
 import css from "./professions.module.css";
 
-type Fix = { verb: "rename" | "merge"; recipe: CatalogRecipe };
-
 /** A crafter on one line: class icon, the character in its class colour, the member dimmed (a name — nobody is pinged). */
-function Who({ meta, c }: { meta: Meta; c: Crafter }) {
+function Who({ meta, c }: { meta: Meta; c: Pick<Crafter, "label" | "member" | "cls"> }) {
   return (
     <Group gap={6} wrap="nowrap" className={css.who}>
       {c.cls && <GameIcon meta={meta} kind="class" id={c.cls} size={20} title={c.cls} />}
@@ -24,25 +23,37 @@ function Who({ meta, c }: { meta: Meta; c: Crafter }) {
 
 /** Highest skill first; a skill not said yet last (the server's order too). */
 const bySkill = (a: Crafter, b: Crafter) => (b.skill ?? -1) - (a.skill ?? -1);
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** "Makes 1–4 Small Bronze Bomb" / "Makes Ironfeather Shoulders" — the game's own item and count. */
+function makesWords(m: NonNullable<CatalogRecipe["makes"]>): string {
+  const n = m.quantity_max && m.quantity_max !== m.quantity ? `${m.quantity}–${m.quantity_max} ` : m.quantity > 1 ? `${m.quantity} ` : "";
+  return `Makes ${n}${m.name}`;
+}
+const ADD_HOW = "A crafter adds it on the Me page or with /me professions.";
+const NOT_LISTED_GROUP = "Not in the game's list";
 
-/** The Professions page (design §5.60), for every member: the finder — a typed recipe name and who makes it, highest
- *  skill first — then a tab per profession listing its crafters with a skill bar and their notable recipes. Officers
- *  rename a misspelt recipe or merge two spellings; the server's sentences show before anything is written. */
+/** The Professions page (design §5.60, §5.64), for every member: the finder — part of a recipe's name searches the game's
+ *  whole list (with it), what somebody makes first; each hit shows its category, what it makes, its reagents and its
+ *  crafters highest skill first, or the server's "Nobody in the guild makes … yet." Then a tab per profession: its
+ *  crafters with a skill bar, and — with the game's list — what the guild makes, grouped by the game's category (without
+ *  the list, each crafter's typed recipes as chips, as before). Officers see the recipes typed before the list that the
+ *  list lacks, with Pick the recipe… / Remove; the server's sentences show before anything is written. */
 export function ProfessionsPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<ProfessionsData | null>(null);
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<CatalogRecipe[] | null>(null);
+  const [found, setFound] = useState<FindResult | null>(null);
   const [tab, setTab] = useState<string | null>(null);
-  const [fix, setFix] = useState<Fix | null>(null);
+  const [pick, setPick] = useState<UnlistedRecipe | null>(null);
   const qRef = useRef("");
   qRef.current = q;
   const cap = meta.professions?.skill_cap || 300;
+  const fromList = !!meta.professions?.recipe_list;
   const [confirm, confirmDialog] = useConfirm();
 
   const find = (text: string) => {
-    if (!text.trim()) { setHits(null); return; }
-    api.get<{ q: string; recipes: CatalogRecipe[] }>(`/api/professions/find?q=${encodeURIComponent(text.trim())}`)
-      .then((d) => { if (d.q.trim() === qRef.current.trim()) setHits(d.recipes); }).catch(fail);
+    if (!text.trim()) { setFound(null); return; }
+    api.get<FindResult>(`/api/professions/find?q=${encodeURIComponent(text.trim())}`)
+      .then((d) => { if (d.q.trim() === qRef.current.trim()) setFound(d); }).catch(fail);
   };
   const load = () => {
     api.get<ProfessionsData>("/api/professions").then(setData).catch(fail);
@@ -53,54 +64,91 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
   useEffect(() => { const t = setTimeout(() => find(q), 250); return () => clearTimeout(t); }, [q]);
 
   const profs = data?.professions || [];
-  const makes = (id: string) => !!meta.professions?.list.find((d) => d.id === id)?.makes;  // Fishing and the gathering trades hold none
+  const makes = (id: string) => !!meta.professions?.list.find((d) => d.id === id)?.makes;  // the server says which hold recipes (R7)
   const pname = (id: string) => profs.find((p) => p.id === id)?.name || meta.professions?.list.find((p) => p.id === id)?.name || id;
   const shown = tab && profs.some((p) => p.id === tab) ? tab : (profs.find((p) => p.crafters.length) || profs[0])?.id || null;
   const recipesOf = (c: Crafter) => (data?.recipes || []).filter((r) => r.profession === c.profession && r.crafters.some((x) => x.uid === c.uid && x.label === c.label));
-  const byCount = (n: number) => `registered by ${n} crafter${n === 1 ? "" : "s"}`;
+  const clsOf = (uid: string, label: string) => profs.flatMap((p) => p.crafters).find((c) => c.uid === uid && c.label === label)?.cls ?? null;
+  const unlisted = data?.officer ? data.unmatched || [] : [];
+
+  /** An officer's fix of one recipe the game's list lacks: the server's preview sentences in the confirm, then the write. */
+  const fix = async (row: UnlistedRecipe, recipe: CatalogRecipe | null) => {
+    const payload = { uid: row.uid, label: row.label, profession: row.profession, name: row.name, recipe_id: recipe ? recipe.id : null };
+    try {
+      const p = await api.post<{ sentences: string[]; message: string }>("/api/professions/unmatched", { ...payload, preview: true });
+      const yes = await confirm({ title: recipe ? `Pick ${recipe.name}` : `Remove ${row.name}`, message: p.sentences.join("\n"),
+        confirmLabel: recipe ? "Pick this recipe" : "Remove", color: recipe ? undefined : "red" });
+      if (!yes) return;
+      const d = await api.post<{ sentences: string[]; message: string }>("/api/professions/unmatched", payload);
+      ok(d.message);
+      load();
+    } catch (e) { fail(e); }
+  };
 
   return (
     <Stack gap="lg" className={css.touch}>
-      <PageTitle title="Professions" intro="Who can make what. Search a recipe, or open a profession to see its crafters. Add your own on the Me page or with /me professions." />
-      <TextInput leftSection={<IconSearch size={16} />} placeholder="a recipe's name, like Mooncloth Bag" value={q} aria-label="Search a recipe"
+      <PageTitle title="Professions" intro={fromList
+        ? "Who can make what. Search the game's recipes, or open a profession to see its crafters. Add your own on the Me page or with /me professions."
+        : "Who can make what. Search a recipe, or open a profession to see its crafters. Add your own on the Me page or with /me professions."} />
+      <TextInput leftSection={<IconSearch size={16} />} placeholder="part of a recipe's name, like ironfeather" value={q} aria-label="Search a recipe"
         onChange={(e) => setQ(e.currentTarget.value)} maw={520} />
       <Card>
-        <CardHeader title={hits === null ? "Type a recipe's name to see who makes it" : `${hits.length} recipe${hits.length === 1 ? "" : "s"} match "${q.trim()}"`} />
-        {hits !== null && hits.length === 0 && (
-          <Text size="sm" c="dimmed" px="md" py="sm">No registered recipe matches "{q.trim()}". A crafter adds a recipe on the Me page, with /me professions, or by saying so in the professions channel.</Text>
+        <CardHeader title={found === null ? "Type a recipe's name to see who makes it" : `${plural(found.total, "recipe matches", "recipes match")} "${q.trim()}"`} />
+        {found !== null && found.recipes.length === 0 && (
+          <Text size="sm" c="dimmed" px="md" py="sm">{found.message}{fromList ? "" : ` ${ADD_HOW}`}</Text>
         )}
-        {hits !== null && hits.length > 0 && (
+        {found !== null && found.recipes.length > 0 && (
           <div className={css.hits}>
-            {hits.map((r) => (
-              <div key={r.key} className={css.hit}>
-                <Group justify="space-between" wrap="wrap" gap="xs">
-                  <div>
+            {found.recipes.map((r) => (
+              <div key={r.id ?? `${r.profession}:${r.key}`} className={css.hit}>
+                <Group wrap="nowrap" align="flex-start" gap="sm">
+                  <GameIcon meta={meta} kind="profession" id={r.profession} size={28} title={pname(r.profession)} />
+                  <Stack gap={2} className={css.what}>
                     <Text fw={700}>{r.name}</Text>
-                    <Text size="xs" c="dimmed">{pname(r.profession)} · {byCount(r.crafters.length)}</Text>
-                  </div>
-                  {data?.officer && (
-                    <Group gap="xs">
-                      <Button size="xs" variant="default" onClick={() => setFix({ verb: "rename", recipe: r })}>Rename…</Button>
-                      <Button size="xs" variant="default" onClick={() => setFix({ verb: "merge", recipe: r })}>Merge…</Button>
-                    </Group>
-                  )}
+                    {r.category && <Text size="xs" c="dimmed">{r.category}</Text>}
+                    {fromList && r.listed === false && <Text size="xs" c="yellow.4">{NOT_LISTED_GROUP}</Text>}
+                    {r.makes && <Text size="xs">{makesWords(r.makes)}</Text>}
+                    {!!r.reagents?.length && <Text size="xs" c="dimmed">Reagents: {r.reagents.map((x) => `${x.quantity} × ${x.name}`).join(", ")}</Text>}
+                  </Stack>
                 </Group>
-                <Stack gap={4} mt={6}>
-                  {[...r.crafters].sort(bySkill).map((c) => (
-                    <Group key={c.uid + c.label} justify="space-between" wrap="nowrap" gap="sm" className={css.crafter}>
-                      <Who meta={meta} c={c} />
-                      <Group gap={5} wrap="nowrap">
-                        <GameIcon meta={meta} kind="profession" id={c.profession} size={20} title={pname(c.profession)} />
+                {r.crafters.length ? (
+                  <Stack gap={4} mt={8}>
+                    {[...r.crafters].sort(bySkill).map((c) => (
+                      <Group key={c.uid + c.label} justify="space-between" wrap="nowrap" gap="sm" className={css.crafter}>
+                        <Who meta={meta} c={c} />
                         {c.skill != null && <Text fw={700} size="sm" c={c.skill >= cap ? "teal.3" : undefined}>{c.skill}</Text>}
                       </Group>
-                    </Group>
-                  ))}
-                </Stack>
+                    ))}
+                  </Stack>
+                ) : <Text size="sm" c="dimmed" mt={8}>{r.nobody} {ADD_HOW}</Text>}
               </div>
             ))}
+            {found.more && <Text size="sm" c="dimmed" px="md" py="sm">{found.more} Type more of the name to narrow it.</Text>}
           </div>
         )}
       </Card>
+
+      {unlisted.length > 0 && (
+        <Card>
+          <CardHeader title={`${plural(unlisted.length, "recipe is", "recipes are")} not in the game's list`}
+            hint="Typed before the bot knew the game's list. Pick the recipe each one meant, or remove it." />
+          <div className={css.fixes}>
+            {unlisted.map((row) => (
+              <div key={`${row.uid}:${row.label}:${row.profession}:${row.name}`} className={css.fixRow}>
+                <Who meta={meta} c={{ label: row.label, member: row.member, cls: clsOf(row.uid, row.label) }} />
+                <Group gap={8} wrap="nowrap" className={css.what}>
+                  <GameIcon meta={meta} kind="profession" id={row.profession} size={20} title={pname(row.profession)} />
+                  <Text size="sm" className={css.name}>{row.name}</Text>
+                </Group>
+                <Group gap="xs" wrap="nowrap" className={css.fixActions}>
+                  <Button size="xs" variant="default" onClick={() => setPick(row)}>Pick the recipe…</Button>
+                  <Button size="xs" variant="subtle" color="red" onClick={() => fix(row, null)}>Remove</Button>
+                </Group>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {data === null && <Text size="sm" c="dimmed">Loading…</Text>}
       {profs.length > 0 && (
@@ -114,85 +162,91 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
           </Tabs.List>
           {profs.map((p) => (
             <Tabs.Panel key={p.id} value={p.id} pt="md">
-              <Card>
-                {p.crafters.length === 0 ? (
-                  <Text size="sm" c="dimmed" px="md" py="sm">Nobody has registered {p.name} yet. A crafter adds it on the Me page, with /me professions, or by saying so in the professions channel.</Text>
-                ) : (
-                  <div className={css.crafters}>
-                    {p.crafters.map((c) => {
-                      const mine = recipesOf(c);
-                      return (
-                        <div key={c.uid + c.label} className={css.craftRow}>
-                          <Who meta={meta} c={c} />
-                          {c.skill != null ? (
-                            <Group gap={8} wrap="nowrap" className={css.skill}>
-                              <Progress value={Math.min(100, (c.skill / cap) * 100)} color={c.skill >= cap ? "teal" : "teal.7"} size="sm" style={{ flex: 1 }} aria-label={`${c.skill} of ${cap}`} />
-                              <Text fw={700} size="sm" c={c.skill >= cap ? "teal.3" : undefined} w={32} ta="right">{c.skill}</Text>
-                            </Group>
-                          ) : <Text size="xs" c="dimmed" className={css.skill}>skill not said yet</Text>}
-                          <div className={css.recipes}>
-                            {mine.length
-                              ? <Group gap={6} wrap="wrap">{mine.map((r) => <Badge key={r.key} variant="outline" color="gray" radius="xl" tt="none" fw={500}>{r.name}</Badge>)}</Group>
-                              : makes(p.id) && <Text size="xs" c="dimmed">no notable recipes registered — the crafter adds them on the Me page</Text>}
+              <Stack gap="md">
+                <Card>
+                  {p.crafters.length === 0 ? (
+                    <Text size="sm" c="dimmed" px="md" py="sm">Nobody has registered {p.name} yet. A crafter adds it on the Me page, with /me professions, or by saying so in the professions channel.</Text>
+                  ) : (
+                    <div className={css.crafters}>
+                      {p.crafters.map((c) => {
+                        const mine = fromList ? [] : recipesOf(c);
+                        return (
+                          <div key={c.uid + c.label} className={fromList ? `${css.craftRow} ${css.craftRowShort}` : css.craftRow}>
+                            <Who meta={meta} c={c} />
+                            {c.skill != null ? (
+                              <Group gap={8} wrap="nowrap" className={css.skill}>
+                                <Progress value={Math.min(100, (c.skill / cap) * 100)} color={c.skill >= cap ? "teal" : "teal.7"} size="sm" style={{ flex: 1 }} aria-label={`${c.skill} of ${cap}`} />
+                                <Text fw={700} size="sm" c={c.skill >= cap ? "teal.3" : undefined} w={32} ta="right">{c.skill}</Text>
+                              </Group>
+                            ) : <Text size="xs" c="dimmed" className={css.skill}>skill not said yet</Text>}
+                            {!fromList && (
+                              <div className={css.recipes}>
+                                {mine.length
+                                  ? <Group gap={6} wrap="wrap">{mine.map((r) => <Badge key={r.key} variant="outline" color="gray" radius="xl" tt="none" fw={500}>{r.name}</Badge>)}</Group>
+                                  : makes(p.id) && <Text size="xs" c="dimmed">no notable recipes registered — the crafter adds them on the Me page</Text>}
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+                {fromList && p.crafters.length > 0 && makes(p.id) && (
+                  <GuildMakes meta={meta} name={p.name} recipes={(data?.recipes || []).filter((r) => r.profession === p.id)} />
                 )}
-              </Card>
+              </Stack>
             </Tabs.Panel>
           ))}
         </Tabs>
       )}
 
-      {fix && <FixModal fix={fix} recipes={data?.recipes || []} confirm={confirm} onClose={() => setFix(null)} onDone={() => { setFix(null); load(); }} />}
+      {pick && (
+        <Modal opened onClose={() => setPick(null)} title={`Pick the recipe ${pick.name} meant`} centered>
+          <Stack gap="md">
+            <Text size="sm">{pick.label}'s {pname(pick.profession)} lists {pick.name}, which is not in the game's list. Search the game's {pname(pick.profession)} recipes and pick the one it meant.</Text>
+            <RecipePicker profession={pick.profession} initial={pick.name} ariaLabel={`Search the game's ${pname(pick.profession)} recipes`}
+              onPick={(r) => { const row = pick; setPick(null); fix(row, r); }} />
+            <Group justify="flex-end"><Button variant="default" size="sm" onClick={() => setPick(null)}>Cancel</Button></Group>
+          </Stack>
+        </Modal>
+      )}
       {confirmDialog}
     </Stack>
   );
 }
 
-/** An officer's Rename… / Merge… of one recipe: one input (the new spelling, or the recipe to merge into, picked from
- *  the same profession), then the server's preview sentences in the confirm, then the write. A refusal is its sentence. */
-function FixModal({ fix, recipes, confirm, onClose, onDone }: {
-  fix: Fix; recipes: CatalogRecipe[]; onClose: () => void; onDone: () => void;
-  confirm: ReturnType<typeof useConfirm>[0];
-}) {
-  const r = fix.recipe;
-  const rename = fix.verb === "rename";
-  const [value, setValue] = useState<string>(rename ? r.name : "");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const others = recipes.filter((x) => x.profession === r.profession && x.key !== r.key).map((x) => ({ value: x.key, label: x.name }));
-  const url = rename ? "/api/professions/rename" : "/api/professions/merge";
-  const payload = rename ? { key: r.key, name: value } : { key: r.key, into: value };
-  const go = async () => {
-    setError(null); setBusy(true);
-    try {
-      const p = await api.post<{ sentences: string[]; message: string }>(url, { ...payload, preview: true });
-      const yes = await confirm({ title: rename ? `Rename ${r.name}` : `Merge ${r.name}`, message: p.sentences.join("\n"), confirmLabel: rename ? "Rename" : "Merge" });
-      if (!yes) return;
-      const d = await api.post<{ sentences: string[]; message: string }>(url, payload);
-      ok(d.message);
-      onDone();
-    } catch (e) {
-      if (e instanceof ApiError) setError(e.message); else fail(e);
-    } finally { setBusy(false); }
-  };
+/** A profession's tab, with the game's list: what the guild makes, grouped by the game's category (the categories in
+ *  order, a recipe typed before the list that the list lacks under its own heading last), each recipe with its crafters. */
+function GuildMakes({ meta, name, recipes }: { meta: Meta; name: string; recipes: CatalogRecipe[] }) {
+  const groups = new Map<string, CatalogRecipe[]>();
+  for (const r of recipes) {
+    const g = r.listed === false ? NOT_LISTED_GROUP : r.category || NOT_LISTED_GROUP;
+    groups.set(g, [...(groups.get(g) || []), r]);
+  }
+  const order = [...groups.keys()].sort((a, b) => (a === NOT_LISTED_GROUP ? 1 : b === NOT_LISTED_GROUP ? -1 : a.localeCompare(b)));
   return (
-    <Modal opened onClose={onClose} title={rename ? `Rename ${r.name}` : `Merge ${r.name}`} centered>
-      <Stack gap="md">
-        {rename
-          ? <TextInput label="The spelling every record will read" value={value} onChange={(e) => setValue(e.currentTarget.value)} data-autofocus />
-          : others.length
-            ? <Select label="The recipe it becomes" data={others} value={value || null} onChange={(v) => setValue(v || "")} searchable />
-            : <Text size="sm" c="dimmed">No other recipe of this profession is registered to merge into. Rename it instead.</Text>}
-        {error && <Text size="sm" c="red.4">{error}</Text>}
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" loading={busy} disabled={!value.trim()} onClick={go}>{rename ? "Rename…" : "Merge…"}</Button>
-        </Group>
-      </Stack>
-    </Modal>
+    <Card>
+      <CardHeader title="What the guild makes" />
+      {recipes.length === 0 ? (
+        <Text size="sm" c="dimmed" px="md" py="sm">Nobody has added a {name} recipe yet. A crafter adds theirs on the Me page or with /me professions.</Text>
+      ) : (
+        <div className={css.crafters}>
+          {order.map((g) => (
+            <div key={g} className={css.group}>
+              <Text size="xs" fw={700} c={g === NOT_LISTED_GROUP ? "yellow.4" : "dimmed"} tt="uppercase" className={css.groupHead}>{g}</Text>
+              {groups.get(g)!.sort((a, b) => a.name.localeCompare(b.name)).map((r) => (
+                <div key={r.id ?? r.key} className={css.makeRow}>
+                  <Text size="sm" fw={600} className={css.name}>{r.name}</Text>
+                  <Group gap={12} wrap="wrap" className={css.what}>
+                    {r.crafters.map((c) => <Who key={c.uid + c.label} meta={meta} c={c} />)}
+                  </Group>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }

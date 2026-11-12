@@ -1,9 +1,11 @@
 import { Badge, Group, Text, Tooltip } from "@mantine/core";
 import type { Meta, Profession } from "../api";
+import { IconQuestionMark } from "@tabler/icons-react";
 import { GameIcon } from "./Icons";
 
 /** One character's professions (design §5.60): a profession icon with its skill beside it (an icon plus a number, like a
- *  role count — never a text label; the tooltip carries the name), the icon alone while the skill is not said yet, green at the cap, the notable recipes as chips, or the
+ *  role count — never a text label; the tooltip carries the name), the icon alone while the skill is not said yet, green at the cap, the notable recipes as chips
+ *  (one typed before the game's list that the list lacks — `unmatched` — marked with a ?, §5.64), or the
  *  empty state in words. `member` = the Members page's row (the empty state names who fills it); without it the line is
  *  the reader's own on Me. A game version without professions renders nothing. */
 export function ProfessionLine({ meta, professions, compact, member }: { meta: Meta; professions?: Profession[]; compact?: boolean; member?: string }) {
@@ -29,7 +31,11 @@ export function ProfessionLine({ meta, professions, compact, member }: { meta: M
         </Tooltip>
       ))}
       {recipes.length
-        ? recipes.map((r) => <Badge key={r.prof + r.name} variant="outline" color="gray" radius="xl" size={compact ? "sm" : "md"} tt="none" fw={500} title={r.prof}>{r.name}</Badge>)
+        ? recipes.map((r) => {
+          const off = !!r.unmatched;  // typed before the game's list, and the list lacks it (§5.64)
+          return <Badge key={r.prof + (r.id ?? r.name)} variant="outline" color={off ? "yellow" : "gray"} radius="xl" size={compact ? "sm" : "md"} tt="none" fw={500}
+            leftSection={off ? <IconQuestionMark size={11} /> : undefined} title={off ? `${r.prof} · not in the game's list` : r.prof}>{r.name}</Badge>;
+        })
         : makesThings && <Text size="xs" c="dimmed">No notable recipes yet — add the ones worth telling the guild about in Professions…</Text>}
     </Group>
   );

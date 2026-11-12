@@ -47,9 +47,10 @@ def test_find_searches_the_whole_list_with_category_makes_and_reagents(w):
     assert row["name"] == "Ironfeather Shoulders" and row["crafters"] == [] and row["listed"] is True
     assert row["category"] == "Leather Pauldrons" and row["makes"]["name"] == "Ironfeather Shoulders" and row["reagents"]
     assert all({"id", "name", "quantity"} <= set(x) for x in row["reagents"])
-    assert d["message"] == "Nobody in the guild makes Ironfeather Shoulders yet."
+    assert d["message"] == "Nobody in the guild makes Ironfeather Shoulders yet." and row["nobody"] == d["message"]
     d = w.c.get("/api/professions/find?q=mooncl", headers=h).json()
     assert d["recipes"][0]["name"] == "Mooncloth Bag" and d["recipes"][0]["crafters"] and d["recipes"][0]["listed"] is True, "crafted first"
+    assert d["recipes"][0]["nobody"] == ""
     [row] = w.c.get("/api/professions/find?q=bold%20gloves", headers=h).json()["recipes"]
     assert row["listed"] is False and row["category"] is None and row["makes"] is None and row["reagents"] == []
     assert row["crafters"][0]["label"] == typed.main.label
@@ -96,7 +97,9 @@ def test_find_scopes_to_a_profession_and_counts_every_match(w):
     d = w.c.get("/api/professions/find?q=a", headers=h).json()
     assert len(d["recipes"]) == 25 and d["total"] > 100
     assert d["message"].splitlines()[-1] == f"And {d['total'] - 25} more recipes match."
-    assert w.c.get("/api/professions/find?q=", headers=h).json() == {"q": "", "recipes": [], "total": 0, "message": ""}
+    assert d["more"] == f"And {d['total'] - 25} more recipes match.", "the page prints the server's sentence"
+    assert w.c.get("/api/professions/find?q=radiant%20gloves&profession=tailoring", headers=h).json()["more"] == ""
+    assert w.c.get("/api/professions/find?q=", headers=h).json() == {"q": "", "recipes": [], "total": 0, "message": "", "more": ""}
 
 
 def test_members_set_takes_professions_with_the_confirm_sentences(w):
@@ -115,7 +118,18 @@ def test_members_set_takes_professions_with_the_confirm_sentences(w):
     meta = w.c.get("/api/meta", headers=h).json()["professions"]
     assert meta["skill_cap"] == 300 and meta["trade_slots"] == 2 and meta["list"][0] == {"id": "alchemy", "name": "Alchemy", "group": "crafting", "icon": "trade_alchemy", "makes": True}
     makes = {d["id"]: d["makes"] for d in meta["list"]}
-    assert makes["fishing"] is False and makes["skinning"] is False and makes["cooking"] is True, "Fishing makes nothing"
+    assert meta["recipe_list"] is True
+    assert makes["mining"] is True and makes["fishing"] is True and makes["cooking"] is True, "R7: with the game's list, the list says which professions hold recipes"
+
+
+def test_meta_without_a_recipe_list_reads_the_profile(w, monkeypatch):
+    """A version without the game's list (tbc): `recipe_list` false, the editor keeps typed recipes, and `makes` is the
+    profile's own — Fishing and the gathering trades hold none."""
+    monkeypatch.setattr(w.reg.profile, "recipes", {})
+    meta = w.c.get("/api/meta", headers=as_user(w, OFFICER)).json()["professions"]
+    makes = {d["id"]: d["makes"] for d in meta["list"]}
+    assert meta["recipe_list"] is False
+    assert makes["fishing"] is False and makes["skinning"] is False and makes["mining"] is False and makes["cooking"] is True
 
 
 def test_me_characters_preview_carries_the_professions_sentences(w):
