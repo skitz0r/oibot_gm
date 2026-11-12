@@ -1,0 +1,68 @@
+{
+ "_links": {
+  "self": {
+   "href": "https://us.api.blizzard.com/data/wow/recipe/2438?namespace=static-1.60.1_70399-forever-us"
+  }
+ },
+ "id": 2438,
+ "name": "Small Bronze Bomb",
+ "media": {
+  "key": {
+   "href": "https://us.api.blizzard.com/data/wow/media/recipe/2438?namespace=static-1.60.1_70399-forever-us"
+  },
+  "id": 2438
+ },
+ "crafted_item": {
+  "key": {
+   "href": "https://us.api.blizzard.com/data/wow/item/4374?namespace=static-1.60.1_70399-forever-us"
+  },
+  "name": "Small Bronze Bomb",
+  "id": 4374
+ },
+ "reagents": [
+  {
+   "reagent": {
+    "key": {
+     "href": "https://us.api.blizzard.com/data/wow/item/4364?namespace=static-1.60.1_70399-forever-us"
+    },
+    "name": "Coarse Blasting Powder",
+    "id": 4364
+   },
+   "quantity": 4
+  },
+  {
+   "reagent": {
+    "key": {
+     "href": "https://us.api.blizzard.com/data/wow/item/2841?namespace=static-1.60.1_70399-forever-us"
+    },
+    "name": "Bronze Bar",
+    "id": 2841
+   },
+   "quantity": 2
+  },
+  {
+   "reagent": {
+    "key": {
+     "href": "https://us.api.blizzard.com/data/wow/item/4404?namespace=static-1.60.1_70399-forever-us"
+    },
+    "name": "Silver Contact",
+    "id": 4404
+   },
+   "quantity": 1
+  },
+  {
+   "reagent": {
+    "key": {
+     "href": "https://us.api.blizzard.com/data/wow/item/2592?namespace=static-1.60.1_70399-forever-us"
+    },
+    "name": "Wool Cloth",
+    "id": 2592
+   },
+   "quantity": 1
+  }
+ ],
+ "crafted_quantity": {
+  "minimum": 1.0,
+  "maximum": 4.0
+ }
+}

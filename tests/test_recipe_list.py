@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import pytest
 import yaml
 
-from oibot_gm.importers.blizzard import Blizzard, recipe_rows
+from oibot_gm.importers.blizzard import Blizzard, recipe_row, recipe_rows
 from oibot_gm.profiles import GameProfile, norm_recipe
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +56,38 @@ def test_a_recipe_without_a_crafted_item_keeps_makes_none():
     assert enchant["name"] == "Enchant Bracer - Inferior Stamina"
     assert enchant["makes"] is None
     assert enchant["reagents"] == [{"id": 247786, "name": "Mote of Magic", "quantity": 1}]
+
+
+def test_a_ranged_quantity_keeps_its_minimum_and_maximum():
+    # recipe 2438 (Small Bronze Bomb) makes 1–4: crafted_quantity {minimum, maximum}, no value
+    row = recipe_row(json.loads((STATIC / "data_wow_recipe_2438.json").read_text()), "engineering", "Explosives")
+    assert row["makes"] == {"id": 4374, "name": "Small Bronze Bomb", "quantity": 1, "quantity_max": 4}
+
+
+def test_a_fixed_quantity_has_no_maximum():
+    row = recipe_row(json.loads((STATIC / "data_wow_recipe_4291.json").read_text()), "enchanting", "Runed Enchanting Rods")
+    assert "quantity_max" not in row["makes"]
+    flat = dict(json.loads((STATIC / "data_wow_recipe_2438.json").read_text()), crafted_quantity={"minimum": 2.0, "maximum": 2.0})
+    assert recipe_row(flat, "engineering", "Explosives")["makes"]["quantity"] == 2
+    assert "quantity_max" not in recipe_row(flat, "engineering", "Explosives")["makes"]
+
+
+@pytest.mark.parametrize("cq", [None, {}, {"minimum": 1.0}, {"value": 1.5}, {"minimum": 1.0, "maximum": 4.5}, {"minimum": 3.0, "maximum": 2.0}, {"value": 0}])
+def test_a_bad_crafted_quantity_is_refused(cq):
+    d = json.loads((STATIC / "data_wow_recipe_2438.json").read_text())
+    if cq is None:
+        d.pop("crafted_quantity")
+    else:
+        d["crafted_quantity"] = cq
+    with pytest.raises(ValueError, match="/data/wow/recipe/2438"):
+        recipe_row(d, "engineering", "Explosives")
+
+
+def test_a_fractional_reagent_quantity_is_refused():
+    d = json.loads((STATIC / "data_wow_recipe_4291.json").read_text())
+    d["reagents"][0]["quantity"] = 1.5
+    with pytest.raises(ValueError, match="quantity"):
+        recipe_row(d, "enchanting", "Runed Enchanting Rods")
 
 
 def test_an_unexpected_shape_is_refused():

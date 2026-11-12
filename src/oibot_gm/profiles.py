@@ -153,7 +153,7 @@ class RecipeDef:
     name: str
     profession: str
     category: str
-    makes: dict | None  # {id, name, quantity}
+    makes: dict | None  # {id, name, quantity} (the least made) + quantity_max only when the game makes a varying count
     reagents: list[dict]  # [{id, name, quantity}]
     key: str  # norm_recipe(name)
 

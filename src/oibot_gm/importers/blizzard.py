@@ -177,8 +177,21 @@ def _ref(d: object, path: str, what: str) -> dict:
 
 
 def _quantity(v: object, path: str) -> int:
-    _shape(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0, path, "quantity")
+    """A whole, positive count (Blizzard sends 1.0); a fraction, zero or anything else stops the import."""
+    _shape(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 and float(v).is_integer(), path, "quantity")
     return int(v)
+
+
+def _makes_quantity(cq: object, path: str) -> dict:
+    """crafted_quantity → {quantity} for {value}, or {quantity: minimum, quantity_max: maximum} for a range that
+    really varies ({minimum, maximum}, e.g. a bomb that makes 1–4). Any other shape, or none, stops the import."""
+    _shape(isinstance(cq, dict), path, "crafted_quantity")
+    if "value" in cq:
+        return {"quantity": _quantity(cq["value"], path)}
+    _shape("minimum" in cq and "maximum" in cq, path, "crafted_quantity")
+    lo, hi = _quantity(cq["minimum"], path), _quantity(cq["maximum"], path)
+    _shape(hi >= lo, path, "crafted_quantity range")
+    return {"quantity": lo, "quantity_max": hi} if hi > lo else {"quantity": lo}
 
 
 def build_of(doc: dict, namespace: str) -> str:
@@ -192,14 +205,14 @@ def build_of(doc: dict, namespace: str) -> str:
 
 
 def recipe_row(d: dict, profession: str, category: str) -> dict:
-    """One recipe response as a recipes.yaml row: {id, name, profession, category, makes {id, name, quantity} | None,
-    reagents [{id, name, quantity}]}. An enchant makes no item: makes is None."""
+    """One recipe response as a recipes.yaml row: {id, name, profession, category, makes {id, name, quantity
+    [, quantity_max]} | None, reagents [{id, name, quantity}]}. An enchant makes no item: makes is None. quantity is the
+    least made; quantity_max is there only when the game makes a varying count."""
     path = f"/data/wow/recipe/{d.get('id')}"
     _shape(isinstance(d.get("id"), int) and isinstance(d.get("name"), str) and bool(d["name"].strip()), path, "id / name")
     makes = None
     if d.get("crafted_item") is not None:
-        q = (d.get("crafted_quantity") or {}).get("value", 1)
-        makes = {**_ref(d["crafted_item"], path, "crafted_item"), "quantity": _quantity(q, path)}
+        makes = {**_ref(d["crafted_item"], path, "crafted_item"), **_makes_quantity(d.get("crafted_quantity"), path)}
     reagents = d.get("reagents") or []
     _shape(isinstance(reagents, list), path, "reagents")
     rows = []
