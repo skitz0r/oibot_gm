@@ -5036,3 +5036,16 @@ question's recipes (search, then `phrase_hits`: two neighbouring words of a name
 dash beside a word starting "enchant"), and the first sixty recipes of a crafter the question names. The 80-recipe dump
 is gone (a recipe book is a count). No tool for the model: code finds the recipes, Claude explains. A version without a
 list keeps the old section word for word.
+
+**Rows without recipes, and specializations (2026-11-13, the owner's call).** With whole recipe books from the armory a
+character's row was a wall of chips. The row (Me, Members) is now the profession icons and skill only; the tooltip
+carries the specialization and the recipe count, the Professions page has the recipes. The Discord hub names a
+profession's recipes up to eight, else a count. "Notable" left the confirm sentence and the hints ("recorded at 300
+with 2 recipes"). **Specialization**: the armory's professions answer has no such field (probed on three crafters; the
+static recipe and profession data mark nothing either), so it is READ from the recipes a character knows —
+`professions.yaml specializations` lists, per specialization, the recipe ids only its holders learn; any one known
+shows it, the most specific wins (a Master Axesmith over Weaponsmith), none known shows nothing and claims nothing.
+Derived at read time, never stored. The table is compiled from the original game's rules and marked `status:
+unverified`: a wrong line is corrected in the YAML. No hand pick: every crafter today is armory-kept, where the
+professions editor is closed (a synced fact is never hand-editable), so a hand-set specialization would need its own
+write path — left until someone needs it.

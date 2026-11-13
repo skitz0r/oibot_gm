@@ -139,11 +139,13 @@ export interface GuideStatus {
  *  typed before the list and not on it — then `unmatched: true`, which a save sends back untouched. */
 export interface Recipe { name: string; id: number | null; unmatched?: boolean }
 /** One profession on a character: a profile profession id, its skill (1..meta.professions.skill_cap; null = not said yet),
- *  notable recipes. */
-export interface Profession { id: string; skill: number | null; recipes: Recipe[] }
+ *  recipes. */
+export interface Profession { id: string; skill: number | null; recipes: Recipe[];
+  /** read by the server from the recipes the character knows (Tribal, Gnomish…); null = none shown */
+  specialization?: string | null }
 /** The Professions page (GET /api/professions, design §5.60): one crafter = a character holding a profession; `cls` = its
  *  class (icon and colour), `member` = the display name (a name, never a ping). */
-export interface Crafter { label: string; member: string; uid: string; skill: number | null; profession: string; cls: string | null }
+export interface Crafter { label: string; member: string; uid: string; skill: number | null; profession: string; cls: string | null; specialization?: string | null }
 /** A recipe and its makers (highest skill first; none = nobody makes it yet, then `nobody` is the server's sentence).
  *  `listed` = on the game's list: `category`, what it `makes` (null for an enchant) and its `reagents`; a recipe typed
  *  before the list that the list lacks has null / [] there. */

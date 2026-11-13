@@ -181,7 +181,7 @@ def test_the_preview_says_the_confirm_sentences_for_profession_fields(reg):
     assert configops.describe(reg, rem, by_id=OWNER) == f"{LABEL}'s Leatherworking no longer lists Hide of the Wild."
     assert configops.describe(reg, rem, by_id=UID) == "Your Leatherworking no longer lists Hide of the Wild."
     prof = _op(member=m.display_name, character=LABEL, field="profession", value="leatherworking 275")
-    assert configops.describe(reg, prof, by_id=UID) == "Your Leatherworking is recorded at 275 with 1 notable recipe."
+    assert configops.describe(reg, prof, by_id=UID) == "Your Leatherworking is recorded at 275 with 1 recipe."
     drop = _op(member=m.display_name, character=LABEL, field="profession_remove", value="leatherworking")
     assert configops.describe(reg, drop, by_id=OWNER) == f"{m.display_name}'s Leatherworking is removed from their record."
 

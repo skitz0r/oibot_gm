@@ -172,7 +172,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
                         const mine = fromList ? [] : recipesOf(c);
                         return (
                           <div key={c.uid + c.label} className={fromList ? `${css.craftRow} ${css.craftRowShort}` : css.craftRow}>
-                            <Who meta={meta} c={c} />
+                            <Group gap={8} wrap="nowrap"><Who meta={meta} c={c} />{c.specialization && <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>{c.specialization}</Text>}</Group>
                             {c.skill != null ? (
                               <Group gap={8} wrap="nowrap" className={css.skill}>
                                 <Progress value={Math.min(100, (c.skill / cap) * 100)} color={c.skill >= cap ? "teal" : "teal.7"} size="sm" style={{ flex: 1 }} aria-label={`${c.skill} of ${cap}`} />
@@ -183,7 +183,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
                               <div className={css.recipes}>
                                 {mine.length
                                   ? <Group gap={6} wrap="wrap">{mine.map((r) => <Badge key={r.key} variant="outline" color="gray" radius="xl" tt="none" fw={500}>{r.name}</Badge>)}</Group>
-                                  : makes(p.id) && <Text size="xs" c="dimmed">no notable recipes registered — the crafter adds them on the Me page</Text>}
+                                  : makes(p.id) && <Text size="xs" c="dimmed">no recipes on record — the crafter adds them on the Me page</Text>}
                               </div>
                             )}
                           </div>

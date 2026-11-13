@@ -129,6 +129,15 @@ class Item:
 
 
 @dataclass
+class SpecializationDef:
+    """One specialization of a profession (professions.yaml `specializations`): `recipes` = the game's recipe ids only
+    its holders can learn. The armory reports no specialization: knowing any of these recipes is how one is read."""
+    id: str
+    name: str
+    recipes: frozenset = frozenset()
+
+
+@dataclass(frozen=True)
 class ProfessionDef:
     """One profession of a game version (professions.yaml): crafting | gathering | secondary, its CDN icon name, and
     whether it has recipes (`recipes: false` for a secondary that makes nothing, like Fishing)."""
@@ -138,6 +147,13 @@ class ProfessionDef:
     icon: str = ""
     recipes: bool = True
     blizzard_id: int | None = None  # the game's profession id (the recipe list's importer and the armory map by it)
+    specializations: tuple = ()  # (SpecializationDef, …) general first; none for most professions and for a version without the data
+
+    def specialization(self, recipe_ids) -> "SpecializationDef | None":
+        """The specialization a set of known recipe ids shows: the LAST one (the most specific) with a recipe among
+        them; None when none is known — which says nothing either way (no exclusive recipe learned yet)."""
+        ids = {i for i in recipe_ids if i is not None}
+        return next((s for s in reversed(self.specializations) if s.recipes & ids), None)
 
     @property
     def makes(self) -> bool:
@@ -248,7 +264,9 @@ class GameProfile:
         pdoc = (y("professions.yaml") or {}) if (root / "professions.yaml").exists() else {}
         professions = {pid: ProfessionDef(id=pid, name=str(d["name"]), group=str(d["group"]), icon=str(d.get("icon") or ""),
                                              recipes=bool(d.get("recipes", True)),
-                                             blizzard_id=int(d["blizzard_id"]) if d.get("blizzard_id") is not None else None)
+                                             blizzard_id=int(d["blizzard_id"]) if d.get("blizzard_id") is not None else None,
+                                             specializations=tuple(SpecializationDef(id=str(s["id"]), name=str(s["name"]), recipes=frozenset(int(i) for i in s.get("recipes") or []))
+                                                                   for s in (pdoc.get("specializations") or {}).get(pid) or []))
                        for pid, d in (pdoc.get("professions") or {}).items()}
         rules = {"skill_cap": int(pdoc.get("skill_cap", 300)), "trade_slots": int(pdoc.get("trade_slots", 2))}
         seed = {norm_recipe(r["name"]): {"id": int(r["id"]), "name": str(r["name"]), "profession": str(r["profession"]), "skill": int(r.get("skill", 0))}

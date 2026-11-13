@@ -87,8 +87,10 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   **Professions…** on the Me page or by telling the bot. Officers can edit it for you, and they set your rank.
 - **Profession / skill** — a character's trade (Alchemy, Leatherworking…) and how far along it is, a number from 1 to 300
   (or not said yet, when a recipe was recorded first).
-- **Notable recipes** — the ones worth telling the guild about, never a whole recipe book. A **crafter** is a character
-  that has them.
+- **Recipes** — what a character can make. A character linked to the armory has its whole recipe book read from the
+  game; one kept by hand has the recipes its player recorded. A **crafter** is a character with a profession.
+- **Specialization** — Tribal, Gnomish, Armorsmith and the like. The game doesn't report it, so the bot reads it from
+  the recipes a character knows: it shows once the character has learned a recipe only that specialization can.
 - **Who can make** — the finder: the crafters of a recipe, names only; nobody is pinged.
 - **Main / alt** — your main is the character you raid on by default (one per member; your rank is on it); alts are
   your other characters.
@@ -396,13 +398,14 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     them once more) and **Sync now** (checks it with the armory at once and updates the record where the armory differs —
     at most every few minutes; no confirm). Nobody is DMed.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
-- **Professions**: each character can carry its professions with their skill (1 to 300, or left unsaid until you know it) and its **notable recipes** —
-  the ones worth telling the guild about, not the whole book. On the Me page each character shows them on one line
+- **Professions**: each character can carry its professions with their skill (1 to 300, or left unsaid until you know it) and its **recipes**.
+  On the Me page each character shows its professions on one line
   under it: the profession's icon with its skill beside it (green at 300; the icon alone while the skill is not said
-  yet), then the recipes. The character's ⋮ has
+  yet). Recipes are not on that line: hover or tap an icon for the specialization and how many recipes are on record,
+  and open the Professions page for the recipes themselves. The character's ⋮ has
   **Professions…**, which edits that character's professions in place: pick a profession, type its skill (leave the box
   empty if you don't know it), add or remove
-  notable recipes. A recipe is added by searching the game's own recipes of that profession: type part of its name
+  recipes. A recipe is added by searching the game's own recipes of that profession: type part of its name
   ("ironfeather") and pick it from the matches — two recipes with one name are told apart by their category, recipes
   the character already has are left out, and past 25 matches it says how many more and asks you to type more of the
   name. A recipe typed before the bot knew the game's list that the list doesn't have is marked with a **?**; saving
@@ -415,7 +418,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   list to pick from (two recipes with one name are told apart by their category; past 25 matches it says how many and
   asks you to narrow it; recipes the character already has are left out); a name the list doesn't have gets *"That isn't a recipe in the game's list."* with
   **Search again…**. Each ends on one confirm screen with the same
-  sentences (*"Your Leatherworking is recorded at 300 with 1 notable recipe."*), and nothing changes before **Do it**.
+  sentences (*"Your Leatherworking is recorded at 300 with 1 recipe."*), and nothing changes before **Do it**.
   A character linked to the armory whose professions follow it shows its list with one sentence why it is not changed
   there — press **Keep professions by hand** in `/me char` (or on the Me page) to edit them — and no edit buttons.
   When both trades are taken it says so (*"Two trades are taken. Cooking, First Aid and Fishing are open."*) and offers
@@ -455,7 +458,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   apart by their category); the answer names its crafters, highest skill first, and only you see it. Nobody is
   pinged: ask them yourself. A recipe nobody makes yet says so (*"Nobody in the guild makes Ironfeather Shoulders
   yet."*) and how a crafter adds theirs; a name the game doesn't have gets *"That isn't a recipe in the game's list."* `/professions list`
-  — pick a profession and see everyone who has it, highest skill first. The Professions page on the site shows the same.
+  — pick a profession and see everyone who has it, highest skill first, with their specialization (Tribal, Gnomish,
+  Armorsmith…) once their recipes show one. The Professions page on the site shows the same.
 - **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name, or part of it
   ("ironfeather" finds every Ironfeather recipe), in the search box: it searches the game's whole list of recipes, the
   ones somebody in the guild makes first. Each matching recipe shows its profession's icon, the game's category
@@ -464,7 +468,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   adds it on the Me page or with `/me professions`; a name the game doesn't have gets *"That isn't a recipe in the game's
   list."*; past 25 matches it says how many more (*"And 12 more recipes match."*). A recipe the game's list doesn't have,
   typed before the bot knew the list, still names its crafter and is marked *Not in the game's list*. Below it, a tab per
-  profession lists everyone who has it with a skill bar, then **What the guild makes**: every recipe of that profession
+  profession lists everyone who has it with a skill bar and their specialization when their recipes show one, then **What the guild makes**: every recipe of that profession
   somebody has, grouped by the game's category, each with its crafters (recipes not in the game's list last, under their
   own heading). A profession nobody has added a recipe for says so, and that a crafter adds theirs on the Me page or with
   `/me professions`. Recipe names are the game's, so there

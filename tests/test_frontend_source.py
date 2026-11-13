@@ -423,20 +423,22 @@ def test_ops_page_listening_column_and_recent_decisions():
 
 
 def test_professions_line_and_editor_on_me_and_members():
-    """Professions (design §5.60): one line under each character — a profession icon with its skill beside it, the notable
-    recipes as chips, or the empty state in words; Professions… in the character ⋮ on Me and Members; the editor posts a
+    """Professions (design §5.60): one line under each character — a profession icon with its skill beside it (no recipes on
+    the row since 2026-11-13), or the empty state in words; Professions… in the character ⋮ on Me and Members; the editor posts a
     preview first and prints only the server's sentences; skill is a number input 1..skill_cap."""
     line = (SRC / "components" / "ProfessionLine.tsx").read_text()
-    assert 'kind="profession"' in line and "No notable recipes yet" in line
+    assert 'kind="profession"' in line
+    assert "Badge" not in line and "notable" not in line, "no recipe chips on the row: icons and skill (the tooltip: specialization, count)"
+    assert "p.specialization" in line and "p.recipes.length" in line
     assert "no professions on record — add them with Professions… in this row's ⋮" in line
     assert "no professions on record — ${member} adds them on the Me page or with /me professions" in line
     ed = (SRC / "components" / "ProfessionsEditor.tsx").read_text()
     assert "preview: true" in ed and "sentences" in ed and "NumberInput" in ed and "skill_cap" in ed and "trade_slots" in ed
     assert "A gathering trade has no recipes." in ed and "has no recipes.`" in ed
     # the site knows Fishing makes nothing (meta.professions.list[].makes), never by group
-    for src in (line, ed, (SRC / "pages" / "Professions.tsx").read_text()):
+    for src in (ed, (SRC / "pages" / "Professions.tsx").read_text()):
         assert "makes" in src and 'group !== "gathering"' not in src
-    assert "?.makes" in line and "d?.makes" in ed
+    assert 'group !== "gathering"' not in line and "d?.makes" in ed  # the row shows no recipes, so it asks nothing about them
     # a cleared skill box stays empty while typing; the server refuses an out-of-range skill (never clamped to 1)
     assert 'clampBehavior="strict"' not in ed and "|| 1" not in ed
     me = (SRC / "components" / "CharacterTable.tsx").read_text()
@@ -452,7 +454,7 @@ def test_professions_page_is_the_finder_with_officer_maintenance():
     app = (SRC / "App.tsx").read_text()
     assert 'path="/professions"' in app and '{ to: "/professions", label: "Professions"' in app
     assert "/api/professions/find" in src and "Who can make what" in src
-    assert "Nobody has registered" in src and "no notable recipes registered — the crafter adds them on the Me page" in src
+    assert "Nobody has registered" in src and "no recipes on record — the crafter adds them on the Me page" in src
     assert 'useLive(load, ["member", "config"])' in src
     # armory link §4.3–4.4 / design §5.64: recipes are the game's — Rename… / Merge… are retired, the page prints the server's
     # sentences (the empty answer, "Nobody in the guild makes … yet.", "And N more recipes match.") and never composes them
@@ -495,7 +497,7 @@ def test_professions_editor_picks_from_the_game_list():
     page = (SRC / "pages" / "Professions.tsx").read_text()
     assert '"${found.q.trim()}"' in page, "the search card's title names the query its count answers"
     line = (SRC / "components" / "ProfessionLine.tsx").read_text()
-    assert "r.unmatched" in line and "not in the game's list" in line
+    assert "r.unmatched" not in line, "the row shows no recipes (2026-11-13): the officers' card and the editor mark an unmatched one"
 
 
 def test_memory_surfaces_read_by_their_shape():

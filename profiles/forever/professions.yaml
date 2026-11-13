@@ -16,5 +16,30 @@ professions:
   cooking:        {name: Cooking,        group: secondary, blizzard_id: 185, icon: inv_misc_food_15}
   first_aid:      {name: First Aid,      group: secondary, blizzard_id: 129, icon: spell_holy_sealofsacrifice}
   fishing:        {name: Fishing,        group: secondary, blizzard_id: 356, icon: trade_fishing, recipes: false}   # makes nothing
+# specializations (2026-11-13): the armory reports none, so one is READ from the recipes a character knows — each lists the
+# recipes (the game's recipe ids, recipes.yaml) only its holders can learn; knowing any one shows it. In order, general
+# first: when several match (a Weaponsmith who became a Master Axesmith) the LAST wins. status: unverified = compiled
+# from the original game's rules, not confirmed for this version — correct a line here, never in code.
+specializations:
+  leatherworking:
+    - {id: dragonscale, name: Dragonscale, status: unverified,
+       recipes: [5683, 5702, 10760, 13042, 10767, 10783, 13043, 10793, 10788, 10808, 10797, 11860, 10764]}
+    - {id: elemental, name: Elemental, status: unverified,
+       recipes: [5688, 5700, 10799, 10784, 10768, 10785, 13416, 10774, 10796, 10782, 10766, 10806, 11859]}
+    - {id: tribal, name: Tribal, status: unverified,
+       recipes: [5684, 5701, 10790, 10769, 10775, 10786, 10773, 10794, 10780, 10809, 10770, 10763, 10779, 10787, 10789, 10798, 12355]}
+  engineering:
+    - {id: gnomish, name: Gnomish, status: unverified,
+       recipes: [7064, 7065, 7067, 7068, 7070, 7071, 6950, 7072, 12432, 12451, 12617, 8464]}
+    - {id: goblin, name: Goblin, status: unverified,
+       recipes: [6939, 6940, 6943, 6944, 6947, 6948, 6949, 6951, 7073, 4927, 2463, 12427, 12618, 8465, 6938]}
+  blacksmithing:
+    - {id: armorsmith, name: Armorsmith, status: unverified,
+       recipes: [5326, 5335, 9172, 9174, 9175, 9331, 9334, 9321, 9337, 9335, 9336]}
+    - {id: weaponsmith, name: Weaponsmith, status: unverified,
+       recipes: [5348, 5350, 5351, 5352, 5346, 9443, 9456, 9445, 9447]}
+    - {id: swordsmith, name: Master Swordsmith, status: unverified, recipes: [9451, 13844, 12686, 9453]}
+    - {id: hammersmith, name: Master Hammersmith, status: unverified, recipes: [9450, 9454, 13842, 9442]}
+    - {id: axesmith, name: Master Axesmith, status: unverified, recipes: [9455, 12687, 9440, 9452]}
 # later, an addon export or a wago.tools seed: [{id: <game recipe id>, name: Devilsaur Gauntlets, profession: leatherworking, skill: 300}]
 recipes: []

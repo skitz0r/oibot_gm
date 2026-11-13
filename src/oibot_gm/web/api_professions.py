@@ -20,7 +20,7 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
         """`cls` = the character's class, for the page's class icon and colour (the name is never a ping)."""
         m = reg.members.get(c.uid)
         ch = next((x for x in m.active() if x.label == c.label), None) if m else None
-        return {"label": c.label, "member": c.member, "uid": str(c.uid), "skill": c.skill, "profession": c.profession, "cls": ch.cls if ch else None}
+        return {"label": c.label, "member": c.member, "uid": str(c.uid), "skill": c.skill, "profession": c.profession, "cls": ch.cls if ch else None, "specialization": c.specialization}
 
     def entry_json(reg, e: pr.CatalogEntry) -> dict:
         """`listed` = a recipe of the game's list (then `category`, `makes` {id, name, quantity[, quantity_max]} or null for

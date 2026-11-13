@@ -51,7 +51,7 @@ def test_me_professions_adds_a_profession_a_skill_and_a_recipe(reg):
         assert h.modal.title == "Leatherworking: add a recipe", "never 'A Alchemy recipe'"
         assert [f.label for f in h.modal._fields] == ["The recipe's name"]
         await h.submit(h.modal, recipe="Devilsaur Gauntlets")
-        assert "Your Leatherworking is recorded at 300 with 1 notable recipe." in h.text
+        assert "Your Leatherworking is recorded at 300 with 1 recipe." in h.text
         await h.press("Do it")
         assert "✅" in h.text
     asyncio.run(go())
@@ -79,7 +79,7 @@ def test_add_recipe_searches_the_list_within_the_profession(reg):
         assert [(o.value, o.label, o.description) for o in sel.options] == [("10789", "Devilsaur Gauntlets", "Leather Gauntlets"),
                                                                              ("10798", "Devilsaur Leggings", "Leather Legguards")]
         await h.pick("Pick the recipe", "10789")
-        assert "Your Leatherworking is recorded at 300 with 1 notable recipe." in h.text and h.buttons() == ["Do it", "Back"]
+        assert "Your Leatherworking is recorded at 300 with 1 recipe." in h.text and h.buttons() == ["Do it", "Back"]
         await h.press("Do it")
         assert "✅" in h.text
         await FLOWS["me_professions"](h.command(), reg)
@@ -152,7 +152,7 @@ def test_change_skill_and_remove_end_on_the_consequence(reg):
         await h.press("Change skill…")
         await h.pick("Pick the profession", "alchemy")
         await h.pick("Pick the skill", "225")
-        assert "Your Alchemy is recorded at 225 with 1 notable recipe." in h.text
+        assert "Your Alchemy is recorded at 225 with 1 recipe." in h.text
         await h.press("Do it")
         await FLOWS["me_professions"](h.command(), reg)
         await h.press("Remove…")
@@ -185,7 +185,7 @@ def test_add_recipe_asks_which_profession_and_refuses_a_gatherer_only_character(
         await h.pick("Which profession makes it?", "cooking")
         await h.submit(h.modal, recipe="Smoked Desert Dumplings")
         await h.pick("Pick the recipe", "13056")
-        assert "Your Cooking is recorded at 300 with 1 notable recipe." in h.text
+        assert "Your Cooking is recorded at 300 with 1 recipe." in h.text
     asyncio.run(go2())
     _no_list(reg)
     _give(reg, UID, LABEL, [{"id": "mining", "skill": 300}, {"id": "fishing", "skill": 10}])
@@ -431,3 +431,12 @@ def test_a_skill_may_be_left_not_said_and_the_hub_says_so(reg):
         assert "Leatherworking** · skill not said yet" in h.text
     asyncio.run(go())
     assert _char(reg, UID, LABEL).professions[0].skill is None
+
+
+def test_the_hub_counts_a_long_recipe_book_and_names_a_short_one():
+    import types
+    from oibot_gm import flows_professions as fp
+    few = [types.SimpleNamespace(name=f"Recipe {i}") for i in range(3)]
+    assert fp.recipes_words(few) == " · Recipe 0, Recipe 1, Recipe 2" and fp.recipes_words([]) == ""
+    many = [types.SimpleNamespace(name=f"Recipe {i}") for i in range(106)]
+    assert fp.recipes_words(many) == " · 106 recipes"

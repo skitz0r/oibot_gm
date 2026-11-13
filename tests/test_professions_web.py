@@ -31,7 +31,7 @@ def test_professions_page_reads_catalog_and_find(w):
     assert [p["id"] for p in d["professions"]][:3] == ["alchemy", "blacksmithing", "enchanting"] and d["officer"] is False
     assert d["recipes"][0]["name"] == "Mooncloth Bag" and d["recipes"][0]["crafters"][0]["skill"] == 300
     tailoring = next(p for p in d["professions"] if p["id"] == "tailoring")
-    assert tailoring["crafters"] == [{"label": m.main.label, "member": m.display_name, "uid": str(m.discord_id), "skill": 300, "profession": "tailoring", "cls": m.main.cls}]
+    assert tailoring["crafters"] == [{"label": m.main.label, "member": m.display_name, "uid": str(m.discord_id), "skill": 300, "profession": "tailoring", "cls": m.main.cls, "specialization": None}]
     assert w.c.get("/api/professions/find?q=mooncloth%20bag", headers=h).json()["recipes"][0]["name"] == "Mooncloth Bag"
     assert w.c.get("/api/professions", headers=as_user(w, OFFICER)).json()["officer"] is True
 
@@ -184,7 +184,7 @@ def test_a_skill_not_said_round_trips_as_null(w):
     assert p.json()["sentences"][0] == f"{m.display_name}'s Alchemy is recorded."
     assert w.c.post("/api/members/set", json=body, headers=h).status_code == 200
     row = next(r for r in w.c.get("/api/members", headers=h).json()["rows"] if r["uid"] == str(m.discord_id))
-    assert row["characters"][0]["professions"] == [{"id": "alchemy", "skill": None, "recipes": []}]
+    assert row["characters"][0]["professions"] == [{"id": "alchemy", "skill": None, "recipes": [], "specialization": None}]
 
 
 def test_the_site_shows_a_skill_not_said_as_the_icon_alone():

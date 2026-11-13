@@ -134,7 +134,7 @@ export function ProfessionsEditor({ meta, label, professions, onSave, onCancel, 
                     })}
                     {!fromList && (
                       <>
-                        <TextInput size="xs" w={{ base: "100%", xs: 220 }} placeholder="A notable recipe, e.g. Mooncloth Bag" aria-label={`Add a recipe to ${d?.name || p.id}`}
+                        <TextInput size="xs" w={{ base: "100%", xs: 220 }} placeholder="A recipe, e.g. Mooncloth Bag" aria-label={`Add a recipe to ${d?.name || p.id}`}
                           maxLength={RECIPE_MAX} value={typed[i] || ""} onChange={(e) => setTyped({ ...typed, [i]: e.currentTarget.value })}
                           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addRecipe(i); } }} />
                         <Button size="xs" variant="subtle" leftSection={<IconPlus size={13} />} disabled={!(typed[i] || "").trim()} onClick={() => addRecipe(i)}>Add</Button>

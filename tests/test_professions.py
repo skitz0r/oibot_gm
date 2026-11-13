@@ -184,7 +184,7 @@ def test_finders_skip_retired_puppets_and_departed(reg):
 def test_profession_consequence_reads_aloud(reg):
     m = reg.members[UID]
     own = cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"name": "Devilsaur Gauntlets"}, {"name": "Hide of the Wild"}]}], by_id=UID)
-    assert own == ["Your Leatherworking is recorded at 300 with 2 notable recipes."]
+    assert own == ["Your Leatherworking is recorded at 300 with 2 recipes."]
     _give(reg, UID, LABEL, [{"id": "leatherworking", "skill": 300}, {"id": "enchanting", "skill": 100}])
     officer = cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": 300}], by_id=OFFICER_UID)
     assert officer == [f"{m.display_name}'s Enchanting is removed from their record."]
@@ -265,7 +265,7 @@ def test_profession_consequence_without_a_skill(reg):
     m = reg.members[UID]
     assert cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": None}], by_id=UID) == ["Your Leatherworking is recorded."]
     assert cq.profession_consequence(reg, m, LABEL, [{"id": "leatherworking", "skill": None, "recipes": [{"name": "Devilsaur Gauntlets"}, {"name": "Hide of the Wild"}]}],
-                                     by_id=OFFICER_UID) == [f"{m.display_name}'s Leatherworking is recorded with 2 notable recipes."]
+                                     by_id=OFFICER_UID) == [f"{m.display_name}'s Leatherworking is recorded with 2 recipes."]
 
 
 # ---- the finder over the game's whole list (armory link §4.4): a listed recipe nobody makes is a different answer from
@@ -470,3 +470,39 @@ def test_a_professions_question_names_an_enchant_by_the_word_after_its_dash(reg)
     assert pr.phrase_hits(reg, q) == [] and pr.phrase_hits(reg, "the crusader is a paladin", tails=True) == []
     text = "\n".join(pr.help_section(types.SimpleNamespace(reg=reg, question=q)))
     assert "Nobody in the guild makes Enchant Weapon - Crusader yet." in text and "Grand Crusader" not in text
+
+
+# ---- specializations, read from the recipes a character knows (2026-11-13: the armory reports none) ----
+
+def test_every_specialization_recipe_is_on_the_games_list_in_its_profession_and_in_one_specialization_only():
+    p = GameProfile.load(ROOT / "profiles" / "forever")
+    with_specs = {pid: d for pid, d in p.professions.items() if d.specializations}
+    assert set(with_specs) == {"leatherworking", "engineering", "blacksmithing"}
+    for pid, d in with_specs.items():
+        seen: dict[int, str] = {}
+        for s in d.specializations:
+            assert s.recipes, s.id
+            for rid in s.recipes:
+                assert rid in p.recipes and p.recipes[rid].profession == pid, (s.id, rid)
+                assert rid not in seen, f"{rid} is in {seen.get(rid)} and {s.id}"
+                seen[rid] = s.id
+    lw = {s.id: s for s in p.professions["leatherworking"].specializations}
+    assert {p.recipes[i].name for i in lw["tribal"].recipes} >= {"Devilsaur Gauntlets", "Ironfeather Shoulders", "Wolfshead Helm"}
+    assert all("Dragonscale" in p.recipes[i].name for i in lw["dragonscale"].recipes)
+    assert not GameProfile.load(ROOT / "profiles" / "tbc").professions
+
+
+def test_a_specialization_is_read_from_a_known_recipe_and_the_most_specific_wins(reg):
+    import types
+    _real(reg)
+    rid = lambda name: reg.profile.recipes_named(name.lower())[0].id  # noqa: E731
+    _give(reg, REAL_UID, REAL_LABEL, [{"id": "leatherworking", "skill": 300, "recipes": [{"id": rid("Wolfshead Helm")}, {"id": rid("Heavy Armor Kit")}]},
+                                      {"id": "blacksmithing", "skill": 300, "recipes": [{"id": rid("Phantom Blade")}, {"id": rid("Nightfall")}]}])
+    _give(reg, REAL2_UID, REAL2_LABEL, [{"id": "leatherworking", "skill": 250, "recipes": [{"id": rid("Heavy Armor Kit")}]}])
+    c = next(c for c in reg.members[REAL_UID].active() if c.label == REAL_LABEL)
+    assert [pr.specialization_of(reg, p) for p in c.professions] == ["Tribal", "Master Axesmith"]
+    c2 = next(c for c in reg.members[REAL2_UID].active() if c.label == REAL2_LABEL)
+    assert pr.specialization_of(reg, c2.professions[0]) is None, "no exclusive recipe known: nothing is claimed"
+    assert [(x.label, x.specialization) for x in pr.crafters_of(reg, "leatherworking")] == [(REAL_LABEL, "Tribal"), (REAL2_LABEL, None)]
+    line = next(x for x in pr.help_section(types.SimpleNamespace(reg=reg, question="who is our tribal leatherworker?")) if x.startswith("Leatherworking: "))
+    assert f"{REAL_LABEL} (Kestrel, 300, Tribal, by hand, 2 recipes)" in line and f"{REAL2_LABEL} (Wren, 250, by hand, 1 recipe)" in line

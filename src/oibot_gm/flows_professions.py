@@ -34,6 +34,19 @@ def skill_steps(cap: int) -> list[int]:
     return [1] + [s for s in range(25, cap - 20, 25) if s < top[0]] + top
 
 
+HUB_RECIPES = 8  # the hub names a profession's recipes up to here; a longer book (the armory's) is a count
+
+
+def recipes_words(recipes) -> str:
+    """A profession's recipes on the hub's line: their names while they are few, else how many (the Professions page
+    has them all); nothing for none."""
+    if not recipes:
+        return ""
+    if len(recipes) <= HUB_RECIPES:
+        return " · " + ", ".join(r.name for r in recipes)
+    return f" · {len(recipes)} recipes"
+
+
 def _join(names: list[str]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
@@ -101,7 +114,8 @@ class ProfessionsWizard(MemberWizard):
         prof = self.reg.profile
         if c.professions:
             lines = [f"**{c.label}**"] + [(f"• **{self.name(p.id)} {p.skill}**" if p.skill is not None else f"• **{self.name(p.id)}** · {SKILL_UNSAID}")
-                                          + (" · " + ", ".join(r.name for r in p.recipes) if p.recipes else "") for p in c.professions]
+                                          + (f" · {spec}" if (spec := pr.specialization_of(self.reg, p)) else "")
+                                          + recipes_words(p.recipes) for p in c.professions]
         else:
             lines = [f"**{c.label}** · {self.reg.professions_summary(c)}. Press Add profession to record the first one."]
         if synced(c):  # the armory keeps them (armory link §5.4): shown, never edited here, with why and what to do

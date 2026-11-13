@@ -20,9 +20,18 @@ class Crafter:
     uid: int
     profession: str  # profile id
     skill: int | None  # None = not said yet (sorts last)
+    specialization: str | None = None  # its name, read from the recipes (specialization_of); None = none shown
 
 
 SKILL_UNSAID = "skill not said yet"
+
+
+def specialization_of(reg: Registry, p) -> str | None:
+    """THE reader of a character's specialization in one profession (a registry Profession): the name of the one its
+    known recipes show (ProfessionDef.specialization — the armory reports none), else None. Never stored."""
+    d = reg.profile.professions.get(p.id)
+    s = d.specialization(r.id for r in p.recipes) if d and d.specializations else None
+    return s.name if s else None
 
 
 def skill_words(skill: int | None) -> str:
@@ -120,7 +129,7 @@ def catalog(reg: Registry) -> list[CatalogEntry]:
                     spellings.setdefault(gk, {})[r.name] = spellings.get(gk, {}).get(r.name, 0) + 1
                     if e.id is None and r.id:
                         e.id = r.id
-                e.crafters.append(Crafter(c.label, m.display_name, m.discord_id, p.id, p.skill))
+                e.crafters.append(Crafter(c.label, m.display_name, m.discord_id, p.id, p.skill, specialization_of(reg, p)))
     for gk, e in by_key.items():
         if gk in spellings:
             e.name = sorted(spellings[gk].items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
@@ -306,7 +315,7 @@ def answer_lines(reg: Registry, hits: list[CatalogEntry], total: int | None = No
 
 
 def crafters_of(reg: Registry, pid: str, min_skill: int = 0) -> list[Crafter]:
-    out = [Crafter(c.label, m.display_name, m.discord_id, p.id, p.skill) for m, c in _rows(reg) for p in c.professions
+    out = [Crafter(c.label, m.display_name, m.discord_id, p.id, p.skill, specialization_of(reg, p)) for m, c in _rows(reg) for p in c.professions
            if p.id == pid and (not min_skill or (p.skill is not None and p.skill >= min_skill))]
     return sorted(out, key=_by_skill)
 
@@ -694,7 +703,7 @@ def help_section(ask) -> list[str]:
         return unfence(text, "member-text").replace("\n", " ").strip()
 
     out = ["### Who can make what: professions with their crafters (highest skill first), each as character (member, skill, "
-           "level when known, how the record is kept, recipes on record) · `armory` = the whole recipe book is read from the "
+           "specialization when their recipes show one, level when known, how the record is kept, recipes on record) · `armory` = the whole recipe book is read from the "
            "game about every hour: a recipe not shown for that crafter is one they do NOT know — say so plainly, never "
            "suggest asking them or adding it · `by hand` = the crafter typed their recipes and may know more: only for them say "
            "it can be added on the Me page, with /me professions or by saying 'I can make …' in the professions channel · "
@@ -720,7 +729,8 @@ def help_section(ask) -> list[str]:
             level = getattr(c.armory, "level", None) if c.armory else None
             kept = "armory" if c.armory is not None and c.profession_sync else "by hand"
             n = len(p.recipes)
-            parts.append(f"{safe(c.label)} ({safe(m.display_name)}, {skill_words(p.skill)}, " + (f"level {level}, " if level else "")
+            spec = specialization_of(reg, p)
+            parts.append(f"{safe(c.label)} ({safe(m.display_name)}, {skill_words(p.skill)}, " + (f"{spec}, " if spec else "") + (f"level {level}, " if level else "")
                          + f"{kept}, {n} recipe{'' if n == 1 else 's'})")
             if p.recipes and any(k and re.search(rf"\b{re.escape(k)}\b", q) for k in (norm_recipe(c.label), norm_recipe(m.display_name))):
                 books.append((c, d, p.recipes))

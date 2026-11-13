@@ -997,7 +997,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     # /me professions (design §5.60): one character's professions, skill and notable recipes — picked, never typed but a
     # recipe's name; the confirm prints consequences.profession_consequence, the write is the character verb.
-    @me.command(name="professions", description="Your characters' professions, skill and notable recipes")
+    @me.command(name="professions", description="Your characters' professions, skill and recipes")
     async def me_professions(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if reg:
@@ -1178,7 +1178,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         esc = discord.utils.escape_markdown
         head = f"**{d.name}** · {len(cs)} crafter{'s' if len(cs) != 1 else ''}"
-        text = fit_lines([(head, [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" for c in cs])])
+        text = fit_lines([(head, [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" + (f" · {c.specialization}" if c.specialization else "") for c in cs])])
         await interaction.response.send_message(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     professions_list = app_commands.describe(profession="which profession")(professions_list)
