@@ -16,7 +16,7 @@ import { MemberEdit } from "../components/members/MemberEdit";
 import { ConfirmWalk, PickModal, type Pick, type WalkItem } from "../components/members/PeopleDialogs";
 import { ProfessionLine } from "../components/ProfessionLine";
 import { ProfessionsEditor } from "../components/ProfessionsEditor";
-import { ArmoryMark, synced, syncedSentence, useArmoryActions } from "../components/ArmoryLink";
+import { ArmoryMark, EDITING_FIRST, synced, syncedSentence, useArmoryActions } from "../components/ArmoryLink";
 import { ArmoryMap } from "../components/members/ArmoryMap";
 import { MoveCharacter, type MoveTarget } from "../components/members/MoveCharacter";
 import { classColour } from "../theme";
@@ -73,6 +73,11 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const [move, setMove] = useState<MoveTarget | null>(null);
 
   const rows = data?.rows || [];
+  useEffect(() => {  // the editor's character renamed, moved away or now kept by the armory: the editor closes with it
+    if (prof === null || !data) return;
+    const now = data.rows.find((r) => r.uid === prof.r.uid)?.characters.find((c) => c.label === prof.c.label);
+    if (!now || synced(now)) setProf(null);
+  }, [data]);  // eslint-disable-line react-hooks/exhaustive-deps
   const hasProfs = !!meta.professions?.list.length;
   const me = meta.viewer.uid;
   const own = data?.own || {};
@@ -167,6 +172,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
     </Menu>
   );
 
+  const editingThis = (r: MemberRow, c: Character) => !!prof && prof.r.uid === r.uid && prof.c.label === c.label;
   const charMenu = (r: MemberRow, c: Character) => (
     <Menu shadow="md" width={260} position="bottom-end" classNames={{ item: css.menuItem }}>
       <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" loading={armory.isBusy(c, r.uid)} aria-label={`${c.label} the character`}><IconDotsVertical size={15} /></ActionIcon></Menu.Target>
@@ -174,12 +180,12 @@ export function MembersPage({ meta }: { meta: Meta }) {
         <Menu.Label>{c.label}</Menu.Label>
         <Item label="Spec…" onClick={() => setPick({ kind: "spec", r, c })} />
         <Item label="Extra roles…" onClick={() => setPick({ kind: "flex", r, c })} />
-        {hasProfs && <Item label="Professions…" why={synced(c) ? "the armory keeps them: Keep professions by hand first" : prof && (prof.r.uid !== r.uid || prof.c.label !== c.label) ? "save or cancel the professions you're editing first" : null} onClick={() => setProf({ r, c })} />}
+        {hasProfs && <Item label="Professions…" why={synced(c) ? "the armory keeps them: Keep professions by hand first" : prof && (prof.r.uid !== r.uid || prof.c.label !== c.label) ? EDITING_FIRST : null} onClick={() => setProf({ r, c })} />}
         <Item label="Make main" why={c.is_main ? "already the main" : null} onClick={() => press(r, { character: c.label, main: true }, `Make ${c.label} ${r.display_name}'s main?`, "Make it the main")} />
         <Item label="Confirm" why={c.confirmed ? "already confirmed" : !c.name ? "a planned character is confirmed once it has a name" : r.uid === me && own.confirm ? own.confirm : null}
           onClick={() => press(r, { character: c.label, confirm: true }, `Confirm ${c.label}?`, "Confirm")} />
-        {!r.test && armory.actions(c, r.uid).map((a) => <Item key={a.key} label={a.label} color={a.color} onClick={a.run} />)}
-        {!!c.name && c.status === "active" && <Item label="Move to another member…" onClick={() => setMove({ r, c })} />}
+        {!r.test && armory.actions(c, r.uid).map((a) => <Item key={a.key} label={a.label} color={a.color} why={editingThis(r, c) ? EDITING_FIRST : null} onClick={a.run} />)}
+        {!!c.name && c.status === "active" && <Item label="Move to another member…" why={editingThis(r, c) ? EDITING_FIRST : null} onClick={() => setMove({ r, c })} />}
         <Menu.Divider />
         <Item label="Retire…" onClick={() => press(r, { character: c.label, retire: true }, `Retire ${c.label}?`, "Retire")} />
         <Item label="Delete…" color="red" onClick={() => press(r, { character: c.label, delete: true }, `Delete ${c.label}?`, "Delete", "red")} />

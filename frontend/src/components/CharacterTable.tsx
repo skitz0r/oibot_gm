@@ -5,7 +5,7 @@ import { IconCrown, IconDots, IconPencil, IconPlus, IconTrash } from "@tabler/ic
 import { api, ApiError, type Character, type Me, type Meta, type TableSaved } from "../api";
 import { ProfessionLine } from "./ProfessionLine";
 import { ProfessionsEditor } from "./ProfessionsEditor";
-import { armoryWords, linkable, synced, syncedSentence, useArmoryActions } from "./ArmoryLink";
+import { armoryWords, EDITING_FIRST, linkable, synced, syncedSentence, useArmoryActions } from "./ArmoryLink";
 import { GameIcon } from "./Icons";
 import { CharacterCell, SpecCell, StatusBadge } from "./Cells";
 import { CardHeader, fail, ok } from "./Page";
@@ -49,6 +49,11 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
   const armory = useArmoryActions(meta, "/api/me/armory", onChanged);  // Link to the armory… · Sync now · the switch · Unlink…
   const armoryOn = (c: Character) => !!meta.armory && !!c.armory && linkable(c);
   useEffect(() => { onEditing?.(editing || prof !== null); }, [editing, prof]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {  // the editor's character renamed, moved away or now kept by the armory: the editor closes with it
+    if (prof === null) return;
+    const now = me.characters.find((c) => c.label === prof.label);
+    if (!now || synced(now)) setProf(null);
+  }, [me]);  // eslint-disable-line react-hooks/exhaustive-deps
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));
 
   function startEdit() {
@@ -111,7 +116,9 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
                         <Text size="sm" inherit>Professions…</Text>
                         {synced(c) && <Text size="xs" c="dimmed">the armory keeps them: Keep professions by hand first</Text>}
                       </Menu.Item>}
-                      {armory.actions(c).map((a) => <Menu.Item key={a.key} color={a.color} onClick={a.run}>{a.label}</Menu.Item>)}
+                      {armory.actions(c).map((a) => prof?.label === c.label
+                        ? <Menu.Item key={a.key} disabled><Text size="sm" inherit>{a.label}</Text><Text size="xs" c="dimmed">{EDITING_FIRST}</Text></Menu.Item>
+                        : <Menu.Item key={a.key} color={a.color} onClick={a.run}>{a.label}</Menu.Item>)}
                       <Menu.Item onClick={() => retire(c)}>Retire</Menu.Item>
                       <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => del(c)}>Delete</Menu.Item>
                     </Menu.Dropdown>

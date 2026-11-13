@@ -7,9 +7,13 @@ import { useConfirm } from "./ConfirmModal";
 import { GameIcon } from "./Icons";
 import { fail, ok } from "./Page";
 import { classColour } from "../theme";
+import css from "../pages/members.module.css";
 
 /** The two faces of the armory verbs (web/api_armory.py): a member's own characters, or an officer's for anyone (`uid`). */
 export type ArmoryBase = "/api/me/armory" | "/api/members/armory";
+
+/** Why a character's ⋮ greys an action while a professions editor is open (Me and Members): finish that edit first. */
+export const EDITING_FIRST = "save or cancel the professions you're editing first";
 
 /** A named, active character can be linked; a planned one has nothing to look up. */
 export const linkable = (c: Character) => c.status === "active" && !!c.name;
@@ -53,7 +57,7 @@ export function ArmoryMark({ c }: { c: Character }) {
   return (
     <>
       <Tooltip label={armoryWords(c)} multiline maw={280} events={{ hover: true, focus: true, touch: true }}>
-        <span style={{ display: "inline-flex" }} aria-label={armoryWords(c)}>
+        <span role="img" tabIndex={0} style={{ display: "inline-flex" }} aria-label={armoryWords(c)}>
           {linked ? <IconShieldCheck size={16} color="var(--mantine-color-teal-4)" /> : <IconShield size={16} color="var(--mantine-color-gray-6)" />}
         </span>
       </Tooltip>
@@ -72,31 +76,36 @@ const busyKey = (uid: string | undefined, label: string) => `${uid || "me"}\u000
  *  by hand / Follow the armory again (the switch) and Sync now. Unlink and the switch preview first and the confirm prints
  *  ONLY the server's sentences; Sync now has no confirm (a refresh) and says the server's sentence. `uid` = the member an
  *  officer acts for (Members); the Me page sends none (the session's own record). The ⋮ spins only while a request is
- *  out (`isBusy`), never while the confirm waits. `characterOf` gives the link dialog a member's record (Members: the
+ *  out (`isBusy`, per member and character: two requests at once each keep their own spinner), never while the confirm
+ *  waits; a cancelled confirm changes nothing and reloads nothing. `characterOf` gives the link dialog a member's record (Members: the
  *  first name and surname the review's rows lack). Render `dialogs` once. */
 export function useArmoryActions(meta: Meta, base: ArmoryBase, onChanged: () => void) {
   const [ask, confirmDialog] = useConfirm();
   const [linking, setLinking] = useState<LinkTarget | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const spin = (k: string, on: boolean) => setBusy((b) => { const n = new Set(b); if (on) n.add(k); else n.delete(k); return n; });
 
   async function confirmed(path: string, body: Record<string, unknown>, title: string, confirmLabel: string, color?: string) {
     const k = busyKey(body.uid as string | undefined, String(body.label));
-    setBusy(k);
+    let wrote = false;
+    spin(k, true);
     try {
       const p = await api.post<{ sentences: string[] }>(path, { ...body, preview: true });
-      setBusy(null);
+      spin(k, false);
       if (!(await ask({ title, message: p.sentences.join("\n"), confirmLabel, color }))) return;
-      setBusy(k);
+      spin(k, true);
+      wrote = true;
       const x = await api.post<{ message: string }>(path, body);
       ok(x.message);
-    } catch (e) { fail(e); } finally { setBusy(null); onChanged(); }
+    } catch (e) { fail(e); } finally { spin(k, false); if (wrote) onChanged(); }
   }
   async function syncNow(body: Record<string, unknown>) {
-    setBusy(busyKey(body.uid as string | undefined, String(body.label)));
+    const k = busyKey(body.uid as string | undefined, String(body.label));
+    spin(k, true);
     try {
       const x = await api.post<{ result: string; message: string }>(`${base}/sync`, body);
       ok(x.message);
-    } catch (e) { fail(e); } finally { setBusy(null); onChanged(); }
+    } catch (e) { fail(e); } finally { spin(k, false); onChanged(); }
   }
 
   /** The actions that apply to `c` now (none where the version has no armory or the character is planned). */
@@ -122,7 +131,7 @@ export function useArmoryActions(meta: Meta, base: ArmoryBase, onChanged: () => 
       {confirmDialog}
     </>
   );
-  return { actions, isBusy: (c: Character, uid?: string) => busy === busyKey(uid, c.label), dialogs, openLink: setLinking };
+  return { actions, isBusy: (c: Character, uid?: string) => busy.has(busyKey(uid, c.label)), dialogs, openLink: setLinking };
 }
 
 /** Who and what the link dialog looks up: the character (`label`, its first name and surname as the record has them) and,
@@ -183,7 +192,7 @@ export function LinkDialog({ meta, base, target, onClose, onLinked }: { meta: Me
   const f = looked?.key === key ? looked.found : null;
   return (
     <Modal opened={target !== null} onClose={onClose} title={target ? `Link ${target.label} to the armory` : ""} centered>
-      <Stack gap="md">
+      <Stack gap="md" className={css.touch}>
         <Text size="sm" c="dimmed">Type the name as the armory shows it and look it up. Nothing is linked until you press Link it.</Text>
         <Group gap="sm" grow wrap="wrap" align="flex-start">
           <TextInput label="First name" maxLength={40} value={first} onChange={(e) => { setFirst(e.currentTarget.value); setError(null); }}

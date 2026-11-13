@@ -19,7 +19,7 @@ interface Found {
 }
 
 /** Config › Settings (owner edits, officers read; shown only when /api/meta.armory): link this server to its guild in the
- *  game. The owner types the guild's name, **Look it up** shows what the armory found — name, faction, kind, members,
+ *  game. The owner types the guild's name, **Look it up** shows what the armory found — name, faction, realm type, members,
  *  created — so a stranger's guild of the same name is seen first; **Link this guild** confirms with the server's
  *  sentences. **Unlink…** confirms with the server's sentences too (every character keeps its link). Discord's
  *  /gm config armory and MCP set_armory_guild are the same verbs. */
@@ -109,7 +109,7 @@ export function ArmoryGuildCard() {
                   <Table.Tbody>
                     <Table.Tr><Table.Td><Text size="xs" c="dimmed">Name</Text></Table.Td><Table.Td><Text size="sm" fw={600}>{f.name}</Text></Table.Td></Table.Tr>
                     <Table.Tr><Table.Td><Text size="xs" c="dimmed">Faction</Text></Table.Td><Table.Td><Text size="sm">{f.faction}</Text></Table.Td></Table.Tr>
-                    <Table.Tr><Table.Td><Text size="xs" c="dimmed">Kind</Text></Table.Td><Table.Td><Text size="sm">{f.kind}</Text></Table.Td></Table.Tr>
+                    <Table.Tr><Table.Td><Text size="xs" c="dimmed">Realm type</Text></Table.Td><Table.Td><Text size="sm">{f.kind}</Text></Table.Td></Table.Tr>
                     <Table.Tr><Table.Td><Text size="xs" c="dimmed">Members</Text></Table.Td><Table.Td><Text size="sm">{f.members}</Text></Table.Td></Table.Tr>
                     <Table.Tr><Table.Td><Text size="xs" c="dimmed">Created</Text></Table.Td><Table.Td><Text size="sm">{f.created_label}</Text></Table.Td></Table.Tr>
                   </Table.Tbody>

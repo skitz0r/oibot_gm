@@ -298,7 +298,9 @@ character links whether or not the owner has linked the guild — §8; what a li
   Once linked: **Sync now** (checks it with the armory at once; no confirm), **Keep professions by hand** (or **Follow
   the armory again**) and **Unlink…**, each showing the bot's sentences before anything changes. While the armory keeps a
   character's professions, its professions line says *Updated from the armory Thu 12 Nov 8:00 PM. Keep professions by
-  hand to edit them.* and **Professions…** in the ⋮ is greyed with why.
+  hand to edit them.* and **Professions…** in the ⋮ is greyed with why. While a character's professions are open for
+  editing, its armory actions and **Move to another member…** are greyed (*save or cancel the professions you're editing
+  first*).
 - **Members (officers).** Each character line carries a small shield — filled when it is linked, hollow when not; hover it
   for the same line as on Me — and, when something looks off, a short badge: *the armory shows a Mage* (the record keeps
   its own class), *the armory no longer finds it* (for a day or more; the link stays) or *not in the guild* (information,

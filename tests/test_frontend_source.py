@@ -608,3 +608,22 @@ def test_armory_link_pages_preview_and_print_only_the_servers_sentences():
     css = (SRC / "pages" / "members.module.css").read_text()
     phone = css[css.rindex("@media (max-width: 48em)"):]
     assert ".seedRow { grid-template-columns: minmax(0, 1fr); }" in phone, "the review's rows stack on a phone"
+    # final review: C2 — the character whose professions editor is open greys its armory actions and Move, and the editor
+    # closes when its character went or became synced (Me and Members)
+    assert "EDITING_FIRST" in link and "editingThis(r, c) ? EDITING_FIRST : null" in page and page.count("EDITING_FIRST") >= 3
+    assert "prof?.label === c.label" in me and "EDITING_FIRST" in me
+    assert "if (!now || synced(now)) setProf(null);" in page and "if (!now || synced(now)) setProf(null);" in me
+    # C4 — the map and the review reload at most every few seconds and never under a dialog or a press
+    live = (SRC / "hooks" / "useLive.ts").read_text()
+    assert "export function useHeldLive" in live and "every" in live
+    assert 'useHeldLive(load, ["member"], give !== null)' in amap and 'useHeldLive(load, ["member"], busy !== null)' in seed
+    # C5 — one spinner per member + character; a cancelled confirm reloads nothing
+    assert "new Set(b)" in link and "busy.has(busyKey(uid, c.label))" in link and "if (wrote) onChanged();" in link
+    # C6 — the shield is an image a keyboard reaches; the link dialog's controls are 44 px on a phone
+    assert 'role="img" tabIndex={0}' in link and "className={css.touch}" in link
+    # D1 — the not-claimed fold says what is true; C7 — the guild card's row says "Realm type"
+    assert "that no record here is linked to" in amap and "nobody here has registered" not in amap
+    guild = (SRC / "components" / "ArmoryGuildCard.tsx").read_text()
+    assert ">Realm type<" in guild and ">Kind<" not in guild
+    # D5 — a puppet's characters never offer the armory: Members gates the mark and the actions on !r.test
+    assert "{!r.test && armory.actions(c, r.uid)" in page and "{!r.test && <ArmoryMark c={c} />}" in page

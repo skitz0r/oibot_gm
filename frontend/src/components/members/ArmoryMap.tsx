@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Box, Button, Card, Collapse, Group, Loader, Modal, Select, Stack, Text, UnstyledButton } from "@mantine/core";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { api, ApiError, type ArmoryFound, type ArmoryMap as MapData, type MemberRow, type Meta, type RosterRow } from "../../api";
-import { useLive } from "../../hooks/useLive";
+import { useHeldLive } from "../../hooks/useLive";
 import { useDirty } from "../../hooks/useDirty";
 import { linkable, type LinkTarget } from "../ArmoryLink";
 import { CardHeader, fail, ok } from "../Page";
@@ -13,7 +13,8 @@ import css from "../../pages/members.module.css";
  *  read and how many characters are linked; **Link characters to the armory…** opens the review of proposed links
  *  (ArmorySeed) in place; the fold **In the guild, not claimed (N)** lists the roster's characters no record holds, each
  *  with **Give to a member…**. Without a roster the card says the server's sentence (no guild linked / not read yet).
- *  Each character's own link is on its row (ArmoryMark). Reloads on the `member` topic (a write, a roster read). */
+ *  Each character's own link is on its row (ArmoryMark). Reloads on the `member` topic (a write, a roster read), at most
+ *  every few seconds and never while Give to a member… is open. */
 export function ArmoryMap({ meta, rows, openLink, onChanged }: { meta: Meta; rows: MemberRow[]; openLink: (t: LinkTarget) => void; onChanged: () => void }) {
   const [d, setD] = useState<MapData | null>(null);
   const [failed, setFailed] = useState(false);
@@ -22,7 +23,7 @@ export function ArmoryMap({ meta, rows, openLink, onChanged }: { meta: Meta; row
   const [give, setGive] = useState<RosterRow | null>(null);
   const load = () => api.get<MapData>("/api/armory/map").then((x) => { setD(x); setFailed(false); }).catch(() => setFailed(true));  // the inline sentence, never a toast on every `member` event
   useEffect(() => { load(); }, []);
-  useLive(load, ["member"]);
+  useHeldLive(load, ["member"], give !== null);  // at most every few seconds, never while Give to a member… is open
 
   if (!d) {
     return (
@@ -51,7 +52,7 @@ export function ArmoryMap({ meta, rows, openLink, onChanged }: { meta: Meta; row
           <UnstyledButton className={css.fold} aria-expanded={open} onClick={() => setOpen(!open)} style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
             {open ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
             <Text fw={600} size="sm">{`In the guild, not claimed (${n.unclaimed})`}</Text>
-            <Text size="xs" c="dimmed">characters on the guild's roster that nobody here has registered</Text>
+            <Text size="xs" c="dimmed">characters on the guild's roster that no record here is linked to</Text>
           </UnstyledButton>
           <Collapse expanded={open}>
             {d.unclaimed.map((x) => (

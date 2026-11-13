@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Box, Button, Group, Stack, Text } from "@mantine/core";
 import { api, ApiError, type MemberRow, type Meta, type RosterRow, type Seed, type SeedResult, type SeedRow } from "../../api";
 import { useConfirm } from "../ConfirmModal";
-import { useLive } from "../../hooks/useLive";
+import { useHeldLive } from "../../hooks/useLive";
 import { GameIcon } from "../Icons";
 import { fail, ok } from "../Page";
 import type { LinkTarget } from "../ArmoryLink";
@@ -37,7 +37,7 @@ export function ArmorySeed({ meta, rows, openLink, onChanged }: { meta: Meta; ro
   const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<Seed>("/api/armory/seed").then((d) => { setData(d); setFailed(false); }).catch(() => setFailed(true));  // the inline sentence, never a toast on every `member` event
   useEffect(() => { load(); }, []);
-  useLive(() => { if (busy === null) load(); }, ["member"]);
+  useHeldLive(load, ["member"], busy !== null);  // at most every few seconds, never under a press or its confirm
 
   /** Preview (the server's sentences and each refused pick's) → confirm → link → the fresh proposal from the answer. */
   async function apply(picks: Pick[], key: string, title: string, confirmLabel: string) {
