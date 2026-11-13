@@ -256,8 +256,8 @@ src/oibot_gm/
                        loot_weight_defaults / loot_weights / loot_overridden / loot_weight_check; set_loot_weights(fields, by, rev=) = one write of the
                        new `loot` config section; import_tmb_wishlists reports per_character
                        Professions (§5.60): RegisteredCharacter.professions [Profession {id, skill, recipes [Recipe {name, id}]}]; check_professions = THE
-                       validation (a profile profession, skill 1..skill_cap, ≤ trade_slots crafting + gathering, once each, recipe names ≤ RECIPE_NAME_MAX
-                       and unique after norm_recipe, none where ProfessionDef.makes is false); set_professions = the one setter, called by
+                       validation (a profile profession, skill 1..skill_cap, ≤ trade_slots crafting + gathering, once each; without the game's list: recipe
+                       names ≤ RECIPE_NAME_MAX and unique after norm_recipe, none where ProfessionDef.makes is false); set_professions = the one setter, called by
                        save_character_table's `professions` row key (the whole list replaces); professions_summary.
                        With the game's list (§5.64, _list_recipes): Recipe.id = the recipe's IDENTITY (name = the list's spelling); an id must be on the list
                        and of that profession, a name alone resolves within its profession (twins → the lowest id, R6) or is refused ("isn't a recipe in the
@@ -304,7 +304,9 @@ src/oibot_gm/
                        professions=) (profession_sync back on; the caller renames first in the same batch), unlink_armory (professions stay, kept by
                        hand), set_profession_sync(uid, label, on, by) → changed?, armory_update(uid, id, changes, professions=, ride=) = THE check's write
                        (nothing differs → no write; `ride` = Last-Modified / checked_at stored only with a commit; save_quiet "<member>: <label> updated
-                       from the armory"). set_professions refuses a CHANGED list on a linked, sync-on character in one sentence (R2; unchanged passes)
+                       from the armory"). set_professions refuses a CHANGED list on a linked, sync-on character in one sentence (R2; unchanged passes).
+                       give_refusal(uid, armory_id, name, surname, *, label=, row=, by=, by_id=) = Give to a member…'s every refusal before a write (D2:
+                       registered here, not left; link_refusal; a new row through check_character_table + link_refusal on a shadow copy)
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|loot-ask|plan main|alt|char [action]|professions|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me loot-ask = flows_appeal, a question about one of your own awards;
@@ -438,7 +440,7 @@ src/oibot_gm/
                        the gate's ONE Jev request (decision · remember · relevance), judge() for the other paths, memory_block() = the <memory> data
                        block (unfenced), on_save = a channel turned Off forgets; remember_at() = the keep line (OIBOT_REMEMBER_AT raises it);
                        scripts/memory_probe.py = the spike's offline probe, scripts/listen_probe.py = the gate's retune check (bait ≥ 80 %, banter ≤ 15 %)
-  professions.py       professions (design §5.60): catalog(reg) = the recipe catalog DERIVED from the records (a listed recipe per id in the
+  professions.py       professions (design §5.60, §5.64): catalog(reg) = what the guild makes, DERIVED from the records (a listed recipe per id in the
                        list's spelling, an unmatched one per norm_recipe key in the most used spelling, crafters highest skill first; never stored);
                        search(reg, text, limit, profession=) = THE finder over the game's WHOLE list (indexed once per profile) + unmatched recipes with crafters,
                        three tiers (exact, whole words, part of a name; a crafted recipe never drops out as part of a longer name), made first; limit None =
@@ -458,7 +460,10 @@ src/oibot_gm/
                        `who` section (every member, any channel: who plays what + rank, named members first, no officer marks; an officer
                        in private gets `bank` instead — owner decision 2026-10-29, design §5.25);
                        `professions` section (every member, any channel: each profession's crafters with skill, then every registered recipe with its
-                       makers; gated by professions.help_hit — a profession named as a word or a registered recipe's whole words — design §5.60);
+                       makers, then with the game's list up to HELP_HITS recipes the question names; gated by professions.help_hit — a profession named
+                       as a word, a registered recipe's or a listed recipe's whole words — design §5.60, §5.64);
+                       armory_lines(reg, m) = the ASKER's own characters' armory link in the snapshot (linked or not, updated_words, in the guild when
+                       known, professions followed or kept by hand; one <member-text source="armory"> block; where armory.available; never another member's — §5.64);
                        `guides` section (every member, gated on "guide" as a word: each faction's latest guild guide, uploader unfenced — §5.63);
                        manual_sections (the manual by its own ## headings, mtime-cached, tiers tagged — the Help page), command_rows(tree, tier),
                        site_url(reg, path, anchor) = THE site link (?g= before the #anchor)
@@ -508,6 +513,9 @@ src/oibot_gm/
                        mcp_actor validates it); §5.48: import_ledger (csv | path, preview → rev), import_batches / undo_import (void rows per batch, actor), loot_weights / set_loot_weights (owner, ops_change), distil.
                        list_companions / revoke_companion (§5.50: never a value; no issue tool — a token must not land in a transcript).
                        armory_guild (read) / set_armory_guild (§5.1: preview → what the armory found + its guild_id and the settings rev; the link / unlink carries them; actor = the owner).
+                       Armory link (§5.64): armory_map / armory_seed (reads), link_character (preview → find, then the armory_id it showed) / unlink_character /
+                       move_character (every game version, R11) / apply_armory_seed (armory_seed's rev) — decisions need the actor (D8); no tool for the
+                       professions switch, Sync now or Give to a member…
                        list_guild_guides / withdraw_guild_guide / restore_guild_guide (§5.63: actor; no upload or get tool — no BattleTag in a transcript).
                        Setup tools (raid_set, schedule_*, raid_reset, aura_*, family_set, set_channel, set_config, set_recruitment, set_plain_permissions) send
                        TYPED changes through ops_change(guild, changes, preview) → POST /api/ops/change (`confirmed`; preview=True returns the Described lines);
@@ -630,7 +638,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        rest 404 where armory.available is false; `member` published after each write and on
                        every roster read (discord_armory.ROSTER_LISTENERS). char_extras = the character rows' `armory` (+ `when` = the local12 time alone), `profession_sync`,
                        `flags` (web/api.py char_json). MCP: armory_map, armory_seed, link_character, unlink_character, move_character,
-                       apply_armory_seed (tests/test_parity_matrix.py ARMORY: Discord pending until the wizards land)
+                       apply_armory_seed (tests/test_parity_matrix.py ARMORY: every action's web, Discord and MCP rows)
   web/api_professions.py  install_professions_api (called from api.py; design §5.60, §5.64): GET /api/professions (every member: each profession's
                        crafters + the catalog; `officer`; officers' `unmatched`), GET /api/professions/find?q=&profession= (who_can_make; 25 rows + `total`;
                        a row's `listed` / `category` / `makes` / `reagents` / `nobody` = nobody_sentence; `message` = answer_lines, `more` = more_sentence),

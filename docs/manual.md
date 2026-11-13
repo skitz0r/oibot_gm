@@ -124,12 +124,22 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
 - **Latest** — the newest version of a faction that is not withdrawn; it is the one offered first.
 - **Withdraw / restore** (officers) — **withdraw** takes a version out of members' reach (it is kept, and the latest
   falls back to the one before); **restore** brings it back.
-- **Armory** — Blizzard's public page for a guild or a character in the game (WoW: Forever has one; a version without
-  it never shows any of this).
-- **Linked** — this Discord server follows its guild's armory page. The owner links it once (§8, *The guild in the
-  armory*); a server with no linked guild works as before.
-- **In the guild** / **not in the guild** — what the linked guild's roster in the armory says about a character. It is
-  a fact, never a condition: someone not in the guild registers and raids like anyone else.
+- **Armory** — Blizzard's public page for a guild or a character in the game. WoW: Forever has one; a game version
+  without it never shows any of this, and nothing in the bot needs it.
+- **The guild in the armory** — the one guild in the game this Discord server is linked to, or none. The owner links it
+  (§8); a server with no guild works as before.
+- **Linked** — a character whose record follows its armory character: every hour the bot asks the armory whether it
+  changed and takes its name, level and, unless they are kept by hand, its professions. You link your own character, an
+  officer links anyone's; linking is optional and works whether or not the character is in the guild (§3, *The armory*).
+- **In the guild** / **not in the guild** — what the linked guild's roster in the armory says about a linked character.
+  The roster is read every three hours, so someone who just joined can read *not in the guild* for a while. It is a
+  fact, never a condition: someone not in the guild registers and raids like anyone else.
+- **Not claimed** — a character on the guild's roster that no record here is linked to. Officers see them on the
+  Members page and can give one to a member who has a record here.
+- **Kept by hand** — a linked character's professions when its member edits them instead of the armory (**Keep
+  professions by hand**; **Follow the armory again** lets the armory replace them once more).
+- **Move to another member** (officers) — a character registered to the wrong person goes to the right one, with its
+  past loot and attendance (§7).
 
 ## 2. Channels
 
@@ -276,7 +286,8 @@ string is your purchase, and the answer is a file for you alone. Delete your mes
 where it replies), and stays silent anywhere else. When two conversions are already running it says *Other guides are being converted
 right now. Try again in a minute.*; a string that would unpack past any real guide's size is refused as too big.
 
-**The armory on the site** (where the game version has one, WoW: Forever, and the owner has linked the guild — §8).
+**The armory on the site** (where the game version has one, WoW: Forever, and the host has set the Blizzard keys; a
+character links whether or not the owner has linked the guild — §8; what a link does is in §3, *The armory*).
 - **Me.** Under each named character a line says *Linked to the armory · Updated Thu 12 Nov 8:00 PM · in the guild* (*not in
   the guild* when the guild's roster doesn't list it; nothing when that isn't known yet; *professions kept by hand* when
   you switched them off), or *Not linked to the armory yet. Link to the armory… in this row's ⋮ looks it up first.* The
@@ -293,7 +304,8 @@ right now. Try again in a minute.*; a string that would unpack past any real gui
   its own class), *the armory no longer finds it* (for a day or more; the link stays) or *not in the guild* (information,
   not an error). The character's **⋮** has the same armory actions on that member's behalf, and **Move to another
   member…** (every game version): pick the member from the list, the bot's sentences say what goes with the character
-  (its past loot, attendance, signups, wishlist and regular spots) and who is told, then **Move it**. Under the list, the
+  (its past loot, attendance, signups, wishlist and regular spots) and who is told, then **Move it** — what a move does in
+  full is in §7. Under the list, the
   card **The armory** names the guild's roster and when it was read and how many characters are linked; with no guild
   linked, or its roster not read yet, it says so and what happens next.
   - **Link characters to the armory…** opens the proposed links in three groups, each with a sentence: **Sure** (same
@@ -302,7 +314,7 @@ right now. Try again in a minute.*; a string that would unpack past any real gui
     **Likely** (same class and a close name) — each with its best match and why, **Confirm**, or **Pick another…** for
     another match (**Link this one**) or **Look it up by name…**; **No match** — **Link to the armory…** per character.
     If the roster or the records changed since you looked, it shows the new proposal and says so; nothing was linked.
-  - **In the guild, not claimed (N)** (folded) lists the guild's characters nobody here has registered — class, name,
+  - **In the guild, not claimed (N)** (folded) lists the guild's characters no record here is linked to — class, name,
     level — each with **Give to a member…**: pick the member, then which of their characters it is (one of the same class
     not linked yet) or **A new character, registered for them** with its spec; the bot's sentences show under the picks
     and **Give it** links it (or registers and links it). If it was registered but couldn't be linked, the page says
@@ -359,14 +371,23 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   - **Name a planned character at launch**: `/me char action:Name a planned character` — pick it (skipped when
     there is only one), type first and last name, and the confirm screen says what follows (*"Answered Join on … — the
     answer now names Stormcall"*); answers and seats it holds take the new name.
-  - **The armory** (where the game version has one, WoW: Forever): under each named character the hub says
+  - **The armory** (where the game version has one, WoW: Forever). Linking a character is optional, and it never
+    depends on the guild: a fill-in from outside it links the same way. A linked character takes the armory's name and
+    surname (its old name still finds its history, and its sheets show the new one), and every hour the bot asks the
+    armory whether it changed: its level, a new name, and — unless you keep them by hand — its professions, which then
+    replace the ones on record whole. It never changes spec, main, rank, absences or class (when the armory shows another
+    class, officers see it). If the armory stops finding the character, the record keeps what it had and stays linked;
+    officers see *the armory no longer finds it* after a day. One armory character links to one record only, and a name
+    another record here holds can't be taken; either is refused in one sentence (ask an officer). Nobody gets a DM or a
+    notice about any of this. The same actions are on the Me page (§2a). Under each named character the hub says
     *Linked to the armory · Updated 5 minutes ago · in the guild* (*not in the guild* when the guild's roster doesn't list
     it; nothing when that isn't known yet), or *Not linked to the armory yet*. **Link to the armory…** opens a box with the
     first name (filled in) and the surname — type them as the game spells them, and leave the surname empty when the
     character has none. The bot looks the character up (*Looking in the armory…*) and the confirm screen says what it
     found — name, class, level — that your character takes that name and that the armory's professions replace its own;
-    **Link it** links it, **Back** changes nothing. Not found says so in one sentence (*reach level 10 and log out once*)
-    with **Try again**. Once linked: **Unlink…** (your record keeps what it last had; its professions are kept by hand),
+    **Link it** links it, **Back** changes nothing. A character below level 10 is found on the guild's roster when the
+    owner has linked the guild; not found says so in one sentence (*reach level 10 and log out once*) with **Try again**.
+    Six lookups a minute per person at most (*Wait a moment before looking up another name.*). Once linked: **Unlink…** (your record keeps what it last had; its professions are kept by hand),
     **Keep professions by hand** (you edit them yourself from then on; **Follow the armory again** lets the armory replace
     them once more) and **Sync now** (checks it with the armory at once and updates the record where the armory differs —
     at most every few minutes; no confirm). Nobody is DMed.
@@ -399,15 +420,16 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   leatherworker" (a new profession with no number is recorded with its skill not said; saying it again with a number
   sets the skill), "I just
   learned Devilsaur Gauntlets on Rhoz", "take Devilsaur Gauntlets off Rhoz", "remove enchanting from Jonnie". It shows the
-  change and waits for your **Apply**, like any change to your record. You need not name the character: "I can make
+  change and waits for your **Apply**, like any change to your record; for a character whose professions follow the
+  armory it says to turn on **Keep professions by hand** first, and changes nothing. You need not name the character: "I can make
   Ironfeather Shoulders" goes to your one character that makes things, else to your main, and the bot asks which only when
   two of your characters could hold it. The bot looks the recipe up in the game's list, so it knows which profession
   makes it: the whole name in any case, or enough of it ("ironf shoulders"); when part of a name fits several recipes
   it names up to five (*"Did you mean Devilsaur Gauntlets or Devilsaur Leggings?"*) and changes nothing. Taking a
   recipe off works the same way over the recipes that character has ("I can't make ironfeather any more"). If the
   character doesn't have that profession yet and could still take it, the change records both, and says so before
-  you confirm (*"Rhoz has no Leatherworking on record yet. Apply records Leatherworking on Rhoz and adds Green Dragonscale
-  Breastplate to the recipes Rhoz makes."*); say the skill later. The bot asks only when the game has a recipe of that
+  you confirm (*"Thornwick has no Leatherworking on record yet. Apply records Leatherworking on Thornwick and adds Green
+  Dragonscale Breastplate to the recipes Thornwick makes."*); say the skill later. The bot asks only when the game has a recipe of that
   name in two professions the character holds, or could take (*"Which profession makes Radiant Gloves?"*), with a
   list of the professions to pick from — only you can pick, nothing changes until you do, and the list expires after ten
   minutes; say "… with tailoring" to skip the question. Say the profession and its recipes in one message ("I am 265
@@ -445,7 +467,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   is nothing to rename or merge. Officers see the recipes typed before the bot knew the game's list that the list
   doesn't have (*"3 recipes are not in the game's list"*), each with who has it, **Pick the recipe…** (search that
   profession's recipes in the game's list, starting from the typed name, and pick the one it meant) and **Remove**. Both
-  show the bot's own sentence first (*"Rhoz's Leatherworking lists Devilsaur
+  show the bot's own sentence first (*"Thornwick's Leatherworking lists Devilsaur
   Gauntlets in place of Devilsaur Gauntlet."*) and change nothing before you confirm. On a phone the search comes first, each
   recipe and each of the officers' rows is a card, a made recipe stacks over its crafters and the tabs scroll sideways.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
@@ -1165,11 +1187,20 @@ edits that new family and leaves the one it shared alone.
   `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete, and the
   armory's Link to the armory… · Unlink… · Keep professions by hand · Follow the armory again · Sync now, which also show what looks off: *the
   armory shows a Mage*, *the armory no longer finds it*), with the
-  same ripple on the confirm screen. **Move to another member…** (officers, on every game version) moves one character
-  to another Discord user: pick them in Discord's own member picker, the confirm says what goes with it (its past loot,
-  attendance, signups, wishlist and regular spots) and that both see a notice — nobody is DMed; **Move it** moves it.
-  A move is refused in one sentence (an open ask on it, the new member has no record here or already has that name) with
-  **Pick someone else**.
+  same ripple on the confirm screen. **Move to another member…** (officers, on every game version, with or without an
+  armory) moves one character to another Discord user — for a character registered to the wrong person: pick them in
+  Discord's own member picker, the confirm says what goes with it (its past loot, attendance, signups, wishlist and
+  regular spots) and that both see a notice on their Me page — nobody is DMed; **Move it** moves it. Everything follows
+  the character: its record (with its armory link and professions), its past loot awards and its raid attendance count
+  for the new member as if they had held it all along (on a night both played, the better of the two counts, once), an
+  open question to the council about one of its awards becomes the new member's, and its answers and seats on live runs
+  move with it. It arrives as an alt, or as the main when the new member has none; if it was the old member's main,
+  their next character becomes main. A regular spot is given up when the new member already has one in that raid's
+  schedule (a member holds one spot per schedule) — the confirm names it. The loot history itself is never rewritten:
+  the move is recorded, and every lookup reads it. A move is refused in one sentence, with **Pick someone else**: an
+  open ask on the character (withdraw it first), a new member with no record here or who left, one who already has a
+  character of that name, or one already on a live run the character is on (sort that out first); nobody moves a
+  character to themselves (the owner aside — another officer does it).
   `/roster armory` (where the game has an armory) shows the guild linked and when its roster was read, how many
   characters are linked, the ones not linked yet as *sure*, *likely* and *with no match on the roster*, and how many of
   the guild's characters nobody here has claimed (with no guild linked, or its roster not read yet, it says so and what
@@ -1445,8 +1476,13 @@ the faction, the kind of guild (PvP, Normal, Roleplay or Roleplay PvP), how many
   (and the guild's id), then links with that `guild_id` and the `rev` it shows — the owner's decision, so it needs `OIBOT_MCP_ACTOR` set to the
   owner's Discord id.
 
-Nobody is DMed; the ops channel gets one line naming the guild. **Unlinking** keeps every character's own link; only
-*in the guild* stops being known. Plain text can't link a guild (a name can answer with a stranger's guild).
+Nobody is DMed; the ops channel gets one line naming the guild. Once linked, the bot reads the guild's roster every
+three hours: it says who is *in the guild*, which guild characters nobody here has claimed, and what officers review
+when they link characters in bulk (§7 `/roster armory`, §2a Members). It never reads the in-game rank: Discord roles stay
+the authority for officers and members. If the armory ever shows another guild at that name's address, the bot stops
+reading it and says so once in the ops channel; link the guild again to fix it. When the armory is down or answers
+oddly, the last data stays and the ops channel gets at most one warning an hour. **Unlinking** keeps every character's
+own link; only *in the guild* stops being known. Plain text can't link a guild (a name can answer with a stranger's guild).
 
 **Moving a guild to another server** (rather than claiming the new server as a guild of its own):
 `scripts/move_guild.py --to <new server id> [--key <guild>]` with the bot stopped (which stops every server it looks
@@ -1953,7 +1989,7 @@ news post says can make the review read or write another server.
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, limits, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
-| `set_professions` · `who_can_make` | replace one character's professions — the whole list, each `{id, skill, recipes: [{id} or {name}]}` (a name is looked up in the game's list; a recipe the character already holds that the list doesn't have is kept as it is); `[]` clears; the two-trade rule and the rest are checked as everywhere else · the game's recipes matching a name (and typed ones somebody makes), each with its crafters, highest skill first, the first 25 and how many more — names only, nobody pinged |
+| `set_professions` · `who_can_make` | replace one character's professions — the whole list, each `{id, skill, recipes: [{id} or {name}]}` (a name is looked up in the game's list; a recipe the character already holds that the list doesn't have is kept as it is); `[]` clears; the two-trade rule and the rest are checked as everywhere else; a changed list is refused for a linked character whose professions follow the armory · the game's recipes matching a name (and typed ones somebody makes), each with its crafters, highest skill first, the first 25 and how many more — names only, nobody pinged |
 | `list_guild_guides` · `withdraw_guild_guide` · `restore_guild_guide` | the guild guide library (§3b): every version, newest first, with its faction, when, who uploaded it, `latest` and `withdrawn` · take one out of members' reach or bring it back — **a decision: needs `OIBOT_MCP_ACTOR`** (`preview=true` = the sentences, no actor). No tool uploads or gets a guide: a BattleTag and an import string must not land in a transcript |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
 | `import_members` | a roster from a signup list (§7): rows `{discord_id, name, character, cls, spec, offspec?, rank?}` — `scripts/raidhelper_roster.py --members event.json` writes them from a Raid-Helper export — register each person with the character as their main; `preview=true` lists what would be added and skipped, nothing written; a row's `rank` needs the actor (D8), without one they start as trial |
@@ -2431,7 +2467,9 @@ raid or "tonight"; a member's view leaves out the officers' workflow lines — s
 the planner's notes). Also the last few finished or cancelled runs per raid (with the cancel reason) — a past run you
 name by key or in words ("last Tuesday", "the last Barrow Deeps") in full, who joined and who was rostered — and when
 the next sheet opens. And your own record — characters, roles, DMs, upcoming absences with your own reasons,
-confirmations and fill asks waiting on you, your answer and seat on each live run — or, if you applied, your
+confirmations and fill asks waiting on you, your answer and seat on each live run, and, where the game has an armory,
+each character's link (linked or not, when it was last updated, in the guild or not when that is known, professions
+from the armory or kept by hand) — or, if you applied, your
 application's status and the note sent to you (never which officer decided).
 
 **Who plays what** is open to every member, anywhere the bot answers — a public channel included: ask "who's playing
@@ -2505,4 +2543,9 @@ standing signup to set: each run is answered on its own sheet (or by telling the
 follow-on of a follow-on, a "first raid only" answer on the sheet (leave after the lead instead) and a follow-on added to a
 run already open don't exist. Guild guides (§3b): a version has no name or note of its own, a new version is not announced in any channel, two
 versions can't be compared, and the route explorer and companion addon of §2a are built from your own import string, not
-from a library version. If you ask for one of these, say so plainly.
+from a library version. The armory (§3): the bot can't prove a character is yours (there is no Battle.net login), so a
+wrong claim is fixed by an officer's **Move to another member…**; it reads no gear, talents, stats or reputations and
+ignores the in-game rank; a character that just joined the guild reads *not in the guild* until the next roster read (up
+to three hours); bulk linking is reviewed on demand and never runs by itself, and on Discord `/roster armory` links only
+the sure matches (the likely ones, the characters nobody claims and **Give to a member…** are on the site's Members
+page); plain text can't link, unlink or move a character. If you ask for one of these, say so plainly.

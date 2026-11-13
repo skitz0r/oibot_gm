@@ -1,6 +1,6 @@
 # Armory link: real recipes, linked characters, a synced record — design
 
-Date: 2026-11-12. Status: written from the owner's decisions in chat, read by a builder-check reviewer; awaiting the owner's approval.
+Date: 2026-11-12. Status: approved by the owner 2026-11-12; built 2026-11-12/13 — docs/design.md §5.64 is the record as built (it differs from this document where §5.64 says so).
 Design home when built: `docs/design.md` §5.64. Research: the live probe of 2026-11-11/12 (§9 below).
 
 ## 1. Why
@@ -131,7 +131,7 @@ missing_since}` or None, and `profession_sync: bool = True`.
   locked) are rewritten to the new label in the same step, so sheets and cards show the real name; finished runs are
   left alone. This is one new verb, `rename_character`, used by linking and nothing else writes the two fields.
 - **A name already taken.** The armory name equals another record's full name in the guild: refused in one sentence
-  naming the holder to an officer ("Rhoz Zug is registered to Bovice. Move it or retire it first."), "ask an
+  naming the holder to an officer ("Bram Kettle is registered to Tessa. Move it or retire it first."), "ask an
   officer" to a member. Never a partial write.
 - **One claim.** An armory character links to at most one record per guild; a second claim is refused naming who
   holds it (to an officer) or telling a member to ask an officer.
@@ -155,7 +155,7 @@ characters the profile cannot show yet (below level 10), and the **not claimed**
 `out/`, never in the data repo (derived, foreign data).
 
 Failures: a 404 on a linked character sets `missing_since` and keeps everything; it is shown to officers after 24 h
-("The armory no longer finds Rhoz Zug") and never unlinks by itself. API down, 429, a changed shape → the run stops,
+("The armory no longer finds Bram Kettle") and never unlinks by itself. API down, 429, a changed shape → the run stops,
 one ops warning per hour at most, the last data stays. All requests off the event loop; a per-guild lock; several
 guilds share one token and one polite rate (≤ 10 requests a second).
 
@@ -197,7 +197,7 @@ shows officers a proposal before writing anything.
   also the member's display name): listed with the candidate, an officer confirms each or picks another.
 - **No match** — left unlinked; the member or an officer links later.
 
-Measured on Big Guys Forever on 2026-11-12 (27 registered, 60 on the roster): 11 sure, 9 likely, 7 no match, 48
+Measured on the owner's guild on 2026-11-12 (27 registered, 60 on the roster): 11 sure, 9 likely, 7 no match, 48
 roster characters not claimed (15 of them level-1 bank characters). So the seed is a review screen, not a silent job.
 
 ## 6. Non-goals

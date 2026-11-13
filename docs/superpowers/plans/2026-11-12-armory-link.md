@@ -121,7 +121,7 @@ class ArmoryShape(ArmoryError): ...          # a response that failed validation
 class Fetched: data: dict; modified: str | None      # the Last-Modified header verbatim
 NOT_MODIFIED = object()
 
-def address(name: str, surname: str | None) -> str   # "rhoz-zug": lowercase, spaces → "-", percent-encoded
+def address(name: str, surname: str | None) -> str   # "bram-kettle": lowercase, spaces → "-", percent-encoded
 def available(reg) -> bool                            # profile.armory is set and the credentials exist
 class Armory:
     def __init__(self, region, profile_ns, static_ns, fetch=None)
@@ -215,7 +215,7 @@ async def apply(bot, reg, picks: list[tuple[int, str, int]], by, *, by_id, via=N
 ```
 Sure = first name (case-folded) and class equal exactly one roster row, no other registered character shares that name + class, no record holds that armory id. Likely = same class and (the registered name with spaces removed equals the roster's first+surname or first name with spaces removed, or one starts with the other at ≥ 4 letters, or `difflib` ratio ≥ 0.8, or the member's display name does the same) — at most three candidates, best first. Already-linked characters appear in no list. `rev` = a hash of the proposal; `apply` refuses a pick whose roster row is gone.
 
-- [ ] Tests on a fixture shaped like the measured guild (anonymised): `test_seed_sure_needs_uniqueness_on_both_sides`, `test_metzbower_is_likely_for_metz_bower_never_sure`, `test_display_name_can_make_a_likely`, `test_a_class_mismatch_is_no_match`, `test_apply_links_each_on_its_own_and_reports_a_refusal`, `test_linked_characters_are_left_out`, `test_propose_writes_nothing`.
+- [ ] Tests on a fixture shaped like the measured guild (anonymised): `test_seed_sure_needs_uniqueness_on_both_sides`, `test_thornwick_is_likely_for_thorn_wick_never_sure`, `test_display_name_can_make_a_likely`, `test_a_class_mismatch_is_no_match`, `test_apply_links_each_on_its_own_and_reports_a_refusal`, `test_linked_characters_are_left_out`, `test_propose_writes_nothing`.
 - [ ] Implement. Gate, commit.
 
 ### Task 12: Discord surfaces
@@ -246,4 +246,4 @@ Sure = first name (case-folded) and class equal exactly one roster row, no other
 
 - [ ] `docs/manual.md` (§1a words; Me, Members, Config; Professions), `docs/design.md` §5.64 (both phases, the decisions and calls of the spec), CLAUDE.md layout lines (`armory.py`, `discord_armory.py`, `armory_seed.py`, `flows_armory.py`, `web/api_armory.py`, the new fields and verbs, MCP tools), `help.py` (the asker's record names its link state), memory note updated.
 - [ ] **Whole-branch review** by a fresh reviewer: correctness, the five Review Focus lines, D2 (grep for any path that creates a `Member` / `RegisteredCharacter` from armory data other than Give to a member…'s officer add), the DM rule, a token in any log. Fix wave.
-- [ ] Full `uv run pytest -q`, `check_commands`, `check_bundle`, push. Operator: restart, link Big Guys Forever (`/gm config armory`), open the seed, confirm the sure matches, read the ops channel for one hour of quiet syncs.
+- [ ] Full `uv run pytest -q`, `check_commands`, `check_bundle`, push. Operator: restart, link the owner's guild (`/gm config armory`), open the seed, confirm the sure matches, read the ops channel for one hour of quiet syncs.

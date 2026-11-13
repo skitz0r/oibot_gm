@@ -4667,30 +4667,107 @@ carries the `UPLOAD_HINT` line under its confirm sentence) and the officers' wit
 number: `trailer(text)`, kept by `reissue` and stored as `GuideVersion.base`); the re-issue of §5.55 had the same gap.
 The upload also takes a file with no extension (`flows_guides.is_text_file`), as the guild's tools save it.
 
-### 5.64 Armory link, phase 1: recipes as game data (built 2026-11-12)
+### 5.64 Armory link: recipes as game data, linked characters, the officers' map and the move (built 2026-11-12/13)
 
-**Why.** WoW: Forever launched on 2026-11-04 with Blizzard's API live for it. The bot's recipe catalog (§5.60) was whatever
-members happened to type: one record said Leatherworking 265 with three recipes while the armory says 300 with 103, and
-"Gauntlet" / "Gauntlets" stayed two recipes until an officer merged them. Phase 1 makes the recipe list game data; phase 2
-(below, planned) links characters to the armory. Spec: `docs/superpowers/specs/2026-11-12-armory-link-design.md` §4;
-plan: `docs/superpowers/plans/2026-11-12-armory-link.md`.
+**Why.** WoW: Forever launched on 2026-11-04 with Blizzard's API live for it (undocumented): with the app credentials the
+bot already held it gives a guild's roster and each character's professions with every known recipe. The bot's recipe
+catalog (§5.60) was whatever members happened to type: one record said Leatherworking 265 with three recipes while the
+armory says 300 with 103, and "Gauntlet" / "Gauntlets" stayed two recipes until an officer merged them. The owner wanted
+the armory to keep records current **without** a second set of records and **without** making guild membership a
+condition of anything: a fill-in from outside the guild registers and raids like anyone else. Phase 1 makes the recipe list
+game data; phase 2 lets a registered character follow its armory character, gives officers the map and the review of
+proposed links, and lets them move a wrongly claimed character to its real member. Spec:
+`docs/superpowers/specs/2026-11-12-armory-link-design.md`; plan: `docs/superpowers/plans/2026-11-12-armory-link.md`. This
+section is the record as built; where it differs from the spec it says so.
 
-**Decisions.** The owner's **D6**: recipes are game data — the definitive list replaces the catalog derived from typed
-names. The designer's calls the owner saw and did not overrule: **C6** hand entry picks from the real list, so free-typed
-names are no longer stored; **C7** the officers' Rename… / Merge… of recipes are retired (a recipe's name is the game's).
-Designer's rulings taken while building, each with what it costs if wrong:
+**Decisions (owner, 2026-11-11/12).**
+- **D1 One guild or none.** A Discord server is linked to exactly one in-game guild or to none; the test server has none
+  and works as before. A guild is identified by more than its name (a short name resolves to a stranger's guild).
+- **D2 One record.** Discord registration stays the only way a member or character record comes to exist; the armory never
+  creates one, it adds facts to a character somebody registered. (Give to a member… registers a roster character for an
+  EXISTING member through the officers' own add path — never a record without a Discord user.)
+- **D3 Linking is optional.** Registration is unchanged and never gated on the armory; nothing requires a linked character
+  to be in the guild.
+- **D4 A linked character is overwritten.** A check overwrites what the armory knows better: no suggestions, no merge.
+- **D5 Professions follow the armory per character.** On by default for a linked character; off = **kept by hand**
+  (hand-edited from the list). An unlinked character is always kept by hand.
+- **D6 Recipes are game data.** The definitive recipe list replaces the catalog derived from typed names.
+- **D7 The in-game rank is ignored.** Discord roles stay the authority for officer / member; the bot's own per-member rank
+  stays an officer setting. The client never reads the rank.
+- **D8 Sure matches link on one confirm.** A registered character whose first name and class match exactly one roster
+  entry is proposed as sure and linked on the officer's one confirm; everything else is linked by a person.
+- **D9 Officers see the map and fix it.** The member → character → armory map is visible; an officer links / unlinks for
+  anyone and moves a character to another Discord user when a claim was wrong. A move carries everything (owner,
+  2026-11-12): the record, its past loot awards and raid attendance count for the new member as if they had held it all
+  along, its appeals become theirs, its signups and seats on live runs move; the ledger stays append-only.
+- **D10 A change check, not a re-download.** No event stream exists: linked characters are checked hourly with "changed
+  since"; the roster every three hours (Blizzard's own cache).
+
+**The designer's calls** (the owner saw them and did not overrule):
+- **C1** A check writes professions (D5), level and the armory's name; never spec, main / alt, rank or absences.
+- **C2** A class that differs from the armory is a flag officers see, never written onto the character.
+- **C3** Leaving the guild changes only "in the guild". No DM and no notice for any check (the DM rule); a move is the one
+  write of this feature that leaves notices (both members, never a DM).
+- **C4** Linking adopts the armory's name and surname (14 of the 27 characters registered before launch carried another).
+- **C5** Gear, talents, stats, reputations: out of scope; nothing here makes them harder later.
+- **C6** Hand entry picks from the real list; free-typed recipe names are no longer stored.
+- **C7** The officers' Rename… / Merge… of recipes are retired (a recipe's name is the game's).
+- **C8** Ownership of an armory character can't be proven without a Battle.net login (out of scope). The guards: one armory
+  character links to at most one record per guild, the map is visible, officers move a character.
+- **C9** A rename keeps the old name as an alias, history is not rewritten: `former_names`; the ledger, award ids and appeal
+  files stay; every by-name lookup also answers to a former name; LIVE run files take the new label in the same commit.
+
+**Decided while building** (the controller's rulings, each with what it costs if wrong):
 - **R1** `recipes.yaml` supersedes `professions.yaml`'s `recipe_seed` for a version with a list; the seed stays for one
   without. If wrong, a dead seed path lingers.
+- **R2** A hand edit of a linked character whose professions follow the armory is refused only when the submitted list
+  DIFFERS from the stored one: an unchanged list in a whole-table save passes, so every Save of that member's character
+  table keeps working. If wrong, a no-op resubmit is accepted silently, which is harmless.
+- **R3** Moving a member's main is not refused: the old member's next character becomes main and their ranks settle by the
+  existing `settle_ranks` rule. If wrong, the old member has a main they didn't expect until an officer sets it.
 - **R6** 66 recipe names occur twice within one profession (the original and a Season of Discovery twin, different ids),
-  and 3 names in two professions (Radiant Gloves, Gordok Ogre Suit, Synthetic Gordok Ogre Suit). Where a NAME must become
-  one recipe without a person choosing (the migration, plain text), the lowest id of that name within the profession wins;
-  wherever a person picks (a Discord select, the site's search), same-name recipes are separate rows told apart by their
-  category. No category name is special-cased in code. If wrong, a hand-entered recipe points at the twin until an officer
-  or (phase 2) the armory corrects it.
-- **R7** the list gives recipes to Mining (17 smelts), Skinning, Herbalism and Fishing (3 each), although
+  and 3 names in two professions (Radiant Gloves, Gordok Ogre Suit, Synthetic Gordok Ogre Suit); the list holds 2,493
+  recipes, not the spec's 2,494. Where a NAME must become one recipe without a person choosing (the migration, plain
+  text), the lowest id of that name within the profession wins; wherever a person picks (a Discord select, the site's
+  search), same-name recipes are separate rows told apart by their category. No category name is special-cased in code. If
+  wrong, a hand-entered recipe points at the twin until an officer or the armory corrects it.
+- **R7** The list gives recipes to Mining (17 smelts), Skinning, Herbalism and Fishing (3 each), although
   `ProfessionDef.makes` says gathering trades and Fishing make nothing. With a list, "this profession has recipes" is read
   from the list (`professions.has_recipes`, `/api/meta.professions.list[].makes`); `makes` keeps deciding without one. If
   wrong, gathering characters can record recipes the guild did not mean to track.
+- **R9** "In the guild" is DERIVED when read — the character's armory id on the last roster read of the guild linked NOW
+  (True / False / None = not known) — and never stored. This CHANGES the spec's §5.2 field list: `ArmoryLink` has no
+  `in_guild` (an old key in a file is ignored). A stored copy went stale whenever the server's guild link changed and cost
+  a commit per character on every link, switch or unlink of the guild. The cost: membership lags the roster by up to three
+  hours instead of following each profile read.
+- **R10** A full name is unique across ALL records, test puppets included: a rename or a link refuses a name a puppet
+  holds ("<Name> is held by a test character. Clear the test bench first." to an officer). Uniqueness is what every by-name
+  lookup of loot and seats relies on, and registration already refuses the same collision. If wrong, a real member whose
+  in-game name a rehearsal puppet holds can't link until the bench is cleared.
+- **R11** A move works on every game version — it needs no armory (a wrong claim can exist anywhere): the move route, MCP
+  tool and Discord action are not gated; every other armory surface is hidden or answers 404 where `armory.available` is
+  false. If wrong, a version without an armory has one officer action nobody asked for.
+- **A regular spot is given up, not refused.** A member holds one regular spot per schedule; when the new member already
+  holds one in a series the moved character is a regular of, that spot is dropped and the confirm names it — refusing would
+  make officers untangle spots before fixing a wrong claim. If wrong, an officer loses a spot they expected to carry, and
+  the confirm told them first.
+- **Attendance counts the better row.** On a night the new member has their own row and the moved character has one too,
+  attendance takes the better of the two, never both: "as if they had held it all along" can't count one night twice.
+  If wrong, a member's attendance is slightly understated on nights both played.
+- **Whose an award is, is frozen at the move.** The move's row freezes the names that mean this character (its full names,
+  and the first names no other character of the old member answered to then), so a later registration of the same first
+  name never flips an old award back. An entry after the move under the old member follows the character only by a full
+  name the old member had no own character for by then.
+- **Limits.** Armory lookups: 6 a minute per person (`LOOKUPS_PER_MINUTE`: the site's find / link and Discord's link box;
+  the site answers 429), so nobody spends the host's quota. Sync now: once per character per 5 minutes (`SYNC_NOW_EVERY`),
+  stamped only after a check that worked.
+- **A puppet is never linked** and never holds a link (`link_refusal`, `armory_holder`, `armory_linked`, the seed's
+  `_eligible`); Discord's character hub hides the armory actions on a puppet's characters, and a link
+  for one is refused on every surface.
+- **The seed is on demand.** The spec's "when the guild is linked (and on demand)" became on demand only: the Members
+  page's **Link characters to the armory…** and `/roster armory`. Linking the guild links no character.
+
+**Phase 1 — recipes as game data.**
 
 **The words.** *The game's list*, *not in the game's list* (never "unmatched" where a person reads), *Pick the recipe…*,
 *Remove*, *Nobody in the guild makes X yet.* (a listed recipe with no crafter) against *That isn't a recipe in the game's
@@ -4742,7 +4819,7 @@ list), the site, MCP `who_can_make`, the help section (a question naming a liste
 characters only, none without a list) → `GET /api/professions` `unmatched` (officers). `professions.fix_unmatched` = **Pick
 the recipe…** (a recipe of that profession takes its place in place, or the typed one comes off when the character already
 has it) or **Remove**, one `save_character_table` under `config_lock` at the record's rev (a change in between is refused,
-never overwritten); `POST /api/professions/unmatched` previews the sentences first (*"Rhoz's Leatherworking lists Devilsaur
+never overwritten); `POST /api/professions/unmatched` previews the sentences first (*"Thornwick's Leatherworking lists Devilsaur
 Gauntlets in place of Devilsaur Gauntlet."*), then writes with one audit line. Web only: `configops.BY_DESIGN_ONLY["recipe_fix"]`.
 
 **The page** (`pages/Professions.tsx`). The search box searches the list; each hit shows its profession's icon, the game's
@@ -4765,11 +4842,163 @@ twins), `tests/test_recipe_identity.py` (the check, the round trip, the migratio
 after a new build); the importer's token request is not paced. A chip on a character does not show its category, so two
 same-name twins on one character read alike outside the editor's picker.
 
-**Phase 2 — linking and the sync (planned).** Spec §5: a server links to one in-game guild or none (`GuildConfig.armory`, owner
-only, confirmed by what the lookup found, the stored guild id checked on every roster read); a registered character MAY be
-linked to its armory character (D2 one record — the armory never creates one; D3 never gated on guild membership; linking
-adopts the armory's name, the old name kept as an alias); a linked character's professions follow the armory hourly through
-a conditional request (D4 overwritten, D5 a per-character switch, "Kept by hand" when off), level and "in the guild" too,
-never spec, main, rank or absences; a sure first-name-and-class match is proposed for the officers' one confirm (D8); the
-Members page shows the map and the guild characters nobody claimed, and officers move a character to another member (D9). No
-DM and no notice for any sync. Gated on the profile naming an armory (`integrations.yaml`); tbc: off.
+**Phase 2 — linking, the check, the map, the seed and the move.**
+
+**The words.** **Armory**, **the guild in the armory**, **linked**, **in the guild** / **not in the guild**, **not
+claimed**, **kept by hand**, *Updated from the armory <when>* (`Registry.local12`; Discord's own `<t:…:R>` in a hub),
+**Sync now**, **Move to another member…** (manual §1a). Never "sync" as a noun, "slug", "namespace", "ruleset" or "seed"
+where a person reads: the seed is *Link characters to the armory…* with **Sure** / **Likely** / **No match**.
+
+**The boundary.** `armory.py` = THE armory client: `Armory(region, profile_ns, static_ns, fetch=)` `guild` / `roster(since=)`
+/ `character(since=)` / `professions`, blocking (callers use `asyncio.to_thread`), every answer validated (`ArmoryShape`),
+`ArmoryMissing` (404) / `ArmoryDown(retry_after)` / `ArmoryAccess` with `.words` (the sentence a person reads),
+`NOT_MODIFIED` on a 304; `address` / `guild_slug`; `available(reg)` = the profile names an armory (`integrations.yaml
+armory:` — the namespaces and the class / ruleset tables) AND the host's `BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET` are
+in `.env`; `find_guild(reg, name)`. The rank is never read (D7) and no token appears in any error. `battlenet.py` holds what
+every Blizzard client shares: one client-credentials token (`TOKEN`) and one limiter (`LIMITER`, ≤ 10 requests in any second
+across every guild), used by `importers/blizzard.py` too. Tests never call Blizzard: anonymised recorded answers under
+`tests/fixtures/armory/` and an injected `fetch`.
+
+**The server's guild** (§5.1 of the spec, D1). `GuildConfig.armory` = `ArmoryGuild {region, guild_id, slug, name, faction,
+linked_by, linked_at}` | None, in the `settings` rev. `Registry.set_armory_guild` / `clear_armory_guild` are owner only
+(`is_owner_id`), one commit each; `armory_guild_words` says the link in words. The owner types the name (prose);
+`armory.find_guild` looks it up and `consequences.armory_guild_consequence` says what was found — name, faction, kind,
+member count, created day — then what changes, so a stranger's guild of the same name is seen before the press; the link
+names the `guild_id` its preview showed (the site's POST without it is refused; MCP sends it and the settings rev).
+Unlinking (`armory_guild_clear_consequence`) keeps every character's link; only "in the guild" stops being known. Surfaces:
+`/gm config armory` (`flows_config.ArmoryGuildWizard`), Config › Settings' `ArmoryGuildCard.tsx` over `GET/POST
+/api/admin/armory`, MCP `armory_guild` / `set_armory_guild` (the owner as actor), a `config_summary` line; plain text never
+(`configops.BY_DESIGN_ONLY["armory_guild"]`).
+
+**A character's link** (§5.2). `RegisteredCharacter.armory` = `ArmoryLink {id, slug, linked_by, linked_at, checked_at,
+modified, level, cls, missing_since}` | None (no `in_guild`, R9), `profession_sync: bool = True`, `former_names` (old labels,
+oldest first). `discord_armory.find_for_link` finds the character a person means: its armory profile, else — below level 10
+or before its first logout — the linked guild's roster; `NOT_FOUND` says to reach level 10 and log out once. No gate on the
+guild (D3). `link_character` is THE link (own character, or an officer decided live): `Registry.link_refusal` first (a test
+puppet; already linked; another record's claim — the holder named to an officer only; a full name another record holds,
+puppets included, R10), then ONE commit = `Registry.rename_character` (the armory's name; the old label → `former_names`;
+every live run's labels through `rc.relabel_runs`, under the member's runs' board locks, sheets redrawn) + `link_armory`
+(the first check's facts and, from a profile, the armory's professions replacing the hand list). The confirm is
+`armory_link_consequence`; found on the roster, the professions follow from level 10, when the armory first shows them.
+`unlink_character` keeps the record as it last was, professions kept by hand (`armory_unlink_consequence`).
+`set_profession_sync` is the switch (`profession_sync_consequence`); turning it on runs an immediate unconditional check.
+A changed hand edit of a synced character is refused in one sentence (R2). One audit line per write; no DM, no notice.
+
+**The names.** `Registry.same_character` = THE by-name predicate (the label now or a former one); `own_character` (a
+current name → a first name → a former name); `holder_of` = who holds a full name now (a former name never blocks);
+`find_full`; `award_holder` / `award_is_for` — an award WITH a Discord id is decided by the id, an id-less row by the full
+name; `name_taken_refusal` = the one sentence. Readers through them: the import dedupe, scoring's history, reweight, My loot,
+received marks, the loot log, appeals, the companion's routing and match, help.
+
+**The check** (§5.3, D10). `armory_tick` is `raid_scheduler`'s hook (every minute; off where `armory.available` is false or
+the guild has neither a linked guild nor a linked character): when due, ONE background task per guild reads the roster
+(`roster_refresh`, every three hours, conditional on its own Last-Modified; a failed read waits an hour per guild id) and
+then checks every linked character (`sync_guild`, hourly; `Registry.armory_linked` = no puppets, nobody who left, no
+retired character). Per character (`_sync_one`, under one asyncio lock per guild): one conditional request on the profile;
+not modified → only memory moves, no commit; modified → profile and (when `profession_sync`) professions through
+`check_professions(trusted=True)` — the armory is the truth, no trade-slot, skill-cap or on-the-list check, the whole list
+replaced — and ONE commit only if something differs (`Registry.armory_update`; `checked_at` / `modified` ride along only
+with a commit that happens anyway). The armory's class goes on the link, never on the character (C2: the `class` flag). A
+name the game changed is taken through `rename_character` ("<member>: <name> updated from the armory"); a name another
+record holds keeps the record's name and warns ops once an hour. A recipe id the list lacks is kept by id and told to ops
+once per guild ("the recipe list is behind the game", `out/armory/<key>/recipes_reported.json`).
+- **Not found any more.** A 404 tries the roster by the armory id (a character renamed in the game is re-pointed and
+  renamed; another character answering to the old address is never taken for it); found nowhere → `missing_since` once,
+  everything kept, never an unlink; officers see "the armory no longer finds it" after 24 hours (`MISSING_AFTER`, the
+  `missing` flag), and a later answer clears it.
+- **In the guild** (R9). `discord_armory.in_guild` reads the roster snapshot of the guild linked now
+  (`out/armory/<key>/roster.json` — rows, when, Last-Modified, guild id — derived, foreign data, never the data repo). It
+  lags the game by up to three hours: a character that just joined reads "not in the guild" until the next roster read.
+  A guild at the stored address answering with another id stops roster work and warns once (never follows a stranger).
+- **Failures.** The armory down, refusing the keys, or answering an unexpected shape stops that run; the last data stays;
+  at most one ops warning per guild per hour per kind (`armory`, `roster-missing`, `professions:<id>`, `name:<id>`).
+- **Sync now** = `sync_character(force=True)`: the same step unconditionally, the member's own or an officer's, once per
+  character per 5 minutes (`SYNC_LIMITED`); `armory_sync_sentence` says what it did.
+- `flags(reg, c)` = what officers see: `class` (the armory's class differs), `missing` (a day or more), `outside` (not in
+  the guild — information, not an error).
+
+**The seed** (§5.5, D8; `armory_seed.py`). `propose(reg, roster, taken_at=)` is pure (no request, no write) over active,
+named, unlinked characters of real members still in the server:
+- **Sure** — the first name (case-folded, accents kept) and the class match exactly ONE roster row (every row counts,
+  held or not), that row is not held by any record, no other registered character (linked ones included, puppets aside) has
+  that first name and class, and a registered surname, when set, is the row's. Two characters are never sure for one row.
+- **Likely** — same class, an unheld row not already some character's sure match, and a close name, names folded (case
+  and accents dropped, only letters kept): the registered first name (and surname when both have one) equal to the row's;
+  else the folded label or first name equal to, starting, or containing (the shorter at least 4 letters) the row's full
+  name, first name or surname, or difflib's ratio ≥ 0.8; else the same against each word of the member's Discord display
+  name and the whole display name. At most 3 candidates, best first; `why` = same name · close name · display name.
+- **No match** — the rest. `unclaimed` = the unheld rows no sure match takes; `rev` = a hash of the proposal.
+`check` = what `apply` would refuse before asking the armory (the preview's count, `armory_seed_consequence(n, refused)`);
+`apply` (officers, live) re-checks each pick against the current snapshot (`ROW_GONE`, `ANOTHER_CHARACTER`, `NO_GUILD`,
+`NO_ROSTER`, `link_refusal`) and links it through `find_for_link` + `link_character` on its own; one refusal never stops or
+undoes the others. Nothing links without an officer's pick. The surfaces compare `rev`: a proposal that moved is shown
+again and nothing is linked. Measured on the owner's guild on 2026-11-12 (27 registered, 60 on the roster): 11 sure, 9
+likely, 7 no match — a review screen, not a silent job.
+
+**Give to a member…** (`armory_seed.give`, officers, the site only). A not-claimed roster character goes to a member who is
+registered and still in the server: their existing character of the same class is linked to it, or — with a spec the
+officer picks — it is registered for them through the officers' character table (`discord_people.save_characters`: their
+main when they have none, else an alt) and then linked. `Registry.give_refusal` finds every refusal first on a copy (D2,
+left, the table's own refusals, `link_refusal`), nothing written; the confirm is `armory_give_consequence`. When the add
+lands but the link is refused afterwards, the answer says it is registered and not linked, never "nothing happened".
+
+**The move** (§5.4, D9, R3, R11). `Registry.move_character(from_id, label, to_id, by, *, rs, by_id, moved)` = ONE commit:
+both member files (the record with its wishlist, regular spots, armory link, professions and former names; an alt, or the
+main when the new member has none; the old member's next character becomes main, `settle_ranks`), a row of
+`<guild>/character_moves.jsonl` {label, name, names, firsts, armory_id, from, to, by, by_id, at}, every live run
+(`rc.move_on_runs`: signups, seats, callouts, pins, the board, lock seats, regulars), the answered placement asks on them,
+and a `character` notice to each member (never a DM). `move_effects` = the spots kept, the spots given up, the next main,
+whether it arrives as main — the verb and `consequences.move_consequence` read it. `move_refusal`, one sentence: an open ask
+on the character (withdraw it first), the new member not registered / left / the same member, a puppet to or from a real
+member, a name the new member's records answer to, the new member already on a live run of the character, a move TO
+yourself (the owner aside). Officers only, decided live; `discord_armory.move_character` holds the board locks of
+`Registry.move_runs` and redraws the sheets. History is never rewritten: `Registry.owner_of(uid, label, when)` resolves
+"whose" from the moves rows alone (frozen names, chains fold), `award_time` is the one time it reads, and `owner_of_award`
+feeds `award_holder`, My loot, received marks, scoring, the loot log, help, the loot-log notice and appeals
+(`appeals.appeal_owner`: an open question to the council on the character's award becomes the new member's);
+`_attendance_row_now` gives one row per run, the better of the member's own and the moved character's (`_row_rank`:
+attended > rostered or benched > called out or No thanks > no answer or away).
+
+**Surfaces.** Discord (`flows_armory.py`): `CharArmory` in the character hub (`/me char`, `/roster char`) — the line
+*Linked to the armory · Updated <t:R> · in the guild* (officers also see the flags), **Link to the armory…** (a box: first
+name + surname → the lookup behind the working screen → decide → **Link it**), **Unlink…**, **Keep professions by hand** /
+**Follow the armory again**, **Sync now** (no confirm), and officers' **Move to another member…** (Discord's user select →
+decide → **Move it**); `/me professions` on a synced character shows the list and why, no edit buttons (`synced_sentence`);
+`/roster armory` (`ArmoryOverview`, officers) = the counts and **Link the sure matches** → decide → `armory_seed.apply`. The
+site (`web/api_armory.py`, thin callers; every write previews; MCP writes need the actor, D8; 404 where
+`armory.available` is false except the move): `POST /api/me/armory/find|link|unlink|switch|sync` (own character by label)
+and `/api/members/armory/<same>` (officers), `POST /api/members/armory/give`, `GET /api/armory/map`, `GET /api/armory/seed`
++ `POST /api/armory/seed/apply`, `POST /api/members/move`; character rows carry `armory` / `profession_sync` / `flags`.
+Pages: `ArmoryLink.tsx` (the row line and the ⋮ actions on Me and Members, the link dialog), Members' `ArmoryMap.tsx` (the
+card *The armory*: counts, **Link characters to the armory…** = `ArmorySeed.tsx`, the fold **In the guild, not claimed
+(N)** with **Give to a member…**) and `MoveCharacter.tsx`. MCP: `armory_map`, `armory_seed`, `link_character`,
+`unlink_character`, `move_character`, `apply_armory_seed`. Help: `help.armory_lines` puts the asker's own characters' link
+state in the snapshot (linked or not, *Updated from the armory <when>*, in the guild when known, professions followed or
+kept by hand), never another member's. Plain text: none (`configops.BY_DESIGN_ONLY` `armory_link` / `armory_seed` /
+`armory_move` — a surname typed into chat is not worth a parser); the parity rows are `ARMORY` in
+`tests/test_parity_matrix.py`. Nothing DMs anyone.
+
+**Tests.** `tests/test_armory_client.py` (the boundary on recorded answers, validation, 304, the limiter, no token in an
+error), `tests/test_armory_guild.py`, `tests/test_armory_link.py`, `tests/test_armory_sync.py` (no commit when nothing
+changed, missing, renamed in the game, R9, failures and the warning throttle), `tests/test_armory_seed.py`,
+`tests/test_character_rename.py`, `tests/test_character_move.py` (loot, attendance, appeals, regular spots, refusals),
+`tests/test_armory_api.py`, `tests/test_armory_flows.py` (every wizard through `tests/wizard_harness.py`),
+`tests/test_help.py` (the asker's link state), `tests/test_confirm_readability.py` (every armory sentence),
+`tests/test_parity_matrix.py`, `tests/test_frontend_source.py` and the copy lint.
+
+**Not done / known limits.** Proof of ownership (C8) — a wrong claim is fixed by a move; gear, talents, stats,
+reputations, achievements; the in-game rank (D7); EU / KR / TW beyond the configurable region. Bulk linking runs on demand,
+never by itself; Discord's `/roster armory` links only the sure matches — the likely ones, the not-claimed characters and
+Give to a member… are the site's (MCP has no give tool). "In the guild" lags the game by up to three hours. The not-claimed
+count differs by surface: the site's fold lists every roster character no record is linked to, while `/roster armory` and
+the seed leave out the rows a sure match would take. A link found from the profile whose professions read answers 404
+keeps the hand list with professions following the armory, although its confirm said they are replaced (rare; the next
+check that reads them replaces them). After a move, the old member keeps their past "no answer" misses on the moved
+character's schedule, and a member with no rank who receives a main starts at trial; a day-only award dated the move's own
+day resolves to the new member. The move's confirm can pass twenty words in its first sentence with three-word display
+names. The Discord professions screen of a synced character points at Keep professions by hand even when the host's
+Blizzard keys are missing (the button is hidden then). The Config page's two cards share the settings rev, so a save on
+one makes the other's next save answer that something changed. The seed's preview can count one pick too many when two
+picks claim the same armory id. A plain-text "take X off" for a recipe held in two professions refuses without saying how
+to answer. The migration's ops line says "not in the list" for a name the list gives to another profession. `/gm config`
+is at Discord's limit of 25 subcommands (`armory` is the last).
