@@ -714,8 +714,37 @@ def move_consequence(reg: Registry, m_from, c, m_to) -> list[str]:
         out.append("Both see a notice on their Me page.")
     return out
 
+
+def armory_give_consequence(reg: Registry, m, found, *, main: bool) -> list[str]:
+    """The confirm before an officer registers a guild character nobody claims for member `m` and links it (armory link
+    §5.4, Give to a member…): what the armory shows and where it goes, where its professions come from, who sees it and
+    the way back. `found` = discord_armory.Found; `main` = it becomes their main (they have none yet)."""
+    what = f"a level {int(found.level)} {found.cls}" if found.cls else f"a level {int(found.level)} character"
+    slot = "their main" if main else "an alt"
+    profs = ("Its professions follow the armory from level 10." if found.source == "roster"
+             else "Its professions come from the armory.")
+    return [f"{found.label}, {what}, is registered to {m.display_name} as {slot}.", profs,
+            "They see it on their Me page, and you can unlink it at any time."]
+
+
+def armory_seed_consequence(n: int) -> list[str]:
+    """The confirm before an officer links the picked characters of the seed (armory link §5.5): each link goes on its
+    own, so a refused one never stops the others; members see their links; each can be unlinked."""
+    first = ("One character is linked to the armory." if n == 1
+             else f"{n} characters are linked to the armory, and a refused one never stops the others.")
+    return [first, "Each member sees the link on their Me page.",
+            "You can unlink it at any time." if n == 1 else "You can unlink any of them at any time."]
+
+
+def armory_sync_sentence(label: str, result: str) -> str:
+    """What Sync now did to `label` (discord_armory.sync_character's result), in one sentence."""
+    from .discord_armory import SYNC_LIMITED
+
+    return {"updated": f"{label} is updated from the armory.", "unchanged": f"{label} already matches the armory.",
+            "missing": f"The armory no longer finds {label}, so it keeps what it last had.", "limited": SYNC_LIMITED}.get(result, SYNC_LIMITED)
+
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
-           "VERBS", "absence_consequence", "armory_created_words", "armory_link_consequence", "armory_unlink_consequence", "armory_guild_clear_consequence", "armory_guild_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
+           "VERBS", "absence_consequence", "armory_created_words", "armory_give_consequence", "armory_seed_consequence", "armory_sync_sentence", "armory_link_consequence", "armory_unlink_consequence", "armory_guild_clear_consequence", "armory_guild_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
            "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "move_consequence", "people_consequence", "profession_consequence", "profession_sync_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 

@@ -24,6 +24,7 @@ from pydantic import BaseModel, ValidationError
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from .. import consequences as cq
 from .. import armory as armory_mod
+from .api_armory import char_extras as armory_extras
 from .. import professions as professions_mod
 from .. import guild_routing
 from ..consequences import consequence as consequence_lines, consequences_json, regular_remove as regular_remove_lines
@@ -618,7 +619,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return {"label": c.label, "name": c.name, "surname": c.surname, "cls": c.cls, "spec": c.spec, "offspec": c.offspec, "is_main": c.is_main,
                 "status": c.status, "rank": c.rank, "rosters": list((runs or {}).get(c.label, [])), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off,
                 "flex": list(c.flex), "regular_on": [reg.series_label(k) for k in c.rosters if ":" in k],
-                "professions": reg.professions_entries(c)}
+                "professions": reg.professions_entries(c), **armory_extras(reg, c)}  # armory link §5.4: `armory`, `profession_sync`, `flags`
 
     def regulars_json(reg, m) -> list[dict]:
         """A member's regular series: {series, label, character, cls, spec, role} (the Me page's My regular raids)."""
@@ -2603,6 +2604,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_me import install_me_api  # the member inbox (asks, notices, own answers) and the officers' on-behalf routes (design §5.40)
 
     install_me_api(app, bot, who=who, body=body, find_live=find_live, resolve_member=resolve_member)
+
+    from .api_armory import install_armory_api  # a character's armory link: link / unlink / the switch / Sync now, the map, the seed, move (armory link §5.4)
+
+    install_armory_api(app, bot, who=who, body=body, publish=publish, visible=visible, char_json=char_json, resolve_member=resolve_member, live_officer=live_officer)
 
     from .api_professions import install_professions_api  # the Professions page: catalog, finder, the officers' fix (design §5.60, §5.64)
 

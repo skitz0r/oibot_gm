@@ -195,6 +195,9 @@ def _load_snapshot(reg) -> _Snapshot | None:
     return snap if snap is not None and g is not None and snap.guild_id == int(g.guild_id) else None
 
 
+ROSTER_LISTENERS: list = []  # fn(guild key) after every roster read is saved (the web publishes `member`: the map's "in the guild")
+
+
 def _save_snapshot(reg, snap: _Snapshot) -> None:
     _st(reg)["roster"] = snap
     p = _snap_path(reg)
@@ -206,6 +209,11 @@ def _save_snapshot(reg, snap: _Snapshot) -> None:
         tmp.replace(p)
     except OSError:
         log.exception("armory roster snapshot for %s not saved", reg.key)
+    for fn in list(ROSTER_LISTENERS):
+        try:
+            fn(reg.key)
+        except Exception:  # noqa: BLE001 — a listener never stops the roster read
+            log.exception("armory roster listener failed")
 
 
 def roster_snapshot(reg) -> tuple[list[RosterRow], str | None]:

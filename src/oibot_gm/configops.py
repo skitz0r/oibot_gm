@@ -571,6 +571,12 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     # armory link §5.1: the server's guild in the game is linked by the owner after a lookup whose findings they read first
     # (/gm config armory, Config › Settings, MCP armory_guild / set_armory_guild with the actor — tests/test_armory_guild.py)
     "armory_guild": {"surface": "web", "path": "POST /api/admin/armory", "reason": "linking the server to its guild in the game is never plain text: a name can answer with a stranger's guild, so the owner reads what the lookup found before pressing — on Config › Settings, with /gm config armory or through MCP's preview then set_armory_guild with the owner as the actor"},
+    # armory link §5.4: "Plain text: out" — a character's link (link / unlink / the professions switch / Sync now / Give to a
+    # member…), the seed and a move are features, not ops: the site's routes (web/api_armory.py), MCP (link_character,
+    # unlink_character, move_character, apply_armory_seed with the actor) and Discord's wizards (tests/test_parity_matrix.py ARMORY)
+    "armory_link": {"surface": "web", "path": "POST /api/me/armory/link", "reason": "a character's armory link is never plain text: a surname typed into chat is not worth a parser, and the person reads what the armory found before pressing — the Me and Members pages, Discord's character wizard and MCP's link_character / unlink_character with the actor"},
+    "armory_seed": {"surface": "web", "path": "POST /api/armory/seed/apply", "reason": "the seed is a review of proposed matches an officer confirms row by row — never plain text; the Members page, Discord's counts with the sure batch, and MCP's armory_seed then apply_armory_seed with the actor"},
+    "armory_move": {"surface": "web", "path": "POST /api/members/move", "reason": "moving a character and its past loot and attendance to another member is never plain text: an officer reads the confirm first — the Members page, Discord's character wizard and MCP's move_character with the actor"},
     "recipe_fix": {"surface": "web", "path": "POST /api/professions/unmatched", "reason": "the recipes typed before the game's list that it doesn't have are a list on the Professions page, each with Pick the recipe… (a search over the list) and Remove beside it; a one-off clean-up of old data needs no second editor, and a member's own editor already removes one"},
 }
 

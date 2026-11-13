@@ -1138,6 +1138,77 @@ def set_armory_guild(name: str | None = None, guild_id: int | None = None, rev: 
     return msg(data)
 
 
+# ---- a character's armory link (armory link §5.2, §5.4, §5.5): reads free; link, unlink, move and the seed's confirm are
+# decisions (D8: OIBOT_MCP_ACTOR, sent as X-Oibot-Actor); a preview needs no actor. The professions switch, Sync now and
+# Give to a member… are the site's and Discord's.
+@mcp.tool()
+def armory_map(guild: Guild = None) -> dict:
+    """The officers' armory map: per member each character's link (`linked`, `armory_id`, `level`, `updated` = "Updated from
+    the armory <when>", `in_guild` true / false / null = not known, `profession_sync`, `flags`: class = the armory's class
+    differs, missing = the armory hasn't found it for a day, outside = not in the guild), then `unclaimed` (the guild's
+    characters nobody here has linked: id, name, surname, class, level), `roster` (the guild, when its roster was last read,
+    or why there is none) and `counts`. Refused where the version has no armory or the host has no Blizzard keys."""
+    return api(guild).get("/api/armory/map")
+
+
+@mcp.tool()
+def armory_seed(guild: Guild = None) -> dict:
+    """The seed: every registered, unlinked character set against the guild's roster — `sure` (one roster character of
+    that first name and class, nobody else's), `likely` (a close name, `candidate` best first and `others`), `none`, the
+    `unclaimed` roster characters — and `rev`. Nothing is linked until apply_armory_seed names the picks with this `rev`."""
+    return api(guild).get("/api/armory/seed")
+
+
+@mcp.tool()
+def link_character(member: str, character: str, surname: str | None = None, name: str | None = None, armory_id: int | None = None,
+                   preview: bool = False, guild: Guild = None) -> str:
+    """Link a member's character to its armory character (the record then follows the armory: its name, level and
+    professions). `member` = a name, character or id; `character` = the record's name; `surname` (and `name`, default the
+    character's first name) = how the armory spells it. ALWAYS `preview=true` first: it answers what the armory found and
+    its `armory_id` — read the sentences to the person — then link with the same names and that `armory_id` (refused if the
+    name now finds another character). A link is a decision: needs OIBOT_MCP_ACTOR (sent as X-Oibot-Actor); a preview needs none."""
+    body = {"member": member, "label": character, "surname": surname, "name": name}
+    if preview:
+        d = api(guild).post("/api/members/armory/find", {k: v for k, v in body.items() if v is not None})
+        f = d.get("found") or {}
+        return " ".join(d.get("sentences") or []) + f" To link it: armory_id={f.get('id')}."
+    if armory_id is None:
+        raise ToolError("Preview first (preview=true) and pass the armory_id it shows: another character can answer to that name.")
+    return msg(api(guild).post("/api/members/armory/link", {**{k: v for k, v in body.items() if v is not None}, "armory_id": armory_id}, actor=True))
+
+
+@mcp.tool()
+def unlink_character(member: str, character: str, preview: bool = False, guild: Guild = None) -> str:
+    """Unlink a member's character from the armory: the record keeps what it last had, and its professions are kept by
+    hand from then on. A decision: needs OIBOT_MCP_ACTOR; `preview=true` = the sentences only (no actor)."""
+    d = api(guild).post("/api/members/armory/unlink", {"member": member, "label": character, "preview": bool(preview)}, actor=not preview)
+    return " ".join(d.get("sentences") or []) if preview and isinstance(d, dict) else msg(d)
+
+
+@mcp.tool()
+def move_character(member: str, character: str, to: str, preview: bool = False, guild: Guild = None) -> str:
+    """Move one character to another member (`to` = a name or id): the record with its wishlist, regular spots and armory
+    link, its past loot and attendance, its signups and seats on live runs. Both get a notice, nobody a DM. Refused while
+    it holds an open ask, or when `to` already has a character of that name. A decision: needs OIBOT_MCP_ACTOR;
+    `preview=true` = the sentences only (no actor)."""
+    d = api(guild).post("/api/members/move", {"member": member, "label": character, "to": to, "preview": bool(preview)}, actor=not preview)
+    return " ".join(d.get("sentences") or []) if preview and isinstance(d, dict) else msg(d)
+
+
+@mcp.tool()
+def apply_armory_seed(picks: list[dict], rev: str | None = None, preview: bool = False, guild: Guild = None) -> str:
+    """Link the seed's picks: [{member (name or id), character, armory_id}] — usually the `sure` rows of armory_seed, and
+    the likely ones the person confirmed. `rev` = armory_seed's (a proposal that moved since is refused: read it again).
+    Each pick is linked on its own; a refused one is named and never stops the others. A decision: needs OIBOT_MCP_ACTOR;
+    `preview=true` = the sentences only (no actor)."""
+    if not rev:
+        raise ToolError("Preview first: read armory_seed and pass its rev, so a proposal that changed meanwhile is not applied.")
+    rows = [{"member": str(p.get("member") or p.get("uid") or ""), "character": p.get("character") or p.get("label"), "armory_id": p.get("armory_id")}
+            for p in picks if isinstance(p, dict)]
+    d = api(guild).post("/api/armory/seed/apply", {"rev": rev, "picks": rows, "preview": bool(preview)}, actor=not preview)
+    return " ".join(d.get("sentences") or []) if preview and isinstance(d, dict) else msg(d)
+
+
 @mcp.tool()
 def revoke_companion(token: str, preview: bool = False, guild: Guild = None) -> str:
     """Revoke a loot-companion token (owner): `token` = its id (ft-…) or its label from list_companions. The companion

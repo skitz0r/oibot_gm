@@ -608,6 +608,22 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
                  f"{to.display_name} is already on {rc.run_words(reg, a_run)}, so sort that out first."):
         dump.add("move refusal", text[:24], [text], link_names)
 
+    # ---- the site's armory routes (armory link §5.4, §5.5; web/api_armory.py): Give to a member…, the seed's confirm,
+    # Sync now's answer and the routes' own refusals
+    from oibot_gm.web import api_armory
+
+    for main in (True, False):
+        dump.add("armory_give_consequence", f"profile, main={main}", cq.armory_give_consequence(reg, am, other, main=main), link_names)
+        dump.add("armory_give_consequence", f"roster, no class, main={main}", cq.armory_give_consequence(reg, am, low, main=main), link_names)
+    for n in (1, 2, 12):
+        dump.add("armory_seed_consequence", f"{n} picks", cq.armory_seed_consequence(n), link_names)
+    for result in ("updated", "unchanged", "missing", "limited"):
+        dump.add("armory_sync_sentence", result, [cq.armory_sync_sentence("Bram Kettle", result)], link_names)
+    for text in (api_armory.LOOK_FIRST, api_armory.FOUND_ANOTHER, api_armory.NO_GUILD_YET, api_armory.NOT_READ_YET, api_armory.SEED_CHANGED,
+                 api_armory.NO_PICKS, api_armory.NOT_REGISTERED, api_armory.SPEC_NEEDED.format(name="Bram Kettle"),
+                 api_armory.NO_CLASS.format(name="Bram Kettle")):
+        dump.add("armory route refusal", text[:24], [text], link_names)
+
     # ---- appeals
     from oibot_gm import appeals
 

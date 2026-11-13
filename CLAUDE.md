@@ -616,6 +616,17 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        GET /api/me/guide/explorer (inline, its own CSP sandbox, no-store), /file/{name} (the three downloads) — the folder is
                        always the session's own uid; /api/meta.guides = the version has the tool. The library (§5.63): GET /api/guides/library,
                        POST …/upload and …/{id}/download (members, never MCP), …/{id}/withdraw|restore (officers live, `preview` → sentences, MCP actor)
+  web/api_armory.py    install_armory_api (called from api.py; armory link §5.2, §5.4, §5.5) = thin callers of the discord_armory / armory_seed
+                       verbs: POST /api/me/armory/find|link|unlink|switch|sync (the session's own character by `label`, never a uid) and
+                       /api/members/armory/<same> (officers, `uid` | `member`); link names the `armory_id` its find showed (else 400 LOOK_FIRST,
+                       another → 409); POST /api/members/armory/give (officers: link the member's `label`, else register the roster row through
+                       discord_people.save_characters — `spec` required, an existing member only, D2 — then link); GET /api/armory/map (officers:
+                       per visible member each named character, `unclaimed`, the roster's age); GET /api/armory/seed + POST …/seed/apply
+                       (`rev` → 409 with the fresh proposal); POST /api/members/move (discord_armory.move_character). Every write `preview`s;
+                       from MCP a write needs the actor (D8); 404 where armory.available is false; `member` published after each write and on
+                       every roster read (discord_armory.ROSTER_LISTENERS). char_extras = the character rows' `armory`, `profession_sync`,
+                       `flags` (web/api.py char_json). MCP: armory_map, armory_seed, link_character, unlink_character, move_character,
+                       apply_armory_seed (tests/test_parity_matrix.py ARMORY: Discord pending until the wizards land)
   web/api_professions.py  install_professions_api (called from api.py; design §5.60, §5.64): GET /api/professions (every member: each profession's
                        crafters + the catalog; `officer`; officers' `unmatched`), GET /api/professions/find?q=&profession= (who_can_make; 25 rows + `total`;
                        a row's `listed` / `category` / `makes` / `reagents` / `nobody` = nobody_sentence; `message` = answer_lines, `more` = more_sentence),

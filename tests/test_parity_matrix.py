@@ -314,3 +314,65 @@ def test_the_guide_library_has_its_discord_and_web_paths_mcp_tools_and_written_e
     assert not missing, "\n".join(missing)
     assert {"guide_upload", "guide_get"} <= set(configops.BY_DESIGN_ONLY)
     assert not any("guide" in t and ("upload" in t or "download" in t or "issue" in t) for t in mcp_tools), "MCP never uploads or fetches a guild guide"
+
+
+# a character's armory link (armory link §5.2, §5.4, §5.5): features, not ops — never plain text (configops.BY_DESIGN_ONLY
+# armory_link / armory_seed / armory_move). The site's routes (web/api_armory.py) and MCP's tools are here; Discord's wizards
+# (task 12: the character wizard's Link… / Unlink… / Keep professions by hand / Sync now / Move to another member…, /roster
+# armory's sure batch) are ARMORY_DISCORD_PENDING until they land — each then gains its "discord" ref and leaves that table.
+ARMORY: dict[str, dict[str, str]] = {
+    "find": {"web": "POST /api/me/armory/find", "mcp": "link_character"},  # MCP: link_character(preview=true)
+    "find_for": {"web": "POST /api/members/armory/find", "mcp": "link_character"},
+    "link": {"web": "POST /api/me/armory/link", "mcp": "link_character"},
+    "link_for": {"web": "POST /api/members/armory/link", "mcp": "link_character"},
+    "unlink": {"web": "POST /api/me/armory/unlink", "mcp": "unlink_character"},
+    "unlink_for": {"web": "POST /api/members/armory/unlink", "mcp": "unlink_character"},
+    "switch": {"web": "POST /api/me/armory/switch"},
+    "switch_for": {"web": "POST /api/members/armory/switch"},
+    "sync": {"web": "POST /api/me/armory/sync"},
+    "sync_for": {"web": "POST /api/members/armory/sync"},
+    "give": {"web": "POST /api/members/armory/give"},
+    "map": {"web": "GET /api/armory/map", "mcp": "armory_map"},
+    "seed": {"web": "GET /api/armory/seed", "mcp": "armory_seed"},
+    "seed_apply": {"web": "POST /api/armory/seed/apply", "mcp": "apply_armory_seed"},
+    "move": {"web": "POST /api/members/move", "mcp": "move_character"},
+}
+ARMORY_MCP_EXEMPT = {
+    "switch": "how a character's professions are kept is the member's own choice on the Me page or in Discord; no MCP tool was asked for",
+    "switch_for": "an officer flips it on the Members page or in Discord's character wizard; no MCP tool was asked for",
+    "sync": "Sync now is a refresh a person presses beside the character; the hourly check does the same for MCP's reads",
+    "sync_for": "Sync now is a refresh a person presses beside the character; the hourly check does the same for MCP's reads",
+    "give": "Give to a member… registers a character from the guild's roster on the Members page's not-claimed fold; MCP links an existing one",
+}
+ARMORY_DISCORD_PENDING = {
+    action: "task 12 (phase 2) adds it to Discord: the character wizard's armory actions, /roster armory, Move to another member…"
+    for action in ("find", "find_for", "link", "link_for", "unlink", "unlink_for", "switch", "switch_for", "sync", "sync_for", "seed_apply", "move")
+}
+ARMORY_DISCORD_EXEMPT = {
+    "give": "Give to a member… lives on the site's not-claimed fold beside the roster rows (§5.4); Discord shows the counts",
+    "map": "the map is a table of every member's characters (the Members page); Discord shows the counts in /roster armory",
+    "seed": "the per-row review is the site's (task 12 designer's call); Discord shows the counts and links the sure batch",
+}
+
+
+def test_the_armory_link_has_web_routes_mcp_tools_and_written_gaps(mcp_tools, web_routes, slash_paths):
+    missing = []
+    for action, row in ARMORY.items():
+        if row["web"] not in web_routes:
+            missing.append(f"armory {action}/web: {row['web']!r}")
+        if "mcp" in row:
+            assert action not in ARMORY_MCP_EXEMPT, f"armory {action}: an MCP tool AND an exemption"
+            if row["mcp"] not in mcp_tools:
+                missing.append(f"armory {action}/mcp: {row['mcp']!r}")
+        else:
+            assert len(ARMORY_MCP_EXEMPT.get(action, "")) > 15, f"armory {action}: no MCP tool — say why"
+        if "discord" in row:
+            assert action not in ARMORY_DISCORD_PENDING and action not in ARMORY_DISCORD_EXEMPT, f"armory {action}: a Discord path AND a gap"
+            if not discord_path_exists(row["discord"], slash_paths):
+                missing.append(f"armory {action}/discord: {row['discord']!r}")
+        else:
+            why = ARMORY_DISCORD_PENDING.get(action) or ARMORY_DISCORD_EXEMPT.get(action, "")
+            assert len(why) > 15, f"armory {action}: no Discord path — say why"
+            assert not (action in ARMORY_DISCORD_PENDING and action in ARMORY_DISCORD_EXEMPT), action
+    assert not missing, "\n".join(missing)
+    assert {"armory_link", "armory_seed", "armory_move"} <= set(configops.BY_DESIGN_ONLY)
