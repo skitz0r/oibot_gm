@@ -734,8 +734,10 @@ def _loot(ask: Ask) -> list[str]:
              + [f for c in m.characters for f in c.former_names]}  # an award or precedent under a name before a rename (design §5.2)
     if names:
         ids = {m.discord_id for m in named}
-        # an award with a Discord id is decided by the id; an id-less row by whose character the name is (design §5.2)
-        mine_l = [a for a in ledger if a.discord_id in ids or (a.discord_id is None and (h := reg.award_holder(a)) is not None and h[0].discord_id in ids)]
+        # an award with a Discord id is decided by the id — its member now, through a character move (§5.4); an id-less
+        # row by whose character the name is (design §5.2)
+        mine_l = [a for a in ledger if (reg.owner_of_award(a) in ids if a.discord_id is not None
+                                        else (h := reg.award_holder(a)) is not None and h[0].discord_id in ids)]
         mine_p = [r for r in prec if str(r.get("human", "")).lower() in names or str(r.get("bot", "")).lower() in names]
         out.append(f"for the member(s) named: {len(mine_l)} award(s), {len(mine_p)} precedent(s)")
         out += _block("loot-named", [l_line(a) for a in mine_l[-10:]] + [p_line(r) for r in mine_p[-5:]])

@@ -948,6 +948,69 @@ def relabel_runs(rs: RaidStore, uid: int, old: str, new: str, by: str = "") -> l
     return out
 
 
+def character_entries(ev: RaidEvent, uid: int, names: set[str]) -> list:
+    """Member `uid`'s entries on run `ev` that carry a character answering to one of `names` (lower case): their
+    signup, their seats (selected and benched) and their callouts. A character move carries them over (move_on_runs)."""
+    out: list = []
+    sg = ev.signups.get(str(uid))
+    if sg is not None and sg.character.strip().lower() in names:
+        out.append(sg)
+    out += [p for r in ev.rosters for p in r.selected + r.benched if (p.character or "").strip().lower() in names and player_uid(ev, p) == uid]
+    out += [co for co in ev.callouts if co.discord_id == uid and co.character.strip().lower() in names]
+    return out
+
+
+def on_run(ev: RaidEvent, uid: int) -> bool:
+    """Whether member `uid` is on run `ev` at all: an answer, a seat, a callout or an open ask."""
+    return (str(uid) in ev.signups or ev.seat_of(uid) is not None or any(co.discord_id == uid for co in ev.callouts)
+            or any(a.discord_id == uid and a.pending for a in ev.fill_asks))
+
+
+def move_on_runs(rs: RaidStore, uid: int, to, names: set[str], label: str, *, series_add=frozenset(), series_drop=frozenset(),
+                 by: str = "") -> list[str]:
+    """A character moved from member `uid` to member `to` (Registry.move_character, design §5.4): on every LIVE run
+    (open or locked) its signup, seats and callouts change owner (the id and the display name), and with the signup
+    the member's pins, board place, lock seat, follow-on leave and nudge; a run of a series in `series_add` lists
+    `to` among its regulars, one in `series_drop` no longer lists `uid`. The caller refused a run where `to` is
+    already on it (Registry.move_refusal) and any open ask. Each changed run saved once (the caller's store.batch makes
+    it one commit); finished and cancelled runs keep who played. Returns the run keys changed."""
+    out = []
+    a, b = str(uid), str(to.discord_id)
+    for ev in rs.live():
+        hits = character_entries(ev, uid, names)
+        changed = bool(hits)
+        sg = ev.signups.get(a)
+        if sg is not None and any(x is sg for x in hits):
+            old_name = sg.display_name
+            ev.signups = {(b if k == a else k): v for k, v in ev.signups.items()}
+            if a in ev.pins:
+                ev.pins = {(b if k == a else k): v for k, v in ev.pins.items()}
+            if ev.layout:
+                ev.layout = [[to.display_name if n == old_name else n for n in g] for g in ev.layout]
+            for field in ("lock_seats", "leaving", "nudged"):
+                ids = getattr(ev, field)
+                if ids and uid in ids:
+                    setattr(ev, field, [to.discord_id if i == uid else i for i in ids])
+        for x in hits:
+            if isinstance(x, Player):
+                x.signup_name = to.display_name
+            else:
+                x.display_name = to.display_name
+            x.discord_id = to.discord_id
+        if ev.series and ev.series in series_add and to.discord_id not in ev.regulars:
+            ev.regulars = list(ev.regulars) + [to.discord_id]
+            changed = True
+        if ev.series and ev.series in series_drop and uid in ev.regulars:
+            ev.regulars = [i for i in ev.regulars if i != uid]
+            changed = True
+        if not changed:
+            continue
+        ev.log.append(f"{label} moved to {to.display_name}" + (f" (by {by})" if by else ""))
+        rs.save(ev, f"{label} moved to {to.display_name}")
+        out.append(ev.key)
+    return out
+
+
 def stamp_log(ev: RaidEvent) -> None:
     """Every log line gets a stamp the first time the run is saved after it was written (lines are appended right
     before a save, so the save time is the line's time). `ev.log_at` follows `ev.log` index for index; a line removed

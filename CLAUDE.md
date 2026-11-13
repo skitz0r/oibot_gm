@@ -73,6 +73,8 @@ src/oibot_gm/
                        A character's link (§5.2): armory_link_consequence(reg, m, c, found, by_id) (what the armory or the roster shows, the name and the
                        professions it takes — from level 10 when found on the roster), armory_unlink_consequence(reg, m, c, by_id) (kept by hand from now
                        on), profession_sync_consequence(on, label, current=) (on: the hand edits are replaced and can't be brought back; already so → one sentence)
+                       A move (§5.4): move_consequence(reg, m_from, c, m_to) (it moves with its past loot, attendance, signups, wishlist and regular spots;
+                       both see a notice; move it back the same way)
   inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
@@ -123,7 +125,9 @@ src/oibot_gm/
                        missing_since once, never an unlink; a recipe id the list lacks is kept and told to ops once (out/armory/<key>/recipes_reported.json).
                        In memory per guild key: last check / Last-Modified per armory id, Sync now's limit (stamped only after a check that worked), the warn throttle
                        (per kind: armory | roster-missing | professions:<id> | name:<id>); one asyncio lock per guild. A roster failure waits an hour per guild id.
-                       No DM, no notice — ever
+                       No DM, no notice — ever, but for the move: move_character(bot, reg, from_id, label, to_id, by, *, by_id, via, preview) (§5.4;
+                       officers only, PRIV_LIVE, OFFICER_ONLY["move"]; preview = consequences.move_consequence; Registry.move_character on the loop
+                       under the board locks of Registry.move_runs with the bot's RaidStore, sheets redrawn, one audit line; the verb writes both notices)
   armory_seed.py       the seed (armory link §5.5, D8): propose(reg, roster, *, taken_at=) → Seed{sure, likely, none, unclaimed, rev} of
                        SeedRow{uid, member, label, cls, candidate, why same name|close name|display name, others} — PURE (no request, no write);
                        active, named, unlinked characters of real members still here; sure = first name (case-folded) + class on exactly one
@@ -189,7 +193,8 @@ src/oibot_gm/
                        and escaped; the card + a PUBLIC thread "loot · <member> · <item>" on officer_channel; no channel → waits on Loot › Appeals)
                        and resolve_appeal (one OUTCOMES choice, officers' note, the member's `appeal` NOTICE — never a DM — card to its final state,
                        thread archived, thread_close_line escapes the note); officer_details = the council's record (D2: Details button / Loot ›
-                       Appeals only, never the card);
+                       Appeals only, never the card); appeal_owner / owner_name = whose the question is NOW (Registry.owner_of on the asker: a
+                       moved character's questions follow it — of_member(uid, reg), the resolve notice, the officers' row; the file is never rewritten);
                        AppealButton `appeal.<gk>:details|resolve:<id>`; APPEAL_LISTENERS → `loot:appeals`; MCP list_appeals / resolve_appeal
                        (actor, D8) — never opens one. NO LLM anywhere
   flows_appeal.py      me_loot_ask (/me loot-ask: award select — the newest 25, its first line points at the site for older ones — → one prose
@@ -272,6 +277,18 @@ src/oibot_gm/
                        already registered here. Ask an officer."); the old label → former_names (a name taken back leaves it); ONE commit = the member +
                        every live run's labels (rc.relabel_runs: signup, seats, fill asks, callouts; `relabelled` gets the keys to redraw) + their
                        placement asks; the ledger, award ids, appeals and finished / cancelled runs keep the old name; the same name = no write
+                       A move (§5.4, the owner's decision 2026-11-12): move_character(from_id, label, to_id, by, *, rs (REQUIRED), by_id, moved) = THE
+                       move of a record to another member (wishlist, regular spots — one per member per series: a spot the new member holds stays theirs —,
+                       armory link, former names travel; an alt, or the main when they have none; the old member's next character is their main, R3);
+                       ONE commit = both members + a row of <guild>/character_moves.jsonl {label, name, names, armory_id, from, to, by, by_id, at}
+                       (append-only, character_moves() cached by stat) + every live run (rc.move_on_runs) + the answered placement asks on them + a
+                       `character` notice to each (never a DM); move_refusal (one sentence: an open ask, a name the new member's records answer to, not
+                       registered / left / the same member / puppet ↔ real, a move TO yourself — owner aside —, the new member already on a live run the
+                       character is on). owner_of(uid, label, when) = THE resolver of "whose award / attendance": an entry under `uid` for a character
+                       moved away after `when` → the member it went to (chains fold; a day = its guild-local first moment; no moves = uid, a stat only);
+                       owner_of_award(a) feeds award_holder, My loot, received marks, scoring, the loot log, help, appeals and the loot-log notice;
+                       attendance rows resolve through _attendance_row_now (one row per run, the member's own entry first). The ledger, finished runs and
+                       appeal files are never rewritten
                        The link's writes (§5.2/§5.3, one commit each, under the member-write lock): armory_holder(id) (one claim per armory character per
                        guild: an ACTIVE character of a real member, never a puppet), armory_linked() (what the hourly check reads: no puppets, nobody who left, no retired character),
                        armory_character(uid, id) (found by the link, never a name), link_refusal(uid, label, id, name, surname, by_id=, officer=) (a test puppet /
@@ -333,7 +350,9 @@ src/oibot_gm/
                        leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run.
                        People (§5.41): character_changes / character_effects / character_preview / after_character_change (a respec rewrites the
                        sheet answers; a retired / deleted / respecced seat is freed — a role flip on a locked RECURRING run keeps it); join_while_away;
-                       relabel_runs(rs, uid, old, new) = a renamed character's label in every LIVE run (Registry.rename_character's batch)
+                       relabel_runs(rs, uid, old, new) = a renamed character's label in every LIVE run (Registry.rename_character's batch);
+                       move_on_runs(rs, uid, to, names, label, series_add=, series_drop=) = a moved character's signup, seats, callouts (+ pins, board,
+                       lock seat, leave, nudge, regulars) to its new member on every LIVE run (Registry.move_character's batch); character_entries / on_run
                        Raid night (design §5.39): expire_confirmations expires only a held ask (locked runs only); unasked_seats (the lock's recovery: only
                        RaidEvent.lock_seats, the seats at the flip — never a fill-seated or later seat; legacy_lock_sent = a pre-field run is stamped); cancel_effects;
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;

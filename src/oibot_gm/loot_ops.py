@@ -489,10 +489,12 @@ async def apply_async(reg: Registry, op, by: str, bot, by_id: int | None, via: s
 def member_awards(reg: Registry, ctx, m, limit: int = 50) -> list:
     """A member's live awards, newest first: by Discord id, and by character name for rows recorded without one (a
     sub stored by name who registered later; a name the character had before a rename counts, a current name of
-    someone else's character wins — Registry.award_holder, design §5.2). What My loot shows — never anyone else's."""
+    someone else's character wins — Registry.award_holder, design §5.2); a character moved to them brings its past
+    awards, one moved away takes them (Registry.owner_of_award, §5.4). What My loot shows — never anyone else's."""
     if m is None:
         return []
-    rows = [a for a in ctx.ledger if a.discord_id == m.discord_id or (a.discord_id is None and (h := reg.award_holder(a)) is not None and h[0] is m)]
+    rows = [a for a in ctx.ledger if (reg.owner_of_award(a) == m.discord_id if a.discord_id is not None
+                                       else (h := reg.award_holder(a)) is not None and h[0] is m)]
     rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
     return rows[:max(0, int(limit))]
 
@@ -533,7 +535,7 @@ def received_map(reg: Registry, ctx, m) -> dict[tuple[str, str], str]:
 
     out: dict[tuple[str, str], str] = {}
     for a in (ctx.ledger if m else []):
-        if a.discord_id not in (None, m.discord_id):
+        if a.discord_id is not None and reg.owner_of_award(a) != m.discord_id:  # its member now: a moved character's too (§5.4)
             continue
         h = reg.award_holder(a)  # keyed by the character's name NOW: an award under a former name marks it too (design §5.2)
         if h is None or h[0] is not m or h[1] is None:

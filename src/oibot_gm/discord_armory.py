@@ -55,7 +55,8 @@ SYNC_LIMITED = "Updated a moment ago. Try again in a few minutes."
 OFFICER_ONLY = {"link": "Only an officer links another member's character.",
                 "unlink": "Only an officer unlinks another member's character.",
                 "switch": "Only an officer changes how another member's professions are kept.",
-                "sync": "Only an officer updates another member's character from the armory."}
+                "sync": "Only an officer updates another member's character from the armory.",
+                "move": "Only an officer moves a character to another member."}
 
 
 def _now() -> datetime:
@@ -487,6 +488,35 @@ async def set_profession_sync(bot, reg, uid: int, label: str, on: bool, by: str,
             except ArmoryError as e:
                 log.info("[%s] professions follow the armory again; the check waits: %s", reg.key, e)
     return reg.armory_character(uid, c.armory.id) or c
+
+
+async def move_character(bot, reg, from_id: int, label: str, to_id: int, by: str, *, by_id, via=None, preview: bool = False):
+    """THE move to another member (spec §5.4, the owner's decision 2026-11-12): member `from_id`'s character `label` becomes
+    member `to_id`'s, and everything follows it — the record (Registry.move_character), its past loot and attendance
+    (resolved through the moves file, Registry.owner_of), its signups and seats on live runs. Officers only, decided live
+    (PRIV_LIVE); moving a character to yourself is refused by the verb (the owner aside). Refused, nothing written:
+    Registry.move_refusal's sentence. `preview` → consequences.move_consequence, nothing written. The write runs on the
+    loop under the board locks of every live run it may touch, with the bot's own RaidStore, then those sheets are
+    redrawn; one audit line. Both members get a notice (the verb writes them), nobody a DM. → the character."""
+    from .consequences import move_consequence
+    from .discord_people import _board_locks
+
+    if not await _officer(bot, reg, by_id):
+        raise RegistryError(OFFICER_ONLY["move"])
+    rs = _rs(bot, reg)
+    why = reg.move_refusal(from_id, label, to_id, rs=rs, by_id=by_id)
+    if why:
+        raise RegistryError(why)
+    m_from, m_to = reg.members[int(from_id)], reg.members[int(to_id)]
+    c = reg.own_character([x for x in m_from.characters if x.name], label)
+    if preview:
+        return move_consequence(reg, m_from, c, m_to)
+    keys: list[str] = []
+    async with _board_locks(bot, reg, reg.move_runs(from_id, label, to_id, rs=rs)):
+        c = reg.move_character(from_id, label, to_id, by, rs=rs, by_id=by_id, moved=keys)  # re-checks every refusal
+    await _redraw(bot, reg, rs, keys)
+    await _audit(bot, reg, by, f"moved {m_from.display_name}'s {c.label} to {m_to.display_name}", via=via, by_id=by_id)
+    return c
 
 
 # ------------------------------------------------------------------ the check (spec §5.3)

@@ -574,6 +574,19 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
                  "Bram Kettle's professions come from the armory, so turn on Keep professions by hand to edit them."):
         dump.add("armory refusal", text[:24], [text], link_names)
 
+    # ---- a character moved to another member (armory link §5.4): the confirm, then every refusal the verb says
+    to = ms[1]
+    dump.add("move_consequence", "the main", cq.move_consequence(reg, am, ac, to), link_names)
+    dump.add("move_consequence", "an alt", cq.move_consequence(reg, am, SimpleNamespace(label="Bram Kettle", is_main=False), to), link_names)
+    a_run = SimpleNamespace(instance=RID, team=RID, start=reg.now_local() + timedelta(days=3))
+    for text in ("They have no registered characters yet.", f"{am.display_name} has no character named Bram Kettle.",
+                 "The new owner has to register here first.", f"Bram Kettle is already {am.display_name}'s.",
+                 "A test character never moves to or from a real member.", "Another officer moves a character to you.",
+                 f"{to.display_name} has left the server.", f"{to.display_name} already has a character called Bram Kettle.",
+                 "Bram Kettle has an open ask. Withdraw it first.",
+                 f"{to.display_name} is already signed up for {rc.run_words(reg, a_run)}, so sort that signup out first."):
+        dump.add("move refusal", text[:24], [text], link_names)
+
     # ---- appeals
     from oibot_gm import appeals
 

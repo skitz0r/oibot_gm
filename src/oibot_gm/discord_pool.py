@@ -1133,8 +1133,9 @@ def loot_log_line(reg: Registry, award, was: str | None, ico=None) -> str:
     icon = ""
     if ico is not None:
         hit = None
+        owner = reg.owner_of_award(award)  # its member now (a character moved since, §5.4)
         for m in reg.members.values():
-            if award.discord_id is not None and m.discord_id != award.discord_id:
+            if owner is not None and m.discord_id != owner:
                 continue
             hit = next((c for c in m.characters if c.label.lower() == award.raider.lower()), None)
             if hit is not None:
@@ -1183,7 +1184,7 @@ def award_notice(reg: Registry, award, was: str | None) -> None:
     text = ("Loot correction: " if was else "Loot: ") + line
     to: list[int] = []
     if award.raider != DISENCHANT and award.discord_id is not None:
-        to.append(int(award.discord_id))
+        to.append(int(reg.owner_of_award(award)))
     if was and was != DISENCHANT:
         try:
             hit = reg.find(was)

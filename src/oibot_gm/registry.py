@@ -36,8 +36,9 @@ NOTICE_CAP = 20
 NOTICE_DAYS = 30
 NOTICE_TEXT_MAX = 300
 NOTICE_KINDS = ("not_rostered", "released", "answered_for_you", "cancelled", "schedule_removed", "application", "loot_award", "ask_closed", "confirmed",
-                "appeal", "guide")  # appeal: the council answered a member's question about an award (appeals.py, design §5.49);
-# guide: an officer withdrew the member's guild guide upload (guides/library.py, design §5.63)
+                "appeal", "guide", "character")  # appeal: the council answered a member's question about an award (appeals.py, design §5.49);
+# guide: an officer withdrew the member's guild guide upload (guides/library.py, design §5.63);
+# character: an officer moved a character from one member to another (Registry.move_character, armory link §5.4)
 MAX_ABSENCE_DAYS = 120
 ABSENCE_REASON_MAX = 200  # an absence's reason (officer-only prose), capped at the verb so every surface refuses alike
 PLAYER_RANKS = ("trial", "raider", "core")
@@ -46,6 +47,25 @@ DEFAULT_RAID_SIZE = 20  # when neither the roster nor the raid says
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _moment(x) -> datetime | None:
+    """A time as an aware datetime: an ISO stamp (no zone = UTC), a date or a 'YYYY-MM-DD' (its first moment, UTC), or
+    None when there is none or it can't be read. What a character move compares an award's or a run's time with."""
+    from datetime import date
+
+    if x is None:
+        return None
+    if isinstance(x, datetime):
+        t = x
+    elif isinstance(x, date):
+        t = datetime(x.year, x.month, x.day)
+    else:
+        try:
+            t = datetime.fromisoformat(str(x).strip())
+        except ValueError:
+            return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
 WISHLIST_MAX = 10  # items per character (D5)
@@ -2283,12 +2303,13 @@ class Registry:
         return was[0] if len(was) == 1 else None
 
     def award_holder(self, a) -> tuple[Member, RegisteredCharacter | None] | None:
-        """(member, character) an award belongs to. A row with a Discord id is decided by the id: that member, and their
+        """(member, character) an award belongs to. A row with a Discord id is decided by the id (resolved through
+        character moves — owner_of_award, §5.4): that member, and their
         character by the recorded name (current first, then former; None when the character is gone) — never another
         member's, whatever the name. A row with no id by the full name, a current name first. None: nobody registered
         (a sub, a guest, a disenchant, a former name two characters had)."""
         if a.discord_id is not None:
-            m = self.members.get(a.discord_id)
+            m = self.members.get(self.owner_of_award(a))  # a character moved since: its member now (design §5.4)
             return (m, self.own_character(m.characters, a.raider)) if m is not None else None
         return self.find_full(a.raider)
 
@@ -2308,6 +2329,190 @@ class Registry:
             return bool(str(a or "").strip())
         ha, hb = self.find_full(a), self.find_full(b)
         return ha is not None and hb is not None and ha[1] is hb[1]
+
+    # ---- a character moved to another member (armory link, design §5.4 "Move to another member…", the owner's decision
+    # 2026-11-12): everything follows the character. The ledger, finished runs and appeal files are never rewritten; the
+    # move is one row of <guild>/character_moves.jsonl and owner_of is THE resolver of "whose award / whose attendance".
+    MOVES_FILE = "character_moves.jsonl"
+
+    def character_moves(self) -> list[dict]:
+        """Every move of the guild, oldest first: {label, name, names, armory_id, from, to, by, by_id, at} — read once and
+        cached against the file's size and mtime (another process's append is read on the next call). [] = none ever."""
+        p = self.store.root / self.key / self.MOVES_FILE
+        try:
+            st = p.stat()
+        except OSError:
+            return []
+        stamp = (st.st_size, st.st_mtime_ns)
+        held = self.__dict__.get("_moves")
+        if held is not None and held[0] == stamp:
+            return held[1]
+        rows = [r for r in self.store.read_jsonl(Path(self.key) / self.MOVES_FILE)
+                if isinstance(r, dict) and str(r.get("from", "")).isdigit() and str(r.get("to", "")).isdigit()]
+        self.__dict__["_moves"] = (stamp, rows)
+        return rows
+
+    def owner_of(self, uid: int | None, label: str | None, when=None) -> int | None:
+        """Whose an entry recorded under member `uid` for the character `label` at time `when` (an award, a run's seat)
+        is NOW: `uid`, unless that character was moved away from them after `when` — then the member it went to, and so
+        on through later moves (a chain folds). The character is known by any name it answered to at the move (its label
+        or a former name), or by its first name when `uid` holds no character answering to that first name. An entry
+        dated at or after the move stays with `uid` (a name they took again later); an entry with no time counts as
+        before; a day alone (a date, 'YYYY-MM-DD') is its first moment in the guild's time zone. None for no `uid`. No
+        moves: `uid` itself, nothing read but the file's stat."""
+        from datetime import date
+
+        if uid is None:
+            return None
+        cur = int(uid)
+        rows = self.character_moves()
+        n = str(label or "").strip().lower()
+        if not rows or not n:
+            return cur
+        if isinstance(when, str) and len(when.strip()) == 10:
+            try:
+                when = date.fromisoformat(when.strip())
+            except ValueError:
+                pass
+        if isinstance(when, date) and not isinstance(when, datetime):
+            when = datetime(when.year, when.month, when.day, tzinfo=self.tz)
+        t = _moment(when)
+        for r in rows:  # oldest first: a chain folds in the order it happened
+            if int(r["from"]) != cur:
+                continue
+            at = _moment(r.get("at"))
+            if t is not None and at is not None and t >= at:
+                continue
+            names = {str(x).strip().lower() for x in (r.get("names") or [r.get("label")]) if x}
+            first = str(r.get("name") or "").strip().lower()
+            if n in names or (n == first and self._first_name_free(cur, n)):
+                cur = int(r["to"])
+        return cur
+
+    def _first_name_free(self, uid: int, first: str) -> bool:
+        m = self.members.get(uid)
+        return m is None or self.own_character([c for c in m.characters if c.name], first) is None
+
+    def owner_of_award(self, a) -> int | None:
+        """The member an award recorded with a Discord id belongs to now: its `discord_id` resolved through the moves
+        (owner_of, at the award's confirmation, else its day). None for a row recorded without an id (award_holder reads
+        its name)."""
+        uid = getattr(a, "discord_id", None)
+        if uid is None:
+            return None
+        return self.owner_of(uid, getattr(a, "raider", None), getattr(a, "confirmed_at", None) or getattr(a, "received", None))
+
+    def move_refusal(self, from_id: int, label: str, to_id: int, *, rs, by_id: int | None = None) -> str | None:
+        """Why member `from_id`'s character `label` can't move to member `to_id` now, in one sentence, else None. `rs` = the
+        live runs (a raidcycle.RaidStore). Rights are the caller's (officers); the verb refuses moving a character TO
+        yourself (the owner aside: like confirming your own character, another officer does it) — FROM yourself is how
+        an officer fixes their own wrong claim."""
+        from . import raidcycle as rc
+
+        m = self.members.get(int(from_id))
+        if m is None:
+            return "They have no registered characters yet."
+        c = self.own_character([x for x in m.characters if x.name], label)
+        if c is None:
+            return f"{m.display_name} has no character named {str(label or '').strip() or '?'}."
+        to = self.members.get(int(to_id)) if str(to_id or "").isdigit() else None
+        if to is None:
+            return "The new owner has to register here first."
+        if to is m:
+            return f"{c.label} is already {m.display_name}'s."
+        if bool(m.test) != bool(to.test):
+            return "A test character never moves to or from a real member."
+        why = self.puppet_refusal(m, by_id) or self.puppet_refusal(to, by_id)
+        if why:
+            return why
+        if by_id is not None and int(by_id) == to.discord_id and not self.is_owner_id(by_id):
+            return "Another officer moves a character to you."
+        if to.left_at:
+            return f"{to.display_name} has left the server."
+        names = [c.label] + list(c.former_names)
+        for x in to.characters:
+            hit = next((n for n in names if x.name and self.same_character(x, n)), None)
+            if hit:
+                return f"{to.display_name} already has a character called {hit}."
+        low = {n.lower() for n in names}
+        live = rs.live()
+        teams = {ev.team for ev in live}
+        if any(a.get("answer") is None and a.get("roster") in teams and str(a.get("character") or "").strip().lower() in low for a in m.placement_asks) \
+                or any(a.discord_id == m.discord_id and a.pending and a.character.strip().lower() in low for ev in live for a in ev.fill_asks):
+            return f"{c.label} has an open ask. Withdraw it first."
+        for ev in live:
+            if rc.character_entries(ev, m.discord_id, low) and rc.on_run(ev, to.discord_id):
+                return f"{to.display_name} is already signed up for {rc.run_words(self, ev)}, so sort that signup out first."
+        return None
+
+    def move_runs(self, from_id: int, label: str, to_id: int, *, rs) -> list[str]:
+        """The live runs a move of `label` from `from_id` to `to_id` may rewrite (the board locks its caller holds): those
+        where either member has an entry, and those of a series the character is a regular of."""
+        from . import raidcycle as rc
+
+        m = self.members.get(int(from_id))
+        c = self.own_character([x for x in m.characters if x.name], label) if m is not None else None
+        series = set(c.rosters) if c is not None else set()
+        ids = {int(from_id), int(to_id)}
+        return sorted(ev.key for ev in rs.live() if any(rc.on_run(ev, u) for u in ids) or (ev.series and ev.series in series))
+
+    @_member_write
+    def move_character(self, from_id: int, label: str, to_id: int, by: str, *, rs, by_id: int | None = None,
+                       moved: list | None = None) -> RegisteredCharacter:
+        """THE move (design §5.4): member `from_id`'s character `label` (any name it answers to) becomes member `to_id`'s,
+        with everything on the record — wishlist, regular spots, armory link, professions, former names. It arrives as an
+        alt, or as the main when they have none (their rank as it stands, trial for a first character); the old member's
+        next character becomes their main with their rank (R3, settle_ranks). A regular spot in a series the new member
+        already holds with another character stays theirs (one character per member per series): the record drops it.
+        In ONE commit: both member files, the move's row in <guild>/character_moves.jsonl (who, from, to, when — owner_of
+        resolves past awards and attendance through it), every LIVE run in `rs` (a raidcycle.RaidStore — the running
+        bot's, REQUIRED, like rename_character) whose signup, seats, callouts, board, pins or regulars carry the
+        character (rc.move_on_runs), the answered placement asks on those runs, and a notice to each member (kind
+        `character`, never a DM). Refused, nothing written: move_refusal's sentence (RegistryError). `moved` (a list)
+        gets the run keys changed: the sheets a caller redraws. → the character."""
+        from . import raidcycle as rc
+
+        why = self.move_refusal(from_id, label, to_id, rs=rs, by_id=by_id)
+        if why:
+            raise RegistryError(why)
+        m, to = self.members[int(from_id)], self.members[int(to_id)]
+        c = self.own_character([x for x in m.characters if x.name], label)
+        names = [c.label] + [f for f in c.former_names if f.lower() != c.label.lower()]
+        low = {n.lower() for n in names}
+        rank_m, rank_to = member_rank(m), member_rank(to)
+        held = {k for x in to.characters if x.status == "active" for k in x.rosters}
+        kept_series = [k for k in c.rosters if k not in held]
+        left_series = {k for k in c.rosters if not any(k in x.rosters for x in m.characters if x is not c and x.status == "active")}
+        line = f"{m.display_name}: {c.label} moved to {to.display_name} (by {by})"
+        with self.store.batch(f"{self.key}: {line}"):
+            m.characters = [x for x in m.characters if x is not c]
+            if c.is_main:
+                nxt = next((x for x in m.active()), None)
+                if nxt is not None:
+                    nxt.is_main = True
+            settle_ranks(m, rank_m)
+            c.rosters = kept_series
+            c.is_main = to.main is None and c.status == "active"
+            c.updated_at = now()
+            to.characters.append(c)
+            settle_ranks(to, rank_to if c.is_main else None)
+            teams = {ev.team for ev in rs.live()}
+            asks = [a for a in m.placement_asks if a.get("roster") in teams and str(a.get("character") or "").strip().lower() in low]
+            if asks:
+                gone = {a.get("roster") for a in asks}
+                m.placement_asks = [a for a in m.placement_asks if not any(a is x for x in asks)]
+                to.placement_asks = [a for a in to.placement_asks if a.get("roster") not in gone] + asks
+            self.store.append_jsonl(Path(self.key) / self.MOVES_FILE, {
+                "label": c.label, "name": c.name, "names": names, "armory_id": c.armory.id if c.armory else None,
+                "from": m.discord_id, "to": to.discord_id, "by": by, "by_id": by_id, "at": now()})
+            self.notify(m.discord_id, "character", f"{by} moved {c.label} from you to {to.display_name}. Its past loot and attendance went with it.", save=False)
+            self.notify(to.discord_id, "character", f"{by} moved {c.label} from {m.display_name} to you. Its past loot and attendance came with it.", save=False)
+            self.save(m, line)
+            self.save(to, line)
+            keys = rc.move_on_runs(rs, m.discord_id, to, low, c.label, series_add=set(kept_series), series_drop=left_series, by=by)
+        if moved is not None:
+            moved.extend(keys)
+        return c
 
     def find(self, name: str, *, former: bool = True) -> tuple[Member, RegisteredCharacter] | None:
         """By character name: a full name now, then (`former`) one it had before a rename (a current name wins), then a
@@ -3394,12 +3599,35 @@ class Registry:
         """`member`'s (a Member or a Discord id) rows over the window, newest first: {key, start, when, raid, kind,
         outcome rostered|unconfirmed|benched|away|called_out|no_thanks|no_answer, counted, attended (loot factor),
         attended_view (bench counts), character, cls, spec}. Every character of theirs counts (the rollup is by Discord
-        id, never by character name)."""
+        id, never by character name); a character moved to them brings its past runs, one moved away takes them (§5.4)."""
         m = self._attendance_member(member)
         if m is None:
             return []
-        rows = [r for ev in self.attendance_runs_in(window_days, at) if (r := self._attendance_row(m, ev)) is not None]
+        rows = [r for ev in self.attendance_runs_in(window_days, at) if (r := self._attendance_row_now(m, ev)) is not None]
         return sorted(rows, key=lambda r: r["start"], reverse=True)
+
+    def _attendance_row_now(self, m: "Member", ev) -> dict | None:
+        """`m`'s row of a done run as it counts NOW (design §5.4): their own entry, unless the character it carries was
+        moved away from them since (owner_of), else the entry of a member whose character on that night has moved to
+        `m` — one row per run, `m`'s own entry first (they played that night on another character). Without moves: the
+        run's own row, unchanged. Finished run files are never rewritten."""
+        row = self._attendance_row(m, ev)
+        moves = self.character_moves()
+        if not moves:
+            return row
+        uid = m.discord_id
+        if row is not None and self.owner_of(uid, row["character"], ev.starts_at) != uid:
+            row = None
+        if row is not None:
+            return row
+        for x in dict.fromkeys(int(r["from"]) for r in moves):
+            if x == uid:
+                continue
+            xm = self.members.get(x) or Member(discord_id=x, display_name=str(x))  # a record removed since: no asks, no absences
+            rx = self._attendance_row(xm, ev)
+            if rx is not None and self.owner_of(x, rx["character"], ev.starts_at) == uid:
+                return rx
+        return None
 
     def attendance(self, member, window_days: int | None = None, *, bench: bool = False, at: datetime | None = None) -> tuple[int, int]:
         """(attended, total) for `member` (a Member or a Discord id) over the done runs of the window (default the loot

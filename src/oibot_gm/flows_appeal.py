@@ -89,7 +89,7 @@ async def me_loot_ask(interaction: discord.Interaction, reg: Registry, *, award:
     if m is None:
         await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
         return
-    asked = {ap.id for ap in appeals.store_of(reg).of_member(uid)}
+    asked = {ap.id for ap in appeals.store_of(reg).of_member(uid, reg)}
     mine = [(aid, a) for aid, a in appeals.own_awards(reg, guild_ctx(interaction.client, reg), m) if aid not in asked]
     if not mine:
         await interaction.response.send_message("No award to ask about: nothing recorded for you yet, or you've asked about each one already "

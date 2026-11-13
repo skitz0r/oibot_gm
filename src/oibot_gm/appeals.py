@@ -136,7 +136,11 @@ class AppealStore:
         d = self.store.root / self.dir
         return [Appeal.model_validate(yaml.safe_load(f.read_text())) for f in sorted(d.glob("*.yaml"))] if d.exists() else []
 
-    def of_member(self, uid: int) -> list[Appeal]:
+    def of_member(self, uid: int, reg: Registry | None = None) -> list[Appeal]:
+        """The member's questions: with `reg`, those about awards that are theirs NOW (appeal_owner — a character moved
+        to them brings its questions, one moved away takes them); without, the ones they asked."""
+        if reg is not None:
+            return [a for a in self.all() if appeal_owner(reg, a) == int(uid)]
         return [a for a in self.all() if a.member_id == int(uid)]
 
     def save(self, ap: Appeal, message: str) -> Appeal:
@@ -152,6 +156,22 @@ class AppealStore:
 
 def store_of(reg: Registry) -> AppealStore:
     return AppealStore(reg.store, reg.key)
+
+
+def appeal_owner(reg: Registry, ap) -> int | None:
+    """The member a question belongs to now (design §5.4): who asked it, unless the character the award went to was moved
+    to another member since — then theirs (Registry.owner_of on the asker, the character as the question names it and
+    the award's day). The appeal file is never rewritten; its id never changes."""
+    uid = getattr(ap, "member_id", None)
+    if uid is None:
+        return None
+    return reg.owner_of(uid, getattr(ap, "character", None), getattr(ap, "received", None))
+
+
+def owner_name(reg: Registry, ap) -> str:
+    """The display name of the member the question belongs to now (appeal_owner), else the asker's as recorded."""
+    m = reg.members.get(appeal_owner(reg, ap)) if getattr(ap, "member_id", None) is not None else None
+    return m.display_name if m is not None else ap.member_name
 
 
 def _lock(reg: Registry) -> threading.Lock:
@@ -195,7 +215,7 @@ def open_consequence(reg: Registry, award) -> str:
 
 
 def resolve_consequence(reg: Registry, ap: Appeal, outcome: str) -> str:
-    return (f"{ap.member_name}'s question about {ap.item} closes, and the card and thread close with it. "
+    return (f"{owner_name(reg, ap)}'s question about {ap.item} closes, and the card and thread close with it. "
             f"They see “{OUTCOME_LABELS[outcome]}” on their Me page. Your note stays with the officers.")
 
 
@@ -330,7 +350,7 @@ def record_resolve(reg: Registry, aid: str, outcome: str, note: str | None, by: 
         ap.resolved_at, ap.resolved_by, ap.resolved_by_id = now(), by, by_id
         with reg.store.batch(f"{reg.key}: loot question {ap.id} resolved ({outcome}) by {by}"):
             st.save(ap, f"resolved ({outcome}) by {by}")
-            reg.notify(ap.member_id, "appeal", notice_text(ap))  # D26: an outcome to KNOW — never a DM
+            reg.notify(appeal_owner(reg, ap), "appeal", notice_text(ap))  # D26: an outcome to KNOW — never a DM; whose the award is now (§5.4)
         return ap
 
 
@@ -373,7 +393,7 @@ async def resolve_appeal(bot, reg: Registry, aid: str, outcome, *, note: str | N
     ap = await asyncio.to_thread(record_resolve, reg, aid, o, note, by, by_id)
     await update_card(bot, reg, ap)
     await ops_mod.audited(bot.ops, reg, by, f"loot question from {ap.member_name} about {ap.item} resolved: {OUTCOME_LABELS[o]}", via=via, by_id=by_id)
-    return ap, f"Resolved: {OUTCOME_LABELS[o]}. {ap.member_name} sees it on their Me page."
+    return ap, f"Resolved: {OUTCOME_LABELS[o]}. {owner_name(reg, ap)} sees it on their Me page."
 
 
 # ---------------------------------------------------------------- the card (Discord)

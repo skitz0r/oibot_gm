@@ -682,8 +682,18 @@ def profession_sync_consequence(on: bool, label: str | None = None, *, current: 
             "Each update from the armory keeps them current after that.",
             "The hand edits can't be brought back."]
 
+
+def move_consequence(reg: Registry, m_from, c, m_to) -> list[str]:
+    """The confirm before an officer moves member `m_from`'s character `c` to member `m_to` (armory link §5.4,
+    Registry.move_character): what moves with it — its past loot and attendance among it — who is told, and the way
+    back. Each person is named once."""
+    whose = f"{m_from.display_name}'s main {c.label}" if c.is_main else f"{m_from.display_name}'s {c.label}"
+    return [f"{whose} moves to {m_to.display_name} with its past loot, attendance, signups, wishlist and regular spots.",
+            "Both see a notice on their Me page.",
+            "You can move it back the same way."]
+
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
            "VERBS", "absence_consequence", "armory_created_words", "armory_link_consequence", "armory_unlink_consequence", "armory_guild_clear_consequence", "armory_guild_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
-           "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "people_consequence", "profession_consequence", "profession_sync_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
+           "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "move_consequence", "people_consequence", "profession_consequence", "profession_sync_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 

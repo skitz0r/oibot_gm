@@ -114,6 +114,10 @@ def _history(reg, live: list[LootAward]) -> Callable[[Player, str], list[LootAwa
             held[id(a)] = reg.award_holder(a)
         return held[id(a)]
 
+    def owner(a):  # the award's member now: a character moved since takes its awards along (Registry.owner_of_award, §5.4)
+        fn = getattr(reg, "owner_of_award", None)
+        return fn(a) if fn is not None else a.discord_id
+
     def mine(p: Player, who: str) -> list[LootAward]:
         m = reg.members.get(p.discord_id) if p.discord_id is not None else None
         if m is not None:
@@ -126,7 +130,7 @@ def _history(reg, live: list[LootAward]) -> Callable[[Player, str], list[LootAwa
             h = holder(a)
             if h is not None and h[1] is not None:  # a resolved award is decided by its holder only (the id first)
                 return h[1] is c
-            if a.discord_id is not None and p.discord_id is not None and a.discord_id != p.discord_id:
+            if a.discord_id is not None and p.discord_id is not None and owner(a) != p.discord_id:
                 return False  # someone else's award (a character since gone): never by name
             return a.raider == who  # unresolved: a sub or guest stored by name
         return [a for a in live if theirs(a)]

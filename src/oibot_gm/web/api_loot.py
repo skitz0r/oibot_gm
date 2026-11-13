@@ -534,11 +534,12 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         return memo[id(a)]
 
     def is_members(reg, a, uid, memo: dict) -> bool:
-        """The award is member `uid`'s: by its Discord id; an id-less row by whose character the name is."""
+        """The award is member `uid`'s: by its Discord id resolved through character moves (owner_of_award); an id-less
+        row by whose character the name is."""
         if uid is None:
             return False
         if a.discord_id is not None:
-            return a.discord_id == uid
+            return reg.owner_of_award(a) == uid  # its member now: a moved character's past awards follow it (§5.4)
         h = owner(reg, a, memo)
         return h is not None and h[0].discord_id == uid
 
@@ -588,7 +589,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         needle = " ".join(str(q or "").split()).lower()[:60]
         if needle:  # the member's own awards only — a search never widens what they see
             rows = [a for a in rows if needle in " ".join(str(x or "") for x in (a.item_name, a.item_id, a.raider, a.boss)).lower()]
-        asked = {ap.id: ap for ap in appeals.store_of(reg).of_member(v.uid)} if v.member else {}
+        asked = {ap.id: ap for ap in appeals.store_of(reg).of_member(v.uid, reg)} if v.member else {}
         out = []
         ids = appeals.ledger_ids(ctx.ledger)  # the appeal id of each award (two identical imported rows apart)
         start, size = max(0, int(offset)), max(1, min(int(limit), 200))
@@ -610,12 +611,13 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
                 "state_text": appeals.state_words(reg, ap)}
 
     def officer_appeal_json(reg, ap, ctx, awards=None) -> dict:
-        am = reg.members.get(ap.member_id)  # the asker's own character by the name on the appeal (now or before a rename)
+        uid = appeals.appeal_owner(reg, ap)  # whose the award is now: the asker, or whom its character moved to (§5.4)
+        am = reg.members.get(uid)  # their character by the name on the appeal (now or before a rename)
         ac = reg.own_character(am.characters, ap.character) if am is not None else None
         cls, spec = (ac.cls, ac.spec) if ac is not None else (None, None)
         gid = reg.config.discord_guild_id
         link = f"https://discord.com/channels/{gid}/{ap.thread_id or ap.channel_id}" + ("" if ap.thread_id else f"/{ap.message_id}") if (ap.thread_id or ap.message_id) else None
-        out = {**member_appeal_json(reg, ap), "member": ap.member_name, "member_id": str(ap.member_id), "cls": cls, "spec": spec, "item_id": ap.item_id,
+        out = {**member_appeal_json(reg, ap), "member": appeals.owner_name(reg, ap), "member_id": str(uid), "cls": cls, "spec": spec, "item_id": ap.item_id,
                "boss": ap.boss, "date_label": day(reg, ap.received), "offspec": ap.offspec, "asked_label": reg.local12(ap.created_at), "via": ap.via,
                "note": ap.note, "resolved_by": ap.resolved_by, "resolved_label": reg.local12(ap.resolved_at) if ap.resolved_at else None, "link": link,
                "details": appeals.officer_details(reg, ctx, ap, awards)}
