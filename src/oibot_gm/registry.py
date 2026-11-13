@@ -2802,13 +2802,19 @@ class Registry:
         return c
 
     def check_professions(self, entries: list[dict], *, trusted: bool = False,
-                          keep_unmatched: frozenset[tuple[str, str]] | set[tuple[str, str]] = frozenset()) -> list[Profession]:
+                          keep_unmatched: frozenset[tuple[str, str]] | set[tuple[str, str]] = frozenset(),
+                          held: list[Profession] | None = None) -> list[Profession]:
         """Validate and normalise a character's whole professions list (design §5.60) — one sentence per refusal:
         a profile profession, skill 1..cap, at most trade_slots crafting+gathering, each profession once, recipe names
         non-empty, ≤ RECIPE_NAME_MAX, one per normalised name, none on a profession that makes nothing (ProfessionDef.makes).
         With the game's recipe list (armory link §4.2) a recipe's identity is its id: see _list_recipes. `trusted` (the
         armory's own facts) skips the trade-slot, skill-cap and on-the-list checks. `keep_unmatched` = the character's STORED
-        id-less recipes as (profession id, norm_recipe(name)) — Registry.stored_unmatched; only those may round-trip unmatched."""
+        id-less recipes as (profession id, norm_recipe(name)) — Registry.stored_unmatched; only those may round-trip unmatched.
+        `held` = the character's STORED list (a hand edit: Registry.check_hand_professions): what it already holds
+        round-trips unchanged even where the hand rules would refuse it as new — a recipe (by profession and id, or an
+        id-less name) the list lacks or gives elsewhere (the armory's, kept after Keep professions by hand or Unlink), a
+        skill above the cap left as it is, more trade professions than slots when none is added, recipes on a profession
+        the list gives none. The hand rules apply to what is new or changed."""
         from .profiles import norm_recipe
 
         prof = self.profile
@@ -2817,6 +2823,8 @@ class Registry:
             raise RegistryError("professions is a list")
         rules = prof.profession_rules
         cap, slots = rules["skill_cap"], rules["trade_slots"]
+        kept = {p.id: p for p in held or []}
+        keep_unmatched = set(keep_unmatched) | {(p.id, norm_recipe(r.name)) for p in held or [] for r in p.recipes if r.id is None}
         out: list[Profession] = []
         seen: set[str] = set()
         for e in entries:
@@ -2837,10 +2845,12 @@ class Registry:
                     skill = int(raw)
                 except (TypeError, ValueError):
                     raise RegistryError(f"Skill is a number from 1 to {cap}.")
-                if not (1 <= skill if trusted else 1 <= skill <= cap):
+                as_held = pid in kept and kept[pid].skill == skill  # a skill the character holds, unchanged
+                if not (1 <= skill if trusted or as_held else 1 <= skill <= cap):
                     raise RegistryError(f"Skill is a number from 1 to {cap}.")
             if listed:
-                out.append(Profession(id=pid, skill=skill, recipes=self._list_recipes(d, e.get("recipes") or [], trusted, keep_unmatched)))
+                out.append(Profession(id=pid, skill=skill, recipes=self._list_recipes(d, e.get("recipes") or [], trusted, keep_unmatched,
+                                                                                      held=kept.get(pid))))
                 continue
             recipes: list[Recipe] = []
             keys: set[str] = set()
@@ -2862,27 +2872,35 @@ class Registry:
                     raise RegistryError("A recipe's id is a number.")
                 seeded = prof.recipe_seed.get(k)
                 recipes.append(Recipe(name=name, id=rid if rid else (seeded["id"] if seeded else None)))
-            if recipes and not d.makes:
+            had = {norm_recipe(r.name) for r in kept[pid].recipes} if pid in kept else set()
+            if recipes and not d.makes and not all(norm_recipe(r.name) in had for r in recipes):
                 raise RegistryError("A gathering profession has no recipes." if d.group == "gathering" else f"{d.name} has no recipes.")
             out.append(Profession(id=pid, skill=skill, recipes=recipes))
-        if not trusted and sum(1 for p in out if prof.profession(p.id).group in ("crafting", "gathering")) > slots:
+        trades = {p.id for p in out if prof.profession(p.id).group in ("crafting", "gathering")}
+        held_trades = {pid for pid in kept if pid in prof.professions and prof.profession(pid).group in ("crafting", "gathering")}
+        if not trusted and len(trades) > slots and not trades <= held_trades:  # over the slots is kept only when nothing is added
             raise RegistryError("A character has two trade professions — drop one first.")
         return out
 
-    def _list_recipes(self, d, given: list, trusted: bool, keep_unmatched=frozenset()) -> list[Recipe]:
+    def _list_recipes(self, d, given: list, trusted: bool, keep_unmatched=frozenset(), *, held: Profession | None = None) -> list[Recipe]:
         """One profession's recipes against the game's list (armory link §4.2): an `id` must be on the list and of this
         profession; a name alone is matched by norm_recipe within the profession (the lowest id of a name the profession
         holds twice — R6) and takes the list's spelling; an id-less name the list doesn't have round-trips as it is when
         it is already stored on the character (`keep_unmatched` — the authority; the entry's `unmatched: true` flag is a
         convenience, so MCP and older clients that leave it out are not refused); any other name is matched or refused.
-        Dedupe by id (an unmatched one by its name). With the list, a profession has recipes when the list
-        gives it any (R7). `trusted` keeps an id or a name the list doesn't know."""
+        `held` = this profession as the character holds it now: a recipe it holds whose id the list lacks or gives to
+        another profession (the armory's, kept by hand since) round-trips as stored, by its id or its name — never one
+        it doesn't hold. Dedupe by id (an unmatched one by its name). With the list, a profession has recipes when the
+        list gives it any (R7), or when every recipe is one it holds. `trusted` keeps an id or a name the list doesn't know."""
         from .profiles import norm_recipe
 
         prof = self.profile
+        held_ids = {r.id: r for r in (held.recipes if held else []) if r.id is not None}
+        held_names = {norm_recipe(r.name): r for r in (held.recipes if held else []) if r.id is not None}
         recipes: list[Recipe] = []
         ids: set[int] = set()
         keys: set[str] = set()
+        new = False  # a recipe this profession doesn't hold yet
         for r in given:
             raw = r if isinstance(r, dict) else {"name": r}
             name = " ".join(str(raw.get("name") or "").split())
@@ -2897,13 +2915,16 @@ class Registry:
                 raise RegistryError(f"A recipe name is up to {RECIPE_NAME_MAX} characters.")
             if rid is not None:
                 hit = prof.recipes.get(rid)
-                if hit is None and not trusted:
-                    raise RegistryError(f"{name or 'That recipe'} isn't a recipe in the game's list.")
-                if hit is not None and hit.profession != d.id and not trusted:
-                    raise RegistryError(f"{hit.name} isn't a {d.name} recipe.")
-                if hit is None and not name:
-                    raise RegistryError("A recipe needs a name.")
-                rec = Recipe(name=hit.name if hit else name, id=rid)
+                if (hit is None or hit.profession != d.id) and rid in held_ids and not trusted:
+                    rec = held_ids[rid].model_copy()  # held already (the armory's): kept as stored
+                else:
+                    if hit is None and not trusted:
+                        raise RegistryError(f"{name or 'That recipe'} isn't a recipe in the game's list.")
+                    if hit is not None and hit.profession != d.id and not trusted:
+                        raise RegistryError(f"{hit.name} isn't a {d.name} recipe.")
+                    if hit is None and not name:
+                        raise RegistryError("A recipe needs a name.")
+                    rec = Recipe(name=hit.name if hit else name, id=rid)
             else:
                 k = norm_recipe(name)
                 named = prof.recipes_named(k)
@@ -2913,12 +2934,16 @@ class Registry:
                     rec = Recipe(name=best.name, id=best.id)
                 elif (d.id, k) in keep_unmatched:
                     rec = Recipe(name=name, id=None)  # old data on this character: kept as it was
+                elif k in held_names:
+                    rec = held_names[k].model_copy()  # a held recipe the list lacks, named without its id
                 elif trusted:
                     rec = Recipe(name=name, id=None)
                 elif named:
                     raise RegistryError(f"{name} isn't a {d.name} recipe.")
                 else:
                     raise RegistryError(f"{name} isn't a recipe in the game's list.")
+            if not (rec.id in held_ids if rec.id is not None else (d.id, norm_recipe(rec.name)) in keep_unmatched):
+                new = True
             if rec.id is not None:
                 if rec.id in ids:
                     continue
@@ -2929,7 +2954,7 @@ class Registry:
                     continue
                 keys.add(k)
             recipes.append(rec)
-        if recipes and not trusted and not prof.recipes_of(d.id):
+        if recipes and not trusted and not prof.recipes_of(d.id) and new:
             raise RegistryError("A gathering profession has no recipes." if d.group == "gathering" else f"{d.name} has no recipes.")
         return recipes
 
@@ -2996,6 +3021,32 @@ class Registry:
                     self._snap[m.discord_id] = m.model_dump()
         return res
 
+    def professions_refusal(self, c: "RegisteredCharacter | None", entries: list[dict] | None = None) -> str | None:
+        """THE synced-character rule (spec §5.3, R2), one sentence: a linked character whose professions follow the armory
+        refuses any change to them — the stored list (the armory's, unchecked by hand rules) may ride along unchanged with
+        another edit of the row. `entries` None = a change whatever it is (plain text's profession fields). The write
+        (set_professions) and every preview (consequences.profession_consequence, professions.op_rows /
+        preview_sentences) ask this same check, so no preview offers what the write refuses. None = editable."""
+        if c is None or c.armory is None or not c.profession_sync:
+            return None
+        said = f"{c.label}'s professions come from the armory, so turn on Keep professions by hand to edit them."
+        if entries is None:
+            return said
+        try:
+            same = _profs_key(self.check_professions(entries, trusted=True, keep_unmatched=self.stored_unmatched(c))) == _profs_key(c.professions)
+        except RegistryError:
+            same = False
+        return None if same else said
+
+    def check_hand_professions(self, c: "RegisteredCharacter | None", entries: list[dict]) -> list[Profession]:
+        """THE hand check of a character's whole professions list (every surface's preview and the write): refused for a
+        synced character's change (professions_refusal), else check_professions with what `c` already holds kept
+        (`held`: the hand rules apply to what is new or changed). → the normalised list."""
+        why = self.professions_refusal(c, entries)
+        if why:
+            raise RegistryError(why)
+        return self.check_professions(entries, keep_unmatched=self.stored_unmatched(c), held=list(c.professions) if c else None)
+
     @_member_write
     def set_professions(self, discord_id: int, label: str, entries: list[dict]) -> RegisteredCharacter:
         """Replace a character's professions with a validated list — the one setter; the table save calls it (like set_flex)."""
@@ -3003,18 +3054,12 @@ class Registry:
         c = self.own_character(m.active(), label)
         if not c:
             raise RegistryError(f"You have no active character named {label}.")
+        why = self.professions_refusal(c, entries)
+        if why:
+            raise RegistryError(why)
         if c.armory is not None and c.profession_sync:
-            # a synced fact is never also editable (spec §5.3, R2): the stored list (the armory's, unchecked by hand rules)
-            # may ride along unchanged with another edit of the row; any change is refused
-            try:
-                same = [p.model_dump() for p in self.check_professions(entries, trusted=True, keep_unmatched=self.stored_unmatched(c))] \
-                    == [p.model_dump() for p in c.professions]
-            except RegistryError:
-                same = False
-            if same:
-                return c
-            raise RegistryError(f"{c.label}'s professions come from the armory, so turn on Keep professions by hand to edit them.")
-        new = self.check_professions(entries, keep_unmatched=self.stored_unmatched(c))
+            return c  # the stored list riding along unchanged with another edit of the row (R2)
+        new = self.check_hand_professions(c, entries)
         if [p.model_dump() for p in new] == [p.model_dump() for p in c.professions]:
             return c
         c.professions, c.updated_at = new, now()

@@ -264,6 +264,10 @@ src/oibot_gm/
                        game's list" / "isn't a <P> recipe"); an id-less name round-trips only when already STORED on the character (stored_unmatched →
                        keep_unmatched; `unmatched: true` from professions_entries = THE round trip every editing surface reads); "has recipes" = the
                        list gives the profession any (R7); dedupe by id; trusted=True (phase 2's sync) skips slots, cap and the list.
+                       check_hand_professions(c, entries) = THE hand check (set_professions and every preview): professions_refusal (a synced
+                       character, the write's own sentence) then check_professions(held=c.professions) — what the character holds round-trips
+                       as stored (an off-list recipe by id or name, a skill over the cap unchanged, slots exceeded with none added); the hand
+                       rules apply to what is new or changed
                        migrate_recipes = the once-per-start match of typed recipes to the list (one commit per guild, nothing when nothing matches;
                        discord_bot runs it per guild at ready in a thread → professions.migrated_line, one ops line)
                        Character names (armory link, spec §5.2, C9): RegisteredCharacter.armory (ArmoryLink {id, slug, linked_by, linked_at, checked_at,
@@ -451,7 +455,8 @@ src/oibot_gm/
                        resolves against it: did_you_mean for several names, NeedsProfession only for two listed professions, one candidate never asked);
                        fix_unmatched(reg, uid, label, pid, name, recipe_id|None, by, by_id=, preview=) = the officers' fix for a recipe typed before the
                        list (Pick the recipe… / Remove; rename_recipe / merge_recipe and their routes are retired, §5.64 C7), unmatched(reg) = those
-                       recipes for the officers' card (none without a list), migrated_line; HELP_WORDS / help_hit / help_section = the help section
+                       recipes for the officers' card (off_list: no id, an id the list lacks or gives elsewhere — an armory one kept by hand; never a
+                       character whose professions follow the armory; none without a list), migrated_line; HELP_WORDS / help_hit / help_section = the help section
                        (every member-typed name through unfence).
                        Names only: nothing pings, DMs, tracks a request or reads a website. Game data: profiles/<v>/professions.yaml (GameProfile.professions,
                        profession_rules, ProfessionDef.makes); the confirm words: consequences.profession_consequence (verb "professions")

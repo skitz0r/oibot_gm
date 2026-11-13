@@ -4788,6 +4788,14 @@ gate: tbc has no file and every behaviour below is exactly as before there (test
 name alone within its profession (R6), and refuses a name the list lacks — unless that id-less name is already stored on
 the character (`stored_unmatched`): old data round-trips untouched, and `professions_entries` marks it `unmatched: true` for
 every surface that edits the whole list. Dedupe is by id. `trusted=True` (phase 2's sync) skips the slot, cap and list checks.
+A hand edit goes through `Registry.check_hand_professions(c, entries)` — THE hand check of the write (`set_professions`) and
+every preview (`profession_consequence`, `professions.op_rows` / `preview_sentences`, the Discord hub's summary): first
+`professions_refusal` (a synced character refuses any change, one sentence, the write's own — no preview offers what Apply
+refuses), then `check_professions(held=c.professions)`: what the character already HOLDS round-trips as stored — a recipe
+the list lacks or gives to another profession (by its id, or by its name without the id), a skill above the cap left as it
+is, more trade professions than slots while none is added, recipes on a profession the list gives none — so an armory
+list kept by hand (Keep professions by hand, Unlink) never blocks the next edit. The hand rules apply to what is new or
+changed; nothing can be added through what is kept (a held recipe is held only in its own profession).
 
 **The migration.** `Registry.migrate_recipes` matches every typed recipe to the list by `norm_recipe`, within its profession
 first, and gives it the id and the list's spelling; what does not match stays as written (id empty — no new field). It runs

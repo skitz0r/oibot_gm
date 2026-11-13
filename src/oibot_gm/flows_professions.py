@@ -275,7 +275,7 @@ class ProfessionsWizard(MemberWizard):
         try:
             c = self.char()
             said = cq.profession_consequence(self.reg, self.member(), c.label, entries, by_id=interaction.user.id)
-            summary = self.reg.professions_summary(c.model_copy(update={"professions": self.reg.check_professions(entries, keep_unmatched=self.reg.stored_unmatched(c))}))
+            summary = self.reg.professions_summary(c.model_copy(update={"professions": self.reg.check_hand_professions(c, entries)}))
         except RegistryError as e:
             await self.refuse(interaction, str(e), self.hub, "Back")
             return

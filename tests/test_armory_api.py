@@ -410,3 +410,20 @@ def test_shape_errors_are_plain_sentences(g):
 
 def test_the_roster_words_never_promise_a_time(g):
     assert "keeps trying" in api_armory.NOT_READ_YET and "minute" not in api_armory.NOT_READ_YET
+
+
+def test_the_sites_previews_of_a_synced_characters_professions_refuse_in_the_writes_words(g, fake):
+    """B2: the Me page's and the Members page's previews refuse up front, as Save would."""
+    said = "Bram Kettle's professions come from the armory, so turn on Keep professions by hand to edit them."
+    fake.profs["bram-kettle"] = [dict(p, recipes=[r for r in p["recipes"] if r["id"] != 999001]) for p in fake.profs["bram-kettle"]]
+    reg, h = g.reg, as_user(g, TESSA)
+    assert g.c.post("/api/me/armory/link", json={"label": "Bram", "surname": "Kettle", "armory_id": 700101}, headers=h).status_code == 200
+    c = reg.members[TESSA].main
+    profs = reg.professions_entries(c) + [{"id": "cooking", "skill": 100, "recipes": []}]
+    before = commits(reg)
+    r = g.c.post("/api/me/characters", json={"rows": [{"label": "Bram Kettle", "professions": profs}], "preview": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == said, r.text
+    oh = as_user(g, OFFICER)
+    r = g.c.post("/api/members/set", json={"uid": str(TESSA), "character": "Bram Kettle", "professions": profs, "preview": True}, headers=oh)
+    assert r.status_code == 400 and r.json()["error"] == said, r.text
+    assert commits(reg) == before

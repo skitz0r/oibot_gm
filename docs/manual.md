@@ -388,7 +388,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     **Link it** links it, **Back** changes nothing. A character below level 10 is found on the guild's roster when the
     owner has linked the guild; not found says so in one sentence (*reach level 10 and log out once*) with **Try again**.
     Six lookups a minute per person at most (*Wait a moment before looking up another name.*). Once linked: **Unlink…** (your record keeps what it last had; its professions are kept by hand),
-    **Keep professions by hand** (you edit them yourself from then on; **Follow the armory again** lets the armory replace
+    **Keep professions by hand** (you edit them yourself from then on; whatever the armory gave stays as it was until you
+    change it, even a recipe the game's list doesn't have yet; **Follow the armory again** lets the armory replace
     them once more) and **Sync now** (checks it with the armory at once and updates the record where the armory differs —
     at most every few minutes; no confirm). Nobody is DMed.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
@@ -464,8 +465,10 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   somebody has, grouped by the game's category, each with its crafters (recipes not in the game's list last, under their
   own heading). A profession nobody has added a recipe for says so, and that a crafter adds theirs on the Me page or with
   `/me professions`. Recipe names are the game's, so there
-  is nothing to rename or merge. Officers see the recipes typed before the bot knew the game's list that the list
-  doesn't have (*"3 recipes are not in the game's list"*), each with who has it, **Pick the recipe…** (search that
+  is nothing to rename or merge. Officers see the recipes on record that the game's list doesn't have — typed before the
+  bot knew the list, or kept from the armory on a character whose professions are now kept by hand — (*"3 recipes are
+  not in the game's list"*), each with who has it (never a character whose professions follow the armory: the armory
+  keeps those), **Pick the recipe…** (search that
   profession's recipes in the game's list, starting from the typed name, and pick the one it meant) and **Remove**. Both
   show the bot's own sentence first (*"Thornwick's Leatherworking lists Devilsaur
   Gauntlets in place of Devilsaur Gauntlet."*) and change nothing before you confirm. On a phone the search comes first, each
