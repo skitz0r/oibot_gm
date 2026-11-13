@@ -2636,6 +2636,31 @@ class Registry:
             return self.name_taken_refusal(full, taken[0], officer=officer)
         return None
 
+    GIVE_NOT_REGISTERED = "Only someone registered here can be given a character."
+
+    def give_refusal(self, discord_id: int, armory_id: int, name: str, surname: str | None, *, label: str | None = None,
+                     row: dict | None = None, by: str = "", by_id: int | None = None) -> str | None:
+        """Why an officer can't give armory character `armory_id` (`name surname` in the game) to member `discord_id`
+        (armory link §5.4, Give to a member…), else None — nothing written. The member must be registered here (D2: never
+        a record without a Discord user) and still in the server. With `label`: link_refusal for that character. With
+        `row` (a new character table row): every refusal of the officers' character table, then link_refusal on the
+        record as it would be after the add (a copy; the live record is untouched)."""
+        m = self.members.get(discord_id)
+        if m is None:
+            return self.GIVE_NOT_REGISTERED
+        if m.left_at:
+            return f"{m.display_name} has left the server."
+        if label:
+            return self.link_refusal(discord_id, label, armory_id, name, surname, by_id=by_id, officer=True)
+        with self.config_lock:
+            try:
+                self.check_character_table(discord_id, [row or {}], by, officer=True, by_id=by_id)
+            except RegistryError as e:
+                return str(e)
+            sh = self._table_shadow(discord_id)
+            sh._apply_table(discord_id, [row or {}], by, by_id)
+        return sh.link_refusal(discord_id, f"{name} {surname}" if surname else name, armory_id, name, surname, by_id=by_id, officer=True)
+
     @_member_write
     def link_armory(self, discord_id: int, label: str, link: "ArmoryLink", by: str, *, professions: list[Profession] | None = None,
                     by_id: int | None = None, officer: bool = False) -> RegisteredCharacter:

@@ -727,13 +727,18 @@ def armory_give_consequence(reg: Registry, m, found, *, main: bool) -> list[str]
             "They see it on their Me page, and you can unlink it at any time."]
 
 
-def armory_seed_consequence(n: int) -> list[str]:
-    """The confirm before an officer links the picked characters of the seed (armory link §5.5): each link goes on its
-    own, so a refused one never stops the others; members see their links; each can be unlinked."""
+def armory_seed_consequence(n: int, refused: int = 0) -> list[str]:
+    """The confirm before an officer links the picked characters of the seed (armory link §5.5): `n` = the picks that
+    pass every check made before asking the armory (armory_seed.check), `refused` = the ones that don't — named, so the
+    officer knows before the press; each link goes on its own; members see their links; each can be unlinked."""
+    if n == 0:
+        return ["No character is linked, because every pick is refused."]
     first = ("One character is linked to the armory." if n == 1
-             else f"{n} characters are linked to the armory, and a refused one never stops the others.")
-    return [first, "Each member sees the link on their Me page.",
-            "You can unlink it at any time." if n == 1 else "You can unlink any of them at any time."]
+             else f"{n} characters are linked to the armory, each on its own.")
+    told = "Each member sees the link on their Me page."
+    if refused:
+        return [first, "One pick is refused, and its reason is shown." if refused == 1 else f"{refused} picks are refused, and each reason is shown.", told]
+    return [first, told, "You can unlink it at any time." if n == 1 else "You can unlink any of them at any time."]
 
 
 def armory_sync_sentence(label: str, result: str) -> str:

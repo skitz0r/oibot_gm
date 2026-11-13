@@ -29,6 +29,7 @@ or stops the others. Nothing is linked that an officer did not pick (D8: even a 
 No DM, no notice (the link's own audit line is the record). The surfaces (Discord, the site, MCP) compare `rev` themselves."""
 from __future__ import annotations
 
+import asyncio
 import difflib
 import hashlib
 import json
@@ -49,6 +50,11 @@ NO_ROSTER = "The guild's roster hasn't been read from the armory yet, so nothing
 ROW_GONE = "That character is no longer on the guild's roster, so nothing was linked."
 ANOTHER_CHARACTER = "The armory shows another character under that name now, so nothing was linked."
 FAILED = "Something went wrong while linking it, so nothing was linked."
+# Give to a member… (spec §5.4, the not-claimed fold): give()
+GIVE_OFFICER_ONLY = "Only an officer gives a guild character to a member."
+SPEC_NEEDED = "Pick {name}'s spec to register it."
+NO_CLASS = "The armory gives {name} a class this bot doesn't know, so register it by hand."
+LINK_FAILED = "Something went wrong while linking it."
 
 CANDIDATES = 3  # at most this many candidates per likely character
 MIN_PART = 4  # "starts with" / "contains" needs the shorter name to have at least this many letters
@@ -195,6 +201,42 @@ def propose(reg, roster: list[RosterRow], *, taken_at: str | None = None) -> See
     return Seed(sure, likely, none, unclaimed, rev)
 
 
+
+
+def _rows(reg) -> tuple[dict[int, RosterRow], str | None]:
+    """The current roster snapshot by armory id, and the sentence for a pick when there is none: no guild linked /
+    not read yet (never "no longer on the roster" without a snapshot)."""
+    snapshot, taken_at = discord_armory.roster_snapshot(reg)
+    unread = None if taken_at is not None else NO_GUILD if reg.config.armory is None else NO_ROSTER
+    return {r.id: r for r in snapshot}, unread
+
+
+def _row(rows: dict[int, RosterRow], unread: str | None, aid: int) -> RosterRow:
+    """THE row check of apply, check and give: the row with that armory id on the current snapshot, else RegistryError."""
+    row = rows.get(int(aid))
+    if row is None:
+        raise RegistryError(unread or ROW_GONE)
+    return row
+
+
+def check(reg, picks: list[tuple[int, str, int]], *, by_id) -> list[dict]:
+    """What apply would refuse before asking the armory anything (the preview): the row check and link_refusal per pick.
+    → [{uid, label, id, ok, text}] in the picks' order; `text` is the refusal ("" when it would go). Nothing written."""
+    rows, unread = _rows(reg)
+    out = []
+    for uid, label, aid in picks:
+        res = {"uid": int(uid), "label": label, "id": int(aid), "ok": False, "text": ""}
+        out.append(res)
+        try:
+            row = _row(rows, unread, aid)
+        except RegistryError as e:
+            res["text"] = str(e)
+            continue
+        why = reg.link_refusal(int(uid), label, row.id, row.name, row.surname, by_id=by_id, officer=True)
+        res["ok"], res["text"] = why is None, why or ""
+    return out
+
+
 async def apply(bot, reg, picks: list[tuple[int, str, int]], by: str, *, by_id, via=None) -> list[dict]:
     """Link what an officer picked: (uid, label, armory id) each. Officers only, decided live. Every pick is checked
     against the current roster snapshot (the row must still be there; a second claim is refused as the link refuses it)
@@ -202,19 +244,13 @@ async def apply(bot, reg, picks: list[tuple[int, str, int]], by: str, *, by_id, 
     `text` is one sentence. Raises RegistryError(OFFICER_ONLY) for anyone else, nothing written."""
     if not await discord_armory._officer(bot, reg, by_id):
         raise RegistryError(OFFICER_ONLY)
-    snapshot, taken_at = discord_armory.roster_snapshot(reg)
-    rows = {r.id: r for r in snapshot}
-    # no snapshot at all: say why (no guild linked / not read yet), never "no longer on the roster"
-    unread = None if taken_at is not None else NO_GUILD if reg.config.armory is None else NO_ROSTER
+    rows, unread = _rows(reg)
     out: list[dict] = []
     for uid, label, aid in picks:
         res = {"uid": int(uid), "label": label, "id": int(aid), "ok": False, "text": ""}
         out.append(res)
         try:
-            row = rows.get(int(aid))
-            if row is None:
-                res["text"] = unread or ROW_GONE
-                continue
+            row = _row(rows, unread, aid)
             why = reg.link_refusal(int(uid), label, row.id, row.name, row.surname, by_id=by_id, officer=True)
             if why:  # refused before asking the armory anything
                 res["text"] = why
@@ -234,3 +270,61 @@ async def apply(bot, reg, picks: list[tuple[int, str, int]], by: str, *, by_id, 
             log.exception("armory seed: linking %s's %s to %s failed", uid, label, aid)
             res["text"] = FAILED
     return out
+
+
+async def give(bot, reg, uid: int, armory_id: int, by: str, *, label: str | None = None, spec: str | None = None,
+               offspec: str | None = None, by_id, via=None, preview: bool = False) -> dict:
+    """Give to a member… (spec §5.4): a guild character from the roster snapshot goes to member `uid`. With `label` their
+    existing character is linked to it (the link); without, it is registered for them through the officers' character
+    table (name, surname and class from the roster, `spec` from the officer; their main when they have none, else an
+    alt) and then linked. Officers only, decided live. Every refusal that can be known is found first, nothing written
+    (Registry.give_refusal: D2, left, link_refusal, the add path's own refusals), then the armory is asked once.
+    `preview` → {"found": Found, "sentences"}. A write → {"registered", "linked", "text", "character"}: when the add
+    landed but the link was refused afterwards (a race, the armory), `registered` True and `linked` False say so —
+    never a refusal that reads as "nothing happened". Raises RegistryError / ArmoryError before any write."""
+    from . import discord_people
+    from .consequences import armory_give_consequence
+
+    if not await discord_armory._officer(bot, reg, by_id):
+        raise RegistryError(GIVE_OFFICER_ONLY)
+    row = _row(*_rows(reg), armory_id)
+    full = f"{row.name} {row.surname}" if row.surname else row.name
+    m = reg.members.get(int(uid))
+    add, main = None, False
+    if not label:
+        if not row.cls:
+            raise RegistryError(NO_CLASS.format(name=full))
+        if not str(spec or "").strip():
+            raise RegistryError(SPEC_NEEDED.format(name=full))
+        main = m is not None and m.main is None
+        add = {"name": row.name, "surname": row.surname, "cls": row.cls, "spec": str(spec).strip(),
+               "offspec": str(offspec or "").strip() or None, "main": main, "slot": "main" if main else "alt"}
+    why = await asyncio.to_thread(reg.give_refusal, int(uid), row.id, row.name, row.surname, label=label, row=add, by=by, by_id=by_id)
+    if why:
+        raise RegistryError(why)
+    found = await discord_armory.find_for_link(bot, reg, row.name, row.surname)
+    if found.id != row.id:
+        raise RegistryError(ANOTHER_CHARACTER)
+    if label:
+        out = await discord_armory.link_character(bot, reg, int(uid), label, found, by, by_id=by_id, via=via, preview=preview)
+        if preview:
+            return {"found": found, "sentences": out}
+        return {"registered": False, "linked": True, "text": f"{out.label} is linked to the armory.", "character": out}
+    if preview:
+        return {"found": found, "sentences": armory_give_consequence(reg, m, found, main=main)}
+    await discord_people.save_characters(bot, reg, int(uid), [add], by, by_id=by_id, officer=True, via=via or "discord")
+    try:
+        c = await discord_armory.link_character(bot, reg, int(uid), found.label, found, by, by_id=by_id, via=via)
+    except Exception as e:  # noqa: BLE001 — the add stands: say so, never "nothing happened"
+        if isinstance(e, RegistryError):
+            words = str(e)
+        elif isinstance(e, ArmoryError):
+            words = e.words
+        else:
+            log.exception("armory give: linking %s's new %s to %s failed", uid, found.label, row.id)
+            words = LINK_FAILED
+        m = reg.members[int(uid)]
+        c = reg.own_character(m.active(), found.label)
+        return {"registered": True, "linked": False, "text": f"{found.label} is registered to {m.display_name} but not linked. {words}", "character": c}
+    m = reg.members[int(uid)]
+    return {"registered": True, "linked": True, "text": f"{c.label} is registered to {m.display_name} and linked to the armory.", "character": c}

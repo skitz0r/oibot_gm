@@ -615,13 +615,18 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     for main in (True, False):
         dump.add("armory_give_consequence", f"profile, main={main}", cq.armory_give_consequence(reg, am, other, main=main), link_names)
         dump.add("armory_give_consequence", f"roster, no class, main={main}", cq.armory_give_consequence(reg, am, low, main=main), link_names)
-    for n in (1, 2, 12):
-        dump.add("armory_seed_consequence", f"{n} picks", cq.armory_seed_consequence(n), link_names)
+    for n, k in ((1, 0), (2, 0), (12, 0), (1, 1), (3, 2), (0, 4)):
+        dump.add("armory_seed_consequence", f"{n} picks, {k} refused", cq.armory_seed_consequence(n, k), link_names)
     for result in ("updated", "unchanged", "missing", "limited"):
         dump.add("armory_sync_sentence", result, [cq.armory_sync_sentence("Bram Kettle", result)], link_names)
+    from oibot_gm import armory_seed
+    from oibot_gm.registry import Registry as _Reg
+
     for text in (api_armory.LOOK_FIRST, api_armory.FOUND_ANOTHER, api_armory.NO_GUILD_YET, api_armory.NOT_READ_YET, api_armory.SEED_CHANGED,
-                 api_armory.NO_PICKS, api_armory.NOT_REGISTERED, api_armory.SPEC_NEEDED.format(name="Bram Kettle"),
-                 api_armory.NO_CLASS.format(name="Bram Kettle")):
+                 api_armory.NO_PICKS, api_armory.TOO_MANY_LOOKUPS, api_armory.PICK_ON, api_armory.PICK_SHAPE, api_armory.PICK_ROW, api_armory.PICK_TO,
+                 _Reg.GIVE_NOT_REGISTERED, armory_seed.GIVE_OFFICER_ONLY, armory_seed.SPEC_NEEDED.format(name="Bram Kettle"),
+                 armory_seed.NO_CLASS.format(name="Bram Kettle"), armory_seed.LINK_FAILED,
+                 f"Bram Kettle is registered to {am.display_name} but not linked. {armory_seed.LINK_FAILED}"):
         dump.add("armory route refusal", text[:24], [text], link_names)
 
     # ---- appeals

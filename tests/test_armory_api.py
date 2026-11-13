@@ -20,6 +20,7 @@ from oibot_gm import armory, armory_seed, configops, discord_armory
 from oibot_gm import consequences as cq
 from oibot_gm import mcp_server as ms
 from oibot_gm.profiles import GameProfile
+from oibot_gm.registry import Registry
 from oibot_gm.web import api_armory
 
 TESSA, ORLA, WREN = 470_000_000_000_000_101, 470_000_000_000_000_102, 470_000_000_000_000_103
@@ -202,7 +203,11 @@ def test_the_seed_previews_refuses_a_stale_rev_and_links_the_picks(g):
     assert r.status_code == 409 and r.json()["error"] == api_armory.SEED_CHANGED and r.json()["rev"] == d["rev"]
     assert g.c.post("/api/armory/seed/apply", json={"rev": d["rev"], "picks": []}, headers=h).json()["error"] == api_armory.NO_PICKS
     p = g.c.post("/api/armory/seed/apply", json={"rev": d["rev"], "picks": picks, "preview": True}, headers=h).json()
-    assert p == {"preview": True, "sentences": cq.armory_seed_consequence(2)} and commits(reg) == before
+    # the preview checks each pick before the armory is asked (no row is held yet, so both pass; the apply then finds
+    # 700101 held by the first link and refuses the second)
+    assert p["sentences"] == cq.armory_seed_consequence(2, 0) and [r["ok"] for r in p["results"]] == [True, True] and commits(reg) == before
+    r = g.c.post("/api/armory/seed/apply", json={"rev": d["rev"], "picks": [{"uid": "x"}]}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == api_armory.PICK_SHAPE and "{" not in r.json()["error"]
     r = g.c.post("/api/armory/seed/apply", json={"rev": d["rev"], "picks": picks}, headers=h)
     assert r.status_code == 200, r.text
     out = r.json()
@@ -221,7 +226,7 @@ def test_give_links_an_existing_character_or_registers_one_through_the_add_path(
     r = g.c.post("/api/members/armory/give", json={"uid": str(ORLA), "armory_id": 700103, "preview": True}, headers=h)
     assert r.status_code == 400 and r.json()["error"] == "Pick Tamsin Pell's spec to register it."
     r = g.c.post("/api/members/armory/give", json={"uid": "470000000000000999", "armory_id": 700103, "spec": "Balance"}, headers=h)
-    assert r.status_code == 400 and r.json()["error"] == api_armory.NOT_REGISTERED and 470000000000000999 not in reg.members
+    assert r.status_code == 400 and r.json()["error"] == Registry.GIVE_NOT_REGISTERED and 470000000000000999 not in reg.members
     r = g.c.post("/api/members/armory/give", json={"uid": str(ORLA), "armory_id": 1, "spec": "Balance"}, headers=h)
     assert r.status_code == 400 and r.json()["error"] == armory_seed.ROW_GONE
     r = g.c.post("/api/members/armory/give", json={"uid": str(ORLA), "armory_id": 700103, "spec": "Nonsense", "preview": True}, headers=h)
@@ -234,8 +239,11 @@ def test_give_links_an_existing_character_or_registers_one_through_the_add_path(
     c = next(x for x in reg.members[ORLA].active() if x.label == "Tamsin Pell")
     assert c.cls == "Druid" and c.spec == "Balance" and not c.is_main and c.armory.id == 700103
     assert r.json()["message"] == "Tamsin Pell is registered to Orla and linked to the armory." and ("member", reg.key) in g.sent
+    assert r.json()["registered"] is True and r.json()["linked"] is True and r.json()["character"]["armory"]["linked"]
     r = g.c.post("/api/members/armory/give", json={"uid": str(WREN), "armory_id": 700103, "spec": "Balance"}, headers=h)
-    assert r.status_code == 400 and r.json()["error"].endswith("Unlink it there first.")
+    assert r.status_code == 400 and "already registered to Orla" in r.json()["error"], "the add path's own refusal, nothing written"
+    r = g.c.post("/api/members/armory/give", json={"uid": str(WREN), "armory_id": 700103, "label": "Pip", "preview": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"].endswith("Unlink it there first."), "link_refusal's own sentence"
 
 
 def test_move_previews_then_moves_for_officers_only(g):
@@ -304,9 +312,16 @@ def test_tbc_has_no_armory_routes_and_no_armory_on_a_row(w, fake, monkeypatch):
     for verb in ("find", "link", "unlink", "switch", "sync"):
         assert w.c.post(f"/api/me/armory/{verb}", json={"label": "Bram", "preview": True}, headers=as_user(w, TESSA)).status_code == 404, verb
         assert w.c.post(f"/api/members/armory/{verb}", json={"uid": str(TESSA), "label": "Bram", "preview": True}, headers=as_user(w, OFFICER)).status_code == 404, verb
-    for path in ("/api/armory/seed/apply", "/api/members/move", "/api/members/armory/give"):
+    for path in ("/api/armory/seed/apply", "/api/members/armory/give"):
         assert w.c.post(path, json={"uid": str(TESSA), "preview": True}, headers=as_user(w, OFFICER)).status_code == 404, path
-    row = w.c.get("/api/me", headers=as_user(w, TESSA)).json()["characters"][0]
+    # R11: a move needs no armory — it previews and moves on tbc too
+    reg.add_character(ORLA, "Orla", "Brom", "Warrior", "Arms", None, True)
+    w.bot.admit(reg.members[ORLA])
+    p = w.c.post("/api/members/move", json={"uid": str(TESSA), "label": "Bram", "to": str(ORLA), "preview": True}, headers=as_user(w, OFFICER))
+    assert p.status_code == 200 and p.json()["sentences"], p.text
+    r = w.c.post("/api/members/move", json={"uid": str(TESSA), "label": "Bram", "to": str(ORLA)}, headers=as_user(w, OFFICER))
+    assert r.status_code == 200 and r.json()["message"] == "Bram moved to Orla." and r.json()["character"]["armory"] is None
+    row = w.c.get("/api/me", headers=as_user(w, ORLA)).json()["characters"][0]
     assert row["armory"] is None and row["flags"] == [] and row["profession_sync"] is True
     assert not fake.calls, "nothing asked of the armory"
 
@@ -328,3 +343,69 @@ def test_a_roster_read_publishes_the_member_topic(g, fake):
     g.sent[:] = []
     run(discord_armory.roster_refresh(g.bot, g.reg, force=True))
     assert ("member", g.reg.key) in g.sent
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def test_give_says_when_it_registered_but_could_not_link(g, monkeypatch):
+    """The add landed, the link was refused afterwards (a race, the armory, a bug): 200 with registered true, linked
+    false and why — never a refusal that reads as "nothing happened"."""
+    reg, h = g.reg, as_user(g, OFFICER)
+
+    async def refused(*a, **k):
+        if k.get("preview"):
+            return ["x"]
+        raise RuntimeError("boom")
+    monkeypatch.setattr(discord_armory, "link_character", refused)
+    r = g.c.post("/api/members/armory/give", json={"uid": str(ORLA), "armory_id": 700103, "spec": "Balance"}, headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["registered"] is True and d["linked"] is False and d["character"]["label"] == "Tamsin Pell"
+    assert d["message"] == f"Tamsin Pell is registered to Orla but not linked. {armory_seed.LINK_FAILED}"
+    assert reg.members[ORLA].active()[-1].armory is None
+
+
+def test_the_seed_preview_counts_the_picks_that_will_go(g):
+    reg, h = g.reg, as_user(g, OFFICER)
+    assert g.c.post("/api/me/armory/link", json={"label": "Bram", "surname": "Kettle", "armory_id": 700101}, headers=as_user(g, TESSA)).status_code == 200
+    rev = g.c.get("/api/armory/seed", headers=as_user(g, OFFICER)).json()["rev"]
+    picks = [{"uid": str(WREN), "label": "Pip", "armory_id": 700101}, {"uid": str(WREN), "label": "Pip", "armory_id": 700105}]
+    p = g.c.post("/api/armory/seed/apply", json={"rev": rev, "picks": picks, "preview": True}, headers=as_user(g, OFFICER)).json()
+    assert p["sentences"] == cq.armory_seed_consequence(1, 1) and [r["ok"] for r in p["results"]] == [False, True]
+    assert p["results"][0]["text"].endswith("Unlink it there first.")
+
+
+def test_lookups_are_limited_per_person(g, fake):
+    h = as_user(g, TESSA)
+    for _ in range(api_armory.LOOKUPS_PER_MINUTE):
+        assert g.c.post("/api/me/armory/find", json={"label": "Bram", "surname": "Kettle"}, headers=h).status_code == 200
+    n = fake.count("character")
+    r = g.c.post("/api/me/armory/find", json={"label": "Bram", "surname": "Kettle"}, headers=h)
+    assert r.status_code == 429 and r.json()["error"] == api_armory.TOO_MANY_LOOKUPS and fake.count("character") == n
+    assert g.c.post("/api/me/armory/find", json={"label": "Brom", "surname": "Kettle"}, headers=as_user(g, ORLA)).status_code != 429, "per person"
+
+
+def test_an_armory_outage_is_a_503_and_a_refusal_stays_400(g, fake):
+    fake.fail = armory.ArmoryDown("The armory isn't answering right now. Try again later.", "503")
+    r = g.c.post("/api/me/armory/find", json={"label": "Bram", "surname": "Kettle"}, headers=as_user(g, TESSA))
+    assert r.status_code == 503 and r.json()["error"] == "The armory isn't answering right now. Try again later."
+    fake.fail = None
+    r = g.c.post("/api/me/armory/find", json={"label": "Bram", "surname": "Nobody"}, headers=as_user(g, TESSA))
+    assert r.status_code == 400
+
+
+def test_shape_errors_are_plain_sentences(g):
+    h = as_user(g, TESSA)
+    r = g.c.post("/api/me/armory/switch", json={"label": "Bram", "on": "no"}, headers=h)
+    assert r.json()["error"] == api_armory.PICK_ON
+    oh = as_user(g, OFFICER)
+    r = g.c.post("/api/members/armory/give", json={"uid": str(ORLA), "armory_id": "x"}, headers=oh)
+    assert r.status_code == 400 and r.json()["error"] == api_armory.PICK_ROW
+    r = g.c.post("/api/members/move", json={"uid": str(WREN), "label": "Pip"}, headers=oh)
+    assert r.status_code == 400 and r.json()["error"] == api_armory.PICK_TO
+    for text in (api_armory.PICK_ON, api_armory.PICK_ROW, api_armory.PICK_TO, api_armory.PICK_SHAPE):
+        assert text[0].isupper() and text.endswith(".") and not set("{}:_") & set(text)
+
+
+def test_the_roster_words_never_promise_a_time(g):
+    assert "keeps trying" in api_armory.NOT_READ_YET and "minute" not in api_armory.NOT_READ_YET

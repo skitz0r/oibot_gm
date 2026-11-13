@@ -11,7 +11,7 @@ No business rule lives here: the verbs decide rights live, refuse in one sentenc
   SAVE_LISTENERS; a new roster read through discord_armory.ROSTER_LISTENERS, installed here)."""
 from __future__ import annotations
 
-import asyncio
+import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from .. import armory as armory_mod
 from .. import armory_seed, discord_armory
 from .. import consequences as cq
-from ..armory import ArmoryError
+from ..armory import ArmoryAccess, ArmoryDown, ArmoryError
 from ..registry import CharactersChanged, ConfigChanged, RegistryError
 
 ACTOR_NEEDED = ("Linking, unlinking or moving a character is a decision a person makes: from MCP it needs OIBOT_MCP_ACTOR set to "
@@ -27,16 +27,18 @@ ACTOR_NEEDED = ("Linking, unlinking or moving a character is a decision a person
 LOOK_FIRST = "Look the character up first, then link the one it found."
 FOUND_ANOTHER = "That name now finds a different character in the armory. Look it up again before linking."
 NO_GUILD_YET = "No guild in the game is linked to this server yet. The owner links it on the Config page."
-NOT_READ_YET = "The guild's roster hasn't been read from the armory yet. The bot reads it within a few minutes."
+NOT_READ_YET = "The guild's roster hasn't been read from the armory yet, and the bot keeps trying."
 SEED_CHANGED = "The roster or the records changed since you looked. Read the new proposal, then confirm again."
 NO_PICKS = "Pick at least one character to link."
-NOT_REGISTERED = "Only someone registered here can be given a character."
-SPEC_NEEDED = "Pick {name}'s spec to register it."
-NO_CLASS = "The armory gives {name} a class this bot doesn't know, so register it by hand."
-NOT_YOURS = "A test character can't be linked to the armory."
+LOOKUPS_PER_MINUTE = 6  # armory lookups per person a minute (find / link): a logged-in member never spends the host's quota
+TOO_MANY_LOOKUPS = "Wait a moment before looking up another name."
+PICK_ON = "Choose whether the armory keeps this character's professions."
+PICK_SHAPE = "Each pick names a member, one of their characters and a character from the guild's roster."
+PICK_ROW = "Pick a character from the guild's roster."
+PICK_TO = "Pick the member it moves to."
 
 
-def armory_json(reg, c) -> dict | None:
+def armory_json(reg, c, fl: list[str] | None = None) -> dict | None:
     """A character's link as every character row carries it (`char_json`: the Me and Members pages; the map). None where
     the version has no armory. `linked` false = not linked yet. `name` / `surname` = the record's (a linked record takes
     the armory's), `level` / `cls` = the armory's (null before a link), `updated` = "Updated from the armory <when>",
@@ -48,17 +50,18 @@ def armory_json(reg, c) -> dict | None:
     if a is None:
         return {"linked": False, "id": None, "name": c.name, "surname": c.surname, "level": None, "cls": None, "updated": None,
                 "in_guild": None, "missing": False}
+    fl = discord_armory.flags(reg, c) if fl is None else fl  # `fl`: the row's flags when the caller has them already
     return {"linked": True, "id": a.id, "name": c.name, "surname": c.surname, "level": a.level, "cls": a.cls,
-            "updated": discord_armory.updated_words(reg, c), "in_guild": discord_armory.in_guild(reg, c),
-            "missing": "missing" in discord_armory.flags(reg, c)}
+            "updated": discord_armory.updated_words(reg, c), "in_guild": discord_armory.in_guild(reg, c), "missing": "missing" in fl}
 
 
 def char_extras(reg, c) -> dict:
     """The armory facts on a character row: `armory` (armory_json), `profession_sync` (true = the armory keeps its
     professions), `flags` ("class" · "missing" · "outside"; [] without an armory)."""
-    on = armory_mod.available(reg)
-    return {"armory": armory_json(reg, c), "profession_sync": bool(getattr(c, "profession_sync", True)),
-            "flags": discord_armory.flags(reg, c) if on else []}
+    if not armory_mod.available(reg):
+        return {"armory": None, "profession_sync": bool(getattr(c, "profession_sync", True)), "flags": []}
+    fl = discord_armory.flags(reg, c)
+    return {"armory": armory_json(reg, c, fl), "profession_sync": bool(getattr(c, "profession_sync", True)), "flags": fl}
 
 
 def row_json(r) -> dict:
@@ -132,6 +135,8 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
             return JSONResponse({"error": str(e)}, status_code=409)
         if isinstance(e, RegistryError):
             return JSONResponse({"error": str(e)}, status_code=400)
+        if isinstance(e, (ArmoryDown, ArmoryAccess)):  # the armory is down or refuses the host's keys: try again later
+            return JSONResponse({"error": e.words}, status_code=503, headers={"Retry-After": "60"})
         if isinstance(e, ArmoryError):
             return JSONResponse({"error": e.words}, status_code=400)
         text = await report_error(bot.ops, v.reg.config, e, f"[{v.via}] {v.name} {request.url.path}")
@@ -168,12 +173,27 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
         v, d, uid = await target(request, officer)
         return await find_preview(request, v, d, uid)
 
+    looked: dict[tuple[str, int], list[float]] = {}  # (guild key, person) → the times of their lookups this minute (memory)
+
+    def lookup_allowed(v) -> bool:
+        now = time.monotonic()
+        key = (v.reg.key, int(v.uid))
+        recent = [t for t in looked.get(key, []) if now - t < 60]
+        if len(recent) >= LOOKUPS_PER_MINUTE:
+            looked[key] = recent
+            return False
+        looked[key] = [*recent, now]
+        return True
+
     async def lookup(v, d: dict, uid: int):
         """(label, Found): the member's character `label` (the verb's own refusal when there is none — before any request),
-        then what the armory shows under `name` (default: the character's first name) and `surname`."""
+        then what the armory shows under `name` (default: the character's first name) and `surname`. At most
+        LOOKUPS_PER_MINUTE a minute per person (429 TOO_MANY_LOOKUPS)."""
         label = str(d.get("label") or "").strip()
-        _m, c = discord_armory._character(v.reg, uid, label)
+        _m, c = discord_armory.character_of(v.reg, uid, label)
         name = str(d.get("name") or "").strip() or c.name
+        if not lookup_allowed(v):
+            raise HTTPException(429, TOO_MANY_LOOKUPS)
         return label, await discord_armory.find_for_link(bot, v.reg, name, d.get("surname") or None)
 
     async def find_preview(request: Request, v, d: dict, uid: int):
@@ -226,7 +246,7 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
         preview = bool(d.get("preview"))
         need_actor(v, preview)
         if not isinstance(d.get("on"), bool):
-            return JSONResponse({"error": "on must be true or false"}, status_code=400)
+            return JSONResponse({"error": PICK_ON}, status_code=400)
         on = d["on"]
         try:
             out = await discord_armory.set_profession_sync(bot, v.reg, uid, str(d.get("label") or ""), on, v.name, by_id=v.uid, via=v.via, preview=preview)
@@ -270,81 +290,35 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
 
     @app.post("/api/members/armory/give")
     async def armory_give(request: Request):
-        """Officers: {uid | member, armory_id, label?, spec?, offspec?, preview?}. With `label`: that member's character
-        is linked to the roster's character (the link). Without: the roster's character is registered for them through
-        the officers' character table (name, surname and class from the roster; `spec` is required) and then linked.
-        Never a record without a Discord user: the member must be registered here already (D2)."""
-        from .. import discord_people
-
+        """Officers: {uid | member, armory_id, label?, spec?, offspec?, preview?} → armory_seed.give (every rule is the
+        verb's). preview → {preview, found, sentences}; a write → {registered, linked, message, character}: `linked` false
+        with `registered` true = the character was registered but the link was refused afterwards (the message says why)."""
         v, d = await body(request, officer=True)
         reg = v.reg
         need_armory(reg)
         preview = bool(d.get("preview"))
         need_actor(v, preview)
-        if live_officer is not None and not await live_officer(v):
-            raise HTTPException(403, "Officers only.")
-        ref = d.get("member") if d.get("member") not in (None, "") else d.get("uid")
         try:
-            m = member_of(v, d) if ref not in (None, "") else None
+            m = member_of(v, d) if (d.get("member") or d.get("uid")) not in (None, "") else None
         except HTTPException as e:
             if "unknown member" not in str(e.detail):  # an ambiguous name says which ones it could be
                 raise
-            m = None  # nobody registered under that id: never a record without a Discord user (D2)
-        if m is None:
-            return JSONResponse({"error": NOT_REGISTERED}, status_code=400)
-        if m.test:
-            return JSONResponse({"error": NOT_YOURS}, status_code=400)
-        if m.left_at:
-            return JSONResponse({"error": f"{m.display_name} has left the server."}, status_code=400)
+            m = None
         try:
             aid = int(d.get("armory_id"))
         except (TypeError, ValueError):
-            return JSONResponse({"error": "armory_id must be a number"}, status_code=400)
-        rows, at = discord_armory.roster_snapshot(reg)
-        row = next((r for r in rows if r.id == aid), None)
-        if row is None:
-            text = armory_seed.ROW_GONE if at else armory_seed.NO_GUILD if reg.config.armory is None else armory_seed.NO_ROSTER
-            return JSONResponse({"error": text}, status_code=400)
-        label = str(d.get("label") or "").strip()
-        uid = m.discord_id
+            return JSONResponse({"error": PICK_ROW}, status_code=400)
+        uid = m.discord_id if m is not None else int(str(d.get("uid") or 0)) if str(d.get("uid") or "").isdigit() else 0
         try:
-            if label:
-                why = reg.link_refusal(uid, label, row.id, row.name, row.surname, by_id=v.uid, officer=True)
-                if why:
-                    raise RegistryError(why)
-            found = await discord_armory.find_for_link(bot, reg, row.name, row.surname)
-            if found.id != row.id:
-                return JSONResponse({"error": armory_seed.ANOTHER_CHARACTER}, status_code=409)
-            if label:
-                out = await discord_armory.link_character(bot, reg, uid, label, found, v.name, by_id=v.uid, via=v.via, preview=preview)
-                if preview:
-                    return {"preview": True, "found": found_json(found), "sentences": out}
-                tell(reg)
-                return {"message": f"{out.label} is linked to the armory.", "character": row_out(reg, out)}
-            if not row.cls:
-                raise RegistryError(NO_CLASS.format(name=found.label))
-            spec = str(d.get("spec") or "").strip()
-            if not spec:
-                raise RegistryError(SPEC_NEEDED.format(name=found.label))
-            hit = reg.armory_holder(row.id)
-            if hit is not None:
-                raise RegistryError(f"{found.label} in the armory is linked to {hit[0].display_name}'s {hit[1].label}. Unlink it there first.")
-            main = m.main is None
-            add = {"name": found.name, "surname": found.surname, "cls": row.cls, "spec": spec,
-                   "offspec": str(d.get("offspec") or "").strip() or None, "main": main, "slot": "main" if main else "alt"}
-            await asyncio.to_thread(reg.check_character_table, uid, [add], v.name, officer=True, by_id=v.uid)  # every refusal of the add path
-            if preview:
-                return {"preview": True, "found": found_json(found), "sentences": cq.armory_give_consequence(reg, m, found, main=main)}
-            await discord_people.save_characters(bot, reg, uid, [add], v.name, by_id=v.uid, officer=True, via=v.via)
-        except Exception as e:  # noqa: BLE001
+            out = await armory_seed.give(bot, reg, uid, aid, v.name, label=str(d.get("label") or "").strip() or None, spec=d.get("spec"),
+                                         offspec=d.get("offspec"), by_id=v.uid, via=v.via, preview=preview)
+        except Exception as e:  # noqa: BLE001 — refusals read as written
             return await fail(v, request, e)
+        if preview:
+            return {"preview": True, "found": found_json(out["found"]), "sentences": out["sentences"]}
         tell(reg)
-        try:
-            c = await discord_armory.link_character(bot, reg, uid, found.label, found, v.name, by_id=v.uid, via=v.via)
-        except (RegistryError, ArmoryError) as e:  # registered, but the link was refused meanwhile: say both
-            why = e.words if isinstance(e, ArmoryError) else str(e)
-            return JSONResponse({"error": f"{found.label} is registered to {m.display_name} but not linked. {why}"}, status_code=400)
-        return {"message": f"{c.label} is registered to {m.display_name} and linked to the armory.", "character": row_out(reg, c)}
+        c = out["character"]
+        return {"registered": out["registered"], "linked": out["linked"], "message": out["text"], "character": row_out(reg, c) if c else None}
 
     # ---- the officers' map (§5.4)
 
@@ -398,14 +372,17 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
                 uid = member_of(v, p).discord_id if isinstance(p, dict) and p.get("member") not in (None, "") else int(str(p["uid"]))
                 picks.append((uid, str(p.get("label") or p["character"]), int(p["armory_id"])))
             except (KeyError, TypeError, ValueError, AttributeError):
-                return JSONResponse({"error": "each pick is {uid, label, armory_id}"}, status_code=400)
+                return JSONResponse({"error": PICK_SHAPE}, status_code=400)
         if not picks:
             return JSONResponse({"error": NO_PICKS}, status_code=400)
         fresh = propose_now(reg)
         if str(d.get("rev") or "") != fresh.rev:
             return JSONResponse({"error": SEED_CHANGED, **seed_json(reg, fresh)}, status_code=409)
-        if preview:
-            return {"preview": True, "sentences": cq.armory_seed_consequence(len(picks))}
+        if preview:  # every check made before asking the armory, so the sentence counts the picks that will go
+            checked = armory_seed.check(reg, picks, by_id=v.uid)
+            ok = sum(1 for r in checked if r["ok"])
+            return {"preview": True, "sentences": cq.armory_seed_consequence(ok, len(checked) - ok),
+                    "results": [{**r, "uid": str(r["uid"])} for r in checked]}
         try:
             results = await armory_seed.apply(bot, reg, picks, v.name, by_id=v.uid, via=v.via)
         except Exception as e:  # noqa: BLE001
@@ -424,13 +401,12 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
         follows it (past loot, attendance, signups, wishlist, regular spots, its armory link) become `to`'s. Both get a
         notice, nobody a DM; the verb writes the one audit line."""
         v, d = await body(request, officer=True)
-        reg = v.reg
-        need_armory(reg)
+        reg = v.reg  # R11: a move needs no armory — it works on every game version
         preview = bool(d.get("preview"))
         need_actor(v, preview)
         m_from = member_of(v, d)
         if d.get("to") in (None, ""):
-            return JSONResponse({"error": "to: the member it moves to"}, status_code=400)
+            return JSONResponse({"error": PICK_TO}, status_code=400)
         m_to = member_of(v, {"member": d.get("to")})
         try:
             out = await discord_armory.move_character(bot, reg, m_from.discord_id, str(d.get("label") or ""), m_to.discord_id, v.name,

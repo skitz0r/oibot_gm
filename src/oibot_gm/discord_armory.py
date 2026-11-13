@@ -332,6 +332,9 @@ def _character(reg, uid: int, label: str) -> tuple[Member, RegisteredCharacter]:
     return m, c
 
 
+character_of = _character  # the public name (the site's routes): (member, named active character) or the verbs' refusal
+
+
 async def _redraw(bot, reg, rs, keys: list[str]) -> None:
     for key in dict.fromkeys(keys):
         ev = rs.events.get(key)

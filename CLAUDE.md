@@ -134,7 +134,10 @@ src/oibot_gm/
                        active, named, unlinked characters of real members still here; sure = first name (case-folded) + class on exactly one
                        roster row, unheld, unique on the registered side, the surname equal when set; likely = same class + a folded name equal /
                        starts with / contains (≥ 4 letters) / difflib ≥ 0.8, else the display name; ≤ 3 candidates; a held row is never a candidate
-                       nor unclaimed. apply(bot, reg, picks [(uid, label, armory id)], by, *, by_id, via) → [{uid, label, id, ok, text}]: officers
+                       nor unclaimed. check(reg, picks, *, by_id) = apply's checks before the armory (the preview); give(bot, reg, uid, armory_id,
+                       by, *, label=, spec=, offspec=, by_id, via, preview) = Give to a member… (officers live; Registry.give_refusal first:
+                       D2, left, link_refusal, the add path on a copy; then add + link; a link refused after the add → registered, not linked).
+                       apply(bot, reg, picks [(uid, label, armory id)], by, *, by_id, via) → [{uid, label, id, ok, text}]: officers
                        (live), each pick re-checked on the current snapshot (ROW_GONE / ANOTHER_CHARACTER / link_refusal) and linked through
                        find_for_link + link_character on its own; nothing links without an officer's pick
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
@@ -619,11 +622,12 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
   web/api_armory.py    install_armory_api (called from api.py; armory link §5.2, §5.4, §5.5) = thin callers of the discord_armory / armory_seed
                        verbs: POST /api/me/armory/find|link|unlink|switch|sync (the session's own character by `label`, never a uid) and
                        /api/members/armory/<same> (officers, `uid` | `member`); link names the `armory_id` its find showed (else 400 LOOK_FIRST,
-                       another → 409); POST /api/members/armory/give (officers: link the member's `label`, else register the roster row through
-                       discord_people.save_characters — `spec` required, an existing member only, D2 — then link); GET /api/armory/map (officers:
-                       per visible member each named character, `unclaimed`, the roster's age); GET /api/armory/seed + POST …/seed/apply
-                       (`rev` → 409 with the fresh proposal); POST /api/members/move (discord_armory.move_character). Every write `preview`s;
-                       from MCP a write needs the actor (D8); 404 where armory.available is false; `member` published after each write and on
+                       another → 409; LOOKUPS_PER_MINUTE 6 per person → 429); POST /api/members/armory/give → armory_seed.give (no rule in the
+                       route); GET /api/armory/map (officers: per visible member each named character, `unclaimed`, the roster's age);
+                       GET /api/armory/seed + POST …/seed/apply (`rev` → 409 with the fresh proposal; the preview = armory_seed.check, the
+                       sentence counts the picks that pass); POST /api/members/move (discord_armory.move_character; on EVERY game version, R11).
+                       Every write `preview`s; ArmoryDown / ArmoryAccess → 503, a refusal 400; from MCP a write needs the actor (D8); the
+                       rest 404 where armory.available is false; `member` published after each write and on
                        every roster read (discord_armory.ROSTER_LISTENERS). char_extras = the character rows' `armory`, `profession_sync`,
                        `flags` (web/api.py char_json). MCP: armory_map, armory_seed, link_character, unlink_character, move_character,
                        apply_armory_seed (tests/test_parity_matrix.py ARMORY: Discord pending until the wizards land)
