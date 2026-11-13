@@ -44,6 +44,8 @@ from .registry import Member, RegisteredCharacter, RegistryError
 log = logging.getLogger(__name__)
 
 OFFICER_ONLY = "Only an officer links characters to the armory for the whole guild."
+NO_GUILD = "No guild in the game is linked to this server, so nothing was linked."
+NO_ROSTER = "The guild's roster hasn't been read from the armory yet, so nothing was linked."
 ROW_GONE = "That character is no longer on the guild's roster, so nothing was linked."
 ANOTHER_CHARACTER = "The armory shows another character under that name now, so nothing was linked."
 FAILED = "Something went wrong while linking it, so nothing was linked."
@@ -120,7 +122,7 @@ def _closeness(source: str, row: RosterRow) -> tuple[int, float] | None:
 
 def _score(m: Member, c: RegisteredCharacter, row: RosterRow) -> tuple[tuple, str] | None:
     """(sort key — higher is better —, why) for a likely candidate, or None."""
-    if _fold(c.name) == _fold(row.name) and (not c.surname or not row.surname or _fold(c.surname) == _fold(row.surname)):
+    if _fold(c.name) and _fold(c.name) == _fold(row.name) and (not c.surname or not row.surname or _fold(c.surname) == _fold(row.surname)):
         return (3, 1, 1.0), "same name"
     own = [s for s in (_fold(c.label), _fold(c.name)) if s]
     hits = [h for h in (_closeness(s, row) for s in dict.fromkeys(own)) if h]
@@ -200,7 +202,10 @@ async def apply(bot, reg, picks: list[tuple[int, str, int]], by: str, *, by_id, 
     `text` is one sentence. Raises RegistryError(OFFICER_ONLY) for anyone else, nothing written."""
     if not await discord_armory._officer(bot, reg, by_id):
         raise RegistryError(OFFICER_ONLY)
-    rows = {r.id: r for r in discord_armory.roster_snapshot(reg)[0]}
+    snapshot, taken_at = discord_armory.roster_snapshot(reg)
+    rows = {r.id: r for r in snapshot}
+    # no snapshot at all: say why (no guild linked / not read yet), never "no longer on the roster"
+    unread = None if taken_at is not None else NO_GUILD if reg.config.armory is None else NO_ROSTER
     out: list[dict] = []
     for uid, label, aid in picks:
         res = {"uid": int(uid), "label": label, "id": int(aid), "ok": False, "text": ""}
@@ -208,7 +213,7 @@ async def apply(bot, reg, picks: list[tuple[int, str, int]], by: str, *, by_id, 
         try:
             row = rows.get(int(aid))
             if row is None:
-                res["text"] = ROW_GONE
+                res["text"] = unread or ROW_GONE
                 continue
             why = reg.link_refusal(int(uid), label, row.id, row.name, row.surname, by_id=by_id, officer=True)
             if why:  # refused before asking the armory anything

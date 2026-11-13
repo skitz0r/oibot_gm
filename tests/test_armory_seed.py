@@ -144,10 +144,14 @@ def test_linked_characters_are_left_out(reg):
     reg.retire(WREN, "Pip")  # a retired character is not proposed
     reg.add_character(ORLA, "Orla", "Tamsin", "Druid", "Feral", None, True)
     reg.member_left(ORLA)  # nor one of a member who left
+    puppet = reg.test_members()[0]
+    reg.add_character(puppet.discord_id, puppet.display_name, "Korrin", "Shaman", "Elemental", None, False)  # a sure match, but a puppet
+    assert reg.members[puppet.discord_id].test
     seed = armory_seed.propose(reg, roster())
     everyone = seed.sure + seed.likely + seed.none
     assert not mine(everyone)
     assert not any(r.uid in {m.discord_id for m in reg.members.values() if m.test} for r in everyone)  # puppets never
+    assert 700106 in {r.id for r in seed.unclaimed}  # the puppet's would-be match stays unclaimed
     assert 700101 not in {r.id for r in seed.unclaimed}
 
 
@@ -162,6 +166,21 @@ def test_propose_writes_nothing_and_its_rev_follows_the_content(reg, fake):
     assert armory_seed.propose(reg, roster(), taken_at="2026-11-12T20:00:00+00:00").rev != a.rev  # a row gone
     assert armory_seed.propose(reg, roster(THORN), taken_at="2026-11-12T23:00:00+00:00").rev != a.rev  # read again
     assert [r.member for r in mine(a.sure + a.likely)] == ["Tessa", "Wren"]
+
+
+def test_a_name_that_folds_to_nothing_is_never_the_same_name(reg):
+    reg.add_character(TESSA, "Tessa", "Þææ", "Mage", "Frost", None, True)  # no letter folds to a-z
+    odd = RosterRow(id=700401, name="Ðøþ", surname=None, slug="ðøþ", level=60, cls="Mage")
+    seed = armory_seed.propose(reg, [odd])
+    assert [(r.label, r.candidate) for r in mine(seed.none)] == [("Þææ", None)]
+
+
+def test_a_three_letter_name_is_too_short_to_be_contained(reg):
+    reg.add_character(TESSA, "Tessa", "Kor", "Shaman", "Elemental", None, True)  # inside "Korrin", but three letters
+    reg.add_character(WREN, "Wren", "Korr", "Shaman", "Enhancement", None, True)  # four letters: a close name
+    seed = armory_seed.propose(reg, roster())
+    assert [r.label for r in mine(seed.none)] == ["Kor"]
+    assert [(r.label, r.candidate.id, r.why) for r in mine(seed.likely)] == [("Korr", 700106, "close name")]
 
 
 # ------------------------------------------------------------------ apply
@@ -202,3 +221,14 @@ def test_apply_refuses_a_row_the_armory_now_shows_as_another_character(reg, fake
     out = run(armory_seed.apply(bot, reg, [(TESSA, "Tamsin", 700103)], "Owner", by_id=OWNER))
     assert out == [{"uid": TESSA, "label": "Tamsin", "id": 700103, "ok": False, "text": armory_seed.ANOTHER_CHARACTER}]
     assert reg.own_character(reg.members[TESSA].characters, "Tamsin").armory is None
+
+
+def test_apply_without_a_roster_says_why(reg, fake):
+    bot = FakeBot()
+    reg.add_character(TESSA, "Tessa", "Bram", "Warrior", "Protection", None, True)
+    out = run(armory_seed.apply(bot, reg, [(TESSA, "Bram", 700101)], "Owner", by_id=OWNER))
+    assert [r["text"] for r in out] == [armory_seed.NO_GUILD]  # no guild linked to the server
+    reg.set_armory_guild(fake.guild_facts, "Owner", by_id=OWNER)
+    out = run(armory_seed.apply(bot, reg, [(TESSA, "Bram", 700101)], "Owner", by_id=OWNER))
+    assert [r["text"] for r in out] == [armory_seed.NO_ROSTER]  # linked, the roster not read yet
+    assert fake.calls == [] and reg.own_character(reg.members[TESSA].characters, "Bram").armory is None

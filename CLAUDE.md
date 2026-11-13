@@ -122,8 +122,6 @@ src/oibot_gm/
                        missing_since once, never an unlink; a recipe id the list lacks is kept and told to ops once (out/armory/<key>/recipes_reported.json).
                        In memory per guild key: last check / Last-Modified per armory id, Sync now's limit, the warn throttle; one asyncio lock per guild.
                        No DM, no notice — ever
-  roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
-  loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
   armory_seed.py       the seed (armory link §5.5, D8): propose(reg, roster, *, taken_at=) → Seed{sure, likely, none, unclaimed, rev} of
                        SeedRow{uid, member, label, cls, candidate, why same name|close name|display name, others} — PURE (no request, no write);
                        active, named, unlinked characters of real members still here; sure = first name (case-folded) + class on exactly one
@@ -132,6 +130,8 @@ src/oibot_gm/
                        nor unclaimed. apply(bot, reg, picks [(uid, label, armory id)], by, *, by_id, via) → [{uid, label, id, ok, text}]: officers
                        (live), each pick re-checked on the current snapshot (ROW_GONE / ANOTHER_CHARACTER / link_refusal) and linked through
                        find_for_link + link_character on its own; nothing links without an officer's pick
+  roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
+  loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
                        Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),
                        session.py (LootSession keyed (guild, run), Drop/drop_id, Proposal + pending Override, batch_rev/drops_rev, LootChanged/LootBusy,
                        run_distribution on a snapshot + merge, make_award/sync_ledger, load_sessions/migrate_sessions, LOOT_LISTENERS; undistributed() =
