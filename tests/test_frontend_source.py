@@ -598,6 +598,13 @@ def test_armory_link_pages_preview_and_print_only_the_servers_sentences():
     # Me: the line and the actions; a synced character's professions are read-only with why
     assert "armory.actions(c)" in me and "armoryWords(c)" in me and "syncedSentence(c)" in me and "synced(c)" in me
     assert "synced={synced(c) ? syncedSentence(c) : undefined}" in page
+    # review round: Enter never spends a lookup while one is out; the answer's key names the character too; the ⋮ spins per
+    # member + character; Give and Move register as edit modes; a Give refusal leaves Give it pressable; the review's link
+    # dialog is prefilled from the member's record; no toast on a failed reload
+    assert "busy !== null) return;" in link and "target?.uid" in link and "target?.label" in link and "isBusy" in link
+    assert "useDirty(" in amap and "useDirty(" in move and "setRefused(e.message)" in amap
+    assert "rows.find((m) => m.uid === r.uid)" in seed and "c?.surname" in seed
+    assert "fail(e); });" not in amap and "fail(e); });" not in seed
     css = (SRC / "pages" / "members.module.css").read_text()
     phone = css[css.rindex("@media (max-width: 48em)"):]
     assert ".seedRow { grid-template-columns: minmax(0, 1fr); }" in phone, "the review's rows stack on a phone"

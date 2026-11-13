@@ -3,6 +3,7 @@ import { Box, Button, Card, Collapse, Group, Loader, Modal, Select, Stack, Text,
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { api, ApiError, type ArmoryFound, type ArmoryMap as MapData, type MemberRow, type Meta, type RosterRow } from "../../api";
 import { useLive } from "../../hooks/useLive";
+import { useDirty } from "../../hooks/useDirty";
 import { linkable, type LinkTarget } from "../ArmoryLink";
 import { CardHeader, fail, ok } from "../Page";
 import { ArmorySeed, RosterChar } from "./ArmorySeed";
@@ -19,7 +20,7 @@ export function ArmoryMap({ meta, rows, openLink, onChanged }: { meta: Meta; row
   const [review, setReview] = useState(false);
   const [open, setOpen] = useState(false);
   const [give, setGive] = useState<RosterRow | null>(null);
-  const load = () => api.get<MapData>("/api/armory/map").then((x) => { setD(x); setFailed(false); }).catch((e) => { setFailed(true); fail(e); });
+  const load = () => api.get<MapData>("/api/armory/map").then((x) => { setD(x); setFailed(false); }).catch(() => setFailed(true));  // the inline sentence, never a toast on every `member` event
   useEffect(() => { load(); }, []);
   useLive(load, ["member"]);
 
@@ -46,7 +47,7 @@ export function ArmoryMap({ meta, rows, openLink, onChanged }: { meta: Meta; row
               {review ? "Close the proposed links" : "Link characters to the armory…"}
             </Button>
           </Group>
-          {review && <Box style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}><ArmorySeed meta={meta} openLink={openLink} onChanged={() => { load(); onChanged(); }} /></Box>}
+          {review && <Box style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}><ArmorySeed meta={meta} rows={rows} openLink={openLink} onChanged={() => { load(); onChanged(); }} /></Box>}
           <UnstyledButton className={css.fold} aria-expanded={open} onClick={() => setOpen(!open)} style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
             {open ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
             <Text fw={600} size="sm">{`In the guild, not claimed (${n.unclaimed})`}</Text>
@@ -82,7 +83,9 @@ function GiveDialog({ meta, row, rows, onClose, onDone }: { meta: Meta; row: Ros
   const [spec, setSpec] = useState<string | null>(null);
   const [said, setSaid] = useState<Said>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setUid(null); setWhich(null); setSpec(null); setSaid(null); }, [row]);
+  const [refused, setRefused] = useState<string | null>(null);  // the write's refusal, beside the preview it was sent for: Give it can be pressed again
+  useDirty("armory-give", row !== null && uid !== null);
+  useEffect(() => { setUid(null); setWhich(null); setSpec(null); setSaid(null); setRefused(null); }, [row]);
 
   const member = rows.find((m) => m.uid === uid) || null;
   const could = member && row ? member.characters.filter((c) => linkable(c) && !c.armory?.linked && c.cls === row.cls) : [];
@@ -98,7 +101,7 @@ function GiveDialog({ meta, row, rows, onClose, onDone }: { meta: Meta; row: Ros
   useEffect(() => {
     if (!b) { setSaid(null); return; }
     let live = true;  // an answer for earlier picks is dropped
-    setSaid(null);
+    setSaid(null); setRefused(null);
     api.post<{ found: ArmoryFound; sentences: string[] }>("/api/members/armory/give", { ...b, preview: true })
       .then((p) => { if (live) setSaid({ key, found: p.found, sentences: p.sentences }); })
       .catch((e) => { if (live) setSaid({ key, error: (e as Error).message }); });
@@ -107,13 +110,13 @@ function GiveDialog({ meta, row, rows, onClose, onDone }: { meta: Meta; row: Ros
 
   async function go() {
     if (!b || !said || "error" in said || said.key !== key) return;
-    setBusy(true);
+    setBusy(true); setRefused(null);
     try {
       const x = await api.post<{ registered: boolean; linked: boolean; message: string }>("/api/members/armory/give", b);
       if (x.linked) ok(x.message); else fail(new Error(x.message));  // registered but not linked: exactly the server's sentence
       onClose();
     } catch (e) {
-      if (e instanceof ApiError) setSaid({ key, error: e.message }); else fail(e);
+      if (e instanceof ApiError) setRefused(e.message); else fail(e);
     } finally { setBusy(false); onDone(); }
   }
 
@@ -134,6 +137,7 @@ function GiveDialog({ meta, row, rows, onClose, onDone }: { meta: Meta; row: Ros
         {b && said === null && <Loader size="xs" />}
         {said && "sentences" in said && <Text size="sm" style={{ whiteSpace: "pre-line" }}>{said.sentences.join("\n")}</Text>}
         {said && "error" in said && <Text size="sm" c="red">{said.error}</Text>}
+        {refused && <Text size="sm" c="red" style={{ whiteSpace: "pre-line" }}>{refused}</Text>}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onClose}>Cancel</Button>
           <Button loading={busy} disabled={!said || "error" in said} onClick={go}>Give it</Button>

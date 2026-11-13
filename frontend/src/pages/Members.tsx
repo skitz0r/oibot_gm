@@ -169,7 +169,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
 
   const charMenu = (r: MemberRow, c: Character) => (
     <Menu shadow="md" width={260} position="bottom-end" classNames={{ item: css.menuItem }}>
-      <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" loading={armory.busy === c.label} aria-label={`${c.label} the character`}><IconDotsVertical size={15} /></ActionIcon></Menu.Target>
+      <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" loading={armory.isBusy(c, r.uid)} aria-label={`${c.label} the character`}><IconDotsVertical size={15} /></ActionIcon></Menu.Target>
       <Menu.Dropdown>
         <Menu.Label>{c.label}</Menu.Label>
         <Item label="Spec…" onClick={() => setPick({ kind: "spec", r, c })} />

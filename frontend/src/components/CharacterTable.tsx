@@ -104,7 +104,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
                 <Table.Td><StatusBadge named={!!c.name} confirmed={!!c.confirmed} /></Table.Td>
                 <Table.Td>
                   <Menu position="bottom-end" withinPortal>
-                    <Menu.Target><ActionIcon variant="subtle" color="gray" loading={busy === c.label || armory.busy === c.label} aria-label={`${c.label} actions`}><IconDots size={17} /></ActionIcon></Menu.Target>
+                    <Menu.Target><ActionIcon variant="subtle" color="gray" loading={busy === c.label || armory.isBusy(c)} aria-label={`${c.label} actions`}><IconDots size={17} /></ActionIcon></Menu.Target>
                     <Menu.Dropdown>
                       {!c.is_main && <Menu.Item leftSection={<IconCrown size={14} />} onClick={() => makeMain(c)}>Make main</Menu.Item>}
                       {hasProfs && <Menu.Item disabled={synced(c) || (prof !== null && prof.label !== c.label)} onClick={() => setProf(c)}>

@@ -280,8 +280,8 @@ right now. Try again in a minute.*; a string that would unpack past any real gui
 - **Me.** Under each named character a line says *Linked to the armory · Updated Thu 12 Nov 8:00 PM · in the guild* (*not in
   the guild* when the guild's roster doesn't list it; nothing when that isn't known yet; *professions kept by hand* when
   you switched them off), or *Not linked to the armory yet. Link to the armory… in this row's ⋮ looks it up first.* The
-  character's **⋮** holds **Link to the armory…** — a window with the first name filled in and the surname (leave it empty
-  when the character has none); **Look it up** shows what the armory found (the class icon, the name, the level) with the
+  character's **⋮** holds **Link to the armory…** — a window with the first name and surname filled in from your record (under
+  the surname: *Leave it empty if the character has none.*); **Look it up** shows what the armory found (the class icon, the name, the level) with the
   bot's own sentences, or why not in one sentence (not found, the name is taken, *Wait a moment before looking up another
   name.*, or the armory is down), and **Link it** links exactly the character on screen; nothing is linked before that.
   Once linked: **Sync now** (checks it with the armory at once; no confirm), **Keep professions by hand** (or **Follow

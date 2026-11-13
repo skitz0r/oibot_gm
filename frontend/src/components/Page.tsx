@@ -3,7 +3,11 @@ import { notifications } from "@mantine/notifications";
 
 /** Success toast. A string with newlines shows one line per line (the server's multi-line replies: what happened, then the ripple). */
 export const ok = (message: React.ReactNode) => notifications.show({ message: typeof message === "string" && message.includes("\n") ? <span style={{ whiteSpace: "pre-line" }}>{message}</span> : message, color: "teal" });
-export const fail = (e: unknown) => notifications.show({ message: (e as Error).message || "Something went wrong", color: "red" });
+/** A refusal as a red toast; a multi-line server message (a seed result naming each refusal) keeps its line breaks, as `ok`'s does. */
+export const fail = (e: unknown) => {
+  const m = (e as Error).message || "Something went wrong";
+  notifications.show({ message: m.includes("\n") ? <span style={{ whiteSpace: "pre-line" }}>{m}</span> : m, color: "red" });
+};
 
 export function PageTitle({ title, intro, right }: { title: string; intro?: React.ReactNode; right?: React.ReactNode }) {
   return (

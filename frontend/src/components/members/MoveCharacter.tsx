@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Group, Loader, Modal, Select, Stack, Text } from "@mantine/core";
 import { api, ApiError, type Character, type MemberRow } from "../../api";
 import { fail, ok } from "../Page";
+import { useDirty } from "../../hooks/useDirty";
 import css from "../../pages/members.module.css";
 
 /** Which character moves, from whom. */
@@ -16,6 +17,7 @@ export function MoveCharacter({ move, rows, onClose, onDone }: { move: MoveTarge
   const [to, setTo] = useState<string | null>(null);
   const [said, setSaid] = useState<Said>(null);
   const [busy, setBusy] = useState(false);
+  useDirty("armory-move", move !== null && to !== null);
   useEffect(() => { setTo(null); setSaid(null); }, [move]);
   useEffect(() => {
     if (!move || !to) { setSaid(null); return; }

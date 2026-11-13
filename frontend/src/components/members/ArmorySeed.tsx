@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Box, Button, Group, Stack, Text } from "@mantine/core";
-import { api, ApiError, type Meta, type RosterRow, type Seed, type SeedResult, type SeedRow } from "../../api";
+import { api, ApiError, type MemberRow, type Meta, type RosterRow, type Seed, type SeedResult, type SeedRow } from "../../api";
 import { useConfirm } from "../ConfirmModal";
 import { useLive } from "../../hooks/useLive";
 import { GameIcon } from "../Icons";
@@ -28,14 +28,14 @@ export function RosterChar({ meta, row }: { meta: Meta; row: RosterRow }) {
  *  link dialog). **No match**: **Link to the armory…** per row. Every link previews first: the confirm prints ONLY the
  *  server's sentences and each pick it would refuse (its one sentence); the answer names each refusal. A review that
  *  moved since it was read (409) shows the new one with the server's sentence. The proposal reloads after every write. */
-export function ArmorySeed({ meta, openLink, onChanged }: { meta: Meta; openLink: (t: LinkTarget) => void; onChanged: () => void }) {
+export function ArmorySeed({ meta, rows, openLink, onChanged }: { meta: Meta; rows: MemberRow[]; openLink: (t: LinkTarget) => void; onChanged: () => void }) {
   const [data, setData] = useState<Seed | null>(null);
   const [failed, setFailed] = useState(false);
   const [changed, setChanged] = useState<string | null>(null);  // the server's "it changed since you looked" sentence
   const [busy, setBusy] = useState<string | null>(null);
   const [other, setOther] = useState<string | null>(null);  // the likely row whose other matches are open
   const [ask, confirmDialog] = useConfirm();
-  const load = () => api.get<Seed>("/api/armory/seed").then((d) => { setData(d); setFailed(false); }).catch((e) => { setFailed(true); fail(e); });
+  const load = () => api.get<Seed>("/api/armory/seed").then((d) => { setData(d); setFailed(false); }).catch(() => setFailed(true));  // the inline sentence, never a toast on every `member` event
   useEffect(() => { load(); }, []);
   useLive(() => { if (busy === null) load(); }, ["member"]);
 
@@ -63,12 +63,16 @@ export function ArmorySeed({ meta, openLink, onChanged }: { meta: Meta; openLink
   if (!data) {
     return failed
       ? <Group gap="sm" p="md"><Text size="sm">The proposed links couldn't be loaded. Reload to try again.</Text><Button size="xs" variant="light" onClick={() => load()}>Reload</Button></Group>
-      : <Text size="sm" c="dimmed" p="md">Reading the guild's roster…</Text>;
+      : <Text size="sm" c="dimmed" p="md">Loading the proposed links…</Text>;
   }
   if (data.roster.words) return <Text size="sm" p="md">{data.roster.words}</Text>;
 
   const pick = (r: SeedRow, row: RosterRow): Pick => ({ uid: r.uid, label: r.label, armory_id: row.id });
-  const target = (r: SeedRow): LinkTarget => ({ uid: r.uid, label: r.label, name: r.label.split(" ")[0], surname: null });
+  /** The link dialog's prefill: the member's record for that character (first name and surname), else the label's first word. */
+  const target = (r: SeedRow): LinkTarget => {
+    const c = rows.find((m) => m.uid === r.uid)?.characters.find((x) => x.label === r.label);
+    return { uid: r.uid, label: r.label, name: c?.name ?? r.label.split(" ")[0], surname: c?.surname ?? null };
+  };
   const who = (r: SeedRow) => (
     <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
       <GameIcon meta={meta} kind="class" id={r.cls} size={20} title={r.cls} />
@@ -96,7 +100,7 @@ export function ArmorySeed({ meta, openLink, onChanged }: { meta: Meta; openLink
       {data.sure.length ? (
         <Group px="md" py="sm" justify="flex-end">
           <Button loading={busy === "sure"} disabled={busy !== null && busy !== "sure"}
-            onClick={() => apply(data.sure.filter((r) => r.candidate).map((r) => pick(r, r.candidate as RosterRow)), "sure", `Link ${data.sure.length} sure ${data.sure.length === 1 ? "match" : "matches"} to the armory?`, "Link them")}>
+            onClick={() => apply(data.sure.filter((r) => r.candidate).map((r) => pick(r, r.candidate as RosterRow)), "sure", "Link the sure matches to the armory?", "Link them")}>
             Link the sure matches…
           </Button>
         </Group>
@@ -111,6 +115,7 @@ export function ArmorySeed({ meta, openLink, onChanged }: { meta: Meta; openLink
             <Stack gap={2} style={{ minWidth: 0 }}>
               {r.candidate && <RosterChar meta={meta} row={r.candidate} />}
               {r.why && <Text size="xs" c="dimmed">{r.why}</Text>}
+              {r.others.length > 0 && other !== k && <Text size="xs" c="dimmed" className={css.charName}>{`other matches: ${r.others.slice(0, 2).map((o) => o.label).join(", ")}`}</Text>}
               {other === k && (
                 <Stack gap={4} mt={4}>
                   {r.others.map((o) => (
