@@ -692,8 +692,11 @@ def move_consequence(reg: Registry, m_from, c, m_to) -> list[str]:
     no "move it back" line, because a spot given up does not come back."""
     eff = reg.move_effects(m_from, c, m_to)
     whose = f"{m_from.display_name}'s main {c.label}" if c.is_main else f"{m_from.display_name}'s {c.label}"
-    carries = "past loot, attendance, signups, wishlist and regular spots" if eff["kept"] else "past loot, attendance, signups and wishlist"
-    out = [f"{whose} moves to {m_to.display_name} with its {carries}."]
+    carries = "loot history, attendance and regular spots" if eff["kept"] else "loot history and attendance"
+    first = f"{whose} moves to {m_to.display_name} with its {carries}."
+    if len(first.split()) > 20:  # long display names: the whole record, never a sentence too long to read aloud
+        first = f"{whose} moves to {m_to.display_name} with everything on its record."
+    out = [first]
     if eff["dropped"]:
         words = " and ".join(series_words(reg, k) for k in eff["dropped"])
         said = (f"It gives up its regular spot on {words}, where the new member already has one." if len(eff["dropped"]) == 1

@@ -89,6 +89,24 @@ def test_unmatched_recipes_are_fixed_by_officers_preview_first(w):
     assert r.status_code == 400 and r.json()["error"] == f"{m.main.label}'s Tailoring no longer lists Mooncloth Bagg."
 
 
+def test_the_fix_route_answers_a_changed_record_409_and_no_list_404(w, monkeypatch):
+    """B4: a record changed meanwhile is a 409 (reload), as every people route; a version without the list is a 404."""
+    from oibot_gm import professions as pr
+    from oibot_gm.registry import CharactersChanged
+
+    m = typed_crafter(w, 0, "Mooncloth Bagg")
+    oh = as_user(w, OFFICER)
+    body = {"uid": str(m.discord_id), "label": m.main.label, "profession": "tailoring", "name": "Mooncloth Bagg", "recipe_id": None}
+
+    def changed(*a, **k):
+        raise CharactersChanged(m)
+    monkeypatch.setattr(pr, "fix_unmatched", changed)
+    r = w.c.post("/api/professions/unmatched", json=body, headers=oh)
+    assert r.status_code == 409 and "changed since you loaded them" in r.json()["error"]
+    monkeypatch.setattr(w.reg.profile, "recipes", {})
+    assert w.c.post("/api/professions/unmatched", json=body, headers=oh).status_code == 404
+
+
 def test_find_scopes_to_a_profession_and_counts_every_match(w):
     m = crafter(w)
     h = as_user(w, m.discord_id)

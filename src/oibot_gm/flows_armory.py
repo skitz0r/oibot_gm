@@ -204,11 +204,17 @@ class CharArmory:
     async def sync_now(self, interaction: discord.Interaction) -> None:
         await self.working(interaction, "Asking the armory…")
         label = self.draft["label"]
+        m = self.reg.members.get(self.member_id)
+        held = self.reg.own_character(m.characters, label) if m else None
+        aid = held.armory.id if held is not None and held.armory is not None else None
         try:
             res = await discord_armory.sync_character(interaction.client, self.reg, self.member_id, label, force=True, by_id=interaction.user.id)
         except (RegistryError, ArmoryError) as e:
             await self.refuse(interaction, _why(e), self.start, "Back")
             return
+        now = self.reg.armory_character(self.member_id, aid) if aid is not None else None  # by its link: the check may have renamed it
+        if now is not None:
+            label = self.draft["label"] = now.label
         said = cq.armory_sync_sentence(label, res)
         await self.finish(interaction, f"✅ {said}" if res in ("updated", "unchanged") else said)
 
@@ -276,18 +282,18 @@ def bounded(lines: list[str], budget: int, noun: str = "") -> list[str]:
     return out
 
 
-def batch_words(ok: int, total: int) -> str:
-    """The sure batch's result head: how many were linked."""
-    if ok == total:
-        return "One character is linked to the armory." if ok == 1 else f"{ok} characters are linked to the armory."
-    return f"{ok} of {total} characters are linked to the armory."
+batch_words = armory_seed.batch_words  # the sure batch's result head: ONE generator, the site's toast says the same
+
+
+def _esc(text: str) -> str:
+    return discord.utils.escape_markdown(str(text))
 
 
 def _row_words(r) -> str:
-    """'Tessa's Bram → Bram Kettle, level 60' — a sure match as the decide screen lists it."""
+    """'Tessa's Bram → Bram Kettle, level 60' — a sure match as the decide screen lists it (member text escaped)."""
     cand = r.candidate
     full = f"{cand.name} {cand.surname}" if cand.surname else cand.name
-    return f"• {r.member}'s {r.label} → {full}, level {cand.level}"
+    return f"• {_esc(r.member)}'s {_esc(r.label)} → {_esc(full)}, level {cand.level}"
 
 
 class ArmoryOverview(Wizard):
@@ -310,15 +316,18 @@ class ArmoryOverview(Wizard):
             seed = armory_seed.propose(reg, rows, taken_at=at)
             self.rev = seed.rev
             g = reg.config.armory
-            lines.insert(len(lines) - 1, f"**{g.name}** · roster read <t:{int(datetime.fromisoformat(at).timestamp())}:R>")
+            lines.insert(len(lines) - 1, f"**{_esc(g.name)}** · roster read <t:{int(datetime.fromisoformat(at).timestamp())}:R>")
             lines.append(f"Not linked yet: **{len(seed.sure)}** sure · **{len(seed.likely)}** likely · **{len(seed.none)}** with no match on the roster")
-            lines.append(f"In the guild and not claimed: **{len(seed.unclaimed)}**")
+            # the site's count (discord_armory.unclaimed: roster characters no record is linked to), one number on both
+            lines.append(f"In the guild and not claimed: **{len(discord_armory.unclaimed(reg))}**")
+            if seed.sure:
+                lines.append("-# " + armory_seed.sure_share_words(len(seed.sure)))
             if seed.sure:
                 items.append(self.button("Link the sure matches", self.review, discord.ButtonStyle.primary))
         from .help import site_url
 
         url = site_url(reg, "/app/members", "armory")
-        lines.append("-# The likely matches, the characters nobody claims and moves are on the Members page of the site.")
+        lines.append("-# The likely matches, the guild characters no record is linked to and moves are on the Members page of the site.")
         if url:
             items.append(discord.ui.Button(label="Open the Members page", style=discord.ButtonStyle.link, url=url))
         items.append(self.button("Done", self.done))
@@ -351,17 +360,15 @@ class ArmoryOverview(Wizard):
             await self.start(interaction, CHANGED)
             return
         picks = [(r.uid, r.label, r.candidate.id) for r in seed.sure]
-        names = {(r.uid, r.label): f"{r.member}'s {r.label}" for r in seed.sure}
         try:
             results = await armory_seed.apply(interaction.client, self.reg, picks, interaction.user.display_name, by_id=interaction.user.id, via="discord")
         except RegistryError as e:
             await self.refuse(interaction, str(e), self.start, "Back")
             return
-        ok = sum(1 for r in results if r["ok"])
-        head = batch_words(ok, len(results))
-        if ok == len(results) and ok:
+        head, refused = armory_seed.result_lines(self.reg, results)
+        if all(r["ok"] for r in results) and results:
             head = f"✅ {head}"
-        refused = [f"• {names.get((r['uid'], r['label']), r['label'])}: {r['text']}" for r in results if not r["ok"]]
+        refused = [_esc(x) for x in refused]
         await self.finish(interaction, "\n".join([head, *bounded(refused, LIST_BUDGET - len(head))]))
 
 

@@ -313,7 +313,9 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
         try:
             facts = await asyncio.to_thread(armory.find_guild, reg, str(d.get("name") or ""))
         except armory.ArmoryError as e:
-            return JSONResponse({"error": e.words}, status_code=400)
+            from .api_armory import armory_error_response
+
+            return armory_error_response(e)  # down / keys refused → 503, as every armory route answers
         if preview:
             return {"preview": True, "sentences": armory_guild_consequence(reg, facts), "rev": reg.config_rev("settings"),
                     "found": {"name": facts.name, "faction": facts.faction, "kind": facts.kind, "members": facts.members, "guild_id": facts.id,

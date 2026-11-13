@@ -171,7 +171,14 @@ def test_an_officer_links_for_a_member_and_a_stale_officer_waits(g):
 def test_the_map_shows_officers_every_link_and_the_unclaimed(g):
     reg = g.reg
     assert g.c.post("/api/me/armory/link", json={"label": "Bram", "surname": "Kettle", "armory_id": 700101}, headers=as_user(g, TESSA)).status_code == 200
-    d = g.c.get("/api/armory/map", headers=as_user(g, OFFICER)).json()
+    page = g.c.get("/api/armory/map", headers=as_user(g, OFFICER)).json()
+    assert "members" not in page, "the page reads each link from its own row: the map sends no per-member list"
+    # C1: linked / not yet count what the seed considers — Brom and Pip, never a puppet nor someone who left
+    assert page["counts"] == {"linked": 1, "not_linked": 2, "unclaimed": 7}
+    reg.members[WREN].left_at = "2026-11-12T00:00:00+00:00"
+    assert g.c.get("/api/armory/map", headers=as_user(g, OFFICER)).json()["counts"]["not_linked"] == 1
+    reg.members[WREN].left_at = None
+    d = g.c.get("/api/armory/map", headers={"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot"}).json()  # MCP
     by = {m["display_name"]: m for m in d["members"]}
     [bram] = by["Tessa"]["characters"]
     assert bram["label"] == "Bram Kettle" and bram["linked"] and bram["armory_id"] == 700101 and bram["in_guild"] is True
@@ -182,7 +189,7 @@ def test_the_map_shows_officers_every_link_and_the_unclaimed(g):
     assert 700101 not in ids and 700105 in ids and len(ids) == 7
     assert d["unclaimed"][0].keys() == {"id", "name", "surname", "label", "cls", "level"}
     assert d["roster"]["guild"] == "Lantern Wardens" and d["roster"]["read"] and d["roster"]["words"] is None
-    assert d["counts"] == {"linked": 1, "not_linked": len([c for m in d["members"] for c in m["characters"]]) - 1, "unclaimed": 7}
+    assert d["counts"] == page["counts"]
     assert any(m["test"] for m in d["members"]), "the test bench shows as the Members page shows it (no rehearsal live: every officer)"
     reg.clear_armory_guild("Owner", by_id=OWNER)
     d = g.c.get("/api/armory/map", headers=as_user(g, OFFICER)).json()
@@ -215,6 +222,10 @@ def test_the_seed_previews_refuses_a_stale_rev_and_links_the_picks(g):
     assert out["linked"] == 1 and [x["ok"] for x in out["results"]] == [True, False]
     assert out["results"][1]["text"].endswith("Unlink it there first.") and out["rev"] != d["rev"]
     assert reg.members[TESSA].main.armory.id == 700101 and ("member", reg.key) in g.sent
+    # B7 / C3: Discord's words, and only the refused picks under the head (never one line per link)
+    assert out["head"] == "1 of 2 characters are linked to the armory." == armory_seed.batch_words(1, 2)
+    assert out["refused"] == [f"• Wren's Pip: {out['results'][1]['text']}"]
+    assert out["message"] == "\n".join([out["head"], *out["refused"]])
 
 
 def test_give_links_an_existing_character_or_registers_one_through_the_add_path(g):
@@ -293,7 +304,7 @@ def test_mcp_reads_freely_and_writes_only_with_the_actor(g, monkeypatch):
         assert "stops following the armory" in ms.unlink_character("Tessa", "Bram Kettle", preview=True)
         assert ms.unlink_character("Tessa", "Bram Kettle") == "Bram Kettle is unlinked from the armory."
         seed = ms.armory_seed()
-        assert "Linked 1." in ms.apply_armory_seed([{"member": "Tessa", "character": "Bram Kettle", "armory_id": 700101}], rev=seed["rev"])
+        assert "One character is linked to the armory." in ms.apply_armory_seed([{"member": "Tessa", "character": "Bram Kettle", "armory_id": 700101}], rev=seed["rev"])
         assert ms.move_character("Wren", "Pip", "Orla") == "Pip moved to Orla."
     finally:
         ms.use(None)

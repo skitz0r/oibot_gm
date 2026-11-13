@@ -318,6 +318,17 @@ def test_news_policy_loot_sections(reg, rs):
     assert not re.search(r"\d{4}-\d{2}-\d{2}", block), "the clock rule: no ISO dates in the loot section"
 
 
+def test_an_officers_loot_question_finds_an_id_less_first_name_row(reg, rs):
+    """L1: a row recorded without a Discord id under the first name alone ("Bram", an import) is the named member's,
+    as the history import's dedupe reads it (Registry.named_holder) — a character never renamed included."""
+    uid = 600_000_000_000_000_090
+    reg.add_character(uid, "Tessa", "Bram", "Warrior", "Arms", None, True, surname="Kettle")
+    reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {"raider": "Bram", "item_id": 0, "item_name": "Robe of Tests", "tier": "S", "total_weight": 1.0,
+                                                      "received": "2026-09-02", "instance": "bd", "boss": "Boss", "offspec": False, "import_id": "l1-a"})
+    loot = state(reg, rs, OWNER, True, "what loot did Bram Kettle get?")
+    assert "for the member(s) named: 1 award(s)" in loot
+
+
 def test_a_members_loot_question_shows_their_own_awards_only(reg, rs):
     """Regression (integration item 11, D2): the loot section read precedents.jsonl / ledger.jsonl raw (voided awards
     and status rows included) and was officer-only. It reads the guild's RegistryLootContext now; a member gets their

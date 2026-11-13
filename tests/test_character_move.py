@@ -454,7 +454,7 @@ def test_the_confirm_reads_aloud(reg, rs):
     for c in (char(reg, TESSA, "Bram Kettle"), char(reg, TESSA, "Wren Hollow")):
         said = cq.move_consequence(reg, tessa, c, orla)
         assert lint(said, names) == [], said
-        assert any("past loot" in s and "attendance" in s for s in said)
+        assert any("loot history" in s and "attendance" in s for s in said)
 
 
 def test_import_dedupe_sees_through_a_move(reg, rs):
@@ -536,7 +536,7 @@ def test_the_confirm_names_a_regular_spot_given_up_and_a_main_change(reg, rs):
     reg.add_character(PELL, "Pell", "Tamsin", "Druid", "Restoration", None, True, surname="Reed")
     reg.regular_add(PELL, SERIES, "t", "Tamsin Reed")
     said = cq.move_consequence(reg, reg.members[TESSA], char(reg, TESSA, "Bram Kettle"), reg.members[PELL])
-    assert said[0] == "Tessa's main Bram Kettle moves to Pell with its past loot, attendance, signups and wishlist."
+    assert said[0] == "Tessa's main Bram Kettle moves to Pell with its loot history and attendance."
     assert said[1].startswith("It gives up its regular spot on Barrow Deeps") and said[1].endswith("where the new member already has one.")
     assert said[2] == "Wren Hollow becomes the old member's main."
     move(reg, rs, to=PELL)

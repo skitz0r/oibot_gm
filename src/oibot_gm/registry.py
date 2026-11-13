@@ -2587,6 +2587,15 @@ class Registry:
                     return m, c
         return None
 
+    def named_holder(self, name: str | None) -> tuple[Member, RegisteredCharacter] | None:
+        """Whose character a name recorded WITHOUT a Discord id means (a loot row's raider): `find` — a full name now, a
+        former one, then a first name — and None when nobody, or when two characters share that first name. THE lookup
+        of the history import's dedupe (_import_plan) and help's loot block for the members a question names."""
+        try:
+            return self.find(str(name or ""))
+        except RegistryError:
+            return None
+
     # ---- a character's armory link (armory link, design §5.2 / §5.3): the Registry half — one verb per fact, each one
     # commit under the member-write lock; discord_armory.py does the reading, the rights and the Discord side. The armory
     # never creates a record (D2): every verb here acts on a character somebody registered.
@@ -3353,11 +3362,7 @@ class Registry:
             its member and name now, else the name as written."""
             return f"#{m.discord_id}:{c.label.lower()}" if m is not None and c is not None else raw
 
-        def found(name: str):
-            try:
-                return self.find(name)
-            except RegistryError:  # a first name two characters share: the name as written
-                return None
+        found = self.named_holder
 
         def held_by(a):
             """The ledger side, resolved as the file side is: a row with an id by its member (award_holder), an id-less

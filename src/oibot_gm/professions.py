@@ -50,6 +50,7 @@ class CatalogEntry:
 
 NOT_A_RECIPE = "That isn't a recipe in the game's list."
 NOT_REGISTERED = "Nobody has registered that recipe yet."  # a version without the game's list
+NO_RECIPE_LIST = "This game version has no recipe list."  # the officers' fix where there is none (the route answers 404)
 
 
 def nobody_sentence(name: str) -> str:
@@ -275,7 +276,7 @@ def fix_unmatched(reg: Registry, uid: int, label: str, pid: str, name: str, reci
     (check_character_table). Read and written under config_lock, the save carrying the record's rev as read: a change
     landing in between is refused (CharactersChanged), never overwritten. Officers only: the route checks the reader."""
     if not reg.profile.has_recipe_list:
-        raise RegistryError("This game version has no recipe list.")
+        raise RegistryError(NO_RECIPE_LIST)
     with reg.config_lock:
         return _fix_unmatched(reg, uid, label, pid, name, recipe_id, by, by_id, preview)
 

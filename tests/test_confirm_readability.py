@@ -628,6 +628,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
                  armory_seed.NO_CLASS.format(name="Bram Kettle"), armory_seed.LINK_FAILED,
                  f"Bram Kettle is registered to {am.display_name} but not linked. {armory_seed.LINK_FAILED}"):
         dump.add("armory route refusal", text[:24], [text], link_names)
+    armory_long_names(reg, rs, dump)
 
     # ---- appeals
     from oibot_gm import appeals
@@ -704,6 +705,96 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
 
     dump.write()
     assert not dump.problems, f"{len(dump.problems)} confirm sentences break the Confirm rule:\n" + "\n".join(dump.problems)
+
+
+def armory_long_names(reg, rs, dump):
+    """Final review B5: every sentence generator added by the armory link, with the longest names a guild has — a
+    three-word display name and a two-word character name on both sides — so a confirm stays readable aloud."""
+    from oibot_gm import armory_seed, flows_armory
+    from oibot_gm import professions as pr
+    from oibot_gm.discord_armory import Found
+    from oibot_gm.registry import ArmoryLink, Profession, Recipe, Registry
+
+    A, B = REAL + 90, REAL + 91
+    reg.add_character(A, "Annabelle Rose Whitford", "Bramwell", "Warrior", "Arms", None, True, surname="Kettleworth")
+    reg.add_character(A, "Annabelle Rose Whitford", "Wrenna", "Mage", "Fire", None, False, surname="Hollowmere")
+    reg.add_character(B, "Bartholomew James Kingsley", "Ivoryn", "Priest", "Holy", None, True, surname="Marshwater")
+    am, bm = reg.members[A], reg.members[B]
+    ac = am.main
+    names = {"Annabelle", "Bartholomew", "Bramwell", "Wrenna", "Ivoryn"}
+    found = {"profile, a new name": Found(id=711001, slug="x", name="Bramwell", surname="Ashcroftson", cls="Warrior", level=60, source="profile"),
+             "profile, the same name": Found(id=711001, slug="x", name="Bramwell", surname="Kettleworth", cls="Warrior", level=60, source="profile"),
+             "roster, a new name, no class": Found(id=711002, slug="x", name="Bramwell", surname="Ashcroftson", cls=None, level=7, source="roster"),
+             "roster, the same name": Found(id=711002, slug="x", name="Bramwell", surname="Kettleworth", cls="Warrior", level=7, source="roster")}
+    for case, f in found.items():
+        for who, by in (("own", A), ("an officer", OFFICER_ID)):
+            dump.add("armory_link_consequence", f"long names, {who}, {case}", cq.armory_link_consequence(reg, am, ac, f, by), names)
+        dump.add("armory_give_consequence", f"long names, {case}, main", cq.armory_give_consequence(reg, bm, f, main=True), names)
+        dump.add("armory_give_consequence", f"long names, {case}, an alt", cq.armory_give_consequence(reg, bm, f, main=False), names)
+    for who, by in (("own", A), ("an officer", OFFICER_ID)):
+        dump.add("armory_unlink_consequence", f"long names, {who}", cq.armory_unlink_consequence(reg, am, ac, by), names)
+    for on in (True, False):
+        for cur in (None, on):
+            dump.add("profession_sync_consequence", f"long names, on={on}, current={cur}", cq.profession_sync_consequence(on, ac.label, current=cur), names)
+    for result in ("updated", "unchanged", "missing", "limited"):
+        dump.add("armory_sync_sentence", f"long names, {result}", [cq.armory_sync_sentence(ac.label, result)], names)
+    # the move, every case, the real records and the long ones built to reach each branch
+    dump.add("move_consequence", "long names, the main to a member with a main", cq.move_consequence(reg, am, ac, bm), names)
+    dump.add("move_consequence", "long names, an alt", cq.move_consequence(reg, am, reg.own_character(am.characters, "Wrenna Hollowmere"), bm), names)
+    spot = f"{RID}:default"
+
+    def mv_char(label, *, main=False, rosters=()):
+        return SimpleNamespace(label=label, name=label.split()[0], is_main=main, status="active", rosters=list(rosters))
+
+    def mv_member(name, chars):
+        main = next((x for x in chars if x.is_main), None)
+        return SimpleNamespace(display_name=name, characters=chars, main=main, active=lambda: list(chars))
+
+    bram = mv_char("Bramwell Kettleworth", main=True, rosters=[spot])
+    giver = mv_member("Annabelle Rose Whitford", [bram, mv_char("Wrenna Hollowmere")])
+    for case, c, frm, recv in (
+            ("the main, a regular kept", bram, giver, mv_member("Bartholomew James Kingsley", [mv_char("Ivoryn Marshwater", main=True)])),
+            ("the main, its spot given up", bram, giver, mv_member("Bartholomew James Kingsley", [mv_char("Ivoryn Marshwater", main=True, rosters=[spot])])),
+            ("the main to a member with no main, a spot given up", bram, giver, mv_member("Bartholomew James Kingsley", [mv_char("Ivoryn Marshwater", rosters=[spot])])),
+            ("the only character to a member with none", mv_char("Bramwell Kettleworth", main=True), mv_member("Annabelle Rose Whitford", []),
+             mv_member("Bartholomew James Kingsley", []))):
+        dump.add("move_consequence", f"long names, {case}", cq.move_consequence(reg, frm, c, recv), names)
+    # the refusals, from the verbs themselves
+    dump.add("name_taken_refusal", "long names, an officer", [Registry.name_taken_refusal("Bramwell Kettleworth", am, officer=True)], names)
+    dump.add("name_taken_refusal", "long names, a member", [Registry.name_taken_refusal("Bramwell Kettleworth", am, officer=False)], names)
+    ac.armory = ArmoryLink(id=711003, slug="bramwell-kettleworth", linked_by="t", linked_at="2026-11-12T00:00:00+00:00")
+    for officer in (True, False):
+        dump.add("link_refusal", f"long names, a second claim, officer={officer}",
+                 [reg.link_refusal(B, "Ivoryn Marshwater", 711003, "Bramwell", "Kettleworth", officer=officer) or ""], names)
+    dump.add("link_refusal", "long names, already linked", [reg.link_refusal(A, ac.label, 711003, "Bramwell", "Kettleworth", officer=True) or ""], names)
+    dump.add("professions_refusal", "long names", [reg.professions_refusal(ac) or ""], names)
+    for self_mode in (True, False):
+        dump.add("synced_sentence", f"long names, self_mode={self_mode}", [flows_armory.synced_sentence(ac, self_mode=self_mode)], names)
+    ac.armory = None
+    dump.add("move_refusal", "long names, the same member", [reg.move_refusal(A, ac.label, A, rs=rs) or ""], names)
+    dump.add("move_refusal", "long names, to yourself", [reg.move_refusal(A, ac.label, B, rs=rs, by_id=B) or ""], names)
+    dump.add("move_refusal", "long names, no such character", [reg.move_refusal(A, "Bramwell Ashcroftson", B, rs=rs) or ""], names)
+    bm.left_at = "2026-11-12T00:00:00+00:00"
+    dump.add("move_refusal", "long names, left", [reg.move_refusal(A, ac.label, B, rs=rs) or ""], names)
+    dump.add("give_refusal", "long names, left", [reg.give_refusal(B, 711004, "Bramwell", "Ashcroftson") or ""], names)
+    bm.left_at = None
+    # the seed's words, the finder's sentences, and the professions confirm and fix with these names
+    for ok, total in ((1, 1), (12, 12), (3, 5)):
+        dump.add("batch_words", f"{ok} of {total}", [armory_seed.batch_words(ok, total)], names)
+    for n in (1, 7):
+        dump.add("sure_share_words", str(n), [armory_seed.sure_share_words(n)], names)
+    dump.add("nobody_sentence", "a long recipe name", [pr.nobody_sentence("Runecloth Robe of the Kettleworth Ascendancy")], names)
+    for n in (1, 40):
+        dump.add("more_sentence", str(n), [pr.more_sentence(n)], names)
+    dump.add("profession_consequence", "long names, an officer",
+             _said(cq.profession_consequence, reg, am, ac.label, [{"id": "leatherworking", "skill": 250, "recipes": []}], by_id=OFFICER_ID), names)
+    ac.professions = [Profession(id="tailoring", skill=300, recipes=[Recipe(name="Moonclth Bag")])]
+    reg.save(am, "typed recipe")
+    dump.add("fix_unmatched", "long names, the recipe picked",
+             _said(pr.fix_unmatched, reg, A, ac.label, "tailoring", "Moonclth Bag", 10431, "Officer", by_id=OFFICER_ID, preview=True), names)
+    dump.add("fix_unmatched", "long names, removed",
+             _said(pr.fix_unmatched, reg, A, ac.label, "tailoring", "Moonclth Bag", None, "Officer", by_id=OFFICER_ID, preview=True), names)
+    reg.save_character_table(A, [{"label": ac.label, "professions": []}], "t", officer=True)
 
 
 def _said(fn, *a, **kw) -> list[str]:

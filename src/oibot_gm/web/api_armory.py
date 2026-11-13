@@ -98,6 +98,14 @@ def propose_now(reg):
     return armory_seed.propose(reg, rows, taken_at=at)
 
 
+def armory_error_response(e: ArmoryError) -> JSONResponse:
+    """THE armory failure as JSON, on every route that asks the armory (here and the guild link in api_setup): down or
+    refusing the host's keys → 503 with Retry-After (try again later); anything else the armory said → 400. Its words."""
+    if isinstance(e, (ArmoryDown, ArmoryAccess)):
+        return JSONResponse({"error": e.words}, status_code=503, headers={"Retry-After": "60"})
+    return JSONResponse({"error": e.words}, status_code=400)
+
+
 def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=None, char_json=None, resolve_member=None, live_officer=None) -> None:
     def published(guild_key: str) -> None:
         fn = getattr(app.state, "publish", None) or publish  # app.state: the one fan-out (tests read it there)
@@ -132,10 +140,8 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
             return JSONResponse({"error": str(e)}, status_code=409)
         if isinstance(e, RegistryError):
             return JSONResponse({"error": str(e)}, status_code=400)
-        if isinstance(e, (ArmoryDown, ArmoryAccess)):  # the armory is down or refuses the host's keys: try again later
-            return JSONResponse({"error": e.words}, status_code=503, headers={"Retry-After": "60"})
         if isinstance(e, ArmoryError):
-            return JSONResponse({"error": e.words}, status_code=400)
+            return armory_error_response(e)
         text = await report_error(bot.ops, v.reg.config, e, f"[{v.via}] {v.name} {request.url.path}")
         return JSONResponse({"error": text}, status_code=500 if text == GENERIC_ERROR else 400)
 
@@ -309,26 +315,36 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
 
     @app.get("/api/armory/map")
     async def armory_map(request: Request):
-        """Officers: per member (as the Members page lists them: test puppets only for the officers who may change them)
-        each named, active character's link state; then the guild's characters nobody claims, and the roster's age."""
+        """Officers: the guild's characters nobody claims, the roster's age and the counts — linked / not yet over exactly
+        the characters the seed considers (armory_seed.considered: no test puppets, nobody who left), so "not yet" reaches
+        zero when every one is linked. MCP alone also gets `members` (per member as the Members page lists them, each
+        named, active character's link state); the page reads each link from its own row."""
         v = await who(request, officer=True)
         reg = v.reg
         need_armory(reg)
-        ms = sorted((m for m in reg.members.values() if visible is None or visible(v, m)), key=lambda m: m.display_name.lower())
-        rows, linked, unlinked = [], 0, 0
-        for m in ms:
+        linked = unlinked = 0
+        for m in reg.members.values():
+            for c in m.characters:
+                if armory_seed.considered(m, c):
+                    linked += c.armory is not None
+                    unlinked += c.armory is None
+        unclaimed = [row_json(r) for r in sorted(discord_armory.unclaimed(reg), key=lambda r: (r.name.lower(), (r.surname or "").lower()))]
+        out = {"unclaimed": unclaimed, "roster": roster_state(reg), "counts": {"linked": linked, "not_linked": unlinked, "unclaimed": len(unclaimed)}}
+        if v.via == "mcp":
+            out["members"] = map_members(v, reg)
+        return out
+
+    def map_members(v, reg) -> list[dict]:
+        rows = []
+        for m in sorted((m for m in reg.members.values() if visible is None or visible(v, m)), key=lambda m: m.display_name.lower()):
             chars = []
             for c in sorted((c for c in m.active() if c.name), key=lambda c: (not c.is_main, c.created_at)):
                 a = armory_json(reg, c) or {}
-                linked += bool(a.get("linked"))
-                unlinked += not a.get("linked")
                 chars.append({"label": c.label, "cls": c.cls, "is_main": c.is_main, "linked": bool(a.get("linked")), "armory_id": a.get("id"),
                               "level": a.get("level"), "armory_cls": a.get("cls"), "updated": a.get("updated"), "in_guild": a.get("in_guild"),
                               "profession_sync": bool(c.profession_sync), "flags": discord_armory.flags(reg, c)})
             rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "test": bool(m.test), "left": bool(m.left_at), "characters": chars})
-        unclaimed = [row_json(r) for r in sorted(discord_armory.unclaimed(reg), key=lambda r: (r.name.lower(), (r.surname or "").lower()))]
-        return {"members": rows, "unclaimed": unclaimed, "roster": roster_state(reg),
-                "counts": {"linked": linked, "not_linked": unlinked, "unclaimed": len(unclaimed)}}
+        return rows
 
     # ---- the seed (§5.5)
 
@@ -374,8 +390,8 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
             return await fail(v, request, e)
         tell(reg)
         ok = sum(1 for r in results if r["ok"])
-        head = f"Linked {ok} of {len(results)}." if ok != len(results) else f"Linked {ok}."
-        return {"message": "\n".join([head, *(r["text"] for r in results)]), "linked": ok,
+        head, refused = armory_seed.result_lines(reg, results)  # Discord's words: the head, then only the refused picks
+        return {"message": "\n".join([head, *refused]), "head": head, "refused": refused, "linked": ok,
                 "results": [{**r, "uid": str(r["uid"])} for r in results], **seed_json(reg, propose_now(reg))}
 
     # ---- Move to another member… (§5.4, officers)

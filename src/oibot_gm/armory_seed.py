@@ -99,10 +99,16 @@ def _row_label(r: RosterRow) -> str:
     return f"{r.name} {r.surname}" if r.surname else r.name
 
 
+def considered(m: Member, c: RegisteredCharacter) -> bool:
+    """THE predicate of which characters the armory's link counts are about: an active, named character of a real member
+    still here (never a test puppet, never someone who left). The seed proposes the unlinked ones; the officers' map
+    counts linked and not yet over exactly these."""
+    return not m.test and not m.left_at and c.status == "active" and bool(c.name)
+
+
 def _eligible(reg) -> list[tuple[Member, RegisteredCharacter]]:
-    """What is proposed: active, named, unlinked characters of real members still here — members by display name, then label."""
-    out = [(m, c) for m in reg.members.values() if not m.test and not m.left_at
-           for c in m.characters if c.status == "active" and c.name and c.armory is None]
+    """What is proposed: the considered characters not linked yet — members by display name, then label."""
+    out = [(m, c) for m in reg.members.values() for c in m.characters if considered(m, c) and c.armory is None]
     return sorted(out, key=lambda mc: (_cf(mc[0].display_name), _cf(mc[1].label), mc[0].discord_id))
 
 
@@ -270,6 +276,29 @@ async def apply(bot, reg, picks: list[tuple[int, str, int]], by: str, *, by_id, 
             log.exception("armory seed: linking %s's %s to %s failed", uid, label, aid)
             res["text"] = FAILED
     return out
+
+
+def batch_words(ok: int, total: int) -> str:
+    """The seed's result head, how many were linked: THE words of the site's toast and Discord's `/roster armory`."""
+    if ok == total:
+        return "One character is linked to the armory." if ok == 1 else f"{ok} characters are linked to the armory."
+    return f"{ok} of {total} characters are linked to the armory."
+
+
+def result_lines(reg, results: list[dict]) -> tuple[str, list[str]]:
+    """An apply's result as a person reads it: (the head — batch_words —, one line per REFUSED pick "• <member>'s <label>:
+    <why>"). A pick that went needs no line of its own; the head counts it."""
+    ok = sum(1 for r in results if r["ok"])
+
+    def whose(r) -> str:
+        m = reg.members.get(int(r["uid"]))
+        return f"{m.display_name}'s {r['label']}" if m is not None else r["label"]
+    return batch_words(ok, len(results)), [f"• {whose(r)}: {r['text']}" for r in results if not r["ok"]]
+
+
+def sure_share_words(n: int) -> str:
+    """The `/roster armory` line under the not-claimed count: how many of those characters a sure match would take."""
+    return "One of them has a sure match." if n == 1 else f"{n} of them have a sure match."
 
 
 async def give(bot, reg, uid: int, armory_id: int, by: str, *, label: str | None = None, spec: str | None = None,

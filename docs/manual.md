@@ -304,7 +304,7 @@ character links whether or not the owner has linked the guild — §8; what a li
   its own class), *the armory no longer finds it* (for a day or more; the link stays) or *not in the guild* (information,
   not an error). The character's **⋮** has the same armory actions on that member's behalf, and **Move to another
   member…** (every game version): pick the member from the list, the bot's sentences say what goes with the character
-  (its past loot, attendance, signups, wishlist and regular spots) and who is told, then **Move it** — what a move does in
+  (its loot history, attendance and regular spots) and who is told, then **Move it** — what a move does in
   full is in §7. Under the list, the
   card **The armory** names the guild's roster and when it was read and how many characters are linked; with no guild
   linked, or its roster not read yet, it says so and what happens next.
@@ -386,7 +386,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     character has none. The bot looks the character up (*Looking in the armory…*) and the confirm screen says what it
     found — name, class, level — that your character takes that name and that the armory's professions replace its own;
     **Link it** links it, **Back** changes nothing. A character below level 10 is found on the guild's roster when the
-    owner has linked the guild; not found says so in one sentence (*reach level 10 and log out once*) with **Try again**.
+    owner has linked the guild; its confirm says the roster shows it and that its professions follow the armory from
+    level 10, when the armory first shows them (until then they stay as they are). Not found says so in one sentence (*reach level 10 and log out once*) with **Try again**.
     Six lookups a minute per person at most (*Wait a moment before looking up another name.*). Once linked: **Unlink…** (your record keeps what it last had; its professions are kept by hand),
     **Keep professions by hand** (you edit them yourself from then on; whatever the armory gave stays as it was until you
     change it, even a recipe the game's list doesn't have yet; **Follow the armory again** lets the armory replace
@@ -1192,8 +1193,8 @@ edits that new family and leaves the one it shared alone.
   armory shows a Mage*, *the armory no longer finds it*), with the
   same ripple on the confirm screen. **Move to another member…** (officers, on every game version, with or without an
   armory) moves one character to another Discord user — for a character registered to the wrong person: pick them in
-  Discord's own member picker, the confirm says what goes with it (its past loot, attendance, signups, wishlist and
-  regular spots) and that both see a notice on their Me page — nobody is DMed; **Move it** moves it. Everything follows
+  Discord's own member picker, the confirm says what goes with it (its loot history, attendance and regular spots) and
+  **Move it** moves it. Both members get a notice on their Me page, and nobody is DMed. Everything follows
   the character: its record (with its armory link and professions), its past loot awards and its raid attendance count
   for the new member as if they had held it all along (on a night both played, the better of the two counts, once), an
   open question to the council about one of its awards becomes the new member's, and its answers and seats on live runs
@@ -1202,16 +1203,19 @@ edits that new family and leaves the one it shared alone.
   schedule (a member holds one spot per schedule) — the confirm names it. The loot history itself is never rewritten:
   the move is recorded, and every lookup reads it. A move is refused in one sentence, with **Pick someone else**: an
   open ask on the character (withdraw it first), a new member with no record here or who left, one who already has a
-  character of that name, or one already on a live run the character is on (sort that out first); nobody moves a
-  character to themselves (the owner aside — another officer does it).
+  character of that name, one already on a live run the character is on (sort that out first), or a test character
+  moving to or from a real member. An officer can't move a character to themselves; another officer does it. The owner
+  can.
   `/roster armory` (where the game has an armory) shows the guild linked and when its roster was read, how many
   characters are linked, the ones not linked yet as *sure*, *likely* and *with no match on the roster*, and how many of
-  the guild's characters nobody here has claimed (with no guild linked, or its roster not read yet, it says so and what
+  the guild's characters no record here is linked to — the same number as the site's **In the guild, not claimed** —
+  with how many of them have a sure match (with no guild linked, or its roster not read yet, it says so and what
   to do). **Link the sure matches** says first what linking does, then lists them, one per line (*Tessa's Bram → Bram
   Kettle, level 60*), with the reason beside any the bot already knows it will refuse; **Link them** links each on its own
-  and says how many were linked (*3 characters are linked to the armory.*) and why any one was refused. When every one
+  and says how many were linked (*3 characters are linked to the armory.*) and why any one was refused — the site's
+  **Link the sure matches…** says it in the same words. When every one
   would be refused it says so, with only **Back**. If the roster or the records changed
-  since you looked, it shows the new counts and links nothing. The likely matches, the characters nobody claims and moves
+  since you looked, it shows the new counts and links nothing. The likely matches, the guild characters no record is linked to and moves
   between members are on the site's Members page (the button opens it); `/roster professions member:` is `/me professions` on their behalf, and its confirm
   names them (*"Kestrel's Tailoring is recorded at 275."*); `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the
   member's (on the main): no character to pick, and the choices are trial, raider, core and social. Every confirm names
@@ -1480,7 +1484,7 @@ the faction, the kind of guild (PvP, Normal, Roleplay or Roleplay PvP), how many
   owner's Discord id.
 
 Nobody is DMed; the ops channel gets one line naming the guild. Once linked, the bot reads the guild's roster every
-three hours: it says who is *in the guild*, which guild characters nobody here has claimed, and what officers review
+three hours: it says who is *in the guild*, which guild characters no record here is linked to, and what officers review
 when they link characters in bulk (§7 `/roster armory`, §2a Members). It never reads the in-game rank: Discord roles stay
 the authority for officers and members. If the armory ever shows another guild at that name's address, the bot stops
 reading it and says so once in the ops channel; link the guild again to fix it. When the armory is down or answers
@@ -1963,7 +1967,7 @@ news post says can make the review read or write another server.
 | `setup_status` | the Config page's Setup checklist (each row ok / warn / bad with what was tested), the invite's state, and the Host card (invite link, servers that aren't guilds, parked guilds, the summary's Host lines as `facts`) |
 | `left_members` · `remove_record` | members who left the Discord server · remove one's record (officers; refused while they're in the server or hold a live seat) |
 | `armory_guild` · `set_armory_guild` | the guild in the game this server is linked to · link it (`preview=true` first: what the armory found and its id; then the same `name` with that `guild_id` and `rev` — **needs `OIBOT_MCP_ACTOR`**, the owner's id) or unlink it (`clear=true`) — §8 |
-| `armory_map` · `armory_seed` | each member's characters and their armory link (linked, level, when it was last updated, in the guild or not, how its professions are kept, what looks off: the armory's class differs, the armory no longer finds it, not in the guild), the guild's characters nobody here has claimed, and when the roster was last read · the proposed matches between registered characters and the guild's roster (sure, likely with their candidates, no match) and its `rev` — nothing is linked by reading either |
+| `armory_map` · `armory_seed` | each member's characters and their armory link (linked, level, when it was last updated, in the guild or not, how its professions are kept, what looks off: the armory's class differs, the armory no longer finds it, not in the guild), the guild's characters no record here is linked to, and when the roster was last read · the proposed matches between registered characters and the guild's roster (sure, likely with their candidates, no match) and its `rev` — nothing is linked by reading either |
 | `link_character` · `unlink_character` · `move_character` · `apply_armory_seed` | link a member's character to its armory character (`preview=true` first: what the armory found and its `armory_id`; then the same names with that `armory_id`) · unlink it (the record keeps what it last had; its professions are kept by hand) · move a character to another member, with its past loot, attendance, signups, wishlist and regular spots (both get a notice, nobody a DM) · link the seed's picks with `armory_seed`'s `rev`, each on its own — **decisions: need `OIBOT_MCP_ACTOR`** (`preview=true` = the sentences, no actor). A move works on every game version, with or without an armory. How professions are kept and Sync now are the site's and Discord's; Give to a member… is on the site only (the Members page's not-claimed fold) |
 | `list_companions` · `revoke_companion` | the loot-companion tokens (label, connected or not, last seen, who issued it — never a value) · revoke one by label or id (`preview=true` says what it does first). Issuing is not a tool: a token is issued on the site or with `/gm config companion` (§8) |
 | `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), each raid's week, live runs, test bench, and `summary`: the configuration in words by section (as `config_summary`) |
@@ -2551,5 +2555,5 @@ from a library version. The armory (§3): the bot can't prove a character is you
 wrong claim is fixed by an officer's **Move to another member…**; it reads no gear, talents, stats or reputations and
 ignores the in-game rank; a character that just joined the guild reads *not in the guild* until the next roster read (up
 to three hours); bulk linking is reviewed on demand and never runs by itself, and on Discord `/roster armory` links only
-the sure matches (the likely ones, the characters nobody claims and **Give to a member…** are on the site's Members
+the sure matches (the likely ones, the guild characters no record is linked to and **Give to a member…** are on the site's Members
 page); plain text can't link, unlink or move a character. If you ask for one of these, say so plainly.

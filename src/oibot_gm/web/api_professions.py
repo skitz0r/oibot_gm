@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .. import ops as ops_mod
 from .. import professions as pr
-from ..registry import RegistryError
+from ..registry import CharactersChanged, RegistryError
 
 FIND_LIMIT = 25  # rows the finder returns; `total` counts every match
 
@@ -63,6 +63,8 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
         list takes the picked recipe's place, or comes off. `preview` answers the sentences and writes nothing; a write
         saves the member's record once (the table verb) and writes one audit line."""
         v, d = await body(request, officer=True)
+        if not v.reg.profile.has_recipe_list:  # as the other gated routes: nothing here on a version without the list
+            raise HTTPException(404, pr.NO_RECIPE_LIST)
         try:
             uid = int(str(d.get("uid") or "0"))
             rid = d.get("recipe_id")
@@ -76,6 +78,8 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
                 said = pr.fix_unmatched(*args, by_id=v.uid, preview=True)
             else:  # a git commit: off the event loop
                 said = await asyncio.to_thread(pr.fix_unmatched, *args, by_id=v.uid, preview=False)
+        except CharactersChanged as e:  # the record changed since it was read: 409, as every people route answers
+            return JSONResponse({"error": str(e)}, status_code=409)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         if not preview:

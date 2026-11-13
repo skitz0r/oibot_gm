@@ -4984,11 +4984,18 @@ attendance factor reads).
 name + surname → the lookup behind the working screen → decide → **Link it**), **Unlink…**, **Keep professions by hand** /
 **Follow the armory again**, **Sync now** (no confirm), and officers' **Move to another member…** (Discord's user select →
 decide → **Move it**); `/me professions` on a synced character shows the list and why, no edit buttons (`synced_sentence`);
-`/roster armory` (`ArmoryOverview`, officers) = the counts and **Link the sure matches** → decide → `armory_seed.apply`. The
+`/roster armory` (`ArmoryOverview`, officers) = the counts and **Link the sure matches** → decide → `armory_seed.apply`;
+its not-claimed number is the site's (`discord_armory.unclaimed`: roster characters no record is linked to) with how many
+of them have a sure match on a line of its own, and the batch's result is `armory_seed.result_lines` (the head
+`batch_words`, then only the refused picks) — the site's toast says the same. Member text on these screens goes through
+`escape_markdown`; Sync now's result names the character as the check left it (read again by its armory id). The
 site (`web/api_armory.py`, thin callers; every write previews; MCP writes need the actor, D8; 404 where
-`armory.available` is false except the move): `POST /api/me/armory/find|link|unlink|switch|sync` (own character by label)
-and `/api/members/armory/<same>` (officers), `POST /api/members/armory/give`, `GET /api/armory/map`, `GET /api/armory/seed`
-+ `POST /api/armory/seed/apply`, `POST /api/members/move`; character rows carry `armory` / `profession_sync` / `flags`.
+`armory.available` is false except the move; `armory_error_response` = THE armory failure as JSON — down or keys refused
+503, else 400 — on these routes and the guild link): `POST /api/me/armory/find|link|unlink|switch|sync` (own character by label)
+and `/api/members/armory/<same>` (officers), `POST /api/members/armory/give`, `GET /api/armory/map` (counts linked / not
+yet over `armory_seed.considered` — the seed's own predicate: no puppets, nobody who left — and the not-claimed rows; the
+per-member list only for MCP), `GET /api/armory/seed`
++ `POST /api/armory/seed/apply` (`message`, `head`, `refused`), `POST /api/members/move`; character rows carry `armory` / `profession_sync` / `flags`.
 Pages: `ArmoryLink.tsx` (the row line and the ⋮ actions on Me and Members, the link dialog), Members' `ArmoryMap.tsx` (the
 card *The armory*: counts, **Link characters to the armory…** = `ArmorySeed.tsx`, the fold **In the guild, not claimed
 (N)** with **Give to a member…**) and `MoveCharacter.tsx`. MCP: `armory_map`, `armory_seed`, `link_character`,
@@ -5009,12 +5016,10 @@ changed, missing, renamed in the game, R9, failures and the warning throttle), `
 **Not done / known limits.** Proof of ownership (C8) — a wrong claim is fixed by a move; gear, talents, stats,
 reputations, achievements; the in-game rank (D7); EU / KR / TW beyond the configurable region. Bulk linking runs on demand,
 never by itself; Discord's `/roster armory` links only the sure matches — the likely ones, the not-claimed characters and
-Give to a member… are the site's (MCP has no give tool). "In the guild" lags the game by up to three hours. The not-claimed
-count differs by surface: the site's fold lists every roster character no record is linked to, while `/roster armory` and
-the seed leave out the rows a sure match would take. After a move, the old member keeps their past "no answer" misses on the moved
+Give to a member… are the site's (MCP has no give tool). "In the guild" lags the game by up to three hours. The seed's
+own not-claimed list leaves out the rows a sure match would take (the map and `/roster armory` count them all). After a move, the old member keeps their past "no answer" misses on the moved
 character's schedule, and a member with no rank who receives a main starts at trial; a day-only award dated the move's own
-day resolves to the new member. The move's confirm can pass twenty words in its first sentence with three-word display
-names. The Discord professions screen of a synced character points at Keep professions by hand even when the host's
+day resolves to the new member. The Discord professions screen of a synced character points at Keep professions by hand even when the host's
 Blizzard keys are missing (the button is hidden then). The Config page's two cards share the settings rev, so a save on
 one makes the other's next save answer that something changed. The seed's preview can count one pick too many when two
 picks claim the same armory id. A plain-text "take X off" for a recipe held in two professions refuses without saying how

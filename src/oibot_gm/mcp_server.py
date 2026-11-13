@@ -1139,8 +1139,8 @@ def set_armory_guild(name: str | None = None, guild_id: int | None = None, rev: 
 
 
 # ---- a character's armory link (armory link §5.2, §5.4, §5.5): reads free; link, unlink, move and the seed's confirm are
-# decisions (D8: OIBOT_MCP_ACTOR, sent as X-Oibot-Actor); a preview needs no actor. The professions switch, Sync now and
-# Give to a member… are the site's and Discord's.
+# decisions (D8: OIBOT_MCP_ACTOR, sent as X-Oibot-Actor); a preview needs no actor. The professions switch and Sync now
+# are the site's and Discord's; Give to a member… is the site's only.
 @mcp.tool()
 def armory_map(guild: Guild = None) -> dict:
     """The officers' armory map: per member each character's link (`linked`, `armory_id`, `level`, `updated` = "Updated from

@@ -294,7 +294,10 @@ def test_roster_armory_shows_the_counts_and_links_the_sure_matches(reg, rs, fake
     async def go():
         await FLOWS["roster_armory"](h.command(), reg)
         assert "Lantern Wardens" in h.text and "Linked to the armory: **0**" in h.text
-        assert "**3** sure" in h.text and f"In the guild and not claimed: **{len(seed.unclaimed)}**" in h.text
+        # D2: the site's number (every roster character no record is linked to), and how many a sure match would take
+        assert len(discord_armory.unclaimed(reg)) == len(seed.unclaimed) + 3
+        assert "**3** sure" in h.text and f"In the guild and not claimed: **{len(discord_armory.unclaimed(reg))}**" in h.text
+        assert "3 of them have a sure match." in h.text
         assert "Link the sure matches" in h.buttons()
         await h.press("Link the sure matches")
         assert "Tessa's Bram → Bram Kettle" in h.text and "Orla's Tamsin → Tamsin Pell" in h.text
@@ -303,6 +306,7 @@ def test_roster_armory_shows_the_counts_and_links_the_sure_matches(reg, rs, fake
         assert h.buttons() == ["Link them", "Back"] and not reg.armory_linked()
         await h.press("Link them")
         assert "2 of 3 characters are linked to the armory." in h.text and armory_seed.ANOTHER_CHARACTER in h.text and "Orla's Tamsin" in h.text
+        assert "Tessa's Bram" not in h.text.split("linked to the armory.", 1)[1], "only the refused picks are listed"
     run(go())
     assert {c.label for _m, c in reg.armory_linked()} == {"Bram Kettle", "Pip Wobble"}
 
@@ -473,3 +477,26 @@ def test_the_sure_batch_offers_no_link_when_every_pick_is_refused(reg, rs, fake,
         assert "Link the sure matches" in h.buttons()
     run(go())
     assert not reg.armory_linked()
+
+
+def test_sync_now_names_the_character_as_the_check_left_it(reg, rs, fake, clock):
+    """B6: the armory renamed it; the result says the new name (read again by its link)."""
+    people(reg)
+    link_bram(reg, rs)
+    fake.chars["bram-kettle"] = facts("Bram", "Fallow", 700101, modified="Fri, 13 Nov 2026 10:00:00 GMT")
+    h = harness(reg, rs, TESSA)
+
+    async def go():
+        await FLOWS["member_char"](h.command(), reg)
+        await h.press("Sync now")
+        assert cq.armory_sync_sentence("Bram Fallow", "updated") in h.text and "Bram Kettle" not in h.text
+    run(go())
+    assert char(reg, TESSA, "Bram Fallow") is not None
+
+
+def test_member_text_on_the_armory_screens_is_escaped(reg, rs, fake, clock, officer):
+    """B10: a display name or a label with Discord markdown is shown as typed, never as formatting."""
+    from oibot_gm.flows_armory import _row_words
+
+    row = types.SimpleNamespace(member="__Tes*sa__", label="Bram", candidate=types.SimpleNamespace(name="Bram", surname="Kettle", level=60))
+    assert _row_words(row) == "• \\_\\_Tes\\*sa\\_\\_'s Bram → Bram Kettle, level 60"

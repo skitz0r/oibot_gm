@@ -202,6 +202,15 @@ def test_not_found_is_one_sentence(reg, rs, armory_on, env):
     assert r.status_code == 400 and r.json()["error"] == armory.GUILD_MISSING_WORDS, "a name with no letters is not a guild"
 
 
+def test_the_armory_down_is_a_503_on_the_guild_link_too(reg, rs, armory_on, env, monkeypatch):
+    """B3: the guild link answers an outage as every armory route does (503, try again later), never a 400."""
+    monkeypatch.setattr(armory.time, "sleep", lambda s: None)
+    armory_on.routes["/data/wow/guild/down-hall"] = (503, b"")
+    c = TestClient(web.create_app(WebLootBot(reg, rs)))
+    r = c.post("/api/admin/armory", json={"name": "Down Hall", "preview": True}, headers=as_user(c, OWNER))
+    assert r.status_code == 503 and r.json()["error"] == armory.DOWN_WORDS and r.headers.get("retry-after") == "60"
+
+
 def test_clear_keeps_character_links(reg, rs, armory_on):
     reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
     m = next(iter(reg.members.values()))
