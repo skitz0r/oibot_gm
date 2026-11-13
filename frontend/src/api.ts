@@ -164,7 +164,29 @@ export interface ProfessionsData {
   unmatched?: UnlistedRecipe[];
 }
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
-export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[]; professions?: Profession[] }
+export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[]; professions?: Profession[];
+  /** armory link §5.4 (web/api_armory.char_extras): null where the version has no armory; `profession_sync` = the armory keeps
+   *  its professions (false = kept by hand); `flags` (officers read them) = "class" · "missing" · "outside" */
+  armory?: CharArmory | null; profession_sync?: boolean; flags?: ArmoryFlag[] }
+/** A character's link (web/api_armory.armory_json): `updated` = "Updated from the armory <when>" in words, `when` = that
+ *  <when> alone (null before the first check); `cls` / `level` = the armory's; `in_guild` true / false / null = not known (R9). */
+export interface CharArmory { linked: boolean; id: number | null; name: string | null; surname: string | null; level: number | null; cls: string | null;
+  updated: string | null; when: string | null; in_guild: boolean | null; missing: boolean }
+export type ArmoryFlag = "class" | "missing" | "outside";
+/** What a lookup found (POST …/armory/find, link / give previews): the armory's name, class and level. */
+export interface ArmoryFound { id: number; name: string; surname: string | null; label: string; cls: string | null; level: number; source: "profile" | "roster" }
+/** A character on the linked guild's roster (the not-claimed fold, the review's candidates). */
+export interface RosterRow { id: number; name: string; surname: string | null; label: string; cls: string | null; level: number }
+/** The roster as last read: `words` = the sentence when there is none (no guild linked / not read yet), else null; `read` in words. */
+export interface RosterState { guild: string | null; read: string | null; words: string | null }
+/** GET /api/armory/map (officers): the not-claimed rows, the roster's state and the counts (each character's link is on its row). */
+export interface ArmoryMap { unclaimed: RosterRow[]; roster: RosterState; counts: { linked: number; not_linked: number; unclaimed: number } }
+/** One registered character set against the roster (GET /api/armory/seed). */
+export interface SeedRow { uid: string; member: string; label: string; cls: string; candidate: RosterRow | null; why: string; others: RosterRow[] }
+export interface Seed { sure: SeedRow[]; likely: SeedRow[]; none: SeedRow[]; unclaimed: RosterRow[]; rev: string; roster: RosterState;
+  counts: { sure: number; likely: number; none: number; unclaimed: number } }
+/** One pick's result on POST /api/armory/seed/apply (preview: would it pass; write: did it): `text` = its sentence. */
+export interface SeedResult { uid: string; label: string; id: number; ok: boolean; text: string }
 export interface Absence { start: string; end: string; reason: string | null; span?: string }  // `span` = the days in words (the clock rule); start/end stay ISO for the clear call
 /** One live sheet on the Me page (web/api_me.py sheet_row_extras): `may_answer` = Join / Bench / No thanks apply now (open);
  *  `may_cant` = Can't make it… (with a note) applies (locked, rostered or joined), `cant_consequence` = its confirm's sentences; `queue_note` = ad hoc and joined — a change

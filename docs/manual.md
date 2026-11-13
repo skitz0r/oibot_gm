@@ -276,6 +276,38 @@ string is your purchase, and the answer is a file for you alone. Delete your mes
 where it replies), and stays silent anywhere else. When two conversions are already running it says *Other guides are being converted
 right now. Try again in a minute.*; a string that would unpack past any real guide's size is refused as too big.
 
+**The armory on the site** (where the game version has one, WoW: Forever, and the owner has linked the guild — §8).
+- **Me.** Under each named character a line says *Linked to the armory · Updated Thu 12 Nov 8:00 PM · in the guild* (*not in
+  the guild* when the guild's roster doesn't list it; nothing when that isn't known yet; *professions kept by hand* when
+  you switched them off), or *Not linked to the armory yet. Link to the armory… in this row's ⋮ looks it up first.* The
+  character's **⋮** holds **Link to the armory…** — a window with the first name filled in and the surname (leave it empty
+  when the character has none); **Look it up** shows what the armory found (the class icon, the name, the level) with the
+  bot's own sentences, or why not in one sentence (not found, the name is taken, *Wait a moment before looking up another
+  name.*, or the armory is down), and **Link it** links exactly the character on screen; nothing is linked before that.
+  Once linked: **Sync now** (checks it with the armory at once; no confirm), **Keep professions by hand** (or **Follow
+  the armory again**) and **Unlink…**, each showing the bot's sentences before anything changes. While the armory keeps a
+  character's professions, its professions line says *Updated from the armory Thu 12 Nov 8:00 PM. Keep professions by
+  hand to edit them.* and **Professions…** in the ⋮ is greyed with why.
+- **Members (officers).** Each character line carries a small shield — filled when it is linked, hollow when not; hover it
+  for the same line as on Me — and, when something looks off, a short badge: *the armory shows a Mage* (the record keeps
+  its own class), *the armory no longer finds it* (for a day or more; the link stays) or *not in the guild* (information,
+  not an error). The character's **⋮** has the same armory actions on that member's behalf, and **Move to another
+  member…** (every game version): pick the member from the list, the bot's sentences say what goes with the character
+  (its past loot, attendance, signups, wishlist and regular spots) and who is told, then **Move it**. Under the list, the
+  card **The armory** names the guild's roster and when it was read and how many characters are linked; with no guild
+  linked, or its roster not read yet, it says so and what happens next.
+  - **Link characters to the armory…** opens the proposed links in three groups, each with a sentence: **Sure** (same
+    first name and class as exactly one character in the guild, and nobody else here could be it) — **Link the sure
+    matches…** shows the bot's count and any it would refuse, then links each on its own and names any refusal;
+    **Likely** (same class and a close name) — each with its best match and why, **Confirm**, or **Pick another…** for
+    another match (**Link this one**) or **Look it up by name…**; **No match** — **Link to the armory…** per character.
+    If the roster or the records changed since you looked, it shows the new proposal and says so; nothing was linked.
+  - **In the guild, not claimed (N)** (folded) lists the guild's characters nobody here has registered — class, name,
+    level — each with **Give to a member…**: pick the member, then which of their characters it is (one of the same class
+    not linked yet) or **A new character, registered for them** with its spec; the bot's sentences show under the picks
+    and **Give it** links it (or registers and links it). If it was registered but couldn't be linked, the page says
+    exactly that and why. Nobody without a record here can be given a character.
+
 **Tell the bot** (officers): every officer page has **Tell the bot…** in the left rail, and every live sheet on the Rosters page has
 **Tell the bot about this run** (it starts with the run's name). Type a question ("who hasn't answered tonight?") and the answer comes
 back from the same snapshot `/ask` uses, the officer view; type a request ("bench Jonny tonight", "Barrow Deeps alt run locks 12 hours

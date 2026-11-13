@@ -66,3 +66,13 @@
   .absBack { grid-area: back; }
   .absBy { display: inline; }
 }
+
+/* The armory card (armory link §5.4, §5.5): the review's group heads and rows — the registered character · its match on the
+   guild's roster · the buttons — and the not-claimed fold's rows on the same grid; below sm each row stacks. */
+.seedHead { padding: 12px 16px 6px; border-top: 1px solid var(--mantine-color-slate-5); }
+.seedRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; padding: 8px 16px;
+           border-bottom: 1px solid var(--mantine-color-slate-6); min-width: 0; }
+.seedRow > * { min-width: 0; }
+@media (max-width: 48em) {
+  .seedRow { grid-template-columns: minmax(0, 1fr); }
+}

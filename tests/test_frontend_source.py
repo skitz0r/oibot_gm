@@ -557,3 +557,47 @@ def test_guide_reissue_card_on_the_leveling_guide_tab():
     assert 'setReText("")' in comp and 'setFromTag("")' in comp and 'setNewTag("")' in comp, "the string and both tags are dropped after the download"
     assert "RestedXP sells" in comp and "your own" in comp, "the card says it is for the member's own accounts"
     assert "localStorage" not in comp
+
+
+def test_armory_link_pages_preview_and_print_only_the_servers_sentences():
+    """Armory link §5.4, §5.5 (task 14): Me's ⋮ and Members' character ⋮ carry Link to the armory… · Sync now · Keep
+    professions by hand / Follow the armory again · Unlink…, all behind `meta.armory`; Move to another member… is on every
+    version (R11). The link dialog links exactly the character its lookup showed (armory_id) and drops a stale answer;
+    every write previews and the confirm prints the server's sentences (no literal confirm message anywhere); the review
+    groups Sure / Likely / No match, sends the proposal's rev and takes the fresh one from a 409; Give to a member…
+    previews and prints the half-done answer as it is; a synced character's professions are read-only with why."""
+    link = _code_only((SRC / "components" / "ArmoryLink.tsx").read_text())
+    amap = _code_only((SRC / "components" / "members" / "ArmoryMap.tsx").read_text())
+    seed = _code_only((SRC / "components" / "members" / "ArmorySeed.tsx").read_text())
+    move = _code_only((SRC / "components" / "members" / "MoveCharacter.tsx").read_text())
+    page = _code_only((SRC / "pages" / "Members.tsx").read_text())
+    me = _code_only((SRC / "components" / "CharacterTable.tsx").read_text())
+    for name, code in (("ArmoryLink", link), ("ArmoryMap", amap), ("ArmorySeed", seed), ("MoveCharacter", move)):
+        assert not re.search(r"message:\s*[`\"'\[]", code), f"{name}: a confirm message written in the browser"
+    for label in ("Link to the armory…", "Sync now", "Keep professions by hand", "Follow the armory again", "Unlink…"):
+        assert f'"{label}"' in link, label
+    assert "if (!meta.armory || !c.armory || !linkable(c)) return [];" in link, "no armory action where the version has none"
+    assert 'message: p.sentences.join("\\n")' in link and "preview: true" in link
+    assert "${base}/find" in link and "armory_id: looked.found.id" in link and "typed.current === asked" in link
+    assert "e.status === 409" in link, "a name that now finds another character asks for a new look"
+    assert "Look it up" in link and "Link it" in link and "useDirty(" in link
+    assert "Not updated from the armory yet" in link and "in the guild" in link and "not in the guild" in link
+    assert "Keep professions by hand to edit them." in link
+    # Members: the mark and flags on each row (not for puppets), the actions, Move on every version, the card behind meta.armory
+    assert "<ArmoryMark c={c} />" in page and "armory.actions(c, r.uid)" in page and "Move to another member…" in page
+    assert "{meta.armory && <Box" in page and "<ArmoryMap " in page and "<MoveCharacter " in page
+    assert "meta.armory" not in move, "a move works on every game version (R11)"
+    assert '"/api/members/move"' in move and move.count("preview: true") == 1 and "said.sentences.join" in move
+    assert "In the guild, not claimed (" in amap and "Give to a member…" in amap and "Link characters to the armory…" in amap
+    assert '"/api/members/armory/give"' in amap and "preview: true" in amap and "x.linked" in amap and "x.message" in amap
+    assert "r.words" in amap and "data.roster.words" in seed, "an empty roster says the server's sentence"
+    for words in ('"Sure"', '"Likely"', '"No match"', "Pick another…", "Confirm", "Look it up by name…", "Link the sure matches…"):
+        assert words in seed, words
+    assert '"/api/armory/seed/apply"' in seed and "rev: data.rev" in seed and "e.status === 409" in seed and "setChanged(e.message)" in seed
+    assert "p.results" in seed and "x.results" in seed, "each refused pick is named before and after the press"
+    # Me: the line and the actions; a synced character's professions are read-only with why
+    assert "armory.actions(c)" in me and "armoryWords(c)" in me and "syncedSentence(c)" in me and "synced(c)" in me
+    assert "synced={synced(c) ? syncedSentence(c) : undefined}" in page
+    css = (SRC / "pages" / "members.module.css").read_text()
+    phone = css[css.rindex("@media (max-width: 48em)"):]
+    assert ".seedRow { grid-template-columns: minmax(0, 1fr); }" in phone, "the review's rows stack on a phone"

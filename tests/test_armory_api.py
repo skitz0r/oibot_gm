@@ -93,6 +93,7 @@ def test_a_member_finds_previews_and_links_their_own_character(g):
     a = out["character"]["armory"]
     assert a["linked"] and a["id"] == 700101 and a["level"] == 60 and a["in_guild"] is True and a["missing"] is False
     assert a["updated"].startswith("Updated from the armory ") and out["character"]["profession_sync"] is True and out["character"]["flags"] == []
+    assert a["when"] and a["updated"] == f"Updated from the armory {a['when']}", "the site's 'Updated <when>' reads the same time"
     assert reg.members[TESSA].main.label == "Bram Kettle" and reg.members[TESSA].main.armory.id == 700101
     assert len(audits(g, "linked Tessa's Bram to the armory")) == 1 and ("member", reg.key) in g.sent
     me = g.c.get("/api/me", headers=h).json()["characters"][0]

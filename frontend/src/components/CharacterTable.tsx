@@ -5,6 +5,7 @@ import { IconCrown, IconDots, IconPencil, IconPlus, IconTrash } from "@tabler/ic
 import { api, ApiError, type Character, type Me, type Meta, type TableSaved } from "../api";
 import { ProfessionLine } from "./ProfessionLine";
 import { ProfessionsEditor } from "./ProfessionsEditor";
+import { armoryWords, linkable, synced, syncedSentence, useArmoryActions } from "./ArmoryLink";
 import { GameIcon } from "./Icons";
 import { CharacterCell, SpecCell, StatusBadge } from "./Cells";
 import { CardHeader, fail, ok } from "./Page";
@@ -45,6 +46,8 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
   const [ask, dialog] = useConfirm();
   const [prof, setProf] = useState<Character | null>(null);  // the one character whose professions are edited in place (it registers its own useDirty)
   const hasProfs = !!meta.professions?.list.length;
+  const armory = useArmoryActions(meta, "/api/me/armory", onChanged);  // Link to the armory… · Sync now · the switch · Unlink…
+  const armoryOn = (c: Character) => !!meta.armory && !!c.armory && linkable(c);
   useEffect(() => { onEditing?.(editing || prof !== null); }, [editing, prof]);  // eslint-disable-line react-hooks/exhaustive-deps
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));
 
@@ -92,7 +95,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
           <Table.Thead><Table.Tr><Table.Th w={editing ? 84 : 44} /><Table.Th>Character</Table.Th><Table.Th w={editing ? "22%" : "14%"}>Spec</Table.Th><Table.Th w={editing ? "22%" : "14%"}>Offspec</Table.Th><Table.Th w={editing ? "20%" : "14%"}>Flex</Table.Th>{!editing && <Table.Th w={120}>Status</Table.Th>}<Table.Th w={48} /></Table.Tr></Table.Thead>
           <Table.Tbody>
             {!editing && me.characters.map((c) => [
-              <Table.Tr key={c.label} style={hasProfs ? { borderBottom: "none" } : undefined}>
+              <Table.Tr key={c.label} style={hasProfs || armoryOn(c) ? { borderBottom: "none" } : undefined}>
                 <Table.Td>{c.is_main && <Tooltip label="your main"><IconCrown size={18} color="var(--mantine-color-slate-2)" /></Tooltip>}</Table.Td>
                 <Table.Td><CharacterCell meta={meta} cls={c.cls} label={c.label} size={34} /></Table.Td>
                 <Table.Td><SpecCell meta={meta} cls={c.cls} spec={c.spec} role={c.role} /></Table.Td>
@@ -101,25 +104,34 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
                 <Table.Td><StatusBadge named={!!c.name} confirmed={!!c.confirmed} /></Table.Td>
                 <Table.Td>
                   <Menu position="bottom-end" withinPortal>
-                    <Menu.Target><ActionIcon variant="subtle" color="gray" loading={busy === c.label} aria-label={`${c.label} actions`}><IconDots size={17} /></ActionIcon></Menu.Target>
+                    <Menu.Target><ActionIcon variant="subtle" color="gray" loading={busy === c.label || armory.busy === c.label} aria-label={`${c.label} actions`}><IconDots size={17} /></ActionIcon></Menu.Target>
                     <Menu.Dropdown>
                       {!c.is_main && <Menu.Item leftSection={<IconCrown size={14} />} onClick={() => makeMain(c)}>Make main</Menu.Item>}
-                      {hasProfs && <Menu.Item disabled={prof !== null && prof.label !== c.label} onClick={() => setProf(c)}>Professions…</Menu.Item>}
+                      {hasProfs && <Menu.Item disabled={synced(c) || (prof !== null && prof.label !== c.label)} onClick={() => setProf(c)}>
+                        <Text size="sm" inherit>Professions…</Text>
+                        {synced(c) && <Text size="xs" c="dimmed">the armory keeps them: Keep professions by hand first</Text>}
+                      </Menu.Item>}
+                      {armory.actions(c).map((a) => <Menu.Item key={a.key} color={a.color} onClick={a.run}>{a.label}</Menu.Item>)}
                       <Menu.Item onClick={() => retire(c)}>Retire</Menu.Item>
                       <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => del(c)}>Delete</Menu.Item>
                     </Menu.Dropdown>
                   </Menu>
                 </Table.Td>
               </Table.Tr>,
-              hasProfs && (
+              (hasProfs || armoryOn(c)) && (
                 <Table.Tr key={`${c.label}:professions`}>
                   <Table.Td />
                   <Table.Td colSpan={6} pt={0}>
-                    {prof?.label === c.label
+                    {armoryOn(c) && (
+                      <Text size="xs" c="dimmed" mb={hasProfs ? 4 : 0}>
+                        {c.armory?.linked ? armoryWords(c) : "Not linked to the armory yet. Link to the armory… in this row's ⋮ looks it up first."}
+                      </Text>
+                    )}
+                    {!hasProfs ? null : prof?.label === c.label
                       ? <ProfessionsEditor meta={meta} label={c.label} professions={c.professions} onCancel={() => setProf(null)}
                           onSaved={() => { setProf(null); onChanged(); }}
                           onSave={(entries, { preview }) => api.post<TableSaved>("/api/me/characters", { rows: [{ label: c.label, professions: entries }], rev: me.characters_rev, preview })} />
-                      : <ProfessionLine meta={meta} professions={c.professions} />}
+                      : <ProfessionLine meta={meta} professions={c.professions} synced={synced(c) ? syncedSentence(c) : undefined} />}
                   </Table.Td>
                 </Table.Tr>
               ),
@@ -158,6 +170,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
           <Button size="sm" loading={busy === "save"} onClick={save}>Save changes</Button>
         </Group>
       )}
+      {armory.dialogs}
       {dialog}
     </Card>
   );

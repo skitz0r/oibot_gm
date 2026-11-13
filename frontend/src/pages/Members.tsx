@@ -16,6 +16,9 @@ import { MemberEdit } from "../components/members/MemberEdit";
 import { ConfirmWalk, PickModal, type Pick, type WalkItem } from "../components/members/PeopleDialogs";
 import { ProfessionLine } from "../components/ProfessionLine";
 import { ProfessionsEditor } from "../components/ProfessionsEditor";
+import { ArmoryMark, synced, syncedSentence, useArmoryActions } from "../components/ArmoryLink";
+import { ArmoryMap } from "../components/members/ArmoryMap";
+import { MoveCharacter, type MoveTarget } from "../components/members/MoveCharacter";
 import { classColour } from "../theme";
 import css from "./members.module.css";
 
@@ -66,6 +69,8 @@ export function MembersPage({ meta }: { meta: Meta }) {
   useRefresh(load);
   useLive(() => { if (editRef.current === null) load(); }, ["member", "run:"]);  // never under an edit in progress
   const changed = () => { load(); setAbsKey((k) => k + 1); };
+  const armory = useArmoryActions(meta, "/api/members/armory", load);  // Link to the armory… · Sync now · the switch · Unlink…
+  const [move, setMove] = useState<MoveTarget | null>(null);
 
   const rows = data?.rows || [];
   const hasProfs = !!meta.professions?.list.length;
@@ -164,15 +169,17 @@ export function MembersPage({ meta }: { meta: Meta }) {
 
   const charMenu = (r: MemberRow, c: Character) => (
     <Menu shadow="md" width={260} position="bottom-end" classNames={{ item: css.menuItem }}>
-      <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`${c.label} the character`}><IconDotsVertical size={15} /></ActionIcon></Menu.Target>
+      <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" loading={armory.busy === c.label} aria-label={`${c.label} the character`}><IconDotsVertical size={15} /></ActionIcon></Menu.Target>
       <Menu.Dropdown>
         <Menu.Label>{c.label}</Menu.Label>
         <Item label="Spec…" onClick={() => setPick({ kind: "spec", r, c })} />
         <Item label="Extra roles…" onClick={() => setPick({ kind: "flex", r, c })} />
-        {hasProfs && <Item label="Professions…" why={prof && (prof.r.uid !== r.uid || prof.c.label !== c.label) ? "save or cancel the professions you're editing first" : null} onClick={() => setProf({ r, c })} />}
+        {hasProfs && <Item label="Professions…" why={synced(c) ? "the armory keeps them: Keep professions by hand first" : prof && (prof.r.uid !== r.uid || prof.c.label !== c.label) ? "save or cancel the professions you're editing first" : null} onClick={() => setProf({ r, c })} />}
         <Item label="Make main" why={c.is_main ? "already the main" : null} onClick={() => press(r, { character: c.label, main: true }, `Make ${c.label} ${r.display_name}'s main?`, "Make it the main")} />
         <Item label="Confirm" why={c.confirmed ? "already confirmed" : !c.name ? "a planned character is confirmed once it has a name" : r.uid === me && own.confirm ? own.confirm : null}
           onClick={() => press(r, { character: c.label, confirm: true }, `Confirm ${c.label}?`, "Confirm")} />
+        {!r.test && armory.actions(c, r.uid).map((a) => <Item key={a.key} label={a.label} color={a.color} onClick={a.run} />)}
+        {!!c.name && c.status === "active" && <Item label="Move to another member…" onClick={() => setMove({ r, c })} />}
         <Menu.Divider />
         <Item label="Retire…" onClick={() => press(r, { character: c.label, retire: true }, `Retire ${c.label}?`, "Retire")} />
         <Item label="Delete…" color="red" onClick={() => press(r, { character: c.label, delete: true }, `Delete ${c.label}?`, "Delete", "red")} />
@@ -191,13 +198,14 @@ export function MembersPage({ meta }: { meta: Meta }) {
         {(c.flex || []).map((x) => <span key={x} className={css.flexIcon}><GameIcon meta={meta} kind="role" id={x} size={18} title={`could also play ${x}`} /></span>)}
         {waits(c) && <Group gap={6} wrap="nowrap"><span className={css.unconfirmed} /><Text size="xs" c="dimmed">waits for a confirm</Text></Group>}
         {!c.name && <Text size="xs" c="dimmed">planned, no name yet</Text>}
+        {!r.test && <ArmoryMark c={c} />}
         {charMenu(r, c)}
       </div>
       {!!c.regular_on?.length && <Anchor component={Link} to="/rosters" size="xs" c="dimmed" ml={32}>regular of {c.regular_on.join(", ")}</Anchor>}
       {hasProfs && (prof && prof.r.uid === r.uid && prof.c.label === c.label
         ? <Box mt={4} mb={6}><ProfessionsEditor meta={meta} label={c.label} professions={c.professions} onCancel={() => setProf(null)}
             onSaved={() => { setProf(null); load(); }} onSave={professionsSave(r, c)} /></Box>
-        : <Box ml={32} mt={2} mb={4}><ProfessionLine meta={meta} professions={c.professions} compact member={r.display_name} /></Box>)}
+        : <Box ml={32} mt={2} mb={4}><ProfessionLine meta={meta} professions={c.professions} compact member={r.display_name} synced={synced(c) ? syncedSentence(c) : undefined} /></Box>)}
     </Box>
   );
 
@@ -292,6 +300,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
               ))}
             </div>
           </Card>
+          {meta.armory && <Box mt="lg"><ArmoryMap meta={meta} rows={rows} openLink={armory.openLink} onChanged={load} /></Box>}
         </Tabs.Panel>
         <Tabs.Panel value="absences" pt="md"><AbsencesTable reloadKey={absKey} /></Tabs.Panel>
         <Tabs.Panel value="test" pt="md"><TestBench meta={meta} rows={rows} onChanged={load} /></Tabs.Panel>
@@ -299,6 +308,8 @@ export function MembersPage({ meta }: { meta: Meta }) {
       <AbsencesModal meta={meta} opened={!!absFor} who={absFor ? { uid: absFor.uid, display_name: absFor.display_name } : null} onClose={() => setAbsFor(null)} onSaved={() => { setAbsFor(null); changed(); }} />
       <PickModal meta={meta} pick={pick} rankChoices={data.rank_choices || []} onClose={() => setPick(null)} onDone={load} />
       <ConfirmWalk meta={meta} queue={walk?.queue || []} skipped={walk?.skipped || []} skipReason={own.confirm} opened={walk !== null} onClose={() => { setWalk(null); load(); }} />
+      <MoveCharacter move={move} rows={rows} onClose={() => setMove(null)} onDone={load} />
+      {armory.dialogs}
       {confirmDialog}
     </Stack>
   );

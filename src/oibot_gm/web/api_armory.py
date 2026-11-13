@@ -37,6 +37,7 @@ def armory_json(reg, c, fl: list[str] | None = None) -> dict | None:
     """A character's link as every character row carries it (`char_json`: the Me and Members pages; the map). None where
     the version has no armory. `linked` false = not linked yet. `name` / `surname` = the record's (a linked record takes
     the armory's), `level` / `cls` = the armory's (null before a link), `updated` = "Updated from the armory <when>",
+    `when` = that <when> alone (Registry.local12; null before the first check — the site's "Updated <when>"),
     `in_guild` = on the linked guild's roster (true / false / null = not known), `missing` = the armory has not found it
     for a day (the "missing" flag)."""
     if not armory_mod.available(reg):
@@ -44,10 +45,11 @@ def armory_json(reg, c, fl: list[str] | None = None) -> dict | None:
     a = c.armory
     if a is None:
         return {"linked": False, "id": None, "name": c.name, "surname": c.surname, "level": None, "cls": None, "updated": None,
-                "in_guild": None, "missing": False}
+                "when": None, "in_guild": None, "missing": False}
     fl = discord_armory.flags(reg, c) if fl is None else fl  # `fl`: the row's flags when the caller has them already
+    at = discord_armory.last_checked(reg, c)
     return {"linked": True, "id": a.id, "name": c.name, "surname": c.surname, "level": a.level, "cls": a.cls,
-            "updated": discord_armory.updated_words(reg, c), "in_guild": discord_armory.in_guild(reg, c), "missing": "missing" in fl}
+            "updated": discord_armory.updated_words(reg, c), "when": reg.local12(at) if at else None, "in_guild": discord_armory.in_guild(reg, c), "missing": "missing" in fl}
 
 
 def char_extras(reg, c) -> dict:
