@@ -399,7 +399,7 @@ def test_a_failed_sync_now_can_be_pressed_again(reg, fake, bot, clock):
     assert run(discord_armory.sync_character(bot, reg, TESSA, "Bram Kettle", force=True, by_id=TESSA)) == "limited"
 
 
-def test_a_puppet_is_never_linked_nor_holds_a_link_nor_blocks_a_real_name(reg, fake, bot, clock, rs):
+def test_a_puppet_is_never_linked_and_never_holds_a_link(reg, fake, bot, clock):
     from oibot_gm.registry import ArmoryLink
 
     people(reg)
@@ -410,10 +410,36 @@ def test_a_puppet_is_never_linked_nor_holds_a_link_nor_blocks_a_real_name(reg, f
     assert reg.armory_holder(700101) is None
     assert reg.link_refusal(TESSA, "Bram", 700101, "Bram", "Kettle", officer=True) is None
     pc.armory = None
-    # a puppet seeded from a real signup name never blocks a real member's character taking it
-    reg.rename_character(TESSA, "Bram", pc.name, pc.surname, "t", rs=rs, officer=True)
-    assert char(reg, TESSA, pc.label) is not None
-    assert reg.link_refusal(TESSA, pc.label, 700101, pc.name, pc.surname, officer=True) is None
+
+
+def test_a_puppets_name_is_still_unique_and_refused_in_words(reg, fake, bot, clock, rs):
+    """R10: a full name stays unique across every record, puppets included; the officer is told to clear the test bench."""
+    from types import SimpleNamespace
+
+    people(reg)
+    puppet = next(m for m in reg.members.values() if m.test and m.main and m.main.name)
+    pc = puppet.main
+    before, rev = commits(reg), reg.characters_rev(reg.members[TESSA])
+    with pytest.raises(Exception) as officer:
+        reg.rename_character(TESSA, "Bram", pc.name, pc.surname, "t", rs=rs, officer=True)
+    assert str(officer.value) == f"{pc.label} is held by a test character. Clear the test bench first."
+    with pytest.raises(Exception) as member:
+        reg.rename_character(TESSA, "Bram", pc.name, pc.surname, "t", rs=rs, officer=False)
+    assert str(member.value) == "That name is already registered here. Ask an officer."
+    assert reg.link_refusal(TESSA, "Bram", 700101, pc.name, pc.surname, officer=True) == str(officer.value)
+    assert reg.link_refusal(TESSA, "Bram", 700101, pc.name, pc.surname, officer=False) == str(member.value)
+    fake.chars[pc.label.lower().replace(" ", "-")] = facts(pc.name, pc.surname, 700150, cls=pc.cls)
+    found = run(discord_armory.find_for_link(bot, reg, pc.name, pc.surname))
+    with pytest.raises(Exception) as linked_:
+        run(discord_armory.link_character(bot, reg, TESSA, "Bram", found, "Owner", by_id=OWNER))
+    assert str(linked_.value) == str(officer.value)
+    assert commits(reg) == before and reg.characters_rev(reg.members[TESSA]) == rev  # nothing written
+    assert char(reg, TESSA, "Bram").armory is None
+    # both records are found as before
+    assert reg.find(pc.label)[0] is puppet and reg.find("Bram")[0].discord_id == TESSA
+    assert reg.award_is_for(SimpleNamespace(discord_id=TESSA, raider="Bram"), "Bram")
+    assert not reg.award_is_for(SimpleNamespace(discord_id=TESSA, raider="Bram"), pc.label)
+    assert reg.award_is_for(SimpleNamespace(discord_id=puppet.discord_id, raider=pc.label), pc.label)
 
 
 def test_two_unlinks_at_once_answer_in_words(reg, fake, bot, clock):

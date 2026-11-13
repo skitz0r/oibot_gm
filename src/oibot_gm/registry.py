@@ -2215,10 +2215,9 @@ class Registry:
         full = f"{name} {surname}" if surname else name
         if full == c.label:
             return c
-        hit = self.holder_of(full, against=m)
+        hit = self.holder_of(full)
         if hit is not None and hit[1] is not c:
-            raise RegistryError(f"{full} is registered to {hit[0].display_name}. Move it or retire it first." if officer
-                                else "That name is already registered here. Ask an officer.")
+            raise RegistryError(self.name_taken_refusal(full, hit[0], officer=officer))
         from . import raidcycle as rc
 
         old = c.label
@@ -2259,13 +2258,20 @@ class Registry:
                 or next((c for c in pool if (c.name or "").lower() == r), None)
                 or next((c for c in pool if self.same_character(c, r)), None))
 
-    def holder_of(self, label: str | None, *, against: Member | None = None) -> tuple[Member, RegisteredCharacter] | None:
+    def holder_of(self, label: str | None) -> tuple[Member, RegisteredCharacter] | None:
         """Who holds `label` as a CURRENT full name (a former name holds nothing): the taken-name check of every verb
-        that names a character. `against` = the member whose character would take the name: a test puppet never counts
-        as the holder against a real member (the test bench seeds puppets from real signup names)."""
-        real = against is not None and not against.test
-        return next(((m, c) for m in self.members.values() if not (real and m.test) for c in m.characters
-                     if c.name and self.same_character(c, label, former=False)), None)
+        that names a character. A full name is unique across ALL records, test puppets included (R10)."""
+        return next(((m, c) for m in self.members.values() for c in m.characters if c.name and self.same_character(c, label, former=False)), None)
+
+    @staticmethod
+    def name_taken_refusal(full: str, holder: Member, *, officer: bool) -> str:
+        """The one sentence when a rename or a link would take a full name another record holds: to an officer the holder
+        (a test puppet's name is freed by clearing the test bench — R10), to a member "ask an officer"."""
+        if not officer:
+            return "That name is already registered here. Ask an officer."
+        if holder.test:
+            return f"{full} is held by a test character. Clear the test bench first."
+        return f"{full} is registered to {holder.display_name}. Move it or retire it first."
 
     def find_full(self, label: str | None) -> tuple[Member, RegisteredCharacter] | None:
         """A named character by its full name: the current holder, else the one character that had it before a rename.
@@ -2377,10 +2383,9 @@ class Registry:
         if hit is not None and hit[1] is not c:
             return (f"{full} in the armory is linked to {hit[0].display_name}'s {hit[1].label}. Unlink it there first." if officer
                     else "That armory character is already linked here. Ask an officer.")
-        taken = self.holder_of(full, against=m)
+        taken = self.holder_of(full)
         if taken is not None and taken[1] is not c:
-            return (f"{full} is registered to {taken[0].display_name}. Move it or retire it first." if officer
-                    else "That name is already registered here. Ask an officer.")
+            return self.name_taken_refusal(full, taken[0], officer=officer)
         return None
 
     @_member_write

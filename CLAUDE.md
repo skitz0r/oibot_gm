@@ -268,7 +268,7 @@ src/oibot_gm/
                        an id-less ledger row with `find`, as its file rows); award_is_for(a, name) = the companion's / correct's / a conflict's compare;
                        same_name(a, b) = two id-less names. rename_character(uid, label, name, surname, by, *, rs (REQUIRED: the bot's RaidStore), by_id,
                        officer, relabelled) = THE character rename: refused with
-                       nothing written for a name another record holds — holder_of(label, against=m): a test puppet never blocks a real member's name — ("<Name> is registered to <member>. Move it or retire it first." / "That name is
+                       nothing written for a name another record holds — a full name is unique across every record, puppets included (R10); name_taken_refusal = the sentence ("<Name> is registered to <member>. Move it or retire it first." / a puppet's: "<Name> is held by a test character. Clear the test bench first." / "That name is
                        already registered here. Ask an officer."); the old label → former_names (a name taken back leaves it); ONE commit = the member +
                        every live run's labels (rc.relabel_runs: signup, seats, fill asks, callouts; `relabelled` gets the keys to redraw) + their
                        placement asks; the ledger, award ids, appeals and finished / cancelled runs keep the old name; the same name = no write

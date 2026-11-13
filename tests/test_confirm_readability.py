@@ -569,7 +569,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
         dump.add("profession_sync_consequence", f"on={on}, no name", cq.profession_sync_consequence(on), link_names)
         dump.add("profession_sync_consequence", f"on={on}, already so", cq.profession_sync_consequence(on, ac.label, current=on), link_names)
     for text in (discord_armory.NOT_FOUND, discord_armory.SYNC_LIMITED, *discord_armory.OFFICER_ONLY.values(),
-                 "That armory character is already linked here. Ask an officer.", "A test character can't be linked to the armory.",
+                 "That armory character is already linked here. Ask an officer.", "A test character can't be linked to the armory.", "Bram Kettle is held by a test character. Clear the test bench first.",
                  "Bram Kettle in the armory is linked to Bramble's Bram Kettle. Unlink it there first.",
                  "Bram Kettle's professions come from the armory, so turn on Keep professions by hand to edit them."):
         dump.add("armory refusal", text[:24], [text], link_names)
