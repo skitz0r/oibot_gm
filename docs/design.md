@@ -5025,3 +5025,14 @@ one makes the other's next save answer that something changed. The seed's previe
 picks claim the same armory id. A plain-text "take X off" for a recipe held in two professions refuses without saying how
 to answer. The migration's ops line says "not in the list" for a name the list gives to another profession. `/gm config`
 is at Discord's limit of 25 subcommands (`armory` is the last).
+
+**The help answer after the first day (2026-11-13).** Asked "who is our highest level enchanter and can they do fiery
+weapon?", the bot answered "nobody has that registered as a notable recipe… ask them, or have them add it". Three causes,
+all in the snapshot (professions.help_section), none in the model: its header still described hand-registered notable
+recipes; nothing said whose recipes the armory keeps, so absence could not be read as "doesn't know it"; and the finder's
+sentence tier needs every word of a name, which nobody types for "Enchant Weapon - Fiery Weapon". With the game's list the
+section is now a line per crafter (member, skill, level when linked, `armory` | `by hand`, a recipe count), the
+question's recipes (search, then `phrase_hits`: two neighbouring words of a name, or an enchant's one word after its
+dash beside a word starting "enchant"), and the first sixty recipes of a crafter the question names. The 80-recipe dump
+is gone (a recipe book is a count). No tool for the model: code finds the recipes, Claude explains. A version without a
+list keeps the old section word for word.

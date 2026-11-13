@@ -2492,11 +2492,15 @@ An @mention in a question reads as that person's name, for every way you ask (an
 the bot listens in).
 
 **Who can make what** is open to every member the same way: "who can make Devilsaur Gauntlets?", "any alchemists?",
-"who has the highest tailoring?" are answered from what members registered (§3 *Professions*) — each profession's crafters
-with their skill, and every notable recipe with who makes it — names only, nobody pinged. The question has to name a
-profession, a registered recipe or a recipe of the game's list (by its whole name, two words or more). A recipe of the
-game's list nobody makes gets *"Nobody in the guild makes … yet."* and how a crafter adds it; a name the game doesn't
-have gets *"That isn't a recipe in the game's list."* Retired
+"who has the highest tailoring?" are answered from the characters' records (§3 *Professions*) — each profession's crafters
+with their skill, their level when the character is linked to the armory, and how many recipes are on record — names
+only, nobody pinged. The question has to name a profession or a recipe of the game's list: its whole name, two words
+that sit together in it (*"can anyone do fiery weapon?"*), or an enchant by the word after its dash (*"the crusader
+enchant"*). A character whose professions follow the armory has its whole recipe book read from the game, so a recipe
+it doesn't show is one it doesn't know: the bot says so plainly. Only for a character kept by hand does it add how the
+crafter records a recipe. A recipe of the game's list nobody makes gets *"Nobody in the guild makes … yet."*; a name the
+game doesn't have gets *"That isn't a recipe in the game's list."* *"What tailoring recipes does <character> know?"*
+lists that character's first sixty and points at the Professions page for the rest. Retired
 characters, puppets and people who left the server are never named.
 
 Officers get more, only when the question is about it (a few keywords decide; "status", "overview" or "what's going

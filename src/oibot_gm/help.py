@@ -1023,7 +1023,7 @@ SECTIONS: dict[str, tuple[re.Pattern, Callable[[Ask], list[str]], int, bool]] = 
     "news": (re.compile(r"\b(news|proposals?|jobs?|review|agents?|patch(es)?|hotfix\w*|blue ?posts?|go(ne)? through|went through|revert\w*|(was|were|been|got|it) applied)\b"), _news, 2_500, True),
     "loot": (re.compile(r"\b(loot|precedents?|ledger|award(ed|s)?|got|drops?|items?|council|gear|overrid\w*|overrode|overruled?)\b"), _loot, 2_500, False),  # members: their own
     "who": (re.compile(r"\b(list|who|whos|plays?|playing|class(es)?|specs?|heal(er|ers|s|ing)?|tank(s|ing)?|melee|ranged|dps|roles?|offspec|alts?|mains?|members?|characters?|ranks?)\b"), _who, 4_000, False),  # members: public-safe
-    "professions": (professions.HELP_WORDS, professions.help_section, 3_000, False),
+    "professions": (professions.HELP_WORDS, professions.help_section, 4_500, False),
     "guides": (GUIDE_WORDS, _guild_guides, 900, False),
     "bank": (re.compile(r"\b(list|who|healers?|tanks?|melee|ranged|dps|unconfirmed|confirm\w*|officers?|alts?|mains?|members?|bank|characters?|ranks?|privilege)\b"), _bank, 4_000, True),
     "policy": (re.compile(r"\b(polic(y|ies)|loot rules?|comp rules?|persona|standing instructions?)\b"), _policy, 3_000, True),

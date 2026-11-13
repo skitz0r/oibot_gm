@@ -457,7 +457,11 @@ src/oibot_gm/
                        list (Pick the recipe… / Remove; rename_recipe / merge_recipe and their routes are retired, §5.64 C7), unmatched(reg) = those
                        recipes for the officers' card (off_list: no id, an id the list lacks or gives elsewhere — an armory one kept by hand; never a
                        character whose professions follow the armory; none without a list), migrated_line; HELP_WORDS / help_hit / help_section = the help section
-                       (every member-typed name through unfence).
+                       (every member-typed name through unfence). With the list the section (2026-11-13) = a line per crafter (member, skill,
+                       level when linked, `armory` | `by hand`, a recipe COUNT — never a recipe book), the question's recipes (search, then
+                       phrase_hits = two neighbouring words of a name, or with tails= an enchant's one word after its dash + "enchant…"), then the
+                       first HELP_BOOK recipes of a crafter the question names; `armory` = a recipe not shown is one they don't know (the header
+                       says so); without a list _help_section_registered = as before.
                        Names only: nothing pings, DMs, tracks a request or reads a website. Game data: profiles/<v>/professions.yaml (GameProfile.professions,
                        profession_rules, ProfessionDef.makes); the confirm words: consequences.profession_consequence (verb "professions")
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
