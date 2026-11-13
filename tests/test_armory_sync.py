@@ -98,7 +98,7 @@ def test_unknown_recipe_id_is_kept_and_reported_once(reg, fake, bot, clock):
 
 def test_404_sets_missing_and_keeps_everything(reg, fake, bot, clock):
     c = linked(bot, reg)
-    kept = c.model_dump(exclude={"armory"})
+    kept = c.model_dump(exclude={"armory", "updated_at"})  # the write stamps updated_at: a second may tick
     level = c.armory.level
     del fake.chars["bram-kettle"]
     fake.rows = [r for r in fake.rows if r.id != 700101]
@@ -108,7 +108,7 @@ def test_404_sets_missing_and_keeps_everything(reg, fake, bot, clock):
     assert commits(reg) == before + 1
     c = char(reg, TESSA, "Bram Kettle")
     assert c.armory is not None and c.armory.missing_since == clock().isoformat(timespec="seconds") and c.armory.level == level
-    assert c.model_dump(exclude={"armory"}) == kept
+    assert c.model_dump(exclude={"armory", "updated_at"}) == kept
     assert "missing" not in discord_armory.flags(reg, c)  # shown to officers after a day
     clock.advance(hours=25)
     assert run(discord_armory.sync_character(bot, reg, TESSA, "Bram Kettle")) == "missing"
