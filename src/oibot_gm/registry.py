@@ -93,7 +93,11 @@ class Profession(BaseModel):
 class ArmoryLink(BaseModel):
     """A character's link to its armory profile (armory link, design §5.2): the armory's character id and the name the
     armory knows it by, who linked it and when, and what the last check read. Nothing sets it yet (the link is the
-    next step); `cls` is what the armory says, never written onto the character (a difference is a flag officers see)."""
+    next step); `cls` is what the armory says, never written onto the character (a difference is a flag officers see).
+    "In the guild" is not stored: it is derived from the linked guild's roster (discord_armory.in_guild, R9); an old key
+    in a file is ignored."""
+    model_config = ConfigDict(extra="ignore")
+
     id: int
     slug: str
     linked_by: str
@@ -102,7 +106,6 @@ class ArmoryLink(BaseModel):
     modified: Optional[str] = None  # the armory's Last-Modified, for the next conditional request
     level: Optional[int] = None
     cls: Optional[str] = None
-    in_guild: Optional[bool] = None
     missing_since: Optional[str] = None  # the armory stopped finding it (never unlinks by itself)
 
 
@@ -2212,7 +2215,7 @@ class Registry:
         full = f"{name} {surname}" if surname else name
         if full == c.label:
             return c
-        hit = self.holder_of(full)
+        hit = self.holder_of(full, against=m)
         if hit is not None and hit[1] is not c:
             raise RegistryError(f"{full} is registered to {hit[0].display_name}. Move it or retire it first." if officer
                                 else "That name is already registered here. Ask an officer.")
@@ -2256,10 +2259,13 @@ class Registry:
                 or next((c for c in pool if (c.name or "").lower() == r), None)
                 or next((c for c in pool if self.same_character(c, r)), None))
 
-    def holder_of(self, label: str | None) -> tuple[Member, RegisteredCharacter] | None:
+    def holder_of(self, label: str | None, *, against: Member | None = None) -> tuple[Member, RegisteredCharacter] | None:
         """Who holds `label` as a CURRENT full name (a former name holds nothing): the taken-name check of every verb
-        that names a character."""
-        return next(((m, c) for m in self.members.values() for c in m.characters if c.name and self.same_character(c, label, former=False)), None)
+        that names a character. `against` = the member whose character would take the name: a test puppet never counts
+        as the holder against a real member (the test bench seeds puppets from real signup names)."""
+        real = against is not None and not against.test
+        return next(((m, c) for m in self.members.values() if not (real and m.test) for c in m.characters
+                     if c.name and self.same_character(c, label, former=False)), None)
 
     def find_full(self, label: str | None) -> tuple[Member, RegisteredCharacter] | None:
         """A named character by its full name: the current holder, else the one character that had it before a rename.
@@ -2322,9 +2328,9 @@ class Registry:
     # never creates a record (D2): every verb here acts on a character somebody registered.
     def armory_holder(self, armory_id: int) -> tuple[Member, RegisteredCharacter] | None:
         """Who in this guild holds the link to armory character `armory_id` (one claim per armory character per guild):
-        an ACTIVE character of any member, else None. A retired character's old link claims nothing."""
+        an ACTIVE character of a real member, else None. A retired character's old link claims nothing, nor a test puppet."""
         aid = int(armory_id)
-        return next(((m, c) for m in self.members.values() for c in m.characters
+        return next(((m, c) for m in self.members.values() if not m.test for c in m.characters
                      if c.status == "active" and c.armory is not None and c.armory.id == aid), None)
 
     def armory_linked(self) -> list[tuple[Member, RegisteredCharacter]]:
@@ -2357,11 +2363,13 @@ class Registry:
         """Why linking the member's character `label` to armory character `armory_id` (named `name surname` there) is
         refused, else None — nothing written. One sentence: a puppet in rehearsal, no such character, already linked to it,
         another record's claim (naming the holder to an officer, "ask an officer" to a member — spec §5.2 "One claim"),
-        or a name another record holds now (the rename's own refusal)."""
+        or a name another record holds now (the rename's own refusal); a test puppet is never linked."""
         try:
             m, c = self._linkable(discord_id, label, by_id)
         except RegistryError as e:
             return str(e)
+        if m.test:
+            return "A test character can't be linked to the armory."
         full = f"{name} {surname}" if surname else name
         if c.armory is not None and c.armory.id == int(armory_id):
             return f"{c.label} is already linked to that armory character."
@@ -2369,7 +2377,7 @@ class Registry:
         if hit is not None and hit[1] is not c:
             return (f"{full} in the armory is linked to {hit[0].display_name}'s {hit[1].label}. Unlink it there first." if officer
                     else "That armory character is already linked here. Ask an officer.")
-        taken = self.holder_of(full)
+        taken = self.holder_of(full, against=m)
         if taken is not None and taken[1] is not c:
             return (f"{full} is registered to {taken[0].display_name}. Move it or retire it first." if officer
                     else "That name is already registered here. Ask an officer.")
@@ -2420,7 +2428,7 @@ class Registry:
     @_member_write
     def armory_update(self, discord_id: int, armory_id: int, changes: dict, *, professions: list[Profession] | None = None,
                       ride: dict | None = None) -> bool:
-        """THE write of a check (spec §5.3): `changes` = ArmoryLink fields the armory says now (level, cls, in_guild, slug,
+        """THE write of a check (spec §5.3): `changes` = ArmoryLink fields the armory says now (level, cls, slug,
         missing_since), `professions` = the armory's whole validated list (applied only while profession_sync is still on),
         `ride` = fields stored only when something else differs (the armory's Last-Modified: a logout alone writes
         nothing; checked_at, now by default). The character is found by its link (`armory_id`), never by a name. Nothing differs → no write, False.

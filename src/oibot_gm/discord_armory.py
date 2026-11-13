@@ -106,7 +106,7 @@ def reset_state() -> None:
 
 
 def _st(reg) -> dict:
-    return _STATE.setdefault(reg.key, {"checked": {}, "modified": {}, "forced": {}, "warned_at": None, "strangers": set(),
+    return _STATE.setdefault(reg.key, {"checked": {}, "modified": {}, "forced": {}, "warned_at": {}, "strangers": set(),
                                        "reported": None, "roster": _UNLOADED, "roster_try": None, "last_sync": None, "task": None})
 
 
@@ -141,10 +141,16 @@ def updated_words(reg, c: RegisteredCharacter) -> str:
 
 
 def in_guild(reg, c: RegisteredCharacter) -> bool | None:
-    """In the server's guild (True / False), or not known (None): no link, or no guild linked to the server."""
-    if c.armory is None or reg.config.armory is None:
+    """In the server's guild — DERIVED, never stored (R9): True when the character's armory id is on the last roster read
+    of the guild linked NOW, False when that roster was read and it is not there, None (not known) when the character
+    isn't linked, no guild is linked, or that guild's roster hasn't been read yet. A guild linked, switched or unlinked
+    changes the answer at once, with no write."""
+    if c.armory is None:
         return None
-    return c.armory.in_guild
+    snap = _load_snapshot(reg)  # only the snapshot of the guild linked now answers
+    if snap is None:
+        return None
+    return any(r.id == c.armory.id for r in snap.rows)
 
 
 def flags(reg, c: RegisteredCharacter) -> list[str]:
@@ -232,13 +238,16 @@ async def _emit(bot, reg, level: str, text: str) -> None:
         log.exception("ops emit failed")
 
 
-async def _warn_hourly(bot, reg, text: str) -> None:
-    """The armory down / refusing the keys / answering oddly: at most one ops warning per guild per hour."""
-    st = _st(reg)
-    if st["warned_at"] is not None and _now() - st["warned_at"] < WARN_EVERY:
+async def _warn_hourly(bot, reg, kind: str, text: str) -> None:
+    """At most one ops warning per guild per hour for each `kind` ("armory" = down / refusing the keys / answering oddly,
+    "roster-missing", "professions:<armory id>", "name:<armory id>"): one character's warning never hides another's, nor
+    an outage."""
+    warned = _st(reg)["warned_at"]
+    last = warned.get(kind)
+    if last is not None and _now() - last < WARN_EVERY:
         log.info("[%s] %s (warned this hour already)", reg.key, text)
         return
-    st["warned_at"] = _now()
+    warned[kind] = _now()
     await _emit(bot, reg, "warn", text)
 
 
@@ -259,7 +268,7 @@ def _reported_path(reg) -> Path:
 async def _report_unknown_recipes(bot, reg, m: Member, c: RegisteredCharacter, profs) -> None:
     """A recipe id the game's list lacks is kept by its id; it is told to ops ONCE per guild (kept under out/ so a
     restart doesn't tell it again): the recipe list is behind the game."""
-    if not profs:
+    if not profs or not reg.profile.has_recipe_list:  # without the game's list there is nothing to be behind
         return
     st = _st(reg)
     if st["reported"] is None:
@@ -414,11 +423,9 @@ async def link_character(bot, reg, uid: int, label: str, found: Found, by: str, 
                 profs = _trusted(reg, await asyncio.to_thread(armory.client_for(reg).professions, found.slug))
             except ArmoryMissing:
                 profs = None
-        g = reg.config.armory
         at = _iso(_now())
         link = ArmoryLink(id=found.id, slug=_norm(found.slug), linked_by=by, linked_at=at, checked_at=at, modified=found.modified,
-                          level=found.level, cls=found.cls, missing_since=None,
-                          in_guild=None if g is None else (True if found.source == "roster" else found.guild_id == int(g.guild_id)))
+                          level=found.level, cls=found.cls, missing_since=None)
 
         def write():
             return reg.link_armory(uid, found.label, link, by, professions=profs, by_id=by_id, officer=officer)
@@ -447,6 +454,9 @@ async def unlink_character(bot, reg, uid: int, label: str, by: str, *, by_id, vi
     if preview:
         return armory_unlink_consequence(reg, m, c, by_id)
     async with _lock(reg):
+        m, c = _character(reg, uid, label)  # again: another unlink may have landed while the lock was waited for
+        if c.armory is None:
+            raise RegistryError(f"{c.label} isn't linked to the armory.")
         aid = c.armory.id
         c = await asyncio.to_thread(reg.unlink_armory, uid, label, by, by_id=by_id)
     await _audit(bot, reg, by, f"unlinked {m.display_name}'s {c.label} from the armory (id {aid})", via=via, by_id=by_id)
@@ -465,7 +475,7 @@ async def set_profession_sync(bot, reg, uid: int, label: str, on: bool, by: str,
     if c.armory is None:
         raise RegistryError(f"{c.label} isn't linked to the armory.")
     if preview:
-        return profession_sync_consequence(bool(on), c.label)
+        return profession_sync_consequence(bool(on), c.label, current=c.profession_sync)
     changed = await asyncio.to_thread(reg.set_profession_sync, uid, label, bool(on), by, by_id=by_id)
     if changed:
         await _audit(bot, reg, by, f"{m.display_name}'s {c.label}: professions " + ("follow the armory" if on else "kept by hand"),
@@ -494,13 +504,14 @@ async def sync_character(bot, reg, uid: int, label: str, *, force: bool = False,
         raise RegistryError(f"{c.label} isn't linked to the armory.")
     aid = c.armory.id
     if force:
-        forced = _st(reg)["forced"]
-        last = forced.get(aid)
+        last = _st(reg)["forced"].get(aid)
         if last is not None and _now() - last < SYNC_NOW_EVERY:
             return "limited"
-        forced[aid] = _now()
     async with _lock(reg):
-        return await _sync_one(bot, reg, uid, aid, force=force)
+        res = await _sync_one(bot, reg, uid, aid, force=force)  # an ArmoryError leaves no stamp: the next press tries again
+    if force:
+        _st(reg)["forced"][aid] = _now()
+    return res
 
 
 async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
@@ -513,7 +524,6 @@ async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
     link = c.armory
     st = _st(reg)
     cli = armory.client_for(reg)
-    g = reg.config.armory
     since = None if force else (st["modified"].get(aid) or link.modified)
     try:
         facts = await asyncio.to_thread(cli.character, link.slug, since)
@@ -522,12 +532,8 @@ async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
     stamp = _iso(_now())
     if facts is armory.NOT_MODIFIED:
         st["checked"][aid] = stamp
-        changes = {}
-        if g is None and link.in_guild is not None:
-            changes["in_guild"] = None  # the server's guild was unlinked: who is in it stops being known
-        if link.missing_since:
-            changes["missing_since"] = None
-        done = changes and await asyncio.to_thread(reg.armory_update, uid, aid, changes, ride={"checked_at": stamp})
+        done = link.missing_since is not None and await asyncio.to_thread(
+            reg.armory_update, uid, aid, {"missing_since": None}, ride={"checked_at": stamp})
         return "updated" if done else "unchanged"
     if facts is not None and facts.id != aid:
         facts = None  # another character holds that name now: the linked one is looked for by its id
@@ -557,13 +563,12 @@ async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
         try:
             profs = _trusted(reg, raw)
         except RegistryError as e:  # the armory's list didn't fit the record: keep the last one, tell ops (hourly)
-            await _warn_hourly(bot, reg, f"{m.display_name}'s {c.label}: the armory's professions were not kept. {e}")
+            await _warn_hourly(bot, reg, f"professions:{aid}", f"{m.display_name}'s {c.label}: the armory's professions were not kept. {e}")
             profs = None
     name, surname = (facts.name, facts.surname) if facts is not None else (row.name, row.surname)
     level = facts.level if facts is not None else row.level
     cls = (facts.cls if facts is not None else row.cls) or link.cls
-    inside = None if g is None else (facts.guild_id == int(g.guild_id) if facts is not None else True)
-    changes = {"level": level, "cls": cls, "in_guild": inside, "slug": slug, "missing_since": None}
+    changes = {"level": level, "cls": cls, "slug": slug, "missing_since": None}
     ride = {"checked_at": stamp, **({"modified": facts.modified} if facts is not None and facts.modified else {})}
     full = f"{name} {surname}" if surname else name
 
@@ -577,7 +582,7 @@ async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
                                       message=f"{m.display_name}: {full} updated from the armory", by_id=None, officer=True)
             renamed = True
         except RegistryError as e:  # the name is another record's, or one the bot can't store: the link follows the id anyway
-            await _warn_hourly(bot, reg, f"The armory calls {m.display_name}'s {c.label} {full} now, and the record keeps its name. {e}")
+            await _warn_hourly(bot, reg, f"name:{aid}", f"The armory calls {m.display_name}'s {c.label} {full} now, and the record keeps its name. {e}")
             done = await asyncio.to_thread(write)
     else:
         done = await asyncio.to_thread(write)
@@ -602,7 +607,7 @@ async def sync_guild(bot, reg) -> dict:
                 res = await _sync_one(bot, reg, m.discord_id, c.armory.id, force=False)
             except ArmoryError as e:
                 out["stopped"] = True
-                await _warn_hourly(bot, reg, f"Updating characters from the armory stopped. {e.words}")
+                await _warn_hourly(bot, reg, "armory", f"Updating characters from the armory stopped. {e.words}")
                 log.info("[%s] armory check stopped: %s", reg.key, e)
                 break
             out["checked"] += 1
@@ -630,7 +635,7 @@ async def _roster_refresh(bot, reg, force: bool) -> list[RosterRow] | None:
     snap = _load_snapshot(reg)
     if snap is not None and not force and _now() - datetime.fromisoformat(snap.taken_at) < ROSTER_EVERY:
         return list(snap.rows)
-    st["roster_try"] = _now()
+    st["roster_try"] = (int(g.guild_id), _now())
     cli = armory.client_for(reg)
     try:
         facts = await asyncio.to_thread(cli.guild, g.slug)
@@ -642,10 +647,10 @@ async def _roster_refresh(bot, reg, force: bool) -> list[RosterRow] | None:
             return None
         rows, modified = await asyncio.to_thread(cli.roster, g.slug, None if force or snap is None else snap.modified)
     except ArmoryMissing:
-        await _warn_hourly(bot, reg, f"The armory no longer finds {g.name}, so its roster is not read.")
+        await _warn_hourly(bot, reg, "roster-missing", f"The armory no longer finds {g.name}, so its roster is not read.")
         return None
     except ArmoryError as e:
-        await _warn_hourly(bot, reg, f"Reading {g.name}'s roster from the armory stopped. {e.words}")
+        await _warn_hourly(bot, reg, "armory", f"Reading {g.name}'s roster from the armory stopped. {e.words}")
         return None
     if rows is armory.NOT_MODIFIED:
         rows = list(snap.rows) if snap is not None else []
@@ -664,7 +669,8 @@ def _due(reg) -> tuple[bool, bool]:
     if reg.config.armory is not None:
         snap = _load_snapshot(reg)
         stale = snap is None or now - datetime.fromisoformat(snap.taken_at) >= ROSTER_EVERY
-        roster = stale and (st["roster_try"] is None or now - st["roster_try"] >= SYNC_EVERY)
+        tried = st["roster_try"]  # a failed read of THIS guild waits an hour; a guild linked or switched since is read now
+        roster = stale and (tried is None or tried[0] != int(reg.config.armory.guild_id) or now - tried[1] >= SYNC_EVERY)
     return sync, roster
 
 

@@ -69,7 +69,7 @@ def test_new_fields_default_and_an_old_member_file_loads_unchanged(reg):
     assert c.armory is None and c.profession_sync and c.former_names == []
     assert path.read_text() == before, "a member file is not rewritten because fields were added"
     link = ArmoryLink(id=42, slug="bram-kettle", linked_by="Tessa", linked_at="2026-11-12T10:00:00+00:00")
-    assert link.checked_at is None and link.level is None and link.in_guild is None and link.missing_since is None
+    assert link.checked_at is None and link.level is None and link.missing_since is None
     assert RegisteredCharacter(name="Bram", cls="Warrior", spec="Arms", armory=link).armory.id == 42
 
 

@@ -667,10 +667,13 @@ def armory_unlink_consequence(reg: Registry, m, c, by_id) -> list[str]:
             "You can link it again at any time."]
 
 
-def profession_sync_consequence(on: bool, label: str | None = None) -> list[str]:
+def profession_sync_consequence(on: bool, label: str | None = None, *, current: bool | None = None) -> list[str]:
     """The confirm of the switch (D5): off = kept by hand, edited from the game's list; on = the armory's professions
-    replace the hand edits now, and those can't be brought back."""
+    replace the hand edits now, and those can't be brought back. `current` = the switch as it stands: already in that
+    state → one sentence saying so (nothing would change)."""
     name = label or "This character"
+    if current is not None and bool(current) == bool(on):
+        return [f"{name}'s professions already follow the armory." if on else f"{name}'s professions are already kept by hand."]
     if not on:
         return [f"{name}'s professions are kept by hand from now on.",
                 "The armory stops changing them, and you edit them from the game's list.",

@@ -212,7 +212,11 @@ def test_link_happy_path(reg, fake, bot, clock):
     assert commits(reg) == before + 1  # the rename and the link land as one commit
     assert c.label == "Bram Kettle" and c.former_names == ["Bram"]
     a = c.armory
-    assert (a.id, a.slug, a.level, a.cls, a.in_guild, a.linked_by, a.missing_since) == (700101, "bram-kettle", 60, "Warrior", True, "Tessa", None)
+    assert (a.id, a.slug, a.level, a.cls, a.linked_by, a.missing_since) == (700101, "bram-kettle", 60, "Warrior", "Tessa", None)
+    assert "in_guild" not in a.model_dump()  # derived from the roster, never stored (R9)
+    assert discord_armory.in_guild(reg, c) is None  # the guild's roster hasn't been read yet
+    run(discord_armory.roster_refresh(bot, reg))
+    assert discord_armory.in_guild(reg, c) is True
     assert c.profession_sync is True
     assert [p.id for p in c.professions] == ["leatherworking"]  # the hand-typed Mining is replaced by the armory's list
     audit = [t for lv, t in bot.ops.lines[lines:] if lv == "info"]
@@ -225,13 +229,13 @@ def test_link_happy_path(reg, fake, bot, clock):
 def test_link_needs_no_guild_membership(reg, fake, bot, clock):
     people(reg)  # no guild linked to the server, and the character is in a stranger's guild
     fake.chars["bram-kettle"] = facts("Bram", "Kettle", 700101, guild_id=555)
+    fake.rows = [r for r in fake.rows if r.id != 700101]
     c = link_bram(bot, reg)
-    assert c.armory.id == 700101 and c.armory.in_guild is None  # not known: no guild is linked
+    assert c.armory.id == 700101 and discord_armory.in_guild(reg, c) is None  # not known: no guild is linked
     assert discord_armory.flags(reg, c) == []
     link_guild(reg)
-    reg.unlink_armory(TESSA, "Bram Kettle", "Tessa", by_id=TESSA)
-    c = link_bram_again(bot, reg)
-    assert c.armory.in_guild is False and "outside" in discord_armory.flags(reg, c)
+    run(discord_armory.roster_refresh(bot, reg))
+    assert discord_armory.in_guild(reg, c) is False and "outside" in discord_armory.flags(reg, c)
 
 
 def link_bram_again(bot, reg):
@@ -272,7 +276,7 @@ def test_a_low_level_character_is_found_on_the_roster(reg, fake, bot, clock):
     said = cq.armory_link_consequence(reg, reg.members[WREN], char(reg, WREN, "Pip"), found, WREN)
     assert "roster" in said[0] and "level 10" in said[1]
     c = run(discord_armory.link_character(bot, reg, WREN, "Pip", found, "Wren", by_id=WREN))
-    assert c.label == "Pip Wobble" and (c.armory.level, c.armory.in_guild) == (1, True)
+    assert c.label == "Pip Wobble" and (c.armory.level, discord_armory.in_guild(reg, c)) == (1, True)
     assert fake.count("professions") == 0  # nothing to read below level 10
 
 
