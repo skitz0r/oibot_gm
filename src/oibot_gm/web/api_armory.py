@@ -11,8 +11,6 @@ No business rule lives here: the verbs decide rights live, refuse in one sentenc
   SAVE_LISTENERS; a new roster read through discord_armory.ROSTER_LISTENERS, installed here)."""
 from __future__ import annotations
 
-import time
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -20,18 +18,15 @@ from .. import armory as armory_mod
 from .. import armory_seed, discord_armory
 from .. import consequences as cq
 from ..armory import ArmoryAccess, ArmoryDown, ArmoryError
+from ..discord_armory import LOOKUPS_PER_MINUTE, NO_GUILD_YET, NOT_READ_YET, TOO_MANY_LOOKUPS  # noqa: F401 — the core's words, re-exported
 from ..registry import CharactersChanged, ConfigChanged, RegistryError
 
 ACTOR_NEEDED = ("Linking, unlinking or moving a character is a decision a person makes: from MCP it needs OIBOT_MCP_ACTOR set to "
                 "an officer's Discord id (sent as X-Oibot-Actor). A preview needs none.")
 LOOK_FIRST = "Look the character up first, then link the one it found."
 FOUND_ANOTHER = "That name now finds a different character in the armory. Look it up again before linking."
-NO_GUILD_YET = "No guild in the game is linked to this server yet. The owner links it on the Config page."
-NOT_READ_YET = "The guild's roster hasn't been read from the armory yet, and the bot keeps trying."
 SEED_CHANGED = "The roster or the records changed since you looked. Read the new proposal, then confirm again."
 NO_PICKS = "Pick at least one character to link."
-LOOKUPS_PER_MINUTE = 6  # armory lookups per person a minute (find / link): a logged-in member never spends the host's quota
-TOO_MANY_LOOKUPS = "Wait a moment before looking up another name."
 PICK_ON = "Choose whether the armory keeps this character's professions."
 PICK_SHAPE = "Each pick names a member, one of their characters and a character from the guild's roster."
 PICK_ROW = "Pick a character from the guild's roster."
@@ -173,18 +168,6 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
         v, d, uid = await target(request, officer)
         return await find_preview(request, v, d, uid)
 
-    looked: dict[tuple[str, int], list[float]] = {}  # (guild key, person) → the times of their lookups this minute (memory)
-
-    def lookup_allowed(v) -> bool:
-        now = time.monotonic()
-        key = (v.reg.key, int(v.uid))
-        recent = [t for t in looked.get(key, []) if now - t < 60]
-        if len(recent) >= LOOKUPS_PER_MINUTE:
-            looked[key] = recent
-            return False
-        looked[key] = [*recent, now]
-        return True
-
     async def lookup(v, d: dict, uid: int):
         """(label, Found): the member's character `label` (the verb's own refusal when there is none — before any request),
         then what the armory shows under `name` (default: the character's first name) and `surname`. At most
@@ -192,7 +175,7 @@ def install_armory_api(app: FastAPI, bot, *, who, body, publish=None, visible=No
         label = str(d.get("label") or "").strip()
         _m, c = discord_armory.character_of(v.reg, uid, label)
         name = str(d.get("name") or "").strip() or c.name
-        if not lookup_allowed(v):
+        if not discord_armory.lookup_allowed(v.reg, v.uid):
             raise HTTPException(429, TOO_MANY_LOOKUPS)
         return label, await discord_armory.find_for_link(bot, v.reg, name, d.get("surname") or None)
 

@@ -15,7 +15,7 @@ import discord
 
 from .constants import ROLES
 from .consequences import RANK_CHOICES
-from .flows_armory import ARMORY_ACTIONS, CharArmory
+from .flows_armory import ARMORY_ACTIONS, CharArmory, bounded
 from .registry import Member, RegisteredCharacter, Registry, RegistryError
 from .wizard import MAX_OPTIONS, Opt, Wizard, flow
 
@@ -190,7 +190,9 @@ class CharWizard(CharArmory, MemberWizard):
         rank = f"\n-# Rank: **{m.rank}** (it lives on the main)" if m.main else ""
         buttons = [self.button(CHAR_ACTIONS[a], self._goto(a), discord.ButtonStyle.danger if a == "delete" else discord.ButtonStyle.secondary)
                    for a in self.actions if a != "name" or m.planned()] + self.armory_buttons()
-        await self.show(interaction, "\n".join(lines)[:1500] + rank + "\nWhat do you want to change?", *buttons, self.button("Cancel", self.cancel))
+        # whole lines only (flows_armory.bounded): a character is never cut in half, a <t:…:R> stamp never split
+        await self.show(interaction, "\n".join(bounded(lines, 1500, " characters")) + rank + "\nWhat do you want to change?", *buttons,
+                        self.button("Cancel", self.cancel))
 
     def _goto(self, action: str):
         async def go(interaction: discord.Interaction) -> None:

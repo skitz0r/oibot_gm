@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import urllib.parse
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -51,6 +52,11 @@ MISSING_AFTER = timedelta(hours=24)  # "the armory no longer finds it" is shown 
 
 NOT_FOUND = "The armory has no character by that name. Reach level 10 and log out once, then try again."
 SYNC_LIMITED = "Updated a moment ago. Try again in a few minutes."
+# a read view's empty state (the site's map / seed, Discord's /roster armory): what is missing and how it fills
+NO_GUILD_YET = "No guild in the game is linked to this server yet. The owner links it on the Config page or with /gm config armory."
+NOT_READ_YET = "The guild's roster hasn't been read from the armory yet, and the bot keeps trying."
+LOOKUPS_PER_MINUTE = 6  # armory lookups per person a minute (the site's find / link, Discord's link box): never the host's quota
+TOO_MANY_LOOKUPS = "Wait a moment before looking up another name."
 # the refusal when the presser is neither the character's member nor an officer (rights decided live: PRIV_LIVE)
 OFFICER_ONLY = {"link": "Only an officer links another member's character.",
                 "unlink": "Only an officer unlinks another member's character.",
@@ -109,6 +115,20 @@ def reset_state() -> None:
 def _st(reg) -> dict:
     return _STATE.setdefault(reg.key, {"checked": {}, "modified": {}, "forced": {}, "warned_at": {}, "strangers": set(),
                                        "reported": None, "roster": _UNLOADED, "roster_try": None, "last_sync": None, "task": None})
+
+
+def lookup_allowed(reg, by_id) -> bool:
+    """THE lookup limit: at most LOOKUPS_PER_MINUTE armory lookups a minute per person per guild (memory; a refusal is
+    TOO_MANY_LOOKUPS — the site answers it as a 429, Discord on the link box's screen). A lookup allowed is counted."""
+    now = time.monotonic()
+    looked = _st(reg).setdefault("looked", {})
+    key = int(by_id) if by_id is not None else None
+    recent = [t for t in looked.get(key, []) if now - t < 60]
+    if len(recent) >= LOOKUPS_PER_MINUTE:
+        looked[key] = recent
+        return False
+    looked[key] = [*recent, now]
+    return True
 
 
 def _lock(reg) -> asyncio.Lock:

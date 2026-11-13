@@ -329,15 +329,15 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     answer now names Stormcall"*); answers and seats it holds take the new name.
   - **The armory** (where the game version has one, WoW: Forever): under each named character the hub says
     *Linked to the armory · Updated 5 minutes ago · in the guild* (*not in the guild* when the guild's roster doesn't list
-    it; nothing when that isn't known yet), or *Not linked to the armory yet.* **Link to the armory…** opens a box with the
+    it; nothing when that isn't known yet), or *Not linked to the armory yet*. **Link to the armory…** opens a box with the
     first name (filled in) and the surname — type them as the game spells them, and leave the surname empty when the
     character has none. The bot looks the character up (*Looking in the armory…*) and the confirm screen says what it
     found — name, class, level — that your character takes that name and that the armory's professions replace its own;
     **Link it** links it, **Back** changes nothing. Not found says so in one sentence (*reach level 10 and log out once*)
     with **Try again**. Once linked: **Unlink…** (your record keeps what it last had; its professions are kept by hand),
     **Keep professions by hand** (you edit them yourself from then on; **Follow the armory again** lets the armory replace
-    them once more) and **Sync now** (reads it from the armory at once — at most every few minutes; no confirm, it only
-    reads). Nobody is DMed.
+    them once more) and **Sync now** (checks it with the armory at once and updates the record where the armory differs —
+    at most every few minutes; no confirm). Nobody is DMed.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
 - **Professions**: each character can carry its professions with their skill (1 to 300, or left unsaid until you know it) and its **notable recipes** —
   the ones worth telling the guild about, not the whole book. On the Me page each character shows them on one line
@@ -1131,7 +1131,7 @@ edits that new family and leaves the one it shared alone.
   aims, §6). They take at most a member
   (Discord's own picker) and a fixed choice; the character, rank or schedule is picked from a list and confirmed before anything saves.
   `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete, and the
-  armory's Link to the armory… · Unlink… · Keep professions by hand · Sync now, which also show what looks off: *the
+  armory's Link to the armory… · Unlink… · Keep professions by hand · Follow the armory again · Sync now, which also show what looks off: *the
   armory shows a Mage*, *the armory no longer finds it*), with the
   same ripple on the confirm screen. **Move to another member…** (officers, on every game version) moves one character
   to another Discord user: pick them in Discord's own member picker, the confirm says what goes with it (its past loot,
@@ -1141,8 +1141,10 @@ edits that new family and leaves the one it shared alone.
   `/roster armory` (where the game has an armory) shows the guild linked and when its roster was read, how many
   characters are linked, the ones not linked yet as *sure*, *likely* and *with no match on the roster*, and how many of
   the guild's characters nobody here has claimed (with no guild linked, or its roster not read yet, it says so and what
-  to do). **Link the sure matches** lists them, one per line (*Tessa's Bram → Bram Kettle, level 60*), then **Link them**
-  links each on its own and says how many were linked and why any one was refused. If the roster or the records changed
+  to do). **Link the sure matches** says first what linking does, then lists them, one per line (*Tessa's Bram → Bram
+  Kettle, level 60*), with the reason beside any the bot already knows it will refuse; **Link them** links each on its own
+  and says how many were linked (*3 characters are linked to the armory.*) and why any one was refused. When every one
+  would be refused it says so, with only **Back**. If the roster or the records changed
   since you looked, it shows the new counts and links nothing. The likely matches, the characters nobody claims and moves
   between members are on the site's Members page (the button opens it); `/roster professions member:` is `/me professions` on their behalf, and its confirm
   names them (*"Kestrel's Tailoring is recorded at 275."*); `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the

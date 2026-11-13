@@ -19,7 +19,9 @@ from oibot_gm import consequences as cq
 from oibot_gm import wizard_flows  # noqa: F401 — registers every flow
 from oibot_gm.armory import ArmoryDown
 from oibot_gm.profiles import GameProfile
-from oibot_gm.web.api_armory import NO_GUILD_YET, NOT_READ_YET
+from oibot_gm.discord_armory import NO_GUILD_YET, NOT_READ_YET
+from oibot_gm.flows_armory import bounded
+from oibot_gm.web import api_armory
 from oibot_gm.wizard import FLOWS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,7 +85,7 @@ def test_a_member_links_their_character_through_the_lookup_and_the_decide_screen
 
     async def go():
         await FLOWS["member_char"](h.command(), reg)
-        assert "Not linked to the armory yet." in h.text
+        assert "Not linked to the armory yet" in h.text and "Not linked to the armory yet." not in h.text, "a status line: no full stop"
         assert "Link to the armory…" in h.buttons() and not ({"Unlink…", "Sync now", "Move to another member…"} & set(h.buttons()))
         await h.press("Link to the armory…")  # one named character: straight to the box
         assert h.modal is not None and [f.label for f in h.modal._fields] == ["First name", "Surname"]
@@ -296,10 +298,11 @@ def test_roster_armory_shows_the_counts_and_links_the_sure_matches(reg, rs, fake
         assert "Link the sure matches" in h.buttons()
         await h.press("Link the sure matches")
         assert "Tessa's Bram → Bram Kettle" in h.text and "Orla's Tamsin → Tamsin Pell" in h.text
-        assert h.text.endswith("\n".join(cq.armory_seed_consequence(3)))
+        body = h.text.split("\n", 1)[1]
+        assert body.startswith("\n".join(cq.armory_seed_consequence(3))), "the confirm first: no list pushes it off the screen"
         assert h.buttons() == ["Link them", "Back"] and not reg.armory_linked()
         await h.press("Link them")
-        assert "Linked 2 of 3." in h.text and armory_seed.ANOTHER_CHARACTER in h.text and "Orla's Tamsin" in h.text
+        assert "2 of 3 characters are linked to the armory." in h.text and armory_seed.ANOTHER_CHARACTER in h.text and "Orla's Tamsin" in h.text
     run(go())
     assert {c.label for _m, c in reg.armory_linked()} == {"Bram Kettle", "Pip Wobble"}
 
@@ -400,3 +403,73 @@ def test_roster_armory_fits_discords_limits(reg):
     assert len(roster.commands) <= 25
     cmd = next(c for c in roster.commands if c.name == "armory")
     assert len(cmd.description) <= 100 and not cmd.parameters
+
+
+# ---------------------------------------------------------------- follow-up (review of task 12)
+
+def test_the_empty_states_and_the_lookup_limit_are_the_cores_and_name_both_ways():
+    assert api_armory.NO_GUILD_YET is NO_GUILD_YET and api_armory.NOT_READ_YET is NOT_READ_YET
+    assert "Config page" in NO_GUILD_YET and "/gm config armory" in NO_GUILD_YET
+    assert api_armory.TOO_MANY_LOOKUPS is discord_armory.TOO_MANY_LOOKUPS
+    assert api_armory.LOOKUPS_PER_MINUTE is discord_armory.LOOKUPS_PER_MINUTE
+
+
+def test_the_link_box_counts_against_the_same_lookup_limit_as_the_site(reg, rs, fake, clock):
+    people(reg)
+    for _ in range(discord_armory.LOOKUPS_PER_MINUTE):  # the site's finds, through the same helper
+        assert discord_armory.lookup_allowed(reg, TESSA)
+    h = harness(reg, rs, TESSA)
+
+    async def go():
+        await FLOWS["member_char"](h.command(), reg)
+        await h.press("Link to the armory…")
+        await h.submit(h.modal, name="Bram", surname="Kettle")
+        assert discord_armory.TOO_MANY_LOOKUPS in h.text and "Try again" in h.buttons()
+    run(go())
+    assert fake.count("character") == 0, "nothing asked of the armory"
+    assert discord_armory.lookup_allowed(reg, ORLA), "per person"
+
+
+def test_bounded_cuts_whole_lines_and_counts_the_rest():
+    lines = [f"Line {i} · Updated <t:1700000000:R>" for i in range(100)]
+    out = bounded(lines, 300, " characters")
+    assert out[-1].startswith("and ") and out[-1].endswith(" more characters")
+    assert all(x in lines for x in out[:-1]) and len("\n".join(out)) <= 300
+    assert int(out[-1].split()[1]) == 100 - (len(out) - 1)
+    assert bounded(lines[:3], 300) == lines[:3]
+    room = len(lines[0]) + 1 + len("and 1 more character") + 1  # a line and its tail
+    assert bounded(lines[:2], room, " characters") == [lines[0], "and 1 more character"]
+
+
+def test_a_long_hub_keeps_whole_characters_and_says_how_many_more(reg, rs, fake, clock):
+    people(reg)
+    names = ["Abel", "Bryn", "Cato", "Dara", "Eber", "Finn", "Gwen", "Hale", "Ivor", "Jory", "Kael", "Lune", "Mabb", "Nell",
+             "Oswin", "Perrin", "Quill", "Rook", "Sable", "Thane", "Ulric", "Vane", "Wick", "Yorra"]
+    for n in names:
+        reg.add_character(TESSA, "Tessa", n, "Warrior", "Arms", None, False)
+    h = harness(reg, rs, TESSA)
+    run(FLOWS["member_char"](h.command(), reg))
+    body = h.text
+    assert "more characters" in body and "What do you want to change?" in body
+    assert body.count("<t:") == body.count(":R>"), "no stamp cut in half"
+    shown = [n for n in names if f"**{n}**" in body]
+    assert shown and len(shown) < len(names)
+
+
+def test_the_sure_batch_offers_no_link_when_every_pick_is_refused(reg, rs, fake, clock, officer, monkeypatch):
+    seed_people(reg)
+    link_guild(reg)
+    run(discord_armory.roster_refresh(Client(rs), reg))
+    monkeypatch.setattr(armory_seed, "check", lambda reg_, picks, by_id: [{"uid": u, "label": lb, "id": a, "ok": False, "text": "Refused for a test."}
+                                                                          for u, lb, a in picks])
+    h = harness(reg, rs, OWNER, "Owner")
+
+    async def go():
+        await FLOWS["roster_armory"](h.command(), reg)
+        await h.press("Link the sure matches")
+        assert "Nothing can be linked" in h.text and "Refused for a test." in h.text
+        assert h.buttons() == ["Back"]
+        await h.press("Back")
+        assert "Link the sure matches" in h.buttons()
+    run(go())
+    assert not reg.armory_linked()

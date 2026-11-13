@@ -27,7 +27,7 @@ from .wizard import Field, Form, Wizard, flow
 ARMORY_ACTIONS = {"link": "Link to the armory…", "unlink": "Unlink…", "by_hand": "Keep professions by hand",
                   "follow": "Follow the armory again", "sync": "Sync now"}
 MOVE_LABEL = "Move to another member…"
-SURE_SHOWN = 15  # the sure matches listed on the decide screen; the rest are counted
+LIST_BUDGET = 1800  # characters a screen's list may take with its sentences (Discord's 2,000 less the title and buttons' room)
 CHANGED = "The roster or the records changed since you looked, so nothing was linked. Here are the new counts."
 
 
@@ -47,7 +47,7 @@ def armory_line(reg: Registry, c: RegisteredCharacter, *, officer: bool = False)
     """A character's armory state under its line in the hub: 'Linked to the armory · Updated <t:…:R> · in the guild'
     (in / not in the guild only when it is known), professions kept by hand, and the officers' flags."""
     if c.armory is None:
-        return "Not linked to the armory yet."
+        return "Not linked to the armory yet"
     bits = ["Linked to the armory", updated_stamp(reg, c)]
     where = discord_armory.in_guild(reg, c)
     if where is not None:
@@ -136,6 +136,9 @@ class CharArmory:
             return
         await self.working(interaction, "Looking in the armory…")
         bot = interaction.client
+        if not discord_armory.lookup_allowed(self.reg, interaction.user.id):  # THE limit the site's find / link use too
+            await self.refuse(interaction, discord_armory.TOO_MANY_LOOKUPS, self.link_form, "Try again")
+            return
         try:
             m, c = self.reread()
             found = await discord_armory.find_for_link(bot, self.reg, values.get("name") or c.name, values.get("surname") or None)
@@ -252,9 +255,32 @@ def _propose(reg: Registry) -> armory_seed.Seed:
 
 
 def _empty_words(reg: Registry) -> str:
-    from .web.api_armory import NO_GUILD_YET, NOT_READ_YET  # the site's read views say the same
+    """The site's read views say the same (discord_armory's words)."""
+    return discord_armory.NO_GUILD_YET if reg.config.armory is None else discord_armory.NOT_READ_YET
 
-    return NO_GUILD_YET if reg.config.armory is None else NOT_READ_YET
+
+def bounded(lines: list[str], budget: int, noun: str = "") -> list[str]:
+    """Whole `lines` while they fit in `budget` characters, then one line "and N more<noun>" — a list never pushes the
+    sentences around it past Discord's 2,000 characters, and never stops mid-line (a <t:…:R> stamp stays whole)."""
+    def tail(left: int) -> str:
+        return f"and {left} more{noun[:-1] if left == 1 and noun.endswith('s') else noun}"
+
+    out, used = [], 0
+    for i, line in enumerate(lines):
+        after = len(lines) - i - 1  # the lines a tail would count if this one is the last shown
+        room = budget - (len(tail(after)) + 1 if after else 0)
+        if used + len(line) + 1 > room:
+            return [*out, tail(len(lines) - i)]
+        out.append(line)
+        used += len(line) + 1
+    return out
+
+
+def batch_words(ok: int, total: int) -> str:
+    """The sure batch's result head: how many were linked."""
+    if ok == total:
+        return "One character is linked to the armory." if ok == 1 else f"{ok} characters are linked to the armory."
+    return f"{ok} of {total} characters are linked to the armory."
 
 
 def _row_words(r) -> str:
@@ -309,12 +335,15 @@ class ArmoryOverview(Wizard):
         picks = [(r.uid, r.label, r.candidate.id) for r in seed.sure]
         checked = armory_seed.check(self.reg, picks, by_id=interaction.user.id)  # what apply refuses before asking the armory
         why = {(r["uid"], r["label"]): r["text"] for r in checked if not r["ok"]}
-        shown = [_row_words(r) + (f" · {why[(r.uid, r.label)]}" if (r.uid, r.label) in why else "") for r in seed.sure[:SURE_SHOWN]]
-        if len(seed.sure) > SURE_SHOWN:
-            shown.append(f"and {len(seed.sure) - SURE_SHOWN} more")
+        rows = [_row_words(r) + (f" · {why[(r.uid, r.label)]}" if (r.uid, r.label) in why else "") for r in seed.sure]
         n = len(picks) - len(why)
-        await self.decide(interaction, "\n".join([*shown, "", *cq.armory_seed_consequence(n, len(why))]), do=self.apply,
-                          do_label="Link them" if n > 1 else "Link it")
+        if n == 0:  # every pick refused: nothing to press that links
+            head = "Nothing can be linked, because every sure match is refused. Each reason is beside it."
+            await self.show(interaction, "\n".join([head, "", *bounded(rows, LIST_BUDGET - len(head))]), self.button("Back", self.start))
+            return
+        said = "\n".join(cq.armory_seed_consequence(n, len(why)))  # the confirm first: no list can push it off the screen
+        await self.decide(interaction, "\n".join([said, "", *bounded(rows, LIST_BUDGET - len(said))]),
+                          do=self.apply, do_label="Link them" if n > 1 else "Link it")
 
     async def apply(self, interaction: discord.Interaction, _note: str | None) -> None:
         seed = _propose(self.reg)
@@ -329,9 +358,11 @@ class ArmoryOverview(Wizard):
             await self.refuse(interaction, str(e), self.start, "Back")
             return
         ok = sum(1 for r in results if r["ok"])
-        head = f"✅ Linked {ok}." if ok == len(results) else f"Linked {ok} of {len(results)}."
+        head = batch_words(ok, len(results))
+        if ok == len(results) and ok:
+            head = f"✅ {head}"
         refused = [f"• {names.get((r['uid'], r['label']), r['label'])}: {r['text']}" for r in results if not r["ok"]]
-        await self.finish(interaction, "\n".join([head, *refused]))
+        await self.finish(interaction, "\n".join([head, *bounded(refused, LIST_BUDGET - len(head))]))
 
 
 @flow("roster_armory")
