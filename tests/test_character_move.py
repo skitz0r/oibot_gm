@@ -186,7 +186,7 @@ def test_a_name_the_new_member_already_has_is_refused(reg, rs):
 def test_a_member_not_registered_is_refused_and_never_created(reg, rs):
     people(reg)
     stranger = 700_000_000_000_000_099
-    assert refused(reg, rs, to=stranger) == "The new owner has to register here first."
+    assert refused(reg, rs, to=stranger) == "The new member has to register here first."
     assert stranger not in reg.members
     reg.members[ORLA].left_at = "2026-11-01T00:00:00+00:00"
     reg.save(reg.members[ORLA], "t: left")
@@ -198,13 +198,13 @@ def test_the_other_refusals(reg, rs):
     assert refused(reg, rs, to=TESSA) == "Bram Kettle is already Tessa's."
     assert refused(reg, rs, label="Nobody Here") == "Tessa has no character named Nobody Here."
     assert refused(reg, rs, to=reg.test_members()[0].discord_id) == "A test character never moves to or from a real member."
-    assert refused(reg, rs, by_id=ORLA) == "Another officer moves a character to you."
+    assert refused(reg, rs, by_id=ORLA) == "Ask another officer to move it to you."
     move(reg, rs, "Wren Hollow", by_id=TESSA)  # from yourself is how an officer fixes their own wrong claim
     # the new member already signed up for a live run the character is on: the officer sorts that signup out first
     ev = live_run(reg, rs, 3)
     rc.set_signup(reg, rs, ev, reg.members[TESSA], "Bram Kettle", "in", source="test")
     rc.set_signup(reg, rs, ev, reg.members[ORLA], "Ivo Marsh", "in", source="test")
-    assert refused(reg, rs) == f"Orla is already signed up for {rc.run_words(reg, ev)}, so sort that signup out first."
+    assert refused(reg, rs) == f"Orla is already on {rc.run_words(reg, ev)}, so sort that out first."
 
 
 # ---------------------------------------------------------------- history follows the character
@@ -466,3 +466,78 @@ def test_import_dedupe_sees_through_a_move(reg, rs):
     rows = ledger_csv.parse("character,item,received\nBram Kettle,Robe of Tests,2026-10-09\n").rows
     rep = reg.import_awards(rows, "Officer", preview=True)
     assert (rep["new"], rep["duplicates"]) == (0, 1), "the ledger's row is Orla's character now, as the file's is"
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def test_a_regular_who_did_not_answer_gets_the_moved_characters_rostered_night(reg, rs):
+    people(reg)
+    reg.regular_add(ORLA, SERIES, "t", "Ivo Marsh")
+    ev = done_run(reg, rs, [reg.members[TESSA]], 6, label_of={TESSA: "Bram Kettle"})
+    ev.regulars = [TESSA, ORLA]  # both expected; Orla never answered
+    rs.save(ev, "t: regulars")
+    assert [r["outcome"] for r in reg.attendance_runs(ORLA)] == ["no_answer"] and reg.attendance(TESSA) == (1, 1)
+    move(reg, rs)
+    rows = reg.attendance_runs(ORLA)
+    assert [(r["outcome"], r["character"]) for r in rows] == [("rostered", "Bram Kettle")], "the better row: one run, one row"
+    assert reg.attendance(ORLA) == (1, 1) and reg.attendance(TESSA) == (0, 0)
+
+
+def test_a_first_name_row_is_decided_at_the_move(reg, rs):
+    people(reg)
+    award_row(reg, "Bram", uid=TESSA, iid="mv-f1")  # an imported row carries the first name only
+    award_row(reg, "Wren", uid=TESSA, item="Wand of Tests", iid="mv-f2")
+    move(reg, rs)
+    by = {a.import_id: a for a in RegistryLootContext(reg, reg.store, None).ledger}
+    assert reg.owner_of_award(by["mv-f1"]) == ORLA and reg.owner_of_award(by["mv-f2"]) == TESSA
+    reg.add_character(TESSA, "Tessa", "Bram", "Rogue", "Combat", None, False, surname="Stone")  # a later Bram changes nothing
+    assert reg.owner_of_award(by["mv-f1"]) == ORLA and reg.award_holder(by["mv-f1"])[0] is reg.members[ORLA]
+    (row,) = [json.loads(x) for x in moves_file(reg).read_text().splitlines()]
+    assert row["firsts"] == ["Bram"]
+
+
+def test_a_shared_first_name_is_not_frozen(reg, rs):
+    people(reg)
+    reg.add_character(TESSA, "Tessa", "Bram", "Rogue", "Combat", None, False, surname="Stone")
+    award_row(reg, "Bram", uid=TESSA, iid="mv-f1")
+    move(reg, rs)
+    (row,) = [json.loads(x) for x in moves_file(reg).read_text().splitlines()]
+    assert row["firsts"] == [], "two of Tessa's characters answered to Bram at the move: the row stays hers"
+    (a,) = [a for a in RegistryLootContext(reg, reg.store, None).ledger if a.import_id == "mv-f1"]
+    assert reg.owner_of_award(a) == TESSA
+
+
+def test_an_award_after_the_move_under_the_old_id_follows_the_character(reg, rs):
+    people(reg)
+    move(reg, rs)
+    later = (reg.now_local() + timedelta(days=2)).isoformat()
+    award_row(reg, "Bram Kettle", uid=TESSA, iid="mv-late", received=later[:10], confirmed_at=later)  # a council's stale seat
+    (a,) = [a for a in RegistryLootContext(reg, reg.store, None).ledger if a.import_id == "mv-late"]
+    assert reg.owner_of_award(a) == ORLA, "Tessa held no Bram Kettle then: it is the moved character's"
+
+
+def test_the_award_and_its_appeal_resolve_at_the_same_time(reg, rs):
+    people(reg)
+    move(reg, rs)
+    reg.rename_character(ORLA, "Bram Kettle", "Bram", "Fallow", "Owner", rs=rs, by_id=OWNER, officer=True)
+    soon = reg.now_local() + timedelta(hours=1)
+    reg.add_character(TESSA, "Tessa", "Bram", "Rogue", "Combat", None, False, surname="Kettle")
+    char(reg, TESSA, "Bram Kettle").created_at = (soon + timedelta(hours=1)).isoformat()  # registered after the award
+    award_row(reg, "Bram Kettle", uid=TESSA, iid="mv-t1", received=soon.date().isoformat(), confirmed_at=soon.isoformat())
+    ctx = RegistryLootContext(reg, reg.store, None)
+    (a,) = [a for a in ctx.ledger if a.import_id == "mv-t1"]
+    ap = appeals.Appeal(id=appeals.ledger_ids(ctx.ledger)[id(a)], award_ref="x", member_id=TESSA, member_name="Tessa", character="Bram Kettle",
+                        item="Robe of Tests", received=a.received.isoformat(), text="I'd like to know more please.", created_at="2026-11-12T00:00:00+00:00")
+    assert reg.owner_of_award(a) == appeals.appeal_owner(reg, ap) == ORLA, "both read the confirmation time, not the day"
+
+
+def test_the_confirm_names_a_regular_spot_given_up_and_a_main_change(reg, rs):
+    people(reg)
+    reg.add_character(PELL, "Pell", "Tamsin", "Druid", "Restoration", None, True, surname="Reed")
+    reg.regular_add(PELL, SERIES, "t", "Tamsin Reed")
+    said = cq.move_consequence(reg, reg.members[TESSA], char(reg, TESSA, "Bram Kettle"), reg.members[PELL])
+    assert said[0] == "Tessa's main Bram Kettle moves to Pell with its past loot, attendance, signups and wishlist."
+    assert said[1].startswith("It gives up its regular spot on Barrow Deeps") and said[1].endswith("where the new member already has one.")
+    assert said[2] == "Wren Hollow becomes the old member's main."
+    move(reg, rs, to=PELL)
+    assert char(reg, PELL, "Bram Kettle").rosters == [] and reg.members[TESSA].main.label == "Wren Hollow"

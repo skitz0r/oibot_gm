@@ -140,7 +140,8 @@ class AppealStore:
         """The member's questions: with `reg`, those about awards that are theirs NOW (appeal_owner — a character moved
         to them brings its questions, one moved away takes them); without, the ones they asked."""
         if reg is not None:
-            return [a for a in self.all() if appeal_owner(reg, a) == int(uid)]
+            awards = all_awards(reg) if reg.character_moves() else {}
+            return [a for a in self.all() if appeal_owner(reg, a, awards) == int(uid)]
         return [a for a in self.all() if a.member_id == int(uid)]
 
     def save(self, ap: Appeal, message: str) -> Appeal:
@@ -158,19 +159,24 @@ def store_of(reg: Registry) -> AppealStore:
     return AppealStore(reg.store, reg.key)
 
 
-def appeal_owner(reg: Registry, ap) -> int | None:
+def appeal_owner(reg: Registry, ap, awards: dict | None = None) -> int | None:
     """The member a question belongs to now (design §5.4): who asked it, unless the character the award went to was moved
-    to another member since — then theirs (Registry.owner_of on the asker, the character as the question names it and
-    the award's day). The appeal file is never rewritten; its id never changes."""
+    to another member since — then theirs (Registry.owner_of on the asker and the character as the question names it,
+    at the award's own time — Registry.award_time, the same moment owner_of_award reads, so the two never disagree).
+    `awards` = all_awards(reg) when the caller reads several; the ledger is read only when the guild has a move. The
+    appeal file is never rewritten; its id never changes."""
     uid = getattr(ap, "member_id", None)
     if uid is None:
         return None
-    return reg.owner_of(uid, getattr(ap, "character", None), getattr(ap, "received", None))
+    if not reg.character_moves():
+        return int(uid)
+    a = (awards if awards is not None else all_awards(reg)).get(getattr(ap, "id", None))
+    return reg.owner_of(uid, getattr(ap, "character", None), reg.award_time(a) if a is not None else getattr(ap, "received", None))
 
 
-def owner_name(reg: Registry, ap) -> str:
+def owner_name(reg: Registry, ap, awards: dict | None = None) -> str:
     """The display name of the member the question belongs to now (appeal_owner), else the asker's as recorded."""
-    m = reg.members.get(appeal_owner(reg, ap)) if getattr(ap, "member_id", None) is not None else None
+    m = reg.members.get(appeal_owner(reg, ap, awards)) if getattr(ap, "member_id", None) is not None else None
     return m.display_name if m is not None else ap.member_name
 
 

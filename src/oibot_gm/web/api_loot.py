@@ -611,13 +611,13 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
                 "state_text": appeals.state_words(reg, ap)}
 
     def officer_appeal_json(reg, ap, ctx, awards=None) -> dict:
-        uid = appeals.appeal_owner(reg, ap)  # whose the award is now: the asker, or whom its character moved to (§5.4)
+        uid = appeals.appeal_owner(reg, ap, awards)  # whose the award is now: the asker, or whom its character moved to (§5.4)
         am = reg.members.get(uid)  # their character by the name on the appeal (now or before a rename)
         ac = reg.own_character(am.characters, ap.character) if am is not None else None
         cls, spec = (ac.cls, ac.spec) if ac is not None else (None, None)
         gid = reg.config.discord_guild_id
         link = f"https://discord.com/channels/{gid}/{ap.thread_id or ap.channel_id}" + ("" if ap.thread_id else f"/{ap.message_id}") if (ap.thread_id or ap.message_id) else None
-        out = {**member_appeal_json(reg, ap), "member": appeals.owner_name(reg, ap), "member_id": str(uid), "cls": cls, "spec": spec, "item_id": ap.item_id,
+        out = {**member_appeal_json(reg, ap), "member": appeals.owner_name(reg, ap, awards), "member_id": str(uid), "cls": cls, "spec": spec, "item_id": ap.item_id,
                "boss": ap.boss, "date_label": day(reg, ap.received), "offspec": ap.offspec, "asked_label": reg.local12(ap.created_at), "via": ap.via,
                "note": ap.note, "resolved_by": ap.resolved_by, "resolved_label": reg.local12(ap.resolved_at) if ap.resolved_at else None, "link": link,
                "details": appeals.officer_details(reg, ctx, ap, awards)}

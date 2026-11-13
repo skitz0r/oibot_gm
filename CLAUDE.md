@@ -73,8 +73,9 @@ src/oibot_gm/
                        A character's link (§5.2): armory_link_consequence(reg, m, c, found, by_id) (what the armory or the roster shows, the name and the
                        professions it takes — from level 10 when found on the roster), armory_unlink_consequence(reg, m, c, by_id) (kept by hand from now
                        on), profession_sync_consequence(on, label, current=) (on: the hand edits are replaced and can't be brought back; already so → one sentence)
-                       A move (§5.4): move_consequence(reg, m_from, c, m_to) (it moves with its past loot, attendance, signups, wishlist and regular spots;
-                       both see a notice; move it back the same way)
+                       A move (§5.4): move_consequence(reg, m_from, c, m_to) (≤ 3: it moves with its past loot, attendance, signups, wishlist [and regular
+                       spots it keeps]; a regular spot it gives up / whose main changes, only when they apply (Registry.move_effects); both see a notice,
+                       left out when both special cases take the room; no "move it back" line)
   inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
@@ -280,15 +281,19 @@ src/oibot_gm/
                        A move (§5.4, the owner's decision 2026-11-12): move_character(from_id, label, to_id, by, *, rs (REQUIRED), by_id, moved) = THE
                        move of a record to another member (wishlist, regular spots — one per member per series: a spot the new member holds stays theirs —,
                        armory link, former names travel; an alt, or the main when they have none; the old member's next character is their main, R3);
-                       ONE commit = both members + a row of <guild>/character_moves.jsonl {label, name, names, armory_id, from, to, by, by_id, at}
-                       (append-only, character_moves() cached by stat) + every live run (rc.move_on_runs) + the answered placement asks on them + a
-                       `character` notice to each (never a DM); move_refusal (one sentence: an open ask, a name the new member's records answer to, not
-                       registered / left / the same member / puppet ↔ real, a move TO yourself — owner aside —, the new member already on a live run the
-                       character is on). owner_of(uid, label, when) = THE resolver of "whose award / attendance": an entry under `uid` for a character
-                       moved away after `when` → the member it went to (chains fold; a day = its guild-local first moment; no moves = uid, a stat only);
-                       owner_of_award(a) feeds award_holder, My loot, received marks, scoring, the loot log, help, appeals and the loot-log notice;
-                       attendance rows resolve through _attendance_row_now (one row per run, the member's own entry first). The ledger, finished runs and
-                       appeal files are never rewritten
+                       ONE commit = both members + a row of <guild>/character_moves.jsonl {label, name, names, firsts, armory_id, from, to, by, by_id,
+                       at} (append-only, character_moves() cached by stat; names / firsts = _move_names FROZEN at the move: its full names, and its first
+                       names no other character of the old member answered to) + every live run (rc.move_on_runs) + the answered placement asks on them +
+                       a `character` notice to each (never a DM); move_effects(m, c, to) = {kept, dropped (spots the new member already holds), next_main,
+                       arrives_main} — the verb and the confirm read it; move_refusal (one sentence: an open ask, a name the new member's records answer
+                       to, not registered / left / the same member / puppet ↔ real, a move TO yourself — owner aside —, the new member already on a live
+                       run the character is on). owner_of(uid, label, when) = THE resolver of "whose award / attendance", from the moves rows alone: an
+                       entry before the move by a frozen name → the member it went to; one at / after it by a full name the old member had no own
+                       character for by then (created_at) → too; chains fold; a day = its guild-local first moment; no moves = uid, a stat only;
+                       award_time(a) (confirmed_at, else the day) = the one time owner_of_award and appeals.appeal_owner read; owner_of_award feeds
+                       award_holder, My loot, received marks, scoring, the loot log, help, appeals and the loot-log notice; _attendance_row_now = one row
+                       per run, the BETTER of the member's own and a moved character's (_row_rank: attended > played > no answer / away; the old member
+                       keeps a row only for another character). The ledger, finished runs and appeal files are never rewritten
                        The link's writes (§5.2/§5.3, one commit each, under the member-write lock): armory_holder(id) (one claim per armory character per
                        guild: an ACTIVE character of a real member, never a puppet), armory_linked() (what the hourly check reads: no puppets, nobody who left, no retired character),
                        armory_character(uid, id) (found by the link, never a name), link_refusal(uid, label, id, name, surname, by_id=, officer=) (a test puppet /

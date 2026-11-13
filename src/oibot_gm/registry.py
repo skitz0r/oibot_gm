@@ -2354,14 +2354,16 @@ class Registry:
 
     def owner_of(self, uid: int | None, label: str | None, when=None) -> int | None:
         """Whose an entry recorded under member `uid` for the character `label` at time `when` (an award, a run's seat)
-        is NOW: `uid`, unless that character was moved away from them after `when` — then the member it went to, and so
-        on through later moves (a chain folds). The character is known by any name it answered to at the move (its label
-        or a former name), or by its first name when `uid` holds no character answering to that first name. An entry
-        dated at or after the move stays with `uid` (a name they took again later); an entry with no time counts as
-        before; a day alone (a date, 'YYYY-MM-DD') is its first moment in the guild's time zone. None for no `uid`. No
-        moves: `uid` itself, nothing read but the file's stat."""
-        from datetime import date
-
+        is NOW: `uid`, unless that character was moved away from them — then the member it went to, and so on through
+        later moves (a chain folds). Decided by the move's row alone, never by the records as they are now:
+        - an entry dated BEFORE the move follows it when `label` is one of the names the row froze as this character's
+          under the old member (`names`: its full names, current and former; `firsts`: its first names that no other
+          character of the old member answered to at the move);
+        - an entry dated AT OR AFTER the move (a stale council's award, a seat recorded late) follows it only by a full
+          name, and only when the old member had no character of their own answering to that name by then (one created
+          at or before `when` — a name they took again keeps its new entries).
+        An entry with no time counts as before; a day alone (a date, 'YYYY-MM-DD') is its first moment in the guild's
+        time zone. None for no `uid`. No moves: `uid` itself, nothing read but the file's stat."""
         if uid is None:
             return None
         cur = int(uid)
@@ -2369,38 +2371,69 @@ class Registry:
         n = str(label or "").strip().lower()
         if not rows or not n:
             return cur
+        t = _moment(self._guild_day(when))
+        for r in rows:  # oldest first: a chain folds in the order it happened
+            if int(r["from"]) != cur:
+                continue
+            names = {str(x).strip().lower() for x in (r.get("names") or [r.get("label")]) if x}
+            at = _moment(r.get("at"))
+            if t is None or at is None or t < at:
+                if n in names or n in {str(x).strip().lower() for x in r.get("firsts") or [] if x}:
+                    cur = int(r["to"])
+            elif n in names and not self._had_name_by(cur, n, t):
+                cur = int(r["to"])
+        return cur
+
+    def _guild_day(self, when):
+        """A bare day (a date, or 'YYYY-MM-DD') → its first moment in the guild's time zone; anything else unchanged."""
+        from datetime import date
+
         if isinstance(when, str) and len(when.strip()) == 10:
             try:
                 when = date.fromisoformat(when.strip())
             except ValueError:
-                pass
+                return when
         if isinstance(when, date) and not isinstance(when, datetime):
-            when = datetime(when.year, when.month, when.day, tzinfo=self.tz)
-        t = _moment(when)
-        for r in rows:  # oldest first: a chain folds in the order it happened
-            if int(r["from"]) != cur:
-                continue
-            at = _moment(r.get("at"))
-            if t is not None and at is not None and t >= at:
-                continue
-            names = {str(x).strip().lower() for x in (r.get("names") or [r.get("label")]) if x}
-            first = str(r.get("name") or "").strip().lower()
-            if n in names or (n == first and self._first_name_free(cur, n)):
-                cur = int(r["to"])
-        return cur
+            return datetime(when.year, when.month, when.day, tzinfo=self.tz)
+        return when
 
-    def _first_name_free(self, uid: int, first: str) -> bool:
+    def _had_name_by(self, uid: int, name: str, t: datetime) -> bool:
+        """Whether member `uid` holds a character of their own answering to the full name `name` that existed by `t`."""
         m = self.members.get(uid)
-        return m is None or self.own_character([c for c in m.characters if c.name], first) is None
+        for c in (m.characters if m is not None else []):
+            made = _moment(c.created_at)
+            if c.name and self.same_character(c, name) and (made is None or made <= t):
+                return True
+        return False
+
+    @staticmethod
+    def award_time(a):
+        """The moment a character move compares an award with: its confirmation, else its day (owner_of reads a bare day
+        as its guild-local first moment). The ONE time owner_of_award and an appeal's owner (appeals.appeal_owner) use."""
+        return getattr(a, "confirmed_at", None) or getattr(a, "received", None)
 
     def owner_of_award(self, a) -> int | None:
         """The member an award recorded with a Discord id belongs to now: its `discord_id` resolved through the moves
-        (owner_of, at the award's confirmation, else its day). None for a row recorded without an id (award_holder reads
-        its name)."""
+        (owner_of at award_time). None for a row recorded without an id (award_holder reads its name)."""
         uid = getattr(a, "discord_id", None)
         if uid is None:
             return None
-        return self.owner_of(uid, getattr(a, "raider", None), getattr(a, "confirmed_at", None) or getattr(a, "received", None))
+        return self.owner_of(uid, getattr(a, "raider", None), self.award_time(a))
+
+    def _move_names(self, m: "Member", c: RegisteredCharacter) -> tuple[list[str], list[str]]:
+        """The names under which member `m`'s rows mean `c`, frozen at a move: its full names (the label, then former
+        ones) and its first names (of the label and the former names) that no OTHER character of `m` answers to now."""
+        full = [c.label] + [f for f in c.former_names if f.lower() != c.label.lower()]
+        others = [x for x in m.characters if x is not c and x.name]
+        firsts: list[str] = []
+        for f in [c.name or ""] + [f.split()[0] for f in c.former_names if f.split()]:
+            low = f.strip().lower()
+            if not low or low in (x.lower() for x in firsts):
+                continue
+            taken = any((x.name or "").lower() == low or any((g.split() or [""])[0].lower() == low for g in x.former_names) for x in others)
+            if not taken:
+                firsts.append(f.strip())
+        return full, firsts
 
     def move_refusal(self, from_id: int, label: str, to_id: int, *, rs, by_id: int | None = None) -> str | None:
         """Why member `from_id`'s character `label` can't move to member `to_id` now, in one sentence, else None. `rs` = the
@@ -2417,7 +2450,7 @@ class Registry:
             return f"{m.display_name} has no character named {str(label or '').strip() or '?'}."
         to = self.members.get(int(to_id)) if str(to_id or "").isdigit() else None
         if to is None:
-            return "The new owner has to register here first."
+            return "The new member has to register here first."
         if to is m:
             return f"{c.label} is already {m.display_name}'s."
         if bool(m.test) != bool(to.test):
@@ -2426,7 +2459,7 @@ class Registry:
         if why:
             return why
         if by_id is not None and int(by_id) == to.discord_id and not self.is_owner_id(by_id):
-            return "Another officer moves a character to you."
+            return "Ask another officer to move it to you."
         if to.left_at:
             return f"{to.display_name} has left the server."
         names = [c.label] + list(c.former_names)
@@ -2442,8 +2475,18 @@ class Registry:
             return f"{c.label} has an open ask. Withdraw it first."
         for ev in live:
             if rc.character_entries(ev, m.discord_id, low) and rc.on_run(ev, to.discord_id):
-                return f"{to.display_name} is already signed up for {rc.run_words(self, ev)}, so sort that signup out first."
+                return f"{to.display_name} is already on {rc.run_words(self, ev)}, so sort that out first."
         return None
+
+    def move_effects(self, m: "Member", c: RegisteredCharacter, to: "Member") -> dict:
+        """What a move of `m`'s `c` to `to` does beyond the record itself (the confirm says each, the verb does each):
+        {kept: the regular spots it keeps, dropped: those it gives up because `to` already holds a spot in that series
+        (one character per member per series), next_main: the old member's character that becomes their main (None
+        unless `c` is their main and another is left), arrives_main: it becomes `to`'s main (they have none)}."""
+        held = {k for x in to.characters if x.status == "active" for k in x.rosters}
+        nxt = next((x for x in m.active() if x is not c), None) if c.is_main else None
+        return {"kept": [k for k in c.rosters if k not in held], "dropped": [k for k in c.rosters if k in held],
+                "next_main": nxt, "arrives_main": to.main is None and c.status == "active"}
 
     def move_runs(self, from_id: int, label: str, to_id: int, *, rs) -> list[str]:
         """The live runs a move of `label` from `from_id` to `to_id` may rewrite (the board locks its caller holds): those
@@ -2477,11 +2520,11 @@ class Registry:
             raise RegistryError(why)
         m, to = self.members[int(from_id)], self.members[int(to_id)]
         c = self.own_character([x for x in m.characters if x.name], label)
-        names = [c.label] + [f for f in c.former_names if f.lower() != c.label.lower()]
+        names, firsts = self._move_names(m, c)
         low = {n.lower() for n in names}
         rank_m, rank_to = member_rank(m), member_rank(to)
-        held = {k for x in to.characters if x.status == "active" for k in x.rosters}
-        kept_series = [k for k in c.rosters if k not in held]
+        eff = self.move_effects(m, c, to)
+        kept_series = eff["kept"]
         left_series = {k for k in c.rosters if not any(k in x.rosters for x in m.characters if x is not c and x.status == "active")}
         line = f"{m.display_name}: {c.label} moved to {to.display_name} (by {by})"
         with self.store.batch(f"{self.key}: {line}"):
@@ -2503,7 +2546,7 @@ class Registry:
                 m.placement_asks = [a for a in m.placement_asks if not any(a is x for x in asks)]
                 to.placement_asks = [a for a in to.placement_asks if a.get("roster") not in gone] + asks
             self.store.append_jsonl(Path(self.key) / self.MOVES_FILE, {
-                "label": c.label, "name": c.name, "names": names, "armory_id": c.armory.id if c.armory else None,
+                "label": c.label, "name": c.name, "names": names, "firsts": firsts, "armory_id": c.armory.id if c.armory else None,
                 "from": m.discord_id, "to": to.discord_id, "by": by, "by_id": by_id, "at": now()})
             self.notify(m.discord_id, "character", f"{by} moved {c.label} from you to {to.display_name}. Its past loot and attendance went with it.", save=False)
             self.notify(to.discord_id, "character", f"{by} moved {c.label} from {m.display_name} to you. Its past loot and attendance came with it.", save=False)
@@ -3607,10 +3650,11 @@ class Registry:
         return sorted(rows, key=lambda r: r["start"], reverse=True)
 
     def _attendance_row_now(self, m: "Member", ev) -> dict | None:
-        """`m`'s row of a done run as it counts NOW (design §5.4): their own entry, unless the character it carries was
-        moved away from them since (owner_of), else the entry of a member whose character on that night has moved to
-        `m` — one row per run, `m`'s own entry first (they played that night on another character). Without moves: the
-        run's own row, unchanged. Finished run files are never rewritten."""
+        """`m`'s row of a done run as it counts NOW (design §5.4). Their own entry counts unless the character it carries
+        was moved away from them since (owner_of: the old member keeps a row only for an entry on another character);
+        an entry of another member whose character that night has moved to `m` is a candidate too. One run is one row:
+        the BETTER of the candidates (_row_rank: attended beats not attended, an entry of play beats no answer or away;
+        a tie keeps their own). Without moves: the run's own row, unchanged. Finished run files are never rewritten."""
         row = self._attendance_row(m, ev)
         moves = self.character_moves()
         if not moves:
@@ -3618,16 +3662,23 @@ class Registry:
         uid = m.discord_id
         if row is not None and self.owner_of(uid, row["character"], ev.starts_at) != uid:
             row = None
-        if row is not None:
-            return row
+        best = row
         for x in dict.fromkeys(int(r["from"]) for r in moves):
             if x == uid:
                 continue
             xm = self.members.get(x) or Member(discord_id=x, display_name=str(x))  # a record removed since: no asks, no absences
             rx = self._attendance_row(xm, ev)
-            if rx is not None and self.owner_of(x, rx["character"], ev.starts_at) == uid:
-                return rx
-        return None
+            if rx is not None and self.owner_of(x, rx["character"], ev.starts_at) == uid and (best is None or self._row_rank(rx) > self._row_rank(best)):
+                best = rx
+        return best
+
+    @staticmethod
+    def _row_rank(r: dict) -> int:
+        """How much an attendance row says the member played: attended 3 · rostered unconfirmed or benched 2 · called
+        out or No thanks 1 · no answer or away 0."""
+        if r.get("attended"):
+            return 3
+        return {"unconfirmed": 2, "benched": 2, "rostered": 2, "called_out": 1, "no_thanks": 1}.get(r.get("outcome"), 0)
 
     def attendance(self, member, window_days: int | None = None, *, bench: bool = False, at: datetime | None = None) -> tuple[int, int]:
         """(attended, total) for `member` (a Member or a Discord id) over the done runs of the window (default the loot

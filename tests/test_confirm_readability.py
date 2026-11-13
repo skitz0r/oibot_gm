@@ -576,15 +576,36 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
 
     # ---- a character moved to another member (armory link §5.4): the confirm, then every refusal the verb says
     to = ms[1]
-    dump.add("move_consequence", "the main", cq.move_consequence(reg, am, ac, to), link_names)
-    dump.add("move_consequence", "an alt", cq.move_consequence(reg, am, SimpleNamespace(label="Bram Kettle", is_main=False), to), link_names)
+
+    def mv_char(label, *, main=False, rosters=()):
+        return SimpleNamespace(label=label, name=label.split()[0], is_main=main, status="active", rosters=list(rosters))
+
+    def mv_member(name, chars):
+        main = next((x for x in chars if x.is_main), None)
+        return SimpleNamespace(display_name=name, characters=chars, main=main, active=lambda: list(chars))
+
+    spot, spot2 = f"{RID}:default", f"{RID}:alt"
+    bram = mv_char("Bram Kettle", main=True, rosters=[spot])
+    wren = mv_char("Wren Hollow")
+    giver = mv_member("Bramble", [bram, wren])
+    for case, c, frm, recv in (
+            ("the main, a regular, to a member with a main", bram, giver, mv_member("cbottoms", [mv_char("Ivo Marsh", main=True)])),
+            ("an alt, no regular spot", wren, giver, mv_member("cbottoms", [mv_char("Ivo Marsh", main=True)])),
+            ("an alt to a member with no main", wren, giver, mv_member("cbottoms", [])),
+            ("the main, its spot given up", bram, giver, mv_member("cbottoms", [mv_char("Ivo Marsh", main=True, rosters=[spot])])),
+            ("the main to a member with no main, its only character", mv_char("Bram Kettle", main=True), mv_member("Bramble", []), mv_member("cbottoms", [])),
+            ("the main, a spot given up, to a member with no main", bram, giver, mv_member("cbottoms", [mv_char("Ivo Marsh", rosters=[spot])])),
+            ("two spots given up", mv_char("Bram Kettle", rosters=[spot, spot2]), giver,
+             mv_member("cbottoms", [mv_char("Ivo Marsh", main=True, rosters=[spot, spot2])]))):
+        dump.add("move_consequence", case, cq.move_consequence(reg, frm, c, recv), link_names | {"Wren", "Ivo"})
+    dump.add("move_consequence", "a real record", cq.move_consequence(reg, am, ac, to), link_names)
     a_run = SimpleNamespace(instance=RID, team=RID, start=reg.now_local() + timedelta(days=3))
     for text in ("They have no registered characters yet.", f"{am.display_name} has no character named Bram Kettle.",
-                 "The new owner has to register here first.", f"Bram Kettle is already {am.display_name}'s.",
-                 "A test character never moves to or from a real member.", "Another officer moves a character to you.",
+                 "The new member has to register here first.", f"Bram Kettle is already {am.display_name}'s.",
+                 "A test character never moves to or from a real member.", "Ask another officer to move it to you.",
                  f"{to.display_name} has left the server.", f"{to.display_name} already has a character called Bram Kettle.",
                  "Bram Kettle has an open ask. Withdraw it first.",
-                 f"{to.display_name} is already signed up for {rc.run_words(reg, a_run)}, so sort that signup out first."):
+                 f"{to.display_name} is already on {rc.run_words(reg, a_run)}, so sort that out first."):
         dump.add("move refusal", text[:24], [text], link_names)
 
     # ---- appeals

@@ -685,12 +685,34 @@ def profession_sync_consequence(on: bool, label: str | None = None, *, current: 
 
 def move_consequence(reg: Registry, m_from, c, m_to) -> list[str]:
     """The confirm before an officer moves member `m_from`'s character `c` to member `m_to` (armory link §5.4,
-    Registry.move_character): what moves with it — its past loot and attendance among it — who is told, and the way
-    back. Each person is named once."""
+    Registry.move_character), at most three sentences: what moves with it (its past loot and attendance among it; its
+    regular spots only when it keeps one); then, only when they apply (Registry.move_effects), the regular spot it gives
+    up because the new member already holds one in that schedule, and whose main changes; then who is told — left out
+    when both special cases take the room (they are what the officer must hear). Each person is named once; there is
+    no "move it back" line, because a spot given up does not come back."""
+    eff = reg.move_effects(m_from, c, m_to)
     whose = f"{m_from.display_name}'s main {c.label}" if c.is_main else f"{m_from.display_name}'s {c.label}"
-    return [f"{whose} moves to {m_to.display_name} with its past loot, attendance, signups, wishlist and regular spots.",
-            "Both see a notice on their Me page.",
-            "You can move it back the same way."]
+    carries = "past loot, attendance, signups, wishlist and regular spots" if eff["kept"] else "past loot, attendance, signups and wishlist"
+    out = [f"{whose} moves to {m_to.display_name} with its {carries}."]
+    if eff["dropped"]:
+        words = " and ".join(series_words(reg, k) for k in eff["dropped"])
+        said = (f"It gives up its regular spot on {words}, where the new member already has one." if len(eff["dropped"]) == 1
+                else f"It gives up its spots on {words}, which the new member holds.")
+        if len(said.split()) > 20:  # long schedule names: the count, never a sentence too long to read aloud
+            said = ("It gives up its regular spot, because the new member already holds one in that schedule." if len(eff["dropped"]) == 1
+                    else f"It gives up {len(eff['dropped'])} regular spots, because the new member already holds them.")
+        out.append(said)
+    nxt = eff["next_main"]
+    gone = f"{nxt.label} becomes the old member's main" if nxt is not None else "the old member has no main left"
+    if c.is_main and eff["arrives_main"]:
+        out.append(f"It becomes the new member's main, and {gone}.")
+    elif c.is_main:
+        out.append(gone[0].upper() + gone[1:] + ".")
+    elif eff["arrives_main"]:
+        out.append("It becomes the new member's main.")
+    if len(out) < 3:
+        out.append("Both see a notice on their Me page.")
+    return out
 
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
            "VERBS", "absence_consequence", "armory_created_words", "armory_link_consequence", "armory_unlink_consequence", "armory_guild_clear_consequence", "armory_guild_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
