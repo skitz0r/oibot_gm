@@ -15,6 +15,7 @@ import discord
 
 from .constants import ROLES
 from .consequences import RANK_CHOICES
+from .flows_armory import ARMORY_ACTIONS, CharArmory
 from .registry import Member, RegisteredCharacter, Registry, RegistryError
 from .wizard import MAX_OPTIONS, Opt, Wizard, flow
 
@@ -156,11 +157,13 @@ SELF_ACTIONS = ("spec", "main", "flex", "retire", "delete", "name")
 OFFICER_ACTIONS = ("spec", "main", "flex", "rank", "retire", "delete")
 
 
-class CharWizard(MemberWizard):
+class CharWizard(CharArmory, MemberWizard):
     """The hub: `/me char [action]` (self mode) and `/roster char member: [action]` (an officer). The Choice pre-seeds
     the action and skips the hub's action row. Spec · Main · Flex · Retire · Delete on a character, Rank on the member
     (D25: rank lives on the main; officers only), Name hands over to the naming wizard (a planned character, self only).
-    Every action ends on THE decide screen with the ripple from code (rc.character_preview), then one table save."""
+    Every action ends on THE decide screen with the ripple from code (rc.character_preview), then one table save.
+    The armory actions (flows_armory.CharArmory): Link to the armory… · Unlink… · Keep professions by hand / Follow the
+    armory again · Sync now where the version has an armory, and an officer's Move to another member… on every version."""
 
     def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User, *, self_mode: bool):
         super().__init__(reg, owner_id, member, title="Your characters" if self_mode else "Characters", self_mode=self_mode)
@@ -183,10 +186,10 @@ class CharWizard(MemberWizard):
 
         m = self.member()
         ico = _ico(interaction) or (lambda kind, key: "")
-        lines = [char_line(ico, c) for c in sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower()))]
+        lines = [char_line(ico, c) + self.armory_lines(c) for c in sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower()))]
         rank = f"\n-# Rank: **{m.rank}** (it lives on the main)" if m.main else ""
         buttons = [self.button(CHAR_ACTIONS[a], self._goto(a), discord.ButtonStyle.danger if a == "delete" else discord.ButtonStyle.secondary)
-                   for a in self.actions if a != "name" or m.planned()]
+                   for a in self.actions if a != "name" or m.planned()] + self.armory_buttons()
         await self.show(interaction, "\n".join(lines)[:1500] + rank + "\nWhat do you want to change?", *buttons, self.button("Cancel", self.cancel))
 
     def _goto(self, action: str):
@@ -195,6 +198,8 @@ class CharWizard(MemberWizard):
         return go
 
     def eligible(self, action: str) -> list[tuple[int, RegisteredCharacter]]:
+        if action in ARMORY_ACTIONS or action == "move":
+            return self.armory_eligible(action)
         if action == "main":
             return self.indexed(lambda c: not c.is_main)
         if action == "name":
@@ -213,7 +218,8 @@ class CharWizard(MemberWizard):
             return
         chars = self.eligible(action)
         if not chars:
-            text = {"main": "There is no other character to make the main — `/me char` can add an alt with Add (or `/register`)." if self.self_mode
+            text = {"link": "Every named character is linked to the armory already.", "move": "There is no named character to move.",
+                    "main": "There is no other character to make the main — `/me char` can add an alt with Add (or `/register`)." if self.self_mode
                     else f"{self.member_name} has no other character to make main."}.get(action, "No character to change.")
             await self.finish(interaction, text)
             return
@@ -224,7 +230,10 @@ class CharWizard(MemberWizard):
 
     async def pick_char(self, interaction: discord.Interaction) -> None:
         action = self.draft["action"]
-        prompt = {"main": "Which character becomes the main? Rank moves with it.", "spec": "Whose spec changes?", "flex": "Which character's extra roles?",
+        prompt = {"link": "Which character do you link to the armory?", "unlink": "Which character stops following the armory?",
+                  "by_hand": "Whose professions do you keep by hand?", "follow": "Whose professions follow the armory again?",
+                  "sync": "Which character is updated from the armory?", "move": "Which character moves to another member?",
+                  "main": "Which character becomes the main? Rank moves with it.", "spec": "Whose spec changes?", "flex": "Which character's extra roles?",
                   "retire": "Which character retires?", "delete": "Which character is deleted?"}[action]
         await self.show(interaction, prompt, self.select("Pick the character", self.char_opts(self.eligible(action), _ico(interaction), self.draft.get("idx")), self.char_picked),
                         self.button("Back", self.hub), self.button("Cancel", self.cancel))
@@ -233,6 +242,9 @@ class CharWizard(MemberWizard):
         idx = int(values[0])
         c = self.member().characters[idx]
         self.draft.update(idx=idx, label=c.label, cls=c.cls, spec=c.spec, offspec=c.offspec, flex=list(c.flex))
+        if self.draft["action"] in ARMORY_ACTIONS or self.draft["action"] == "move":
+            await self.armory_picked(interaction)
+            return
         await {"spec": self.spec_screen, "flex": self.flex_screen}.get(self.draft["action"], self.review)(interaction)
 
     # ---- spec

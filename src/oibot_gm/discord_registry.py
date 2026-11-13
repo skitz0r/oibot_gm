@@ -1274,6 +1274,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["member_char"](interaction, reg, member=member, action=action.value if action else None)
 
+    @roster.command(name="armory", description="Who is linked to the armory, and link the sure matches in one go")
+    async def roster_armory(interaction: discord.Interaction):
+        reg, interaction = await officer(interaction)
+        if reg:  # flows_armory.ArmoryOverview: the counts, Link the sure matches (armory_seed.apply); the rest is the site's
+            await FLOWS["roster_armory"](interaction, reg)
+
     @roster.command(name="professions", description="A member's professions on their behalf: add, change skill, recipes, remove")
     @app_commands.describe(member="whose professions")
     async def roster_professions(interaction: discord.Interaction, member: discord.User):

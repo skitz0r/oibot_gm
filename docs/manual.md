@@ -327,6 +327,17 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   - **Name a planned character at launch**: `/me char action:Name a planned character` — pick it (skipped when
     there is only one), type first and last name, and the confirm screen says what follows (*"Answered Join on … — the
     answer now names Stormcall"*); answers and seats it holds take the new name.
+  - **The armory** (where the game version has one, WoW: Forever): under each named character the hub says
+    *Linked to the armory · Updated 5 minutes ago · in the guild* (*not in the guild* when the guild's roster doesn't list
+    it; nothing when that isn't known yet), or *Not linked to the armory yet.* **Link to the armory…** opens a box with the
+    first name (filled in) and the surname — type them as the game spells them, and leave the surname empty when the
+    character has none. The bot looks the character up (*Looking in the armory…*) and the confirm screen says what it
+    found — name, class, level — that your character takes that name and that the armory's professions replace its own;
+    **Link it** links it, **Back** changes nothing. Not found says so in one sentence (*reach level 10 and log out once*)
+    with **Try again**. Once linked: **Unlink…** (your record keeps what it last had; its professions are kept by hand),
+    **Keep professions by hand** (you edit them yourself from then on; **Follow the armory again** lets the armory replace
+    them once more) and **Sync now** (reads it from the armory at once — at most every few minutes; no confirm, it only
+    reads). Nobody is DMed.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
 - **Professions**: each character can carry its professions with their skill (1 to 300, or left unsaid until you know it) and its **notable recipes** —
   the ones worth telling the guild about, not the whole book. On the Me page each character shows them on one line
@@ -348,6 +359,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   asks you to narrow it; recipes the character already has are left out); a name the list doesn't have gets *"That isn't a recipe in the game's list."* with
   **Search again…**. Each ends on one confirm screen with the same
   sentences (*"Your Leatherworking is recorded at 300 with 1 notable recipe."*), and nothing changes before **Do it**.
+  A character linked to the armory whose professions follow it shows its list with one sentence why it is not changed
+  there — press **Keep professions by hand** in `/me char` (or on the Me page) to edit them — and no edit buttons.
   When both trades are taken it says so (*"Two trades are taken. Cooking, First Aid and Fishing are open."*) and offers
   only those.
   Or tell the bot (a DM, an @mention, or a channel it listens in): "Rhoz is a 300 leatherworker", "Rhoz is a
@@ -1114,11 +1127,24 @@ edits that new family and leaves the one it shared alone.
 
 ## 7. Officers: day-to-day commands
 
-- Registry: `/roster list|confirm|rank|set-main|char|professions|add|remove|members|absences|absent|back|comp` (`comp` = the
+- Registry: `/roster list|confirm|rank|set-main|char|professions|armory|add|remove|members|absences|absent|back|comp` (`comp` = the
   aims, §6). They take at most a member
   (Discord's own picker) and a fixed choice; the character, rank or schedule is picked from a list and confirmed before anything saves.
-  `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete), with the
-  same ripple on the confirm screen; `/roster professions member:` is `/me professions` on their behalf, and its confirm
+  `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete, and the
+  armory's Link to the armory… · Unlink… · Keep professions by hand · Sync now, which also show what looks off: *the
+  armory shows a Mage*, *the armory no longer finds it*), with the
+  same ripple on the confirm screen. **Move to another member…** (officers, on every game version) moves one character
+  to another Discord user: pick them in Discord's own member picker, the confirm says what goes with it (its past loot,
+  attendance, signups, wishlist and regular spots) and that both see a notice — nobody is DMed; **Move it** moves it.
+  A move is refused in one sentence (an open ask on it, the new member has no record here or already has that name) with
+  **Pick someone else**.
+  `/roster armory` (where the game has an armory) shows the guild linked and when its roster was read, how many
+  characters are linked, the ones not linked yet as *sure*, *likely* and *with no match on the roster*, and how many of
+  the guild's characters nobody here has claimed (with no guild linked, or its roster not read yet, it says so and what
+  to do). **Link the sure matches** lists them, one per line (*Tessa's Bram → Bram Kettle, level 60*), then **Link them**
+  links each on its own and says how many were linked and why any one was refused. If the roster or the records changed
+  since you looked, it shows the new counts and links nothing. The likely matches, the characters nobody claims and moves
+  between members are on the site's Members page (the button opens it); `/roster professions member:` is `/me professions` on their behalf, and its confirm
   names them (*"Kestrel's Tailoring is recorded at 275."*); `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the
   member's (on the main): no character to pick, and the choices are trial, raider, core and social. Every confirm names
   the member once (*"Kestrel's character Kestrelle retires, and …"*) and prints the same sentences as the Members page.

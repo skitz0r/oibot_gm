@@ -4,13 +4,15 @@ consequences.profession_consequence's sentences, written as a one-row table thro
 character verb). Profession and skill are selects (the Wizard rule: a number is a preset select). With the game's
 recipe list (armory link §4.4) Add recipe… is a search: part of the name (prose, validated against the list, never
 parsed) → a select of that profession's recipes → the decide screen; without a list a recipe's name is one prose field,
-validated by Registry.check_professions. Never a DM."""
+validated by Registry.check_professions. A linked character whose professions follow the armory shows its list and
+why it is not edited here (Keep professions by hand in the character wizard), with no edit buttons. Never a DM."""
 from __future__ import annotations
 
 import discord
 
 from . import consequences as cq
 from . import professions as pr
+from .flows_armory import synced, synced_sentence
 from .flows_roster import MemberWizard, _ico, _stop_at_entry
 from .professions import SKILL_UNSAID
 from .registry import RECIPE_NAME_MAX, RegisteredCharacter, Registry, RegistryError
@@ -102,6 +104,11 @@ class ProfessionsWizard(MemberWizard):
                                           + (" · " + ", ".join(r.name for r in p.recipes) if p.recipes else "") for p in c.professions]
         else:
             lines = [f"**{c.label}** · {self.reg.professions_summary(c)}. Press Add profession to record the first one."]
+        if synced(c):  # the armory keeps them (armory link §5.4): shown, never edited here, with why and what to do
+            lines.append(synced_sentence(c, self_mode=self.self_mode))
+            items = [self.button("Other character…", self.pick_char)] if len(self.indexed()) > 1 else []
+            await self.show(interaction, "\n".join(lines)[:1800], *items, self.button("Done", self.cancel))
+            return
         if self.trades_full(c):
             slots = prof.profession_rules["trade_slots"]
             free = [d.name for d in self.open_professions(c)]

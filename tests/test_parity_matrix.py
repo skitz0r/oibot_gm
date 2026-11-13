@@ -317,25 +317,25 @@ def test_the_guide_library_has_its_discord_and_web_paths_mcp_tools_and_written_e
 
 
 # a character's armory link (armory link §5.2, §5.4, §5.5): features, not ops — never plain text (configops.BY_DESIGN_ONLY
-# armory_link / armory_seed / armory_move). The site's routes (web/api_armory.py) and MCP's tools are here; Discord's wizards
-# (task 12: the character wizard's Link… / Unlink… / Keep professions by hand / Sync now / Move to another member…, /roster
-# armory's sure batch) are ARMORY_DISCORD_PENDING until they land — each then gains its "discord" ref and leaves that table.
+# armory_link / armory_seed / armory_move). The site's routes (web/api_armory.py), MCP's tools and Discord's wizards: the
+# character wizard (flow member_char: Link to the armory… / Unlink… / Keep professions by hand / Sync now / Move to another
+# member…) and /roster armory's sure batch (flow roster_armory).
 ARMORY: dict[str, dict[str, str]] = {
-    "find": {"web": "POST /api/me/armory/find", "mcp": "link_character"},  # MCP: link_character(preview=true)
-    "find_for": {"web": "POST /api/members/armory/find", "mcp": "link_character"},
-    "link": {"web": "POST /api/me/armory/link", "mcp": "link_character"},
-    "link_for": {"web": "POST /api/members/armory/link", "mcp": "link_character"},
-    "unlink": {"web": "POST /api/me/armory/unlink", "mcp": "unlink_character"},
-    "unlink_for": {"web": "POST /api/members/armory/unlink", "mcp": "unlink_character"},
-    "switch": {"web": "POST /api/me/armory/switch"},
-    "switch_for": {"web": "POST /api/members/armory/switch"},
-    "sync": {"web": "POST /api/me/armory/sync"},
-    "sync_for": {"web": "POST /api/members/armory/sync"},
+    "find": {"web": "POST /api/me/armory/find", "discord": "flow:member_char", "mcp": "link_character"},  # MCP: link_character(preview=true)
+    "find_for": {"web": "POST /api/members/armory/find", "discord": "flow:member_char", "mcp": "link_character"},
+    "link": {"web": "POST /api/me/armory/link", "discord": "flow:member_char", "mcp": "link_character"},
+    "link_for": {"web": "POST /api/members/armory/link", "discord": "flow:member_char", "mcp": "link_character"},
+    "unlink": {"web": "POST /api/me/armory/unlink", "discord": "flow:member_char", "mcp": "unlink_character"},
+    "unlink_for": {"web": "POST /api/members/armory/unlink", "discord": "flow:member_char", "mcp": "unlink_character"},
+    "switch": {"web": "POST /api/me/armory/switch", "discord": "flow:member_char"},
+    "switch_for": {"web": "POST /api/members/armory/switch", "discord": "flow:member_char"},
+    "sync": {"web": "POST /api/me/armory/sync", "discord": "flow:member_char"},
+    "sync_for": {"web": "POST /api/members/armory/sync", "discord": "flow:member_char"},
     "give": {"web": "POST /api/members/armory/give"},
     "map": {"web": "GET /api/armory/map", "mcp": "armory_map"},
     "seed": {"web": "GET /api/armory/seed", "mcp": "armory_seed"},
-    "seed_apply": {"web": "POST /api/armory/seed/apply", "mcp": "apply_armory_seed"},
-    "move": {"web": "POST /api/members/move", "mcp": "move_character"},
+    "seed_apply": {"web": "POST /api/armory/seed/apply", "discord": "flow:roster_armory", "mcp": "apply_armory_seed"},
+    "move": {"web": "POST /api/members/move", "discord": "flow:member_char", "mcp": "move_character"},
 }
 ARMORY_MCP_EXEMPT = {
     "switch": "how a character's professions are kept is the member's own choice on the Me page or in Discord; no MCP tool was asked for",
@@ -344,10 +344,7 @@ ARMORY_MCP_EXEMPT = {
     "sync_for": "Sync now is a refresh a person presses beside the character; the hourly check does the same for MCP's reads",
     "give": "Give to a member… registers a character from the guild's roster on the Members page's not-claimed fold; MCP links an existing one",
 }
-ARMORY_DISCORD_PENDING = {
-    action: "task 12 (phase 2) adds it to Discord: the character wizard's armory actions, /roster armory, Move to another member…"
-    for action in ("find", "find_for", "link", "link_for", "unlink", "unlink_for", "switch", "switch_for", "sync", "sync_for", "seed_apply", "move")
-}
+ARMORY_DISCORD_PENDING: dict[str, str] = {}  # every armory action Discord has landed (task 12)
 ARMORY_DISCORD_EXEMPT = {
     "give": "Give to a member… lives on the site's not-claimed fold beside the roster rows (§5.4); Discord shows the counts",
     "map": "the map is a table of every member's characters (the Members page); Discord shows the counts in /roster armory",
