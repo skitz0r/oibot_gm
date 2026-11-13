@@ -321,6 +321,28 @@ def member_lines(reg: Registry, rs, m, head: str, officer_view: bool) -> list[st
     return out
 
 
+def armory_lines(reg: Registry, m) -> list[str]:
+    """The asker's own characters' armory link (design §5.64), where the game version has an armory: per named character,
+    linked or not, when it was last updated (Registry.local12 words), in the guild / not in the guild when the linked
+    guild's roster says so, and whether its professions follow the armory or are kept by hand. The asker's record only —
+    never another member's. Character names are member text: one delimited block."""
+    from . import armory, discord_armory
+
+    if m.test or not armory.available(reg):
+        return []
+    rows = []
+    for c in m.active():
+        if not c.name:
+            continue
+        if c.armory is None:
+            rows.append(f"{c.label}: not linked to the armory (linked with Link to the armory… in /me char or on the Me page)")
+            continue
+        where = {True: " · in the guild", False: " · not in the guild"}.get(discord_armory.in_guild(reg, c), "")
+        kept = "professions follow the armory" if c.profession_sync else "professions kept by hand"
+        rows.append(f"{c.label}: linked to the armory · {discord_armory.updated_words(reg, c)}{where} · {kept}")
+    return (["  the asker's characters and the armory:"] + _block("armory", rows)) if rows else []
+
+
 def applicant_line(reg: Registry, user_id: int, officer: bool = False) -> str | None:
     """An applicant's own status (shown to them, or to an officer): label, state, since when, the decision note. Who
     decided is internal review data: named for an officer only (the decision DM never names them either)."""
@@ -1183,6 +1205,7 @@ def people_lines(ask: Ask) -> list[str]:
         lines.append("## Reply audience: a channel others can read — the asker's own absence reasons are left out on purpose.")
     if m:  # their own reasons are theirs — but not in a reply others can read
         lines.extend(member_lines(reg, rs, m, f"## Asker ({who})", officer_view=not ask.audience_public))
+        lines.extend(armory_lines(reg, m))
     else:
         lines.append(f"## Asker: <@{ask.user_id}> ({who}) · not registered")
     own = applicant_line(reg, ask.user_id, officer=ask.officer)

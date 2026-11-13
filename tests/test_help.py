@@ -585,3 +585,41 @@ def test_guild_guides_section_names_each_factions_latest_for_members(reg, monkey
     assert "### Guild guides" not in H.guild_state(reg, None, uid, False, "when is the next raid", None, public=False)
     monkeypatch.setattr(lib, "available", lambda r: False)
     assert "### Guild guides" not in H.guild_state(reg, None, uid, False, ask, None, public=False), "no tool, no section"
+
+
+# ---------------------------------------------------------------- the armory link (design §5.64)
+
+def test_the_askers_record_names_each_characters_armory_link(reg, monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+
+    from oibot_gm import armory, discord_armory
+    from oibot_gm import help as H
+    from oibot_gm.armory import GuildFacts, RosterRow
+    from oibot_gm.registry import ArmoryLink
+
+    monkeypatch.setattr(discord_armory, "OUT", tmp_path / "armory-out")
+    discord_armory.reset_state()
+    uid, other = 9300, 9301
+    reg.add_character(uid, "Tessa", "Bram", "Warrior", "Protection", None, True, surname="Kettle")
+    reg.add_character(uid, "Tessa", "Pip", "Rogue", "Combat", None, False)
+    reg.add_character(other, "Orla", "Thornwick", "Druid", "Balance", None, True)
+    at = "2026-11-12T20:00:00+00:00"
+    for u, label, aid in ((uid, "Bram Kettle", 700101), (other, "Thornwick", 700102)):
+        reg.own_character(reg.members[u].characters, label).armory = ArmoryLink(id=aid, slug="x", linked_by="t", linked_at=at, checked_at=at)
+    ask = "is my character linked to the armory?"
+    monkeypatch.setattr(armory, "available", lambda r: False)
+    assert "the armory" not in H.guild_state(reg, None, uid, False, ask, None, public=False), "no armory, no lines"
+    monkeypatch.setattr(armory, "available", lambda r: True)
+    s = H.guild_state(reg, None, uid, False, ask, None, public=False)
+    when = reg.local12(at)
+    assert f"Bram Kettle: linked to the armory · Updated from the armory {when} · professions follow the armory" in s, "in the guild unknown: left out"
+    assert "Pip: not linked to the armory" in s and '<member-text source="armory">' in s, "names are member text, in a block"
+    assert "Thornwick: linked" not in s, "another member's link is never in the asker's record"
+    reg.set_armory_guild(GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", members=8,
+                                    created=datetime(2026, 10, 26, tzinfo=timezone.utc)), "Owner", by_id=OWNER)
+    discord_armory._save_snapshot(reg, discord_armory._Snapshot(rows=[RosterRow(id=700101, name="Bram", surname="Kettle", slug="bram-kettle",
+                                                                                  level=60, cls="Warrior")], taken_at=at, modified=None, guild_id=418362))
+    reg.own_character(reg.members[uid].characters, "Bram Kettle").profession_sync = False
+    s = H.guild_state(reg, None, uid, False, ask, None, public=False)
+    assert f"Updated from the armory {when} · in the guild · professions kept by hand" in s
+    discord_armory.reset_state()
