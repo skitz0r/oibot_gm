@@ -210,7 +210,7 @@ def test_sync_guild_counts_and_skips_puppets_leavers_and_retired(reg, fake, bot,
     assert all(c.armory is None for c in puppet.characters)
 
 
-@pytest.mark.parametrize("err", [ArmoryDown(detail="503"), ArmoryShape("/x", "members"), ArmoryAccess("keys", "401")])
+@pytest.mark.parametrize("err", [ArmoryDown(detail="503"), ArmoryAccess("keys", "401")])
 def test_down_warns_once_an_hour(reg, fake, bot, clock, err):
     linked(bot, reg)
     found = run(discord_armory.find_for_link(bot, reg, "Tamsin", "Pell"))
@@ -494,3 +494,134 @@ def test_the_switch_already_in_that_state_says_so(reg, fake, bot, clock):
     run(discord_armory.set_profession_sync(bot, reg, TESSA, "Bram Kettle", False, "Tessa", by_id=TESSA))
     said = run(discord_armory.set_profession_sync(bot, reg, TESSA, "Bram Kettle", False, "Tessa", by_id=TESSA, preview=True))
     assert said == ["Bram Kettle's professions are already kept by hand."]
+
+
+# ------------------------------------------------------------------ final review A2: one character's odd answer
+
+
+def three_linked(bot, reg, fake):
+    """Bram Kettle (Tessa), Tamsin Pell (Orla's Brom), Pip Rook (Wren's Pip): checked in that order (by Discord id)."""
+    linked(bot, reg)
+    found = run(discord_armory.find_for_link(bot, reg, "Tamsin", "Pell"))
+    run(discord_armory.link_character(bot, reg, ORLA, "Brom", found, "Owner", by_id=OWNER))
+    fake.chars["pip-rook"] = facts("Pip", "Rook", 700105, cls="Rogue")
+    fake.profs["pip-rook"] = []
+    found = run(discord_armory.find_for_link(bot, reg, "Pip", "Rook"))
+    run(discord_armory.link_character(bot, reg, WREN, "Pip", found, "Owner", by_id=OWNER))
+    fake.chars = {k: replace(v, level=59, modified=LATER) for k, v in fake.chars.items()}  # every one has news
+
+
+@pytest.mark.parametrize("err", [ArmoryShape("/profile/wow/character/tamsin-pell/professions", "tier"),
+                                 ArmoryAccess("refused", "GET x: 403", token=False)])
+def test_one_characters_odd_answer_never_stops_the_run(reg, fake, bot, clock, monkeypatch, err):
+    three_linked(bot, reg, fake)
+    real = fake.professions
+
+    def odd(slug):
+        if "tamsin" in slug:
+            raise err
+        return real(slug)
+
+    monkeypatch.setattr(fake, "professions", odd)
+    lines = len(bot.ops.lines)
+    res = run(discord_armory.sync_guild(bot, reg))
+    assert not res["stopped"] and res["updated"] == 2
+    assert char(reg, TESSA, "Bram Kettle").armory.level == 59 and char(reg, WREN, "Pip Rook").armory.level == 59
+    assert char(reg, ORLA, "Tamsin Pell").armory.level == 60, "the odd one keeps its last data"
+    warned = [t for _l, t in bot.ops.lines[lines:]]
+    assert len(warned) == 1 and "Orla's Tamsin Pell" in warned[0] and "stopped" not in warned[0]
+    clock.advance(minutes=30)
+    run(discord_armory.sync_guild(bot, reg))
+    assert len(bot.ops.lines) == lines + 1, "once an hour for that character"
+
+
+def test_a_token_refusal_still_stops_the_run(reg, fake, bot, clock):
+    three_linked(bot, reg, fake)
+    fake.fail, fake.calls = ArmoryAccess("keys", "token refused"), []
+    res = run(discord_armory.sync_guild(bot, reg))
+    assert res["stopped"] and fake.count("character") == 1
+
+
+def test_a_profession_without_tiers_is_a_profession_with_no_recipes():
+    from test_armory_client import C, client
+
+    a, _ = client({f"{C}/professions": (200, {"primaries": [{"profession": {"id": 165, "name": "Leatherworking"}}]})})
+    assert a.professions("tamsin-pell") == [{"id": "leatherworking", "skill": 0, "recipes": []}]
+
+
+def test_a_403_is_not_a_token_refusal_and_a_401_is():
+    from test_armory_client import C, client
+
+    a, _ = client({C: (403, b"")})
+    with pytest.raises(ArmoryAccess) as e:
+        a.character("tamsin-pell")
+    assert e.value.token is False
+    a, _ = client({C: (401, b"")})
+    with pytest.raises(ArmoryAccess) as e:
+        a.character("tamsin-pell")
+    assert e.value.token is True
+
+
+# ------------------------------------------------------------------ final review A3 / A4: a check that must read again
+
+
+def test_follow_the_armory_again_after_a_failed_check_reads_again_next_hour(reg, fake, bot, clock):
+    linked(bot, reg)
+    run(discord_armory.set_profession_sync(bot, reg, TESSA, "Bram Kettle", False, "Tessa", by_id=TESSA))
+    reg.save_character_table(TESSA, [{"label": "Bram Kettle", "professions": [{"id": "mining", "skill": 200}]}], "Tessa", by_id=TESSA)
+    fake.fail = ArmoryDown(detail="503")
+    run(discord_armory.set_profession_sync(bot, reg, TESSA, "Bram Kettle", True, "Tessa", by_id=TESSA))  # the forced check fails
+    assert [p.id for p in char(reg, TESSA, "Bram Kettle").professions] == ["mining"]
+    fake.fail, fake.calls = None, []
+    clock.advance(hours=1)
+    assert run(discord_armory.sync_character(bot, reg, TESSA, "Bram Kettle")) == "updated"  # nothing changed in the game
+    assert ("character", "bram-kettle", None) in fake.calls, "read unconditionally, never a 304 on the old stamp"
+    assert [p.id for p in char(reg, TESSA, "Bram Kettle").professions] == ["leatherworking"]
+    fake.calls = []
+    run(discord_armory.sync_character(bot, reg, TESSA, "Bram Kettle"))
+    assert fake.calls == [("character", "bram-kettle", STAMP)], "then conditional again"
+
+
+def test_a_link_whose_professions_read_404s_reads_them_on_the_next_check(reg, fake, bot, clock, monkeypatch):
+    from oibot_gm.armory import ArmoryMissing
+
+    people(reg)
+    link_guild(reg)
+    real = fake.professions
+
+    def missing(slug):
+        raise ArmoryMissing("gone", "404")
+
+    monkeypatch.setattr(fake, "professions", missing)
+    c = link_bram(bot, reg)
+    assert [p.id for p in c.professions] == ["mining"] and c.armory.modified is None
+    monkeypatch.setattr(fake, "professions", real)
+    fake.calls = []
+    clock.advance(hours=1)
+    assert run(discord_armory.sync_character(bot, reg, TESSA, "Bram Kettle")) == "updated"
+    assert ("character", "bram-kettle", None) in fake.calls
+    c = char(reg, TESSA, "Bram Kettle")
+    assert [p.id for p in c.professions] == ["leatherworking"]
+
+
+# ------------------------------------------------------------------ final review A7: no no-op commits
+
+
+def test_a_case_only_name_difference_and_a_reordered_answer_write_nothing(reg, fake, bot, clock):
+    linked(bot, reg)
+    fake.chars["bram-kettle"] = replace(fake.chars["bram-kettle"], surname="KETTLE", modified=LATER)
+    fake.profs["bram-kettle"][0]["recipes"] = list(reversed(fake.profs["bram-kettle"][0]["recipes"]))
+    before = commits(reg)
+    for _ in range(2):
+        clock.advance(hours=1)
+        assert run(discord_armory.sync_character(bot, reg, TESSA, "Bram Kettle", force=True)) == "unchanged"
+    assert commits(reg) == before and char(reg, TESSA, "Bram Kettle").label == "Bram Kettle"
+
+
+def test_many_unknown_recipes_are_one_ops_line(reg, fake, bot, clock):
+    """A6: a list a patch behind tells ops once per check, counting, naming the first few."""
+    fake.profs["bram-kettle"][0]["recipes"] += [{"id": 999100 + i, "name": f"Patch Wrap {chr(65 + i)}"} for i in range(5)]
+    linked(bot, reg)
+    behind = [t for _l, t in bot.ops.lines if "behind the game" in t]
+    assert len(behind) == 1
+    assert "6 recipes on Tessa's Bram Kettle" in behind[0] and "and 3 more" in behind[0] and "999001" in behind[0]

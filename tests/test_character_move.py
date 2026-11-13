@@ -541,3 +541,49 @@ def test_the_confirm_names_a_regular_spot_given_up_and_a_main_change(reg, rs):
     assert said[2] == "Wren Hollow becomes the old member's main."
     move(reg, rs, to=PELL)
     assert char(reg, PELL, "Bram Kettle").rosters == [] and reg.members[TESSA].main.label == "Wren Hollow"
+
+
+def test_a_name_another_character_of_the_old_member_holds_now_is_not_frozen(reg, rs):
+    """A1: Bram Kettle is renamed Bram Fallow, then Tessa registers a new Bram Kettle and it receives loot. Moving Bram
+    Fallow leaves the new character's awards with Tessa, before and after a restart: a name one of her other characters
+    answers to at the move is not one the moved character takes along."""
+    from oibot_gm.registry import Registry
+
+    people(reg)
+    old = (reg.now_local() - timedelta(days=30)).date().isoformat()
+    award_row(reg, "Bram Kettle", uid=TESSA, iid="mv-pre", received=old)  # Bram Fallow's own, under its name then
+    reg.rename_character(TESSA, "Bram Kettle", "Bram", "Fallow", "Owner", rs=rs, by_id=OWNER, officer=True)
+    reg.add_character(TESSA, "Tessa", "Bram", "Rogue", "Combat", None, False, surname="Kettle")
+    today = reg.now_local()
+    award_row(reg, "Bram Kettle", uid=TESSA, item="Wand of Tests", iid="mv-alt", received=today.date().isoformat(),
+              confirmed_at=(today - timedelta(minutes=5)).isoformat())
+    ctx = RegistryLootContext(reg, reg.store, None)
+    by = {a.import_id: a for a in ctx.ledger}
+    rogue = char(reg, TESSA, "Bram Kettle")
+    before_pre = reg.award_holder(by["mv-pre"])
+    assert reg.award_holder(by["mv-alt"])[1] is rogue
+    move(reg, rs, label="Bram Fallow")
+    (row,) = [json.loads(x) for x in moves_file(reg).read_text().splitlines()]
+    assert "Bram Kettle" not in row["names"] and row["names"][0] == "Bram Fallow"
+    assert row["firsts"] == []
+    for r in (reg, Registry(reg.store, reg.key, reg.profile)):  # a restart reads the same row
+        by = {a.import_id: a for a in RegistryLootContext(r, r.store, None).ledger}
+        assert r.owner_of_award(by["mv-alt"]) == TESSA
+        assert r.award_holder(by["mv-alt"])[1].label == "Bram Kettle" and r.award_holder(by["mv-alt"])[1].cls == "Rogue"
+        # the moved character's own award under the name the Rogue now holds: a current name beats a former one, the
+        # same answer before and after the move — Tessa's Bram Kettle
+        h = r.award_holder(by["mv-pre"])
+        assert r.owner_of_award(by["mv-pre"]) == TESSA and h[0].discord_id == before_pre[0].discord_id == TESSA
+        assert h[1].label == before_pre[1].label == "Bram Kettle" and h[1].cls == "Rogue"
+
+
+@pytest.mark.parametrize("miss", ["called_out", "no_thanks", "no_answer", "benched", "unconfirmed"])
+def test_away_is_the_better_row_than_any_counted_miss(reg, miss):
+    """A8: away is never counted, so on a night both rows exist it beats every counted miss — the loot factor's order."""
+    from oibot_gm.registry import Registry
+
+    away = {"outcome": "away", "counted": False, "attended": False}
+    missed = {"outcome": miss, "counted": True, "attended": False}
+    played = {"outcome": "rostered", "counted": True, "attended": True}
+    assert Registry._row_rank(away) > Registry._row_rank(missed)
+    assert Registry._row_rank(played) > Registry._row_rank(away)

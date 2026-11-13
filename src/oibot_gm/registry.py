@@ -110,10 +110,17 @@ class Profession(BaseModel):
     recipes: list[Recipe] = Field(default_factory=list)
 
 
+def _profs_key(profs) -> list:
+    """A professions list compared regardless of its recipes' order (the armory may answer them in another order)."""
+    return [(p.id, p.skill, sorted((r.id if r.id is not None else -1, r.name) for r in p.recipes)) for p in profs]
+
+
 class ArmoryLink(BaseModel):
     """A character's link to its armory profile (armory link, design §5.2): the armory's character id and the name the
-    armory knows it by, who linked it and when, and what the last check read. Nothing sets it yet (the link is the
-    next step); `cls` is what the armory says, never written onto the character (a difference is a flag officers see).
+    armory knows it by, who linked it and when, and what the last check read. Set by Registry.link_armory (the link,
+    discord_armory.link_character), refreshed by armory_update (each check), dropped by unlink_armory; it travels with
+    the character on a move. `cls` is what the armory says, never written onto the character (a difference is a flag
+    officers see).
     "In the guild" is not stored: it is derived from the linked guild's roster (discord_armory.in_guild, R9); an old key
     in a file is ignored."""
     model_config = ConfigDict(extra="ignore")
@@ -2357,8 +2364,8 @@ class Registry:
         is NOW: `uid`, unless that character was moved away from them — then the member it went to, and so on through
         later moves (a chain folds). Decided by the move's row alone, never by the records as they are now:
         - an entry dated BEFORE the move follows it when `label` is one of the names the row froze as this character's
-          under the old member (`names`: its full names, current and former; `firsts`: its first names that no other
-          character of the old member answered to at the move);
+          under the old member (`names`: its full names, current and former, and `firsts`: its first names — each one
+          no other character of the old member answered to at the move);
         - an entry dated AT OR AFTER the move (a stale council's award, a seat recorded late) follows it only by a full
           name, and only when the old member had no character of their own answering to that name by then (one created
           at or before `when` — a name they took again keeps its new entries).
@@ -2422,9 +2429,12 @@ class Registry:
 
     def _move_names(self, m: "Member", c: RegisteredCharacter) -> tuple[list[str], list[str]]:
         """The names under which member `m`'s rows mean `c`, frozen at a move: its full names (the label, then former
-        ones) and its first names (of the label and the former names) that no OTHER character of `m` answers to now."""
-        full = [c.label] + [f for f in c.former_names if f.lower() != c.label.lower()]
+        ones) and its first names (of the label and the former names) — each only when no OTHER character of `m` answers
+        to it now. A former name another of their characters took again is that character's (a current name beats a
+        former one): its rows stay with `m`, before the move and after it."""
         others = [x for x in m.characters if x is not c and x.name]
+        full = [c.label] + [f for f in c.former_names if f.lower() != c.label.lower()
+                            and not any(self.same_character(x, f, former=False) for x in others)]
         firsts: list[str] = []
         for f in [c.name or ""] + [f.split()[0] for f in c.former_names if f.split()]:
             low = f.strip().lower()
@@ -2693,13 +2703,16 @@ class Registry:
     def set_profession_sync(self, discord_id: int, label: str, on: bool, by: str, *, by_id: int | None = None) -> bool:
         """THE switch (D5): `on` = the linked character's professions follow the armory; off = kept by hand (edited from
         the game's list, every hand-entry check). An unlinked character is always kept by hand: refused. The same value is
-        no write → False; a change is one commit → True. Turning it on replaces nothing here: the caller's next check does."""
+        no write → False; a change is one commit → True. Turning it on replaces nothing here: the caller's next check does,
+        and the stored Last-Modified is dropped so that check (and any after a restart) reads the armory unconditionally."""
         m, c = self._linkable(discord_id, label, by_id)
         if c.armory is None:
             raise RegistryError(f"{c.label} isn't linked to the armory.")
         if c.profession_sync == bool(on):
             return False
         c.profession_sync, c.updated_at = bool(on), now()
+        if on:
+            c.armory = c.armory.model_copy(update={"modified": None})
         self.save(m, f"{m.display_name}: {c.label} professions " + ("follow the armory" if on else "kept by hand") + f" (by {by})")
         return True
 
@@ -2720,7 +2733,7 @@ class Registry:
         new = old.model_copy(update=dict(changes))
         differs = new.model_dump(exclude={"checked_at"}) != old.model_dump(exclude={"checked_at"})
         profs = professions if professions is not None and c.profession_sync else None
-        if profs is not None and [p.model_dump() for p in profs] != [p.model_dump() for p in c.professions]:
+        if profs is not None and _profs_key(profs) != _profs_key(c.professions):  # a reordered answer is no change
             differs = True
         else:
             profs = None
@@ -3678,8 +3691,8 @@ class Registry:
         """`m`'s row of a done run as it counts NOW (design §5.4). Their own entry counts unless the character it carries
         was moved away from them since (owner_of: the old member keeps a row only for an entry on another character);
         an entry of another member whose character that night has moved to `m` is a candidate too. One run is one row:
-        the BETTER of the candidates (_row_rank: attended beats not attended, an entry of play beats no answer or away;
-        a tie keeps their own). Without moves: the run's own row, unchanged. Finished run files are never rewritten."""
+        the BETTER of the candidates as the loot factor reads it (_row_rank: attended beats everything, away — never
+        counted — beats every counted miss; a tie keeps their own). Without moves: the run's own row, unchanged. Finished run files are never rewritten."""
         row = self._attendance_row(m, ev)
         moves = self.character_moves()
         if not moves:
@@ -3699,11 +3712,12 @@ class Registry:
 
     @staticmethod
     def _row_rank(r: dict) -> int:
-        """How much an attendance row says the member played: attended 3 · rostered unconfirmed or benched 2 · called
-        out or No thanks 1 · no answer or away 0."""
+        """How much an attendance row says the member played, as the loot attendance factor reads it: attended 4 · away
+        3 (never counted, so it beats every counted miss) · rostered unconfirmed or benched 2 · called out or No thanks
+        1 · no answer 0 (the last three are counted misses)."""
         if r.get("attended"):
-            return 3
-        return {"unconfirmed": 2, "benched": 2, "rostered": 2, "called_out": 1, "no_thanks": 1}.get(r.get("outcome"), 0)
+            return 4
+        return {"away": 3, "unconfirmed": 2, "benched": 2, "rostered": 2, "called_out": 1, "no_thanks": 1}.get(r.get("outcome"), 0)
 
     def attendance(self, member, window_days: int | None = None, *, bench: bool = False, at: datetime | None = None) -> tuple[int, int]:
         """(attended, total) for `member` (a Member or a Discord id) over the done runs of the window (default the loot

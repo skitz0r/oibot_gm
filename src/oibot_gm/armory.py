@@ -66,7 +66,13 @@ class ArmoryShape(ArmoryError):
 
 
 class ArmoryAccess(ArmoryError):
-    """The bot's credentials are missing or refused: retrying will not help until the host fixes .env."""
+    """The bot's credentials are missing or refused: retrying will not help until the host fixes .env. `token` = the
+    refusal is the credentials' (the token request refused, a 401 after a fresh token): every request would fail. False
+    = a 403 for this one path (one character's answer withheld): the guild's hourly run skips that character and goes on."""
+
+    def __init__(self, words: str, detail: str = "", token: bool = True):
+        super().__init__(words, detail)
+        self.token = token
 
 
 @dataclass(frozen=True)
@@ -272,7 +278,7 @@ class Armory:
         if status == 429:
             raise ArmoryDown(detail=f"GET {path}: 429", retry_after=_retry_after(reply.headers.get("retry-after")))
         if status in (401, 403):
-            raise ArmoryAccess(ACCESS_WORDS, f"GET {path}: {status}")
+            raise ArmoryAccess(ACCESS_WORDS, f"GET {path}: {status}", token=status == 401)
         if status != 200:
             raise ArmoryDown(detail=f"GET {path}: {status}")
         try:
@@ -342,7 +348,7 @@ class Armory:
                 _need(isinstance(p, dict), path, group)
                 bid = _int(_dict(p, "profession", path), "id", path)
                 skill, recipes, seen = 0, [], set()
-                for t in _list(p, "tiers", path):
+                for t in _list(p, "tiers", path, optional=True):  # no tiers: a profession with no recipes known
                     _need(isinstance(t, dict), path, "tier")
                     skill = max(skill, _int(t, "skill_points", path))
                     for r in _list(t, "known_recipes", path, optional=True):

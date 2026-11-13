@@ -19,9 +19,13 @@ throttle, the roster's last try. The roster snapshot is derived, foreign data: `
 (the rows, when taken, the roster's Last-Modified, the guild id), loaded at first use after a restart.
 
 The DM rule holds throughout: nothing here DMs anyone or writes a notice. Failures reach the guild's ops feed: at most
-one warning per guild per hour for the armory being down / refusing the keys / answering oddly (the run stops, the last
-data stays, the next hourly tick resumes), once per stranger guild under the server's guild address, once per recipe id
-the game's list lacks ("the recipe list is behind the game")."""
+one warning per guild per hour for the armory being down / refusing the keys (the run stops, the last data stays, the
+next hourly tick resumes), one an hour per character whose own answer is odd or withheld (that character keeps its last
+data and the run goes on), once per stranger guild under the server's guild address, one line per check for the recipe
+ids the game's list lacks, each told once ("the recipe list is behind the game").
+
+A character whose professions follow the armory but couldn't be read (a 404, a list that didn't fit, a forced check that
+failed after Follow the armory again) is read unconditionally next time (`_read_again`), never a 304 on its last stamp."""
 from __future__ import annotations
 
 import asyncio
@@ -114,7 +118,17 @@ def reset_state() -> None:
 
 def _st(reg) -> dict:
     return _STATE.setdefault(reg.key, {"checked": {}, "modified": {}, "forced": {}, "warned_at": {}, "strangers": set(),
-                                       "reported": None, "roster": _UNLOADED, "roster_try": None, "last_sync": None, "task": None})
+                                       "reported": None, "roster": _UNLOADED, "roster_try": None, "last_sync": None, "task": None,
+                                       "reread": set()})
+
+
+def _read_again(reg, aid: int) -> None:
+    """The next check of armory character `aid` reads it unconditionally (never a 304 on the last stamp): its professions
+    follow the armory but the last check couldn't read them (a 404, a list that didn't fit, a forced check that failed).
+    A check that reads them clears it."""
+    st = _st(reg)
+    st["modified"].pop(aid, None)
+    st["reread"].add(aid)
 
 
 def lookup_allowed(reg, by_id) -> bool:
@@ -268,8 +282,9 @@ async def _emit(bot, reg, level: str, text: str) -> None:
 
 
 async def _warn_hourly(bot, reg, kind: str, text: str) -> None:
-    """At most one ops warning per guild per hour for each `kind` ("armory" = down / refusing the keys / answering oddly,
-    "roster-missing", "professions:<armory id>", "name:<armory id>"): one character's warning never hides another's, nor
+    """At most one ops warning per guild per hour for each `kind` ("armory" = down / refusing the keys / the roster
+    answering oddly, "roster-missing", "character:<armory id>" = one character's odd or withheld answer,
+    "professions:<armory id>", "name:<armory id>"): one character's warning never hides another's, nor
     an outage."""
     warned = _st(reg)["warned_at"]
     last = warned.get(kind)
@@ -294,9 +309,13 @@ def _reported_path(reg) -> Path:
     return OUT / reg.key / "recipes_reported.json"
 
 
+UNKNOWN_NAMED = 3  # the "recipe list is behind" ops line names this many, then counts the rest
+
+
 async def _report_unknown_recipes(bot, reg, m: Member, c: RegisteredCharacter, profs) -> None:
     """A recipe id the game's list lacks is kept by its id; it is told to ops ONCE per guild (kept under out/ so a
-    restart doesn't tell it again): the recipe list is behind the game."""
+    restart doesn't tell it again): the recipe list is behind the game. ONE line per check, however many are new: how
+    many, and the first few by name and id."""
     if not profs or not reg.profile.has_recipe_list:  # without the game's list there is nothing to be behind
         return
     st = _st(reg)
@@ -305,11 +324,20 @@ async def _report_unknown_recipes(bot, reg, m: Member, c: RegisteredCharacter, p
             st["reported"] = set(json.loads(_reported_path(reg).read_text(encoding="utf-8")))
         except (OSError, ValueError):
             st["reported"] = set()
-    new = [(p, r) for p in profs for r in p.recipes if r.id is not None and r.id not in reg.profile.recipes and r.id not in st["reported"]]
-    for p, r in new:
-        st["reported"].add(r.id)
-        await _emit(bot, reg, "warn", f"The recipe list is behind the game: {reg.profile.profession(p.id).name} {r.name} "
-                                      f"(id {r.id}) on {m.display_name}'s {c.label} is kept by its id.")
+    new, seen = [], set()
+    for p in profs:
+        for r in p.recipes:
+            if r.id is not None and r.id not in reg.profile.recipes and r.id not in st["reported"] and r.id not in seen:
+                seen.add(r.id)
+                new.append((p, r))
+    st["reported"].update(seen)
+    named = [f"{reg.profile.profession(p.id).name} {r.name} (id {r.id})" for p, r in new[:UNKNOWN_NAMED]]
+    if len(new) == 1:
+        await _emit(bot, reg, "warn", f"The recipe list is behind the game: {named[0]} on {m.display_name}'s {c.label} is kept by its id.")
+    elif new:
+        more = f", and {len(new) - len(named)} more" if len(new) > len(named) else ""
+        await _emit(bot, reg, "warn", f"The recipe list is behind the game: {len(new)} recipes on {m.display_name}'s {c.label} "
+                                      f"are kept by their ids: {', '.join(named)}{more}.")
     if new:
         try:
             _reported_path(reg).parent.mkdir(parents=True, exist_ok=True)
@@ -394,7 +422,8 @@ def _trusted(reg, raw) -> list | None:
     if raw is None:
         return None
     entries = [{"id": p["id"], "skill": p["skill"] if int(p.get("skill") or 0) >= 1 else None,
-                "recipes": [{"id": r["id"], "name": r["name"]} for r in p.get("recipes") or []]} for p in raw]
+                "recipes": [{"id": r["id"], "name": r["name"]} for r in sorted(p.get("recipes") or [], key=lambda r: r["id"])]}
+               for p in raw]  # recipes by id: one stored order, whatever order the armory answers in
     return reg.check_professions(entries, trusted=True)
 
 
@@ -456,8 +485,10 @@ async def link_character(bot, reg, uid: int, label: str, found: Found, by: str, 
             except ArmoryMissing:
                 profs = None
         at = _iso(_now())
-        link = ArmoryLink(id=found.id, slug=_norm(found.slug), linked_by=by, linked_at=at, checked_at=at, modified=found.modified,
-                          level=found.level, cls=found.cls, missing_since=None)
+        # a profile whose professions read 404ed: no stamp kept, so the next check reads them (never a 304 on this one)
+        reread = found.source == "profile" and profs is None
+        link = ArmoryLink(id=found.id, slug=_norm(found.slug), linked_by=by, linked_at=at, checked_at=at,
+                          modified=None if reread else found.modified, level=found.level, cls=found.cls, missing_since=None)
 
         def write():
             return reg.link_armory(uid, found.label, link, by, professions=profs, by_id=by_id, officer=officer)
@@ -466,7 +497,9 @@ async def link_character(bot, reg, uid: int, label: str, found: Found, by: str, 
                                message=f"{m.display_name}: {found.label} linked to the armory (by {by})", by_id=by_id, officer=officer)
         st = _st(reg)
         st["checked"][found.id] = at
-        if found.modified:
+        if reread:
+            _read_again(reg, found.id)
+        elif found.modified:
             st["modified"][found.id] = found.modified
     await _report_unknown_recipes(bot, reg, m, c, profs)
     named = f" as {c.label}" if c.label != old else ""
@@ -513,6 +546,7 @@ async def set_profession_sync(bot, reg, uid: int, label: str, on: bool, by: str,
         await _audit(bot, reg, by, f"{m.display_name}'s {c.label}: professions " + ("follow the armory" if on else "kept by hand"),
                      via=via, by_id=by_id)
         if on:
+            _read_again(reg, c.armory.id)  # if this check fails, the next hourly one reads the professions all the same
             try:
                 async with _lock(reg):
                     await _sync_one(bot, reg, uid, c.armory.id, force=True)
@@ -575,6 +609,17 @@ async def sync_character(bot, reg, uid: int, label: str, *, force: bool = False,
     return res
 
 
+def _stored_as(reg, name: str, surname: str | None) -> str:
+    """The full name the armory's `name surname` would be stored as (Registry.normalise_name, the record's own rule);
+    a name the record can't store stays as the armory wrote it (the rename then refuses it in words)."""
+    def one(x: str) -> str:
+        try:
+            return reg.normalise_name(x)
+        except RegistryError:
+            return x
+    return f"{one(name)} {one(surname)}" if surname else one(name)
+
+
 async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
     """The step of spec §5.3 for one linked character (the guild's lock held). ArmoryMissing is handled here (a 404 =
     the roster, else missing_since); every other ArmoryError goes to the caller with nothing written."""
@@ -585,7 +630,7 @@ async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
     link = c.armory
     st = _st(reg)
     cli = armory.client_for(reg)
-    since = None if force else (st["modified"].get(aid) or link.modified)
+    since = None if force or aid in st["reread"] else (st["modified"].get(aid) or link.modified)
     try:
         facts = await asyncio.to_thread(cli.character, link.slug, since)
     except ArmoryMissing:
@@ -630,14 +675,15 @@ async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
     level = facts.level if facts is not None else row.level
     cls = (facts.cls if facts is not None else row.cls) or link.cls
     changes = {"level": level, "cls": cls, "slug": slug, "missing_since": None}
-    ride = {"checked_at": stamp, **({"modified": facts.modified} if facts is not None and facts.modified else {})}
+    unread = facts is not None and c.profession_sync and profs is None  # stored without a stamp: a restart reads it again too
+    ride = {"checked_at": stamp, **({"modified": None if unread else facts.modified} if facts is not None and facts.modified else {})}
     full = f"{name} {surname}" if surname else name
 
     def write():
         return reg.armory_update(uid, aid, changes, professions=profs, ride=ride)
 
     renamed = False
-    if full != c.label:
+    if _stored_as(reg, name, surname) != c.label:  # "McKay" in the armory is the record's "Mckay": no rename every hour
         try:
             done = await _write_named(bot, reg, uid, c.label, name, surname, "the armory", write,
                                       message=f"{m.display_name}: {full} updated from the armory", by_id=None, officer=True)
@@ -648,17 +694,32 @@ async def _sync_one(bot, reg, uid: int, aid: int, *, force: bool) -> str:
     else:
         done = await asyncio.to_thread(write)
     st["checked"][aid] = stamp
-    if facts is not None and facts.modified:
-        st["modified"][aid] = facts.modified
+    if unread:
+        _read_again(reg, aid)  # the professions weren't read: the next check reads them, never a 304 on this stamp
+    else:
+        st["reread"].discard(aid)
+        if facts is not None and facts.modified:
+            st["modified"][aid] = facts.modified
     if done and profs is not None:
         await _report_unknown_recipes(bot, reg, m, reg.armory_character(uid, aid) or c, profs)
     return "updated" if (done or renamed) else "unchanged"
 
 
+SKIPPED_WHY = {"odd": "The armory answered oddly for this character.",
+               "refused": "The armory refused to show this character."}
+
+
+def _guild_wide(e: ArmoryError) -> bool:
+    """Whether an armory failure is every character's (down, or the bot's keys refused) rather than one character's."""
+    return isinstance(e, armory.ArmoryDown) or (isinstance(e, armory.ArmoryAccess) and e.token)
+
+
 async def sync_guild(bot, reg) -> dict:
     """The hourly step: every linked character of the guild (Registry.armory_linked — no puppets, nobody who left, no
-    retired character), each its own conditional check. The first ArmoryDown / ArmoryAccess / ArmoryShape stops the
-    run (the last data stays; one ops warning per guild per hour; the next hourly tick starts again); a missing
+    retired character), each its own conditional check. The armory down (ArmoryDown) or refusing the bot's keys (a
+    token-level ArmoryAccess) stops the run (the last data stays; one ops warning per guild per hour; the next hourly
+    tick starts again). One character's odd answer (an ArmoryShape, a 403 for that character) skips that character
+    only: it keeps its last data, one ops warning an hour under its own key names it, and the run goes on. A missing
     character is counted and the run goes on. → {"checked", "updated", "missing", "stopped"}."""
     out = {"checked": 0, "updated": 0, "missing": 0, "stopped": False}
     async with _lock(reg):
@@ -667,10 +728,16 @@ async def sync_guild(bot, reg) -> dict:
             try:
                 res = await _sync_one(bot, reg, m.discord_id, c.armory.id, force=False)
             except ArmoryError as e:
-                out["stopped"] = True
-                await _warn_hourly(bot, reg, "armory", f"Updating characters from the armory stopped. {e.words}")
-                log.info("[%s] armory check stopped: %s", reg.key, e)
-                break
+                if _guild_wide(e):
+                    out["stopped"] = True
+                    await _warn_hourly(bot, reg, "armory", f"Updating characters from the armory stopped. {e.words}")
+                    log.info("[%s] armory check stopped: %s", reg.key, e)
+                    break
+                why = SKIPPED_WHY["refused" if isinstance(e, armory.ArmoryAccess) else "odd"]
+                await _warn_hourly(bot, reg, f"character:{c.armory.id}",
+                                   f"{m.display_name}'s {c.label} wasn't updated from the armory and keeps its last details. {why}")
+                log.info("[%s] armory check skipped %s: %s", reg.key, c.armory.id, e)
+                continue
             out["checked"] += 1
             if res in ("updated", "missing"):
                 out[res] += 1

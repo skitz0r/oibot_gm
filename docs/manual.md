@@ -1481,7 +1481,8 @@ three hours: it says who is *in the guild*, which guild characters nobody here h
 when they link characters in bulk (§7 `/roster armory`, §2a Members). It never reads the in-game rank: Discord roles stay
 the authority for officers and members. If the armory ever shows another guild at that name's address, the bot stops
 reading it and says so once in the ops channel; link the guild again to fix it. When the armory is down or answers
-oddly, the last data stays and the ops channel gets at most one warning an hour. **Unlinking** keeps every character's
+oddly, the last data stays and the ops channel gets at most one warning an hour. When it answers oddly for one character
+only, that character keeps its last data, the warning names it, and every other character is still updated. **Unlinking** keeps every character's
 own link; only *in the guild* stops being known. Plain text can't link a guild (a name can answer with a stranger's guild).
 
 **Moving a guild to another server** (rather than claiming the new server as a guild of its own):

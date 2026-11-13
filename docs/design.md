@@ -4754,9 +4754,10 @@ section is the record as built; where it differs from the spec it says so.
 - **Attendance counts the better row.** On a night the new member has their own row and the moved character has one too,
   attendance takes the better of the two, never both: "as if they had held it all along" can't count one night twice.
   If wrong, a member's attendance is slightly understated on nights both played.
-- **Whose an award is, is frozen at the move.** The move's row freezes the names that mean this character (its full names,
-  and the first names no other character of the old member answered to then), so a later registration of the same first
-  name never flips an old award back. An entry after the move under the old member follows the character only by a full
+- **Whose an award is, is frozen at the move.** The move's row freezes the names that mean this character (its full names
+  and its first names, each one no other character of the old member answered to then), so a later registration of the
+  same first name never flips an old award back, and a former name another of the old member's characters took again
+  stays with that character (a current name beats a former one, before the move and after it). An entry after the move under the old member follows the character only by a full
   name the old member had no own character for by then.
 - **Limits.** Armory lookups: 6 a minute per person (`LOOKUPS_PER_MINUTE`: the site's find / link and Discord's link box;
   the site answers 429), so nobody spends the host's quota. Sync now: once per character per 5 minutes (`SYNC_NOW_EVERY`),
@@ -4900,8 +4901,14 @@ not modified → only memory moves, no commit; modified → profile and (when `p
 replaced — and ONE commit only if something differs (`Registry.armory_update`; `checked_at` / `modified` ride along only
 with a commit that happens anyway). The armory's class goes on the link, never on the character (C2: the `class` flag). A
 name the game changed is taken through `rename_character` ("<member>: <name> updated from the armory"); a name another
-record holds keeps the record's name and warns ops once an hour. A recipe id the list lacks is kept by id and told to ops
-once per guild ("the recipe list is behind the game", `out/armory/<key>/recipes_reported.json`).
+record holds keeps the record's name and warns ops once an hour; the armory's name is compared as the record would store
+it (`_stored_as`: "McKay" is the record's "Mckay", never a rename every hour). Recipes are stored by id and compared
+regardless of order, so a reordered answer commits nothing. A recipe id the list lacks is kept by id and told to ops
+once per guild, ONE line per check however many are new ("the recipe list is behind the game", the first three named,
+`out/armory/<key>/recipes_reported.json`). A character whose professions follow the armory but weren't read — their
+read 404ed at the link or a check, the list didn't fit, or the forced check after Follow the armory again failed — is
+read unconditionally next time (`_read_again`; the link and the switch also drop the stored Last-Modified, so a restart
+does the same): never a 304 on the stamp of a read that left the hand list in place.
 - **Not found any more.** A 404 tries the roster by the armory id (a character renamed in the game is re-pointed and
   renamed; another character answering to the old address is never taken for it); found nowhere → `missing_since` once,
   everything kept, never an unlink; officers see "the armory no longer finds it" after 24 hours (`MISSING_AFTER`, the
@@ -4910,8 +4917,12 @@ once per guild ("the recipe list is behind the game", `out/armory/<key>/recipes_
   (`out/armory/<key>/roster.json` — rows, when, Last-Modified, guild id — derived, foreign data, never the data repo). It
   lags the game by up to three hours: a character that just joined reads "not in the guild" until the next roster read.
   A guild at the stored address answering with another id stops roster work and warns once (never follows a stranger).
-- **Failures.** The armory down, refusing the keys, or answering an unexpected shape stops that run; the last data stays;
-  at most one ops warning per guild per hour per kind (`armory`, `roster-missing`, `professions:<id>`, `name:<id>`).
+- **Failures.** The armory down (`ArmoryDown`) or refusing the bot's keys (`ArmoryAccess` with `token`: the token
+  request refused, a 401) stops that run; the last data stays. One character's odd answer (`ArmoryShape`) or a 403 for
+  that character skips it only: it keeps its last data, ops hear once an hour under its own key naming the member and the
+  character, and the run goes on with the next. A profession with no `tiers` is a profession with no recipes known. At
+  most one ops warning per guild per hour per kind (`armory`, `roster-missing`, `character:<id>`, `professions:<id>`,
+  `name:<id>`).
 - **Sync now** = `sync_character(force=True)`: the same step unconditionally, the member's own or an officer's, once per
   character per 5 minutes (`SYNC_LIMITED`); `armory_sync_sentence` says what it did.
 - `flags(reg, c)` = what officers see: `class` (the armory's class differs), `missing` (a day or more), `outside` (not in
@@ -4957,7 +4968,8 @@ yourself (the owner aside). Officers only, decided live; `discord_armory.move_ch
 feeds `award_holder`, My loot, received marks, scoring, the loot log, help, the loot-log notice and appeals
 (`appeals.appeal_owner`: an open question to the council on the character's award becomes the new member's);
 `_attendance_row_now` gives one row per run, the better of the member's own and the moved character's (`_row_rank`:
-attended > rostered or benched > called out or No thanks > no answer or away).
+attended > away, never counted > rostered unconfirmed or benched > called out or No thanks > no answer: the order the loot
+attendance factor reads).
 
 **Surfaces.** Discord (`flows_armory.py`): `CharArmory` in the character hub (`/me char`, `/roster char`) — the line
 *Linked to the armory · Updated <t:R> · in the guild* (officers also see the flags), **Link to the armory…** (a box: first
@@ -4991,9 +5003,7 @@ reputations, achievements; the in-game rank (D7); EU / KR / TW beyond the config
 never by itself; Discord's `/roster armory` links only the sure matches — the likely ones, the not-claimed characters and
 Give to a member… are the site's (MCP has no give tool). "In the guild" lags the game by up to three hours. The not-claimed
 count differs by surface: the site's fold lists every roster character no record is linked to, while `/roster armory` and
-the seed leave out the rows a sure match would take. A link found from the profile whose professions read answers 404
-keeps the hand list with professions following the armory, although its confirm said they are replaced (rare; the next
-check that reads them replaces them). After a move, the old member keeps their past "no answer" misses on the moved
+the seed leave out the rows a sure match would take. After a move, the old member keeps their past "no answer" misses on the moved
 character's schedule, and a member with no rank who receives a main starts at trial; a day-only award dated the move's own
 day resolves to the new member. The move's confirm can pass twenty words in its first sentence with three-word display
 names. The Discord professions screen of a synced character points at Keep professions by hand even when the host's
