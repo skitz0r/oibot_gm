@@ -517,12 +517,15 @@ SHORT_HISTORY = timedelta(days=30)  # kept for less than this: the history says 
 
 
 def watch(reg, discord_id: int, item_id: int) -> str:
-    """Put a named item on the member's own watch list → the sentence (also when it was already there). Refused on a
-    version with no auction houses, for an id the bot can't name (NO_MATCH), and with Registry.watch's refusals."""
+    """Put a named item on the member's own watch list → the sentence (also when it was already there). Refused, in this
+    order: on a version with no auction houses; while prices don't show (C15: the status sentence that says why —
+    discord_auctions.as_of_words); for an id the bot can't name (NO_MATCH); with Registry.watch's refusals."""
     from .registry import RegistryError
 
     if not reg.profile.auctions:
         raise RegistryError(NO_AUCTIONS_WORDS)
+    if not _shown(reg):
+        raise RegistryError(discord_auctions.as_of_words(reg))
     name = names(reg).get(int(item_id))
     if name is None:
         raise RegistryError(NO_MATCH)

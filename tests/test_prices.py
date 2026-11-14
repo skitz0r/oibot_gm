@@ -455,6 +455,34 @@ def test_watch_passes_on_the_registry_refusals(reg, clock):
         prices.watch(reg, UID, PLAGUEBLOOM)
 
 
+def test_nothing_is_added_while_prices_are_hidden(reg, clock, member):
+    """C15: watch refuses with the status sentence that says why while prices don't show; unwatch still trims."""
+    from oibot_gm.registry import RegistryError
+
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4), VIAL: Price(low=640, qty=200)})
+    prices.watch(reg, UID, VIAL)
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=NOW - timedelta(hours=30))
+    assert discord_auctions.state(reg) == "old"
+    with pytest.raises(RegistryError) as e:
+        prices.watch(reg, UID, PLAGUEBLOOM)
+    assert str(e.value) == discord_auctions.as_of_words(reg) == discord_auctions.OLD_WORDS
+    with pytest.raises(RegistryError, match=discord_auctions.OLD_WORDS):
+        prices.watch(reg, UID, 999_999)  # not shown comes before NO_MATCH
+    discord_auctions._st(reg)["table"] = None
+    assert discord_auctions.state(reg) == "waiting"
+    with pytest.raises(RegistryError) as e:
+        prices.watch(reg, UID, PLAGUEBLOOM)
+    assert str(e.value) == discord_auctions.WAITING_WORDS
+    reg.clear_market("Owner", by_id=OWNER)
+    assert discord_auctions.state(reg) == "off"
+    with pytest.raises(RegistryError) as e:
+        prices.watch(reg, UID, PLAGUEBLOOM)
+    assert str(e.value) == discord_auctions.OFF_WORDS
+    assert reg.watching(UID) == [VIAL], "nothing written"
+    assert prices.unwatch(reg, UID, VIAL) == "You've stopped watching Crystal Vial.", "a list can always be trimmed"
+    assert reg.watching(UID) == []
+
+
 def test_watch_list_rows_in_order_with_prices(reg, clock, member):
     priced(reg, {VIAL: Price(low=640, qty=200), PLAGUEBLOOM: Price(low=1500, qty=4)})
     prices.watch(reg, UID, PLAGUEBLOOM)

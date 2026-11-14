@@ -5225,7 +5225,7 @@ plan said "not on adoption").
   /register to keep a watch list." — and at 25 — `WATCH_FULL` "Your watch list holds 25 items. Stop watching one
   first."; already there = no write), `unwatch` (never refused); each one `save_quiet` write. A test puppet has no list.
 - **The words and reads** (`prices.py`): `watch` / `unwatch` → "You're watching <name>." / "You've stopped watching
-  <name>." (an id the bot can't name is refused), `is_watching`, `watch_list` (priced while prices show, names alone
+  <name>." (refused, in order: no auction houses, prices not shown — the status sentence —, an id the bot can't name), `is_watching`, `watch_list` (priced while prices show, names alone
   otherwise; an unnamed id reads `UNNAMED`), `history_sentences` ("Lowest in the last 7 days: 12s 40c · highest: 19s
   2c", the 30 days', "None listed in the last 7 days.", and "The bot has kept prices since <day>." while the record is
   under 30 days; `NO_HISTORY_YET` for a house with nothing kept or a file that can't be read; [] while prices are
@@ -5257,8 +5257,9 @@ plan said "not on adoption").
   row (tests/test_parity_matrix.py `WATCH_OWN`).
 
 **Where the build differs from the spec.** A folded day is a UTC day (its `when` the UTC day alone, never shifted into
-the guild's zone). An adopted shared read is kept (T1-a). `POST /api/prices/watch` does not itself refuse while prices
-are hidden: C15 holds because the search finds nothing then. A folded day's low / high count the changes kept that day,
+the guild's zone). An adopted shared read is kept (T1-a). `prices.watch` itself refuses while prices are hidden (C15 on
+every surface, final review F-1): the refusal is the status sentence that says why (`discord_auctions.as_of_words`);
+`unwatch` is never refused. A folded day's low / high count the changes kept that day,
 not the value carried in from the day before. The site's pieces were checked in a browser against mocked answers only
 (the chart's layout on desktop and phone), not against the live bot.
 

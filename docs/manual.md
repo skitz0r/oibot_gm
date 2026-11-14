@@ -493,7 +493,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   and 30 days (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*), **Stop watching** and **Back**. The list is
   yours alone: nobody else, officers included, can see it. It holds 25 items (*"Your watch list holds 25 items. Stop
   watching one first."*), and you need to be registered to keep one. Nothing pings or messages you when a price moves:
-  open the list when you want to look. While prices aren't shown, the list shows the items' names alone.
+  open the list when you want to look. While prices aren't shown, the list shows the items' names alone, and nothing new
+  can be watched until they are (**Stop watching** still works).
 - **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name, or part of it
   ("ironfeather" finds every Ironfeather recipe), in the search box: it searches the game's whole list of recipes, the
   ones somebody in the guild makes first. Each matching recipe shows its profession's icon, the game's category
@@ -539,7 +540,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   preference: it happens at once, with no confirm, and the same list shows in `/price`. You need to be registered to keep
   one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction
   house picked, or the last prices more than a day old) there is no search and the list shows the items' names alone, with
-  nothing to open. On a phone each item and each search result is a card.
+  nothing to open; nothing new can be watched then (the answer says why), but **Stop watching** still works. On a phone each item and each search result is a card.
 - **How long prices are kept**: the bot keeps every change of every item's lowest price and how many are listed — not
   only watched items — for 90 days; after that one lowest and one highest price per item per day, up to a year; nothing
   older. The record belongs to the auction house, so a guild whose owner picks another house starts that house's record

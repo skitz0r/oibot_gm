@@ -326,6 +326,18 @@ def test_the_list_without_prices_shows_names_only(w, market_on):
     assert d["shown"] is False and d["rows"] == [{"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "", "qty": 0, "words": ""}]
 
 
+def test_nothing_is_added_while_prices_are_off(w, market_on):
+    """C15: prices off → a watch is refused in the status sentence; the list is unchanged."""
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4), BAR: Price(low=489998, qty=30)}, at=now())
+    w.c.post("/api/prices/watch", json={"id": BAR, "on": True}, headers=h)
+    w.reg.clear_market("Owner", by_id=OWNER)
+    r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == discord_auctions.as_of_words(w.reg) == discord_auctions.OFF_WORDS
+    assert w.reg.watching(m.discord_id) == [BAR]
+
+
 def test_find_rows_say_whether_you_watch(w, market_on):
     m = member(w)
     h = as_user(w, m.discord_id)

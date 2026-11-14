@@ -524,7 +524,8 @@ src/oibot_gm/
                        more_words, price_answer (/price), listings_words ("N listed in all"), choices_words, sample_rows, choice_description;
                        help_hit / help_section = the help answer's `prices` section (a price word AND a named item or recipe; ≤ 10 items, ≤ 3 recipes,
                        whole blocks). Display lines, not confirms (T4-a). Every read gated on state: fresh / stale show, off / waiting / old don't.
-                       Price watch (§5.66): watch / unwatch (→ "You're watching <name>." / "You've stopped watching <name>."; an unnamed id NO_MATCH),
+                       Price watch (§5.66): watch / unwatch (→ "You're watching <name>." / "You've stopped watching <name>."; watch refused while
+                       prices don't show — as_of_words, C15 —, an unnamed id NO_MATCH; unwatch never refused),
                        is_watching, watch_list (priced while shown, else names alone; UNNAMED), history_sentences (BLOCKING: the 7- and 30-day
                        "Lowest in the last 7 days: … · highest: …" / "None listed in the last 7 days.", + "The bot has kept prices since <day>."
                        under 30 days; NO_HISTORY_YET; [] while hidden — C16), chart(reg, item, span) (BLOCKING: points {t, when (local12; a folded
