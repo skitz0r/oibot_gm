@@ -282,6 +282,24 @@ def test_two_guilds_on_one_house_share_one_fetch(duo, fake, bot, clock):
     assert (discord_auctions.OUT / b.key / "prices.json").exists()
 
 
+def test_a_second_guild_taking_an_old_shared_read_on_a_not_modified_answer_is_updated(duo, fake, bot, clock):
+    a, b = duo.a, duo.b
+    market(a)
+    b.set_armory_guild(facts(gid=518362, name="Ember Quill"), "Owner", by_id=OWNER2)
+    b.set_market(HORDE_AH, 2, "Owner", by_id=OWNER2)
+    assert run(discord_auctions.refresh(bot, a)) == "updated"
+    clock.advance(hours=2)
+    heard: list[str] = []
+    discord_auctions.PRICE_LISTENERS.append(heard.append)
+    try:
+        assert run(discord_auctions.refresh(bot, b)) == "updated"
+    finally:
+        discord_auctions.PRICE_LISTENERS.remove(heard.append)
+    assert fake.fetches()[-1] == ("table", 2, 6, STAMP), "asked on the shared read's Last-Modified: a 304"
+    assert discord_auctions.state(b) == "fresh" and discord_auctions.table(b).prices == discord_auctions.table(a).prices
+    assert heard == [b.key]
+
+
 def test_tick_starts_one_background_task_when_due(reg, fake, bot, clock):
     market(reg)
 

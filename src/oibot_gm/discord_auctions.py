@@ -287,7 +287,7 @@ async def refresh(bot, reg, *, force: bool = False) -> str:
         if not _same(_market(reg), t):  # the owner changed or cleared the market while it ran
             return "off" if _market(reg) is None else "unchanged"
         await _save(reg, t)
-        if prices is None:
+        if own is not None and t.prices == own.prices:  # the guild's own prices, only fresher: nothing new to hear
             return "unchanged"
         _heard(reg)
         return "updated"
