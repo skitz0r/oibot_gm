@@ -148,11 +148,12 @@ src/oibot_gm/
                        available(reg) (profile `auctions:` + armory.available), client_for, faction_houses (C1: the profile's name per faction, never
                        the neutral house), money(copper) = THE "48g 99s 98c" (zero parts dropped, "0c"); NO_AUCTIONS_WORDS
   discord_auctions.py  the price table (§5.65, discord_armory's pattern): out/auctions/<guild key>/prices.json (derived, never the data repo — C7;
-                       written whole, loaded on first use); refresh(bot, reg, force=) at most hourly, conditional on Last-Modified (Table.at = the last
-                       check that worked); state(reg) off | waiting | fresh | stale (6 h, C3) | old (24 h: not shown, C10 — after a restart too);
+                       written whole, loaded on first use); refresh(bot, reg, force=) at most hourly, conditional on Last-Modified (Table.at = the feed's
+                       time: its Last-Modified, ≤ now, now without one — a 304 leaves it; Table.checked_at = the last check that worked, which drives
+                       the hour and the shared read); state(reg) off | waiting | fresh | stale (6 h, C3) | old (24 h: not shown, C10 — after a restart too), from at;
                        price_of / table / as_of_words (+ STALE_TAIL; stamp= Discord's <t:…:R>); two guilds on one house share a read; a read whose
-                       market changed under it is discarded; PRICE_LISTENERS fn(guild key) on new prices or a stale / old table back to fresh (the
-                       web's `prices` topic); auctions_tick = the scheduler's hook (one background task per guild when due, then name_items: ≤ 200
+                       market changed under it is discarded; PRICE_LISTENERS fn(guild key) on new prices or a new feed time changing the state (the
+                       web's `prices` topic), and from auctions_tick once when time alone turns the table stale or old; auctions_tick = the scheduler's hook (one background task per guild when due, then name_items: ≤ 200
                        listed ids named from Blizzard into out/auctions/items.json); a failure keeps the table + one ops warn per guild per hour;
                        house_choices (the owner's picker: ruleset from the armory, faction houses with listings, samples) / pick_house (re-checked;
                        HousesChanged 409) / refresh_soon (the first read after a pick, off the request). No DM, notice, post or ops line on success

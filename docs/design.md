@@ -5100,12 +5100,16 @@ seller, no sales, no history.
   "nothing changes" (fixed in task 8). `set_armory_guild` clears a market that doesn't survive (C11) and
   `clear_armory_guild` always does, in their own commit. `market_words` = the choice in words or what is missing.
 - **The table** (`discord_auctions.py`): `out/auctions/<guild key>/prices.json` written whole, loaded on first use;
-  `refresh` at most once an hour per guild (conditional on the stored Last-Modified; `Table.at` = the last check that
-  worked, so an unchanged feed stays fresh); `state` off | waiting | fresh | stale (6 h) | old (24 h, not shown); two
-  guilds on one house share one read within the hour; a read whose market changed under it is discarded. `PRICE_LISTENERS`
-  hear new prices AND a stale / hidden table brought back to fresh by a not-modified or identical read (task 8), so an open
-  page updates. `auctions_tick` on the scheduler's minute loop starts one background task per guild when due; a failure
-  keeps the last table and warns ops at most once per guild per hour. No DM, notice, post or ops line on success.
+  `refresh` at most once an hour per guild (conditional on the stored Last-Modified). `Table.at` = the feed's time: the
+  answer's Last-Modified, never later than now, now when it gives none or it can't be read; a not-modified answer leaves
+  it, so a feed that stalls ages into stale and hidden (final review F-2). `Table.checked_at` = the last check that worked
+  (an update or a not-modified answer; a file from before loads with checked = at): the hourly schedule and the shared
+  read go by it. `state` off | waiting | fresh | stale (6 h) | old (24 h, not shown), from `at`; two guilds on one house
+  share one read within the hour; a read whose market changed under it is discarded. `PRICE_LISTENERS` hear new prices AND
+  a new feed time that changes the state (stale / hidden back to fresh, hidden to stale) on the same prices, so an open page
+  updates; a not-modified answer never does. `auctions_tick` on the scheduler's minute loop starts one background task per
+  guild when due, and remembers the state it last saw: time alone turning the table stale or hidden is heard once (F-4); a
+  failure keeps the last table and warns ops at most once per guild per hour. No DM, notice, post or ops line on success.
   After each check the same task names up to 200 listed ids nothing local names (Blizzard's item endpoint) into
   `out/auctions/items.json` per game version; an item Blizzard doesn't know is remembered per process only.
   `house_choices` (the owner's picker): the guild's ruleset from its armory page, then each faction house with listings,

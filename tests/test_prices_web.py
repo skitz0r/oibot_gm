@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 from datetime import datetime, timezone
+from email.utils import format_datetime
 from pathlib import Path
 
 import httpx
@@ -55,7 +56,7 @@ class FakeAuctions:
     def table(self, ruleset_id, house_id, since=None):
         self.reads.append((ruleset_id, house_id))
         if house_id == 6:
-            return {BAR: Price(low=489998, qty=30), DREAMFOIL: Price(low=4099, qty=200)}, "Thu, 12 Nov 2026 20:00:00 GMT"
+            return {BAR: Price(low=489998, qty=30), DREAMFOIL: Price(low=4099, qty=200)}, format_datetime(now(), usegmt=True)  # a feed read just now (the routes run on the real clock)
         return {}, None
 
 

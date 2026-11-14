@@ -167,20 +167,81 @@ def test_first_fetch_writes_the_table_and_a_second_within_the_hour_does_nothing(
     assert len(fake.fetches()) == 1
 
 
-def test_not_modified_keeps_the_table_and_its_time_moves_to_now(reg, fake, bot, clock):
+def test_not_modified_keeps_the_table_and_its_time_only_the_checked_time_moves(reg, fake, bot, clock):
+    """F-2: `at` is the feed's time — a 304 leaves it; the checked time moves and drives the hourly schedule."""
     market(reg)
     run(discord_auctions.refresh(bot, reg))
-    before = discord_auctions.table(reg).prices
+    first = discord_auctions.table(reg)
     clock.advance(hours=5)
     assert run(discord_auctions.refresh(bot, reg)) == "unchanged"  # due: asked again on the stored Last-Modified
     assert fake.fetches()[-1] == ("table", 2, 6, STAMP)
-    clock.advance(hours=1, minutes=30)
-    assert run(discord_auctions.refresh(bot, reg)) == "unchanged"
     t = discord_auctions.table(reg)
-    assert t.prices == before and t.at == clock()
-    assert discord_auctions.state(reg) == "fresh", "an unchanged feed is still fresh"
+    assert t.prices == first.prices and t.at == first.at and t.checked_at == clock()
+    clock.advance(minutes=30)
+    assert run(discord_auctions.refresh(bot, reg)) == "unchanged"
+    assert len(fake.fetches()) == 2, "checked within the hour: no second fetch"
     reread = json.loads(prices_file(reg).read_text(encoding="utf-8"))
-    assert datetime.fromisoformat(reread["at"]) == clock()
+    assert datetime.fromisoformat(reread["at"]) == first.at
+    assert datetime.fromisoformat(reread["checked_at"]) == clock() - timedelta(minutes=30)
+
+
+def test_a_stalled_feed_reads_stale_then_hidden(reg, fake, bot, clock):
+    """F-2: Blizzard's feed stops moving (every hourly answer a 304): the prices age from the feed's time."""
+    market(reg)
+    run(discord_auctions.refresh(bot, reg))
+    for _ in range(7):
+        clock.advance(hours=1)
+        assert run(discord_auctions.refresh(bot, reg)) == "unchanged"
+    assert len(fake.fetches()) == 8
+    assert discord_auctions.state(reg) == "stale"
+    assert discord_auctions.as_of_words(reg) == f"Prices as of {reg.local12(clock() - timedelta(hours=7))} — more than six hours old"
+    for _ in range(18):
+        clock.advance(hours=1)
+        run(discord_auctions.refresh(bot, reg))
+    assert discord_auctions.state(reg) == "old" and discord_auctions.price_of(reg, BAR) is None
+
+
+def test_a_day_old_table_after_a_restart_stays_hidden_through_a_not_modified(reg, fake, bot, clock):
+    market(reg)
+    run(discord_auctions.refresh(bot, reg))
+    discord_auctions.reset_state()  # a restart: only the file is left
+    clock.advance(hours=30)
+    assert run(discord_auctions.refresh(bot, reg)) == "unchanged"
+    assert fake.fetches()[-1] == ("table", 2, 6, STAMP), "a 304"
+    assert discord_auctions.state(reg) == "old" and discord_auctions.price_of(reg, BAR) is None
+
+
+def test_prices_as_of_is_the_feeds_time(reg, fake, bot, clock):
+    """F-2: an update's Last-Modified two hours ago reads 'as of' that time; never later than now; none or unreadable = now."""
+    market(reg)
+    fake.modified = "Fri, 13 Nov 2026 18:00:00 GMT"
+    assert run(discord_auctions.refresh(bot, reg)) == "updated"
+    t = discord_auctions.table(reg)
+    assert t.at == clock() - timedelta(hours=2) and t.checked_at == clock()
+    assert discord_auctions.as_of_words(reg) == f"Prices as of {reg.local12(clock() - timedelta(hours=2))}"
+    clock.advance(hours=1)
+    fake.modified = "Sat, 14 Nov 2026 03:00:00 GMT"  # a clock ahead of ours
+    run(discord_auctions.refresh(bot, reg))
+    assert discord_auctions.table(reg).at == clock()
+    clock.advance(hours=1)
+    fake.modified = None
+    run(discord_auctions.refresh(bot, reg))
+    assert discord_auctions.table(reg).at == clock()
+    clock.advance(hours=1)
+    fake.modified = "not a date"
+    run(discord_auctions.refresh(bot, reg))
+    assert discord_auctions.table(reg).at == clock()
+
+
+def test_a_file_written_before_the_checked_time_loads_with_checked_at_its_time(reg, fake, bot, clock):
+    market(reg)
+    prices_file(reg).parent.mkdir(parents=True)
+    at = clock() - timedelta(minutes=20)
+    prices_file(reg).write_text(json.dumps({"at": at.isoformat(), "house_id": 6, "ruleset_id": 2, "modified": STAMP,
+                                            "prices": {str(BAR): [489998, 12]}}), encoding="utf-8")
+    t = discord_auctions.table(reg)
+    assert t.at == at and t.checked_at == at
+    assert run(discord_auctions.refresh(bot, reg)) == "unchanged" and fake.fetches() == [], "checked 20 minutes ago"
 
 
 def test_stale_after_six_hours_and_hidden_after_a_day(reg, fake, bot, clock):
@@ -383,9 +444,10 @@ def test_house_choices_offer_only_the_faction_houses_with_listings(reg, fake, bo
     assert [c[2] for c in fake.fetches()] == [6, 18, 30], "never another faction's or the neutral house"
 
 
-def test_a_stale_or_hidden_table_brought_back_by_an_unchanged_read_is_heard(reg, fake, bot, clock):
-    """An open page showing "more than six hours old" (or no prices, past a day) hears the table come back to fresh, even
-    when the feed answers not modified or the same prices."""
+def test_a_stale_or_hidden_table_is_heard_only_when_the_feed_moves(reg, fake, bot, clock):
+    """A 304 leaves the feed's time, so it can no longer bring a stale or hidden table back to fresh: nothing to hear. A new
+    answer holding the same prices moves the feed's time: an open page showing "more than six hours old" (or no prices,
+    past a day) hears the table come back to fresh."""
     market(reg)
     run(discord_auctions.refresh(bot, reg))
     heard: list[str] = []
@@ -393,16 +455,47 @@ def test_a_stale_or_hidden_table_brought_back_by_an_unchanged_read_is_heard(reg,
     try:
         clock.advance(hours=7)
         assert discord_auctions.state(reg) == "stale"
-        assert run(discord_auctions.refresh(bot, reg)) == "updated"  # a 304 on the stored Last-Modified
+        assert run(discord_auctions.refresh(bot, reg)) == "unchanged"  # a 304 on the stored Last-Modified
         assert fake.fetches()[-1] == ("table", 2, 6, STAMP)
+        assert discord_auctions.state(reg) == "stale" and heard == []
+        clock.advance(hours=1)
+        fake.modified = "Sat, 14 Nov 2026 03:30:00 GMT"  # a new answer holding the same prices, half an hour old
+        assert run(discord_auctions.refresh(bot, reg)) == "updated"
         assert discord_auctions.state(reg) == "fresh" and heard == [reg.key]
         clock.advance(hours=25)
         assert discord_auctions.state(reg) == "old"
-        fake.modified = "Fri, 13 Nov 2026 21:00:00 GMT"  # a new answer holding the same prices
+        fake.modified = "Sun, 15 Nov 2026 05:00:00 GMT"
         assert run(discord_auctions.refresh(bot, reg)) == "updated"
         assert heard == [reg.key, reg.key]
         clock.advance(hours=1)
+        fake.modified = "Sun, 15 Nov 2026 06:00:00 GMT"
         assert run(discord_auctions.refresh(bot, reg)) == "unchanged", "fresh to fresh with the same prices: nothing to hear"
         assert heard == [reg.key, reg.key]
     finally:
         discord_auctions.PRICE_LISTENERS.remove(heard.append)
+
+
+def test_an_open_page_hears_the_table_turn_stale_then_hidden_after_failed_checks(reg, fake, bot, clock):
+    """F-4: the tick remembers the state it last saw per guild and tells the listeners once when time alone changes it
+    (fresh → stale at six hours, stale → old at a day), with every check failing in between."""
+    market(reg)
+    heard: list[str] = []
+
+    async def go():
+        await (await discord_auctions.auctions_tick(bot, reg))  # the first read
+        fake.fail = ArmoryDown()
+        discord_auctions.PRICE_LISTENERS.append(heard.append)
+        try:
+            for _ in range(26 * 12):  # every five minutes for 26 hours
+                clock.advance(minutes=5)
+                task = await discord_auctions.auctions_tick(bot, reg)
+                if task is not None:
+                    await task
+                if clock() - discord_auctions.table(reg).at == timedelta(hours=6, minutes=5):
+                    assert heard == [reg.key], "stale: heard once"
+        finally:
+            discord_auctions.PRICE_LISTENERS.remove(heard.append)
+
+    run(go())
+    assert discord_auctions.state(reg) == "old"
+    assert heard == [reg.key, reg.key], "stale once, then hidden once; nothing in between"

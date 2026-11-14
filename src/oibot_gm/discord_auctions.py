@@ -6,9 +6,11 @@ due — the minute loop never waits for Blizzard); `house_choices` is the owner'
 armory page, then each house of the guild's faction, C1). Module functions taking the client, like discord_armory.py.
 
 The table is derived, foreign data: `out/auctions/<guild key>/prices.json`, written whole (temp + rename), loaded at
-first use after a restart, never in the data repo (C7). `Table.at` is the last check that worked (an update or a
-not-modified answer), so an unchanged feed stays fresh. Stale after six hours (C3), not shown at all after a day (C10)
-— a table loaded after a restart too. A table of a house that is not the one selected now is no table. Two guilds on
+first use after a restart, never in the data repo (C7). `Table.at` is the feed's time: the answer's Last-Modified (never
+later than now; now when it gives none or it can't be read), so a not-modified answer leaves it and a feed that stalls
+ages. `Table.checked_at` is the last check that worked (an update or a not-modified answer): the hourly schedule and the
+shared fetch read it. Stale after six hours (C3), not shown at all after a day (C10), both from `at` — a table loaded
+after a restart too. A table of a house that is not the one selected now is no table. Two guilds on
 one auction house share one fetch within the hour (memory). A fetch whose market changed while it ran is discarded.
 
 After each check that leaves a table, the same background task names up to NAME_PER_FETCH listed ids nothing local names
@@ -23,7 +25,9 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -67,11 +71,29 @@ def _client(reg) -> auctions.Client:
 
 @dataclass(frozen=True)
 class Table:
-    at: datetime  # the last check that worked (UTC)
+    at: datetime  # the feed's time (UTC): its Last-Modified, never later than the check; a not-modified answer leaves it
     house_id: int
     ruleset_id: int
     prices: dict[int, Price]
     modified: str | None  # the listings' Last-Modified, asked on the next check
+    checked_at: datetime | None = None  # the last check that worked (UTC); None = `at`
+
+    @property
+    def checked(self) -> datetime:
+        return self.checked_at or self.at
+
+
+def feed_time(modified: str | None, now: datetime) -> datetime:
+    """The feed's time from its Last-Modified, never later than `now`; `now` when there is none or it can't be read."""
+    if not modified:
+        return now
+    try:
+        t = parsedate_to_datetime(str(modified))
+    except (TypeError, ValueError, IndexError):
+        return now
+    if t is None or t.tzinfo is None:
+        return now
+    return min(t.astimezone(timezone.utc), now)
 
 
 @dataclass(frozen=True)
@@ -102,7 +124,7 @@ def reset_state() -> None:
 
 
 def _st(reg) -> dict:
-    return _STATE.setdefault(reg.key, {"table": _UNLOADED, "warned_at": None, "tried": None, "task": None})
+    return _STATE.setdefault(reg.key, {"table": _UNLOADED, "warned_at": None, "tried": None, "task": None, "seen": None})
 
 
 def _house_key(reg, ruleset_id: int, house_id: int) -> tuple:
@@ -143,12 +165,15 @@ def _decode(d: dict) -> Table:
     if at.tzinfo is None:
         raise ValueError("naive time")
     prices = {int(k): Price(low=int(v[0]), qty=int(v[1])) for k, v in d["prices"].items()}
+    checked = datetime.fromisoformat(str(d["checked_at"])) if d.get("checked_at") else at  # a file from before: checked = at
+    if checked.tzinfo is None:
+        raise ValueError("naive time")
     return Table(at=at, house_id=int(d["house_id"]), ruleset_id=int(d["ruleset_id"]), prices=prices,
-                 modified=None if d.get("modified") is None else str(d["modified"]))
+                 modified=None if d.get("modified") is None else str(d["modified"]), checked_at=checked)
 
 
 def _encode(t: Table) -> str:
-    return json.dumps({"at": t.at.isoformat(timespec="seconds"), "house_id": t.house_id, "ruleset_id": t.ruleset_id,
+    return json.dumps({"at": t.at.isoformat(timespec="seconds"), "checked_at": t.checked.isoformat(timespec="seconds"), "house_id": t.house_id, "ruleset_id": t.ruleset_id,
                        "modified": t.modified, "prices": {str(k): [p.low, p.qty] for k, p in sorted(t.prices.items())}},
                       separators=(",", ":"))
 
@@ -277,9 +302,9 @@ async def refresh_soon(bot, reg) -> asyncio.Task:
 
 
 async def refresh(bot, reg, *, force: bool = False) -> str:
-    """Read the selected auction house when due (an hour since the guild's last check, or `force`) →
-    "updated" (new prices, or a stale / hidden table back to fresh) | "unchanged" (not due, the feed unchanged on a fresh
-    table, or the market changed while it ran) | "off" | "failed".
+    """Read the selected auction house when due (an hour since the guild's last check — `checked_at` —, or `force`) →
+    "updated" (new prices, or a new feed time bringing a stale / hidden table back to fresh) | "unchanged" (not due, a
+    not-modified answer, the same prices on a fresh table, or the market changed while it ran) | "off" | "failed".
     Another guild's read of the same house within the hour is taken instead of a request."""
     m = _market(reg)
     if m is None or not auctions.available(reg):
@@ -288,19 +313,19 @@ async def refresh(bot, reg, *, force: bool = False) -> str:
     st = _st(reg)
     async with _lock(key):
         st["tried"] = (key, _now())
-        was_fresh = state(reg) == "fresh"  # stale / old brought back to fresh is news for an open page, same prices or not
+        before = state(reg)  # a new feed time bringing stale / old back (to fresh, or old to stale) is news for an open page, same prices or not
         own = table(reg)
-        if not force and own is not None and _now() - own.at < FETCH_EVERY:
+        if not force and own is not None and _now() - own.checked < FETCH_EVERY:
             return "unchanged"
         shared = _SHARED.get(key)
-        if not force and shared is not None and _now() - shared.at < FETCH_EVERY:
+        if not force and shared is not None and _now() - shared.checked < FETCH_EVERY:
             if own == shared:
                 return "unchanged"
             await _save(reg, shared)
             _heard(reg)
             return "updated"
         base = own if own is not None else shared
-        if base is not None and shared is not None and shared.at > base.at:
+        if base is not None and shared is not None and (shared.at, shared.checked) > (base.at, base.checked):
             base = shared
         since = base.modified if base is not None else None
         try:
@@ -312,13 +337,16 @@ async def refresh(bot, reg, *, force: bool = False) -> str:
         now = _now()
         if prices is None and base is None:  # a 304 with nothing to keep: read it whole next time
             return "unchanged"
-        t = Table(at=now, house_id=int(m.house_id), ruleset_id=int(m.ruleset_id),
-                  prices=base.prices if prices is None else prices, modified=modified or (base.modified if base else None))
+        if prices is None:  # not modified: the same prices, as of the same feed time; only the check moves
+            t = replace(base, house_id=int(m.house_id), ruleset_id=int(m.ruleset_id), modified=modified or base.modified, checked_at=now)
+        else:
+            t = Table(at=feed_time(modified, now), house_id=int(m.house_id), ruleset_id=int(m.ruleset_id), prices=prices,
+                      modified=modified or (base.modified if base else None), checked_at=now)
         _SHARED[key] = t
         if not _same(_market(reg), t):  # the owner changed or cleared the market while it ran
             return "off" if _market(reg) is None else "unchanged"
         await _save(reg, t)
-        if own is not None and t.prices == own.prices and was_fresh:  # the guild's own prices, only fresher: nothing new to hear
+        if own is not None and t.prices == own.prices and state(reg) == before:  # the same prices, shown the same way: nothing new to hear (a 304 never changes the state)
             return "unchanged"
         _heard(reg)
         return "updated"
@@ -332,17 +360,22 @@ def _due(reg, m) -> bool:
     if tried is not None and tried[0] == key and now - tried[1] < FETCH_EVERY:
         return False  # tried this hour (worked or not): a failure waits an hour; a house picked since is read now
     t = table(reg)
-    return t is None or now - t.at >= FETCH_EVERY
+    return t is None or now - t.checked >= FETCH_EVERY
 
 
 async def auctions_tick(bot, reg):
     """raid_scheduler.scheduler_tick_guild's hook, every minute: when due, ONE background task for the guild reads its
     auction house. Never waits for Blizzard itself. Off without auction houses, credentials or a picked house.
-    → the task started, or None."""
+    → the task started, or None.
+    It also remembers the state it last saw for the guild: time alone turning the table stale (six hours) or hidden (a
+    day), with no check that worked in between, is told to the listeners once, so an open page follows."""
+    st = _st(reg)
+    seen, st["seen"] = st.get("seen"), state(reg)
+    if seen is not None and seen != st["seen"] and st["seen"] in ("stale", "old"):
+        _heard(reg)
     m = _market(reg)
     if m is None or not auctions.available(reg):
         return None
-    st = _st(reg)
     if st["task"] is not None and not st["task"].done():
         return None
     if not _due(reg, m):
@@ -424,7 +457,9 @@ async def house_choices(bot, reg) -> list[Choice]:
         prices, modified = await asyncio.to_thread(cli.table, ruleset, h.id)
         if not prices:
             continue
-        _SHARED[_house_key(reg, ruleset, h.id)] = Table(at=_now(), house_id=int(h.id), ruleset_id=ruleset, prices=prices, modified=modified)
+        now = _now()
+        _SHARED[_house_key(reg, ruleset, h.id)] = Table(at=feed_time(modified, now), house_id=int(h.id), ruleset_id=ruleset, prices=prices,
+                                                        modified=modified, checked_at=now)
         out.append(Choice(house=h, ruleset_id=ruleset, listings=sum(p.qty for p in prices.values()),
                           samples=[(i, prices[i].low if i in prices else None) for i in refs]))
     return out

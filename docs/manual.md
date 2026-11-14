@@ -147,7 +147,8 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
 - **Lowest price** — the cheapest buyout listed on the guild's auction house, per item: what the cheapest one is up
   for right now, never what an item is "worth". **N listed** — how many are up in all. **None listed** — nothing with a
   buyout is up right now.
-- **Prices as of …** — when the bot last read the auction house (every hour). After six hours the line adds *more than
+- **Prices as of …** — how recent the auction house's own listings are, as the game reports them. The bot looks every hour; when the
+  auction house hasn't changed, the time stays. After six hours the line adds *more than
   six hours old*; after a day no price shows at all and the line says the prices are out of date.
 - **Cost to make** — a recipe's reagents at their lowest prices, added up, for one craft. When a reagent has none listed
   the sum reads *"Cost to make: at least 12g 40s — 1 reagent has none listed."* What the craft makes shows its own lowest
