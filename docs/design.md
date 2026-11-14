@@ -5219,7 +5219,10 @@ plan said "not on adoption").
   (final review F-5); `span(key, item, days, now)` → (lowest, highest) of the hourly lowest prices, time with nothing
   listed or unread counting for neither; `kept_since`; `fold(now)` over every file (picked or not): rows older than 90
   days → one lowest / highest per item per UTC day, days older than a year dropped (P2), unread stretches kept as they
-  are but those ended before the year, a file left empty or whose newest feed time is past a year deleted. A broken file raises `HistoryError`.
+  are but those ended before the year, a file left empty or whose newest feed time is past a year deleted. The fold
+  writes `FOLD_BATCH` (200) whole items per transaction with a `FOLD_PAUSE_S` (0.1 s) pause between, longer than SQLite's
+  longest busy-wait sleep, so the hourly keep (5 s busy wait) always gets in; a fold cut short between batches leaves a
+  file that reads correctly, and the next fold finishes it (final review F-7). A broken file raises `HistoryError`.
 - **The feed** (`discord_auctions`): `refresh` keeps every new table taken as the guild's (and an adopted shared one,
   T1-a) with `_keep` in a thread; a failure keeps the price table and warns ops at most once an hour (`HISTORY_FAILED`,
   kind `history`). Not on a 304, not for a read discarded because the market changed. `auctions_tick` starts the fold

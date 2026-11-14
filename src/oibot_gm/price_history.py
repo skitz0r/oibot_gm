@@ -10,7 +10,8 @@ the span, and break the line over an unread stretch (final review F-5: a short h
 `fold` (once a day) turns rows older than KEEP_FULL into one lowest and one highest per
 item per UTC day and drops days older than KEEP_DAILY (and unread stretches that ended before it) — but each item's last value before that year stays as the
 carried start while the house is still read (controller ruling P2); a file whose newest feed time is older than a year,
-or that holds no row, is deleted.
+or that holds no row, is deleted. The fold writes FOLD_BATCH items at a time with a pause between, so a record waiting
+on the lock gets in (final review F-7); a fold cut short leaves a file that reads correctly and the next one finishes it.
 
 Every function BLOCKS (callers use asyncio.to_thread); one connection per call, closed before returning. A file that
 can't be opened or read raises HistoryError. Times are aware UTC datetimes, kept as epoch seconds."""
@@ -19,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +32,8 @@ log = logging.getLogger(__name__)
 KEEP_FULL = timedelta(days=90)  # every change
 KEEP_DAILY = timedelta(days=365)  # one lowest and one highest per item per day; nothing older
 GAP_AFTER = timedelta(hours=3)  # more than this between two kept feed times = time the bot never read
+FOLD_BATCH = 200  # items per fold write: the write lock is held in short stretches, so a record (5 s busy wait) gets in
+FOLD_PAUSE_S = 0.1  # between two batches: longer than SQLite's longest busy-wait sleep (100 ms), so a waiting record wins
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (one INTEGER PRIMARY KEY CHECK (one = 1), first_at INTEGER NOT NULL, last_at INTEGER NOT NULL);
@@ -221,21 +225,42 @@ def _day(s: int) -> int:
     return s - s % 86400
 
 
+def _write(con: sqlite3.Connection, fn) -> None:
+    """`fn()` in one immediate write transaction (the lock taken before any read, as record does)."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        fn()
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    con.execute("COMMIT")
+
+
 def _fold_file(p: Path, now: datetime) -> None:
+    """One file's fold, FOLD_BATCH items per write (F-7): between two batches a record gets the lock; each batch folds
+    whole items, so a fold cut short leaves a file that reads correctly, and the next fold finishes it."""
     full_cut = _day(_secs(now - KEEP_FULL))  # whole UTC days before it are folded
     daily_cut = _secs(now - KEEP_DAILY)
     con = _open(p)
+    con.isolation_level = None  # transactions by hand: one short one per batch
     try:
         meta = con.execute("SELECT first_at, last_at FROM meta").fetchone()
         if meta is not None and meta[1] < daily_cut:  # a house nobody has read for a year (P2): the file goes whole
             gone = True
         else:
-            with con:
-                _fold_days(con, full_cut)
-                _drop_year(con, daily_cut)
+            items = [r[0] for r in con.execute("SELECT DISTINCT item FROM changes WHERE (at < ? AND qty IS NOT NULL) OR at < ?"
+                                               " ORDER BY item", (full_cut, daily_cut))]
+            for i in range(0, len(items), FOLD_BATCH):
+                if i:
+                    time.sleep(FOLD_PAUSE_S)  # the lock is free: a record waiting on it takes it now (never starved)
+                batch = items[i:i + FOLD_BATCH]
+                _write(con, lambda: _fold_items(con, batch, full_cut, daily_cut))
+
+            def last() -> None:
                 con.execute("DELETE FROM unread WHERE stop < ?", (daily_cut,))  # a stretch wholly past the year
                 if meta is not None and meta[0] < daily_cut:
                     con.execute("UPDATE meta SET first_at = ?", (daily_cut,))
+            _write(con, last)
             gone = con.execute("SELECT 1 FROM changes LIMIT 1").fetchone() is None
     finally:
         con.close()
@@ -243,33 +268,40 @@ def _fold_file(p: Path, now: datetime) -> None:
         p.unlink(missing_ok=True)
 
 
-def _fold_days(con: sqlite3.Connection, cut: int) -> None:
-    """Changes before `cut` → one (lowest, highest) per item per UTC day, folded with any day already folded; each item's
-    last change before `cut` stays as it is (the standing value a later span carries in) and counts in its day too."""
-    items = [r[0] for r in con.execute("SELECT DISTINCT item FROM changes WHERE at < ? AND qty IS NOT NULL", (cut,))]
+def _fold_items(con: sqlite3.Connection, items: list[int], full_cut: int, daily_cut: int) -> None:
+    """One batch of the fold, item by item: its days before `full_cut` folded, its rows before `daily_cut` dropped."""
     for item in items:
-        rows = con.execute("SELECT at, low, high, qty FROM changes WHERE item = ? AND at < ? ORDER BY at", (item, cut)).fetchall()
-        keep = rows[-1] if rows[-1][3] is not None else None
-        days: dict[int, list[tuple]] = {}
-        for r in rows:
-            if r is keep:
-                continue
-            days.setdefault(_day(r[0]), []).append(r)
-        for day, group in days.items():
-            if all(r[3] is None for r in group):
-                continue  # already folded
-            seen = group + ([keep] if keep is not None and _day(keep[0]) == day else [])  # the standing change counts in its day
-            lows = [r[1] for r in seen if r[1] is not None]
-            highs = [r[2] for r in seen if r[2] is not None]
-            con.executemany("DELETE FROM changes WHERE item = ? AND at = ?", [(item, r[0]) for r in group])
-            con.execute("INSERT OR REPLACE INTO changes (item, at, low, high, qty) VALUES (?, ?, ?, ?, NULL)",
-                        (item, day, min(lows) if lows else None, max(highs) if highs else None))
+        _fold_days(con, item, full_cut)
+        _drop_year(con, item, daily_cut)
 
 
-def _drop_year(con: sqlite3.Connection, cut: int) -> None:
-    """Rows older than `cut` go, but each item's last one before it (its carried start, P2)."""
-    con.execute("DELETE FROM changes WHERE at < ? AND at < (SELECT MAX(c.at) FROM changes c WHERE c.item = changes.item AND c.at < ?)",
-                (cut, cut))
+def _fold_days(con: sqlite3.Connection, item: int, cut: int) -> None:
+    """The item's changes before `cut` → one (lowest, highest) per UTC day, folded with any day already folded; its last
+    change before `cut` stays as it is (the standing value a later span carries in) and counts in its day too."""
+    rows = con.execute("SELECT at, low, high, qty FROM changes WHERE item = ? AND at < ? ORDER BY at", (item, cut)).fetchall()
+    if not rows:
+        return
+    keep = rows[-1] if rows[-1][3] is not None else None
+    days: dict[int, list[tuple]] = {}
+    for r in rows:
+        if r is keep:
+            continue
+        days.setdefault(_day(r[0]), []).append(r)
+    for day, group in days.items():
+        if all(r[3] is None for r in group):
+            continue  # already folded
+        seen = group + ([keep] if keep is not None and _day(keep[0]) == day else [])  # the standing change counts in its day
+        lows = [r[1] for r in seen if r[1] is not None]
+        highs = [r[2] for r in seen if r[2] is not None]
+        con.executemany("DELETE FROM changes WHERE item = ? AND at = ?", [(item, r[0]) for r in group])
+        con.execute("INSERT OR REPLACE INTO changes (item, at, low, high, qty) VALUES (?, ?, ?, ?, NULL)",
+                    (item, day, min(lows) if lows else None, max(highs) if highs else None))
+
+
+def _drop_year(con: sqlite3.Connection, item: int, cut: int) -> None:
+    """The item's rows older than `cut` go, but its last one before it (its carried start, P2)."""
+    con.execute("DELETE FROM changes WHERE item = ? AND at < (SELECT MAX(at) FROM changes WHERE item = ? AND at < ?)",
+                (item, item, cut))
 
 
 def fold(now: datetime) -> None:

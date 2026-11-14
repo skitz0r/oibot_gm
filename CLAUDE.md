@@ -173,7 +173,8 @@ src/oibot_gm/
                        lowest; nothing listed and unread time count for neither) / kept_since; fold(now) over every file:
                        older than KEEP_FULL 90 days → one low/high per item per UTC day, older than KEEP_DAILY 365 dropped (an item's standing
                        value stays as the carried start — P2; unread stretches kept, those ended past the year dropped), a file empty or whose
-                       newest feed time is past a year deleted; HistoryError
+                       newest feed time is past a year deleted; FOLD_BATCH items per write with FOLD_PAUSE_S between (a record's 5 s busy wait
+                       always gets in — F-7; cut short = still readable, the next fold finishes); HistoryError
   armory_seed.py       the seed (armory link §5.5, D8): propose(reg, roster, *, taken_at=) → Seed{sure, likely, none, unclaimed, rev} of
                        SeedRow{uid, member, label, cls, candidate, why same name|close name|display name, others} — PURE (no request, no write);
                        considered(m, c) = THE predicate (active, named, real member still here — the map counts over it too), unlinked ones proposed; sure = first name (case-folded) + class on exactly one

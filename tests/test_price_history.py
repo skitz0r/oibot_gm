@@ -184,6 +184,104 @@ def test_a_file_made_before_gaps_were_kept_still_opens_and_reads():
     ph.fold(T0 + 11 * D)
 
 
+# ------------------------------------------------------------------ the fold never makes a read's keep fail (final review F-7)
+
+
+def _big_file(key, now, items=2000, per_item=50):
+    """A house read for 200 days with `items` items changing `per_item` times each before the last 90 days."""
+    import sqlite3
+
+    ph.record(key, now - 200 * D, {1: P(1, 1)})
+    rows = [(i, int((now - (200 - j * 2) * D).timestamp()) + i, 100 + (i * 7 + j * 13) % 900, None, 1)
+            for i in range(items) for j in range(per_item)]
+    with sqlite3.connect(ph.path(key)) as con:
+        con.executemany("INSERT OR REPLACE INTO changes (item, at, low, high, qty) VALUES (?, ?, ?, ?, ?)",
+                        [(i, at, low, low, q) for i, at, low, _h, q in rows])
+        con.execute("UPDATE meta SET last_at = ?", (int((now - H).timestamp()),))
+    con.close()
+
+
+def _dump(key):
+    import sqlite3
+
+    with sqlite3.connect(ph.path(key)) as con:
+        out = {t: con.execute(f"SELECT * FROM {t} ORDER BY 1, 2").fetchall() for t in ("meta", "changes", "last", "unread")}
+    con.close()
+    return out
+
+
+def _unbatched(monkeypatch, now, keep=None, **big) -> dict:
+    """The file `_big_file(**big)` builds, folded in one write (and then `keep` recorded) — what a batched fold must equal."""
+    monkeypatch.setattr(ph, "FOLD_BATCH", 10**9, raising=False)  # (raising=False: the same test ran against the one-write fold)
+    _big_file(K, now, **big)
+    ph.fold(now)
+    if keep:
+        assert ph.record(K, now, keep) >= 1
+    out = _dump(K)
+    ph.path(K).unlink()
+    return out
+
+
+def test_a_record_gets_in_while_a_big_fold_runs(monkeypatch):
+    import sqlite3
+    import threading
+    import time
+
+    now = T0
+    keep = {1: P(5, 1), 7: P(3, 2)}
+    unbatched = _unbatched(monkeypatch, now, keep, items=800)
+    _big_file(K, now, items=800)
+    real = sqlite3.connect
+
+    def slow(*a, **k):
+        """A slow disk for every connection, and a short busy wait (0.5 s, not 5): the fold takes seconds."""
+        con = real(*a, **{**k, "timeout": 0.5})
+        con.set_progress_handler(lambda: time.sleep(0.0002) or 0, 1000)
+        return con
+    monkeypatch.setattr(ph.sqlite3, "connect", slow)
+    monkeypatch.setattr(ph, "FOLD_BATCH", 100, raising=False)  # eight batches of about 0.15 s each
+    t = threading.Thread(target=lambda: ph.fold(now))
+    began = time.perf_counter()
+    t.start()
+    time.sleep(0.3)
+    try:
+        kept = ph.record(K, now, keep)
+    except ph.HistoryError as e:  # the fold held the write lock for longer than the busy wait
+        kept = e
+    running = t.is_alive()
+    t.join()
+    took = time.perf_counter() - began
+    assert running, f"the fold had finished before the record ({took:.2f} s): the test proves nothing"
+    assert kept == 2, f"the keep got in between two batches, not {kept!r}"
+    assert _dump(K) == unbatched, "batched and concurrent, the result is the unbatched one"
+
+
+def test_a_fold_cut_short_between_batches_reads_and_the_next_fold_finishes(monkeypatch):
+    import sqlite3
+
+    now = T0
+    whole = _unbatched(monkeypatch, now, items=120, per_item=20)
+    _big_file(K, now, items=120, per_item=20)
+    spans = {i: ph.span(K, i, 365, now) for i in range(0, 120, 7)}
+    monkeypatch.setattr(ph, "FOLD_BATCH", 10)
+    monkeypatch.setattr(ph, "FOLD_PAUSE_S", 0)
+    real = ph._fold_items
+    calls = []
+
+    def cut(con, items, *a):
+        calls.append(len(items))
+        if len(calls) == 3:
+            raise sqlite3.OperationalError("disk I/O error")  # the fold stops between batches
+        return real(con, items, *a)
+    monkeypatch.setattr(ph, "_fold_items", cut)
+    ph.fold(now)  # logged and skipped, as any file the fold can't finish
+    assert len(calls) == 3 and _dump(K) != whole, "two batches folded, the rest not"
+    assert {i: ph.span(K, i, 365, now) for i in spans} == spans, "half folded, every item still reads"
+    monkeypatch.setattr(ph, "_fold_items", real)
+    ph.fold(now)
+    assert _dump(K) == whole, "the next fold finishes it"
+
+
 def test_a_broken_file_raises_history_error():
     ph.path(K).parent.mkdir(parents=True, exist_ok=True); ph.path(K).write_bytes(b"not a database")
     for call in (lambda: ph.record(K, T0, {1: P(1, 1)}), lambda: ph.points(K, 1, T0, T0 + H), lambda: ph.kept_since(K)):
