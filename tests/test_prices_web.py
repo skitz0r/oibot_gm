@@ -159,7 +159,7 @@ def test_market_routes_owner_only_preview_set_clear_and_409(w, market_on):
     assert d["ruleset_id"] == 2 and [c["house_id"] for c in d["choices"]] == [6], "the Horde houses with listings only"
     assert d["words"] == ""
     [c] = d["choices"]
-    assert c["name"] == "Horde Auction House" and c["listings"] == 230 and c["listings_words"] == "230 items listed"
+    assert c["name"] == "Horde Auction House" and c["listings"] == 230 and c["listings_words"] == "230 listed in all"
     assert c["samples"] == [{"id": BAR, "name": "Arcanite Bar", "low_words": "48g 99s 98c"}, {"id": DREAMFOIL, "name": "Dreamfoil", "low_words": "40s 99c"},
                             {"id": RUNECLOTH, "name": "Runecloth", "low_words": prices.NONE_LISTED}]
     rev = reg.config_rev("settings")

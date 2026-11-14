@@ -377,27 +377,21 @@ def test_the_armory_link_has_web_routes_mcp_tools_and_written_gaps(mcp_tools, we
 
 # auction prices (spec §4.1, §4.5): features, not ops — never plain text. The price check is every member's (the
 # Professions page's box, /price, MCP's price_check); the guild's auction house is the owner's (Config, inside
-# /gm config armory's hub — /gm config is at Discord's 25-subcommand limit). Task 6 lands the Discord half: until then
-# each Discord ref waits in PRICES_DISCORD_PENDING (dated, naming the task) — never both a ref and a gap.
+# /gm config armory's hub — /gm config is at Discord's 25-subcommand limit). Task 6 (2026-11-14) landed the Discord
+# half: PRICES_DISCORD_PENDING stays empty — a Discord gap again would be dated there, naming the task that lands it.
 PRICES: dict[str, dict[str, str]] = {
-    "check": {"web": "GET /api/prices/find", "mcp": "price_check"},
-    "market": {"web": "GET /api/admin/market", "mcp": "market"},
-    "market_choices": {"web": "POST /api/admin/market"},
-    "market_set": {"web": "POST /api/admin/market"},
-    "market_clear": {"web": "POST /api/admin/market"},
+    "check": {"web": "GET /api/prices/find", "mcp": "price_check", "discord": "slash:price"},
+    "market": {"web": "GET /api/admin/market", "mcp": "market", "discord": "flow:armory_guild"},
+    "market_choices": {"web": "POST /api/admin/market", "discord": "flow:armory_guild"},
+    "market_set": {"web": "POST /api/admin/market", "discord": "flow:armory_guild"},
+    "market_clear": {"web": "POST /api/admin/market", "discord": "flow:armory_guild"},
 }
 PRICES_MCP_EXEMPT = {
     "market_choices": "the owner matches sample prices against the game by eye before picking; MCP only reads the choice made",
     "market_set": "the owner matches sample prices against the game by eye before picking; MCP only reads the choice made",
     "market_clear": "turning prices off is the owner's switch beside the picker (Config, /gm config armory); MCP reads the choice",
 }
-PRICES_DISCORD_PENDING: dict[str, str] = {  # 2026-11-13: Task 6 (the Discord surfaces) adds each ref and empties this
-    "check": "Task 6 (2026-11-13): /price, every member, ephemeral, item autocomplete — slash:price",
-    "market": "Task 6 (2026-11-13): the auction house line inside /gm config armory's hub — flow:armory_guild",
-    "market_choices": "Task 6 (2026-11-13): Pick the auction house… inside /gm config armory's hub — flow:armory_guild",
-    "market_set": "Task 6 (2026-11-13): Pick the auction house… inside /gm config armory's hub — flow:armory_guild",
-    "market_clear": "Task 6 (2026-11-13): Turn prices off… inside /gm config armory's hub — flow:armory_guild",
-}
+PRICES_DISCORD_PENDING: dict[str, str] = {}
 
 
 def test_auction_prices_have_web_routes_mcp_tools_and_written_gaps(mcp_tools, web_routes, slash_paths):
@@ -417,6 +411,7 @@ def test_auction_prices_have_web_routes_mcp_tools_and_written_gaps(mcp_tools, we
                 missing.append(f"prices {action}/discord: {row['discord']!r}")
         else:
             why = PRICES_DISCORD_PENDING.get(action, "")
-            assert "Task 6" in why and len(why) > 15, f"prices {action}: no Discord path — name the task that lands it"
+            assert "Task" in why and len(why) > 15, f"prices {action}: no Discord path — name the task that lands it"
     assert not missing, "\n".join(missing)
     assert not {"set_market", "market_set", "clear_market"} & mcp_tools, "MCP never picks or clears the auction house"
+    assert not PRICES_DISCORD_PENDING, "every price action has its Discord path (Task 6)"

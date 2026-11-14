@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import discord_auctions
-from .auctions import Price, money
+from .auctions import NO_AUCTIONS_WORDS, Price, money
 from .profiles import RecipeDef
 
 log = logging.getLogger(__name__)
@@ -252,12 +252,12 @@ def made_words(cost: Cost) -> str:
     return f"Makes {count} · {_listed(p)} each, {p.qty} listed"
 
 
-def status_sentence(reg, owner: bool) -> str:
+def status_sentence(reg, owner: bool, *, stamp: bool = False) -> str:
     """How recent the prices are, or why there are none: when off, the owner is told how to turn them on and everyone
-    else reads nothing."""
+    else reads nothing. `stamp`: Discord's native relative time (discord_auctions.as_of_words)."""
     if discord_auctions.state(reg) == "off":
         return OWNER_OFF_WORDS if owner else ""
-    return discord_auctions.as_of_words(reg)
+    return discord_auctions.as_of_words(reg, stamp=stamp)
 
 
 def more_words(n: int) -> str:
@@ -265,10 +265,10 @@ def more_words(n: int) -> str:
     return "And 1 more item matches." if n == 1 else f"And {n} more items match."
 
 
-def answer_lines(reg, shown: list[ItemPrice], total: int, owner: bool) -> list[str]:
+def answer_lines(reg, shown: list[ItemPrice], total: int, owner: bool, *, stamp: bool = False) -> list[str]:
     """A price search in words (the MCP tool, Discord's /price): how recent the prices are, one line per item shown, then
     how many more match — or no match. Prices off: the status line alone (nothing for a member)."""
-    status = status_sentence(reg, owner)
+    status = status_sentence(reg, owner, stamp=stamp)
     if not _shown(reg):
         return [status] if status else []
     lines = [status, *(price_words(p) for p in shown)] if shown else [status, NO_MATCH]
@@ -277,5 +277,76 @@ def answer_lines(reg, shown: list[ItemPrice], total: int, owner: bool) -> list[s
     return lines
 
 
-__all__ = ["Cost", "CostLine", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_OFF_WORDS", "answer_lines", "more_words", "cost_sentence", "made_words", "names",
+PRICE_LINES = 10  # items Discord's /price lists for typed text; the rest are counted
+
+
+def item_price(reg, item_id: int) -> ItemPrice | None:
+    """One named item's price (a picked '#<id>'); None when the bot has no name for that id."""
+    name = names(reg).get(int(item_id))
+    return _item(reg, int(item_id), name) if name else None
+
+
+def price_answer(reg, text: str, owner: bool, *, stamp: bool = True, limit: int = PRICE_LINES) -> list[str]:
+    """Discord's /price in lines: '#<id>' (the autocomplete's value) = that item, typed text = the search's first `limit`
+    and how many more. No prices to show (off, none read yet, a day old): that one sentence alone — a member reads
+    why too, since they asked."""
+    if not reg.profile.auctions:
+        return [NO_AUCTIONS_WORDS]
+    s = discord_auctions.state(reg)
+    if s == "off":
+        return [OWNER_OFF_WORDS if owner else discord_auctions.OFF_WORDS]
+    if s not in ("fresh", "stale"):
+        return [discord_auctions.as_of_words(reg)]
+    raw = str(text or "").strip()
+    if raw.startswith("#") and raw[1:].isdigit():
+        p = item_price(reg, int(raw[1:]))
+        return [status_sentence(reg, owner, stamp=stamp), price_words(p) if p else NO_MATCH]
+    shown, total = search(reg, raw, limit)
+    return answer_lines(reg, shown, total, owner, stamp=stamp)
+
+
+def cost_line(reg, recipe: RecipeDef | None) -> str:
+    """A recipe's cost to make in one line, or "" when there is nothing to say: no recipe, no reagents (never a zero
+    cost) or no prices to show."""
+    if recipe is None or not recipe.reagents:
+        return ""
+    cost = recipe_cost(reg, recipe)
+    return cost_sentence(cost) if cost is not None else ""
+
+
+# ------------------------------------------------------------------ the owner's picker (the site and Discord)
+
+
+def listings_words(n: int) -> str:
+    """How much is up on one auction house: the total quantity listed, not a number of different items."""
+    return f"{int(n)} listed in all"
+
+
+def choices_words(choices: list) -> str:
+    """Why the picker offers nothing, or "" when it has choices."""
+    return "" if choices else discord_auctions.NO_CHOICES
+
+
+def sample_rows(reg, choice) -> list[tuple[int, str, str]]:
+    """A house's reference items as (id, name, lowest price in words), in the profile's order."""
+    named = names(reg)
+    return [(int(i), named.get(int(i)) or f"Item {int(i)}", money(low) if low is not None else NONE_LISTED) for i, low in choice.samples]
+
+
+def sample_names(reg, choices: list) -> str:
+    """The reference items' names in one phrase: 'Arcanite Bar, Dreamfoil and Runecloth'."""
+    got = [n for _i, n, _w in sample_rows(reg, choices[0])] if choices else []
+    if len(got) < 2:
+        return "".join(got)
+    return ", ".join(got[:-1]) + f" and {got[-1]}"
+
+
+def choice_description(reg, choice) -> str:
+    """One house in a select's description (at most 100 characters): how much is listed, then each reference item's
+    lowest price in the order sample_names gives."""
+    return " · ".join([listings_words(choice.listings), *(w for _i, _n, w in sample_rows(reg, choice))])[:100]
+
+
+__all__ = ["Cost", "CostLine", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
+           "choices_words", "cost_line", "item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

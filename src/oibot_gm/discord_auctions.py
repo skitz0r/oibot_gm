@@ -223,8 +223,9 @@ def price_of(reg, item_id: int) -> Price | None:
     return table(reg).prices.get(int(item_id))
 
 
-def as_of_words(reg) -> str:
-    """The one line saying how recent the prices are, or why there are none."""
+def as_of_words(reg, *, stamp: bool = False) -> str:
+    """The one line saying how recent the prices are, or why there are none. `stamp`: Discord's native relative time
+    (`<t:…:R>`, read in the reader's own clock) instead of Registry.local12 words."""
     s = state(reg)
     if s == "off":
         return OFF_WORDS
@@ -232,7 +233,8 @@ def as_of_words(reg) -> str:
         return WAITING_WORDS
     if s == "old":
         return OLD_WORDS
-    words = f"Prices as of {reg.local12(table(reg).at)}"
+    at = table(reg).at
+    words = f"Prices as of <t:{int(at.timestamp())}:R>" if stamp else f"Prices as of {reg.local12(at)}"
     return words + STALE_TAIL if s == "stale" else words
 
 
@@ -253,6 +255,25 @@ async def _emit_warn(bot, reg, text: str) -> None:
         await ops.emit(reg.config, "warn", text)
     except Exception:  # noqa: BLE001 — an ops line never stops the check
         log.exception("ops emit failed")
+
+
+_RUNNING: set[asyncio.Task] = set()  # background reads started by a pick (kept so they aren't collected mid-run)
+
+
+async def refresh_soon(bot, reg) -> asyncio.Task:
+    """After the owner picks an auction house (the site or Discord): its first read, off the request. The picker's own
+    read is usually taken as it is (no request). A failure is logged; the hourly check tries again."""
+    async def go():
+        try:
+            await refresh(bot, reg)
+        except Exception:  # noqa: BLE001 — the hourly check tries again
+            log.exception("first price read for %s failed", reg.key)
+
+    t = asyncio.get_running_loop().create_task(go())
+    _RUNNING.add(t)
+    t.add_done_callback(_RUNNING.discard)
+    await asyncio.sleep(0)  # let the task start now (a shared read then lands before the caller answers)
+    return t
 
 
 async def refresh(bot, reg, *, force: bool = False) -> str:
@@ -431,4 +452,4 @@ async def pick_house(bot, reg, house_id: int, ruleset_id: int) -> House:
 
 
 __all__ = ["Choice", "HOUSES_CHANGED", "NO_CHOICES", "HousesChanged", "NOT_A_CHOICE", "pick_house", "FETCH_EVERY", "HIDE_AFTER", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
-           "WAITING_WORDS", "as_of_words", "auctions_tick", "house_choices", "name_items", "price_of", "refresh", "reset_state", "state", "table"]
+           "WAITING_WORDS", "as_of_words", "auctions_tick", "refresh_soon", "house_choices", "name_items", "price_of", "refresh", "reset_state", "state", "table"]

@@ -146,7 +146,7 @@ def test_owner_links_the_guild_and_the_confirm_names_what_was_found(reg, rs, arm
 
     async def again():
         await FLOWS["armory_guild"](h2.command(), reg)
-        assert "Lantern Wardens" in h2.text and "Horde" in h2.text and h2.buttons() == ["Change…", "Unlink…", "Done"]
+        assert "Lantern Wardens" in h2.text and "Horde" in h2.text and h2.buttons() == ["Change…", "Unlink…", "Auction house…", "Done"]
         await h2.press("Change…")
         await h2.submit(name="Stranger Hall")
         assert "replaces Lantern Wardens" in h2.text

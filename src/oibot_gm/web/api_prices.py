@@ -95,10 +95,8 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
             raise HTTPException(404, auctions.NO_AUCTIONS_WORDS)
 
     def choice_json(reg, c: discord_auctions.Choice) -> dict:
-        named = prices.names(reg)
-        return {"house_id": c.house.id, "name": c.house.name, "listings": c.listings,
-                "listings_words": "1 item listed" if c.listings == 1 else f"{c.listings} items listed",
-                "samples": [{"id": i, "name": named.get(i) or f"Item {i}", "low_words": _low(low)} for i, low in c.samples]}
+        return {"house_id": c.house.id, "name": c.house.name, "listings": c.listings, "listings_words": prices.listings_words(c.listings),
+                "samples": [{"id": i, "name": name, "low_words": words} for i, name, words in prices.sample_rows(reg, c)]}
 
     @app.get("/api/admin/market")
     async def market_get(request: Request):
@@ -134,7 +132,7 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
             except RegistryError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             ruleset = got[0].ruleset_id if got else None
-            return {"choices": [choice_json(reg, c) for c in got], "ruleset_id": ruleset, "words": "" if got else discord_auctions.NO_CHOICES}
+            return {"choices": [choice_json(reg, c) for c in got], "ruleset_id": ruleset, "words": prices.choices_words(got)}
         if d.get("clear"):
             if preview:
                 if reg.config.market is None:
@@ -170,20 +168,5 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         await ops_mod.audited(bot.ops, reg, v.name, f"picked the {house.name} as the guild's auction house", via=v.via, by_id=v.uid)
-        await refresh_soon(reg)
+        await discord_auctions.refresh_soon(bot, reg)
         return {"message": said[:1].upper() + said[1:] + ".", **market_state(v)}
-
-    running: set[asyncio.Task] = set()
-
-    async def refresh_soon(reg) -> None:
-        """The new house's first read, off the request: the picker's own read is usually taken (no request)."""
-        async def go():
-            try:
-                await discord_auctions.refresh(bot, reg)
-            except Exception:  # noqa: BLE001 — the hourly check tries again
-                log.exception("first price read for %s failed", reg.key)
-
-        t = asyncio.get_running_loop().create_task(go())
-        running.add(t)
-        t.add_done_callback(running.discard)
-        await asyncio.sleep(0)  # let it take a shared read now when there is one

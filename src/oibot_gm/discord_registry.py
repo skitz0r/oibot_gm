@@ -939,6 +939,20 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return " · ".join(x for x in (e.name, where, made) if x)[:100]
         return [app_commands.Choice(name=label(e), value=(f"#{e.id}" if e.recipe is not None else e.key)[:100]) for e in hits[:25]]
 
+    async def item_autocomplete(interaction: discord.Interaction, current: str):
+        """/price: the price search over the names the bot already knows (prices.search) — memory only, never a Blizzard
+        call; no prices to show (off, none read yet, a day old) → no choices. A value is '#<item id>'."""
+        reg = guilds.for_interaction(interaction)
+        if reg is None or not (current or "").strip():
+            return []
+        from . import prices
+        try:
+            shown, _total = prices.search(reg, current, 25)
+        except Exception:  # noqa: BLE001 — a suggestion list never errors at the person typing
+            log.exception("price autocomplete failed")
+            return []
+        return [app_commands.Choice(name=p.name[:100], value=f"#{p.id}") for p in shown]
+
     async def instance_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
         if reg is None:
@@ -1150,17 +1164,25 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message(pr.NOT_A_RECIPE if reg.profile.has_recipe_list
                                                     else "Nobody has registered that recipe yet — crafters add theirs with /me professions.", ephemeral=True)
             return
+        from . import prices
         esc = discord.utils.escape_markdown
         if len(hits) == 1 and not hits[0].crafters:  # a recipe of the game's list nobody makes: not the same answer as "not a recipe"
-            await interaction.response.send_message(f"{pr.nobody_sentence(esc(hits[0].name))} A crafter adds it with /me professions.", ephemeral=True,
-                                                    allowed_mentions=discord.AllowedMentions.none())
+            text = f"{pr.nobody_sentence(esc(hits[0].name))} A crafter adds it with /me professions."
+            if cost := prices.cost_line(reg, hits[0].recipe):
+                text += f"\n{cost}\n{prices.status_sentence(reg, False, stamp=True)}."
+            await interaction.response.send_message(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
             return
         blocks = []
+        costed = False
         for e in hits:
             d = reg.profile.professions.get(e.profession)  # a recipe whose profession left the profile keeps no suffix
-            blocks.append((f"**{esc(e.name)}**" + "".join(f" · {x}" for x in ((d.name if d else None), e.category) if x),
-                           [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" for c in e.crafters] or [pr.nobody_sentence(esc(e.name))]))
+            head = f"**{esc(e.name)}**" + "".join(f" · {x}" for x in ((d.name if d else None), e.category) if x)
+            if cost := prices.cost_line(reg, e.recipe):  # prices on and the recipe has reagents: its cost to make
+                head, costed = f"{head}\n{cost}", True
+            blocks.append((head, [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" for c in e.crafters] or [pr.nobody_sentence(esc(e.name))]))
         footer = "Names only — ask them. Crafters add theirs with /me professions."
+        if costed:
+            footer = f"{prices.status_sentence(reg, False, stamp=True)}.\n{footer}"
         await interaction.response.send_message(fit_lines(blocks, footer), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     async def professions_list(interaction: discord.Interaction, profession: str):
@@ -1186,6 +1208,18 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         professions_list = app_commands.choices(profession=choices)(professions_list)
     professions_group.command(name="list", description="A profession's crafters, highest skill first")(professions_list)
     tree.add_command(professions_group)
+
+    # ---------------- /price (members; auction prices §4.5): the lowest price listed, ephemeral, no model call
+    @tree.command(name="price", description="The lowest price listed for an item at the guild's auction house")
+    @app_commands.describe(item="start typing the item's name")
+    @app_commands.autocomplete(item=item_autocomplete)
+    async def price(interaction: discord.Interaction, item: str):
+        reg, interaction = await need(interaction)
+        if not reg:
+            return
+        from . import prices
+        lines = prices.price_answer(reg, item, reg.is_owner_id(interaction.user.id))
+        await interaction.response.send_message("\n".join(lines)[:2000], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     # ---------------- /guide (members; officers withdraw / restore): the guild guide library, design §5.63
     from .discord_guides import register_guide_commands

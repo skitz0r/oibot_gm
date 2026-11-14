@@ -2561,7 +2561,12 @@ class ArmoryGuildWizard(OwnerWizard):
     (consequences.armory_guild_consequence: what was found, so a stranger's guild of the same name is seen first) →
     Registry.set_armory_guild. Linked: what is linked, with **Change…** (the same box) and **Unlink…** (decide with
     armory_guild_clear_consequence). Owner-only presses, re-checked on every press and on the box's submit; nothing is
-    written before the press. The site's Config › Settings card and MCP set_armory_guild are the same verbs."""
+    written before the press. The site's Config › Settings card and MCP set_armory_guild are the same verbs.
+    The guild's auction house (auction prices §4.1, where auctions.available): the hub's line (market_words) with
+    **Auction house…** → `working` → discord_auctions.house_choices in threads → one select ("Auction house N of M", what
+    is listed and the reference items' lowest prices) → decide (market_consequence) → Registry.set_market with the rev
+    the hub was shown at → the hub, the first read in the background; the current house picked again → said, nothing
+    written. **Turn prices off…** → decide (market_clear_consequence) → clear_market. The site's market route is the same."""
 
     def __init__(self, reg: Registry, owner_id: int):
         super().__init__(reg, owner_id, title="The guild in the armory", guard=_owner_guard(reg))
@@ -2581,10 +2586,101 @@ class ArmoryGuildWizard(OwnerWizard):
         await self.hub(i)
 
     async def hub(self, i: discord.Interaction, note: str = "") -> None:
-        words = discord.utils.escape_markdown(self.reg.armory_guild_words())
-        await self.show(i, f"This server's guild in the armory: {words}." + (f"\n\n{note}" if note else ""),
-                        self.button("Change…", self.change, discord.ButtonStyle.primary), self.button("Unlink…", self.unlink_decide),
-                        self.button("Done", self.done))
+        from . import auctions, prices
+
+        esc = discord.utils.escape_markdown
+        lines = [f"This server's guild in the armory: {esc(self.reg.armory_guild_words())}."]
+        items = [self.button("Change…", self.change, discord.ButtonStyle.primary), self.button("Unlink…", self.unlink_decide)]
+        if auctions.available(self.reg):  # the auction house: a version with auction houses, a linked guild (this hub)
+            if self.reg.config.market is not None:
+                lines.append(f"Prices come from the {esc(self.reg.market_words())}.")
+                if status := prices.status_sentence(self.reg, True, stamp=True):
+                    lines.append(status if status.endswith(".") else status + ".")  # "Prices as of …" has none; waiting / old do
+            else:
+                lines.append("No auction house is picked, so prices are off. Press Auction house… to pick the one the guild trades on.")
+            items.append(self.button("Auction house…", self.houses))
+            if self.reg.config.market is not None:
+                items.append(self.button("Turn prices off…", self.prices_off_decide))
+        await self.show(i, "\n".join(lines) + (f"\n\n{note}" if note else ""), *items, self.button("Done", self.done))
+
+    # ---- the guild's auction house (auction prices §4.1): owner only, the same verbs as the Config page
+    async def houses(self, i: discord.Interaction) -> None:
+        """Read the faction's auction houses behind `working` (Blizzard, in threads), then one select."""
+        from . import armory, discord_auctions, prices
+        from .wizard import Opt
+
+        await self.working(i, "Reading the guild's auction houses…")
+        try:
+            got = await discord_auctions.house_choices(i.client, self.reg)
+        except armory.ArmoryError as e:
+            await self.refuse(i, e.words, self.houses, "Try again")
+            return
+        except RegistryError as e:
+            await self.refuse(i, str(e))
+            return
+        if not got:
+            await self.refuse(i, prices.choices_words(got), self.houses, "Try again")
+            return
+        self.draft["choices"] = got
+        opts = [Opt(str(n), f"Auction house {n} of {len(got)}", prices.choice_description(self.reg, c)) for n, c in enumerate(got, 1)]
+        text = (f"Pick the auction house the guild trades on. Each one shows how much is listed, then the lowest price of "
+                f"{prices.sample_names(self.reg, got)}. Match them against the game.")
+        await self.show(i, text, self.select("Which auction house", opts, self.house_picked), self.button("Back", self.hub))
+
+    async def house_picked(self, i: discord.Interaction, values: list[str]) -> None:
+        from .consequences import market_consequence
+
+        choices = self.draft.get("choices") or []
+        n = int(values[0]) if values and values[0].isdigit() else 0
+        if not 1 <= n <= len(choices):
+            await self.houses(i)
+            return
+        c = choices[n - 1]
+        old = self.reg.config.market
+        if old is not None and (int(old.house_id), int(old.ruleset_id)) == (int(c.house.id), int(c.ruleset_id)):
+            await self.hub(i, market_consequence(self.reg, c.house)[0])  # the current one: said so, nothing written
+            return
+        self.draft["choice"] = c
+        text = discord.utils.escape_markdown(" ".join(market_consequence(self.reg, c.house)))
+        await self.decide(i, text, do=self.pick_house, do_label="Pick this auction house")
+
+    async def pick_house(self, i: discord.Interaction, _note: str | None) -> None:
+        import asyncio
+
+        from . import discord_auctions
+        from . import ops as ops_mod
+
+        c = self.draft["choice"]
+        try:
+            said = await asyncio.to_thread(lambda: self.reg.set_market(c.house, c.ruleset_id, i.user.display_name, by_id=i.user.id, rev=self.rev))
+        except RegistryError as e:
+            await self.finish(i, f"❌ {e}")
+            return
+        self.rev = self.reg.config_rev("settings")
+        await ops_mod.audited(i.client.ops, self.reg, i.user.display_name, f"picked the {c.house.name} as the guild's auction house", via="discord", by_id=i.user.id)
+        await discord_auctions.refresh_soon(i.client, self.reg)
+        await self.hub(i, f"✅ {said[:1].upper()}{said[1:]}.")
+
+    async def prices_off_decide(self, i: discord.Interaction) -> None:
+        from .consequences import market_clear_consequence
+
+        text = discord.utils.escape_markdown(" ".join(market_clear_consequence(self.reg)))
+        await self.decide(i, text, do=self.prices_off, do_label="Turn prices off", danger=True)
+
+    async def prices_off(self, i: discord.Interaction, _note: str | None) -> None:
+        import asyncio
+
+        from . import ops as ops_mod
+
+        old = self.reg.config.market
+        try:
+            await asyncio.to_thread(lambda: self.reg.clear_market(i.user.display_name, by_id=i.user.id, rev=self.rev))
+        except RegistryError as e:
+            await self.finish(i, f"❌ {e}")
+            return
+        self.rev = self.reg.config_rev("settings")
+        await ops_mod.audited(i.client.ops, self.reg, i.user.display_name, f"turned prices off (the auction house was the {old.name})", via="discord", by_id=i.user.id)
+        await self.hub(i, "✅ Prices are off.")
 
     async def done(self, i: discord.Interaction) -> None:
         await self.finish(i, "Done.")

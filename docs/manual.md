@@ -457,9 +457,15 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   game's whole list of recipes (the ones somebody in the guild makes come first; two recipes with one name are told
   apart by their category); the answer names its crafters, highest skill first, and only you see it. Nobody is
   pinged: ask them yourself. A recipe nobody makes yet says so (*"Nobody in the guild makes Ironfeather Shoulders
-  yet."*) and how a crafter adds theirs; a name the game doesn't have gets *"That isn't a recipe in the game's list."* `/professions list`
+  yet."*) and how a crafter adds theirs; a name the game doesn't have gets *"That isn't a recipe in the game's list."*
+  When the guild has prices (§8, the guild's auction house), a recipe's answer also says its cost to make at the lowest
+  prices listed (*"Cost to make: at least 3g 20s — 1 reagent has none listed."*), with how recent the prices are. `/professions list`
   — pick a profession and see everyone who has it, highest skill first, with their specialization (Tribal, Gnomish,
   Armorsmith…) once their recipes show one. The Professions page on the site shows the same.
+- **What a thing costs, in Discord**: `/price` — start typing an item's name and pick it; the answer says how recent the
+  prices are, then the item's lowest price listed at the guild's auction house and how many are listed (or *none
+  listed*). Typed text that isn't picked lists up to ten matching items and how many more match. Only you see it. When
+  no auction house is picked, prices haven't been read yet, or the last ones are more than a day old, it says that alone.
 - **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name, or part of it
   ("ironfeather" finds every Ironfeather recipe), in the search box: it searches the game's whole list of recipes, the
   ones somebody in the guild makes first. Each matching recipe shows its profession's icon, the game's category
@@ -1497,6 +1503,19 @@ reading it and says so once in the ops channel; link the guild again to fix it. 
 oddly, the last data stays and the ops channel gets at most one warning an hour. When it answers oddly for one character
 only, that character keeps its last data, the warning names it, and every other character is still updated. **Unlinking** keeps every character's
 own link; only *in the guild* stops being known. Plain text can't link a guild (a name can answer with a stranger's guild).
+
+**The guild's auction house (owner).** Where the game version has auction houses (WoW: Forever) and the guild is linked
+(above), the owner picks the auction house the guild's prices come from; until then prices are off everywhere.
+- **In Discord:** `/gm config armory` shows the auction house under the guild (which one, who picked it and when, and
+  how recent the prices are) with **Auction house…**: the bot reads the guild's faction's auction houses that have
+  something listed (a few seconds) and offers them as *Auction house 1 of 2* and so on, each with how much is listed in
+  all and the lowest price of three well-known items the screen names, so you can match them against the game. Pick
+  one, read the confirm, **Pick this auction house**. Picking the one already in use says so and changes nothing. With
+  one picked, **Turn prices off…** forgets it. When no auction house has anything listed, or the armory can't be
+  reached, the screen says so in one sentence with **Try again**.
+
+Nobody is DMed; the ops channel gets one line per pick or switch-off. The first prices are read right after the pick,
+then every hour.
 
 **Moving a guild to another server** (rather than claiming the new server as a guild of its own):
 `scripts/move_guild.py --to <new server id> [--key <guild>]` with the bot stopped (which stops every server it looks

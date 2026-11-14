@@ -58,7 +58,7 @@ my main", "lock tonight's run"), set acts=true: the bot then turns it into a cha
 """
 
 
-MEMBER_PATHS = {"/register", "/apply", "/help", "/ask", "/roster overview", "/roster members", "/raid sheet", "/raid health", "/raid list", "/raid out"}
+MEMBER_PATHS = {"/register", "/apply", "/help", "/ask", "/roster overview", "/roster members", "/raid sheet", "/raid health", "/raid list", "/raid out", "/price"}
 
 
 def gate_of(path: str) -> str:
