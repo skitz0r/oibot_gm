@@ -181,6 +181,11 @@ class Absence(BaseModel):
     created_at: str = Field(default_factory=now)
 
 
+WATCH_MAX = 25  # Discord's select holds 25 (price watch C7)
+WATCH_FULL = "Your watch list holds 25 items. Stop watching one first."
+WATCH_REGISTER_FIRST = "Register first with /register to keep a watch list."
+
+
 class Member(BaseModel):
     """Legacy keys in old member files (availability, role_prefs, slot_prefs, week, teams) are ignored on load;
     `reload()` migrates role_prefs.flex and teams onto the main character once."""
@@ -200,6 +205,8 @@ class Member(BaseModel):
     # Officers then see "left the server" and may Remove record (Registry.remove_record) — members never delete themselves (D29)
     left_at: Optional[str] = None
     test: bool = False  # seeded by /gm test: the bot puppets them (DMs go to the roster channel; officers answer for them)
+    # the member's own watch list (price watch §4.2): item ids, newest first, at most WATCH_MAX; read by nobody else (C11)
+    watching: list[int] = Field(default_factory=list)
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
 
@@ -1565,6 +1572,50 @@ class Registry:
             return ("no auction house picked yet — the owner links the guild first with /gm config armory, "
                     "then picks its auction house there or on the Config page")
         return "no auction house picked yet — the owner picks it with /gm config armory or on the Config page"
+
+    # ---- the member's watch list (price watch §4.2, C7, C9, C13, C14): their own, read by nobody else
+    def _watcher(self, discord_id: int) -> Member | None:
+        """The member a watch list belongs to — never created here (C13); a test puppet counts as nobody."""
+        m = self.members.get(int(discord_id))
+        return None if m is None or m.test else m
+
+    def watching(self, discord_id: int) -> list[int]:
+        """The member's watched item ids, newest first; [] for someone with no record."""
+        m = self._watcher(discord_id)
+        return list(m.watching) if m else []
+
+    @_member_write
+    def watch(self, discord_id: int, item_id: int) -> bool:
+        """Put an item first on the member's watch list. True = added, False = already there (no write). Refused on a
+        version with no auction houses, without a record (a watch never creates one) and at WATCH_MAX. One quiet commit
+        that never names the item (C14): no change-log line, no ops line, no notice."""
+        if not self.profile.auctions:
+            from oibot_gm.auctions import NO_AUCTIONS_WORDS
+
+            raise RegistryError(NO_AUCTIONS_WORDS)
+        m = self._watcher(discord_id)
+        if m is None:
+            raise RegistryError(WATCH_REGISTER_FIRST)
+        item = int(item_id)
+        if item in m.watching:
+            return False
+        if len(m.watching) >= WATCH_MAX:
+            raise RegistryError(WATCH_FULL)
+        m.watching = [item, *m.watching]
+        self.save_quiet(m, f"{m.display_name}: watch list changed")
+        return True
+
+    @_member_write
+    def unwatch(self, discord_id: int, item_id: int) -> bool:
+        """Take an item off the member's watch list. True = removed, False = it wasn't there (no write, no refusal —
+        also for someone with no record). One quiet commit, as `watch`."""
+        m = self._watcher(discord_id)
+        item = int(item_id)
+        if m is None or item not in m.watching:
+            return False
+        m.watching = [i for i in m.watching if i != item]
+        self.save_quiet(m, f"{m.display_name}: watch list changed")
+        return True
 
     def market_survives(self, facts) -> bool:
         """Does the stored auction house still apply once the server is linked to `facts`' guild (C11)? Only when one is
