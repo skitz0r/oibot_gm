@@ -8,7 +8,8 @@ Registry — no rule lives here.
   viewer's own watch list (always false from MCP).
 - The viewer's own watch list (price watch §4.2, §4.3; the session's uid, never a parameter; every route 403 from MCP —
   C11 — and 404 without auction houses): `GET /api/prices/watching` → {rows [{id, name, low_words, qty, words}] (names
-  alone while prices are hidden), words, shown, max, empty, registered}; `POST /api/prices/watch` {id, on} → {message,
+  alone while prices are hidden), words, shown, max, empty (EMPTY_LIST_SITE, or EMPTY_LIST_HIDDEN while hidden: the
+  search card is hidden then), registered}; `POST /api/prices/watch` {id, on} → {message,
   rows} (prices.watch / unwatch in a thread: one quiet commit whose SAVE_LISTENERS publish `member`, so the member's
   other tabs reload; a refusal 400); `GET /api/prices/history?id=&span=` → {id, name, spans, **prices.chart, sentences}
   for a watched item only (403 otherwise, C6; an unknown span 400), both history reads in one thread.
@@ -115,8 +116,9 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         own_list(v)
         reg = v.reg
         m = reg.members.get(v.uid)
+        shown = shown_now(reg)
         return {"rows": watch_rows(reg, v.uid), "words": prices.status_sentence(reg, bool(v.owner)),
-                "shown": shown_now(reg), "max": WATCH_MAX, "empty": prices.EMPTY_LIST_SITE,
+                "shown": shown, "max": WATCH_MAX, "empty": prices.EMPTY_LIST_SITE if shown else prices.EMPTY_LIST_HIDDEN,
                 "registered": m is not None and not m.test}
 
     @app.post("/api/prices/watch")

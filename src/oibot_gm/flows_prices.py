@@ -122,7 +122,8 @@ class PriceWizard(Wizard):
         reg = self.reg
         rows = prices.watch_list(reg, self.owner_id)
         if not rows:
-            await self.finish(interaction, prices.EMPTY_LIST_DISCORD if _registered(reg, self.owner_id) else WATCH_REGISTER_FIRST)
+            empty = prices.EMPTY_LIST_DISCORD if _shown(reg) else prices.EMPTY_LIST_HIDDEN  # hidden: nothing to /price-watch
+            await self.finish(interaction, empty if _registered(reg, self.owner_id) else WATCH_REGISTER_FIRST)
             return
         shown = _shown(reg)
         items = [_esc(prices.price_words(p) if shown else p.name) for p in rows]

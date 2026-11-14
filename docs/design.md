@@ -5232,7 +5232,8 @@ plan said "not on adoption").
   hidden), `chart(reg, item, span)` (points {t, when, low, high, words} — `when` in the Clock rule's words, a folded day
   its UTC day alone — the span's low / high in numbers and words, and `since` / `until` = the span's start and the
   server's now in epoch seconds), `SPANS` 7 days · 30 days · 90 days · 1 year,
-  `EMPTY_LIST_SITE` / `EMPTY_LIST_DISCORD`.
+  `EMPTY_LIST_SITE` / `EMPTY_LIST_DISCORD`, and `EMPTY_LIST_HIDDEN` "You aren't watching anything yet." on both while
+  prices are hidden (no search to point at — final review F-4).
 - **The site**: `GET /api/prices/find` rows carry `watching`; `GET /api/prices/watching` → {rows, words, shown, max,
   empty, registered}; `POST /api/prices/watch` {id, on} → {message, rows} (a refusal 400 with its sentence; the quiet
   write publishes `member`, so the member's other tabs reload); `GET /api/prices/history?id=&span=` → {id, name, spans,

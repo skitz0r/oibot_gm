@@ -531,7 +531,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   match, each with **Watch** (**Stop watching** when it is already on your list). The page says once how recent the
   prices are (*Prices as of …*). Below it, **Your watch list**: a row per item with its lowest price and how many are
   listed, newest first; an empty list says *"You aren't watching anything yet. Search for an item above and press
-  Watch."* Open a row to see its price over time: a line of the lowest price (a price holds until the next change; a
+  Watch."* (while prices aren't shown, just *"You aren't watching anything yet."*, in `/price` too). Open a row to see its price over time: a line of the lowest price (a price holds until the next change; a
   break where nothing was listed, never a drop to zero; on older days a faint band from that day's lowest to its
   highest), with **7 days** · **30 days** · **90 days** · **1 year**, the highest and lowest of the span at its side and
   the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time and

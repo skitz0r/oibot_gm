@@ -518,6 +518,7 @@ def test_a_watched_id_the_bot_cannot_name(reg, clock, member):
 def test_the_empty_list_sentences():
     assert prices.EMPTY_LIST_SITE == "You aren't watching anything yet. Search for an item above and press Watch."
     assert prices.EMPTY_LIST_DISCORD == "You aren't watching anything yet. Use /price with an item and press Watch."
+    assert prices.EMPTY_LIST_HIDDEN == "You aren't watching anything yet.", "prices hidden: no search to point at"
     assert prices.SPANS == {"7": (7, "7 days"), "30": (30, "30 days"), "90": (90, "90 days"), "365": (365, "1 year")}
 
 

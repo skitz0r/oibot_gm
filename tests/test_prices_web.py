@@ -324,6 +324,10 @@ def test_the_list_without_prices_shows_names_only(w, market_on):
     priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now() - timedelta(hours=30))  # a day old: not shown (C16)
     d = w.c.get("/api/prices/watching", headers=h).json()
     assert d["shown"] is False and d["rows"] == [{"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "", "qty": 0, "words": ""}]
+    assert d["empty"] == prices.EMPTY_LIST_HIDDEN, "the search card is hidden: the empty list points at nothing"
+    w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": False}, headers=h)
+    d = w.c.get("/api/prices/watching", headers=h).json()
+    assert d["rows"] == [] and d["empty"] == "You aren't watching anything yet."
 
 
 def test_nothing_is_added_while_prices_are_off(w, market_on):

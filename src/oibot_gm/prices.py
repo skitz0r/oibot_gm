@@ -511,6 +511,7 @@ SPANS: dict[str, tuple[int, str]] = {"7": (7, "7 days"), "30": (30, "30 days"), 
 UNNAMED = "An item the bot can't name yet"
 EMPTY_LIST_SITE = "You aren't watching anything yet. Search for an item above and press Watch."
 EMPTY_LIST_DISCORD = "You aren't watching anything yet. Use /price with an item and press Watch."
+EMPTY_LIST_HIDDEN = "You aren't watching anything yet."  # prices hidden: nothing can be watched, so no search is pointed at
 NO_HISTORY_YET = "The bot hasn't kept any prices for this auction house yet."
 NOT_A_SPAN = "That isn't one of the spans."
 SHORT_HISTORY = timedelta(days=30)  # kept for less than this: the history says since when
@@ -625,7 +626,7 @@ def chart(reg, item_id: int, span: str, *, now: datetime | None = None) -> dict:
     return out
 
 
-__all__ = ["EMPTY_LIST_DISCORD", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
+__all__ = ["EMPTY_LIST_DISCORD", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

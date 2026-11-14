@@ -530,7 +530,7 @@ src/oibot_gm/
                        "Lowest in the last 7 days: … · highest: …" / "None listed in the last 7 days.", + "The bot has kept prices since <day>."
                        under 30 days; NO_HISTORY_YET; [] while hidden — C16), chart(reg, item, span) (BLOCKING: points {t, when (local12; a folded
                        day its UTC day alone), low, high, words} + the span's low/high and their words + since / until = the span's start and the server's now), SPANS 7 · 30 · 90 days · 1 year,
-                       EMPTY_LIST_SITE / EMPTY_LIST_DISCORD
+                       EMPTY_LIST_SITE / EMPTY_LIST_DISCORD (EMPTY_LIST_HIDDEN on both while prices are hidden: no search to point at)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
                        officers' `config` section = configops.summary_text(config_summary(audience)) (owner: Host too);
                        `prices` section (every member, §5.65: prices.help_section, gated by prices.help_hit alone — code computes, the model words it);

@@ -161,6 +161,14 @@ def test_an_empty_list(reg, market_on):  # noqa: F811
     assert h.text == prices.EMPTY_LIST_DISCORD and h.screen["view"] is None
 
 
+def test_an_empty_list_while_prices_are_hidden(reg, market_on):  # noqa: F811
+    register(reg)
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now() - timedelta(hours=30))  # a day old: hidden (C16)
+    h = harness(reg)
+    run(FLOWS["price"](h.command(), reg))
+    assert h.text == prices.EMPTY_LIST_HIDDEN and h.screen["view"] is None, "no /price item to point at while nothing can be watched"
+
+
 def test_the_full_list_and_the_unregistered_refusals(reg, market_on):  # noqa: F811
     on(reg)
     h = harness(reg)
