@@ -381,3 +381,28 @@ def test_house_choices_offer_only_the_faction_houses_with_listings(reg, fake, bo
     assert first.ruleset_id == 2 and first.listings == 52
     assert first.samples == [(BAR, 489998), (DREAMFOIL, 1500), (RUNECLOTH, None)]
     assert [c[2] for c in fake.fetches()] == [6, 18, 30], "never another faction's or the neutral house"
+
+
+def test_a_stale_or_hidden_table_brought_back_by_an_unchanged_read_is_heard(reg, fake, bot, clock):
+    """An open page showing "more than six hours old" (or no prices, past a day) hears the table come back to fresh, even
+    when the feed answers not modified or the same prices."""
+    market(reg)
+    run(discord_auctions.refresh(bot, reg))
+    heard: list[str] = []
+    discord_auctions.PRICE_LISTENERS.append(heard.append)
+    try:
+        clock.advance(hours=7)
+        assert discord_auctions.state(reg) == "stale"
+        assert run(discord_auctions.refresh(bot, reg)) == "updated"  # a 304 on the stored Last-Modified
+        assert fake.fetches()[-1] == ("table", 2, 6, STAMP)
+        assert discord_auctions.state(reg) == "fresh" and heard == [reg.key]
+        clock.advance(hours=25)
+        assert discord_auctions.state(reg) == "old"
+        fake.modified = "Fri, 13 Nov 2026 21:00:00 GMT"  # a new answer holding the same prices
+        assert run(discord_auctions.refresh(bot, reg)) == "updated"
+        assert heard == [reg.key, reg.key]
+        clock.advance(hours=1)
+        assert run(discord_auctions.refresh(bot, reg)) == "unchanged", "fresh to fresh with the same prices: nothing to hear"
+        assert heard == [reg.key, reg.key]
+    finally:
+        discord_auctions.PRICE_LISTENERS.remove(heard.append)

@@ -278,7 +278,8 @@ async def refresh_soon(bot, reg) -> asyncio.Task:
 
 async def refresh(bot, reg, *, force: bool = False) -> str:
     """Read the selected auction house when due (an hour since the guild's last check, or `force`) →
-    "updated" | "unchanged" (not due, the feed unchanged, or the market changed while it ran) | "off" | "failed".
+    "updated" (new prices, or a stale / hidden table back to fresh) | "unchanged" (not due, the feed unchanged on a fresh
+    table, or the market changed while it ran) | "off" | "failed".
     Another guild's read of the same house within the hour is taken instead of a request."""
     m = _market(reg)
     if m is None or not auctions.available(reg):
@@ -287,6 +288,7 @@ async def refresh(bot, reg, *, force: bool = False) -> str:
     st = _st(reg)
     async with _lock(key):
         st["tried"] = (key, _now())
+        was_fresh = state(reg) == "fresh"  # stale / old brought back to fresh is news for an open page, same prices or not
         own = table(reg)
         if not force and own is not None and _now() - own.at < FETCH_EVERY:
             return "unchanged"
@@ -316,7 +318,7 @@ async def refresh(bot, reg, *, force: bool = False) -> str:
         if not _same(_market(reg), t):  # the owner changed or cleared the market while it ran
             return "off" if _market(reg) is None else "unchanged"
         await _save(reg, t)
-        if own is not None and t.prices == own.prices:  # the guild's own prices, only fresher: nothing new to hear
+        if own is not None and t.prices == own.prices and was_fresh:  # the guild's own prices, only fresher: nothing new to hear
             return "unchanged"
         _heard(reg)
         return "updated"

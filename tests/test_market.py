@@ -92,6 +92,19 @@ def test_a_stale_settings_rev_raises_config_changed(reg):
     assert reg.config.market.house_id == 6
 
 
+def test_picking_the_current_house_again_writes_nothing(reg):
+    """The confirm says "nothing changes" for the house already picked: the write keeps that promise (no commit, the
+    first pick's who and when kept)."""
+    linked(reg).set_market(HORDE_AH, 2, "Owner", by_id=OWNER)
+    first = reg.config.market
+    before = commits(reg)
+    assert cq.market_consequence(reg, HORDE_AH) == ["The Horde Auction House is already the guild's auction house, so nothing changes."]
+    reg.set_market(HORDE_AH, 2, "Someone else", by_id=OWNER)
+    assert commits(reg) == before and reg.config.market == first
+    reg.set_market(OTHER_HORDE_AH, 2, "Owner", by_id=OWNER)
+    assert commits(reg) == before + 1, "another house is a write"
+
+
 def test_relinking_the_same_ruleset_and_faction_keeps_the_market(reg):
     linked(reg).set_market(HORDE_AH, 2, "Owner", by_id=OWNER)
     m = reg.config.market

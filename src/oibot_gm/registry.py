@@ -1593,6 +1593,8 @@ class Registry:
         if not faction_houses(self, [house], a.faction):
             raise RegistryError(f"That auction house isn't the {a.faction} faction's.")
         old = self.config.market
+        if old is not None and (int(old.house_id), int(old.ruleset_id)) == (int(house.id), int(ruleset_id)):
+            return f"prices already come from the {house.name}"  # the confirm said "nothing changes": no write
         self.config.market = Market(ruleset_id=int(ruleset_id), house_id=int(house.id), name=str(house.name), faction=str(a.faction),
                                     picked_by=str(by or "?"), picked_at=now())
         try:

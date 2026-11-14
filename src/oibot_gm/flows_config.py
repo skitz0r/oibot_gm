@@ -2651,12 +2651,16 @@ class ArmoryGuildWizard(OwnerWizard):
         from . import ops as ops_mod
 
         c = self.draft["choice"]
+        before = self.reg.config.market
         try:
             said = await asyncio.to_thread(lambda: self.reg.set_market(c.house, c.ruleset_id, i.user.display_name, by_id=i.user.id, rev=self.rev))
         except RegistryError as e:
             await self.finish(i, f"❌ {e}")
             return
         self.rev = self.reg.config_rev("settings")
+        if self.reg.config.market is before:  # the house already picked: nothing was written, nothing to audit or read
+            await self.hub(i, f"{said[:1].upper()}{said[1:]}.")
+            return
         await ops_mod.audited(i.client.ops, self.reg, i.user.display_name, f"picked the {c.house.name} as the guild's auction house", via="discord", by_id=i.user.id)
         await discord_auctions.refresh_soon(i.client, self.reg)
         await self.hub(i, f"✅ {said[:1].upper()}{said[1:]}.")

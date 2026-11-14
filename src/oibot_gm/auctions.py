@@ -69,6 +69,7 @@ class Client:
         """Every house of the ruleset (every faction's and the neutral ones), in the armory's order."""
         path = f"/data/wow/ruleset/{int(ruleset_id)}/auctions/index"
         d = self.arm.get(path, self.dynamic_ns).data
+        _need("auctions" in d, path, "auctions")  # the index always lists its houses (only an empty HOUSE has no key)
         return [House(id=_int(h, "id", path), name=_str(h, "name", path)) for h in _rows(d, path)]
 
     def table(self, ruleset_id: int, house_id: int, since: str | None = None) -> tuple[dict[int, Price] | None, str | None]:

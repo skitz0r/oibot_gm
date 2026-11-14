@@ -162,3 +162,11 @@ def test_guild_facts_carry_the_ruleset_id():
     facts = arm.guild("lantern-wardens")
     assert isinstance(facts, GuildFacts) and facts.ruleset_id == 2 and facts.kind == "Normal"
     assert isinstance(facts.created, datetime) and facts.created.tzinfo == timezone.utc
+
+
+def test_a_house_list_without_its_auctions_key_raises_armory_shape():
+    """An empty HOUSE answers without `auctions` (an empty table); the house INDEX always lists its houses — a missing key
+    there is a surprise, never "no houses"."""
+    c, _ = client({IDX: (200, {"_links": {}})})
+    with pytest.raises(ArmoryShape):
+        c.houses(1)
