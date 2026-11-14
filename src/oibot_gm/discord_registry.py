@@ -1209,17 +1209,16 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     professions_group.command(name="list", description="A profession's crafters, highest skill first")(professions_list)
     tree.add_command(professions_group)
 
-    # ---------------- /price (members; auction prices §4.5): the lowest price listed, ephemeral, no model call
-    @tree.command(name="price", description="The lowest price listed for an item at the guild's auction house")
-    @app_commands.describe(item="start typing the item's name")
+    # ---------------- /price (members; auction prices §4.5, price watch §4.4): the lowest price listed and Watch, or with no
+    # item the asker's watch list — flows_prices (ephemeral, no model call)
+    @tree.command(name="price", description="An item's lowest price at the guild's auction house, or your watch list")
+    @app_commands.describe(item="start typing the item's name; leave it out for your watch list")
     @app_commands.autocomplete(item=item_autocomplete)
-    async def price(interaction: discord.Interaction, item: str):
+    async def price(interaction: discord.Interaction, item: str | None = None):
         reg, interaction = await need(interaction)
         if not reg:
             return
-        from . import prices
-        lines = prices.price_answer(reg, item, reg.is_owner_id(interaction.user.id))
-        await interaction.response.send_message("\n".join(lines)[:2000], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        await FLOWS["price"](interaction, reg, item=item)
 
     # ---------------- /guide (members; officers withdraw / restore): the guild guide library, design §5.63
     from .discord_guides import register_guide_commands

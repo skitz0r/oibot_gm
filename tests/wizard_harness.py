@@ -35,7 +35,7 @@ class FakeResponse:
         self._done = True
         mid = next(_ids)
         self.itx._sent_id = mid
-        self.h._record(content, view, mid, embed, kw)
+        self.h._record(content, view, mid, embed, {**kw, "ephemeral": ephemeral})
 
     async def edit_message(self, *, content=None, embed=None, view=None, **kw):
         self._done = True
@@ -79,7 +79,7 @@ class Harness:
         self.client = client or SimpleNamespace(raids=SimpleNamespace(store=lambda _reg: rs), announce_absence=self._announce, ico=lambda kind, key: "")
         self.modal = None
         self.channel = None  # the channel the command is used in (None = unknown); a test sets it when a flow posts there
-        self.screens: list[dict] = []  # every render: {"text", "view", "message_id"}
+        self.screens: list[dict] = []  # every render: {"text", "view", "message_id", "embed", "files", "kw" (ephemeral, allowed_mentions …)}
 
     async def _announce(self, reg, m, a, by, by_id=None):
         self.announced.append((m.display_name, a.start, a.end, by))
@@ -90,7 +90,7 @@ class Harness:
         assert len(content or "") <= 2000, f"message over Discord's 2000 characters: {len(content)}"
         kw = kw or {}
         files = ([kw["file"]] if kw.get("file") else []) + list(kw.get("files") or []) + list(kw.get("attachments") or [])
-        self.screens.append({"text": content or "", "view": view, "message_id": message_id, "embed": embed, "files": files})
+        self.screens.append({"text": content or "", "view": view, "message_id": message_id, "embed": embed, "files": files, "kw": kw})
 
     def _lint(self, obj) -> None:
         """Every modal and screen a flow produces must pass wizard.lint — what the Discord API would refuse."""

@@ -479,6 +479,14 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   prices are, then the item's lowest price listed at the guild's auction house and how many are listed (or *none
   listed*). Typed text that isn't picked lists up to ten matching items and how many more match. Only you see it. When
   no auction house is picked, prices haven't been read yet, or the last ones are more than a day old, it says that alone.
+  When the answer is one item, it has a **Watch** button (**Stop watching** when the item is already on your list):
+  pressing it puts the item on your watch list at once and says so (*"You're watching Plaguebloom."*); press again to
+  take it off. `/price` with no item shows **Your watch list**: each item's lowest price and how many are listed, how
+  recent the prices are, and a menu of the items. Pick one to see its price, the lowest and highest price of the last 7
+  and 30 days (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*), **Stop watching** and **Back**. The list is
+  yours alone: nobody else, officers included, can see it. It holds 25 items (*"Your watch list holds 25 items. Stop
+  watching one first."*), and you need to be registered to keep one. Nothing pings or messages you when a price moves:
+  open the list when you want to look. While prices aren't shown, the list shows the items' names alone.
 - **Who can make a thing, on the site**: the **Professions** page is for every member. Type a recipe's name, or part of it
   ("ironfeather" finds every Ironfeather recipe), in the search box: it searches the game's whole list of recipes, the
   ones somebody in the guild makes first. Each matching recipe shows its profession's icon, the game's category

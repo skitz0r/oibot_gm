@@ -117,6 +117,9 @@ class Wizard(discord.ui.View):
     in `show(...)`; the last one calls `finish(...)`. Only the person who started it can press anything, and the
     `guard` (officer/owner status, test-bench rules) is checked again at every press, not only at the start."""
 
+    heading = True  # False: a screen is its text alone, no bold title line (a one-answer screen such as /price)
+    mentions: discord.AllowedMentions | None = None  # set: every screen is sent and edited with it
+
     def __init__(self, reg: Registry, owner_id: int, *, title: str, guard: Callable[[discord.Interaction], Awaitable[str | None]] | None = None):
         super().__init__(timeout=WIZARD_TIMEOUT_S)
         self.reg, self.owner_id, self.title = reg, owner_id, title
@@ -126,6 +129,12 @@ class Wizard(discord.ui.View):
         self._last: discord.Interaction | None = None  # the newest interaction, so an expired wizard can say so
         self._closed = False
         self._saved = False
+
+    def _body(self, text: str) -> str:
+        return (f"**{self.title}**\n{text}" if self.heading else text)[:2000]
+
+    def _kw(self) -> dict:
+        return {"allowed_mentions": self.mentions} if self.mentions is not None else {}
 
     # ---- permissions
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -145,18 +154,18 @@ class Wizard(discord.ui.View):
         self.clear_items()
         for it in items:
             self.add_item(it)
-        body = f"**{self.title}**\n{text}"[:2000]
+        body = self._body(text)
         self._last = interaction
         if text.lstrip().startswith("✅"):  # a write landed and the wizard stays open (a draft hub): a restart says it stays
             self.mark_saved()
         if interaction.response.is_done():
-            await interaction.edit_original_response(content=body, embed=embed, view=self)
+            await interaction.edit_original_response(content=body, embed=embed, view=self, **self._kw())
             return
         on_ours = interaction.message is not None and self.message_id is not None and interaction.message.id == self.message_id
         if on_ours and interaction.type in (discord.InteractionType.component, discord.InteractionType.modal_submit):
-            await interaction.response.edit_message(content=body, embed=embed, view=self)
+            await interaction.response.edit_message(content=body, embed=embed, view=self, **self._kw())
             return
-        await interaction.response.send_message(body, embed=embed, view=self, ephemeral=True)
+        await interaction.response.send_message(body, embed=embed, view=self, ephemeral=True, **self._kw())
         try:
             self.message_id = (await interaction.original_response()).id
         except discord.HTTPException:
@@ -189,9 +198,9 @@ class Wizard(discord.ui.View):
         self._last = interaction
         on_ours = interaction.message is not None and interaction.message.id == self.message_id
         if on_ours:
-            await interaction.response.edit_message(content=f"**{self.title}**\n{text}", embed=None, view=None)
+            await interaction.response.edit_message(content=self._body(text), embed=None, view=None, **self._kw())
         else:
-            await interaction.response.send_message(f"**{self.title}**\n{text}", ephemeral=True)
+            await interaction.response.send_message(self._body(text), ephemeral=True, **self._kw())
             try:
                 self.message_id = (await interaction.original_response()).id
             except discord.HTTPException:
@@ -204,13 +213,13 @@ class Wizard(discord.ui.View):
         from .pending_views import untrack
 
         untrack(f"wiz:{id(self)}")
-        body = f"**{self.title}**\n{text}"[:2000]
+        body = self._body(text)
         if interaction.response.is_done():
-            await interaction.edit_original_response(content=body, embed=None, view=None)
+            await interaction.edit_original_response(content=body, embed=None, view=None, **self._kw())
         elif interaction.message is not None and interaction.message.id == self.message_id:
-            await interaction.response.edit_message(content=body, embed=None, view=None)
+            await interaction.response.edit_message(content=body, embed=None, view=None, **self._kw())
         else:
-            await interaction.response.send_message(body, ephemeral=True)
+            await interaction.response.send_message(body, ephemeral=True, **self._kw())
 
     async def refuse(self, interaction: discord.Interaction, error: str, retry: Callable[[discord.Interaction], Awaitable[None]] | None = None, retry_label: str = "Fix this") -> None:
         """A validation refusal: say what is wrong, keep the draft, and offer to go back to the step that caused it."""
@@ -228,7 +237,7 @@ class Wizard(discord.ui.View):
         if self._closed or not self._last:
             return
         try:
-            await self._last.edit_original_response(content=f"**{self.title}**\nThis wizard expired; nothing was changed. Run the command again to start over.", embed=None, view=None)
+            await self._last.edit_original_response(content=self._body("This wizard expired; nothing was changed. Run the command again to start over."), embed=None, view=None)
         except discord.HTTPException:
             pass
 

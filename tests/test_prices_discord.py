@@ -206,13 +206,14 @@ def test_price_answers_one_item_several_and_the_off_sentence(reg, market_on):
     assert cmd is not None and len(cmd.description) <= 100
 
     def ask(item, uid=None):
-        ix = _ix(reg)
-        if uid is not None:
-            ix.user = types.SimpleNamespace(id=uid, display_name="o")
+        h = Harness(reg, user=types.SimpleNamespace(id=uid or 300_000_000_000_000_404, display_name="o", mention="@o"))
+        ix = h.command()  # the command opens the flow `price` (price watch §4.4): the same lines, through the wizard core
+        ix.extras, ix.guild_id = {"guild": reg.key}, None
         run(cmd.callback(ix, item=item))
-        text, kw = ix.response.sent[0]
+        assert len(h.screens) == 1
+        kw = h.screen["kw"]
         assert kw["ephemeral"] and kw["allowed_mentions"].to_dict()["parse"] == []
-        return text
+        return h.text
 
     assert ask("arcanite bar") == discord_auctions.OFF_WORDS, "prices off: that sentence alone"
     assert ask("arcanite bar", OWNER) == prices.OWNER_LINK_WORDS, "no guild linked: the owner is told to link it first"
@@ -289,10 +290,11 @@ def test_a_version_without_auction_houses_has_no_price_anywhere_in_discord(reg, 
     monkeypatch.setattr(reg, "base_profile", p)
     assert not p.auctions
     tree = _offline_tree(reg)
-    ix = _ix(reg)
-    ix.user = types.SimpleNamespace(id=OWNER, display_name="Owner")
+    h = harness(reg, rs)
+    ix = h.command()
+    ix.extras, ix.guild_id = {"guild": reg.key}, None
     run(tree.get_command("price").callback(ix, item="arcanite bar"))
-    assert ix.response.sent[0][0] == prices.NO_AUCTIONS_WORDS == "This game version has no auction houses."
+    assert h.text == prices.NO_AUCTIONS_WORDS == "This game version has no auction houses."
     # /professions who reads exactly as it did before prices (tbc has no professions: its one sentence, no cost line)
     ix = _ix(reg)
     run(_cmd(tree, "professions who").callback(ix, recipe="mooncloth bag"))
