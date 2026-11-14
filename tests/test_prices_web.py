@@ -303,7 +303,8 @@ def test_watch_then_list_then_stop(w, market_on):
                  "registered": True}
     r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
     assert r.status_code == 200, r.text
-    row = {"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "15s", "qty": 4, "words": "Plaguebloom: lowest price 15s, 4 listed."}
+    row = {"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "15s", "qty": 4, "words": "Plaguebloom: lowest price 15s, 4 listed.",
+           "spark": None}  # no history kept yet: no small line
     assert r.json() == {"message": "You're watching Plaguebloom.", "rows": [row]}
     r = w.c.post("/api/prices/watch", json={"id": BAR, "on": True}, headers=h)
     assert [x["id"] for x in r.json()["rows"]] == [BAR, PLAGUEBLOOM], "newest first"
@@ -378,13 +379,36 @@ def test_history_of_a_watched_item(w, market_on):
     assert w.c.get("/api/prices/history?id=plaguebloom&span=7", headers=h).status_code == 400, "an id that isn't a number"
 
 
-def test_history_of_an_item_you_dont_watch_is_refused(w, market_on):
+def test_history_of_an_item_you_dont_watch(w, market_on):
+    """The owner's decision 2026-11-14 (replacing C6): any item the bot can name shows its history, watched or not — and
+    reading it watches nothing. An id the bot can't name is refused unless it is on the viewer's own list."""
     m = member(w)
     h = as_user(w, m.discord_id)
     priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
     keep(w.reg, now() - timedelta(days=2), {PLAGUEBLOOM: Price(low=1500, qty=4)})
     r = w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=7", headers=h)
-    assert r.status_code == 403 and r.json()["error"] == "Watch the item first to see its history."
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["name"] == "Plaguebloom" and d["points"] and d["sentences"] == prices.history_sentences(w.reg, PLAGUEBLOOM)
+    assert w.reg.watching(m.discord_id) == [], "reading a history watches nothing"
+    r = w.c.get("/api/prices/history?id=999999999&span=7", headers=h)
+    assert r.status_code == 400 and r.json()["error"] == prices.NO_MATCH
+
+
+def test_a_watched_row_carries_its_small_line(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4), BAR: Price(low=489998, qty=30)}, at=now())
+    keep(w.reg, now() - timedelta(days=2), {PLAGUEBLOOM: Price(low=1200, qty=4)})
+    keep(w.reg, now() - timedelta(days=1), {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    w.c.post("/api/prices/watch", json={"id": BAR, "on": True}, headers=h)
+    w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    rows = {r["id"]: r for r in w.c.get("/api/prices/watching", headers=h).json()["rows"]}
+    spark = rows[PLAGUEBLOOM]["spark"]
+    assert spark == prices.spark(w.reg, PLAGUEBLOOM) and spark["until"] - spark["since"] == 7 * 86400
+    assert [low for _t, low in spark["points"] if low is not None][-1] == 1500 and 1200 in [low for _t, low in spark["points"]]
+    assert all(isinstance(t, int) and len(p) == 2 for p in spark["points"] for t in [p[0]]), "positions only: no words"
+    assert rows[BAR]["spark"] is None, "never listed in the kept history: nothing to draw"
 
 
 def test_an_unregistered_server_member_can_search_but_not_watch(w, market_on):
@@ -421,7 +445,8 @@ def test_another_member_never_reads_your_list(w, market_on):
     hb = as_user(w, b.discord_id)
     for q in ("", f"?uid={a.discord_id}", f"?member={a.discord_id}", f"?discord_id={a.discord_id}"):
         assert w.c.get("/api/prices/watching" + q, headers=hb).json()["rows"] == [], q
-    assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=7&uid={a.discord_id}", headers=hb).status_code == 403
+    r = w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=7&uid={a.discord_id}", headers=hb)
+    assert r.status_code == 200 and "watching" not in r.json() and "rows" not in r.json(), "an item's history says nothing of who watches it"
     r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": False, "uid": a.discord_id, "member": a.discord_id}, headers=hb)
     assert r.status_code == 200 and w.reg.watching(a.discord_id) == [PLAGUEBLOOM], "B's stop never touches A's list"
     routes = {(method, r.path): r for r in w.c.app.routes if hasattr(r, "dependant") for method in r.methods}

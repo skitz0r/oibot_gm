@@ -72,8 +72,8 @@ def test_price_with_one_item_offers_watch_and_flips(reg, market_on):  # noqa: F8
 
     async def go():
         await FLOWS["price"](h.command(), reg, item=f"#{PLAGUEBLOOM}")
-        today = prices.price_answer(reg, f"#{PLAGUEBLOOM}", False)
-        assert lines(h) == today, "the answer reads exactly as /price did"
+        today = prices.price_answer(reg, f"#{PLAGUEBLOOM}", False) + prices.history_sentences(reg, PLAGUEBLOOM)
+        assert lines(h) == today, "the answer as /price gave it, then how the price has moved — watched or not"
         assert h.buttons() == ["Watch"]
         await h.press("Watch")
         assert lines(h)[0] == "You're watching Plaguebloom." and lines(h)[1:] == today
@@ -183,7 +183,7 @@ def test_the_full_list_and_the_unregistered_refusals(reg, market_on):  # noqa: F
         await FLOWS["price"](h.command(), reg, item=f"#{PLAGUEBLOOM}")
         await h.press("Watch")
         assert lines(h)[0] == expect and h.buttons() == ["Watch"], "the refusal, the button unchanged"
-        assert lines(h)[1:] == prices.price_answer(reg, f"#{PLAGUEBLOOM}", False)
+        assert lines(h)[1:] == prices.price_answer(reg, f"#{PLAGUEBLOOM}", False) + prices.history_sentences(reg, PLAGUEBLOOM)
     run(refused(WATCH_REGISTER_FIRST))
     assert UID not in reg.members, "a watch never creates a record"
     register(reg)

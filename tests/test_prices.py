@@ -268,26 +268,26 @@ def test_the_owner_is_never_told_to_pick_a_house_that_cannot_be_picked(reg, cloc
 
 
 def test_naming_stops_quietly_on_a_failure_and_caps_per_fetch(reg, clock, monkeypatch):
-    unnamed = {900000 + i: Price(low=100, qty=i) for i in range(1, 251)}  # 250 ids nothing names, qty 1..250
+    unnamed = {900000 + i: Price(low=100, qty=i) for i in range(1, 1251)}  # 1,250 ids nothing names, qty 1..1250
     priced(reg, {BAR: Price(low=489998, qty=999), **unnamed})
     fake = FakeNames({i: f"Kettle Part {i}" for i in unnamed})
     monkeypatch.setattr(discord_auctions, "_client", lambda r: fake)
     bot = SimpleNamespace(ops=FakeOps())
-    assert run(discord_auctions.name_items(bot, reg)) == discord_auctions.NAME_PER_FETCH == 200
+    assert run(discord_auctions.name_items(bot, reg)) == discord_auctions.NAME_PER_FETCH == 1000
     assert BAR not in fake.asked, "an id the recipe list names is never asked"
-    assert fake.asked[:3] == [900250, 900249, 900248], "most listed first"
-    assert len(fake.asked) == 200
-    assert prices.names(reg)[900250] == "Kettle Part 900250"
+    assert fake.asked[:3] == [901250, 901249, 901248], "most listed first"
+    assert len(fake.asked) == 1000
+    assert prices.names(reg)[901250] == "Kettle Part 901250"
     saved = json.loads(items_file().read_text(encoding="utf-8"))
-    assert saved[reg.profile.name]["900250"] == "Kettle Part 900250"
+    assert saved[reg.profile.name]["901250"] == "Kettle Part 901250"
     assert not [p for p in items_file().parent.iterdir() if p.name != "items.json" and p.is_file()], "written whole"
     prices.reset_names()  # a restart: the file names them again
-    assert prices.names(reg)[900250] == "Kettle Part 900250"
+    assert prices.names(reg)[901250] == "Kettle Part 901250"
     # the next fetch names the rest; a 404 is not asked again in this process
     fake.asked.clear()
     del fake.names[900001]
-    assert run(discord_auctions.name_items(bot, reg)) == 49
-    assert len(fake.asked) == 50
+    assert run(discord_auctions.name_items(bot, reg)) == 249
+    assert len(fake.asked) == 250
     fake.asked.clear()
     assert run(discord_auctions.name_items(bot, reg)) == 0 and fake.asked == []
     # a failure stops it quietly: what was named before it is kept, no ops line

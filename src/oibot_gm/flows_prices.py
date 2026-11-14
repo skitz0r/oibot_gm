@@ -106,6 +106,7 @@ class PriceWizard(Wizard):
             await self.finish(interaction, self._screen([_esc(said), *lines]))
             return
         lines = [lines[0], *(_esc(x) for x in lines[1:])]  # the status line is ours; the rest carry item names
+        lines += await asyncio.to_thread(prices.history_sentences, reg, item_id)  # one item: how its price has moved, watched or not
         watching = prices.is_watching(reg, self.owner_id, item_id)
 
         async def press(i: discord.Interaction) -> None:

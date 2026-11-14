@@ -1,7 +1,39 @@
 import { useState } from "react";
 import { Box, SegmentedControl, Stack, Text } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
-import type { PriceHistory } from "../api";
+import type { PriceHistory, PriceSpark } from "../api";
+
+/** A watched item's small line in its row of the list: the lowest price over the last seven days as a step line, broken
+ *  where nothing was listed or the bot didn't read — a shape only, no numbers (the row's price is beside it, the full
+ *  chart opens under the row). Drawn over the server's `since` .. `until`; a flat price sits mid-height. */
+export function Sparkline({ data, label }: { data: PriceSpark; label: string }) {
+  const W = 120;
+  const HH = 28;
+  const lows = data.points.flatMap(([, low]) => (low == null ? [] : [low]));
+  if (lows.length === 0) return null;
+  const lo = Math.min(...lows);
+  const hi = Math.max(...lows);
+  const pad = hi > lo ? (hi - lo) * 0.15 : Math.max(Math.abs(lo) * 0.1, 1);
+  const t0 = data.since;
+  const t1 = Math.max(data.until, t0 + 1);
+  const sx = (t: number) => 1 + ((Math.min(Math.max(t, t0), t1) - t0) / (t1 - t0)) * (W - 2);
+  const sy = (v: number) => 2 + (1 - (v - (lo - pad)) / (hi - lo + 2 * pad)) * (HH - 4);
+  let path = "";
+  let drawing = false;
+  data.points.forEach(([t, low], i) => {
+    if (low == null) { drawing = false; return; }
+    const yy = sy(low).toFixed(1);
+    path += drawing ? ` V${yy}` : ` M${sx(t).toFixed(1)},${yy}`;
+    path += ` H${sx(i + 1 < data.points.length ? data.points[i + 1][0] : t1).toFixed(1)}`;
+    drawing = true;
+  });
+  return (
+    <svg width={W} height={HH} role="img" aria-label={label} style={{ display: "block", maxWidth: "100%" }}>
+      <title>{label}</title>
+      <path d={path} fill="none" stroke="var(--mantine-color-teal-4)" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 /** Layout in pixels: the left gutter holds the two price labels, the bottom the two time labels (a second row when they
  *  would meet). The plot is drawn at the container's real width, so text never shrinks on a phone. */

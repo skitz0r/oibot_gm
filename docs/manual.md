@@ -486,7 +486,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   prices are, then the item's lowest price listed at the guild's auction house and how many are listed (or *none
   listed*). Typed text that isn't picked lists up to ten matching items and how many more match. Only you see it. When
   no auction house is picked, prices haven't been read yet, or the last ones are more than a day old, it says that alone.
-  When the answer is one item, it has a **Watch** button (**Stop watching** when the item is already on your list):
+  When the answer is one item, it also says how the price has moved (the lowest and highest of the last 7 and 30 days),
+  watched or not, and has a **Watch** button (**Stop watching** when the item is already on your list):
   pressing it puts the item on your watch list at once and says so (*"You're watching Plaguebloom."*); press again to
   take it off. `/price` with no item shows **Your watch list**: each item's lowest price and how many are listed, how
   recent the prices are, and a menu of the items. Pick one to see its price, the lowest and highest price of the last 7
@@ -529,15 +530,15 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   for every member. At the top, **What does it go for?** — the same search as the Professions page's box: part of an
   item's name lists up to 25 items with their lowest price and how many are listed (or *none listed*) and how many more
   match, each with **Watch** (**Stop watching** when it is already on your list). The page says once how recent the
-  prices are (*Prices as of …*). Below it, **Your watch list**: a row per item with its lowest price and how many are
-  listed, newest first; an empty list says *"You aren't watching anything yet. Search for an item above and press
-  Watch."* (while prices aren't shown, just *"You aren't watching anything yet."*, in `/price` too). Open a row to see its price over time: a line of the lowest price (a price holds until the next change; a
+  prices are (*Prices as of …*). Below it, **Your watch list**: a row per item with its lowest price, how many are
+  listed and a small line of its price over the last seven days, newest first; an empty list says *"You aren't watching anything yet. Search for an item above and press
+  Watch."* (while prices aren't shown, just *"You aren't watching anything yet."*, in `/price` too). Open a row — of your list or of the search, watched or not — to see the item's price over time: a line of the lowest price (a price holds until the next change; a
   break where nothing was listed, never a drop to zero; on older days a faint band from that day's lowest to its
   highest; a stretch when the bot didn't read the auction house is a break too, read *not read*), with **7 days** · **30 days** · **90 days** · **1 year**, the highest and lowest of the span at its side and
   the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time and
   price (the first point reads the span's start, with the price the item had then). A price that didn't change all span is
   a flat line across it. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'
-  and, while the record is young, *"The bot has kept prices since Sat 7 Nov."*) and **Stop watching**. A watch is your own
+  and, while the record is young, *"The bot has kept prices since Sat 7 Nov."*) and **Watch** or **Stop watching**. A watch is your own
   preference: it happens at once, with no confirm, and the same list shows in `/price`. You need to be registered to keep
   one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction
   house picked, or the last prices more than a day old) there is no search and the list shows the items' names alone, with

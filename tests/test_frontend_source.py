@@ -721,6 +721,11 @@ def test_the_prices_tab():
     for label in ("Watch", "Stop watching", "Your watch list"):
         assert label in page, label
     assert "<ItemName " in page and "<PriceChart" in page
+    # 2026-11-14: a search row opens to the chart too (watched or not), and a watched row carries its small line
+    assert 'toggle(p.id, "search")' in page and 'isOpen(p.id, "search") && panel(' in page, "a search result opens its chart without watching"
+    assert "<Sparkline data={r.spark}" in page, "the watch list's rows draw the server's seven-day line"
+    spark = _code_only((SRC / "components" / "PriceChart.tsx").read_text())
+    assert "export function Sparkline" in spark and "data.since" in spark and "data.until" in spark
     assert "toLocale" not in page and "new Date(" not in page, "times and money are the server's words"
     assert 'useLive(' in page and '"prices"' in page
     assert "useDirty" not in page, "the tab has no edit mode"

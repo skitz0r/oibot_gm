@@ -42,7 +42,6 @@ FIND_LIMIT = 25  # items the price search returns; `total` counts every match
 MARKET_ACTOR = ("Picking the guild's auction house is the owner's decision: from MCP it needs OIBOT_MCP_ACTOR set to the "
                 "owner's Discord id.")
 OWN_LIST = "A watch list is its member's own."  # every watch route refuses an MCP caller (price watch C11)
-WATCH_FIRST = "Watch the item first to see its history."  # history shows for watched items only (C6)
 
 
 def _low(low: int | None) -> str:
@@ -106,7 +105,8 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
     def watch_rows(reg, uid: int) -> list[dict]:
         if not shown_now(reg):  # prices hidden (C16): the names alone
             return [{"id": p.id, "name": p.name, "low_words": "", "qty": 0, "words": ""} for p in prices.watch_list(reg, uid)]
-        return [{"id": p.id, "name": p.name, "low_words": _low(p.low), "qty": p.qty, "words": prices.price_words(p)}
+        return [{"id": p.id, "name": p.name, "low_words": _low(p.low), "qty": p.qty, "words": prices.price_words(p),
+                 "spark": prices.spark(reg, p.id)}  # the row's small line (BLOCKING: a history read each — callers use a thread)
                 for p in prices.watch_list(reg, uid)]
 
     @app.get("/api/prices/watching")
@@ -117,7 +117,7 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         reg = v.reg
         m = reg.members.get(v.uid)
         shown = shown_now(reg)
-        return {"rows": watch_rows(reg, v.uid), "words": prices.status_sentence(reg, bool(v.owner)),
+        return {"rows": await asyncio.to_thread(watch_rows, reg, v.uid), "words": prices.status_sentence(reg, bool(v.owner)),
                 "shown": shown, "max": WATCH_MAX, "empty": prices.EMPTY_LIST_SITE if shown else prices.EMPTY_LIST_HIDDEN,
                 "registered": m is not None and not m.test}
 
@@ -134,11 +134,12 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
             message = await asyncio.to_thread(verb, v.reg, v.uid, item)  # one quiet commit (C14); SAVE_LISTENERS → `member`
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": message, "rows": watch_rows(v.reg, v.uid)}
+        return {"message": message, "rows": await asyncio.to_thread(watch_rows, v.reg, v.uid)}
 
     @app.get("/api/prices/history")
     async def prices_history(request: Request, id: str = "", span: str = "7"):  # noqa: A002 — the page's own word
-        """A watched item's chart over one span and its history sentences (C5); an item not on the list 403 (C6)."""
+        """An item's chart over one span and its history sentences (C5) — any item the bot can name, watched or not
+        (the owner's decision 2026-11-14, replacing C6), and an item on the viewer's own list the bot can't name yet."""
         v = await who(request)
         own_list(v)
         reg = v.reg
@@ -146,8 +147,8 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
             item = int(id)
         except ValueError:
             return JSONResponse({"error": prices.NO_MATCH}, status_code=400)
-        if not prices.is_watching(reg, v.uid, item):
-            raise HTTPException(403, WATCH_FIRST)
+        if item not in prices.names(reg) and not prices.is_watching(reg, v.uid, item):
+            return JSONResponse({"error": prices.NO_MATCH}, status_code=400)
         try:
             chart, sentences = await asyncio.to_thread(lambda: (prices.chart(reg, item, span), prices.history_sentences(reg, item)))
         except RegistryError as e:

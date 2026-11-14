@@ -51,7 +51,7 @@ FETCH_EVERY = timedelta(hours=1)
 STALE_AFTER = timedelta(hours=6)  # C3: shown, marked stale
 HIDE_AFTER = timedelta(hours=24)  # C10: not shown at all
 WARN_EVERY = timedelta(hours=1)  # one ops warning per guild per hour
-NAME_PER_FETCH = 200  # listed ids named from Blizzard after each check, most listed first
+NAME_PER_FETCH = 1000  # listed ids named from Blizzard after each check, most listed first (≤ 10 a second: under two minutes, in the background)
 
 # the words (spec §3): what a reader sees when there is no price to show, and why
 OFF_WORDS = "Prices are off until the owner picks the guild's auction house on the Config page."

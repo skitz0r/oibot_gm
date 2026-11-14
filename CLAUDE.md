@@ -744,8 +744,10 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        The watch list (§5.66; the session's own uid, 403 from MCP — C11 OWN_LIST, 404 where auctions.available is false — /price's gate): find rows carry
                        `watching`; GET /api/prices/watching → {rows (names alone while hidden), words, shown, max, empty, registered};
                        POST /api/prices/watch {id, on} → {message, rows} (prices.watch/unwatch in a thread; a refusal 400; the quiet write publishes
-                       `member`); GET /api/prices/history?id=&span= → {id, name, spans, **prices.chart, sentences} for a watched item only
-                       (403 WATCH_FIRST — C6; an unknown span 400)
+                       `member`); GET /api/prices/history?id=&span= → {id, name, spans, **prices.chart, sentences} for any item the bot
+                       can name, watched or not (the owner's decision 2026-11-14, replacing C6; an unnamed id only when it is on the viewer's
+                       own list, else 400 NO_MATCH; an unknown span 400); a watch list row carries `spark` = prices.spark (the last seven days
+                       as [t, low | null] over since..until, None with nothing to draw — the page's Sparkline; read in the routes' thread)
   web/api_memory.py    install_memory_api (design §5.61): GET /api/memories (officers: search, channel, member, paging), POST
                        /api/memories/{key}/forget (officers; MCP needs the actor), POST /api/me/memories/{key}/forget (own words only, never MCP)
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,

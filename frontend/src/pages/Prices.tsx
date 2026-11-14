@@ -4,14 +4,15 @@ import { IconChevronDown, IconChevronRight, IconSearch } from "@tabler/icons-rea
 import { api, ApiError, type Meta, type PriceFind, type PriceHistory, type PriceRow, type WatchList } from "../api";
 import { ItemName } from "../components/ItemName";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
-import { PriceChart } from "../components/PriceChart";
+import { PriceChart, Sparkline } from "../components/PriceChart";
 import { useLive } from "../hooks/useLive";
 import css from "./prices.module.css";
 
 /** The Prices tab (price watch §4.3; D1, D3, C5, C6, C12, C16), for every member where the version has auction houses:
  *  the search (GET /api/prices/find, the Professions box's search — D2) with Watch / Stop watching per row, then Your
- *  watch list (GET /api/prices/watching), each item opened in place to its chart and the server's history sentences
- *  (GET /api/prices/history) with Stop watching. Every sentence, price and time is the server's words; the page composes
+ *  watch list (GET /api/prices/watching), each row with its small seven-day line (Sparkline, the row's `spark`). A row of
+ *  either — watched or not (the owner's decision 2026-11-14) — opens in place to the item's chart and the server's
+ *  history sentences (GET /api/prices/history) with Watch / Stop watching; one row is open at a time. Every sentence, price and time is the server's words; the page composes
  *  none. A press waits for the server and takes the list it answers; a refusal prints the server's sentence. With prices
  *  hidden the list shows names alone and opens nothing. The `prices` topic (a new table) and `member` (a watch from another
  *  tab) reload it. */
@@ -20,7 +21,9 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [words, setWords] = useState(meta.prices?.words || "");
   const [q, setQ] = useState("");
   const [found, setFound] = useState<PriceFind | null>(null);
-  const [open, setOpen] = useState<number | null>(null);
+  const [openAt, setOpenAt] = useState<{ id: number; at: "search" | "list" } | null>(null);  // the one open row, and in which card
+  const open = openAt ? openAt.id : null;
+  const setOpen = (id: number | null, at: "search" | "list" = "list") => setOpenAt(id === null ? null : { id, at });
   const [span, setSpan] = useState("7");
   const [hist, setHist] = useState<PriceHistory | null>(null);
   const [pressing, setPressing] = useState<Set<number>>(new Set());
@@ -38,7 +41,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const loadHistory = (id: number, s: string) => {
     api.get<PriceHistory>(`/api/prices/history?id=${id}&span=${encodeURIComponent(s)}`)
       .then((d) => { if (view.current.open === d.id && view.current.span === d.span) setHist(d); })
-      .catch((e) => { if (e instanceof ApiError && e.status === 403) setOpen(null); else fail(e); });  // off the list meanwhile
+      .catch((e) => { if (e instanceof ApiError && e.status === 400) setOpen(null); else fail(e); });  // an item the bot can't name any more
   };
   const loadList = () => api.get<WatchList>("/api/prices/watching").then((d) => { setList(d); setWords(d.words); }).catch(fail);
   const load = () => {
@@ -62,7 +65,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
       setList((l) => (l ? { ...l, rows: d.rows } : l));
       setFound((f) => (f ? { ...f, rows: f.rows.map((r) => ({ ...r, watching: mine.has(r.id) })) } : f));
       setRefusal("");
-      if (!on && open === id) setOpen(null);
+      if (!on && openAt?.id === id && openAt.at === "list") setOpen(null);  // its list row is gone
       ok(d.message);
     } catch (e) {
       if (e instanceof ApiError && e.status === 400) setRefusal(e.message);
@@ -79,6 +82,27 @@ export function PricesPage({ meta }: { meta: Meta }) {
   );
   const shown = list?.shown ?? !!meta.prices?.on;  // prices show (fresh or stale): search and history; else names alone
   const rows = list?.rows || [];
+  const mine = new Set(rows.map((r) => r.id));
+  const isOpen = (id: number, at: "search" | "list") => shown && openAt?.id === id && openAt.at === at;
+  const toggle = (id: number, at: "search" | "list") => setOpen(isOpen(id, at) ? null : id, at);
+  const chevron = (id: number, at: "search" | "list") => (
+    <ActionIcon variant="subtle" color="gray" size="sm" aria-expanded={isOpen(id, at)} aria-label={isOpen(id, at) ? "Hide its price over time" : "Show its price over time"}
+      onClick={(e) => { e.stopPropagation(); toggle(id, at); }}>
+      {isOpen(id, at) ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+    </ActionIcon>
+  );
+  /** An open row's panel: the chart, the server's sentences, and Watch / Stop watching. */
+  const panel = (r: PriceRow, watching: boolean) => (
+    <Stack gap="sm" className={css.panel}>
+      {hist === null || hist.id !== r.id ? <Text size="sm" c="dimmed">Loading…</Text> : (
+        <>
+          <PriceChart data={hist} onSpan={changeSpan} span={span} busy={span !== hist.span} />
+          {hist.sentences.map((s) => <Text key={s} size="sm">{s}</Text>)}
+        </>
+      )}
+      <Group>{watchButton(r, watching)}</Group>
+    </Stack>
+  );
 
   return (
     <Stack gap="lg" className={css.touch}>
@@ -96,11 +120,17 @@ export function PricesPage({ meta }: { meta: Meta }) {
               <>
                 <div className={css.rows}>
                   {found.rows.map((p) => (
-                    <div key={p.id} className={css.row}>
-                      <Text size="sm" fw={600} className={css.name}><ItemName id={p.id} name={p.name} /></Text>
-                      <Text size="sm" c={p.qty ? undefined : "dimmed"}>{p.low_words}</Text>
-                      <Text size="sm" c="dimmed">{p.qty ? `${p.qty} listed` : ""}</Text>
-                      <Group justify="flex-end" className={css.actions}>{watchButton(p, !!p.watching)}</Group>
+                    <div key={p.id} className={css.found}>
+                      <div className={`${css.row} ${css.opens}`} onClick={() => toggle(p.id, "search")}>
+                        <Group gap={6} wrap="nowrap" className={css.name}>
+                          {chevron(p.id, "search")}
+                          <Text size="sm" fw={600} className={css.name}><ItemName id={p.id} name={p.name} /></Text>
+                        </Group>
+                        <Text size="sm" c={p.qty ? undefined : "dimmed"}>{p.low_words}</Text>
+                        <Text size="sm" c="dimmed">{p.qty ? `${p.qty} listed` : ""}</Text>
+                        <Group justify="flex-end" className={css.actions} onClick={(e) => e.stopPropagation()}>{watchButton(p, mine.has(p.id) || !!p.watching)}</Group>
+                      </div>
+                      {isOpen(p.id, "search") && panel(p, mine.has(p.id) || !!p.watching)}
                     </div>
                   ))}
                 </div>
@@ -120,34 +150,21 @@ export function PricesPage({ meta }: { meta: Meta }) {
         {rows.length > 0 && (
           <div className={css.list}>
             {rows.map((r) => {
-              const opened = shown && open === r.id;
+              const opened = isOpen(r.id, "list");
               return (
                 <div key={r.id} className={css.item}>
-                  <div className={shown ? `${css.row} ${css.opens}` : css.row} onClick={shown ? () => setOpen(opened ? null : r.id) : undefined}>
+                  <div className={shown ? `${css.row} ${css.opens}` : css.row} onClick={shown ? () => toggle(r.id, "list") : undefined}>
                     <Group gap={6} wrap="nowrap" className={css.name}>
-                      {shown && (
-                        <ActionIcon variant="subtle" color="gray" size="sm" aria-expanded={opened} aria-label={opened ? "Hide its price over time" : "Show its price over time"}
-                          onClick={(e) => { e.stopPropagation(); setOpen(opened ? null : r.id); }}>
-                          {opened ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
-                        </ActionIcon>
-                      )}
+                      {shown && chevron(r.id, "list")}
                       <Text size="sm" fw={600} className={css.name}><ItemName id={r.id} name={r.name} /></Text>
                     </Group>
                     <Text size="sm" c={r.qty ? undefined : "dimmed"}>{r.low_words}</Text>
                     <Text size="sm" c="dimmed">{r.qty ? `${r.qty} listed` : ""}</Text>
-                    <Group justify="flex-end" className={css.actions} onClick={(e) => e.stopPropagation()}>{!shown && watchButton(r, true)}</Group>
+                    <Group justify="flex-end" className={css.actions} onClick={shown ? undefined : (e) => e.stopPropagation()}>
+                      {shown ? (r.spark ? <Sparkline data={r.spark} label="Its lowest price over the last 7 days" /> : null) : watchButton(r, true)}
+                    </Group>
                   </div>
-                  {opened && (
-                    <Stack gap="sm" className={css.panel}>
-                      {hist === null || hist.id !== r.id ? <Text size="sm" c="dimmed">Loading…</Text> : (
-                        <>
-                          <PriceChart data={hist} onSpan={changeSpan} span={span} busy={span !== hist.span} />
-                          {hist.sentences.map((s) => <Text key={s} size="sm">{s}</Text>)}
-                        </>
-                      )}
-                      <Group>{watchButton(r, true)}</Group>
-                    </Stack>
-                  )}
+                  {opened && panel(r, true)}
                 </div>
               );
             })}

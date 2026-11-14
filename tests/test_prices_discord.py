@@ -224,7 +224,7 @@ def test_price_answers_one_item_several_and_the_off_sentence(reg, market_on):
     priced(reg, {BAR: Price(low=489998, qty=30)}, at=now())
     one = ask(f"#{BAR}").splitlines()  # the autocomplete's value: that item
     assert one[0].startswith("Prices as of <t:") and one[0].endswith(":R>"), "a native stamp: the reader's own clock"
-    assert one[1:] == ["Arcanite Bar: lowest price 48g 99s 98c, 30 listed."]
+    assert one[1:] == ["Arcanite Bar: lowest price 48g 99s 98c, 30 listed.", prices.NO_HISTORY_YET], "one item: its price, then its history"
     several = ask("a").splitlines()
     assert len(several) == 12 and several[-1].startswith("And ") and several[-1].endswith(" more items match."), "ten lines and how many more"
     assert ask("dreamfoil").splitlines()[1] == "Dreamfoil: none listed."

@@ -5111,7 +5111,7 @@ seller, no sales, no history.
   updates; a not-modified answer never does. `auctions_tick` on the scheduler's minute loop starts one background task per
   guild when due, and remembers the state it last saw: time alone turning the table stale or hidden is heard once (F-4); a
   failure keeps the last table and warns ops at most once per guild per hour. No DM, notice, post or ops line on success.
-  After each check the same task names up to 200 listed ids nothing local names (Blizzard's item endpoint) into
+  After each check the same task names up to 1,000 listed ids nothing local names (Blizzard's item endpoint) into
   `out/auctions/items.json` per game version; an item Blizzard doesn't know is remembered per process only.
   `house_choices` (the owner's picker): the guild's ruleset from its armory page, then each faction house with listings,
   with its quantity listed in all and the reference items' prices; `pick_house` re-checks a pick against the armory
@@ -5183,7 +5183,9 @@ item the watch list; everything ephemeral.
 nothing pings, DMs or posts when a price moves (the DM rule). **C2** every change kept 90 days, then one lowest and one
 highest per item per day, nothing past a year. **C3** one list on both sides. **C4** search covers named items only.
 **C5** a watched item's history: on the site a chart plus the 7- and 30-day lowest / highest in words; in Discord the
-words only. **C6** history shows for watched items only (it exists for every item, so this can widen without new data).
+words only. **C6** (replaced by the owner 2026-11-14) history shows for ANY item the bot can name, watched or not: a search row
+opens to the same chart and sentences, `/price <item>` adds the history sentences to a one-item answer, and each row of the
+watch list carries a small seven-day line (`prices.spark`: positions only, no words).
 **C7** at most 25 items (Discord's select). **C8** watching and stopping are instant, no confirm. **C9** the list lives on
 the member's record (`Member.watching`, not on a character); history under `out/` only. **C10** history belongs to an
 auction house, not a guild: two guilds on one house share it; another house starts empty; turning prices off deletes

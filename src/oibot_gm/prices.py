@@ -629,7 +629,21 @@ def chart(reg, item_id: int, span: str, *, now: datetime | None = None) -> dict:
     return out
 
 
-__all__ = ["EMPTY_LIST_DISCORD", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
+SPARK_SPAN = "7"  # the watch list's small line: the last seven days
+
+
+def spark(reg, item_id: int, *, now: datetime | None = None) -> dict | None:
+    """A watched item's small line for its row in the list (BLOCKING: reads the history file): the last SPARK_SPAN days as
+    {since, until, points [[epoch seconds, lowest in copper | None = nothing listed or not read from then]]} — positions
+    only, no words (the row's own price is beside it). None when there is nothing to draw: prices don't show, no history,
+    or nothing listed all week."""
+    c = chart(reg, item_id, SPARK_SPAN, now=now)
+    if not any(p["low"] is not None for p in c["points"]):
+        return None
+    return {"since": c["since"], "until": c["until"], "points": [[p["t"], p["low"]] for p in c["points"]]}
+
+
+__all__ = ["EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

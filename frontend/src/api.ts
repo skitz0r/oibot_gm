@@ -178,7 +178,10 @@ export interface PriceFind {
 /** One item's price (web/api_prices): `low_words` = its lowest price or "none listed", `qty` = how many are listed, `words` =
  *  the whole line; `watching` = on the viewer's own watch list (the search's rows only). While prices are hidden a watch
  *  list row carries its name alone (empty `low_words` and `words`). */
-export interface PriceRow { id: number; name: string; low_words: string; qty: number; words: string; watching?: boolean }
+export interface PriceRow { id: number; name: string; low_words: string; qty: number; words: string; watching?: boolean; spark?: PriceSpark | null }
+/** A watch list row's small line (prices.spark): the last seven days as [epoch seconds, lowest in copper | null = nothing
+ *  listed or not read from then] over `since` .. `until` — positions only; null = nothing to draw. */
+export interface PriceSpark { since: number; until: number; points: [number, number | null][] }
 /** GET /api/prices/watching (price watch §4.2): the viewer's own list, newest first; `shown` = prices show now (else names
  *  alone); `empty` = the empty list's sentence; `registered` = the viewer has a record (watching needs one, C13). */
 export interface WatchList { rows: PriceRow[]; words: string; shown: boolean; max: number; empty: string; registered: boolean }
