@@ -215,8 +215,9 @@ def test_price_answers_one_item_several_and_the_off_sentence(reg, market_on):
         return text
 
     assert ask("arcanite bar") == discord_auctions.OFF_WORDS, "prices off: that sentence alone"
-    assert ask("arcanite bar", OWNER) == prices.OWNER_OFF_WORDS, "the owner is told how to turn them on"
+    assert ask("arcanite bar", OWNER) == prices.OWNER_LINK_WORDS, "no guild linked: the owner is told to link it first"
     reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
+    assert ask("arcanite bar", OWNER) == prices.OWNER_OFF_WORDS, "the owner is told how to turn them on"
     reg.set_market(HORDE_AH, 2, "Owner", by_id=OWNER)
     assert ask("arcanite bar") == discord_auctions.WAITING_WORDS
     priced(reg, {BAR: Price(low=489998, qty=30)}, at=now())

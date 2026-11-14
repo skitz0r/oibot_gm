@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import discord_auctions
+from . import auctions
 from .auctions import NO_AUCTIONS_WORDS, Price, money
 from .profiles import RecipeDef
 
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 
 NONE_LISTED = "none listed"
 OWNER_OFF_WORDS = "Pick the guild's auction house on the Config page to see prices."
+OWNER_LINK_WORDS = "Link the server to its guild in the game on the Config page first, then pick its auction house to see prices."
 NO_MATCH = "No item the bot knows has that name."
 
 
@@ -254,10 +256,13 @@ def made_words(cost: Cost) -> str:
 
 
 def status_sentence(reg, owner: bool, *, stamp: bool = False) -> str:
-    """How recent the prices are, or why there are none: when off, the owner is told how to turn them on and everyone
+    """How recent the prices are, or why there are none: when off, the owner is told how to turn them on — only where
+    the picker exists (auction houses and the Blizzard keys: pick the house, or link the guild first) — and everyone
     else reads nothing. `stamp`: Discord's native relative time (discord_auctions.as_of_words)."""
     if discord_auctions.state(reg) == "off":
-        return OWNER_OFF_WORDS if owner else ""
+        if not owner or not auctions.available(reg):
+            return ""
+        return OWNER_OFF_WORDS if reg.config.armory is not None else OWNER_LINK_WORDS
     return discord_auctions.as_of_words(reg, stamp=stamp)
 
 
@@ -291,11 +296,11 @@ def price_answer(reg, text: str, owner: bool, *, stamp: bool = True, limit: int 
     """Discord's /price in lines: '#<id>' (the autocomplete's value) = that item, typed text = the search's first `limit`
     and how many more. No prices to show (off, none read yet, a day old): that one sentence alone — a member reads
     why too, since they asked."""
-    if not reg.profile.auctions:
+    if not auctions.available(reg):  # no auction houses, or no keys to read them: no picker to point at
         return [NO_AUCTIONS_WORDS]
     s = discord_auctions.state(reg)
     if s == "off":
-        return [OWNER_OFF_WORDS if owner else discord_auctions.OFF_WORDS]
+        return [status_sentence(reg, owner) or discord_auctions.OFF_WORDS]
     if s not in ("fresh", "stale"):
         return [discord_auctions.as_of_words(reg)]
     raw = str(text or "").strip()
@@ -492,6 +497,6 @@ def choice_description(reg, choice) -> str:
     return " · ".join([listings_words(choice.listings), *(w for _i, _n, w in sample_rows(reg, choice))])[:100]
 
 
-__all__ = ["Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
+__all__ = ["Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

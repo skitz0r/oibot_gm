@@ -90,8 +90,10 @@ def crafter(w, n=0, recipe_name="Mooncloth Bag"):
 def test_meta_carries_prices_and_item_url(w, market_on):
     m = member(w)
     d = w.c.get("/api/meta", headers=as_user(w, OWNER)).json()
-    assert d["prices"] == {"on": False, "state": "off", "words": prices.OWNER_OFF_WORDS, "market": True}
+    assert d["prices"] == {"on": False, "state": "off", "words": prices.OWNER_LINK_WORDS, "market": True}, "no guild linked: link it first"
     assert d["item_url"] == "https://www.wowhead.com/forever/item={id}", "Forever's items link to Wowhead's Forever section (C12)"
+    w.reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
+    assert w.c.get("/api/meta", headers=as_user(w, OWNER)).json()["prices"]["words"] == prices.OWNER_OFF_WORDS
     assert w.c.get("/api/meta", headers=as_user(w, m.discord_id)).json()["prices"]["words"] == "", "a member reads nothing while prices are off"
     priced(w.reg, {BAR: Price(low=489998, qty=30)}, at=now())
     p = w.c.get("/api/meta", headers=as_user(w, m.discord_id)).json()["prices"]
@@ -211,9 +213,17 @@ def test_everything_404s_or_is_null_on_tbc(tbc):
     assert w.c.post("/api/admin/market", json={"choices": True}, headers=h).status_code == 404
     assert w.c.get("/api/prices/find?q=arcanite", headers=h).status_code == 404
     d = w.c.get("/api/meta", headers=h).json()
-    assert d["prices"] == {"on": False, "state": "off", "words": prices.OWNER_OFF_WORDS, "market": False}
+    assert d["prices"] == {"on": False, "state": "off", "words": "", "market": False}, "no auction houses: no word about a picker"
     assert d["item_url"] == "https://www.wowhead.com/tbc/item={id}", "links ride wowhead_item_url alone"
     assert all(r["cost"] is None for r in w.c.get("/api/professions", headers=h).json()["recipes"])
+
+
+def test_no_keys_means_no_word_about_a_picker(w, market_on, monkeypatch):
+    """F-1: a host without the Blizzard keys has no auction house card, so the owner is not sent to one."""
+    w.reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
+    monkeypatch.setattr(armory, "available", lambda reg: False)
+    d = w.c.get("/api/meta", headers=as_user(w, OWNER)).json()
+    assert d["prices"] == {"on": False, "state": "off", "words": "", "market": False}
 
 
 def test_the_prices_topic_is_published_on_a_table_update(w, market_on):
@@ -233,7 +243,7 @@ def test_mcp_price_check_and_market_read_the_site_routes(w, market_on):
 
     ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
     try:
-        assert ms.price_check("arcanite bar") == prices.OWNER_OFF_WORDS, "prices off: the owner's token reads how to turn them on"
+        assert ms.price_check("arcanite bar") == prices.OWNER_LINK_WORDS, "prices off, no guild linked: the owner's token reads how to turn them on"
         assert "link" in ms.market()["words"] and ms.market()["selected"] is None
         priced(w.reg, {BAR: Price(low=489998, qty=30)}, at=now())
         out = ms.price_check("arcanite bar")

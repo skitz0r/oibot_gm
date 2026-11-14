@@ -227,6 +227,9 @@ def test_the_sentences(reg, clock):
     assert prices.made_words(cost([known], none, 1, 1)) == "Makes 1 · none listed"
     assert prices.made_words(cost([known])) == ""
     # how recent, or why there are none
+    assert prices.status_sentence(reg, owner=True) == prices.OWNER_LINK_WORDS, "no guild linked: link it first"
+    assert prices.status_sentence(reg, owner=False) == ""
+    reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
     assert prices.status_sentence(reg, owner=True) == "Pick the guild's auction house on the Config page to see prices."
     assert prices.status_sentence(reg, owner=False) == ""
     priced(reg, {})
@@ -237,6 +240,28 @@ def test_the_sentences(reg, clock):
     assert prices.status_sentence(reg, owner=False) == discord_auctions.WAITING_WORDS
     priced(reg, {}, at=NOW - timedelta(hours=30))
     assert prices.status_sentence(reg, owner=False) == discord_auctions.OLD_WORDS
+
+
+def test_the_owner_is_never_told_to_pick_a_house_that_cannot_be_picked(reg, clock, monkeypatch):
+    """F-1: the owner's 'pick the auction house' only where the picker exists (auction houses, the keys, a linked guild);
+    without a linked guild, link it first; with no auction houses or no keys, nothing — and /price says there are none."""
+    assert prices.OWNER_LINK_WORDS == "Link the server to its guild in the game on the Config page first, then pick its auction house to see prices."
+    assert prices.status_sentence(reg, owner=True) == prices.OWNER_LINK_WORDS
+    assert prices.price_answer(reg, "arcanite bar", owner=True) == [prices.OWNER_LINK_WORDS]
+    assert prices.price_answer(reg, "arcanite bar", owner=False) == [discord_auctions.OFF_WORDS]
+    reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
+    assert prices.status_sentence(reg, owner=True) == prices.OWNER_OFF_WORDS
+    assert prices.price_answer(reg, "arcanite bar", owner=True) == [prices.OWNER_OFF_WORDS]
+    # a host without the Blizzard keys: no picker, so nothing to tell the owner
+    monkeypatch.setattr(armory, "available", lambda reg: False)
+    assert prices.status_sentence(reg, owner=True) == "" and prices.status_sentence(reg, owner=False) == ""
+    assert prices.price_answer(reg, "arcanite bar", owner=True) == [auctions.NO_AUCTIONS_WORDS]
+    assert prices.price_answer(reg, "arcanite bar", owner=False) == [auctions.NO_AUCTIONS_WORDS]
+    # a version without auction houses
+    monkeypatch.setattr(armory, "available", lambda reg: bool(reg.profile.armory))
+    monkeypatch.setattr(reg, "profile", TBC)
+    assert prices.status_sentence(reg, owner=True) == ""
+    assert prices.price_answer(reg, "arcanite bar", owner=True) == [auctions.NO_AUCTIONS_WORDS]
 
 
 # ------------------------------------------------------------------ the naming step
