@@ -5,6 +5,7 @@ import { CardHeader, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
 import { useLive } from "../../hooks/useLive";
 import { SourceBadge, Who } from "./shared";
+import { ItemName } from "../ItemName";
 
 interface AppealsData { open: OfficerAppeal[]; resolved: OfficerAppeal[]; outcomes: { value: string; label: string; text: string }[]; note_max: number }
 
@@ -38,7 +39,7 @@ export function Appeals({ meta }: { meta: Meta }) {
         <Group justify="space-between" wrap="wrap" gap="xs">
           <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
             <Who meta={meta} name={a.character} cls={a.cls} spec={a.spec} />
-            <Text size="sm" fw={600} truncate>{a.item}</Text>
+            <Text size="sm" fw={600} truncate><ItemName id={a.item_id} name={a.item} /></Text>
             <Text size="xs" c="dimmed">{a.date_label}{a.boss ? ` · ${a.boss}` : ""} · {a.offspec ? "OS" : "MS"}</Text>
           </Group>
           <Group gap={6}>

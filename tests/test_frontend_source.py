@@ -634,7 +634,8 @@ def test_armory_link_pages_preview_and_print_only_the_servers_sentences():
 # auction prices §4.6: the pages that print item names, and the one place in each that is not a link (a button's label —
 # a link can't sit inside a button; the button opens the item's tiers)
 ITEM_PAGES = ("pages/Professions.tsx", "pages/LootLog.tsx", "components/loot/Tonight.tsx", "components/loot/History.tsx",
-              "components/loot/Items.tsx", "components/loot/Wishlists.tsx", "components/loot/MyLoot.tsx")
+              "components/loot/Items.tsx", "components/loot/Wishlists.tsx", "components/loot/MyLoot.tsx", "components/loot/Appeals.tsx",
+              "components/LootWeightsCard.tsx")
 ITEM_NAME_NOT_A_LINK = {"components/loot/Items.tsx": 'onClick={() => setOpen(i.key)}>{i.name}</Button>'}
 # a JSX child printing an item row's name: `{r.item}` anywhere, `{x.name}` on the pages whose `.name` rows are items
 # (never `${…}` inside a template string — a title — nor `={…}` — an attribute)

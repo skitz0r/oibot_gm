@@ -530,6 +530,7 @@ def test_rescore_preview_writes_nothing(w):
     assert out["drops"] == 2 and out["run"]["roster"] == 10 and "top pick(s) would change" in out["message"]
     row = out["rows"][0]
     assert row["old"][0]["score"] != row["new"][0]["score"] and row["awarded"]
+    assert all(r["item_id"] == (w.reg.item(None, r["item"]).id or None) for r in out["rows"]), "a row's item links through ItemName"
     assert ledger_bytes(w.reg) == before and (w.reg.store.root / w.reg.key / "guild.yaml").read_bytes() == cfg and head(w.reg) == h0
     assert not w.reg.config.loot, "the draft was validated on a shadow copy only"
     bad = w.c.post("/api/loot/rescore", json={"fields": {"tier_weight.S": -1}}, headers=as_user(w.c, OFFICER))

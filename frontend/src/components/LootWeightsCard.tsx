@@ -6,13 +6,14 @@ import { CardHeader, fail } from "./Page";
 import { useOpsSave } from "./ReviewModal";
 import { useDirty } from "../hooks/useDirty";
 import { useLive } from "../hooks/useLive";
+import { ItemName } from "./ItemName";
 
 /** GET /api/loot/weights: every weight with its value now and the game profile's default beside it. */
 interface WeightRow { path: string; label: string; group: string; value: number; default: number; overridden: boolean; whole: boolean }
 interface Weights { rows: WeightRow[]; groups: { key: string; title: string; hint: string }[]; rev: string; owner: boolean; note: string }
 /** POST /api/loot/rescore: the last council's drops scored by the numbers alone, now vs the draft. */
 interface Pick { character: string; score: number }
-interface RescoreRow { drop_id: string; item: string; boss: string | null; awarded: string | null; old: Pick[]; new: Pick[]; old_pick: string | null; new_pick: string | null; moved: boolean }
+interface RescoreRow { drop_id: string; item: string; item_id: number | null; boss: string | null; awarded: string | null; old: Pick[]; new: Pick[]; old_pick: string | null; new_pick: string | null; moved: boolean }
 interface Rescore { run: { label: string; day_label: string; roster: number } | null; rows: RescoreRow[]; moved: number; drops: number; message: string }
 
 /** Config › Loot scoring (L06, design §5.48; the OWNER edits, officers read): each weight with the profile default beside
@@ -125,7 +126,7 @@ export function LootWeightsCard() {
                   <Table.Tbody>
                     {rescore.rows.map((r) => (
                       <Table.Tr key={r.drop_id || r.item}>
-                        <Table.Td><Text size="sm">{r.item}</Text>{r.boss && <Text size="xs" c="dimmed">{r.boss}</Text>}</Table.Td>
+                        <Table.Td><Text size="sm"><ItemName id={r.item_id} name={r.item} /></Text>{r.boss && <Text size="xs" c="dimmed">{r.boss}</Text>}</Table.Td>
                         <Table.Td><Text size="xs">{r.awarded || "—"}</Text></Table.Td>
                         <Table.Td><Text size="xs">{r.old.map((p) => `${p.character} ${p.score}`).join(" · ") || "—"}</Text></Table.Td>
                         <Table.Td><Text size="xs">{Object.keys(diff).length ? (r.new.map((p) => `${p.character} ${p.score}`).join(" · ") || "—") : ""}</Text></Table.Td>
