@@ -17,6 +17,11 @@ After each check that leaves a table, the same background task names up to NAME_
 (Blizzard's item endpoint, most listed first; prices.remember keeps them per game version in out/auctions/items.json).
 A failure there stops the naming quietly until the next check.
 
+A new table from Blizzard taken as the guild's table is also kept in the house's price history (price_history.record in a
+thread, keyed by `history_key` — the house, never the guild): never on a not-modified answer, an adopted shared read or a
+read discarded because the market changed. A failed keep keeps the table and warns ops once an hour (HISTORY_FAILED, its
+own hour). `auctions_tick` starts the history's fold once a UTC day (price_history.fold, one background task).
+
 The DM rule holds: nothing here DMs anyone, writes a notice or posts an ops line on success. A failure keeps the last
 table and warns the guild's ops feed at most once an hour."""
 from __future__ import annotations
@@ -31,7 +36,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable, Literal
 
-from . import armory, auctions
+from . import armory, auctions, price_history
 from .armory import ArmoryError
 from .auctions import House, Price
 from .registry import RegistryError
@@ -56,6 +61,7 @@ LINK_FIRST = "Link the server to its guild in the game first, then pick its auct
 NO_CHOICES = "No auction house of the guild's faction has anything listed right now. Try again in a while."
 NOT_A_CHOICE = "That isn't one of the guild's auction houses. Look at the choices again."
 HOUSES_CHANGED = "The guild's auction houses changed since you looked. Look at the choices again."
+HISTORY_FAILED = "Keeping the price history stopped. The prices themselves still update."
 
 State = Literal["off", "waiting", "fresh", "stale", "old"]
 
@@ -114,6 +120,7 @@ _STATE: dict[str, dict] = {}
 _SHARED: dict[tuple, Table] = {}  # (namespace, ruleset, house) → the last table read, whichever guild read it
 _LOCKS: dict[tuple, tuple[object, asyncio.Lock]] = {}
 _UNLOADED = object()
+_FOLD: dict = {"day": None}  # the UTC date of the last daily fold of the kept history (process-wide)
 
 
 def reset_state() -> None:
@@ -121,10 +128,11 @@ def reset_state() -> None:
     _STATE.clear()
     _SHARED.clear()
     _LOCKS.clear()
+    _FOLD["day"] = None
 
 
 def _st(reg) -> dict:
-    return _STATE.setdefault(reg.key, {"table": _UNLOADED, "warned_at": None, "tried": None, "task": None, "seen": None})
+    return _STATE.setdefault(reg.key, {"table": _UNLOADED, "warned_at": {}, "tried": None, "task": None, "seen": None})
 
 
 def _house_key(reg, ruleset_id: int, house_id: int) -> tuple:
@@ -147,6 +155,12 @@ def _lock(key: tuple) -> asyncio.Lock:
 def _market(reg):
     """The selected market, or None: none picked, or a version with no auction houses."""
     return reg.config.market if reg.profile.auctions else None
+
+
+def history_key(reg) -> tuple | None:
+    """The selected auction house's key for its kept price history (price_history), None without a market."""
+    m = _market(reg)
+    return None if m is None else _house_key(reg, m.ruleset_id, m.house_id)
 
 
 def _same(m, t: Table | None) -> bool:
@@ -266,12 +280,13 @@ def as_of_words(reg, *, stamp: bool = False) -> str:
 # ------------------------------------------------------------------ the check
 
 
-async def _emit_warn(bot, reg, text: str) -> None:
-    st = _st(reg)
-    if st["warned_at"] is not None and _now() - st["warned_at"] < WARN_EVERY:
+async def _emit_warn(bot, reg, text: str, kind: str = "read") -> None:
+    """One ops warning per guild per hour for each kind (a failed read, a failed history keep)."""
+    warned = _st(reg)["warned_at"]
+    if warned.get(kind) is not None and _now() - warned[kind] < WARN_EVERY:
         log.info("[%s] %s (warned this hour already)", reg.key, text)
         return
-    st["warned_at"] = _now()
+    warned[kind] = _now()
     ops = getattr(bot, "ops", None)
     if ops is None:
         log.warning("[%s] %s", reg.key, text)
@@ -346,10 +361,40 @@ async def refresh(bot, reg, *, force: bool = False) -> str:
         if not _same(_market(reg), t):  # the owner changed or cleared the market while it ran
             return "off" if _market(reg) is None else "unchanged"
         await _save(reg, t)
+        if prices is not None:  # a new table from Blizzard, taken as the guild's: its changes are kept (once per house per feed time)
+            await _keep(bot, reg, key, t)
         if own is not None and t.prices == own.prices and state(reg) == before:  # the same prices, shown the same way: nothing new to hear (a 304 never changes the state)
             return "unchanged"
         _heard(reg)
         return "updated"
+
+
+async def _keep(bot, reg, key: tuple, t: Table) -> None:
+    """Keep the new table's changes in the house's price history (a thread). A failure keeps the table and warns once an
+    hour."""
+    try:
+        await asyncio.to_thread(price_history.record, key, t.at, t.prices)
+    except price_history.HistoryError:
+        log.exception("price history for %s not kept", reg.key)
+        await _emit_warn(bot, reg, HISTORY_FAILED, kind="history")
+
+
+def _fold_daily() -> None:
+    """Once a UTC day: ONE background task folding every kept history file (price_history.fold in a thread)."""
+    now = _now()
+    if _FOLD["day"] == now.date():
+        return
+    _FOLD["day"] = now.date()
+
+    async def go():
+        try:
+            await asyncio.to_thread(price_history.fold, now)
+        except Exception:  # noqa: BLE001 — the fold tries again tomorrow
+            log.exception("price history fold failed")
+
+    t = asyncio.get_running_loop().create_task(go())
+    _RUNNING.add(t)
+    t.add_done_callback(_RUNNING.discard)
 
 
 def _due(reg, m) -> bool:
@@ -373,6 +418,8 @@ async def auctions_tick(bot, reg):
     seen, st["seen"] = st.get("seen"), state(reg)
     if seen is not None and seen != st["seen"] and st["seen"] in ("stale", "old"):
         _heard(reg)
+    if reg.profile.auctions:  # the kept history's daily fold: every house's file, picked or not (no auction houses: none)
+        _fold_daily()
     m = _market(reg)
     if m is None or not auctions.available(reg):
         return None
@@ -488,5 +535,5 @@ async def pick_house(bot, reg, house_id: int, ruleset_id: int) -> House:
     raise RegistryError(NOT_A_CHOICE)
 
 
-__all__ = ["Choice", "HOUSES_CHANGED", "NO_CHOICES", "HousesChanged", "NOT_A_CHOICE", "pick_house", "FETCH_EVERY", "HIDE_AFTER", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
+__all__ = ["Choice", "HISTORY_FAILED", "HOUSES_CHANGED", "history_key", "NO_CHOICES", "HousesChanged", "NOT_A_CHOICE", "pick_house", "FETCH_EVERY", "HIDE_AFTER", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
            "WAITING_WORDS", "as_of_words", "auctions_tick", "refresh_soon", "house_choices", "name_items", "price_of", "refresh", "reset_state", "state", "table"]

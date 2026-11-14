@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from conftest import OWNER, OWNER2
 
-from oibot_gm import armory, auctions, discord_auctions
+from oibot_gm import armory, auctions, discord_auctions, price_history
 from oibot_gm.armory import ArmoryDown, GuildFacts
 from oibot_gm.auctions import House, Price
 from oibot_gm.profiles import GameProfile
@@ -499,3 +499,115 @@ def test_an_open_page_hears_the_table_turn_stale_then_hidden_after_failed_checks
     run(go())
     assert discord_auctions.state(reg) == "old"
     assert heard == [reg.key, reg.key], "stale once, then hidden once; nothing in between"
+
+
+# ------------------------------------------------------------------ the kept history (price watch, spec §4.1)
+
+
+@pytest.fixture
+def kept(monkeypatch):
+    """Spy on price_history.record (the real one still runs) → the calls (key, at, items)."""
+    calls: list[tuple] = []
+    real = price_history.record
+
+    def spy(key, at, prices):
+        calls.append((key, at, set(prices)))
+        return real(key, at, prices)
+
+    monkeypatch.setattr(price_history, "record", spy)
+    return calls
+
+
+def test_a_new_table_is_kept_once_per_house(duo, fake, bot, clock, kept):
+    a, b = duo.a, duo.b
+    market(a)
+    b.set_armory_guild(facts(gid=518362, name="Ember Quill"), "Owner", by_id=OWNER2)
+    b.set_market(HORDE_AH, 2, "Owner", by_id=OWNER2)
+    assert run(discord_auctions.refresh(bot, a)) == "updated"
+    clock.advance(minutes=10)
+    assert run(discord_auctions.refresh(bot, b)) == "updated"  # b adopts a's read
+    key = discord_auctions.history_key(a)
+    assert key == discord_auctions.history_key(b) == ("dynamic-forever-us", 2, 6)
+    assert price_history.kept_since(key) == discord_auctions.table(a).at
+    assert kept == [(key, discord_auctions.table(a).at, {BAR, DREAMFOIL})]
+    assert price_history.path(key).parent == discord_auctions.OUT / "history"
+
+
+def test_history_key_is_none_without_a_market(reg, fake, clock):
+    assert discord_auctions.history_key(reg) is None
+
+
+def test_a_not_modified_answer_keeps_nothing(reg, fake, bot, clock, kept):
+    market(reg)
+    run(discord_auctions.refresh(bot, reg))
+    assert len(kept) == 1
+    clock.advance(hours=1)
+    assert run(discord_auctions.refresh(bot, reg)) == "unchanged"
+    assert fake.fetches()[-1] == ("table", 2, 6, STAMP)
+    assert len(kept) == 1
+
+
+def test_a_read_discarded_for_a_changed_market_keeps_nothing(reg, fake, bot, clock, kept):
+    market(reg)
+    fake.during = lambda: reg.set_market(OTHER_HORDE_AH, 2, "Owner", by_id=OWNER)
+    run(discord_auctions.refresh(bot, reg))
+    assert kept == []
+    assert not (discord_auctions.OUT / "history").exists()
+
+
+def test_a_failed_keep_still_saves_the_table_and_warns_once(reg, fake, bot, clock, monkeypatch):
+    market(reg)
+
+    def broken(key, at, prices):
+        raise price_history.HistoryError("locked")
+
+    monkeypatch.setattr(price_history, "record", broken)
+    assert run(discord_auctions.refresh(bot, reg)) == "updated"
+    assert discord_auctions.table(reg).prices[BAR] == Price(low=489998, qty=12)
+    assert prices_file(reg).exists()
+    assert bot.ops.lines == [("warn", discord_auctions.HISTORY_FAILED)]
+    clock.advance(minutes=30)
+    fake.modified = LATER
+    assert run(discord_auctions.refresh(bot, reg, force=True)) == "unchanged"  # the same prices, a new feed time
+    assert discord_auctions.table(reg).modified == LATER
+    assert bot.ops.lines == [("warn", discord_auctions.HISTORY_FAILED)], "one history warning per guild per hour"
+    # a read failure in the same hour still warns: each kind has its own hour
+    fake.fail = ArmoryDown()
+    assert run(discord_auctions.refresh(bot, reg, force=True)) == "failed"
+    assert len(bot.ops.lines) == 2 and armory.DOWN_WORDS in bot.ops.lines[1][1]
+
+
+def test_the_fold_runs_once_a_day_off_the_tick(reg, fake, bot, clock, monkeypatch):
+    import threading
+
+    folds: list[tuple] = []
+    main = threading.get_ident()
+    monkeypatch.setattr(price_history, "fold", lambda now: folds.append((now, threading.get_ident() != main)))
+
+    async def tick():
+        read = await discord_auctions.auctions_tick(bot, reg)
+        await asyncio.gather(*list(discord_auctions._RUNNING), *([read] if read else []))
+
+    run(tick())
+    clock.advance(minutes=30)
+    run(tick())
+    assert folds == [(clock() - timedelta(minutes=30), True)], "once a UTC day, in a thread"
+    clock.advance(hours=4)  # past midnight UTC
+    run(tick())
+    assert len(folds) == 2 and folds[1][0] == clock()
+
+
+def test_tbc_keeps_no_history(reg, fake, bot, clock, monkeypatch):
+    folds: list = []
+    monkeypatch.setattr(price_history, "fold", folds.append)
+    tbc = GameProfile.load(ROOT / "profiles" / "tbc")
+
+    class Reg:
+        key, profile = "t", tbc
+        config = type("C", (), {"armory": None, "market": None})()
+
+    assert run(discord_auctions.auctions_tick(bot, Reg())) is None
+    assert run(discord_auctions.refresh(bot, Reg())) == "off"
+    assert discord_auctions.history_key(Reg()) is None
+    assert folds == []
+    assert not (discord_auctions.OUT / "history").exists()
