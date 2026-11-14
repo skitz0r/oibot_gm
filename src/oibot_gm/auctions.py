@@ -90,6 +90,16 @@ class Client:
                 _add(table, item, unit, qty)
         return table, got.modified
 
+    def item_name(self, item_id: int) -> str | None:
+        """An item's name from the static namespace (the naming step behind the price search); None when Blizzard has no
+        item of that id (a 404)."""
+        path = f"/data/wow/item/{int(item_id)}"
+        try:
+            d = self.arm.get(path, self.arm.static_ns).data
+        except armory.ArmoryMissing:
+            return None
+        return _str(d, "name", path)
+
 
 # ------------------------------------------------------------------ per guild
 

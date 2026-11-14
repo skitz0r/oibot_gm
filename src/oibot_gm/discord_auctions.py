@@ -11,6 +11,10 @@ not-modified answer), so an unchanged feed stays fresh. Stale after six hours (C
 — a table loaded after a restart too. A table of a house that is not the one selected now is no table. Two guilds on
 one auction house share one fetch within the hour (memory). A fetch whose market changed while it ran is discarded.
 
+After each check that leaves a table, the same background task names up to NAME_PER_FETCH listed ids nothing local names
+(Blizzard's item endpoint, most listed first; prices.remember keeps them per game version in out/auctions/items.json).
+A failure there stops the naming quietly until the next check.
+
 The DM rule holds: nothing here DMs anyone, writes a notice or posts an ops line on success. A failure keeps the last
 table and warns the guild's ops feed at most once an hour."""
 from __future__ import annotations
@@ -37,11 +41,12 @@ FETCH_EVERY = timedelta(hours=1)
 STALE_AFTER = timedelta(hours=6)  # C3: shown, marked stale
 HIDE_AFTER = timedelta(hours=24)  # C10: not shown at all
 WARN_EVERY = timedelta(hours=1)  # one ops warning per guild per hour
+NAME_PER_FETCH = 200  # listed ids named from Blizzard after each check, most listed first
 
 # the words (spec §3): what a reader sees when there is no price to show, and why
 OFF_WORDS = "Prices are off until the owner picks the guild's auction house on the Config page."
-WAITING_WORDS = "Prices haven't been read from the auction house yet, and the bot keeps trying."
-OLD_WORDS = "Prices are out of date: the last ones read are more than a day old, and the bot keeps trying."
+WAITING_WORDS = "Prices haven't been read from the auction house yet. The bot reads it every hour."
+OLD_WORDS = "Prices are out of date: the last ones read are more than a day old. The bot tries again every hour."
 STALE_TAIL = " — more than six hours old"
 LINK_FIRST = "Link the server to its guild in the game first, then pick its auction house."
 
@@ -319,12 +324,52 @@ async def auctions_tick(bot, reg):
 
     async def go():
         try:
-            await refresh(bot, reg)
+            if await refresh(bot, reg) in ("updated", "unchanged"):
+                await name_items(bot, reg)
         except Exception:  # noqa: BLE001 — the hourly check never takes the scheduler down
             log.exception("auctions tick failed for %s", reg.key)
 
     st["task"] = asyncio.get_running_loop().create_task(go())
     return st["task"]
+
+
+# ------------------------------------------------------------------ item names (spec §4.3)
+
+
+def _name_batch(cli, ids: list[int]) -> tuple[dict[int, str], set[int]]:
+    """Look up each id's name in turn (BLOCKS) → (named, ids Blizzard has no item for). The first failure stops it with
+    what was named so far."""
+    found: dict[int, str] = {}
+    gone: set[int] = set()
+    for i in ids:
+        try:
+            name = cli.item_name(i)
+        except Exception as e:  # noqa: BLE001 — naming is best effort: it stops quietly and goes on next hour
+            log.info("item naming stopped after %d: %s", len(found), getattr(e, "detail", None) or type(e).__name__)
+            break
+        if name:
+            found[i] = name
+        else:
+            gone.add(i)
+    return found, gone
+
+
+async def name_items(bot, reg) -> int:
+    """After a check, name up to NAME_PER_FETCH listed ids that nothing names, most listed first (the hourly check's own
+    background task, never a request path) → how many were named. A failure stops it quietly: no ops line. One naming
+    per game version at a time; the names are kept per version (prices.remember)."""
+    from . import prices  # prices reads this module's table
+
+    t = table(reg)
+    if t is None:
+        return 0
+    async with _lock(("names", reg.profile.name)):
+        ids = prices.unnamed(reg, t.prices, NAME_PER_FETCH)
+        if not ids:
+            return 0
+        found, gone = await asyncio.to_thread(_name_batch, _client(reg), ids)
+        await asyncio.to_thread(prices.remember, reg, found, gone)
+        return len(found)
 
 
 # ------------------------------------------------------------------ the owner's picker
@@ -356,5 +401,5 @@ async def house_choices(bot, reg) -> list[Choice]:
     return out
 
 
-__all__ = ["Choice", "FETCH_EVERY", "HIDE_AFTER", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
-           "WAITING_WORDS", "as_of_words", "auctions_tick", "house_choices", "price_of", "refresh", "reset_state", "state", "table"]
+__all__ = ["Choice", "FETCH_EVERY", "HIDE_AFTER", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
+           "WAITING_WORDS", "as_of_words", "auctions_tick", "house_choices", "name_items", "price_of", "refresh", "reset_state", "state", "table"]

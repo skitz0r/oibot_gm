@@ -1,0 +1,287 @@
+"""Item names, the price search, a recipe's cost to make and the words (auction prices, spec §3, §4.3–§4.5, C6, C9, C10).
+A hand-built price table stands in for the auction house, a fake client for Blizzard's item names, a fake clock for time;
+item and guild names are invented or the game's own."""
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from conftest import OWNER
+
+from oibot_gm import armory, auctions, battlenet, discord_auctions, prices
+from oibot_gm.armory import Armory, ArmoryDown, GuildFacts, Reply
+from oibot_gm.auctions import House, Price
+from oibot_gm.profiles import GameProfile, RecipeDef
+
+ROOT = Path(__file__).resolve().parents[1]
+TBC = GameProfile.load(ROOT / "profiles" / "tbc")
+HORDE_AH = House(id=6, name="Horde Auction House")
+NOW = datetime(2026, 11, 13, 20, 0, tzinfo=timezone.utc)
+BAR, DREAMFOIL, VIAL, LAB = 12360, 13463, 8925, 279990  # Arcanite Bar, Dreamfoil, Crystal Vial, Alchemy Laboratory
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+class Clock:
+    def __init__(self):
+        self.t = NOW
+
+    def __call__(self):
+        return self.t
+
+
+class FakeNames:
+    """The auction client's item_name, recorded: `names` answers, a missing id is a 404 (None), `fail_after` raises."""
+
+    def __init__(self, names=None, fail_after=None):
+        self.names = dict(names or {})
+        self.asked: list[int] = []
+        self.fail_after = fail_after
+
+    def item_name(self, item_id):
+        if self.fail_after is not None and len(self.asked) >= self.fail_after:
+            raise ArmoryDown(detail="503")
+        self.asked.append(item_id)
+        return self.names.get(item_id)
+
+
+class FakeOps:
+    def __init__(self):
+        self.lines = []
+
+    async def emit(self, cfg, level, text, exc=None, dm=True, dm_only=None):
+        self.lines.append((level, text))
+
+
+@pytest.fixture
+def clock(monkeypatch, tmp_path):
+    c = Clock()
+    monkeypatch.setattr(discord_auctions, "_now", c)
+    monkeypatch.setattr(discord_auctions, "OUT", tmp_path / "auctions-out")
+    monkeypatch.setattr(armory, "available", lambda reg: bool(reg.profile.armory))
+    discord_auctions.reset_state()
+    prices.reset_names()
+    yield c
+    discord_auctions.reset_state()
+    prices.reset_names()
+
+
+def facts() -> GuildFacts:
+    return GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", ruleset_id=2,
+                      members=8, created=NOW)
+
+
+def priced(reg, table: dict[int, Price], *, at=NOW):
+    """The guild picks the Horde house and its table is `table`, read at `at`."""
+    if reg.config.armory is None:
+        reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
+    if reg.config.market is None:
+        reg.set_market(HORDE_AH, 2, "Owner", by_id=OWNER)
+    discord_auctions._st(reg)["table"] = discord_auctions.Table(at=at, house_id=6, ruleset_id=2, prices=dict(table), modified=None)
+    return reg
+
+
+def recipe(makes=None, reagents=()) -> RecipeDef:
+    return RecipeDef(id=1, name="A Test Recipe", profession="alchemy", category="Tests", makes=makes, reagents=list(reagents), key="a test recipe")
+
+
+def items_file() -> Path:
+    return discord_auctions.OUT / "items.json"
+
+
+# ------------------------------------------------------------------ names
+
+
+def test_names_come_from_recipes_items_then_the_cache(reg, clock):
+    names = prices.names(reg)
+    assert names[DREAMFOIL] == "Dreamfoil" and names[LAB] == "Alchemy Laboratory", "what a recipe makes and its reagents"
+    # the cache fills only what nothing local names, and is kept per game version
+    items_file().parent.mkdir(parents=True)
+    items_file().write_text(json.dumps({reg.profile.name: {"900001": "Kettle Lid", str(DREAMFOIL): "Wrong Name"},
+                                        "tbc": {"900002": "Another Version's Thing"}}), encoding="utf-8")
+    prices.reset_names()
+    names = prices.names(reg)
+    assert names[900001] == "Kettle Lid"
+    assert names[DREAMFOIL] == "Dreamfoil", "the recipe list wins over the cache"
+    assert 900002 not in names, "two versions never share names"
+    # a version with loot items (tbc): the item data names them; a recipe list names before it
+    item_id, item = next(iter(TBC.items.items()))
+    tbc = SimpleNamespace(profile=TBC)
+    assert prices.names(tbc)[item_id] == item.name
+    assert prices.names(tbc)[900002] == "Another Version's Thing"
+    fake = SimpleNamespace(profile=SimpleNamespace(name="madeup", items={7: SimpleNamespace(name="Item Name")}, known_items={8: "Known"},
+                                                   recipes={1: recipe(makes={"id": 7, "name": "Recipe Name", "quantity": 1})}))
+    assert prices.names(fake) == {7: "Recipe Name", 8: "Known"}
+
+
+def test_item_name_reads_the_static_namespace_and_a_404_is_none():
+    calls = []
+
+    def fetch(url, headers):
+        calls.append(url)
+        if "/item/7" in url:
+            return Reply(200, {}, json.dumps({"id": 7, "name": "Arcanite Bar"}).encode())
+        return Reply(404, {}, b"")
+
+    arm = Armory("us", "profile-forever-us", "static-forever-us", fetch=fetch, limiter=battlenet.Limiter(1000))
+    cli = auctions.Client(arm, "dynamic-forever-us")
+    assert cli.item_name(7) == "Arcanite Bar"
+    assert "/data/wow/item/7?" in calls[0] and "namespace=static-forever-us" in calls[0]
+    assert cli.item_name(8) is None
+
+
+# ------------------------------------------------------------------ the search
+
+
+def test_search_matches_every_word_listed_first_and_counts_the_total(reg, clock):
+    priced(reg, {BAR: Price(low=489998, qty=30), DREAMFOIL: Price(low=1500, qty=40)})
+    assert prices.search(reg, "") == ([], 0)
+    assert prices.search(reg, "   ") == ([], 0)
+    hits, total = prices.search(reg, "ARCANITE bar")
+    assert hits[0] == prices.ItemPrice(id=BAR, name="Arcanite Bar", low=489998, qty=30)
+    assert all("arcanite" in h.name.casefold() and "bar" in h.name.casefold() for h in hits)
+    assert total == len(hits)
+    hits, total = prices.search(reg, "dream")
+    assert hits[0].id == DREAMFOIL, "a listed item comes first"
+    unlisted = [h for h in hits if h.low is None]
+    assert unlisted and all(h.qty == 0 for h in unlisted)
+    assert [h.name for h in unlisted] == sorted(h.name for h in unlisted), "then by name"
+    hits, total = prices.search(reg, "a", limit=5)
+    assert len(hits) == 5 and total > 5, "the total counts every match, past the limit"
+
+
+def test_search_is_empty_when_prices_are_off_or_too_old(reg, clock):
+    assert prices.search(reg, "arcanite") == ([], 0), "no market picked"
+    priced(reg, {BAR: Price(low=489998, qty=30)}, at=NOW - timedelta(hours=25))
+    assert discord_auctions.state(reg) == "old"
+    assert prices.search(reg, "arcanite") == ([], 0)
+    assert prices.recipe_cost(reg, recipe(reagents=[{"id": BAR, "name": "Arcanite Bar", "quantity": 1}])) is None
+    priced(reg, {BAR: Price(low=489998, qty=30)}, at=NOW - timedelta(hours=7))
+    assert discord_auctions.state(reg) == "stale"
+    assert prices.search(reg, "arcanite bar")[1] >= 1, "a stale table still shows"
+
+
+# ------------------------------------------------------------------ cost to make
+
+
+def test_cost_of_an_enchant_a_range_and_a_missing_reagent(reg, clock):
+    priced(reg, {BAR: Price(low=100000, qty=3), DREAMFOIL: Price(low=1200, qty=40), LAB: Price(low=32000, qty=14)})
+    enchant = prices.recipe_cost(reg, recipe(reagents=[{"id": BAR, "name": "Arcanite Bar", "quantity": 1},
+                                                       {"id": DREAMFOIL, "name": "Dreamfoil", "quantity": 2}]))
+    assert enchant.made is None and (enchant.makes_min, enchant.makes_max) == (0, 0)
+    assert enchant.total == 102400 and enchant.missing == 0
+    assert enchant.lines[1] == prices.CostLine(id=DREAMFOIL, name="Dreamfoil", quantity=2, unit=1200, total=2400)
+    assert prices.made_words(enchant) == ""
+    ranged = prices.recipe_cost(reg, recipe(makes={"id": LAB, "name": "Alchemy Laboratory", "quantity": 2, "quantity_max": 4},
+                                            reagents=[{"id": DREAMFOIL, "name": "Dreamfoil", "quantity": 1}]))
+    assert (ranged.makes_min, ranged.makes_max) == (2, 4)
+    assert ranged.made == prices.ItemPrice(id=LAB, name="Alchemy Laboratory", low=32000, qty=14)
+    assert ranged.total == 1200, "per craft: what it makes is never added or subtracted"
+    short = prices.recipe_cost(reg, recipe(makes={"id": LAB, "name": "Alchemy Laboratory", "quantity": 1},
+                                           reagents=[{"id": DREAMFOIL, "name": "Dreamfoil", "quantity": 3},
+                                                     {"id": VIAL, "name": "Crystal Vial", "quantity": 1}]))
+    assert short.missing == 1 and short.total == 3600
+    assert short.lines[1] == prices.CostLine(id=VIAL, name="Crystal Vial", quantity=1, unit=None, total=None)
+    assert prices.cost_sentence(short) == "Cost to make: at least 36s — 1 reagent has none listed."
+
+
+def test_a_reagent_listed_twice_is_one_line(reg, clock):
+    priced(reg, {DREAMFOIL: Price(low=1000, qty=40)})
+    cost = prices.recipe_cost(reg, recipe(reagents=[{"id": DREAMFOIL, "name": "Dreamfoil", "quantity": 2},
+                                                    {"id": VIAL, "name": "Crystal Vial", "quantity": 1},
+                                                    {"id": DREAMFOIL, "name": "Dreamfoil", "quantity": 3}]))
+    assert [(c.id, c.quantity) for c in cost.lines] == [(DREAMFOIL, 5), (VIAL, 1)]
+    assert cost.lines[0].total == 5000 and cost.total == 5000 and cost.missing == 1
+
+
+# ------------------------------------------------------------------ the words
+
+
+def test_the_sentences(reg, clock):
+    assert prices.NONE_LISTED == "none listed"
+    bar = prices.ItemPrice(id=BAR, name="Arcanite Bar", low=489998, qty=30)
+    assert prices.price_words(bar) == "Arcanite Bar: lowest price 48g 99s 98c, 30 listed."
+    assert prices.price_words(prices.ItemPrice(id=BAR, name="Arcanite Bar", low=None, qty=0)) == "Arcanite Bar: none listed."
+
+    def cost(lines, made=None, lo=0, hi=0):
+        return prices.Cost(lines=lines, total=sum(c.total or 0 for c in lines), missing=sum(c.unit is None for c in lines),
+                           made=made, makes_min=lo, makes_max=hi)
+
+    known = prices.CostLine(id=1, name="A", quantity=1, unit=124000, total=124000)
+    gone = prices.CostLine(id=2, name="B", quantity=1, unit=None, total=None)
+    gone2 = prices.CostLine(id=3, name="C", quantity=2, unit=None, total=None)
+    assert prices.cost_sentence(cost([known])) == "Cost to make: 12g 40s."
+    assert prices.cost_sentence(cost([known, gone])) == "Cost to make: at least 12g 40s — 1 reagent has none listed."
+    assert prices.cost_sentence(cost([known, gone, gone2])) == "Cost to make: at least 12g 40s — 2 reagents have none listed."
+    assert prices.cost_sentence(cost([gone, gone2])) == "Cost to make: not known — none of the reagents are listed."
+    lab = prices.ItemPrice(id=LAB, name="Alchemy Laboratory", low=32000, qty=14)
+    assert prices.made_words(cost([known], lab, 1, 1)) == "Makes 1 · lowest price 3g 20s each, 14 listed"
+    assert prices.made_words(cost([known], lab, 2, 4)) == "Makes 2 to 4 · lowest price 3g 20s each, 14 listed"
+    none = prices.ItemPrice(id=LAB, name="Alchemy Laboratory", low=None, qty=0)
+    assert prices.made_words(cost([known], none, 1, 1)) == "Makes 1 · none listed"
+    assert prices.made_words(cost([known])) == ""
+    # how recent, or why there are none
+    assert prices.status_sentence(reg, owner=True) == "Pick the guild's auction house on the Config page to see prices."
+    assert prices.status_sentence(reg, owner=False) == ""
+    priced(reg, {})
+    assert prices.status_sentence(reg, owner=False) == discord_auctions.as_of_words(reg)
+    assert prices.status_sentence(reg, owner=True).startswith("Prices as of ")
+    discord_auctions._st(reg)["table"] = None
+    assert discord_auctions.state(reg) == "waiting"
+    assert prices.status_sentence(reg, owner=False) == discord_auctions.WAITING_WORDS
+    priced(reg, {}, at=NOW - timedelta(hours=30))
+    assert prices.status_sentence(reg, owner=False) == discord_auctions.OLD_WORDS
+
+
+# ------------------------------------------------------------------ the naming step
+
+
+def test_naming_stops_quietly_on_a_failure_and_caps_per_fetch(reg, clock, monkeypatch):
+    unnamed = {900000 + i: Price(low=100, qty=i) for i in range(1, 251)}  # 250 ids nothing names, qty 1..250
+    priced(reg, {BAR: Price(low=489998, qty=999), **unnamed})
+    fake = FakeNames({i: f"Kettle Part {i}" for i in unnamed})
+    monkeypatch.setattr(discord_auctions, "_client", lambda r: fake)
+    bot = SimpleNamespace(ops=FakeOps())
+    assert run(discord_auctions.name_items(bot, reg)) == discord_auctions.NAME_PER_FETCH == 200
+    assert BAR not in fake.asked, "an id the recipe list names is never asked"
+    assert fake.asked[:3] == [900250, 900249, 900248], "most listed first"
+    assert len(fake.asked) == 200
+    assert prices.names(reg)[900250] == "Kettle Part 900250"
+    saved = json.loads(items_file().read_text(encoding="utf-8"))
+    assert saved[reg.profile.name]["900250"] == "Kettle Part 900250"
+    assert not [p for p in items_file().parent.iterdir() if p.name != "items.json" and p.is_file()], "written whole"
+    prices.reset_names()  # a restart: the file names them again
+    assert prices.names(reg)[900250] == "Kettle Part 900250"
+    # the next fetch names the rest; a 404 is not asked again in this process
+    fake.asked.clear()
+    del fake.names[900001]
+    assert run(discord_auctions.name_items(bot, reg)) == 49
+    assert len(fake.asked) == 50
+    fake.asked.clear()
+    assert run(discord_auctions.name_items(bot, reg)) == 0 and fake.asked == []
+    # a failure stops it quietly: what was named before it is kept, no ops line
+    more = {800000 + i: Price(low=100, qty=i) for i in range(1, 11)}
+    priced(reg, more)
+    failing = FakeNames({i: f"Lid {i}" for i in more}, fail_after=3)
+    monkeypatch.setattr(discord_auctions, "_client", lambda r: failing)
+    assert run(discord_auctions.name_items(bot, reg)) == 3
+    assert prices.names(reg)[800010] == "Lid 800010" and 800007 not in prices.names(reg)
+    assert bot.ops.lines == []
+    # the hourly check names after it reads the table, in the same background task
+    discord_auctions.reset_state()
+    prices.reset_names()
+    reader = SimpleNamespace(
+        table=lambda ruleset, house, since=None: ({700001: Price(low=5, qty=2)}, None),
+        item_name=lambda i: "Spare Cog")
+    monkeypatch.setattr(discord_auctions, "_client", lambda r: reader)
+
+    async def tick():
+        await (await discord_auctions.auctions_tick(bot, reg))
+    run(tick())
+    assert prices.names(reg)[700001] == "Spare Cog"
