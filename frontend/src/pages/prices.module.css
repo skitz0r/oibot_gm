@@ -17,6 +17,15 @@
 .item { border-bottom: 1px solid var(--mantine-color-slate-6); }
 .item:last-child { border-bottom: none; }
 .item > .row { padding: 8px 16px; border-bottom: none; }
+.mover { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(52px, auto); gap: 4px 14px; align-items: center; padding: 8px 16px; }
+.mover > * { min-width: 0; }
+.figures { text-align: right; white-space: nowrap; }
+.change { text-align: right; white-space: nowrap; }
+/* a watched row, after a brokerage's list: the item · its small 24-hour line · the price with the day's change under it · how many are listed */
+.watch { display: grid; grid-template-columns: minmax(0, 2fr) 120px minmax(96px, auto) minmax(84px, auto); gap: 4px 20px; align-items: center; padding: 8px 16px; }
+.watch > * { min-width: 0; }
+.spark { display: flex; justify-content: center; }
+.listed { text-align: right; white-space: nowrap; }
 .opens { cursor: pointer; }
 .opens:hover { background: var(--mantine-color-slate-7); }
 .panel { padding: 4px 16px 14px 46px; }
@@ -31,6 +40,11 @@
   .item:last-child { border-bottom: 1px solid var(--mantine-color-slate-5); }
   .item > .row { margin: 0; border: none; padding: 8px 12px; }
   .panel { padding: 4px 12px 12px; }
+  .mover { padding: 8px 12px; }
+  .watch { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 12px; gap: 6px 12px; }
+  .watch > :first-child { grid-column: 1 / -1; }
+  .watch > .listed { grid-column: 1 / -1; text-align: left; }
+  .spark { justify-content: flex-start; }
   .name { white-space: normal; }
   .touch :global(.mantine-Button-root),
   .touch :global(.mantine-ActionIcon-root) { min-height: 44px; min-width: 44px; }

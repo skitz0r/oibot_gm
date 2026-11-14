@@ -531,10 +531,10 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   item's name lists up to 25 items with their lowest price and how many are listed (or *none listed*) and how many more
   match, each with **Watch** (**Stop watching** when it is already on your list). The page says once how recent the
   prices are (*Prices as of …*). Below it, **Your watch list**: a row per item with its lowest price, how many are
-  listed and a small line of its price over the last seven days, newest first; an empty list says *"You aren't watching anything yet. Search for an item above and press
+  listed and, between the name and the price, a small line of its price over the last 24 hours with the day's change under the price (*+12%* in green when it rose, *−8%* in red when it fell), newest first; an empty list says *"You aren't watching anything yet. Search for an item above and press
   Watch."* (while prices aren't shown, just *"You aren't watching anything yet."*, in `/price` too). Open a row — of your list or of the search, watched or not — to see the item's price over time: a line of the lowest price (a price holds until the next change; a
   break where nothing was listed, never a drop to zero; on older days a faint band from that day's lowest to its
-  highest; a stretch when the bot didn't read the auction house is a break too, read *not read*), with **7 days** · **30 days** · **90 days** · **1 year**, the highest and lowest of the span at its side and
+  highest; a stretch when the bot didn't read the auction house is a break too, read *not read*), with **24 hours** (shown first) · **7 days** · **30 days** · **90 days** · **1 year** — the line is green when the price ended the span higher than it began and red when lower; while the bot's record is younger than the span the chart starts where the record does —, the highest and lowest of the span at its side and
   the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time and
   price (the first point reads the span's start, with the price the item had then). A price that didn't change all span is
   a flat line across it. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'
@@ -543,6 +543,16 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction
   house picked, or the last prices more than a day old) there is no search and the list shows the items' names alone, with
   nothing to open; nothing new can be watched then (the answer says why), but **Stop watching** still works. On a phone each item and each search result is a card.
+- **Movers** (an experiment, on the site's Prices tab): between the search and your watch list, two lists — **Dips** and
+  **Rising** — over **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
+  least 10% away from its *usual* price over that time, the biggest move first, up to 15 each way: the usual price → the
+  price now, the change in percent, how many are listed, and how many recipes use the item. The usual price is the middle
+  value of the item's lowest price over the window, weighted by how long each price stood — so one odd listing for an
+  hour moves nothing. Only items with at least 5 listed now, and listed for at least half the window, are ranked: a single
+  cheap or wishful listing isn't a move. Open a row for the item's chart, the recipes it is used in (*"Used in Elixir of
+  the Mongoose, Major Mana Potion and 4 more."*) and **Watch**. Until the bot has kept prices for the whole window the
+  card says so (*"The bot hasn't kept prices for 7 days yet. It started Sat 14 Nov 2:51 PM."*). It shows moves, not
+  advice: nothing pings you, and there is no profit figure.
 - **How long prices are kept**: the bot keeps every change of every item's lowest price and how many are listed — not
   only watched items — for 90 days; after that one lowest and one highest price per item per day, up to a year; nothing
   older. The record belongs to the auction house, so a guild whose owner picks another house starts that house's record

@@ -533,7 +533,7 @@ def test_the_empty_list_sentences():
     assert prices.EMPTY_LIST_SITE == "You aren't watching anything yet. Search for an item above and press Watch."
     assert prices.EMPTY_LIST_DISCORD == "You aren't watching anything yet. Use /price with an item and press Watch."
     assert prices.EMPTY_LIST_HIDDEN == "You aren't watching anything yet.", "prices hidden: no search to point at"
-    assert prices.SPANS == {"7": (7, "7 days"), "30": (30, "30 days"), "90": (90, "90 days"), "365": (365, "1 year")}
+    assert prices.SPANS == {"1": (1, "24 hours"), "7": (7, "7 days"), "30": (30, "30 days"), "90": (90, "90 days"), "365": (365, "1 year")}
 
 
 def test_history_sentences(reg, clock):
@@ -666,3 +666,141 @@ def test_a_version_without_auction_houses_has_no_watch_or_history(reg, clock, me
     assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == []
     assert prices.chart(reg, PLAGUEBLOOM, "7", now=NOW)["points"] == []
     assert prices.watch_list(reg, UID) == []
+
+
+# ---- movers (2026-11-14): dips and risers against an item's usual price over a window
+
+
+def _read_hourly(reg, start, hours, table_at):
+    from oibot_gm import price_history
+
+    for i in range(hours + 1):
+        price_history.record(discord_auctions.history_key(reg), start + i * timedelta(hours=1), table_at(i))
+
+
+def test_movers_rank_dips_and_risers_with_the_servers_words(reg, clock):
+    clock.t = NOW
+    start = NOW - timedelta(hours=24)
+
+    def table(i):
+        late = i >= 20
+        return {PLAGUEBLOOM: Price(low=900 if late else 1500, qty=40), VIAL: Price(low=640, qty=200),
+                BAR: Price(low=600000 if late else 400000, qty=12)}
+
+    priced(reg, table(24), at=NOW)
+    _read_hourly(reg, start, 24, table)
+    m = prices.movers(reg, "24")
+    assert m["window"] == "24" and [w["label"] for w in m["windows"]] == ["6 hours", "12 hours", "24 hours", "7 days"]
+    assert m["ready"] is True and m["words"] == ""
+    (dip,) = m["dips"]
+    assert (dip["id"], dip["name"], dip["usual_words"], dip["now_words"], dip["change_words"], dip["qty"]) == (
+        PLAGUEBLOOM, "Plaguebloom", "15s", "9s", "−40%", 40)
+    uses = sum(1 for r in reg.profile.recipes.values() if any(x["id"] == PLAGUEBLOOM for x in r.reagents))
+    assert uses >= 1 and dip["uses"] == uses and dip["uses_words"] == (f"Used in {uses} recipes" if uses > 1 else "Used in 1 recipe")
+    (up,) = m["rising"]
+    assert (up["id"], up["usual_words"], up["now_words"], up["change_words"]) == (BAR, "40g", "60g", "+50%")
+    assert VIAL not in [r["id"] for r in m["dips"] + m["rising"]], "a price that didn't move is no mover"
+
+
+def test_movers_ignore_small_moves_and_unnamed_items_and_cap_the_lists(reg, clock):
+    clock.t = NOW
+    start = NOW - timedelta(hours=6)
+    fake = [990000 + i for i in range(40)]
+
+    def table(i):
+        late = i >= 5
+        t = {PLAGUEBLOOM: Price(low=1400 if late else 1500, qty=40)}  # −7%: under the 10% line
+        t.update({k: Price(low=(50 + n) if late else 200, qty=9) for n, k in enumerate(fake)})  # 40 big dips nothing names
+        return t
+
+    priced(reg, table(6), at=NOW)
+    _read_hourly(reg, start, 6, table)
+    m = prices.movers(reg, "6")
+    assert m["dips"] == [] and m["rising"] == [] and m["ready"] is True and m["words"] == ""
+    assert m["dips_words"] == "Nothing has dipped 10% or more in the last 6 hours."
+    assert m["rising_words"] == "Nothing has risen 10% or more in the last 6 hours."
+    prices.remember(reg, {k: f"Kettle Part {k}" for k in fake}, set())
+    m = prices.movers(reg, "6")
+    assert len(m["dips"]) == prices.MOVERS_TOP == 15 and m["dips"][0]["change_words"] == "−75%", "the biggest move first"
+    assert m["dips_words"] == "" and m["rising_words"] == "Nothing has risen 10% or more in the last 6 hours."
+
+
+def test_movers_say_when_the_history_is_too_short_or_prices_are_hidden(reg, clock):
+    from oibot_gm.registry import RegistryError
+
+    clock.t = NOW
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=40)}, at=NOW)
+    _read_hourly(reg, NOW - timedelta(hours=3), 3, lambda i: {PLAGUEBLOOM: Price(low=1500, qty=40)})
+    m = prices.movers(reg, "6")
+    assert m["ready"] is False and m["dips"] == [] and m["rising"] == []
+    assert m["words"] == f"The bot hasn't kept prices for 6 hours yet. It started {reg.local12(NOW - timedelta(hours=3))}."
+    with pytest.raises(RegistryError):
+        prices.movers(reg, "48")
+    clock.t = NOW + timedelta(days=2)  # prices a day old: hidden
+    m = prices.movers(reg, "6")
+    assert (m["ready"], m["dips"], m["rising"], m["words"]) == (False, [], [], "")
+
+
+def test_used_in_words(reg):
+    names = sorted(r.name for r in reg.profile.recipes.values() if any(x["id"] == PLAGUEBLOOM for x in r.reagents))
+    words = prices.used_in_words(reg, PLAGUEBLOOM)
+    assert words.startswith("Used in ") and names[0] in words and words.endswith(".")
+    if len(names) > 3:
+        assert words.endswith(f"and {len(names) - 3} more.")
+    assert prices.used_in_words(reg, 999_999_999) == ""
+
+
+def test_movers_read_the_history_once_per_price_table(reg, clock, monkeypatch):
+    from oibot_gm import price_history
+
+    clock.t = NOW
+    table = {PLAGUEBLOOM: Price(low=900, qty=40)}
+    priced(reg, table, at=NOW)
+    _read_hourly(reg, NOW - timedelta(hours=6), 6, lambda i: {PLAGUEBLOOM: Price(low=900 if i >= 5 else 1500, qty=40)})
+    calls = []
+    real = price_history.moves
+    monkeypatch.setattr(price_history, "moves", lambda *a, **k: calls.append(a) or real(*a, **k))
+    prices._MOVERS.clear()
+    first = prices.movers(reg, "6")
+    assert prices.movers(reg, "6") == first and len(calls) == 1, "an open page's reloads don't read the file again"
+    prices.movers(reg, "12")
+    assert len(calls) == 2, "another window is its own answer"
+    priced(reg, table, at=NOW + timedelta(hours=1))
+    clock.t = NOW + timedelta(hours=1)
+    prices.movers(reg, "6")
+    assert len(calls) == 3, "a new price table: read again"
+
+
+def test_a_young_history_starts_the_chart_where_the_history_does(reg, clock):
+    """An hour of history in a seven-day span would sit in the chart's last sliver: the x axis starts at the first kept
+    read instead, and goes back to the span's start once the history is older than it."""
+    from oibot_gm import price_history
+
+    clock.t = NOW
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=NOW)
+    key = discord_auctions.history_key(reg)
+    price_history.record(key, NOW - timedelta(hours=2), {PLAGUEBLOOM: Price(low=1400, qty=4)})
+    price_history.record(key, NOW - timedelta(hours=1), {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    c = prices.chart(reg, PLAGUEBLOOM, "7")
+    assert (c["since"], c["until"]) == (int((NOW - timedelta(hours=2)).timestamp()), int(NOW.timestamp()))
+    assert [p["low"] for p in c["points"]] == [1400, 1500]
+    s = prices.spark(reg, PLAGUEBLOOM)
+    assert s["since"] == c["since"] and (s["change_words"], s["up"]) == ("+7%", True)
+    clock.t = NOW + timedelta(days=30)
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=clock.t)
+    c = prices.chart(reg, PLAGUEBLOOM, "7")
+    assert c["until"] - c["since"] == 7 * 86400, "an older history: the span's own start"
+
+
+def test_the_small_lines_change_words(reg, clock):
+    clock.t = NOW
+    priced(reg, {PLAGUEBLOOM: Price(low=900, qty=4), VIAL: Price(low=640, qty=9)}, at=NOW)
+    keep(reg, NOW - 3 * DAY, {PLAGUEBLOOM: Price(low=1500, qty=4), VIAL: Price(low=640, qty=9)})
+    keep(reg, NOW - timedelta(hours=5), {PLAGUEBLOOM: Price(low=900, qty=4), VIAL: Price(low=640, qty=9)})
+    s = prices.spark(reg, PLAGUEBLOOM)
+    assert (s["change_words"], s["up"]) == ("−40%", False)
+    s = prices.spark(reg, VIAL)
+    assert (s["change_words"], s["up"]) == ("0%", None), "a price that held: no colour"
+    keep(reg, NOW - timedelta(hours=1), {VIAL: Price(low=640, qty=9)})  # Plaguebloom delisted an hour ago
+    s = prices.spark(reg, PLAGUEBLOOM)
+    assert (s["change_words"], s["up"]) == ("", None), "nothing listed now: no change to state"

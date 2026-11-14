@@ -5183,9 +5183,15 @@ item the watch list; everything ephemeral.
 nothing pings, DMs or posts when a price moves (the DM rule). **C2** every change kept 90 days, then one lowest and one
 highest per item per day, nothing past a year. **C3** one list on both sides. **C4** search covers named items only.
 **C5** a watched item's history: on the site a chart plus the 7- and 30-day lowest / highest in words; in Discord the
-words only. **C6** (replaced by the owner 2026-11-14) history shows for ANY item the bot can name, watched or not: a search row
+words only. **Movers** (the owner's experiment, 2026-11-14, site only): `price_history.moves(key, window, now)` = every
+item with ≥ `MOVE_MIN_QTY` (5) listed now and its USUAL price over the window — the time-weighted middle value of its lowest
+price, unlisted and unread time counting for nothing, listed for at least half the window; None until the house's history
+covers the window (the `changes_at` index serves the one read). `prices.movers(reg, window)` ranks the named ones at least
+`MOVE_MIN_PCT` (10) % off their usual price into `dips` / `rising` (≤ 15 each, the biggest first) with the server's words and
+how many recipes use the item (`used_in_words` on the history answer names them); `GET /api/prices/movers?window=6|12|24|168`.
+No alert, no profit figure, no Discord or MCP form yet. **C6** (replaced by the owner 2026-11-14) history shows for ANY item the bot can name, watched or not: a search row
 opens to the same chart and sentences, `/price <item>` adds the history sentences to a one-item answer, and each row of the
-watch list carries a small seven-day line (`prices.spark`: positions only, no words).
+watch list carries a small line (`prices.spark`). The same day the owner asked for a 24-hour view and a brokerage-style row: `SPANS` gains "1" = 24 hours (the default span), the row's line covers the last 24 hours and carries `change_words` / `up` (now against the first price of the stretch — the line's and the figure's colour), and a chart whose history is younger than its span starts its x axis at the first kept read.
 **C7** at most 25 items (Discord's select). **C8** watching and stopping are instant, no confirm. **C9** the list lives on
 the member's record (`Member.watching`, not on a character); history under `out/` only. **C10** history belongs to an
 auction house, not a guild: two guilds on one house share it; another house starts empty; turning prices off deletes

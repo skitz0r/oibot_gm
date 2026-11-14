@@ -722,8 +722,13 @@ def test_the_prices_tab():
         assert label in page, label
     assert "<ItemName " in page and "<PriceChart" in page
     # 2026-11-14: a search row opens to the chart too (watched or not), and a watched row carries its small line
+    # movers (an experiment): the server's two lists, every figure its words; a row opens the same panel
+    assert "/api/prices/movers" in page and 'moversSide("Dips", "dips", movers.dips, movers.dips_words)' in page
+    assert 'moversSide("Rising", "rising", movers.rising, movers.rising_words)' in page and "r.change_words" in page and "hist.used_in" in page
     assert 'toggle(p.id, "search")' in page and 'isOpen(p.id, "search") && panel(' in page, "a search result opens its chart without watching"
-    assert "<Sparkline data={r.spark}" in page, "the watch list's rows draw the server's seven-day line"
+    assert "<Sparkline data={r.spark}" in page, "the watch list's rows draw the server's 24-hour line"
+    assert "r.spark.change_words" in page and "trendOf(r.spark.up)" in page, "the day's change beside the price, the server's words and direction"
+    assert 'useState("1")' in page, "the chart opens on 24 hours"
     spark = _code_only((SRC / "components" / "PriceChart.tsx").read_text())
     assert "export function Sparkline" in spark and "data.since" in spark and "data.until" in spark
     assert "toLocale" not in page and "new Date(" not in page, "times and money are the server's words"

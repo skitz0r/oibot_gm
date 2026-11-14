@@ -288,3 +288,59 @@ def test_a_broken_file_raises_history_error():
         with pytest.raises(ph.HistoryError):
             call()
     ph.fold(T0)                                                               # the fold skips a file it can't read
+
+
+# ---- movers (2026-11-14): an item's price now against its usual price over a window
+
+
+def _hourly(start, hours, table_at):
+    """Record a read every hour for `hours` hours from `start`; table_at(i) = that hour's table."""
+    for i in range(hours + 1):
+        ph.record(K, start + i * H, table_at(i))
+
+
+def test_moves_compare_now_with_the_windows_usual_price():
+    # item 1 sat at 100 for 20 hours then dipped to 60; item 2 sat at 100 then rose to 150; item 3 never moved
+    _hourly(T0, 24, lambda i: {1: P(100 if i < 20 else 60, 9), 2: P(100 if i < 20 else 150, 9), 3: P(70, 9)})
+    now = T0 + 24 * H
+    got = {m.item: m for m in ph.moves(K, timedelta(hours=24), now)}
+    assert (got[1].usual, got[1].now, got[1].qty) == (100, 60, 9)
+    assert (got[2].usual, got[2].now) == (100, 150)
+    assert (got[3].usual, got[3].now) == (70, 70)
+
+
+def test_one_odd_read_does_not_move_the_usual_price():
+    _hourly(T0, 24, lambda i: {1: P(5 if i == 3 else 100, 9)})  # one silly listing for an hour
+    (m,) = ph.moves(K, timedelta(hours=24), T0 + 24 * H)
+    assert (m.usual, m.now) == (100, 100)
+
+
+def test_moves_need_enough_listed_now_and_listed_for_half_the_window():
+    def table(i):
+        t = {1: P(100, 4), 2: P(100, 9)}        # item 1: too few listed now
+        if i >= 20:
+            t[3] = P(100, 9)                    # item 3: listed for only the last 4 of 24 hours
+        return t
+    _hourly(T0, 24, table)
+    assert [m.item for m in ph.moves(K, timedelta(hours=24), T0 + 24 * H)] == [2]
+    assert [m.item for m in ph.moves(K, timedelta(hours=24), T0 + 24 * H, min_qty=1)] == [1, 2]
+
+
+def test_moves_are_none_until_the_history_covers_the_window():
+    assert ph.moves(K, timedelta(hours=6), T0) is None, "no file"
+    _hourly(T0, 5, lambda i: {1: P(100, 9)})
+    assert ph.moves(K, timedelta(hours=6), T0 + 5 * H) is None, "five hours kept: not a full six"
+    ph.record(K, T0 + 6 * H, {1: P(90, 9)})
+    assert [(m.usual, m.now) for m in ph.moves(K, timedelta(hours=6), T0 + 6 * H)] == [(100, 90)]
+
+
+def test_unread_time_counts_for_nothing_in_a_move():
+    # read for 4 hours at 100, then nothing for 20 hours, then back at 100: only 4 of the 24 hours were read
+    _hourly(T0, 4, lambda i: {1: P(100, 9)})
+    ph.record(K, T0 + 24 * H, {1: P(100, 9)})
+    assert ph.moves(K, timedelta(hours=24), T0 + 24 * H) == [], "listed (and read) for less than half the window"
+
+
+def test_an_item_with_nothing_listed_now_is_no_mover():
+    _hourly(T0, 12, lambda i: {1: P(100, 9)} if i < 12 else {})
+    assert ph.moves(K, timedelta(hours=12), T0 + 12 * H) == []

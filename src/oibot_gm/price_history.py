@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS changes (item INTEGER NOT NULL, at INTEGER NOT NULL, 
                                     PRIMARY KEY (item, at)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS last (item INTEGER PRIMARY KEY, low INTEGER, qty INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS unread (start INTEGER PRIMARY KEY, stop INTEGER NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS changes_at ON changes (at, item, low);
 """
+# `changes_at` (movers read a window's changes across every item) is added to an older file the same way.
 # `unread` came after the first files were made: the IF NOT EXISTS above adds it to an older file when it is opened.
 
 
@@ -220,6 +222,63 @@ def kept_since(key: tuple) -> datetime | None:
     """The house's first kept feed time, or None when nothing was kept."""
     row = _read(key, lambda con: con.execute("SELECT first_at FROM meta").fetchone())
     return _time(row[0]) if row else None
+
+
+@dataclass(frozen=True)
+class Move:
+    """An item's lowest price now against its usual price over a window (movers): copper, and how many are listed now."""
+    item: int
+    usual: int
+    now: int
+    qty: int
+
+
+MOVE_MIN_QTY = 5  # fewer listed now is one person's listing, not a market
+
+
+def moves(key: tuple, window: timedelta, now: datetime, *, min_qty: int = MOVE_MIN_QTY) -> list[Move] | None:
+    """Every item listed now (at least `min_qty` of it) with its USUAL price over the last `window`: the middle value of
+    its lowest price, weighted by how long each price stood — so one odd read moves nothing. Time with nothing listed
+    and time the bot didn't read count for nothing, and an item listed (and read) for less than half the window is left
+    out. By item id. None when the house's kept history doesn't reach back the whole window (or nothing is kept).
+    ONE read of the file: the window's changes through the `changes_at` index, a carried start per candidate."""
+    a, b = _secs(now - window), _secs(now)
+
+    def go(con):
+        meta = con.execute("SELECT first_at FROM meta").fetchone()
+        if meta is None or meta[0] > a:
+            return None
+        listed = {item: (low, qty) for item, low, qty in
+                  con.execute("SELECT item, low, qty FROM last WHERE low IS NOT NULL AND qty >= ?", (int(min_qty),))}
+        inside: dict[int, list[tuple[int, int | None]]] = {}
+        for item, at, low in con.execute("SELECT item, at, low FROM changes WHERE at > ? AND at <= ? ORDER BY at", (a, b)):
+            if item in listed:
+                inside.setdefault(item, []).append((at, low))
+        gaps = con.execute("SELECT start, stop FROM unread WHERE start < ? AND stop > ? ORDER BY start", (b, a)).fetchall()
+
+        def read_seconds(s: int, e: int) -> int:
+            return (e - s) - sum(max(0, min(e, stop) - max(s, start)) for start, stop in gaps)
+
+        out = []
+        for item in sorted(listed):
+            before = con.execute("SELECT low FROM changes WHERE item = ? AND at <= ? ORDER BY at DESC LIMIT 1", (item, a)).fetchone()
+            steps = [(a, before[0] if before else None), *inside.get(item, [])]
+            stood: list[tuple[int, int]] = []  # (price, seconds it stood while the bot read)
+            for (s, low), (e, _next) in zip(steps, [*steps[1:], (b, None)]):
+                if low is not None and (secs := read_seconds(s, e)) > 0:
+                    stood.append((low, secs))
+            total = sum(secs for _low, secs in stood)
+            if total * 2 < (b - a):
+                continue
+            half, run = total / 2, 0
+            for low, secs in sorted(stood):
+                run += secs
+                if run >= half:
+                    out.append(Move(item=item, usual=low, now=listed[item][0], qty=listed[item][1]))
+                    break
+        return out
+
+    return _read(key, go)
 
 
 def _day(s: int) -> int:

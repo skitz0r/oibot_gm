@@ -161,7 +161,10 @@ src/oibot_gm/
                        guild's — and an adopted shared read (T1-a) — is kept by _keep (price_history.record in a thread; a failure keeps the table,
                        HISTORY_FAILED one ops warn per guild per hour, kind history); not on a 304 nor a discarded read; auctions_tick starts the fold
                        once a UTC day (_fold_daily: one background task, only where the profile has `auctions:`)
-  price_history.py     the kept price history (§5.66, C2, C10), BLOCKING (callers to_thread): one SQLite file per AUCTION HOUSE (never per guild)
+  price_history.py     (movers, 2026-11-14: moves(key, window, now, min_qty=MOVE_MIN_QTY 5) → [Move(item, usual, now, qty)] | None = each item listed now with the
+                       time-weighted middle value of its lowest price over the window — unlisted / unread time counts for nothing, listed for half the
+                       window, None until the history covers it; the `changes_at` index; prices.movers ranks ≥ MOVE_MIN_PCT 10 % into dips / rising ≤ MOVERS_TOP 15)
+                       the kept price history (§5.66, C2, C10), BLOCKING (callers to_thread): one SQLite file per AUCTION HOUSE (never per guild)
                        under out/auctions/history/ (never the data repo), path(key) from (namespace, ruleset, house); tables meta (first/last kept
                        feed time) · changes (item, at, low, high, qty: a change high = low; a folded day high ≥ low, qty NULL; low NULL = nothing
                        listed from then) · last (the comparison base) · unread (start, stop: more than GAP_AFTER 3 h between two kept feed
@@ -746,7 +749,9 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        POST /api/prices/watch {id, on} → {message, rows} (prices.watch/unwatch in a thread; a refusal 400; the quiet write publishes
                        `member`); GET /api/prices/history?id=&span= → {id, name, spans, **prices.chart, sentences} for any item the bot
                        can name, watched or not (the owner's decision 2026-11-14, replacing C6; an unnamed id only when it is on the viewer's
-                       own list, else 400 NO_MATCH; an unknown span 400); a watch list row carries `spark` = prices.spark (the last seven days
+                       own list, else 400 NO_MATCH; the answer's `used_in` = prices.used_in_words;
+                       GET /api/prices/movers?window=6|12|24|168 → prices.movers (members, site only — an experiment: dips / rising against the
+                       usual price over the window, one history read in a thread; an unknown window 400; 404 where auctions.available is false); an unknown span 400); the chart's spans = prices.SPANS (24 hours first — the default — then 7 / 30 / 90 days, 1 year; a history younger than the span starts the x axis where the history does); a watch list row carries `spark` = prices.spark (the last 24 hours, with change_words '+12%' and up = the line's colour; before 2026-11-14 the last seven days
                        as [t, low | null] over since..until, None with nothing to draw — the page's Sparkline; read in the routes' thread)
   web/api_memory.py    install_memory_api (design §5.61): GET /api/memories (officers: search, channel, member, paging), POST
                        /api/memories/{key}/forget (officers; MCP needs the actor), POST /api/me/memories/{key}/forget (own words only, never MCP)

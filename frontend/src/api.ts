@@ -179,9 +179,14 @@ export interface PriceFind {
  *  the whole line; `watching` = on the viewer's own watch list (the search's rows only). While prices are hidden a watch
  *  list row carries its name alone (empty `low_words` and `words`). */
 export interface PriceRow { id: number; name: string; low_words: string; qty: number; words: string; watching?: boolean; spark?: PriceSpark | null }
-/** A watch list row's small line (prices.spark): the last seven days as [epoch seconds, lowest in copper | null = nothing
+/** A watch list row's small line (prices.spark): the last 24 hours (less while the history is younger) as [epoch seconds, lowest in copper | null = nothing
  *  listed or not read from then] over `since` .. `until` — positions only; null = nothing to draw. */
-export interface PriceSpark { since: number; until: number; points: [number, number | null][] }
+export interface PriceSpark {
+  since: number; until: number; points: [number, number | null][];
+  /** the price now against the first price of the stretch ('+12%' / '−8%' / '0%'; "" = nothing listed now); `up` = the
+   *  line's colour: true risen, false fallen, null neither */
+  change_words: string; up: boolean | null;
+}
 /** GET /api/prices/watching (price watch §4.2): the viewer's own list, newest first; `shown` = prices show now (else names
  *  alone); `empty` = the empty list's sentence; `registered` = the viewer has a record (watching needs one, C13). */
 export interface WatchList { rows: PriceRow[]; words: string; shown: boolean; max: number; empty: string; registered: boolean }
@@ -196,6 +201,17 @@ export interface PriceHistory {
   low: number | null; high: number | null; low_words: string; high_words: string; sentences: string[];
   /** the span's start and the server's now (epoch seconds): the chart's x axis */
   since: number; until: number;
+  /** the recipes the item is a reagent of, in one sentence ("" = none) */
+  used_in?: string;
+}
+/** GET /api/prices/movers (an experiment, site only): the items whose lowest price now is at least 10% off their usual
+ *  price over the window (the middle value of the window; at least 5 listed now) — `dips` and `rising`, the biggest move
+ *  first, every figure the server's words. `ready` false + `words` = the kept history doesn't cover the window yet; an
+ *  empty list has its own sentence. */
+export interface MoverRow { id: number; name: string; usual_words: string; now_words: string; change_words: string; qty: number; uses: number; uses_words: string }
+export interface Movers {
+  window: string; windows: { id: string; label: string }[]; ready: boolean; words: string;
+  dips: MoverRow[]; rising: MoverRow[]; dips_words: string; rising_words: string;
 }
 /** GET /api/admin/market: the guild's auction house (officers read, the owner picks). `words` = the choice in words (or what
  *  is missing), `prices` = how recent the prices are, `clear_sentences` = Turn prices off…'s confirm. */

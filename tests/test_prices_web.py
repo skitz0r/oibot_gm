@@ -368,14 +368,14 @@ def test_history_of_a_watched_item(w, market_on):
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["id"] == PLAGUEBLOOM and d["name"] == "Plaguebloom"
-    assert d["spans"] == [{"id": "7", "label": "7 days"}, {"id": "30", "label": "30 days"}, {"id": "90", "label": "90 days"},
-                          {"id": "365", "label": "1 year"}]
+    assert d["spans"] == [{"id": "1", "label": "24 hours"}, {"id": "7", "label": "7 days"}, {"id": "30", "label": "30 days"},
+                          {"id": "90", "label": "90 days"}, {"id": "365", "label": "1 year"}]
     assert d["sentences"] == prices.history_sentences(w.reg, PLAGUEBLOOM)
     assert d["sentences"][0] == "Lowest in the last 7 days: 12s 40c · highest: 19s 2c"
     assert d["span"] == "30" and d["points"] and (d["low"], d["high"]) == (1240, 1902) and d["low_words"] == "12s 40c"
     assert d["until"] - d["since"] == 30 * 86400 and abs(d["until"] - t.timestamp()) < 60, "the span's start and the server's now"
     assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=14", headers=h).status_code == 400, "an unknown span"
-    assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}", headers=h).json()["span"] == "7", "7 days unless asked"
+    assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}", headers=h).json()["span"] == "1", "24 hours unless asked"
     assert w.c.get("/api/prices/history?id=plaguebloom&span=7", headers=h).status_code == 400, "an id that isn't a number"
 
 
@@ -400,14 +400,15 @@ def test_a_watched_row_carries_its_small_line(w, market_on):
     h = as_user(w, m.discord_id)
     priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4), BAR: Price(low=489998, qty=30)}, at=now())
     keep(w.reg, now() - timedelta(days=2), {PLAGUEBLOOM: Price(low=1200, qty=4)})
-    keep(w.reg, now() - timedelta(days=1), {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    keep(w.reg, now() - timedelta(hours=6), {PLAGUEBLOOM: Price(low=1500, qty=4)})
     w.c.post("/api/prices/watch", json={"id": BAR, "on": True}, headers=h)
     w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
     rows = {r["id"]: r for r in w.c.get("/api/prices/watching", headers=h).json()["rows"]}
     spark = rows[PLAGUEBLOOM]["spark"]
-    assert spark == prices.spark(w.reg, PLAGUEBLOOM) and spark["until"] - spark["since"] == 7 * 86400
-    assert [low for _t, low in spark["points"] if low is not None][-1] == 1500 and 1200 in [low for _t, low in spark["points"]]
-    assert all(isinstance(t, int) and len(p) == 2 for p in spark["points"] for t in [p[0]]), "positions only: no words"
+    assert abs(spark["until"] - spark["since"] - 86400) <= 1, "the last 24 hours"
+    assert [low for _t, low in spark["points"]] == [1200, 1500], "the price carried in, then the change"
+    assert (spark["change_words"], spark["up"]) == ("+25%", True), "now against the first price of the day: the line's colour"
+    assert all(isinstance(t, int) and len(p) == 2 for p in spark["points"] for t in [p[0]]), "positions only"
     assert rows[BAR]["spark"] is None, "never listed in the kept history: nothing to draw"
 
 
@@ -534,3 +535,35 @@ def test_no_watch_ever_reaches_ops_or_a_notice(w, market_on, monkeypatch):
     assert w.bot.ops.lines == before, "no ops line"
     assert inbox.notices_of(w.reg, m.discord_id) == [], "no notice"
     assert heard == ["member"] * 3, "the web's `member` topic: the member's other open tabs reload"
+
+
+# ---- movers (2026-11-14, site only)
+
+
+def test_movers_route(w, market_on):
+    from oibot_gm import price_history
+
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    late = {PLAGUEBLOOM: Price(low=900, qty=40), BAR: Price(low=600000, qty=12)}
+    early = {PLAGUEBLOOM: Price(low=1500, qty=40), BAR: Price(low=400000, qty=12)}
+    priced(w.reg, late, at=now())
+    key = discord_auctions.history_key(w.reg)
+    for i in range(25):
+        price_history.record(key, now() - timedelta(hours=24 - i), late if i >= 20 else early)
+    r = w.c.get("/api/prices/movers?window=24", headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d == prices.movers(w.reg, "24") and d["ready"] is True
+    assert [x["id"] for x in d["dips"]] == [PLAGUEBLOOM] and [x["id"] for x in d["rising"]] == [BAR]
+    assert w.c.get("/api/prices/movers", headers=h).json()["window"] == "24", "24 hours unless asked"
+    r = w.c.get("/api/prices/movers?window=48", headers=h)
+    assert r.status_code == 400 and r.json()["error"] == prices.NOT_A_WINDOW
+    d = w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=7", headers=h).json()
+    assert d["used_in"] == prices.used_in_words(w.reg, PLAGUEBLOOM) != ""
+
+
+def test_movers_on_tbc_is_404(tbc):
+    w = tbc
+    m = member(w)
+    assert w.c.get("/api/prices/movers", headers=as_user(w, m.discord_id)).status_code == 404

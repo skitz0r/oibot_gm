@@ -137,7 +137,7 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         return {"message": message, "rows": await asyncio.to_thread(watch_rows, v.reg, v.uid)}
 
     @app.get("/api/prices/history")
-    async def prices_history(request: Request, id: str = "", span: str = "7"):  # noqa: A002 — the page's own word
+    async def prices_history(request: Request, id: str = "", span: str = "1"):  # noqa: A002 — the page's own word
         """An item's chart over one span and its history sentences (C5) — any item the bot can name, watched or not
         (the owner's decision 2026-11-14, replacing C6), and an item on the viewer's own list the bot can't name yet."""
         v = await who(request)
@@ -154,7 +154,21 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"id": item, "name": prices.names(reg).get(item) or prices.UNNAMED,
-                "spans": [{"id": k, "label": label} for k, (_days, label) in prices.SPANS.items()], **chart, "sentences": sentences}
+                "spans": [{"id": k, "label": label} for k, (_days, label) in prices.SPANS.items()], **chart, "sentences": sentences,
+                "used_in": prices.used_in_words(reg, item)}  # the recipes it is a reagent of, in one sentence ("" = none)
+
+    @app.get("/api/prices/movers")
+    async def prices_movers(request: Request, window: str = "24"):
+        """Every member (an experiment, site only): the items whose lowest price now is well off their usual price over
+        the window — dips and risers (prices.movers; one history read in a thread). An unknown window 400."""
+        v = await who(request)
+        reg = v.reg
+        if not auctions.available(reg):
+            raise HTTPException(404, auctions.NO_AUCTIONS_WORDS)
+        try:
+            return await asyncio.to_thread(prices.movers, reg, window)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
     # ---- the guild's auction house: officers read, the owner picks / clears
     def market_state(v) -> dict:

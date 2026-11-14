@@ -58,6 +58,7 @@ def reset_names() -> None:
         _MERGED.clear()
         _GONE.clear()
         _FETCHED = None
+    _MOVERS.clear()  # the movers' answers were built from those names
 
 
 def _items_path() -> Path:
@@ -506,7 +507,7 @@ def choice_description(reg, choice) -> str:
 # ------------------------------------------------------------------ the watch list and the price history (price watch §3, §4.2)
 
 
-SPANS: dict[str, tuple[int, str]] = {"7": (7, "7 days"), "30": (30, "30 days"), "90": (90, "90 days"), "365": (365, "1 year")}
+SPANS: dict[str, tuple[int, str]] = {"1": (1, "24 hours"), "7": (7, "7 days"), "30": (30, "30 days"), "90": (90, "90 days"), "365": (365, "1 year")}
 """The chart's spans: the key a page sends → (days, the span in words)."""
 UNNAMED = "An item the bot can't name yet"
 EMPTY_LIST_SITE = "You aren't watching anything yet. Search for an item above and press Watch."
@@ -620,30 +621,152 @@ def chart(reg, item_id: int, span: str, *, now: datetime | None = None) -> dict:
     try:
         pts = price_history.points(key, item_id, now - timedelta(days=days), now)
         s = price_history.span(key, item_id, days, now)
+        kept = price_history.kept_since(key)
     except price_history.HistoryError:
         log.warning("price history unreadable for %s", key, exc_info=True)
         return out
+    if kept is not None and int(kept.timestamp()) > out["since"]:
+        # a history younger than the span: the x axis starts where the history does, so the line fills the chart
+        # instead of sitting in its last sliver (the "kept since" sentence says why)
+        out["since"] = min(int(kept.timestamp()), out["until"])
     out["points"] = [_point_json(reg, p) for p in pts]
     out.update(low=s.low, high=s.high, low_words=money(s.low) if s.low is not None else NONE_LISTED,
                high_words=money(s.high) if s.high is not None else NONE_LISTED)
     return out
 
 
-SPARK_SPAN = "7"  # the watch list's small line: the last seven days
+SPARK_SPAN = "1"  # the watch list's small line: the last 24 hours
+
+
+def _change_words(pct: int) -> str:
+    return f"{'+' if pct > 0 else '−' if pct < 0 else ''}{abs(pct)}%"
 
 
 def spark(reg, item_id: int, *, now: datetime | None = None) -> dict | None:
-    """A watched item's small line for its row in the list (BLOCKING: reads the history file): the last SPARK_SPAN days as
-    {since, until, points [[epoch seconds, lowest in copper | None = nothing listed or not read from then]]} — positions
-    only, no words (the row's own price is beside it). None when there is nothing to draw: prices don't show, no history,
-    or nothing listed all week."""
+    """A watched item's small line for its row in the list (BLOCKING: reads the history file): the last 24 hours
+    (SPARK_SPAN; less while the history is younger) as {since, until, points [[epoch seconds, lowest in copper | None =
+    nothing listed or not read from then]], change_words, up}. `change_words` = the price now against the first price of
+    the stretch ('+12%' / '−8%' / '0%'; "" when nothing is listed now), `up` = True risen / False fallen / None neither —
+    the line's colour. None when there is nothing to draw: prices don't show, no history, or nothing listed all day."""
     c = chart(reg, item_id, SPARK_SPAN, now=now)
-    if not any(p["low"] is not None for p in c["points"]):
+    lows = [p["low"] for p in c["points"] if p["low"] is not None]
+    if not lows:
         return None
-    return {"since": c["since"], "until": c["until"], "points": [[p["t"], p["low"]] for p in c["points"]]}
+    last = c["points"][-1]["low"]
+    pct = round((last - lows[0]) * 100 / lows[0]) if last is not None and lows[0] > 0 else None
+    return {"since": c["since"], "until": c["until"], "points": [[p["t"], p["low"]] for p in c["points"]],
+            "change_words": _change_words(pct) if pct is not None else "", "up": None if not pct else pct > 0}
 
 
-__all__ = ["EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
+# ------------------------------------------------------------------ movers (2026-11-14)
+
+WINDOWS: dict[str, tuple[timedelta, str]] = {"6": (timedelta(hours=6), "6 hours"), "12": (timedelta(hours=12), "12 hours"),
+                                             "24": (timedelta(hours=24), "24 hours"), "168": (timedelta(days=7), "7 days")}
+NOT_A_WINDOW = "That isn't one of the windows."
+MOVE_MIN_PCT = 10  # a move smaller than this against the usual price is no mover
+MOVERS_TOP = 15  # rows per list
+USED_IN_NAMES = 3  # recipes named in the "Used in …" sentence; the rest are counted
+
+_USES: dict[str, dict[int, list[str]]] = {}  # profile name → {item id: the names of the recipes it is a reagent of}
+
+
+def _uses(reg) -> dict[int, list[str]]:
+    name = reg.profile.name
+    if name not in _USES:
+        idx: dict[int, set[str]] = {}
+        for r in reg.profile.recipes.values():
+            for x in r.reagents:
+                idx.setdefault(int(x["id"]), set()).add(r.name)
+        _USES[name] = {i: sorted(v, key=str.casefold) for i, v in idx.items()}
+    return _USES[name]
+
+
+def used_in_words(reg, item_id: int) -> str:
+    """'Used in A, B, C and 4 more.' — the recipes of the game's list the item is a reagent of; "" when none."""
+    names = _uses(reg).get(int(item_id)) or []
+    if not names:
+        return ""
+    shown, rest = names[:USED_IN_NAMES], len(names) - USED_IN_NAMES
+    return f"Used in {', '.join(shown)}{f' and {rest} more' if rest > 0 else ''}."
+
+
+def _uses_count_words(n: int) -> str:
+    return "" if n <= 0 else "Used in 1 recipe" if n == 1 else f"Used in {n} recipes"
+
+
+def _pct(usual: int, now: int) -> int:
+    return round((now - usual) * 100 / usual)
+
+
+_MOVERS: dict[tuple, tuple[tuple, dict]] = {}  # (guild key, window) → (what it was computed from, the answer)
+
+
+def movers(reg, window: str, *, now: datetime | None = None) -> dict:
+    """`_movers`, answered once per price table: an open page asks again on every live event, and the answer only
+    changes with a new table, a newly named item or another auction house."""
+    if now is not None:
+        return _movers(reg, window, now=now)
+    t = discord_auctions.table(reg)
+    stamp = (discord_auctions.history_key(reg), t.at if t else None, _shown(reg), len(names(reg)))
+    hit = _MOVERS.get((reg.key, str(window)))
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    out = _movers(reg, window)
+    if out["ready"]:  # a history still too short is asked again: it fills in with the next read
+        _MOVERS[(reg.key, str(window))] = (stamp, out)
+    return out
+
+
+def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
+    """The items whose lowest price NOW is at least MOVE_MIN_PCT % away from their USUAL price over one of WINDOWS
+    (price_history.moves: the middle value over the window, at least MOVE_MIN_QTY listed now, listed for half the
+    window) — BLOCKING: one read of the history file. → {window, windows [{id, label}], ready, words, dips, rising}:
+    the two lists hold at most MOVERS_TOP rows, the biggest move first, of {id, name, usual_words, now_words,
+    change_words ('−40%' / '+50%'), qty, uses (how many recipes it is a reagent of), uses_words}. Only items the bot can
+    name. `ready` False with one sentence in `words` when the kept history doesn't cover the window yet; an empty
+    list has its own sentence (`dips_words` / `rising_words`). Prices not shown, or a file that can't be read: not ready, no words. An unknown window is
+    refused."""
+    from .registry import RegistryError
+
+    if str(window) not in WINDOWS:
+        raise RegistryError(NOT_A_WINDOW)
+    window = str(window)
+    span, label = WINDOWS[window]
+    out = {"window": window, "windows": [{"id": k, "label": v[1]} for k, v in WINDOWS.items()], "ready": False, "words": "",
+           "dips": [], "rising": [], "dips_words": "", "rising_words": ""}
+    key = discord_auctions.history_key(reg)
+    if key is None or not _shown(reg):
+        return out
+    now = now or discord_auctions._now()
+    try:
+        found = price_history.moves(key, span, now)
+        since = price_history.kept_since(key) if found is None else None
+    except price_history.HistoryError:
+        log.warning("price history unreadable for %s", key, exc_info=True)
+        return out
+    if found is None:
+        out["words"] = (f"The bot hasn't kept prices for {label} yet. It started {reg.local12(since)}." if since is not None else NO_HISTORY_YET)
+        return out
+    known, uses = names(reg), _uses(reg)
+    rows = []
+    for m in found:
+        pct = _pct(m.usual, m.now) if m.usual > 0 else 0
+        if abs(pct) < MOVE_MIN_PCT or m.item not in known:
+            continue
+        n = len(uses.get(m.item) or [])
+        rows.append((pct, {"id": m.item, "name": known[m.item], "usual_words": money(m.usual), "now_words": money(m.now),
+                           "change_words": _change_words(pct), "qty": m.qty, "uses": n, "uses_words": _uses_count_words(n)}))
+    out["ready"] = True
+    out["dips"] = [r for _p, r in sorted((x for x in rows if x[0] < 0), key=lambda x: (x[0], x[1]["name"].casefold()))][:MOVERS_TOP]
+    out["rising"] = [r for _p, r in sorted((x for x in rows if x[0] > 0), key=lambda x: (-x[0], x[1]["name"].casefold()))][:MOVERS_TOP]
+    if not out["dips"]:
+        out["dips_words"] = f"Nothing has dipped {MOVE_MIN_PCT}% or more in the last {label}."
+    if not out["rising"]:
+        out["rising_words"] = f"Nothing has risen {MOVE_MIN_PCT}% or more in the last {label}."
+    return out
+
+
+__all__ = ["MOVERS_TOP", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

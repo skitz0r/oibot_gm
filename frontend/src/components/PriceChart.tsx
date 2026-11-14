@@ -3,9 +3,14 @@ import { Box, SegmentedControl, Stack, Text } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import type { PriceHistory, PriceSpark } from "../api";
 
-/** A watched item's small line in its row of the list: the lowest price over the last seven days as a step line, broken
- *  where nothing was listed or the bot didn't read — a shape only, no numbers (the row's price is beside it, the full
- *  chart opens under the row). Drawn over the server's `since` .. `until`; a flat price sits mid-height. */
+/** Risen, fallen or neither: the colour a line and its change take (theme colours; the same in the row and the chart). */
+export const TREND = { up: "var(--mantine-color-teal-4)", down: "var(--mantine-color-red-4)", flat: "var(--mantine-color-slate-2)" };
+export const trendOf = (up: boolean | null | undefined) => (up == null ? TREND.flat : up ? TREND.up : TREND.down);
+
+/** A watched item's small line in its row of the list: the lowest price over the last 24 hours as a step line, broken
+ *  where nothing was listed or the bot didn't read — a shape only, no numbers (the row's price and change are beside it,
+ *  the full chart opens under the row). Coloured by the server's `up` (risen, fallen, neither). Drawn over the server's
+ *  `since` .. `until`; a flat price sits mid-height. */
 export function Sparkline({ data, label }: { data: PriceSpark; label: string }) {
   const W = 120;
   const HH = 28;
@@ -30,7 +35,7 @@ export function Sparkline({ data, label }: { data: PriceSpark; label: string }) 
   return (
     <svg width={W} height={HH} role="img" aria-label={label} style={{ display: "block", maxWidth: "100%" }}>
       <title>{label}</title>
-      <path d={path} fill="none" stroke="var(--mantine-color-teal-4)" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      <path d={path} fill="none" stroke={trendOf(data.up)} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
@@ -45,7 +50,6 @@ const RIGHT = 8;
 /** A label's width at 11 px, near enough to keep two labels apart (the words are the server's, measured by length). */
 const textWidth = (words: string) => words.length * 6.2;
 
-const LINE = "var(--mantine-color-teal-4)";
 const GRID = "var(--mantine-color-slate-5)";
 const INK = "var(--mantine-color-dimmed)";
 const CROSS = "var(--mantine-color-slate-3)";
@@ -73,6 +77,7 @@ export function PriceChart({ data, onSpan, span, busy }: { data: PriceHistory; o
   const lows = pts.flatMap((p) => (p.low == null ? [] : [p.low]));
   if (pts.length === 0 || lows.length === 0) return switcher ? <Stack gap="xs">{switcher}</Stack> : null;  // nothing to draw: never NaN
 
+  const LINE = lows[lows.length - 1] > lows[0] ? TREND.up : lows[lows.length - 1] < lows[0] ? TREND.down : TREND.up;  // the span's direction
   const highs = pts.flatMap((p) => (p.high == null ? (p.low == null ? [] : [p.low]) : [p.high]));
   const lo = Math.min(...lows, ...(data.low == null ? [] : [data.low]));
   const hi = Math.max(...highs, ...(data.high == null ? [] : [data.high]));
