@@ -21,7 +21,7 @@ export function ItemName({ id, name, style }: { id?: number | null; name: string
   const href = itemHref(id);
   if (!href) return <span style={style}>{name}</span>;
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: "inherit", textDecoration: "underline", textDecorationColor: "var(--mantine-color-dimmed)", textUnderlineOffset: 2, ...style }}>
+    <a href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: "var(--mantine-color-anchor)", textDecoration: "underline", textUnderlineOffset: 2, ...style }}>
       {name}
     </a>
   );

@@ -179,7 +179,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
                 <Group wrap="nowrap" align="flex-start" gap="sm">
                   <GameIcon meta={meta} kind="profession" id={r.profession} size={28} title={pname(r.profession)} />
                   <Stack gap={2} className={css.what}>
-                    <Text fw={700}>{r.name}</Text>
+                    <Text fw={700}><ItemName id={r.makes?.id} name={r.name} /></Text>
                     {r.category && <Text size="xs" c="dimmed">{r.category}</Text>}
                     {fromList && r.listed === false && <Text size="xs" c="yellow.4">{NOT_LISTED_GROUP}</Text>}
                     {r.makes && <Text size="xs">{makesWords(r.makes)}<ItemName id={r.makes.id} name={r.makes.name} /></Text>}
@@ -319,7 +319,7 @@ function GuildMakes({ meta, name, recipes, priceWords }: { meta: Meta; name: str
               {groups.get(g)!.sort((a, b) => a.name.localeCompare(b.name)).map((r) => (
                 <div key={r.id ?? r.key} className={css.makeRow}>
                   <div className={css.what}>
-                    <Text size="sm" fw={600} className={css.name}>{r.name}</Text>
+                    <Text size="sm" fw={600} className={css.name}><ItemName id={r.makes?.id} name={r.name} /></Text>
                     {r.cost && <Text size="xs">{r.cost.sentence}</Text>}
                     {r.cost?.made_words && <Text size="xs" c="dimmed">{r.cost.made_words}</Text>}
                   </div>

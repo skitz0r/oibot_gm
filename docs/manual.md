@@ -506,8 +506,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   once how recent the prices are (*Prices as of …*). The **What does it go for?** box above the tabs takes part of any
   item's name and lists the items it matches with their lowest price and how many are listed (or *none listed*), up to 25
   and how many more. With no auction house picked there are no prices on the page: the owner reads one line saying how to
-  turn them on, and nobody else sees anything. Item names there — what a recipe makes, its reagents, the price box's
-  items — open the item's page on Wowhead in a new tab.
+  turn them on, and nobody else sees anything. Item names there — a recipe's name (it opens the item
+  the recipe makes), what it makes, its reagents, the price box's items — open the item's page on Wowhead in a new tab.
+  An enchant makes no item, so its name stays plain text.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
   owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.

@@ -662,7 +662,9 @@ def test_item_names_link_through_one_component():
         hits = ITEM_CHILD.findall(code) + ([] if rel == "pages/Professions.tsx" else NAME_CHILD.findall(code))
         assert not hits, f"{rel}: an item name printed outside ItemName: {hits}"
     prof = _code_only((SRC / "pages" / "Professions.tsx").read_text())
-    for link in ("<ItemName id={r.makes.id} name={r.makes.name} />", "<ItemName id={x.id} name={x.name} />", "<ItemName id={p.id} name={p.name} />"):
+    for link in ("<ItemName id={r.makes.id} name={r.makes.name} />", "<ItemName id={x.id} name={x.name} />", "<ItemName id={p.id} name={p.name} />",
+                 "<Text fw={700}><ItemName id={r.makes?.id} name={r.name} /></Text>",  # a recipe's name links to what it makes (the hit, and What the guild makes)
+                 "className={css.name}><ItemName id={r.makes?.id} name={r.name} /></Text>"):
         assert link in prof, link
 
 
