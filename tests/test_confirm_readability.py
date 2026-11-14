@@ -545,6 +545,21 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     dump.add("armory_guild_consequence", "the same guild again", cq.armory_guild_consequence(reg, wardens), guild_names)
     dump.add("armory_guild_consequence", "another guild, a long name, one member", cq.armory_guild_consequence(reg, hall), guild_names)
     dump.add("armory_guild_clear_consequence", "a guild linked", cq.armory_guild_clear_consequence(reg), guild_names)
+
+    # ---- the guild's auction house (auction prices §4.1): the pick, prices off, and a re-link that clears it (C11)
+    from oibot_gm.auctions import House
+
+    horde_ah, other_ah = House(id=6, name="Horde Auction House"), House(id=18, name="Horde Auction House")
+    house_names = guild_names | {"Horde", "Auction", "House", "Members", "Prices", "Professions", "Discord"}
+    dump.add("market_consequence", "nothing picked yet", cq.market_consequence(reg, horde_ah), house_names)
+    dump.add("market_clear_consequence", "nothing picked", cq.market_clear_consequence(reg), house_names)
+    reg.set_market(horde_ah, 2, "Owner", by_id=OWNER)
+    dump.add("market_consequence", "the same house again", cq.market_consequence(reg, horde_ah), house_names)
+    dump.add("market_consequence", "another house of the same name", cq.market_consequence(reg, other_ah), house_names)
+    dump.add("market_clear_consequence", "a house picked", cq.market_clear_consequence(reg), house_names)
+    dump.add("armory_guild_consequence", "the same ruleset and faction keep the auction house", cq.armory_guild_consequence(reg, wardens), house_names)
+    dump.add("armory_guild_consequence", "another faction and ruleset clear the auction house", cq.armory_guild_consequence(reg, hall), house_names)
+    dump.add("armory_guild_clear_consequence", "a guild linked with an auction house", cq.armory_guild_clear_consequence(reg), house_names)
     reg.clear_armory_guild("Owner", by_id=OWNER)
 
     # ---- a character's armory link (armory link §5.2): link, unlink, the "keep professions by hand" switch, refusals

@@ -617,6 +617,8 @@ def armory_guild_consequence(reg: Registry, facts) -> list[str]:
         change = f"It replaces {old.name}, and every character keeps its link."
     else:
         change = "The bot then reads its roster to show who is in the guild."
+    if reg.config.market is not None and not reg.market_survives(facts):
+        return [found, change, PRICES_OFF]  # the prices line takes the undo's place: at most three sentences
     return [found, change, "You can change or unlink it at any time."]
 
 
@@ -627,7 +629,30 @@ def armory_guild_clear_consequence(reg: Registry) -> list[str]:
         return ["No guild is linked to this server."]
     return [f"{old.name} stops being this server's guild in the armory.",
             "Every character keeps its link, and who is in the guild stops being known.",
-            "You can link a guild again at any time."]
+            PRICES_OFF if reg.config.market is not None else "You can link a guild again at any time."]
+
+
+# ---- the guild's auction house (auction prices §4.1): the pick and turning prices off
+PRICES_OFF = "Prices turn off until you pick the auction house again."
+
+
+def market_consequence(reg: Registry, house) -> list[str]:
+    """The confirm before picking `house` (auctions.House) as the guild's auction house: what changes, who sees it, what
+    can be undone. Two houses of a ruleset share a name, so a change of house says "instead", never the old name."""
+    old = reg.config.market
+    if old is not None and int(old.house_id) == int(house.id):
+        return [f"The {house.name} is already the guild's auction house, so nothing changes."]
+    change = (f"The guild's prices come from this {house.name} instead of the one picked before." if old is not None
+              else f"The guild's prices come from the {house.name} from now on.")
+    return [change, "Members see them on the Professions page after the next hourly check.",
+            "You can pick another auction house or turn prices off at any time."]
+
+
+def market_clear_consequence(reg: Registry) -> list[str]:
+    """The confirm before turning prices off (forgetting the guild's auction house)."""
+    if reg.config.market is None:
+        return ["No auction house is picked for this guild."]
+    return ["Prices turn off on the Professions page and in Discord.", "You can pick the auction house again at any time."]
 
 
 

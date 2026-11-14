@@ -399,6 +399,20 @@ class ArmoryGuild(BaseModel):
     linked_at: str  # UTC ISO
 
 
+class Market(BaseModel):
+    """The auction house the guild's prices come from (auction prices, spec §4.1, D3): the owner's pick. It carries its
+    own ruleset id (the stored ArmoryGuild has none — the picker reads it from the armory) and the guild's faction at the
+    time of the pick, so a re-link to another ruleset or faction can tell it no longer applies (C11). Set by
+    Registry.set_market (owner only), cleared by clear_market, clear_armory_guild and a re-link it does not survive."""
+
+    ruleset_id: int
+    house_id: int
+    name: str  # the house's name as the game shows it ("Horde Auction House")
+    faction: str  # "Horde" | "Alliance": the linked guild's faction when picked
+    picked_by: str
+    picked_at: str  # UTC ISO
+
+
 class GuildConfig(BaseModel):
     key: str
     name: str
@@ -456,6 +470,9 @@ class GuildConfig(BaseModel):
     # the in-game guild this server is linked to (armory link §5.1): None = none (a version with no armory, or never linked).
     # Part of the `settings` rev; the owner sets it with /gm config armory, Config › Settings or MCP (set_armory_guild)
     armory: Optional[ArmoryGuild] = None
+    # the auction house the guild's prices come from (auction prices §4.1): None = prices off. Part of the `settings` rev;
+    # the owner picks it beside the guild link (Registry.set_market / clear_market)
+    market: Optional[Market] = None
 
     def __init__(self, **data):
         if "raid_teams" in data and not data.get("rosters"):
@@ -1494,37 +1511,112 @@ class Registry:
     def set_armory_guild(self, facts, by: str, *, by_id) -> str:
         """Link this server to the guild the owner's lookup found (`facts`: armory.GuildFacts — its id, address, name and
         faction are stored, never re-typed). Owner only (is_owner_id); a version with no armory is refused. Re-linking the
-        same guild refreshes its name and faction; another guild replaces it. Character links are not touched. One commit;
-        the caller writes the audit line."""
+        same guild refreshes its name and faction; another guild replaces it. Character links are not touched. The guild's
+        auction house is cleared in the same commit unless it survives (market_survives, C11). One commit; the caller
+        writes the audit line."""
         self._armory_owner(by_id)
         prof = self.profile.armory or {}
         if not prof:
             raise RegistryError("This game version has no armory.")
-        old = self.config.armory
+        old, old_market = self.config.armory, self.config.market
+        drop = old_market is not None and not self.market_survives(facts)
         self.config.armory = ArmoryGuild(region=str(prof.get("region") or ""), guild_id=int(facts.id), slug=str(facts.slug), name=str(facts.name),
                                          faction=str(facts.faction), linked_by=str(by or "?"), linked_at=now())
+        if drop:
+            self.config.market = None
         try:
-            self.save_config(f"armory guild → {facts.name} ({facts.faction}, id {facts.id}) (by {by})")
+            self.save_config(f"armory guild → {facts.name} ({facts.faction}, id {facts.id})"
+                             f"{'; auction house cleared' if drop else ''} (by {by})")
         except Exception:
-            self.config.armory = old
+            self.config.armory, self.config.market = old, old_market
             raise
         return f"linked to {facts.name} in the armory"
 
     @_config_verb("settings")
     def clear_armory_guild(self, by: str, *, by_id) -> str:
         """Unlink the server's guild. Owner only; refused when none is linked. Every character keeps its own link; only
-        "in the guild" stops being known. One commit; the caller writes the audit line."""
+        "in the guild" stops being known. The guild's auction house is cleared with it (C11). One commit; the caller writes
+        the audit line."""
         self._armory_owner(by_id)
-        old = self.config.armory
+        old, old_market = self.config.armory, self.config.market
         if old is None:
             raise RegistryError("No guild is linked to this server.")
         self.config.armory = None
+        self.config.market = None
         try:
-            self.save_config(f"armory guild {old.name} (id {old.guild_id}) unlinked (by {by})")
+            self.save_config(f"armory guild {old.name} (id {old.guild_id}) unlinked{'; auction house cleared' if old_market else ''} (by {by})")
         except Exception:
-            self.config.armory = old
+            self.config.armory, self.config.market = old, old_market
             raise
         return f"{old.name} is no longer linked"
+
+    # ---- the guild's auction house (auction prices, spec §4.1): owner only, one settings commit each
+    def market_words(self) -> str:
+        """The choice as a person reads it: 'Horde Auction House · picked by Ana on Thu 12 Nov 2026', or what is missing
+        and how to fill it."""
+        if not self.profile.auctions:
+            from oibot_gm.auctions import NO_AUCTIONS_WORDS
+
+            return NO_AUCTIONS_WORDS
+        m = self.config.market
+        if m is not None:
+            return f"{m.name} · picked by {m.picked_by} on {self.local12(m.picked_at, '%a %d %b %Y')}"
+        if self.config.armory is None:
+            return ("no auction house picked yet — the owner links the guild first with /gm config armory, "
+                    "then picks its auction house there or on the Config page")
+        return "no auction house picked yet — the owner picks it with /gm config armory or on the Config page"
+
+    def market_survives(self, facts) -> bool:
+        """Does the stored auction house still apply once the server is linked to `facts`' guild (C11)? Only when one is
+        picked and the new guild plays on the same ruleset with the same faction."""
+        m = self.config.market
+        return m is not None and int(facts.ruleset_id) == int(m.ruleset_id) and str(facts.faction) == str(m.faction)
+
+    def _market_owner(self, by_id) -> None:
+        if not self.is_owner_id(by_id):
+            raise RegistryError("Only the owner picks the guild's auction house.")
+
+    @_config_verb("settings")
+    def set_market(self, house, ruleset_id: int, by: str, *, by_id) -> str:
+        """Pick the auction house the guild's prices come from (`house`: auctions.House from the owner's picker,
+        `ruleset_id` read from the armory with it). Owner only; refused on a version with no auction houses, without a
+        linked guild, or for a house that is not the linked guild's faction's (C1). The faction stored is the linked
+        guild's. One commit; the caller writes the audit line."""
+        from oibot_gm.auctions import NO_AUCTIONS_WORDS, faction_houses
+
+        self._market_owner(by_id)
+        if not self.profile.auctions:
+            raise RegistryError(NO_AUCTIONS_WORDS)
+        a = self.config.armory
+        if a is None:
+            raise RegistryError("Link the server to its guild in the game first, then pick its auction house.")
+        if not faction_houses(self, [house], a.faction):
+            raise RegistryError(f"That auction house isn't the {a.faction} faction's.")
+        old = self.config.market
+        self.config.market = Market(ruleset_id=int(ruleset_id), house_id=int(house.id), name=str(house.name), faction=str(a.faction),
+                                    picked_by=str(by or "?"), picked_at=now())
+        try:
+            self.save_config(f"auction house → {house.name} (ruleset {int(ruleset_id)}, house {int(house.id)}) (by {by})")
+        except Exception:
+            self.config.market = old
+            raise
+        return f"prices come from the {house.name}"
+
+    @_config_verb("settings")
+    def clear_market(self, by: str, *, by_id) -> str:
+        """Turn prices off: forget the guild's auction house. Owner only; refused when none is picked. One commit; the
+        caller writes the audit line."""
+        self._market_owner(by_id)
+        old = self.config.market
+        if old is None:
+            raise RegistryError("No auction house is picked for this guild.")
+        self.config.market = None
+        try:
+            self.save_config(f"auction house {old.name} (house {old.house_id}) cleared (by {by})")
+        except Exception:
+            self.config.market = old
+            raise
+        return "prices are off"
 
     # ---- detached guilds (design §3.5 S-05/S-06): the bot was removed from the server
     def set_detached(self, at: str | None, by: str) -> None:
