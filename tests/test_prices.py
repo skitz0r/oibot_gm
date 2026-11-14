@@ -307,3 +307,81 @@ def test_a_malformed_item_is_skipped_and_naming_goes_on(reg, clock, monkeypatch)
     assert 600005 not in prices.names(reg) and bot.ops.lines == []
     asked.clear()
     assert run(discord_auctions.name_items(bot, reg)) == 0 and asked == [], "it is not asked first again every hour"
+
+
+# ------------------------------------------------------------------ the help answer's section (C5)
+
+THORIUM, CRYSTAL, ENCH_THORIUM = 12359, 12363, 12655  # Thorium Bar, Arcane Crystal, Enchanted Thorium Bar
+
+
+def ask(reg, question):
+    from oibot_gm import help as help_mod
+
+    return help_mod.Ask(reg=reg, rs=None, user_id=9100, officer=False, question=question)
+
+
+def test_how_much_is_an_item_quotes_the_lowest_price(reg, clock):
+    priced(reg, {BAR: Price(low=489998, qty=30), THORIUM: Price(low=900, qty=200), ENCH_THORIUM: Price(low=25000, qty=4)})
+    q = "how much is an Arcanite Bar right now?"
+    assert prices.help_hit(reg, q)
+    lines = prices.help_section(ask(reg, q))
+    assert lines[0].startswith("### Prices:") and "lowest price listed" in lines[0] and "worth" in lines[0], "the header says what the number is"
+    assert lines[1] == discord_auctions.as_of_words(reg) and lines[1].startswith("Prices as of ")
+    assert "Arcanite Bar: lowest price 48g 99s 98c, 30 listed." in lines
+    assert "Arcanite Bar: lowest price 48g 99s 98c, 30 listed." in prices.help_section(ask(reg, "what do arcanite bars cost?")), "a plural"
+    assert "Crystal Vial: none listed." in prices.help_section(ask(reg, "what's the price of a crystal vial")), "named, nothing up"
+    longest = prices.help_section(ask(reg, "cheapest enchanted thorium bar?"))
+    assert "Enchanted Thorium Bar: lowest price 2g 50s, 4 listed." in longest
+    assert not any(l.startswith("Thorium Bar:") for l in longest), "a name inside a longer named one is not named again"
+    from oibot_gm import help as help_mod
+    s = help_mod.guild_state(reg, None, 9100, False, q, None)
+    assert "### Prices:" in s and "Arcanite Bar: lowest price 48g 99s 98c, 30 listed." in s
+
+
+def test_cost_to_make_a_named_recipe_lists_each_reagent(reg, clock):
+    priced(reg, {BAR: Price(low=489998, qty=30), THORIUM: Price(low=900, qty=200)})
+    lines = prices.help_section(ask(reg, "how much does it cost to make Transmute: Arcanite?"))
+    text = "\n".join(lines)
+    assert "Transmute: Arcanite (one craft):" in text
+    assert "  - Thorium Bar × 1: lowest price 9s each, 9s in all" in lines
+    assert "  - Arcane Crystal × 1: none listed" in lines
+    assert "  Makes 1 · lowest price 48g 99s 98c each, 30 listed" in lines
+    assert "  Cost to make: at least 9s — 1 reagent has none listed." in lines
+    assert "0c" not in text, "never a zero cost"
+
+
+def test_no_section_when_prices_are_off_or_no_item_is_named(reg, clock):
+    from oibot_gm import help as help_mod
+
+    q = "how much is an arcanite bar"
+    assert not prices.help_hit(reg, q), "no auction house picked"
+    assert "### Prices" not in help_mod.guild_state(reg, None, 9100, False, q, None)
+    assert not prices.help_hit(SimpleNamespace(profile=TBC), q), "a version without auction houses"
+    priced(reg, {BAR: Price(low=489998, qty=30)})
+    assert not prices.help_hit(reg, "how much gold is in the guild bank?"), "no item named"
+    assert not prices.help_hit(reg, "who has an arcanite bar?"), "no price asked"
+    assert not prices.help_hit(reg, "is the price right on the next raid?"), "a price word, no item"
+    # none read yet, or too old: only the line saying why
+    discord_auctions._st(reg)["table"] = None
+    assert prices.help_hit(reg, q)
+    waiting = prices.help_section(ask(reg, q))
+    assert discord_auctions.WAITING_WORDS in waiting and not any("lowest price" in l and ":" in l and "Arcanite" in l for l in waiting)
+    assert len(waiting) == 2
+    priced(reg, {BAR: Price(low=489998, qty=30)}, at=NOW - timedelta(hours=30))
+    old = prices.help_section(ask(reg, q))
+    assert old[1:] == [discord_auctions.OLD_WORDS], "a day-old table: why, never a price"
+    assert "48g" not in help_mod.guild_state(reg, None, 9100, False, q, None)
+
+
+def test_the_section_stays_under_its_cap(reg, clock):
+    from oibot_gm import help as help_mod
+
+    assert help_mod.SECTIONS["prices"][2] == 2_000
+    named = sorted({n for n in prices.names(reg).values() if len(n.split()) == 2}, key=len, reverse=True)[:30]
+    priced(reg, {i: Price(low=123456789, qty=9999) for i in prices.names(reg)})
+    q = "how much are " + ", ".join(named) + " and what does it cost to make Transmute: Arcanite, Arcanite Rod, Heartseeker and Mooncloth Bag?"
+    lines = prices.help_section(ask(reg, q))
+    items = [l for l in lines if not l.startswith((" ", "###")) and ": lowest price" in l]
+    assert len(items) <= prices.HELP_ITEMS == 10
+    assert sum(1 for l in lines if l.endswith("(one craft):")) <= prices.HELP_RECIPES
+    assert len("\n".join(lines)) <= 2_000, "the section fits its cap without a cut"

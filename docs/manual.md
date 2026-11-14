@@ -2527,6 +2527,17 @@ game doesn't have gets *"That isn't a recipe in the game's list."* *"What tailor
 lists that character's first sixty and points at the Professions page for the rest. Retired
 characters, puppets and people who left the server are never named.
 
+**What a thing costs** is open to every member too, once the owner has picked the guild's auction house (§8): "how much
+is an Arcanite Bar right now?", "what do arcanite bars cost?", "how much does it cost to make Transmute: Arcanite?". The
+question has to ask about a price (*price*, *cost*, *worth*, *how much*, *auction*, *cheapest*) and name an item by its
+whole name or a recipe of the game's list. The bot answers from the same prices `/price` reads: how recent they are,
+then up to ten named items with their lowest price listed on the guild's auction house and how many are listed — or
+*none listed* when nothing is up right now — and, for a named recipe, each reagent at its lowest price, what one craft
+makes priced each, and its cost to make (*"at least …"* when a reagent has none listed). The numbers are computed in
+code; the answer only words them, says "lowest listed" with the time, and never calls a price what an item is worth or
+works out a profit. When prices haven't been read yet or the last ones are more than a day old, it says that and quotes
+no price; with no auction house picked, or a game version without auction houses, a price question gets no prices at all.
+
 Officers get more, only when the question is about it (a few keywords decide; "status", "overview" or "what's going
 on" brings the main ones): **status** (data repo and push, LLM spend, the loot feed, uptime, the last ops lines, the
 last ten registry change lines — the analytics change log's from → to — and the last data commits), **applications** (open ones oldest first with the schedules they can make, the last five

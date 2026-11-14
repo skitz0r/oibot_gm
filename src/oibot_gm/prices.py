@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -314,6 +315,150 @@ def cost_line(reg, recipe: RecipeDef | None) -> str:
     return cost_sentence(cost) if cost is not None else ""
 
 
+# ------------------------------------------------------------------ the help answer's section (C5)
+
+
+HELP_WORDS = re.compile(r"\b(prices?|costs?|worth|how much|auctions?|cheapest)\b")
+"""A question about prices: one of these as a word. The section also needs an item or a recipe the question names."""
+HELP_ITEMS = 10  # items the question names, priced in the help snapshot
+HELP_RECIPES = 3  # recipes the question names, with their cost to make
+HELP_BUDGET = 1_950  # the section's cap in help.SECTIONS (2,000) less _clip's trailer room: whole blocks only, never a cut
+HELP_HEAD = ("### Prices: the lowest price listed on the guild's auction house as of the line below — what the cheapest one is up "
+             "for, not what an item is worth or will sell for; say 'lowest listed' and give the time · 'none listed' = nothing is "
+             "up there right now, never a price of zero · cost to make = one craft's reagents at their lowest prices; 'at least' = "
+             "some reagents have none listed · what a craft makes is priced each and never subtracted: never work out a profit · "
+             "no price lines = say the line below and quote no price")
+
+_HELP_IX: dict[str, tuple[dict, dict]] = {}  # version → (the names dict it was built from, first word → [(words, ids)])
+
+
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"[^\W_]+", str(text or "").casefold().replace("'", "").replace("’", ""))
+
+
+def _help_index(reg) -> dict[str, list[tuple[tuple, list[int]]]]:
+    named = names(reg)
+    held = _HELP_IX.get(reg.profile.name)
+    if held is not None and held[0] is named:
+        return held[1]
+    by_words: dict[tuple, list[int]] = {}
+    for i, n in named.items():
+        w = tuple(_tokens(n))
+        if w and not (len(w) == 1 and len(w[0]) < 4):  # a short one-word name is too common a word
+            by_words.setdefault(w, []).append(int(i))
+    ix: dict[str, list] = {}
+    for w, ids in by_words.items():
+        ix.setdefault(w[0], []).append((w, sorted(ids)))
+    _HELP_IX[reg.profile.name] = (named, ix)
+    return ix
+
+
+def _word_is(q: str, w: str, last: bool) -> bool:
+    return q == w or (last and q in (w + "s", w + "es"))
+
+
+def named_items(reg, question: str, limit: int = HELP_ITEMS) -> list[int]:
+    """The ids of the items a sentence names by their whole name (case-folded words; the last word may be plural), the
+    longest names first (a name inside a longer named one is not named again), in the sentence's order, a listed id
+    before an unlisted one of the same name; at most `limit`."""
+    qw = _tokens(question)
+    ix = _help_index(reg)
+    spans = []
+    for i, q in enumerate(qw):
+        keys = {q, q[:-1] if q.endswith("s") else q, q[:-2] if q.endswith("es") else q}
+        for k in keys:
+            for w, ids in ix.get(k, ()):
+                end = i + len(w)
+                if end <= len(qw) and all(_word_is(qw[i + j], w[j], j == len(w) - 1) for j in range(len(w))):
+                    spans.append((i, end, ids))
+    spans.sort(key=lambda s: (s[0] - s[1], s[0]))
+    taken: list[tuple[int, int, list[int]]] = []
+    for a, b, ids in spans:
+        if all(b <= x or a >= y for x, y, _ids in taken):
+            taken.append((a, b, ids))
+    t = discord_auctions.table(reg)
+    listed = t.prices if t else {}
+    out: list[int] = []
+    for _a, _b, ids in sorted(taken, key=lambda s: s[0]):
+        out += [i for i in sorted(ids, key=lambda i: (i not in listed, i)) if i not in out]
+    return out[:limit]
+
+
+def named_recipes(reg, question: str, limit: int = HELP_RECIPES) -> list[RecipeDef]:
+    """The recipes of the game's list a sentence names (professions' finders: its whole words; only when none, two
+    neighbouring words of a name — looser, so never beside a whole name) that have reagents — a recipe with none has no
+    cost to make; at most `limit`."""
+    from . import professions
+
+    q = question or ""
+    hits = professions.search(reg, q, professions.HELP_HITS) or professions.phrase_hits(reg, q, professions.HELP_HITS)
+    out: list[RecipeDef] = []
+    for e in hits:
+        if e.recipe is not None and e.recipe.reagents and e.recipe not in out:
+            out.append(e.recipe)
+    return out[:limit]
+
+
+def help_hit(reg, question: str) -> bool:
+    """The help answer's prices section: the version has auction houses, the owner picked one, the question asks about a
+    price (HELP_WORDS) and names an item or a recipe. None read yet or a day old still hits: the section then says why."""
+    if not reg.profile.auctions or not HELP_WORDS.search(str(question or "").casefold()):
+        return False
+    if discord_auctions.state(reg) == "off":
+        return False
+    return bool(named_items(reg, question) or named_recipes(reg, question))
+
+
+def _safe(text) -> str:
+    from .llm.provider import unfence
+
+    return unfence(text, "member-text").replace("\n", " ").strip()
+
+
+def _reagent_words(c: CostLine) -> str:
+    head = f"  - {_safe(c.name)} × {c.quantity}: "
+    if c.unit is None:
+        return head + NONE_LISTED
+    return head + f"lowest price {money(c.unit)} each, {money(c.total)} in all"
+
+
+def help_section(ask) -> list[str]:
+    """The help snapshot's prices section (C5; code computes, the model words it): what the numbers are, how recent they
+    are, then up to HELP_ITEMS items the question names with their lowest price or none listed, then up to HELP_RECIPES
+    named recipes with each reagent and the cost to make. None read yet or too old: the line saying why, and no price.
+    Whole blocks while HELP_BUDGET allows, never a line cut. Item names may come from Blizzard: unfenced."""
+    reg = ask.reg
+    q = ask.question or ""
+    out = [HELP_HEAD, discord_auctions.as_of_words(reg)]
+    if not _shown(reg):
+        return out
+    used = len("\n".join(out))
+
+    def fits(block: list[str]) -> bool:
+        nonlocal used
+        n = len("\n".join(block)) + 1
+        if used + n > HELP_BUDGET:
+            return False
+        out.extend(block)
+        used += n
+        return True
+
+    named = names(reg)
+    for i in named_items(reg, q):
+        if not fits([price_words(_item(reg, i, _safe(named.get(i, ""))))]):
+            break
+    for r in named_recipes(reg, q):
+        cost = recipe_cost(reg, r)
+        if cost is None:
+            continue
+        block = [f"{_safe(r.name)} (one craft):", *(_reagent_words(c) for c in cost.lines)]
+        if made := made_words(cost):
+            block.append("  " + made)
+        block.append("  " + cost_sentence(cost))
+        fits(block)
+    return out
+
+
 # ------------------------------------------------------------------ the owner's picker (the site and Discord)
 
 
@@ -347,6 +492,6 @@ def choice_description(reg, choice) -> str:
     return " · ".join([listings_words(choice.listings), *(w for _i, _n, w in sample_rows(reg, choice))])[:100]
 
 
-__all__ = ["Cost", "CostLine", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
-           "choices_words", "cost_line", "item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
+__all__ = ["Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
+           "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

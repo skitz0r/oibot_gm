@@ -273,3 +273,31 @@ def test_who_adds_the_cost_only_when_prices_are_on(reg, market_on):
     # a recipe with no reagents (the game's list has none today): no cost line, never 0c
     assert prices.cost_line(reg, recipe(makes={"id": BAR, "name": "Arcanite Bar", "quantity": 1})) == ""
     assert prices.cost_line(reg, None) == ""
+
+
+# ---------------------------------------------------------------- a game version without auction houses (tbc)
+
+
+def test_a_version_without_auction_houses_has_no_price_anywhere_in_discord(reg, rs, market_on, monkeypatch):
+    from test_armory_guild import ROOT as _ROOT
+
+    from oibot_gm.profiles import GameProfile
+
+    p = GameProfile.load(_ROOT / "profiles" / "tbc")
+    monkeypatch.setattr(reg, "profile", p)
+    monkeypatch.setattr(reg, "base_profile", p)
+    assert not p.auctions
+    tree = _offline_tree(reg)
+    ix = _ix(reg)
+    ix.user = types.SimpleNamespace(id=OWNER, display_name="Owner")
+    run(tree.get_command("price").callback(ix, item="arcanite bar"))
+    assert ix.response.sent[0][0] == prices.NO_AUCTIONS_WORDS == "This game version has no auction houses."
+    # /professions who reads exactly as it did before prices (tbc has no professions: its one sentence, no cost line)
+    ix = _ix(reg)
+    run(_cmd(tree, "professions who").callback(ix, recipe="mooncloth bag"))
+    assert ix.response.sent[0][0] == "Nobody has registered that recipe yet — crafters add theirs with /me professions."
+    # /gm config armory: the version has no armory, so no hub and no auction house button
+    h = harness(reg, rs)
+    run(FLOWS["armory_guild"](h.command(), reg))
+    assert h.text.endswith(armory.NO_ARMORY_WORDS) and h.modal is None
+    assert "Auction house…" not in (h.buttons() if h.screen.get("view") else []) and "Auction house" not in h.text

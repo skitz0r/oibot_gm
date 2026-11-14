@@ -566,6 +566,22 @@ def test_professions_section_answers_who_can_make_for_members(reg):
     assert "### Who can make what" not in H.guild_state(reg, None, uid, False, "when is the next raid", None, public=False)
 
 
+# ---------------------------------------------------------------- prices (auction prices C5; tests/test_prices.py has the rows)
+
+def test_the_prices_section_is_gated_by_prices_help_hit_alone(reg, rs, monkeypatch):
+    from oibot_gm import prices
+
+    asked = []
+    monkeypatch.setattr(prices, "help_hit", lambda r, q: asked.append(q) or False)
+    q = "how much is the price of an arcanite bar?"
+    s = state(reg, rs, OWNER, True, q)
+    assert asked == [q] and "### Prices" not in s, "a price word alone never builds the section"
+    monkeypatch.setattr(prices, "help_hit", lambda r, q: True)
+    s = state(reg, rs, OWNER, False, q)
+    assert "### Prices:" in s and "lowest price listed" in s, "members get it too"
+    assert help_mod.SECTIONS["prices"][2] == 2_000 and help_mod.SECTIONS["prices"][3] is False
+
+
 # ---------------------------------------------------------------- guild guides (design §5.63)
 
 def test_guild_guides_section_names_each_factions_latest_for_members(reg, monkeypatch):
