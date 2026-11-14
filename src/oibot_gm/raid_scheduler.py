@@ -154,6 +154,12 @@ class RaidSchedulerMixin:
             await discord_armory.armory_tick(self, reg)
         except Exception:  # noqa: BLE001 — the armory never stops a guild's minute
             log.exception("armory tick failed for %s", reg.key)
+        try:  # auction prices §4.2: the selected auction house read hourly in the background — never waits here either
+            from . import discord_auctions
+
+            await discord_auctions.auctions_tick(self, reg)
+        except Exception:  # noqa: BLE001 — prices never stop a guild's minute
+            log.exception("auctions tick failed for %s", reg.key)
         # (guild key, run key) whose "nobody left to ask" line went out: two guilds can hold runs with the same key
         exhausted_posted: set[tuple[str, str]] = self.__dict__.setdefault("_fill_exhausted_posted", set())
         cfg = reg.config
