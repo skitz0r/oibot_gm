@@ -18,8 +18,9 @@ After each check that leaves a table, the same background task names up to NAME_
 A failure there stops the naming quietly until the next check.
 
 A new table from Blizzard taken as the guild's table is also kept in the house's price history (price_history.record in a
-thread, keyed by `history_key` — the house, never the guild): never on a not-modified answer, an adopted shared read or a
-read discarded because the market changed. A failed keep keeps the table and warns ops once an hour (HISTORY_FAILED, its
+thread, keyed by `history_key` — the house, never the guild), and so is an adopted shared read (the owner's pick, another
+guild's read: record writes once per feed time, under the house's lock); never a not-modified answer or a read discarded
+because the market changed. A failed keep keeps the table and warns ops once an hour (HISTORY_FAILED, its
 own hour). `auctions_tick` starts the history's fold once a UTC day (price_history.fold, one background task).
 
 The DM rule holds: nothing here DMs anyone, writes a notice or posts an ops line on success. A failure keeps the last
@@ -337,6 +338,7 @@ async def refresh(bot, reg, *, force: bool = False) -> str:
             if own == shared:
                 return "unchanged"
             await _save(reg, shared)
+            await _keep(bot, reg, key, shared)  # an adopted read is kept too: one already kept writes nothing (once per feed time)
             _heard(reg)
             return "updated"
         base = own if own is not None else shared

@@ -94,31 +94,43 @@ def record(key: tuple, at: datetime, prices: dict[int, Price]) -> int:
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         con = _open(p)
-        with con:  # one transaction
-            row = con.execute("SELECT first_at, last_at FROM meta").fetchone()
-            if row is not None and t <= row[1]:
-                return 0
-            last = {item: (low, qty) for item, low, qty in con.execute("SELECT item, low, qty FROM last")}
-            rows: list[tuple] = []
-            for item, pr in prices.items():
-                now = (int(pr.low), int(pr.qty))
-                if last.get(int(item)) != now:
-                    rows.append((int(item), t, now[0], now[0], now[1]))
-            for item, (low, _qty) in last.items():
-                if low is not None and item not in prices:
-                    rows.append((item, t, None, None, 0))
-            con.executemany("INSERT OR REPLACE INTO changes (item, at, low, high, qty) VALUES (?, ?, ?, ?, ?)", rows)
-            con.executemany("INSERT OR REPLACE INTO last (item, low, qty) VALUES (?, ?, ?)", [(r[0], r[2], r[4]) for r in rows])
-            if row is None:
-                con.execute("INSERT INTO meta (one, first_at, last_at) VALUES (1, ?, ?)", (t, t))
-            else:
-                con.execute("UPDATE meta SET last_at = ?", (t,))
-            return len(rows)
+        con.isolation_level = None  # the transaction is opened by hand: the check and the write are one
+        con.execute("BEGIN IMMEDIATE")  # the write lock before reading last_at: another writer can't slip an older feed time in
+        try:
+            n = _record_rows(con, t, prices)
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+        con.execute("COMMIT")
+        return n
     except (sqlite3.Error, OSError) as e:
         raise HistoryError(f"price history {p.name}: {e}") from e
     finally:
         if con is not None:
             con.close()
+
+
+def _record_rows(con: sqlite3.Connection, t: int, prices: dict[int, Price]) -> int:
+    """record's check and write, inside its open transaction → rows kept."""
+    row = con.execute("SELECT first_at, last_at FROM meta").fetchone()
+    if row is not None and t <= row[1]:
+        return 0
+    last = {item: (low, qty) for item, low, qty in con.execute("SELECT item, low, qty FROM last")}
+    rows: list[tuple] = []
+    for item, pr in prices.items():
+        now = (int(pr.low), int(pr.qty))
+        if last.get(int(item)) != now:
+            rows.append((int(item), t, now[0], now[0], now[1]))
+    for item, (low, _qty) in last.items():
+        if low is not None and item not in prices:
+            rows.append((item, t, None, None, 0))
+    con.executemany("INSERT OR REPLACE INTO changes (item, at, low, high, qty) VALUES (?, ?, ?, ?, ?)", rows)
+    con.executemany("INSERT OR REPLACE INTO last (item, low, qty) VALUES (?, ?, ?)", [(r[0], r[2], r[4]) for r in rows])
+    if row is None:
+        con.execute("INSERT INTO meta (one, first_at, last_at) VALUES (1, ?, ?)", (t, t))
+    else:
+        con.execute("UPDATE meta SET last_at = ?", (t,))
+    return len(rows)
 
 
 def _read(key: tuple, fn):

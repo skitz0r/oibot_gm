@@ -528,9 +528,27 @@ def test_a_new_table_is_kept_once_per_house(duo, fake, bot, clock, kept):
     assert run(discord_auctions.refresh(bot, b)) == "updated"  # b adopts a's read
     key = discord_auctions.history_key(a)
     assert key == discord_auctions.history_key(b) == ("dynamic-forever-us", 2, 6)
-    assert price_history.kept_since(key) == discord_auctions.table(a).at
-    assert kept == [(key, discord_auctions.table(a).at, {BAR, DREAMFOIL})]
+    at = discord_auctions.table(a).at
+    assert price_history.kept_since(key) == at
+    assert [p.low for p in price_history.points(key, BAR, at - timedelta(hours=1), at + timedelta(hours=1))] == [489998], \
+        "one set kept: b's adopted read of the same feed time writes nothing"
+    assert [k[1] for k in kept] == [at, at], "b's adoption is passed on too; record keeps it once per feed time"
     assert price_history.path(key).parent == discord_auctions.OUT / "history"
+
+
+def test_a_house_picked_through_the_picker_is_kept_from_its_first_read(reg, fake, bot, clock, monkeypatch, kept):
+    reg.set_armory_guild(facts(ruleset=2), "Owner", by_id=OWNER)
+    monkeypatch.setattr(armory, "client_for", lambda reg: FakeArmory(ruleset=2))
+    run(discord_auctions.house_choices(bot, reg))  # the picker's reads arrive as shared reads
+    picked_at = clock()
+    reg.set_market(HORDE_AH, 2, "Owner", by_id=OWNER)
+    clock.advance(minutes=2)
+    fetched = len(fake.fetches())
+    assert run(discord_auctions.refresh(bot, reg)) == "updated"
+    assert len(fake.fetches()) == fetched, "the picker's read is taken as it is"
+    key = discord_auctions.history_key(reg)
+    assert price_history.kept_since(key) == picked_at
+    assert price_history.span(key, DREAMFOIL, 1, clock()) == price_history.Span(1500, 1500)
 
 
 def test_history_key_is_none_without_a_market(reg, fake, clock):
