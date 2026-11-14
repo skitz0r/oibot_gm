@@ -3,7 +3,7 @@ import { REFRESH_EVENT } from "./hooks/usePoll";
 import { Alert, AppShell, Avatar, Box, Burger, Button, Group, Menu, Modal, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconGauge, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus } from "@tabler/icons-react";
+import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconGauge, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus, IconCoin } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
@@ -19,6 +19,7 @@ import { AgentsPage } from "./pages/Agents";
 import { LootPage } from "./pages/Loot";
 import { LootLogPage } from "./pages/LootLog";
 import { ProfessionsPage } from "./pages/Professions";
+import { PricesPage } from "./pages/Prices";
 import { ReadinessPage } from "./pages/Readiness";
 import { TellTheBot } from "./components/TellTheBot";
 import { PolicyPage } from "./pages/Policy";
@@ -27,6 +28,8 @@ import { ApplicationsPage } from "./pages/Applications";
 import { anyDirty } from "./hooks/useDirty";
 
 const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", label: "Loot log", icon: IconClipboardList }, { to: "/professions", label: "Professions", icon: IconTool }, { to: "/help", label: "Help", icon: IconHelp }];
+/** price watch §4.3: the Prices tab, for every member, where the game version has auction houses (after Professions) */
+const PRICES = { to: "/prices", label: "Prices", icon: IconCoin };
 const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
   { to: "/raids", label: "Raids", icon: IconMountain },
@@ -134,6 +137,8 @@ export default function App() {
   // the Tell the bot box sits on the rail of OFFICER pages only — never on Me (owner decision D40) or the members' Loot log
   const officerPage = meta.viewer.officer && OFFICER.some((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + "/"));
   const several = meta.guilds.length > 1;
+  const pricesTab = !!meta.prices?.market;  // absent on a version without auction houses (tbc)
+  const nav = pricesTab ? [...NAV.slice(0, 3), PRICES, ...NAV.slice(3)] : NAV;
   const link = (n: { to: string; label: string; icon: React.ElementType }) => (
     <NavLink key={n.to} component={Link} to={n.to} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7 }} />
   );
@@ -148,7 +153,7 @@ export default function App() {
           <Box><Title order={3} size="h5">oibot_GM</Title><Text size="xs" c="dimmed">{meta.guild} · {meta.profile}</Text></Box>
         </Group>
         {several && <GuildSelector meta={meta} />}
-        <Stack gap={2}>{NAV.map(link)}</Stack>
+        <Stack gap={2}>{nav.map(link)}</Stack>
         {meta.viewer.officer && (
           <Stack gap={2} mt="md">
             <Text size="xs" c="dimmed" fw={700} tt="uppercase" px="xs" style={{ letterSpacing: ".1em" }}>Officers</Text>
@@ -186,6 +191,7 @@ export default function App() {
             <Route path="/loot" element={officer(<LootPage meta={meta} />)} />
             <Route path="/loot-log" element={<LootLogPage meta={meta} />} />
             <Route path="/professions" element={<ProfessionsPage meta={meta} />} />
+            <Route path="/prices" element={pricesTab ? <PricesPage meta={meta} /> : <Navigate to="/me" replace />} />
             <Route path="/config" element={officer(<ConfigPage meta={meta} />)} />
             <Route path="*" element={<Navigate to="/me" replace />} />
           </Routes>

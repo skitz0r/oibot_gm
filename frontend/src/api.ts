@@ -173,7 +173,23 @@ export interface RecipeCost {
 /** GET /api/prices/find: at most 25 items; `total` = every match; `words` = how recent the prices are; `more` = how many more
  *  match, as a sentence ("" when none are left out); `message` = the whole answer in lines (its last line the empty answer). */
 export interface PriceFind {
-  q: string; rows: { id: number; name: string; low_words: string; qty: number; words: string }[]; total: number; words: string; more: string; message: string;
+  q: string; rows: PriceRow[]; total: number; words: string; more: string; message: string;
+}
+/** One item's price (web/api_prices): `low_words` = its lowest price or "none listed", `qty` = how many are listed, `words` =
+ *  the whole line; `watching` = on the viewer's own watch list (the search's rows only). While prices are hidden a watch
+ *  list row carries its name alone (empty `low_words` and `words`). */
+export interface PriceRow { id: number; name: string; low_words: string; qty: number; words: string; watching?: boolean }
+/** GET /api/prices/watching (price watch §4.2): the viewer's own list, newest first; `shown` = prices show now (else names
+ *  alone); `empty` = the empty list's sentence; `registered` = the viewer has a record (watching needs one, C13). */
+export interface WatchList { rows: PriceRow[]; words: string; shown: boolean; max: number; empty: string; registered: boolean }
+/** GET /api/prices/history (price watch §4.3, C5): a watched item over one span. `t` = epoch seconds (the x position only),
+ *  `when` = the server's words for the point (a time, or a day alone for a folded day), `low` / `high` in copper (low null =
+ *  nothing listed from then: a gap; high > low = a folded day's range), `words` = the lowest in words; the span's lowest and
+ *  highest as numbers and words; `sentences` = the 7- and 30-day sentences (and since when the bot has kept prices). */
+export interface PriceHistory {
+  id: number; name: string; spans: { id: string; label: string }[]; span: string;
+  points: { t: number; when: string; low: number | null; high: number | null; words: string }[];
+  low: number | null; high: number | null; low_words: string; high_words: string; sentences: string[];
 }
 /** GET /api/admin/market: the guild's auction house (officers read, the owner picks). `words` = the choice in words (or what
  *  is missing), `prices` = how recent the prices are, `clear_sentences` = Turn prices off…'s confirm. */

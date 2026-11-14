@@ -635,7 +635,7 @@ def test_armory_link_pages_preview_and_print_only_the_servers_sentences():
 # a link can't sit inside a button; the button opens the item's tiers)
 ITEM_PAGES = ("pages/Professions.tsx", "pages/LootLog.tsx", "components/loot/Tonight.tsx", "components/loot/History.tsx",
               "components/loot/Items.tsx", "components/loot/Wishlists.tsx", "components/loot/MyLoot.tsx", "components/loot/Appeals.tsx",
-              "components/LootWeightsCard.tsx")
+              "components/LootWeightsCard.tsx", "pages/Prices.tsx")
 ITEM_NAME_NOT_A_LINK = {"components/loot/Items.tsx": 'onClick={() => setOpen(i.key)}>{i.name}</Button>'}
 # a JSX child printing an item row's name: `{r.item}` anywhere, `{x.name}` on the pages whose `.name` rows are items
 # (never `${…}` inside a template string — a title — nor `={…}` — an attribute)
@@ -706,3 +706,34 @@ def test_market_card_picks_the_auction_house_with_the_servers_sentences():
     assert "rev: d.rev" in card and "e.status === 409" in card and "e.status === 404" in card
     assert "c.listings_words" in card and "s.low_words" in card and "choices.words" in card and "<ItemName id={s.id}" in card
     assert 'useDirty("market", choices !== null)' in card and '["config", "prices"]' in card
+
+
+def test_the_prices_tab():
+    """Price watch §4.3 (D1, D2, C5, C6, C16, C17): the Prices tab for every member where the version has auction houses —
+    the search with Watch / Stop watching, Your watch list opened in place to its chart and the server's sentences. Every
+    time and every price is the server's words; the chart is the site's own inline SVG in theme colours, no library."""
+    root = SRC.parents[1]
+    app = (SRC / "App.tsx").read_text()
+    page = _code_only((SRC / "pages" / "Prices.tsx").read_text())
+    assert 'path="/prices"' in app and '"/prices", label: "Prices"' in app and "meta.prices?.market" in app
+    for route in ("/api/prices/find", "/api/prices/watching", "/api/prices/watch", "/api/prices/history"):
+        assert route in page, route
+    for label in ("Watch", "Stop watching", "Your watch list"):
+        assert label in page, label
+    assert "<ItemName " in page and "<PriceChart" in page
+    assert "toLocale" not in page and "new Date(" not in page, "times and money are the server's words"
+    assert 'useLive(' in page and '"prices"' in page
+    assert "useDirty" not in page, "the tab has no edit mode"
+    chart = _code_only((SRC / "components" / "PriceChart.tsx").read_text())
+    assert "<svg" in chart and "var(--mantine-" in chart
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b", chart), "theme colours only"
+    assert "toLocale" not in chart and "new Date(" not in chart, "the chart's labels are the server's words"
+    pkg = (root / "frontend" / "package.json").read_text()
+    assert not any(lib in pkg for lib in ("recharts", "@mantine/charts", "chart.js", "d3")), "no chart library (C17)"
+    assert "function PriceBox(" in (SRC / "pages" / "Professions.tsx").read_text(), "the Professions page keeps its box (D2)"
+    css = (SRC / "pages" / "prices.module.css").read_text()
+    assert "@media (max-width: 48em)" in css, "a card per row below sm"
+    from test_copy import tsx_strings
+    reads = " ".join(s for _, s in tsx_strings(SRC / "pages" / "Prices.tsx"))
+    for composed in ("Prices as of", "none listed", "aren't watching", "Register first", "holds 25", "kept prices since", "Lowest in the last"):
+        assert composed not in reads, f"the server says {composed!r}"

@@ -153,6 +153,13 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
 - **Cost to make** — a recipe's reagents at their lowest prices, added up, for one craft. When a reagent has none listed
   the sum reads *"Cost to make: at least 12g 40s — 1 reagent has none listed."* What the craft makes shows its own lowest
   price *each*; the bot never subtracts one from the other (no profit figure).
+- **Your watch list** — the items you keep an eye on (**Watch** on a price answer puts one there, **Stop watching**
+  takes it off), at most 25. It is yours alone: nobody else, officers included, sees it. Nothing pings you when a price
+  moves; you open the list when you want to look.
+- **Lowest / highest in the last 7 days** — of the hourly lowest prices over those days, the lowest and the highest
+  (never the dearest listing). A price that hasn't changed since before the span counts from the span's start; time with
+  nothing listed counts for neither. *"The bot has kept prices since …"* is said while the bot's record is younger than 30
+  days, so a short record isn't read as a calm one.
 - **Item links** — on the site, an item's name with an id opens its page on Wowhead (the game version's section, in a
   new tab). An item known only by name stays plain text. Discord's loot item card links its item the same way.
 
@@ -517,6 +524,27 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   turn them on, and nobody else sees anything. Item names there — a recipe's name (it opens the item
   the recipe makes), what it makes, its reagents, the price box's items — open the item's page on Wowhead in a new tab.
   An enchant makes no item, so its name stays plain text.
+- **Prices and your watch list, on the site**: where the game version has auction houses, the left rail has **Prices**
+  for every member. At the top, **What does it go for?** — the same search as the Professions page's box: part of an
+  item's name lists up to 25 items with their lowest price and how many are listed (or *none listed*) and how many more
+  match, each with **Watch** (**Stop watching** when it is already on your list). The page says once how recent the
+  prices are (*Prices as of …*). Below it, **Your watch list**: a row per item with its lowest price and how many are
+  listed, newest first; an empty list says *"You aren't watching anything yet. Search for an item above and press
+  Watch."* Open a row to see its price over time: a line of the lowest price (a price holds until the next change; a
+  break where nothing was listed, never a drop to zero; on older days a faint band from that day's lowest to its
+  highest), with **7 days** · **30 days** · **90 days** · **1 year**, the highest and lowest of the span at its side and
+  the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time and
+  price. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'
+  and, while the record is young, *"The bot has kept prices since Sat 7 Nov."*) and **Stop watching**. A watch is your own
+  preference: it happens at once, with no confirm, and the same list shows in `/price`. You need to be registered to keep
+  one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction
+  house picked, or the last prices more than a day old) there is no search and the list shows the items' names alone, with
+  nothing to open. On a phone each item and each search result is a card.
+- **How long prices are kept**: the bot keeps every change of every item's lowest price and how many are listed — not
+  only watched items — for 90 days; after that one lowest and one highest price per item per day, up to a year; nothing
+  older. The record belongs to the auction house, so a guild whose owner picks another house starts that house's record
+  (*"The bot hasn't kept any prices for this auction house yet."* until its first read). Turning prices off deletes
+  nothing.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
   owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.

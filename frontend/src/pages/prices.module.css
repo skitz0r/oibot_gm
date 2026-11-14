@@ -1,0 +1,35 @@
+/* The Prices tab (price watch §4.3): the search's rows and the watch list's rows share one grid — item · lowest price ·
+   how many are listed · the button — and a watched item opens in place under its row (the chart, the server's
+   sentences, Stop watching). Below the sm breakpoint every row is a card of its own (the item on its own line, the
+   price and the count under it, the button last) and every control is 44 px. */
+.rows { display: flex; flex-direction: column; }
+.list { display: flex; flex-direction: column; }
+.row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr) minmax(70px, auto) minmax(120px, auto); gap: 4px 16px;
+       align-items: center; padding: 6px 0; border-bottom: 1px solid var(--mantine-color-slate-6); }
+.rows > .row:last-child { border-bottom: none; }
+.row > * { min-width: 0; }
+.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actions { min-width: 0; }
+
+.item { border-bottom: 1px solid var(--mantine-color-slate-6); }
+.item:last-child { border-bottom: none; }
+.item > .row { padding: 8px 16px; border-bottom: none; }
+.opens { cursor: pointer; }
+.opens:hover { background: var(--mantine-color-slate-7); }
+.panel { padding: 4px 16px 14px 46px; }
+
+@media (max-width: 48em) {
+  .row { grid-template-columns: minmax(0, 1fr) auto; margin: 6px 0; border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; padding: 8px 12px; }
+  .rows > .row:last-child { border-bottom: 1px solid var(--mantine-color-slate-5); }
+  .row > :first-child { grid-column: 1 / -1; }
+  .row > .actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .item { margin: 10px 12px; border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; }
+  .item:last-child { border-bottom: 1px solid var(--mantine-color-slate-5); }
+  .item > .row { margin: 0; border: none; padding: 8px 12px; }
+  .panel { padding: 4px 12px 12px; }
+  .name { white-space: normal; }
+  .touch :global(.mantine-Button-root),
+  .touch :global(.mantine-ActionIcon-root) { min-height: 44px; min-width: 44px; }
+  .touch :global(.mantine-Input-input),
+  .touch :global(.mantine-SegmentedControl-label) { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+}

@@ -5163,3 +5163,106 @@ house and ruleset; a relink to another ruleset clears the market first, so the t
 off sentence says "until you pick the auction house again" although a guild must be linked first. The first read of
 `items.json` can happen on the event loop. A member's off sentence (`OFF_WORDS`) names only the Config page. `/price`
 cuts at 2000 characters mid-line.
+
+### 5.66 Prices tab, watch lists and price history (built 2026-11-14)
+
+**Why.** §5.65 put prices inside the Professions page and `/price`, and kept only the latest table, so the bot could not
+say how a price had moved. A member who buys and sells wants one item's price outside the Professions page, a handful of
+items kept in view, and whether today's price is high or low against the last days and weeks. Spec:
+`docs/superpowers/specs/2026-11-14-price-watch-design.md`; plan: `docs/superpowers/plans/2026-11-14-price-watch.md`. This
+section is the record as built; where it differs from the spec it says so.
+
+**Decisions (owner, 2026-11-14).** **D1** a Prices tab for every member: a search for one item's price, and under it the
+member's own watch list; no browse table, no categories. **D2** the search stays on both pages (the Professions box is
+unchanged). **D3** a watch list per member; a search result can be watched. **D4** history is kept for every item, not
+only watched ones, as changes, provided the footprint is light (measured: 5,899 priced items on one house, about 100 KB a
+whole table, 121 GB free on the host). **D5** Discord through the one `/price`: with an item as before plus Watch; with no
+item the watch list; everything ephemeral.
+
+**The designer's calls** (C1–C5 seen in chat, "sounds good"; the rest in the approved spec): **C1** no price alerts —
+nothing pings, DMs or posts when a price moves (the DM rule). **C2** every change kept 90 days, then one lowest and one
+highest per item per day, nothing past a year. **C3** one list on both sides. **C4** search covers named items only.
+**C5** a watched item's history: on the site a chart plus the 7- and 30-day lowest / highest in words; in Discord the
+words only. **C6** history shows for watched items only (it exists for every item, so this can widen without new data).
+**C7** at most 25 items (Discord's select). **C8** watching and stopping are instant, no confirm. **C9** the list lives on
+the member's record (`Member.watching`, not on a character); history under `out/` only. **C10** history belongs to an
+auction house, not a guild: two guilds on one house share it; another house starts empty; turning prices off deletes
+nothing. **C11** nobody else reads a watch list: no officer view, no MCP tool, not in the help answer. **C12** an item
+with nothing listed can be watched; its line reads *none listed* and a stretch with nothing listed is a gap, never a
+zero. **C13** registered members only; a watch never creates a record (the must-apply gate holds). **C14** a watch is
+written quietly: no change-log or ops line, the data repo's message says "<name>: watch list changed", never the item.
+**C15** items are added only while prices show (the search finds nothing otherwise). **C16** history shows only while
+prices show; otherwise the list shows names and the status sentence. **C17** the chart is the site's own inline SVG, no
+library. **C18** the Watch button and the list's select live on an ephemeral answer and don't survive a restart (the
+wizard core's "The bot restarted" edit).
+
+**Rulings in the build.** **P1** the parity matrix passes at every step (Task 4 listed the Discord half pending; Task 5
+emptied it). **P2** while a house is still read, the fold never loses an item's standing value (its last kept value stays
+as the carried start even when older than a year); a file whose NEWEST kept feed time is older than a year is deleted
+whole. **P3** the chart's colour test = no hex colour literal. **T1-a** an adopted shared read (the owner's pick, another
+guild on the same house) is kept too — once per feed time, so a newly picked house's record starts at its first read (the
+plan said "not on adoption").
+
+**As built.**
+- **The store** (`price_history.py`, BLOCKING — callers `asyncio.to_thread`): one SQLite file per auction house under
+  `out/auctions/history/`, named from the house's full key (namespace, ruleset, house; `discord_auctions.history_key`).
+  Tables: `meta` (the first and last kept feed time), `changes` (item, at, low, high, qty; a change has high = low and a
+  qty, a folded day high ≥ low and no qty; low NULL = nothing listed from then), `last` (each item's last kept low and
+  qty, the comparison base). `record(key, at, prices)` writes a row only for an item whose lowest price or quantity
+  differs from the last kept (an item that had listings and has none gets a NULL row), once per feed time — a time not
+  later than the last kept writes nothing; check and write in one immediate transaction. `points(key, item, since,
+  until)` carries the last value before `since` in at `since`; `span(key, item, days, now)` → (lowest, highest) of the
+  hourly lowest prices, time with nothing listed counting for neither; `kept_since`; `fold(now)` over every file (picked
+  or not): rows older than 90 days → one lowest / highest per item per UTC day, days older than a year dropped (P2), a
+  file left empty or whose newest feed time is past a year deleted. A broken file raises `HistoryError`.
+- **The feed** (`discord_auctions`): `refresh` keeps every new table taken as the guild's (and an adopted shared one,
+  T1-a) with `_keep` in a thread; a failure keeps the price table and warns ops at most once an hour (`HISTORY_FAILED`,
+  kind `history`). Not on a 304, not for a read discarded because the market changed. `auctions_tick` starts the fold
+  once a UTC day as one background task, only where the profile has `auctions:`. No DM, notice, post or ops line on
+  success.
+- **The watch list** (`registry.py`): `Member.watching` (item ids, newest first), `WATCH_MAX = 25`; `watching(uid)`,
+  `watch(uid, item)` (refused without auction houses, without a record — `WATCH_REGISTER_FIRST` "Register first with
+  /register to keep a watch list." — and at 25 — `WATCH_FULL` "Your watch list holds 25 items. Stop watching one
+  first."; already there = no write), `unwatch` (never refused); each one `save_quiet` write. A test puppet has no list.
+- **The words and reads** (`prices.py`): `watch` / `unwatch` → "You're watching <name>." / "You've stopped watching
+  <name>." (an id the bot can't name is refused), `is_watching`, `watch_list` (priced while prices show, names alone
+  otherwise; an unnamed id reads `UNNAMED`), `history_sentences` ("Lowest in the last 7 days: 12s 40c · highest: 19s
+  2c", the 30 days', "None listed in the last 7 days.", and "The bot has kept prices since <day>." while the record is
+  under 30 days; `NO_HISTORY_YET` for a house with nothing kept or a file that can't be read; [] while prices are
+  hidden), `chart(reg, item, span)` (points {t, when, low, high, words} — `when` in the Clock rule's words, a folded day
+  its UTC day alone — and the span's low / high in numbers and words), `SPANS` 7 days · 30 days · 90 days · 1 year,
+  `EMPTY_LIST_SITE` / `EMPTY_LIST_DISCORD`.
+- **The site**: `GET /api/prices/find` rows carry `watching`; `GET /api/prices/watching` → {rows, words, shown, max,
+  empty, registered}; `POST /api/prices/watch` {id, on} → {message, rows} (a refusal 400 with its sentence; the quiet
+  write publishes `member`, so the member's other tabs reload); `GET /api/prices/history?id=&span=` → {id, name, spans,
+  span, points, low, high, low_words, high_words, sentences} for a watched item only (403 otherwise, an unknown span
+  400); every watch route is the session's own uid, 403 from MCP (C11), 404 without auction houses. The **Prices** tab
+  (`pages/Prices.tsx`, `prices.module.css`) sits in the rail after Professions when `meta.prices.market`: the status
+  sentence once, the search (**What does it go for?**, rows with **Watch** / **Stop watching**) while prices show, then
+  **Your watch list** — a row per item opened in place to `components/PriceChart.tsx`, the server's sentences and
+  **Stop watching**; the empty sentence, or for a viewer without a record the refusal the server sent on a press. A
+  press waits for the server and takes its list; a refusal is also a red toast. A card per row below sm. `PriceChart`
+  draws at the container's real width: a step line of the lowest price broken where nothing was listed, a faint band
+  low → high on folded days, y over the span's low..high with padding (flat = mid-height), x from the first point to now,
+  the server's `high_words` / `low_words` and first / last `when` as labels (the last on a second row when they would
+  meet), a pointer or arrow-key read-out of one point's `when` and `words`, Mantine colour variables only, an aria-label
+  from the server's sentences; fewer than two points = no frame. The page formats no money and no time.
+- **Discord** (`flows_prices.py`, flow `price`): `/price item` optional; with an item the old answer plus **Watch** /
+  **Stop watching** when it names one item while prices show (a press edits the answer in place); with no item **Your
+  watch list** (a line per item, the status line once, a select) → one item's price line, history sentences, **Stop
+  watching**, **Back**. The wizard core gained two opt-in class attributes: `heading = False` (a screen is its text
+  alone, no bold title) and `mentions` (allowed mentions for every send / edit); defaults leave every other wizard
+  unchanged.
+- **Parity**: the watch list, watch, unwatch and history are site + Discord only, with a written reason per missing MCP
+  row (tests/test_parity_matrix.py `WATCH_OWN`).
+
+**Where the build differs from the spec.** A folded day is a UTC day (its `when` the UTC day alone, never shifted into
+the guild's zone). An adopted shared read is kept (T1-a). `POST /api/prices/watch` does not itself refuse while prices
+are hidden: C15 holds because the search finds nothing then. A folded day's low / high count the changes kept that day,
+not the value carried in from the day before. The site's pieces were checked in a browser against mocked answers only
+(the chart's layout on desktop and phone), not against the live bot.
+
+**Not built.** Price alerts of any kind; a browse table or categories; a profit figure; sharing or comparing lists; any
+officer, owner or tool view of who watches what; a chart image in Discord; history for a version without auction houses;
+history of anything but the lowest price and quantity listed; sale prices. The history file's real size after a week is
+still to be measured and recorded in the operator notes.
