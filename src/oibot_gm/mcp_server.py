@@ -810,6 +810,24 @@ def who_can_make(text: str, guild: Guild = None) -> str:
 
 
 @mcp.tool()
+def price_check(text: str, guild: Guild = None) -> str:
+    """What an item costs at the guild's auction house: part of an item's name → one line per matching item with its
+    lowest price listed and how many are listed, or "none listed", after the line saying how recent the prices are
+    ("Prices as of …"). The first 25 items, then "And N more items match." When no auction house is picked, or the
+    prices are too old to show, the answer says so instead. Lowest listed price, never a sale price. Names only."""
+    return msg(api(guild).get("/api/prices/find", q=text))
+
+
+@mcp.tool()
+def market(guild: Guild = None) -> dict:
+    """The auction house the guild's prices come from: `selected` {name, faction, picked_by, picked_label, house_id,
+    ruleset_id} or null, `words` (the choice in a sentence, or how to make one) and `prices` (how recent the prices are).
+    The owner picks it on the Config page or in Discord, matching sample prices against the game. Refused where the game
+    version has no auction houses or the host has no Blizzard keys."""
+    d = api(guild).get("/api/admin/market")
+    return {k: d.get(k) for k in ("selected", "words", "prices")}
+
+@mcp.tool()
 def set_dm(member: str, on: bool, guild: Guild = None) -> str:
     """Switch a member's DMs from the bot on or off (off = they answer asks on the site only)."""
     return msg(api(guild).post("/api/members/dm", {"member": member, "on": bool(on)}))

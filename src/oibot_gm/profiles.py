@@ -240,6 +240,7 @@ class GameProfile:
     recipes: dict[int, RecipeDef] = field(default_factory=dict)  # recipes.yaml: the game's recipe list by id; empty = typed recipes
     armory: dict[str, Any] | None = None  # integrations.yaml `armory` {region, profile_namespace, static_namespace, classes, rulesets}; None = no armory
     auctions: dict[str, Any] | None = None  # integrations.yaml `auctions` {dynamic_namespace, factions, reference_items}; None = no prices
+    item_url: str | None = None  # integrations.yaml `wowhead_item_url` ({id} filled per item: the site's item links); None = no links
     _spec_cache: dict[str, SpecInfo] = field(default_factory=dict)
 
     @classmethod
@@ -297,6 +298,7 @@ class GameProfile:
             recipes=load_recipes(root / "recipes.yaml"),
             armory=dict(integ["armory"]) if integ.get("armory") else None,
             auctions=dict(integ["auctions"]) if integ.get("auctions") else None,
+            item_url=str(integ["wowhead_item_url"]) if integ.get("wowhead_item_url") else None,
         )
 
     def __post_init__(self):

@@ -24,6 +24,7 @@ from pydantic import BaseModel, ValidationError
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from .. import consequences as cq
 from .. import armory as armory_mod
+from .api_prices import prices_meta
 from .api_armory import char_extras as armory_extras
 from .. import professions as professions_mod
 from .. import guild_routing
@@ -528,6 +529,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "guides": bool((getattr(reg.profile, "guides", None) or {}).get("zones")),
             # armory link §5.1: the version has an armory and the host its Blizzard keys — Config › Settings shows the guild card
             "armory": armory_mod.available(reg),
+            # auction prices (spec §4.4, §4.6): whether prices show and how recent they are for this reader; the item link
+            # template (integrations.yaml wowhead_item_url, {id} filled by the page) — links ride the template alone
+            "prices": prices_meta(reg, bool(v.owner)), "item_url": reg.profile.item_url,
         }
 
     @app.get("/api/meta")
@@ -1329,7 +1333,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     subscribers: dict[asyncio.Queue, tuple[str, bool]] = {}  # queue -> (guild key, the page's viewer is an officer)
 
     def publish(topic: str, guild: str | None = None, *, officers: bool = False) -> None:
-        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy` | `listen` | `memory` | `guides`. `guild` None = every
+        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy` | `listen` | `memory` | `guides` | `prices`. `guild` None = every
         page (process-wide news: the agents' job status); otherwise only that guild's pages. `officers`: only pages an
         officer opened (the test feed: what it names is officers' business). Safe from worker threads."""
         def fan_out():
@@ -2609,6 +2613,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_armory import install_armory_api  # a character's armory link: link / unlink / the switch / Sync now, the map, the seed, move (armory link §5.4)
 
     install_armory_api(app, bot, who=who, body=body, publish=publish, visible=visible, char_json=char_json, resolve_member=resolve_member, live_officer=live_officer)
+
+    from .api_prices import install_prices_api  # the price search and the owner's auction house (auction prices §4.1, §4.5)
+
+    install_prices_api(app, bot, who=who, body=body, need_owner=need_owner, publish=publish)
 
     from .api_professions import install_professions_api  # the Professions page: catalog, finder, the officers' fix (design §5.60, §5.64)
 

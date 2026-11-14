@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from .. import ops as ops_mod
 from .. import professions as pr
 from ..registry import CharactersChanged, RegistryError
+from .api_prices import cost_json
 
 FIND_LIMIT = 25  # rows the finder returns; `total` counts every match
 
@@ -25,11 +26,13 @@ def install_professions_api(app: FastAPI, bot, *, who, body, publish=None) -> No
     def entry_json(reg, e: pr.CatalogEntry) -> dict:
         """`listed` = a recipe of the game's list (then `category`, `makes` {id, name, quantity[, quantity_max]} or null for
         an enchant, and `reagents` [{id, name, quantity}]); an unmatched typed recipe has null / [] there. `nobody` = the
-        sentence the page prints for a listed recipe nobody makes (professions.nobody_sentence), else ""."""
+        sentence the page prints for a listed recipe nobody makes (professions.nobody_sentence), else "". `cost` = the cost
+        to make at the auction house's lowest prices (api_prices.cost_json), null without prices or reagents."""
         d = e.recipe
         return {"key": e.key, "name": e.name, "profession": e.profession, "id": e.id, "crafters": [crafter_json(reg, c) for c in e.crafters],
                 "listed": d is not None, "category": d.category if d else None, "makes": dict(d.makes) if d and d.makes else None,
-                "reagents": [dict(x) for x in d.reagents] if d else [], "nobody": pr.nobody_sentence(e.name) if not e.crafters else ""}
+                "reagents": [dict(x) for x in d.reagents] if d else [], "nobody": pr.nobody_sentence(e.name) if not e.crafters else "",
+                "cost": cost_json(reg, d)}
 
     @app.get("/api/professions")
     async def professions_get(request: Request):

@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 
 NONE_LISTED = "none listed"
 OWNER_OFF_WORDS = "Pick the guild's auction house on the Config page to see prices."
+NO_MATCH = "No item the bot knows has that name."
 
 
 # ------------------------------------------------------------------ names
@@ -259,5 +260,22 @@ def status_sentence(reg, owner: bool) -> str:
     return discord_auctions.as_of_words(reg)
 
 
-__all__ = ["Cost", "CostLine", "ItemPrice", "NONE_LISTED", "OWNER_OFF_WORDS", "cost_sentence", "made_words", "names",
+def more_words(n: int) -> str:
+    """The last line when a search shows fewer items than match: 'And 3 more items match.'"""
+    return "And 1 more item matches." if n == 1 else f"And {n} more items match."
+
+
+def answer_lines(reg, shown: list[ItemPrice], total: int, owner: bool) -> list[str]:
+    """A price search in words (the MCP tool, Discord's /price): how recent the prices are, one line per item shown, then
+    how many more match — or no match. Prices off: the status line alone (nothing for a member)."""
+    status = status_sentence(reg, owner)
+    if not _shown(reg):
+        return [status] if status else []
+    lines = [status, *(price_words(p) for p in shown)] if shown else [status, NO_MATCH]
+    if total > len(shown) and shown:
+        lines.append(more_words(total - len(shown)))
+    return lines
+
+
+__all__ = ["Cost", "CostLine", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_OFF_WORDS", "answer_lines", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

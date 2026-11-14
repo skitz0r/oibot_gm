@@ -49,6 +49,9 @@ WAITING_WORDS = "Prices haven't been read from the auction house yet. The bot re
 OLD_WORDS = "Prices are out of date: the last ones read are more than a day old. The bot tries again every hour."
 STALE_TAIL = " — more than six hours old"
 LINK_FIRST = "Link the server to its guild in the game first, then pick its auction house."
+NO_CHOICES = "No auction house of the guild's faction has anything listed right now. Try again in a while."
+NOT_A_CHOICE = "That isn't one of the guild's auction houses. Look at the choices again."
+HOUSES_CHANGED = "The guild's auction houses changed since you looked. Look at the choices again."
 
 State = Literal["off", "waiting", "fresh", "stale", "old"]
 
@@ -404,5 +407,28 @@ async def house_choices(bot, reg) -> list[Choice]:
     return out
 
 
-__all__ = ["Choice", "FETCH_EVERY", "HIDE_AFTER", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
+class HousesChanged(RegistryError):
+    """The guild's ruleset is not the one the owner's choices were read for (the site answers 409)."""
+
+
+async def pick_house(bot, reg, house_id: int, ruleset_id: int) -> House:
+    """The auction house a picker's ids name, checked against the armory NOW (the site sends ids back, so they are never
+    trusted): the guild's ruleset must still be `ruleset_id` (else HousesChanged) and `house_id` one of its faction's
+    houses (else RegistryError NOT_A_CHOICE). Blocking requests in threads, like house_choices; armory's errors pass."""
+    if not reg.profile.auctions:
+        raise RegistryError(auctions.NO_AUCTIONS_WORDS)
+    g = reg.config.armory
+    if g is None:
+        raise RegistryError(LINK_FIRST)
+    facts = await asyncio.to_thread(armory.client_for(reg).guild, g.slug)
+    if int(facts.ruleset_id) != int(ruleset_id):
+        raise HousesChanged(HOUSES_CHANGED)
+    houses = auctions.faction_houses(reg, await asyncio.to_thread(_client(reg).houses, int(ruleset_id)), g.faction)
+    for h in houses:
+        if int(h.id) == int(house_id):
+            return h
+    raise RegistryError(NOT_A_CHOICE)
+
+
+__all__ = ["Choice", "HOUSES_CHANGED", "NO_CHOICES", "HousesChanged", "NOT_A_CHOICE", "pick_house", "FETCH_EVERY", "HIDE_AFTER", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
            "WAITING_WORDS", "as_of_words", "auctions_tick", "house_choices", "name_items", "price_of", "refresh", "reset_state", "state", "table"]

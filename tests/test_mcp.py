@@ -385,3 +385,30 @@ def test_professions_tools_go_through_the_site_routes():
         assert "game's whole recipe list" in tools["who_can_make"].description
     finally:
         ms.use(None)
+
+
+def test_price_tools_read_the_site_routes():
+    """price_check reads the price search's own answer lines; market reads the owner's choice (auction prices §4.1, §4.5).
+    Picking the house has no tool: the owner matches sample prices against the game by eye."""
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path, dict(request.url.params)))
+        if request.url.path == "/api/prices/find":
+            return httpx.Response(200, json={"rows": [{"id": 12360, "name": "Arcanite Bar"}], "total": 1, "words": "Prices as of Fri 13 Nov 8:00 PM",
+                                             "message": "Prices as of Fri 13 Nov 8:00 PM\nArcanite Bar: lowest price 48g 99s 98c, 30 listed."})
+        if request.url.path == "/api/admin/market":
+            return httpx.Response(200, json={"selected": {"name": "Horde Auction House", "house_id": 6}, "words": "Horde Auction House · picked by Ana",
+                                             "prices": "Prices as of Fri 13 Nov 8:00 PM", "rev": "r1", "clear_sentences": []})
+        return httpx.Response(404, json={"error": "no such route"})
+
+    ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
+    try:
+        assert ms.price_check("arcanite") == "Prices as of Fri 13 Nov 8:00 PM\nArcanite Bar: lowest price 48g 99s 98c, 30 listed."
+        assert calls[0] == ("GET", "/api/prices/find", {"q": "arcanite"})
+        assert ms.market() == {"selected": {"name": "Horde Auction House", "house_id": 6}, "words": "Horde Auction House · picked by Ana",
+                               "prices": "Prices as of Fri 13 Nov 8:00 PM"}
+        tools = {t.name for t in asyncio.run(ms.mcp.list_tools())}
+        assert {"price_check", "market"} <= tools and not {"set_market", "market_set", "clear_market"} & tools
+    finally:
+        ms.use(None)
