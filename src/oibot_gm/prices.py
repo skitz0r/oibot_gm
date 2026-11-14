@@ -7,7 +7,10 @@ up for listed ids nothing local names (`out/auctions/items.json`, one block per 
 id is not searchable until it is named.
 
 Every read is gated on discord_auctions.state: fresh or stale shows prices; off, waiting and old (a day, C10) show none.
-Cost to make is per craft (C9): what the recipe makes shows its own lowest price "each", never combined with the cost."""
+Cost to make is per craft (C9): what the recipe makes shows its own lowest price "each", never combined with the cost.
+
+The watch list and the price history (price watch §3, §4.2, C16): the member's own watch / unwatch sentences, the list's
+rows, the history's sentences and the chart's data — read from Registry and price_history (the history reads BLOCK)."""
 from __future__ import annotations
 
 import json
@@ -17,11 +20,14 @@ import re
 import tempfile
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import discord_auctions
 from . import auctions
+from . import price_history
 from .auctions import NO_AUCTIONS_WORDS, Price, money
+from .constants import fmt12
 from .profiles import RecipeDef
 
 log = logging.getLogger(__name__)
@@ -497,6 +503,124 @@ def choice_description(reg, choice) -> str:
     return " · ".join([listings_words(choice.listings), *(w for _i, _n, w in sample_rows(reg, choice))])[:100]
 
 
-__all__ = ["Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
+# ------------------------------------------------------------------ the watch list and the price history (price watch §3, §4.2)
+
+
+SPANS: dict[str, tuple[int, str]] = {"7": (7, "7 days"), "30": (30, "30 days"), "90": (90, "90 days"), "365": (365, "1 year")}
+"""The chart's spans: the key a page sends → (days, the span in words)."""
+UNNAMED = "An item the bot can't name yet"
+EMPTY_LIST_SITE = "You aren't watching anything yet. Search for an item above and press Watch."
+EMPTY_LIST_DISCORD = "You aren't watching anything yet. Use /price with an item and press Watch."
+NO_HISTORY_YET = "The bot hasn't kept any prices for this auction house yet."
+NOT_A_SPAN = "That isn't one of the spans."
+SHORT_HISTORY = timedelta(days=30)  # kept for less than this: the history says since when
+
+
+def watch(reg, discord_id: int, item_id: int) -> str:
+    """Put a named item on the member's own watch list → the sentence (also when it was already there). Refused on a
+    version with no auction houses, for an id the bot can't name (NO_MATCH), and with Registry.watch's refusals."""
+    from .registry import RegistryError
+
+    if not reg.profile.auctions:
+        raise RegistryError(NO_AUCTIONS_WORDS)
+    name = names(reg).get(int(item_id))
+    if name is None:
+        raise RegistryError(NO_MATCH)
+    reg.watch(discord_id, int(item_id))
+    return f"You're watching {name}."
+
+
+def unwatch(reg, discord_id: int, item_id: int) -> str:
+    """Take an item off the member's own watch list → the sentence (also when it wasn't there); never refused."""
+    reg.unwatch(discord_id, int(item_id))
+    name = names(reg).get(int(item_id))
+    return f"You've stopped watching {name}." if name else "You've stopped watching that item."
+
+
+def is_watching(reg, discord_id: int, item_id: int) -> bool:
+    return int(item_id) in reg.watching(discord_id)
+
+
+def watch_list(reg, discord_id: int) -> list[ItemPrice]:
+    """The member's watch list in its order (newest first), each item priced while prices show, else its name alone
+    (low None, qty 0, C16). An id the bot can't name reads UNNAMED."""
+    named = names(reg)
+    shown = _shown(reg)
+    out = []
+    for i in reg.watching(discord_id):
+        name = named.get(int(i)) or UNNAMED
+        out.append(_item(reg, i, name) if shown else ItemPrice(id=int(i), name=name, low=None, qty=0))
+    return out
+
+
+def _span_sentence(s: price_history.Span, words: str) -> str:
+    """'Lowest in the last 7 days: 12s 40c · highest: 19s 2c' / 'None listed in the last 7 days.'"""
+    if s.low is None:
+        return f"None listed in the last {words}."
+    return f"Lowest in the last {words}: {money(s.low)} · highest: {money(s.high)}"
+
+
+def _day_words(reg, t: datetime) -> str:
+    return reg.local12(t, "%a %d %b")
+
+
+def history_sentences(reg, item_id: int, *, now: datetime | None = None) -> list[str]:
+    """An item's history in words (BLOCKING: reads the history file): the 7-day sentence, the 30-day sentence, and since
+    when the bot has kept prices when that is less than 30 days. [] while prices don't show (C16); [NO_HISTORY_YET] when
+    the house has nothing kept, or its file can't be read."""
+    key = discord_auctions.history_key(reg)
+    if key is None or not _shown(reg):
+        return []
+    now = now or discord_auctions._now()
+    try:
+        since = price_history.kept_since(key)
+        if since is None:
+            return [NO_HISTORY_YET]
+        lines = [_span_sentence(price_history.span(key, item_id, SPANS[k][0], now), SPANS[k][1]) for k in ("7", "30")]
+    except price_history.HistoryError:
+        log.warning("price history unreadable for %s", key, exc_info=True)
+        return [NO_HISTORY_YET]
+    if now - since < SHORT_HISTORY:
+        lines.append(f"The bot has kept prices since {_day_words(reg, since)}.")
+    return lines
+
+
+def _point_json(reg, p: price_history.Point) -> dict:
+    # a folded day is one UTC day (price_history's fold): read as that day alone, never shifted into the guild's zone
+    when = fmt12(p.at.astimezone(timezone.utc), "%a %d %b") if p.qty is None else reg.local12(p.at)
+    return {"t": int(p.at.timestamp()), "when": when, "low": p.low, "high": p.high,
+            "words": money(p.low) if p.low is not None else NONE_LISTED}
+
+
+def chart(reg, item_id: int, span: str, *, now: datetime | None = None) -> dict:
+    """The chart's data for one item over one of SPANS (BLOCKING: reads the history file): its points (epoch seconds,
+    the time in the Clock rule's words, lowest / highest in copper, the lowest in words; low None = nothing listed from
+    then: a gap) and the span's lowest and highest. No points while prices don't show, without history, or for a file
+    that can't be read. An unknown span is refused."""
+    from .registry import RegistryError
+
+    if str(span) not in SPANS:
+        raise RegistryError(NOT_A_SPAN)
+    span = str(span)
+    out = {"span": span, "points": [], "low": None, "high": None, "low_words": NONE_LISTED, "high_words": NONE_LISTED}
+    key = discord_auctions.history_key(reg)
+    if key is None or not _shown(reg):
+        return out
+    now = now or discord_auctions._now()
+    days = SPANS[span][0]
+    try:
+        pts = price_history.points(key, item_id, now - timedelta(days=days), now)
+        s = price_history.span(key, item_id, days, now)
+    except price_history.HistoryError:
+        log.warning("price history unreadable for %s", key, exc_info=True)
+        return out
+    out["points"] = [_point_json(reg, p) for p in pts]
+    out.update(low=s.low, high=s.high, low_words=money(s.low) if s.low is not None else NONE_LISTED,
+               high_words=money(s.high) if s.high is not None else NONE_LISTED)
+    return out
+
+
+__all__ = ["EMPTY_LIST_DISCORD", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
+           "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

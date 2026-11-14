@@ -410,3 +410,196 @@ def test_the_section_stays_under_its_cap(reg, clock):
     assert len(items) <= prices.HELP_ITEMS == 10
     assert sum(1 for l in lines if l.endswith("(one craft):")) <= prices.HELP_RECIPES
     assert len("\n".join(lines)) <= 2_000, "the section fits its cap without a cut"
+
+
+# ------------------------------------------------------------------ the watch list and the price history (price watch §3, §4.2)
+
+UID = 300_000_000_000_000_101
+PLAGUEBLOOM = 13466
+DAY = timedelta(days=1)
+
+
+@pytest.fixture
+def member(reg):
+    m = reg.member(UID, "Thornwick", create=True)
+    reg.save(m, "Thornwick registered")
+    return m
+
+
+def keep(reg, at, table: dict[int, Price]):
+    """The selected house's history keeps `table` at feed time `at`."""
+    from oibot_gm import price_history
+
+    assert price_history.record(discord_auctions.history_key(reg), at, table) >= 0
+
+
+def test_watch_and_unwatch_sentences(reg, clock, member):
+    from oibot_gm.registry import RegistryError
+
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    assert prices.watch(reg, UID, PLAGUEBLOOM) == "You're watching Plaguebloom."
+    assert prices.watch(reg, UID, PLAGUEBLOOM) == "You're watching Plaguebloom.", "harmless to repeat"
+    assert prices.is_watching(reg, UID, PLAGUEBLOOM)
+    assert prices.unwatch(reg, UID, PLAGUEBLOOM) == "You've stopped watching Plaguebloom."
+    assert not prices.is_watching(reg, UID, PLAGUEBLOOM)
+    with pytest.raises(RegistryError, match="No item the bot knows has that name."):
+        prices.watch(reg, UID, 999_999)
+    assert reg.watching(UID) == []
+
+
+def test_watch_passes_on_the_registry_refusals(reg, clock):
+    from oibot_gm.registry import WATCH_REGISTER_FIRST, RegistryError
+
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    with pytest.raises(RegistryError, match=WATCH_REGISTER_FIRST):
+        prices.watch(reg, UID, PLAGUEBLOOM)
+
+
+def test_watch_list_rows_in_order_with_prices(reg, clock, member):
+    priced(reg, {VIAL: Price(low=640, qty=200), PLAGUEBLOOM: Price(low=1500, qty=4)})
+    prices.watch(reg, UID, PLAGUEBLOOM)
+    prices.watch(reg, UID, VIAL)
+    rows = prices.watch_list(reg, UID)
+    assert [(p.id, p.name, p.low, p.qty) for p in rows] == [(VIAL, "Crystal Vial", 640, 200), (PLAGUEBLOOM, "Plaguebloom", 1500, 4)]
+    priced(reg, {VIAL: Price(low=640, qty=200)})
+    assert [(p.id, p.low, p.qty) for p in prices.watch_list(reg, UID)][1] == (PLAGUEBLOOM, None, 0), "none listed now"
+    assert prices.watch_list(reg, 300_000_000_000_000_999) == [], "someone with no record"
+
+
+def test_watch_list_without_prices_shows_names_only(reg, clock, member):
+    priced(reg, {VIAL: Price(low=640, qty=200)})
+    prices.watch(reg, UID, VIAL)
+    priced(reg, {VIAL: Price(low=640, qty=200)}, at=NOW - timedelta(hours=30))
+    assert discord_auctions.state(reg) == "old"
+    assert [(p.id, p.name, p.low, p.qty) for p in prices.watch_list(reg, UID)] == [(VIAL, "Crystal Vial", None, 0)]
+    reg.clear_market("Owner", by_id=OWNER)
+    assert discord_auctions.state(reg) == "off"
+    assert [(p.name, p.low, p.qty) for p in prices.watch_list(reg, UID)] == [("Crystal Vial", None, 0)]
+
+
+def test_a_watched_id_the_bot_cannot_name(reg, clock, member):
+    priced(reg, {900_001: Price(low=99, qty=1)})
+    reg.watch(UID, 900_001)  # named when it was watched; the names file is gone since
+    [row] = prices.watch_list(reg, UID)
+    assert (row.id, row.name, row.low) == (900_001, prices.UNNAMED, 99)
+    assert prices.UNNAMED == "An item the bot can't name yet"
+    assert prices.unwatch(reg, UID, 900_001) == "You've stopped watching that item."
+    assert prices.watch_list(reg, UID) == []
+
+
+def test_the_empty_list_sentences():
+    assert prices.EMPTY_LIST_SITE == "You aren't watching anything yet. Search for an item above and press Watch."
+    assert prices.EMPTY_LIST_DISCORD == "You aren't watching anything yet. Use /price with an item and press Watch."
+    assert prices.SPANS == {"7": (7, "7 days"), "30": (30, "30 days"), "90": (90, "90 days"), "365": (365, "1 year")}
+
+
+def test_history_sentences(reg, clock):
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    for days, low in ((40, 1800), (20, 1100), (15, 2500), (10, 1500), (5, 1240), (3, 1902)):
+        keep(reg, NOW - days * DAY, {PLAGUEBLOOM: Price(low=low, qty=3)})
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == [
+        "Lowest in the last 7 days: 12s 40c · highest: 19s 2c", "Lowest in the last 30 days: 11s · highest: 25s"]
+    clock.t = NOW
+    assert prices.history_sentences(reg, PLAGUEBLOOM) == prices.history_sentences(reg, PLAGUEBLOOM, now=NOW), "now = the bot's clock"
+
+
+def test_a_short_history_says_since_when(reg, clock):
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    for days, low in ((2, 1500), (1, 1400), (0, 1600)):
+        keep(reg, NOW - days * DAY, {PLAGUEBLOOM: Price(low=low, qty=3)})
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == [
+        "Lowest in the last 7 days: 14s · highest: 16s", "Lowest in the last 30 days: 14s · highest: 16s",
+        "The bot has kept prices since Wed 11 Nov."]
+
+
+def test_nothing_listed_in_a_span(reg, clock):
+    priced(reg, {VIAL: Price(low=640, qty=200)})
+    keep(reg, NOW - 40 * DAY, {VIAL: Price(low=640, qty=200)})
+    keep(reg, NOW - 20 * DAY, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    keep(reg, NOW - 10 * DAY, {})  # delisted ten days ago, nothing since
+    keep(reg, NOW - DAY, {VIAL: Price(low=640, qty=200)})
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == [
+        "None listed in the last 7 days.", "Lowest in the last 30 days: 15s · highest: 15s"]
+    assert prices.history_sentences(reg, 900_002, now=NOW)[:2] == [
+        "None listed in the last 7 days.", "None listed in the last 30 days."], "an item the house never listed"
+
+
+def test_a_new_house_has_no_history_yet(reg, clock):
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    keep(reg, NOW - 3 * DAY, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW)[0].startswith("Lowest in the last 7 days")
+    reg.set_market(House(id=7, name="Horde Auction House"), 2, "Owner", by_id=OWNER)  # the owner picks another house
+    discord_auctions._st(reg)["table"] = discord_auctions.Table(at=NOW, house_id=7, ruleset_id=2, prices={}, modified=None)
+    assert discord_auctions.state(reg) == "fresh"
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == [prices.NO_HISTORY_YET]
+    assert prices.NO_HISTORY_YET == "The bot hasn't kept any prices for this auction house yet."
+    assert prices.chart(reg, PLAGUEBLOOM, "7", now=NOW)["points"] == []
+
+
+def test_history_is_hidden_when_prices_are(reg, clock):
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    keep(reg, NOW - 3 * DAY, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=NOW - timedelta(hours=30))
+    assert discord_auctions.state(reg) == "old"
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == []
+    assert prices.chart(reg, PLAGUEBLOOM, "7", now=NOW)["points"] == []
+    reg.clear_market("Owner", by_id=OWNER)
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == []
+    c = prices.chart(reg, PLAGUEBLOOM, "30", now=NOW)
+    assert c == {"span": "30", "points": [], "low": None, "high": None, "low_words": "none listed", "high_words": "none listed"}
+
+
+def test_a_broken_history_file_reads_as_none(reg, clock):
+    from oibot_gm import price_history
+
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    p = price_history.path(discord_auctions.history_key(reg))
+    p.parent.mkdir(parents=True)
+    p.write_bytes(b"this is not a database at all, not even close" * 40)
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == [prices.NO_HISTORY_YET]
+    assert prices.chart(reg, PLAGUEBLOOM, "7", now=NOW)["points"] == []
+
+
+def test_chart_points(reg, clock):
+    from oibot_gm.registry import RegistryError
+
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    keep(reg, NOW - 9 * DAY, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    keep(reg, NOW - 4 * DAY, {})  # delisted: a gap
+    keep(reg, NOW - 2 * DAY, {PLAGUEBLOOM: Price(low=1240, qty=2)})
+    c = prices.chart(reg, PLAGUEBLOOM, "7", now=NOW)
+    assert c["span"] == "7" and [p["low"] for p in c["points"]][:2] == [1500, None] and c["points"][1]["words"] == "none listed"
+    assert all(" AM" in p["when"] or " PM" in p["when"] for p in c["points"])  # the Clock rule
+    assert c["points"][0]["t"] == int((NOW - 7 * DAY).timestamp()), "the price carried to the span's start"
+    assert c["points"][0]["when"] == "Fri 6 Nov 12:00 PM" and c["points"][0]["words"] == "15s"
+    assert (c["low"], c["high"], c["low_words"], c["high_words"]) == (1240, 1500, "12s 40c", "15s")
+    assert prices.chart(reg, PLAGUEBLOOM, "365", now=NOW)["points"][0]["low"] == 1500, "the year starts at the first kept"
+    with pytest.raises(RegistryError, match="That isn't one of the spans."):
+        prices.chart(reg, PLAGUEBLOOM, "14", now=NOW)
+
+
+def test_a_folded_day_reads_as_the_day_alone(reg, clock):
+    from oibot_gm import price_history
+
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    old = datetime(2026, 7, 1, 18, tzinfo=timezone.utc)
+    keep(reg, old, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    keep(reg, old + timedelta(hours=1), {PLAGUEBLOOM: Price(low=1700, qty=4)})
+    keep(reg, old + timedelta(hours=2), {PLAGUEBLOOM: Price(low=1600, qty=4)})
+    keep(reg, NOW - DAY, {PLAGUEBLOOM: Price(low=1400, qty=4)})
+    price_history.fold(NOW)
+    pts = prices.chart(reg, PLAGUEBLOOM, "365", now=NOW)["points"]
+    assert pts[0]["when"] == "Wed 1 Jul" and (pts[0]["low"], pts[0]["high"]) == (1500, 1700)
+    assert pts[-1]["when"].endswith((" AM", " PM"))
+
+
+def test_a_version_without_auction_houses_has_no_watch_or_history(reg, clock, member, monkeypatch):
+    from oibot_gm.registry import RegistryError
+
+    monkeypatch.setattr(reg, "profile", TBC)
+    monkeypatch.setattr(reg, "base_profile", TBC)
+    with pytest.raises(RegistryError, match=auctions.NO_AUCTIONS_WORDS):
+        prices.watch(reg, UID, next(iter(TBC.items)))
+    assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == []
+    assert prices.chart(reg, PLAGUEBLOOM, "7", now=NOW)["points"] == []
+    assert prices.watch_list(reg, UID) == []
