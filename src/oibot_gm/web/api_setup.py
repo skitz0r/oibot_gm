@@ -302,13 +302,15 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
                     return JSONResponse({"error": "No guild is linked to this server."}, status_code=400)
                 return {"preview": True, "sentences": armory_guild_clear_consequence(reg), "rev": reg.config_rev("settings")}
             old = reg.config.armory
+            had_market = reg.config.market is not None
             try:
                 await asyncio.to_thread(lambda: reg.clear_armory_guild(v.name, by_id=v.uid, rev=rev))
             except ConfigChanged as e:
                 return JSONResponse({"error": str(e)}, status_code=409)
             except RegistryError as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
-            await ops_mod.audited(bot.ops, reg, v.name, f"unlinked the armory guild {old.name} (id {old.guild_id})", via=v.via, by_id=v.uid)
+            tail = "; prices turned off" if had_market and reg.config.market is None else ""  # the auction house went with the link (C11)
+            await ops_mod.audited(bot.ops, reg, v.name, f"unlinked the armory guild {old.name} (id {old.guild_id}){tail}", via=v.via, by_id=v.uid)
             return {"message": f"{old.name} is no longer linked.", **armory_state(v)}
         try:
             facts = await asyncio.to_thread(armory.find_guild, reg, str(d.get("name") or ""))
@@ -325,11 +327,13 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
             return JSONResponse({"error": "Look the guild up first, then link the one it found."}, status_code=400)
         if str(want) != str(facts.id):
             return JSONResponse({"error": "That name now finds a different guild in the armory. Look it up again before linking."}, status_code=409)
+        had_market = reg.config.market is not None
         try:
             await asyncio.to_thread(lambda: reg.set_armory_guild(facts, v.name, by_id=v.uid, rev=rev))
         except ConfigChanged as e:
             return JSONResponse({"error": str(e)}, status_code=409)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await ops_mod.audited(bot.ops, reg, v.name, f"linked the server to the armory guild {facts.name} ({facts.faction}, id {facts.id})", via=v.via, by_id=v.uid)
+        tail = "; prices turned off" if had_market and reg.config.market is None else ""  # the auction house went with the link (C11)
+        await ops_mod.audited(bot.ops, reg, v.name, f"linked the server to the armory guild {facts.name} ({facts.faction}, id {facts.id}){tail}", via=v.via, by_id=v.uid)
         return {"message": f"Linked to {facts.name} in the armory.", **armory_state(v)}

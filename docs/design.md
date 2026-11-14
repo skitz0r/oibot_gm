@@ -5098,7 +5098,8 @@ seller, no sales, no history.
   linked guild, on a version without auction houses, and (beyond the brief) for a house that is not the linked guild's
   faction's. Picking the house already picked writes nothing (no commit, no audit line, no read) — the confirm said
   "nothing changes" (fixed in task 8). `set_armory_guild` clears a market that doesn't survive (C11) and
-  `clear_armory_guild` always does, in their own commit. `market_words` = the choice in words or what is missing.
+  `clear_armory_guild` always does, in their own commit; the link's or unlink's audit line then ends "; prices turned off"
+  (Discord's /gm config armory and the site's route, MCP through it — final review F-3). `market_words` = the choice in words or what is missing.
 - **The table** (`discord_auctions.py`): `out/auctions/<guild key>/prices.json` written whole, loaded on first use;
   `refresh` at most once an hour per guild (conditional on the stored Last-Modified). `Table.at` = the feed's time: the
   answer's Last-Modified, never later than now, now when it gives none or it can't be read; a not-modified answer leaves

@@ -358,3 +358,70 @@ def test_a_link_without_the_previewed_guild_id_is_refused(reg, rs, armory_on, en
     r = c.post("/api/admin/armory", json={"name": "Lantern Wardens", "rev": rev}, headers=h)
     assert r.status_code == 400 and r.json()["error"] == "Look the guild up first, then link the one it found."
     assert reg.config.armory is None and not bot.ops.lines
+
+
+# ---------------------------------------------------------------- F-3: a link or unlink that turns prices off says so
+
+
+def _with_alliance_market(reg):
+    """Linked to the same guild as an Alliance one, with its auction house picked: linking Lantern Wardens (Horde) then
+    clears the house (C11)."""
+    import dataclasses
+
+    from oibot_gm.auctions import House
+
+    reg.set_armory_guild(dataclasses.replace(facts(), faction="Alliance"), "Owner", by_id=OWNER)
+    reg.set_market(House(id=2, name="Alliance Auction House"), facts().ruleset_id, "Owner", by_id=OWNER)
+    assert reg.config.market is not None
+
+
+def test_discord_link_and_unlink_audit_lines_say_prices_turned_off(reg, rs, armory_on):
+    from oibot_gm.auctions import House
+
+    _with_alliance_market(reg)
+    h = harness(reg, rs)
+
+    async def link():
+        await FLOWS["armory_guild"](h.command(), reg)
+        await h.press("Change…")
+        await h.submit(name="Lantern Wardens")
+        await h.press("Link this guild")
+    run(link())
+    assert reg.config.market is None
+    lines = [t for _k, _l, t in h.client.ops.lines]
+    assert len(lines) == 1 and lines[0].endswith("; prices turned off"), lines
+    # unlinking with a house picked says so too; without one it doesn't
+    reg.set_market(House(id=6, name="Horde Auction House"), facts().ruleset_id, "Owner", by_id=OWNER)
+    for picked in (True, False):
+        h = harness(reg, rs)
+
+        async def unlink():
+            await FLOWS["armory_guild"](h.command(), reg)
+            await h.press("Unlink…")
+            await h.press("Unlink")
+        run(unlink())
+        lines = [t for _k, _l, t in h.client.ops.lines]
+        assert len(lines) == 1 and "unlinked" in lines[0], lines
+        assert lines[0].endswith("; prices turned off") if picked else "prices" not in lines[0], lines
+        reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
+
+
+def test_site_link_and_unlink_audit_lines_say_prices_turned_off(reg, rs, armory_on, env):
+    from oibot_gm.auctions import House
+
+    _with_alliance_market(reg)
+    bot = WebLootBot(reg, rs)
+    c = TestClient(web.create_app(bot))
+    h = as_user(c, OWNER)
+    r = c.post("/api/admin/armory", json={"name": "Lantern Wardens", "guild_id": 418362, "rev": reg.config_rev("settings")}, headers=h)
+    assert r.status_code == 200, r.text
+    assert reg.config.market is None
+    lines = [t for _k, _l, t in bot.ops.lines]
+    assert len(lines) == 1 and lines[0].endswith("; prices turned off"), lines
+    reg.set_market(House(id=6, name="Horde Auction House"), facts().ruleset_id, "Owner", by_id=OWNER)
+    r = c.post("/api/admin/armory", json={"name": "Lantern Wardens", "guild_id": 418362, "rev": reg.config_rev("settings")}, headers=h)
+    assert r.status_code == 200 and reg.config.market is not None
+    assert "prices" not in bot.ops.lines[-1][2], "the house survives a relink to the same guild: nothing turned off"
+    r = c.post("/api/admin/armory", json={"clear": True, "rev": reg.config_rev("settings")}, headers=h)
+    assert r.status_code == 200
+    assert "unlinked" in bot.ops.lines[-1][2] and bot.ops.lines[-1][2].endswith("; prices turned off")

@@ -2718,13 +2718,15 @@ class ArmoryGuildWizard(OwnerWizard):
         from . import ops as ops_mod
 
         facts = self.draft["facts"]
+        had_market = self.reg.config.market is not None
         try:
             await asyncio.to_thread(lambda: self.reg.set_armory_guild(facts, i.user.display_name, by_id=i.user.id, rev=self.rev))
         except RegistryError as e:
             await self.finish(i, f"❌ {e}")
             return
-        await ops_mod.audited(i.client.ops, self.reg, i.user.display_name, f"linked the server to the armory guild {facts.name} ({facts.faction}, id {facts.id})",
-                              via="discord", by_id=i.user.id)
+        tail = "; prices turned off" if had_market and self.reg.config.market is None else ""  # the auction house went with the link (C11)
+        await ops_mod.audited(i.client.ops, self.reg, i.user.display_name,
+                              f"linked the server to the armory guild {facts.name} ({facts.faction}, id {facts.id}){tail}", via="discord", by_id=i.user.id)
         await self.finish(i, f"✅ Linked to **{discord.utils.escape_markdown(facts.name)}** in the armory.")
 
     async def unlink_decide(self, i: discord.Interaction) -> None:
@@ -2739,12 +2741,14 @@ class ArmoryGuildWizard(OwnerWizard):
         from . import ops as ops_mod
 
         old = self.reg.config.armory
+        had_market = self.reg.config.market is not None
         try:
             await asyncio.to_thread(lambda: self.reg.clear_armory_guild(i.user.display_name, by_id=i.user.id, rev=self.rev))
         except RegistryError as e:
             await self.finish(i, f"❌ {e}")
             return
-        await ops_mod.audited(i.client.ops, self.reg, i.user.display_name, f"unlinked the armory guild {old.name} (id {old.guild_id})", via="discord", by_id=i.user.id)
+        tail = "; prices turned off" if had_market and self.reg.config.market is None else ""  # the auction house went with the link (C11)
+        await ops_mod.audited(i.client.ops, self.reg, i.user.display_name, f"unlinked the armory guild {old.name} (id {old.guild_id}){tail}", via="discord", by_id=i.user.id)
         await self.finish(i, f"✅ {discord.utils.escape_markdown(old.name)} is no longer linked.")
 
 
