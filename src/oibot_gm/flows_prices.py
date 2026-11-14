@@ -102,8 +102,8 @@ class PriceWizard(Wizard):
     async def answer(self, interaction: discord.Interaction, text: str, item_id: int | None, said: str = "") -> None:
         reg = self.reg
         lines = prices.price_answer(reg, text, self.owner)
-        if not _shown(reg) or item_id is None:  # nothing to press: the answer alone
-            await self.finish(interaction, self._screen(lines))
+        if not _shown(reg) or item_id is None:  # nothing to press: the answer alone (a press's sentence still first)
+            await self.finish(interaction, self._screen([_esc(said), *lines]))
             return
         lines = [lines[0], *(_esc(x) for x in lines[1:])]  # the status line is ours; the rest carry item names
         watching = prices.is_watching(reg, self.owner_id, item_id)

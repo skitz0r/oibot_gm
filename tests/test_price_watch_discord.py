@@ -238,6 +238,23 @@ def test_prices_hidden_between_the_answer_and_the_press(reg, market_on):  # noqa
     assert reg.watching(UID) == [], "items are added only while prices show (C15)"
 
 
+def test_stop_watching_after_prices_went_hidden_still_says_so(reg, market_on):  # noqa: F811
+    register(reg)
+    on(reg)
+    reg.watch(UID, PLAGUEBLOOM)
+    h = harness(reg)
+
+    async def go():
+        await FLOWS["price"](h.command(), reg, item=f"#{PLAGUEBLOOM}")
+        assert h.buttons() == ["Stop watching"]
+        priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now() - timedelta(hours=30))  # a day old: hidden (C16)
+        await h.press("Stop watching")
+        assert lines(h) == ["You've stopped watching Plaguebloom.", discord_auctions.OLD_WORDS], "the write's sentence stays first"
+        assert h.screen["view"] is None
+    run(go())
+    assert reg.watching(UID) == []
+
+
 def test_every_answer_is_ephemeral_and_mentions_nobody(reg, market_on):  # noqa: F811
     register(reg)
     on(reg)
@@ -330,7 +347,8 @@ def test_no_model_and_no_blizzard_call(reg, market_on, monkeypatch):  # noqa: F8
         await h.press("Stop watching")
         await h.press("Back")
     run(go())
-    assert h.text == prices.EMPTY_LIST_DISCORD or lines(h)[0] == "**Your watch list**"
+    assert h.text == prices.EMPTY_LIST_DISCORD, "the list emptied by the press: Back reads the empty list"
+    assert reg.watching(UID) == []
 
 
 def test_tbc(reg, rs, market_on, monkeypatch):  # noqa: F811
