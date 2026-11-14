@@ -337,15 +337,18 @@ async def auctions_tick(bot, reg):
 
 
 def _name_batch(cli, ids: list[int]) -> tuple[dict[int, str], set[int]]:
-    """Look up each id's name in turn (BLOCKS) → (named, ids Blizzard has no item for). The first failure stops it with
-    what was named so far."""
+    """Look up each id's name in turn (BLOCKS) → (named, ids not to ask again in this process: no item there, or an odd
+    answer). The first other failure (Blizzard down, access refused, anything unexpected) stops it with what was named."""
     found: dict[int, str] = {}
     gone: set[int] = set()
     for i in ids:
         try:
             name = cli.item_name(i)
+        except armory.ArmoryShape as e:  # one odd answer: skipped like a 404, never asked first again every hour
+            log.info("item %d not named: %s", i, e)
+            name = None
         except Exception as e:  # noqa: BLE001 — naming is best effort: it stops quietly and goes on next hour
-            log.info("item naming stopped after %d: %s", len(found), getattr(e, "detail", None) or type(e).__name__)
+            log.info("item naming stopped after %d: %s", len(found), e if isinstance(e, ArmoryError) else type(e).__name__)
             break
         if name:
             found[i] = name

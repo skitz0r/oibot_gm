@@ -285,3 +285,25 @@ def test_naming_stops_quietly_on_a_failure_and_caps_per_fetch(reg, clock, monkey
         await (await discord_auctions.auctions_tick(bot, reg))
     run(tick())
     assert prices.names(reg)[700001] == "Spare Cog"
+
+
+def test_a_malformed_item_is_skipped_and_naming_goes_on(reg, clock, monkeypatch):
+    listed = {600000 + i: Price(low=100, qty=i) for i in range(1, 6)}  # 600005 is the most listed
+    priced(reg, listed)
+    asked = []
+
+    def fetch(url, headers):
+        item = int(url.split("/data/wow/item/")[1].split("?")[0])
+        asked.append(item)
+        body = {"id": item} if item == 600005 else {"id": item, "name": f"Gear {item}"}  # one answer lacks its name
+        return Reply(200, {}, json.dumps(body).encode())
+
+    arm = Armory("us", "profile-forever-us", "static-forever-us", fetch=fetch, limiter=battlenet.Limiter(1000))
+    cli = auctions.Client(arm, "dynamic-forever-us")
+    monkeypatch.setattr(discord_auctions, "_client", lambda r: cli)
+    bot = SimpleNamespace(ops=FakeOps())
+    assert run(discord_auctions.name_items(bot, reg)) == 4, "the malformed one is skipped, the rest are named"
+    assert asked[0] == 600005 and prices.names(reg)[600001] == "Gear 600001"
+    assert 600005 not in prices.names(reg) and bot.ops.lines == []
+    asked.clear()
+    assert run(discord_auctions.name_items(bot, reg)) == 0 and asked == [], "it is not asked first again every hour"
