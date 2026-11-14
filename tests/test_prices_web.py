@@ -91,7 +91,7 @@ def test_meta_carries_prices_and_item_url(w, market_on):
     m = member(w)
     d = w.c.get("/api/meta", headers=as_user(w, OWNER)).json()
     assert d["prices"] == {"on": False, "state": "off", "words": prices.OWNER_OFF_WORDS, "market": True}
-    assert d["item_url"] is None, "Forever has no item site yet"
+    assert d["item_url"] == "https://www.wowhead.com/forever/item={id}", "Forever's items link to Wowhead's Forever section (C12)"
     assert w.c.get("/api/meta", headers=as_user(w, m.discord_id)).json()["prices"]["words"] == "", "a member reads nothing while prices are off"
     priced(w.reg, {BAR: Price(low=489998, qty=30)}, at=now())
     p = w.c.get("/api/meta", headers=as_user(w, m.discord_id)).json()["prices"]
@@ -139,8 +139,9 @@ def test_find_returns_rows_total_and_words(w, market_on):
     assert d["rows"][0]["low_words"] == prices.NONE_LISTED and d["rows"][0]["qty"] == 0
     d = w.c.get("/api/prices/find?q=a", headers=h).json()
     assert len(d["rows"]) == 25 and d["total"] > 25 and d["message"].endswith(f"And {d['total'] - 25} more items match.")
+    assert d["more"] == f"And {d['total'] - 25} more items match.", "the page prints the server's last sentence alone"
     d = w.c.get("/api/prices/find?q=zzqx", headers=h).json()
-    assert d["rows"] == [] and d["message"].endswith(prices.NO_MATCH)
+    assert d["rows"] == [] and d["message"].endswith(prices.NO_MATCH) and d["more"] == ""
 
 
 def test_market_routes_owner_only_preview_set_clear_and_409(w, market_on):
@@ -181,6 +182,10 @@ def test_market_routes_owner_only_preview_set_clear_and_409(w, market_on):
     assert out["selected"]["name"] == "Horde Auction House" and out["selected"]["house_id"] == 6 and out["clear_sentences"] == cq.market_clear_consequence(reg)
     assert sum("Horde Auction House" in t and "[web]" in t for *_x, t in w.bot.ops.lines) == 1
     assert discord_auctions.state(reg) == "fresh", "the picker's read became the guild's first table"
+    again = w.c.post("/api/admin/market", json={"house_id": 6, "ruleset_id": 2, "rev": out["rev"]}, headers=h)
+    assert again.status_code == 200 and again.json()["message"] == "Prices already come from the Horde Auction House."
+    assert again.json()["rev"] == out["rev"], "the house already picked: nothing written"
+    assert sum("Horde Auction House" in t and "[web]" in t for *_x, t in w.bot.ops.lines) == 1, "and no audit line"
     s = w.c.post("/api/admin/market", json={"clear": True, "preview": True}, headers=h).json()
     assert s["sentences"] == cq.market_clear_consequence(reg) and reg.config.market is not None
     assert w.c.post("/api/admin/market", json={"clear": True, "rev": "stale"}, headers=h).status_code == 409
@@ -238,3 +243,18 @@ def test_mcp_price_check_and_market_read_the_site_routes(w, market_on):
         ms.use(None)
     tools = {t.name for t in asyncio.run(ms.mcp.list_tools())}
     assert {"price_check", "market"} <= tools and not {"set_market", "market_set"} & tools
+
+
+def test_wowhead_links_forever_items():
+    """C12: Forever's template is set, so the Discord loot item card links its item too; tbc unchanged; an item known only
+    by name has no link."""
+    from types import SimpleNamespace
+
+    from oibot_gm.discord_bot import wowhead
+
+    forever = GameProfile.load(ROOT / "profiles" / "forever")
+    tbc_p = GameProfile.load(ROOT / "profiles" / "tbc")
+    assert wowhead(SimpleNamespace(id=13452), forever) == "https://www.wowhead.com/forever/item=13452"
+    assert forever.item_url == "https://www.wowhead.com/forever/item={id}"
+    assert wowhead(SimpleNamespace(id=28830), tbc_p) == "https://www.wowhead.com/tbc/item=28830"
+    assert wowhead(SimpleNamespace(id=0), forever) is None and wowhead(None, forever) is None

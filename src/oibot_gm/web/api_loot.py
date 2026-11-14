@@ -481,8 +481,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             raise HTTPException(404, "no such council")
         reg = v.reg
         return {"id": hit.get("id"), "run": hit.get("run_key"), "label": hit.get("label"), "date_label": day(reg, hit.get("date")), "test": bool(hit.get("test")),
-                "drops": [{"drop_id": x.get("drop_id"), "item": x.get("item_name"), "boss": x.get("boss"), "tiered": x.get("tiered", True)} for x in hit.get("drop_list") or []],
-                "awards": [{"drop_id": a.get("drop_id"), "item": a.get("item_name"), "to": "disenchant" if a.get("raider") == DISENCHANT else a.get("raider"),
+                "drops": [{"drop_id": x.get("drop_id"), "item": x.get("item_name"), "item_id": int(x.get("item_id") or 0), "boss": x.get("boss"), "tiered": x.get("tiered", True)} for x in hit.get("drop_list") or []],
+                "awards": [{"drop_id": a.get("drop_id"), "item": a.get("item_name"), "item_id": int(a.get("item_id") or 0), "to": "disenchant" if a.get("raider") == DISENCHANT else a.get("raider"),
                             "source": a.get("source"), "bot": a.get("bot_pick"), "by": a.get("by"), "at_label": clock(reg, a.get("confirmed_at")), "void": bool(a.get("void")),
                             "tier": a.get("tier"), "offspec": a.get("offspec")} for a in hit.get("awards") or []],
                 "overrides": [{**o, "at_label": clock(reg, o.get("at"))} for o in hit.get("overrides") or []],

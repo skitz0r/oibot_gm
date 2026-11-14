@@ -107,7 +107,7 @@ def load_events() -> dict:
 
 def wowhead(item, profile: GameProfile | None = None) -> str | None:
     """A link to the item on the profile's database site (`integrations.yaml: wowhead_item_url`, `{id}` filled), or
-    None: an item known only by name, or a profile with no such site (WoW: Forever until it has one)."""
+    None: an item known only by name, or a profile with no such site. Forever links to Wowhead's Forever section (C12)."""
     if not item or not getattr(item, "id", 0):
         return None
     root = getattr(profile, "root", None)

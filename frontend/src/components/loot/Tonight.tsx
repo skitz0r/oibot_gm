@@ -6,6 +6,7 @@ import { CardHeader, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
 import { useLive } from "../../hooks/useLive";
 import { usePoll } from "../../hooks/usePoll";
+import { ItemName } from "../ItemName";
 import { COMPANION_COLOUR, ReasonModal, STATE_MARK, SourceBadge, Who, WhoReasonModal, lootWrite } from "./shared";
 
 /** Loot › Tonight: every locked run's council, live on `loot:<run>` — the same verbs the thread's buttons, plain text and
@@ -47,7 +48,7 @@ export function Tonight({ meta, goItems }: { meta: Meta; goItems: () => void }) 
           <Stack p="md" gap="xs">
             {ended.map((r) => (
               <Group key={r.import_id} justify="space-between" wrap="wrap">
-                <Text size="sm"><b>{r.item}</b> → {r.recipient} in game (the bot picked {r.bot || "?"}) · {r.received_label}</Text>
+                <Text size="sm"><b><ItemName name={r.item} /></b> → {r.recipient} in game (the bot picked {r.bot || "?"}) · {r.received_label}</Text>
                 <Group gap="xs">
                   <Button size="xs" onClick={() => setOwed({ kind: "reason", run: r.run, session: r.session, drop: r.drop_id, item: r.item, recipient: r.recipient })}>Give the reason…</Button>
                   <Button size="xs" variant="default" onClick={() => setOwed({ kind: "correct", run: r.run, session: r.session, drop: r.drop_id, item: r.item })}>Mistake — correct…</Button>
@@ -56,7 +57,7 @@ export function Tonight({ meta, goItems }: { meta: Meta; goItems: () => void }) 
             ))}
             {endedConflicts.map((c) => (
               <Group key={`${c.session}-${c.drop_id}`} justify="space-between" wrap="wrap">
-                <Text size="sm"><b>{c.item}</b>: in game it went to {c.in_game}, recorded to {c.recorded}</Text>
+                <Text size="sm"><b><ItemName name={c.item} /></b>: in game it went to {c.in_game}, recorded to {c.recorded}</Text>
                 <Button size="xs" variant="default" onClick={() => setOwed({ kind: "correct", run: c.run, session: c.session, drop: c.drop_id, item: c.item })}>Correct…</Button>
               </Group>
             ))}
@@ -170,7 +171,7 @@ function CouncilBlock({ meta, run, c, onState, goItems, many }: { meta: Meta; ru
               {b.drops.map((d) => (
                 <Group key={d.drop_id} gap={6} wrap="nowrap" pl="sm">
                   <Text size="sm">{STATE_MARK[d.state]}</Text>
-                  <Text size="sm" style={{ minWidth: 0 }} truncate>{d.item}</Text>
+                  <Text size="sm" style={{ minWidth: 0 }} truncate><ItemName id={d.item_id} name={d.item} /></Text>
                   {!d.tiered && <Badge size="xs" variant="outline" color="yellow">untiered</Badge>}
                   {d.held && <Badge size="xs" variant="outline" color="gray">held</Badge>}
                   {d.to && <><Text size="xs" c="dimmed">→</Text><Who meta={meta} name={d.to} cls={clsOf(d.to)?.cls} spec={clsOf(d.to)?.spec} /></>}
@@ -200,7 +201,7 @@ function CouncilBlock({ meta, run, c, onState, goItems, many }: { meta: Meta; ru
                       <Fragment key={p.drop_id}>
                         <Table.Tr>
                           <Table.Td w={28}><ActionIcon size="sm" variant="subtle" color="gray" onClick={() => setOpen({ ...open, [p.drop_id]: !open[p.drop_id] })}>{open[p.drop_id] ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}</ActionIcon></Table.Td>
-                          <Table.Td><Text size="sm" fw={600}>#{p.order} {p.item}</Text><Text size="xs" c="dimmed">{p.boss}</Text></Table.Td>
+                          <Table.Td><Text size="sm" fw={600}>#{p.order} <ItemName id={p.item_id} name={p.item} /></Text><Text size="xs" c="dimmed">{p.boss}</Text></Table.Td>
                           <Table.Td><Who meta={meta} name={p.to} cls={who?.cls} spec={who?.spec} /></Table.Td>
                           <Table.Td>
                             <Group gap={4}>
@@ -262,7 +263,7 @@ function CouncilBlock({ meta, run, c, onState, goItems, many }: { meta: Meta; ru
             <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>Waiting for a reason or a correction</Text>
             {c.pending_reasons.map((r) => (
               <Group key={r.drop_id} justify="space-between" wrap="wrap">
-                <Text size="sm"><b>{r.item}</b> → {r.recipient} in game; the bot picked {r.bot}</Text>
+                <Text size="sm"><b><ItemName name={r.item} /></b> → {r.recipient} in game; the bot picked {r.bot}</Text>
                 <Group gap={4}>
                   <Button size="compact-xs" onClick={() => setReason({ drop: r.drop_id, item: r.item, recipient: r.recipient || "" })}>Give the reason…</Button>
                   <Button size="compact-xs" variant="default" onClick={() => setCorrect({ drop: r.drop_id, item: r.item, current: r.recipient || "" })}>Mistake — correct…</Button>
@@ -271,7 +272,7 @@ function CouncilBlock({ meta, run, c, onState, goItems, many }: { meta: Meta; ru
             ))}
             {c.conflicts.map((r) => (
               <Group key={`cf-${r.drop_id}`} justify="space-between" wrap="wrap">
-                <Text size="sm"><b>{r.item}</b>: in game it went to {r.in_game}, recorded to {r.recorded}</Text>
+                <Text size="sm"><b><ItemName name={r.item} /></b>: in game it went to {r.in_game}, recorded to {r.recorded}</Text>
                 <Button size="compact-xs" variant="default" onClick={() => setCorrect({ drop: r.drop_id, item: r.item, current: r.recorded || "" })}>Correct…</Button>
               </Group>
             ))}
@@ -283,7 +284,7 @@ function CouncilBlock({ meta, run, c, onState, goItems, many }: { meta: Meta; ru
             <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>Recorded ({c.awards.length})</Text>
             {c.awards.map((a) => (
               <Group key={`${a.drop_id}-${a.import_id}`} gap={6} wrap="nowrap">
-                <Text size="sm">✅ {a.item}</Text><Text size="xs" c="dimmed">→</Text>
+                <Text size="sm">✅ <ItemName id={a.item_id} name={a.item} /></Text><Text size="xs" c="dimmed">→</Text>
                 <Who meta={meta} name={a.to} cls={clsOf(a.to)?.cls} spec={clsOf(a.to)?.spec} />
                 <SourceBadge source={a.source} />
                 <Text size="xs" c="dimmed" truncate>{a.by} · {a.at_label}</Text>

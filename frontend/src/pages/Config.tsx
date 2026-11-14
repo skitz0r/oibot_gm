@@ -15,6 +15,7 @@ import { SetupCard } from "../components/SetupCard";
 import { CompanionsCard } from "../components/CompanionsCard";
 import { LootWeightsCard } from "../components/LootWeightsCard";
 import { ArmoryGuildCard } from "../components/ArmoryGuildCard";
+import { MarketCard } from "../components/MarketCard";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -96,6 +97,7 @@ export function ConfigPage({ meta }: { meta: Meta }) {
             <SettingsCard meta={meta} data={data} draft={draft} setDraft={setDraft} stale={stale}
               onReload={async () => { setStale(false); await load(); }} onSaved={async () => { setDraft(null); setStale(false); await load(); }} />
             {meta.armory && <ArmoryGuildCard />}
+            {meta.armory && meta.prices?.market && <MarketCard />}
           </Stack>
         </Tabs.Panel>
 

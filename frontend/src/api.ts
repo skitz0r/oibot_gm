@@ -115,6 +115,12 @@ export interface Meta {
   professions?: { list: { id: string; name: string; group: string; icon: string; makes: boolean }[]; skill_cap: number; trade_slots: number;
     /** §5.64: recipes are picked from the game's list (the editor searches it; `makes` then comes from the list — R7) */
     recipe_list?: boolean };
+  /** auction prices (web/api_prices.prices_meta): `on` = an auction house is picked; `state` off | waiting | fresh | stale |
+   *  old; `words` = how recent the prices are for this reader (the owner, while off: how to turn them on; others: ""),
+   *  `market` = the version has auction houses and the host its keys (Config shows the auction house card) */
+  prices?: PricesMeta;
+  /** the item page template with `{id}` (the profile's item link template); null = no item links (components/ItemName) */
+  item_url?: string | null;
   /** The run's vocabulary, defined once in Python (design §5.56 phase 2) — a page never keeps its own copy: the state words
    *  (open · locked · done · cancelled), the run verbs' labels (raid_buttons.RUN_WORDS — the Discord buttons' own), the
    *  confirmation marks with their words (constants.MARK / MARK_WORDS; "waiting" = no answer yet), how an ask reaches
@@ -153,6 +159,33 @@ export interface CatalogRecipe {
   key: string; name: string; profession: string; id: number | null; crafters: Crafter[];
   listed?: boolean; category?: string | null; makes?: { id: number; name: string; quantity: number; quantity_max?: number } | null;
   reagents?: { id: number; name: string; quantity: number }[]; nobody?: string;
+  /** the cost to make at the auction house's lowest prices (web/api_prices.cost_json); null without prices or reagents */
+  cost?: RecipeCost | null;
+}
+export interface PricesMeta { on: boolean; state: "off" | "waiting" | "fresh" | "stale" | "old"; words: string; market: boolean }
+/** A recipe's cost to make, all words from the server: one line per reagent (`unit_words` = its lowest price or "none listed",
+ *  `total_words` = × the quantity, null when none listed), `sentence` = "Cost to make: …", `made_words` = what a craft makes
+ *  and its own lowest price ("" for an enchant). */
+export interface RecipeCost {
+  lines: { id: number; name: string; quantity: number; unit_words: string; total_words: string | null }[];
+  sentence: string; made_words: string;
+}
+/** GET /api/prices/find: at most 25 items; `total` = every match; `words` = how recent the prices are; `more` = how many more
+ *  match, as a sentence ("" when none are left out); `message` = the whole answer in lines (its last line the empty answer). */
+export interface PriceFind {
+  q: string; rows: { id: number; name: string; low_words: string; qty: number; words: string }[]; total: number; words: string; more: string; message: string;
+}
+/** GET /api/admin/market: the guild's auction house (officers read, the owner picks). `words` = the choice in words (or what
+ *  is missing), `prices` = how recent the prices are, `clear_sentences` = Turn prices off…'s confirm. */
+export interface MarketState {
+  selected: { house_id: number; ruleset_id: number; name: string; faction: string; picked_by: string; picked_label: string } | null;
+  words: string; clear_sentences: string[]; prices: string; rev: string; owner: boolean;
+}
+/** POST /api/admin/market {choices: true}: the houses the owner may pick, each with how much is listed and three sample
+ *  prices; `words` = why the list is empty, else "". */
+export interface MarketChoices {
+  choices: { house_id: number; name: string; listings: number; listings_words: string; samples: { id: number; name: string; low_words: string }[] }[];
+  ruleset_id: number | null; words: string;
 }
 /** GET /api/professions/find: at most 25 rows; `total` = every match; `message` = the answer in words (the empty
  *  answer's sentence); `more` = how many more match, as a sentence ("" when none are left out). */

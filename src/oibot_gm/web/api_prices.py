@@ -2,7 +2,8 @@
 Registry — no rule lives here.
 
 - `GET /api/prices/find?q=` (every member): the price search (prices.search) → {rows [{id, name, low_words, qty, words}],
-  total, words (how recent the prices are, prices.status_sentence for this reader), message (the answer in lines:
+  total, words (how recent the prices are, prices.status_sentence for this reader), more (prices.more_words when rows are
+  left out, else ""), message (the answer in lines:
   prices.answer_lines — MCP's price_check reads it)}. 404 on a version with no auction houses.
 - `GET /api/admin/market` (officers read) + `POST /api/admin/market` (owner): the guild's auction house.
   `{choices: true}` → the houses the owner may pick (discord_auctions.house_choices: a Blizzard read in a thread;
@@ -77,6 +78,7 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         owner = bool(v.owner)
         return {"q": q, "rows": [{"id": p.id, "name": p.name, "low_words": _low(p.low), "qty": p.qty, "words": prices.price_words(p)} for p in shown],
                 "total": total, "words": prices.status_sentence(reg, owner),
+                "more": prices.more_words(total - len(shown)) if shown and total > len(shown) else "",
                 "message": "\n".join(prices.answer_lines(reg, shown, total, owner)) if q.strip() else ""}
 
     # ---- the guild's auction house: officers read, the owner picks / clears
@@ -161,12 +163,15 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
             return JSONResponse({"error": str(e)}, status_code=400)
         if preview:
             return {"preview": True, "sentences": market_consequence(reg, house), "rev": reg.config_rev("settings")}
+        before = reg.config.market
         try:
             said = await asyncio.to_thread(lambda: reg.set_market(house, ruleset_id, v.name, by_id=v.uid, rev=rev))
         except ConfigChanged as e:
             return JSONResponse({"error": str(e)}, status_code=409)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+        if reg.config.market is before:  # the house already picked: nothing was written, nothing to audit or read
+            return {"message": said[:1].upper() + said[1:] + ".", **market_state(v)}
         await ops_mod.audited(bot.ops, reg, v.name, f"picked the {house.name} as the guild's auction house", via=v.via, by_id=v.uid)
         await discord_auctions.refresh_soon(bot, reg)
         return {"message": said[:1].upper() + said[1:] + ".", **market_state(v)}

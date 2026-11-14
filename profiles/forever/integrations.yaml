@@ -2,7 +2,7 @@
 wcl_host: null
 blizzard_namespace: static-forever-us   # item lookups (`oibot items …`) and the recipe list (scripts/import_recipes.py)
 tmb_expansion_id: null
-wowhead_item_url: null   # no item database for Forever yet: cards show the name without a link
+wowhead_item_url: "https://www.wowhead.com/forever/item={id}"   # the site's item links and the Discord loot item card (Wowhead adds the name itself; confirmed by the owner 2026-11-13)
 # The Forever armory (armory link, spec §5/§9): no realms; {region} is filled from `region` (or a guild's own).
 armory:
   region: us

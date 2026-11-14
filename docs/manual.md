@@ -142,6 +142,18 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   professions by hand**; **Follow the armory again** lets the armory replace them once more).
 - **Move to another member** (officers) — a character registered to the wrong person goes to the right one, with its
   past loot and attendance (§7).
+- **The auction house** — the one auction house in the game the guild's prices come from. The owner picks it (§8); until
+  then nobody sees a price. A game version without auction houses never shows any of this.
+- **Lowest price** — the cheapest buyout listed on the guild's auction house, per item: what the cheapest one is up
+  for right now, never what an item is "worth". **N listed** — how many are up in all. **None listed** — nothing with a
+  buyout is up right now.
+- **Prices as of …** — when the bot last read the auction house (every hour). After six hours the line adds *more than
+  six hours old*; after a day no price shows at all and the line says the prices are out of date.
+- **Cost to make** — a recipe's reagents at their lowest prices, added up, for one craft. When a reagent has none listed
+  the sum reads *"Cost to make: at least 12g 40s — 1 reagent has none listed."* What the craft makes shows its own lowest
+  price *each*; the bot never subtracts one from the other (no profit figure).
+- **Item links** — on the site, an item's name with an id opens its page on Wowhead (the game version's section, in a
+  new tab). An item known only by name stays plain text. Discord's loot item card links its item the same way.
 
 ## 2. Channels
 
@@ -486,6 +498,15 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   show the bot's own sentence first (*"Thornwick's Leatherworking lists Devilsaur
   Gauntlets in place of Devilsaur Gauntlet."*) and change nothing before you confirm. On a phone the search comes first, each
   recipe and each of the officers' rows is a card, a made recipe stacks over its crafters and the tabs scroll sideways.
+- **What a thing costs, on the site** (once the owner has picked the guild's auction house, §8): on the Professions page
+  each recipe the search finds shows its cost to make under it — one line per reagent with how many it takes, its lowest
+  price each and that line's total (or *none listed*), then *"Cost to make: …"* and what one craft makes with its own
+  lowest price each and how many are listed. **What the guild makes** shows each recipe's cost to make too. Each card says
+  once how recent the prices are (*Prices as of …*). The **What does it go for?** box above the tabs takes part of any
+  item's name and lists the items it matches with their lowest price and how many are listed (or *none listed*), up to 25
+  and how many more. With no auction house picked there are no prices on the page: the owner reads one line saying how to
+  turn them on, and nobody else sees anything. Item names there — what a recipe makes, its reagents, the price box's
+  items — open the item's page on Wowhead in a new tab.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page) — never your own (the
   owner aside), never on an alt, and never to *alt*: the ranks to give are trial, raider, core and social.
@@ -1513,6 +1534,12 @@ own link; only *in the guild* stops being known. Plain text can't link a guild (
   one, read the confirm, **Pick this auction house**. Picking the one already in use says so and changes nothing. With
   one picked, **Turn prices off…** forgets it. When no auction house has anything listed, or the armory can't be
   reached, the screen says so in one sentence with **Try again**.
+- **On the site:** Config › Settings shows **The auction house** under the guild card (officers read it): which one,
+  who picked it and when, and how recent the prices are — or what is missing and how to fill it. The owner presses
+  **Pick the auction house…** (*Pick another auction house…* once one is picked): the same choices as in Discord, each
+  with how much is listed in all and the three items' lowest prices, then **Pick this one…** shows the bot's own
+  sentences before **Pick this auction house** writes anything. **Turn prices off…** confirms the same way. If someone
+  changed it in the meantime the page says so and shows it as it is now.
 
 Nobody is DMed; the ops channel gets one line per pick or switch-off. The first prices are read right after the pick,
 then every hour.
@@ -2134,7 +2161,8 @@ proposals are below"*, so the buttons you need are always on the newest messages
 since you looked is refused with what changed — *"The batch changed (Jonny overrode the Syphon at 8:13 PM) — look
 again"* — and the cards are redrawn; nothing is recorded that you didn't see.
 
-**Details** opens a card only you see: the candidates (spec icon, character, tier, score), the recommendation and its
+**Details** opens a card only you see — its item's name links to the item's page on Wowhead (WoW: Forever's section on
+Forever, since 2026-11-14; an item known only by name has no link): the candidates (spec icon, character, tier, score), the recommendation and its
 reason, alternates and warnings — and **Confirm**, **Override…**, **Disenchant** (nobody gets it; a reason, recorded at
 once) and **Why not…** (pick someone: the bot compares them with the pick from the numbers — no guessing). After a
 press that card shows what happened (*"✅ recorded by you · 8:14 PM"*).
@@ -2251,6 +2279,9 @@ for 30 minutes with no pick waiting for Confirm and no drop nobody judged — af
 the raid itself is over either way (no more fill asks, nobody shows as rostered on it).
 
 ### On the site: Loot › Tonight, History, Precedents, Items and tiers, Wishlists
+
+On every loot page — Tonight, History, Items, Wishlists, the Loot log, My loot and your wishlist — an item's name with an
+id is a link to its page on Wowhead (in a new tab); an item ticked or imported by name only stays plain text.
 
 **Tonight** is the same council as a table, live: every locked run (with **Open loot council** until it has one), its
 drops per boss (the *Drops* block ticks by item name, a boss and how many copies; un-tick a false drop), every proposal

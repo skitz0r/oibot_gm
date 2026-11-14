@@ -7,6 +7,7 @@ import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, I
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
+import { setItemUrl } from "./components/ItemName";
 import { MePage } from "./pages/Me";
 import { RostersPage } from "./pages/Rosters";
 import { RaidsPage } from "./pages/Raids";
@@ -103,6 +104,7 @@ export default function App() {
     setFailed(null);
     api.get<Meta>("/api/meta").then((m) => {
       setGuild(m.guild_key, m.guild);  // from here on every call, image and live stream names this guild
+      setItemUrl(m.item_url);  // every item name links through this template (auction prices §4.6)
       setMeta(m);
       // never change server without saying so: a selection this person lost, a tab that lost its server, a link to a
       // server they aren't in (K16)

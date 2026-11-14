@@ -6,6 +6,7 @@ import { CardHeader, fail, ok } from "../Page";
 import { GameIcon } from "../Icons";
 import { useLive } from "../../hooks/useLive";
 import { LedgerImport } from "./LedgerImport";
+import { ItemName } from "../ItemName";
 
 const CLEAR = "–";
 
@@ -51,7 +52,7 @@ export function Items({ meta }: { meta: Meta }) {
               {data.untiered.filter(match).length === 0 && <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="dimmed">Nothing untiered.</Text></Table.Td></Table.Tr>}
               {data.untiered.filter(match).map((i) => (
                 <Table.Tr key={i.key} style={{ cursor: "pointer" }} onClick={() => setOpen(i.key)}>
-                  <Table.Td><Text size="sm" fw={600}>{i.name}</Text>{i.learned && <Badge size="xs" variant="outline" color="yellow">{i.source === "import" ? "learned from an import" : "learned from a drop"}</Badge>}</Table.Td>
+                  <Table.Td><Text size="sm" fw={600}><ItemName id={i.id} name={i.name} /></Text>{i.learned && <Badge size="xs" variant="outline" color="yellow">{i.source === "import" ? "learned from an import" : "learned from a drop"}</Badge>}</Table.Td>
                   <Table.Td>{i.boss || "—"}</Table.Td><Table.Td><Text size="xs" c="dimmed">{i.first_seen_label || "—"}</Text></Table.Td><Table.Td>{i.times_dropped ?? "—"}</Table.Td><Table.Td>{i.awards ?? 0}</Table.Td>
                 </Table.Tr>
               ))}
@@ -227,7 +228,7 @@ function ImportModal({ meta, onClose, onDone }: { meta: Meta; onClose: () => voi
                   <Table.Tbody>
                     {pv.items.map((it) => (
                       <Table.Tr key={it.key}>
-                        <Table.Td><Text size="sm" fw={600}>{it.name}</Text>{it.awards > 0 && <Text size="xs" c="dimmed">{it.awards} past award(s)</Text>}</Table.Td>
+                        <Table.Td><Text size="sm" fw={600}><ItemName name={it.name} /></Text>{it.awards > 0 && <Text size="xs" c="dimmed">{it.awards} past award(s)</Text>}</Table.Td>
                         <Table.Td>
                           <Group gap={8} wrap="wrap">
                             {Object.entries(it.changes).map(([spec, [b, a]]) => (

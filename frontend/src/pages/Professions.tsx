@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Badge, Button, Card, Group, Modal, Progress, Stack, Tabs, Text, TextInput } from "@mantine/core";
 import { IconSearch } from "@tabler/icons-react";
-import { api, type CatalogRecipe, type Crafter, type FindResult, type Meta, type ProfessionsData, type UnlistedRecipe } from "../api";
+import { api, type CatalogRecipe, type Crafter, type FindResult, type Meta, type PriceFind, type ProfessionsData, type RecipeCost, type UnlistedRecipe } from "../api";
+import { ItemName } from "../components/ItemName";
 import { GameIcon } from "../components/Icons";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
@@ -24,11 +25,76 @@ function Who({ meta, c }: { meta: Meta; c: Pick<Crafter, "label" | "member" | "c
 /** Highest skill first; a skill not said yet last (the server's order too). */
 const bySkill = (a: Crafter, b: Crafter) => (b.skill ?? -1) - (a.skill ?? -1);
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-/** "Makes 1–4 Small Bronze Bomb" / "Makes Ironfeather Shoulders" — the game's own item and count. */
+/** "Makes 1–4 " / "Makes " — the words before the game's own item (printed through ItemName, so it links). */
 function makesWords(m: NonNullable<CatalogRecipe["makes"]>): string {
   const n = m.quantity_max && m.quantity_max !== m.quantity ? `${m.quantity}–${m.quantity_max} ` : m.quantity > 1 ? `${m.quantity} ` : "";
-  return `Makes ${n}${m.name}`;
+  return `Makes ${n}`;
 }
+
+/** A recipe's cost to make (auction prices §4.4), every number and sentence the server's: one line per reagent — the
+ *  reagent, how many, its lowest price each and the line's total, or "none listed" — then the server's cost sentence and
+ *  what a craft makes at its own lowest price. Nothing when the server sends no cost. */
+function CostLines({ cost }: { cost: RecipeCost }) {
+  return (
+    <Stack gap={0} className={css.cost}>
+      {cost.lines.map((x) => (
+        <Text key={x.id} size="xs" className={css.costLine}>
+          <ItemName id={x.id} name={x.name} /> × {x.quantity}
+          <Text span size="xs" c={x.total_words ? undefined : "dimmed"}> · {x.total_words ? `${x.unit_words} each · ${x.total_words}` : x.unit_words}</Text>
+        </Text>
+      ))}
+      <Text size="xs" fw={600} mt={2}>{cost.sentence}</Text>
+      {cost.made_words && <Text size="xs" c="dimmed">{cost.made_words}</Text>}
+    </Stack>
+  );
+}
+
+/** The price box (auction prices §4.5): part of an item's name → the items it matches with their lowest price and how many
+ *  are listed, from GET /api/prices/find; the empty answer, how recent the prices are and "N more" are the server's words.
+ *  An answer for text no longer in the box is dropped. */
+function PriceBox({ onWords }: { onWords: (w: string) => void }) {
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<PriceFind | null>(null);
+  const want = useRef("");
+  want.current = q.trim();
+  useEffect(() => {
+    const text = q.trim();
+    if (!text) { setFound(null); return; }
+    const t = setTimeout(() => {
+      api.get<PriceFind>(`/api/prices/find?q=${encodeURIComponent(text)}`)
+        .then((d) => { if (want.current === d.q.trim()) { setFound(d); onWords(d.words); } }).catch(fail);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);  // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Card>
+      <CardHeader title="What does it go for?" hint="the lowest price listed on the guild's auction house" />
+      <Stack gap="sm" px="md" py="sm">
+        <TextInput leftSection={<IconSearch size={16} />} placeholder="part of an item's name, like arcanite bar" value={q} aria-label="Search an item's price"
+          onChange={(e) => setQ(e.currentTarget.value)} maw={520} />
+        {found !== null && found.rows.length === 0 && <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-line" }}>{found.message}</Text>}
+        {found !== null && found.rows.length > 0 && (
+          <>
+            {found.words && <Text size="xs" c="dimmed">{found.words}</Text>}
+            <div className={css.prices}>
+              {found.rows.map((p) => (
+                <div key={p.id} className={css.priceRow}>
+                  <Text size="sm" fw={600} className={css.name}><ItemName id={p.id} name={p.name} /></Text>
+                  <Text size="sm" c={p.qty ? undefined : "dimmed"}>{p.low_words}</Text>
+                  <Text size="sm" c="dimmed">{p.qty ? `${p.qty} listed` : ""}</Text>
+                </div>
+              ))}
+            </div>
+            {found.more && <Text size="sm" c="dimmed">{found.more} Type more of the name to narrow it.</Text>}
+          </>
+        )}
+      </Stack>
+    </Card>
+  );
+}
+/** A recipe a price line is about: it has a cost, or reagents a cost would price (then the line says why none shows —
+ *  prices not read yet, or more than a day old). */
+const priced = (r: CatalogRecipe) => !!r.cost || !!r.reagents?.length;
 const ADD_HOW = "A crafter adds it on the Me page or with /me professions.";
 const NOT_LISTED_GROUP = "Not in the game's list";
 
@@ -49,6 +115,10 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
   const cap = meta.professions?.skill_cap || 300;
   const fromList = !!meta.professions?.recipe_list;
   const [confirm, confirmDialog] = useConfirm();
+  /** auction prices (§4.4): prices show once the owner picked the auction house; `priceWords` = how recent they are (the
+   *  server's sentence: /api/meta's, then each price answer's — a page left open hears the hourly check) */
+  const pricesOn = !!meta.prices?.on;
+  const [priceWords, setPriceWords] = useState(pricesOn ? meta.prices?.words || "" : "");  // off: the owner's one line is printed once, above
 
   const find = (text: string) => {
     if (!text.trim()) { setFound(null); return; }
@@ -58,9 +128,10 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
   const load = () => {
     api.get<ProfessionsData>("/api/professions").then(setData).catch(fail);
     if (qRef.current.trim()) find(qRef.current);
+    if (pricesOn) api.get<PriceFind>("/api/prices/find?q=").then((d) => setPriceWords(d.words)).catch(() => undefined);
   };
   useEffect(() => { load(); }, []);
-  useLive(load, ["member", "config"]);
+  useLive(load, ["member", "config", "prices"]);
   useEffect(() => { const t = setTimeout(() => find(q), 250); return () => clearTimeout(t); }, [q]);
 
   const profs = data?.professions || [];
@@ -92,10 +163,14 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
         : "Who can make what. Search a recipe, or open a profession to see its crafters. Add your own on the Me page or with /me professions."} />
       <TextInput leftSection={<IconSearch size={16} />} placeholder="part of a recipe's name, like ironfeather" value={q} aria-label="Search a recipe"
         onChange={(e) => setQ(e.currentTarget.value)} maw={520} />
+      {!pricesOn && meta.prices?.words && <Text size="sm" c="dimmed">{meta.prices.words}</Text>}
       <Card>
         <CardHeader title={found === null ? "Type a recipe's name to see who makes it" : `${plural(found.total, "recipe matches", "recipes match")} "${found.q.trim()}"`} />
         {found !== null && found.recipes.length === 0 && (
           <Text size="sm" c="dimmed" px="md" py="sm">{found.message}{fromList ? "" : ` ${ADD_HOW}`}</Text>
+        )}
+        {found !== null && found.recipes.some(priced) && priceWords && (
+          <Text size="xs" c="dimmed" px="md" pt="sm">{priceWords}</Text>
         )}
         {found !== null && found.recipes.length > 0 && (
           <div className={css.hits}>
@@ -107,8 +182,11 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
                     <Text fw={700}>{r.name}</Text>
                     {r.category && <Text size="xs" c="dimmed">{r.category}</Text>}
                     {fromList && r.listed === false && <Text size="xs" c="yellow.4">{NOT_LISTED_GROUP}</Text>}
-                    {r.makes && <Text size="xs">{makesWords(r.makes)}</Text>}
-                    {!!r.reagents?.length && <Text size="xs" c="dimmed">Reagents: {r.reagents.map((x) => `${x.quantity} × ${x.name}`).join(", ")}</Text>}
+                    {r.makes && <Text size="xs">{makesWords(r.makes)}<ItemName id={r.makes.id} name={r.makes.name} /></Text>}
+                    {!!r.reagents?.length && !r.cost && (
+                      <Text size="xs" c="dimmed">Reagents: {r.reagents.map((x, i) => <span key={i}>{i ? ", " : ""}{x.quantity} × <ItemName id={x.id} name={x.name} /></span>)}</Text>
+                    )}
+                    {r.cost && <CostLines cost={r.cost} />}
                   </Stack>
                 </Group>
                 {r.crafters.length ? (
@@ -149,6 +227,8 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
           </div>
         </Card>
       )}
+
+      {pricesOn && <PriceBox onWords={setPriceWords} />}
 
       {data === null && <Text size="sm" c="dimmed">Loading…</Text>}
       {profs.length > 0 && (
@@ -193,7 +273,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
                   )}
                 </Card>
                 {fromList && p.crafters.length > 0 && makes(p.id) && (
-                  <GuildMakes meta={meta} name={p.name} recipes={(data?.recipes || []).filter((r) => r.profession === p.id)} />
+                  <GuildMakes meta={meta} name={p.name} priceWords={priceWords} recipes={(data?.recipes || []).filter((r) => r.profession === p.id)} />
                 )}
               </Stack>
             </Tabs.Panel>
@@ -218,7 +298,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
 
 /** A profession's tab, with the game's list: what the guild makes, grouped by the game's category (the categories in
  *  order, a recipe typed before the list that the list lacks under its own heading last), each recipe with its crafters. */
-function GuildMakes({ meta, name, recipes }: { meta: Meta; name: string; recipes: CatalogRecipe[] }) {
+function GuildMakes({ meta, name, recipes, priceWords }: { meta: Meta; name: string; recipes: CatalogRecipe[]; priceWords: string }) {
   const groups = new Map<string, CatalogRecipe[]>();
   for (const r of recipes) {
     const g = r.listed === false ? NOT_LISTED_GROUP : r.category || NOT_LISTED_GROUP;
@@ -228,6 +308,7 @@ function GuildMakes({ meta, name, recipes }: { meta: Meta; name: string; recipes
   return (
     <Card>
       <CardHeader title="What the guild makes" />
+      {recipes.some(priced) && priceWords && <Text size="xs" c="dimmed" px="md" pt="sm">{priceWords}</Text>}
       {recipes.length === 0 ? (
         <Text size="sm" c="dimmed" px="md" py="sm">Nobody has added a {name} recipe yet. A crafter adds theirs on the Me page or with /me professions.</Text>
       ) : (
@@ -237,7 +318,11 @@ function GuildMakes({ meta, name, recipes }: { meta: Meta; name: string; recipes
               <Text size="xs" fw={700} c={g === NOT_LISTED_GROUP ? "yellow.4" : "dimmed"} tt="uppercase" className={css.groupHead}>{g}</Text>
               {groups.get(g)!.sort((a, b) => a.name.localeCompare(b.name)).map((r) => (
                 <div key={r.id ?? r.key} className={css.makeRow}>
-                  <Text size="sm" fw={600} className={css.name}>{r.name}</Text>
+                  <div className={css.what}>
+                    <Text size="sm" fw={600} className={css.name}>{r.name}</Text>
+                    {r.cost && <Text size="xs">{r.cost.sentence}</Text>}
+                    {r.cost?.made_words && <Text size="xs" c="dimmed">{r.cost.made_words}</Text>}
+                  </div>
                   <Group gap={12} wrap="wrap" className={css.what}>
                     {r.crafters.map((c) => <Who key={c.uid + c.label} meta={meta} c={c} />)}
                   </Group>

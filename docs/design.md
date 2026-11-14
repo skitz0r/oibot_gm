@@ -5049,3 +5049,112 @@ Derived at read time, never stored. The table is compiled from the original game
 unverified`: a wrong line is corrected in the YAML. No hand pick: every crafter today is armory-kept, where the
 professions editor is closed (a synced fact is never hand-editable), so a hand-set specialization would need its own
 write path — left until someone needs it.
+
+### 5.65 Auction prices and item links (built 2026-11-13/14)
+
+**Why.** With every recipe in the game, its reagents and who makes it (§5.64), the guild's next question is "what does it
+cost?" — a craft, material by material, and what one item goes for right now. Blizzard publishes WoW: Forever's auction
+listings (undocumented) to the app credentials the bot already holds. Separately, Wowhead opened a Forever section, so an
+item's name on the site can link to its page. Spec: `docs/superpowers/specs/2026-11-13-auction-prices-design.md`; plan:
+`docs/superpowers/plans/2026-11-13-auction-prices.md`. This section is the record as built; where it differs from the spec
+it says so.
+
+**Decisions (owner, 2026-11-13).** **D1** two uses, one table: cost to make per material, and an ad hoc price check for
+one item. **D2** an item's price is the LOWEST buyout per unit listed on the selected auction house — no average, no
+"typical", no depth of book. **D3** the owner selects the auction house (the armory does not say which one a guild trades
+on). **D4** item names on the site link to Wowhead, as plain outbound links.
+
+**The designer's calls** (the owner saw them and said "look good"): **C1** only the guild's faction's houses are offered
+(never the neutral Blackwater ones). **C2** a listing without a usable buyout (none, ≤ 0, quantity ≤ 0, no item id) is
+ignored. **C3** prices older than six hours are marked stale. **C4** no vendor prices. **C5** the help answer can quote a
+price. **C6** the price check searches what the recipe list and loot items name plus listed items the bot has named.
+**C7** the table is derived data under `out/`, never the data repo. **C8** no auction house picked = no price anywhere;
+the owner reads how to turn prices on. **C9** cost to make is per craft; what a recipe makes shows its price "each" beside
+"makes N" (a range "makes 2 to 4"); the two are never combined (no profit figure). **C10** prices older than a day are not
+shown at all — also for a table loaded after a restart. **C11** relinking the server to another guild keeps the auction
+house only when ruleset and faction match; otherwise it is cleared in the same commit and the confirm says prices turn off.
+**C12** `https://www.wowhead.com/forever/item={id}` resolves (owner, 2026-11-13); the same key feeds the Discord loot item
+card, which gains its link too (intended).
+
+**What the API gives** (probed 2026-11-13): namespace `dynamic-forever-us`; `ruleset/{id}/auctions/index` lists 15 houses
+under `auctions` (five markets × Alliance / Horde / Blackwater); `…/auctions/{house}` = listings `{item {id}, buyout,
+quantity}` plus a `commodities` link; `…/{house}/commodities` = stackables `{item {id}, quantity, unit_price}`. An empty
+house answers without an `auctions` key (and its commodities 200 with none). Every house carries a Last-Modified. No
+seller, no sales, no history.
+
+**As built.**
+- **The boundary** (`auctions.py`, in the style of armory.py): `Client(arm, dynamic_ns)` over armory's `Armory.get` (the
+  shared token and limiter of battlenet.py); `houses(ruleset_id)`; `table(ruleset_id, house_id, since)` → per item id
+  `Price(low, qty)` — listings `ceil(buyout / quantity)`, stackables `unit_price`, the lowest of all rows and the
+  quantities summed; a 304 on the listings answers "not modified" without reading the stackables. Every shape validated
+  (`ArmoryShape`); the house INDEX without its `auctions` key is a shape error (an empty HOUSE without it is an empty
+  table). `money(copper)` = "48g 99s 98c" (zero parts dropped, "0c"). `available(reg)` = the profile's `auctions:` block
+  and the armory's keys; `faction_houses` matches the profile's house name per faction.
+- **Game data**: `integrations.yaml auctions: {dynamic_namespace, factions {Alliance, Horde: the house name},
+  reference_items}` (Arcanite Bar, Dreamfoil, Runecloth — the picker's samples). tbc has no block: no price feature at all,
+  proven by tests on every surface. `wowhead_item_url` = the item link template (Forever's set in this build).
+- **The choice** (`Registry`): `GuildConfig.market` `Market {ruleset_id, house_id, name, faction, picked_by, picked_at}` in
+  the `settings` rev. `set_market` / `clear_market` = owner only, one commit each, the caller audits; refused without a
+  linked guild, on a version without auction houses, and (beyond the brief) for a house that is not the linked guild's
+  faction's. Picking the house already picked writes nothing (no commit, no audit line, no read) — the confirm said
+  "nothing changes" (fixed in task 8). `set_armory_guild` clears a market that doesn't survive (C11) and
+  `clear_armory_guild` always does, in their own commit. `market_words` = the choice in words or what is missing.
+- **The table** (`discord_auctions.py`): `out/auctions/<guild key>/prices.json` written whole, loaded on first use;
+  `refresh` at most once an hour per guild (conditional on the stored Last-Modified; `Table.at` = the last check that
+  worked, so an unchanged feed stays fresh); `state` off | waiting | fresh | stale (6 h) | old (24 h, not shown); two
+  guilds on one house share one read within the hour; a read whose market changed under it is discarded. `PRICE_LISTENERS`
+  hear new prices AND a stale / hidden table brought back to fresh by a not-modified or identical read (task 8), so an open
+  page updates. `auctions_tick` on the scheduler's minute loop starts one background task per guild when due; a failure
+  keeps the last table and warns ops at most once per guild per hour. No DM, notice, post or ops line on success.
+  After each check the same task names up to 200 listed ids nothing local names (Blizzard's item endpoint) into
+  `out/auctions/items.json` per game version; an item Blizzard doesn't know is remembered per process only.
+  `house_choices` (the owner's picker): the guild's ruleset from its armory page, then each faction house with listings,
+  with its quantity listed in all and the reference items' prices; `pick_house` re-checks a pick against the armory
+  (`HousesChanged` when the ruleset moved).
+- **Prices for people** (`prices.py`, pure): names (recipe list → loot items → the looked-up names), `search(reg, text,
+  limit)` (listed items first), `recipe_cost` (lines per reagent, a duplicate reagent summed, "at least" counting the
+  missing), and every sentence: `price_words`, `cost_sentence` ("Cost to make: at least 3g 20s — 4 reagents have none
+  listed."), `made_words` ("Makes 1 · lowest price 90g each, 2 listed"), `status_sentence` (the owner, while off: how to
+  turn prices on; a member: nothing), `answer_lines`, `more_words`, `listings_words` ("230 listed in all"), `help_section`.
+  `discord_auctions.as_of_words` appends "— more than six hours old" when stale. A recipe with no reagents has no cost
+  (never "0c").
+- **The confirms** (consequences.py): `market_consequence(reg, house)` (a first pick, the same house, another house — two
+  houses share a name, so a change says "instead of the one picked before"), `market_clear_consequence`, and the guild
+  link's confirms swap their undo sentence for `PRICES_OFF` when a market will be cleared (ruling T2-a: the Confirm rule
+  caps at three sentences). `cost_sentence` / `status_sentence` are display lines, not confirms (ruling T4-a), so they stay
+  out of tests/test_confirm_readability.py.
+- **The site**: `/api/meta` carries `prices {on, state, words, market}` and `item_url`; recipe rows on `/api/professions`
+  and `/find` carry `cost {lines, sentence, made_words} | null`; `GET /api/prices/find?q=` (every member) → `{rows, total,
+  words, more, message}`; `GET /api/admin/market` (officers) + `POST` (owner: choices · preview · pick with the rev · clear;
+  409 on a stale rev or changed houses; 404 without auction houses). The topic `prices` reloads an open page.
+  `components/ItemName.tsx` is the ONE item name: with an id and `meta.item_url` a plain link (new tab, `noopener
+  noreferrer`, the template's `{id}` filled), else text; no third-party script or tooltip, and no page names Wowhead. It
+  prints item names on the Professions page (what a recipe makes, its reagents, the price box), Loot › Tonight, History
+  (its council view now carries `item_id`), Items, Wishlists, the Loot log and Me › My loot / wishlist; the one exception
+  is Items' tiered list, whose names are buttons. The Professions page: under a hit's reagents, one line per reagent
+  (item × quantity · price each · line total, or "none listed"), the server's cost sentence and `made_words`; What the
+  guild makes shows each recipe's sentence and `made_words`; "Prices as of …" once per card; the price box **What does it
+  go for?** above the tabs; with prices off, the owner's one line and nothing else. Config › Settings: `MarketCard` under
+  the guild card (the choice in words; owner: Pick the auction house… → the choices with sample prices → the server's
+  sentences → pick; Turn prices off…).
+- **Discord**: `/price` (every member, ephemeral, item autocomplete over `prices.search`, no model); `/professions who`
+  adds the cost line; the auction house lives in the existing `/gm config armory` hub (`/gm config` is at 25
+  subcommands): **Auction house…** → working → "Auction house N of M" select → decide → set; **Turn prices off…**. On a
+  version without auction houses `/price` answers "This game version has no auction houses."
+- **Plain text** (C5): the help answer's `prices` section, gated on a price word AND a named item or recipe of the list
+  (`prices.help_hit`): up to ten items and three recipes with their cost, whole blocks within the section's budget; code
+  computes, Claude words it.
+- **MCP**: `price_check(text)` and `market()` read the site's routes; no tool picks or clears the auction house (the owner
+  matches sample prices by eye).
+
+**Where the build differs from the spec.** The picker shows "N listed in all" (the total quantity, not a count of
+listings). Bid-only listings: none were seen in the feed; C2 is the rule regardless. The item naming pace is 200 ids per
+hourly check. Item links reach the Discord loot item card only (C12); other Discord surfaces print names as before.
+Nobody has looked at the site's new pieces in a browser yet (task 8 was verified by the type check, the build and the
+source tests).
+
+**Known, left for later.** "Same house" in `market_consequence` compares the house id alone (`set_market`'s no-op compares
+house and ruleset; a relink to another ruleset clears the market first, so the two agree in practice). After an unlink the
+off sentence says "until you pick the auction house again" although a guild must be linked first. The first read of
+`items.json` can happen on the event loop. A member's off sentence (`OFF_WORDS`) names only the Config page. `/price`
+cuts at 2000 characters mid-line.

@@ -6,6 +6,7 @@ import { api, ApiError, type LogRow, type Meta, type MyAppeal, type WishCharacte
 import { CardHeader, fail, ok } from "../Page";
 import { useLive } from "../../hooks/useLive";
 import { Who } from "./shared";
+import { ItemName } from "../ItemName";
 
 type MyLootPage = { rows: LogRow[]; total?: number; more?: boolean; appeals: MyAppeal[]; appeal_text: { min: number; max: number } };
 const PAGE = 20;
@@ -65,7 +66,7 @@ export function MyLootCard({ meta }: { meta: Meta }) {
           <Group key={i} gap="xs" wrap="nowrap" justify="space-between">
             <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
               <Who meta={meta} name={r.character} cls={r.cls} spec={r.spec} />
-              <Text size="sm" truncate>{r.item}</Text>
+              <Text size="sm" truncate><ItemName id={r.item_id} name={r.item} /></Text>
             </Group>
             <Group gap={6} wrap="nowrap">
               <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>{r.date_label} · {r.offspec ? "OS" : "MS"}</Text>
@@ -94,7 +95,7 @@ export function MyLootCard({ meta }: { meta: Meta }) {
       <Modal opened={draft !== null} onClose={() => setDraft(null)} title={draft ? `Ask the council · ${draft.row.item}` : ""} centered>
         {draft && (
           <Stack gap="md">
-            <Text size="sm" c="dimmed">{draft.row.character} · {draft.row.item} · {draft.row.date_label} · {draft.row.offspec ? "OS" : "MS"}</Text>
+            <Text size="sm" c="dimmed">{draft.row.character} · <ItemName id={draft.row.item_id} name={draft.row.item} /> · {draft.row.date_label} · {draft.row.offspec ? "OS" : "MS"}</Text>
             <Textarea label="What should the council know?" autosize minRows={3} maxLength={limits.max} value={draft.text}
               description={`${n}/${limits.max}${n < limits.min ? ` · at least ${limits.min}` : ""}`}
               onChange={(e) => setDraft({ ...draft, text: e.currentTarget.value })} />
@@ -186,7 +187,7 @@ export function WishlistCard({ meta }: { meta: Meta }) {
               {!mine && c.entries.map((e) => (
                 <Group key={e.key} gap={6} wrap="nowrap" style={{ opacity: e.received ? 0.5 : 1 }}>
                   <Text size="sm" w={22} c="dimmed">{e.rank}.</Text>
-                  <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>{e.name}</Text>
+                  <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}><ItemName id={e.item_id} name={e.name} /></Text>
                   {e.received && <Badge size="xs" variant="light" color="teal">received {e.received_label}</Badge>}
                   {!e.known && <Tooltip label="not on the tables yet — matched by name once it drops"><Badge size="xs" variant="outline" color="gray">by name</Badge></Tooltip>}
                   <Badge size="xs" variant="light" color={e.offspec ? "gray" : "teal"}>{e.offspec ? "OS" : "MS"}</Badge>
@@ -197,7 +198,7 @@ export function WishlistCard({ meta }: { meta: Meta }) {
                   {edit.rows.map((r, i) => (
                     <Group key={`${r.name}-${i}`} gap={6} wrap="wrap" style={{ opacity: r.received ? 0.6 : 1 }}>
                       <Text size="sm" w={22}>{i + 1}.</Text>
-                      <Text size="sm" style={{ flex: "1 1 160px", minWidth: 0 }} truncate>{r.name}{r.received ? ` · received ${r.received_label}` : ""}</Text>
+                      <Text size="sm" style={{ flex: "1 1 160px", minWidth: 0 }} truncate><ItemName id={r.item_id} name={r.name} />{r.received ? ` · received ${r.received_label}` : ""}</Text>
                       <SegmentedControl size="xs" value={r.offspec ? "os" : "ms"} data={[{ value: "ms", label: "MS" }, { value: "os", label: "OS" }]} onChange={(v) => upd(i, { offspec: v === "os" })} />
                       <TextInput size="xs" placeholder="note" maxLength={120} value={r.note} onChange={(e) => upd(i, { note: e.currentTarget.value })} w={150} />
                       <ActionIcon size="sm" variant="subtle" color="gray" onClick={() => move(i, -1)} disabled={i === 0}><IconArrowUp size={14} /></ActionIcon>

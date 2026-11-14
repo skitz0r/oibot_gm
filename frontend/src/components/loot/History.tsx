@@ -5,10 +5,11 @@ import { CardHeader, fail, ok } from "../Page";
 import { useLive } from "../../hooks/useLive";
 import { ReasonModal, SourceBadge } from "./shared";
 import { DistilModal } from "./Distil";
+import { ItemName } from "../ItemName";
 
 interface Council { id: string; run: string; label: string | null; date_label: string; test: boolean; summary: string;
-  drops: { drop_id: string; item: string; boss: string; tiered: boolean }[];
-  awards: { drop_id: string; item: string; to: string; source: string | null; bot: string | null; by: string | null; at_label: string; void: boolean; tier: string; offspec: boolean }[];
+  drops: { drop_id: string; item: string; item_id: number; boss: string; tiered: boolean }[];
+  awards: { drop_id: string; item: string; item_id: number; to: string; source: string | null; bot: string | null; by: string | null; at_label: string; void: boolean; tier: string; offspec: boolean }[];
   overrides: { item: string; bot: string; human: string; reason: string; by: string; at_label: string }[] }
 
 /** Loot › History: every ended council, newest first; a row opens the council as it ended (drops, awards with who
@@ -48,13 +49,13 @@ export function History() {
               <Table.Tbody>
                 {one.awards.map((a, i) => (
                   <Table.Tr key={i} style={{ opacity: a.void ? 0.45 : 1, textDecoration: a.void ? "line-through" : undefined }}>
-                    <Table.Td>{a.item}</Table.Td><Table.Td>{a.to}{a.offspec ? " (OS)" : ""}</Table.Td><Table.Td><SourceBadge source={a.source} /></Table.Td><Table.Td><Text size="xs" c="dimmed">{a.by} · {a.at_label}</Text></Table.Td>
+                    <Table.Td><ItemName id={a.item_id} name={a.item} /></Table.Td><Table.Td>{a.to}{a.offspec ? " (OS)" : ""}</Table.Td><Table.Td><SourceBadge source={a.source} /></Table.Td><Table.Td><Text size="xs" c="dimmed">{a.by} · {a.at_label}</Text></Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
             </Table>
             {one.overrides.length > 0 && <Text size="sm" fw={600}>Overrides</Text>}
-            {one.overrides.map((o, i) => <Text key={i} size="sm">{o.item}: the bot picked {o.bot}, the council gave it to {o.human} — “{o.reason}” <Text span size="xs" c="dimmed">({o.by})</Text></Text>)}
+            {one.overrides.map((o, i) => <Text key={i} size="sm"><ItemName name={o.item} />: the bot picked {o.bot}, the council gave it to {o.human} — “{o.reason}” <Text span size="xs" c="dimmed">({o.by})</Text></Text>)}
           </Stack>
         )}
       </Modal>
@@ -80,7 +81,7 @@ export function Precedents() {
       {data.needs_reason.length > 0 && (
         <Card>
           <CardHeader title={`Needs a reason (${data.needs_reason.length})`} hint="recorded in game against the bot's pick — give the reason on Tonight" />
-          <Stack p="md" gap={4}>{data.needs_reason.map((r) => <Text key={r.import_id} size="sm"><b>{r.item}</b> → {r.recipient} (the bot picked {r.bot || "?"}) · {r.received_label}</Text>)}</Stack>
+          <Stack p="md" gap={4}>{data.needs_reason.map((r) => <Text key={r.import_id} size="sm"><b><ItemName name={r.item} /></b> → {r.recipient} (the bot picked {r.bot || "?"}) · {r.received_label}</Text>)}</Stack>
         </Card>
       )}
       <Card>
@@ -96,7 +97,7 @@ export function Precedents() {
               {data.rows.length === 0 && <Table.Tr><Table.Td colSpan={6}><Text size="sm" c="dimmed">{status && status !== "active" ? `No ${status} precedents — clear the filter to see them all.` : "No active precedents yet — one is written when the council confirms an override, or gives the reason for a companion award."}</Text></Table.Td></Table.Tr>}
               {data.rows.map((p) => (
                 <Table.Tr key={p.ref} style={{ opacity: p.status === "active" ? 1 : 0.6 }}>
-                  <Table.Td><Text size="xs" c="dimmed">{p.date_label}</Text></Table.Td><Table.Td>{p.item}</Table.Td><Table.Td>{p.bot}</Table.Td><Table.Td>{p.human}</Table.Td>
+                  <Table.Td><Text size="xs" c="dimmed">{p.date_label}</Text></Table.Td><Table.Td><ItemName name={p.item} /></Table.Td><Table.Td>{p.bot}</Table.Td><Table.Td>{p.human}</Table.Td>
                   <Table.Td><Text size="sm">{p.reason}</Text>{p.status !== "active" && <Text size="xs" c="dimmed">{p.status}{p.status_by ? ` by ${p.status_by}` : ""}{p.status_reason ? ` — “${p.status_reason}”` : ""}</Text>}</Table.Td>
                   <Table.Td>
                     {p.status === "active" && <Button size="compact-xs" variant="subtle" color="red" onClick={() => setTarget({ p, restore: false })}>Retire</Button>}

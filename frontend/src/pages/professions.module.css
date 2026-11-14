@@ -34,7 +34,20 @@
 .makeRow { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); gap: 4px 16px; align-items: center; padding: 6px 0; }
 .makeRow > * { min-width: 0; }
 
+/* auction prices (§4.4–4.5): a hit's cost to make — one line per reagent, then the server's sentences — and the price box's
+   rows (item · lowest price · how many are listed), each a card of its own below sm. */
+.cost { margin-top: 4px; }
+.costLine { overflow-wrap: anywhere; }
+.prices { display: flex; flex-direction: column; }
+.priceRow { display: grid; grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr) minmax(70px, auto); gap: 4px 16px; align-items: center;
+            padding: 6px 0; border-bottom: 1px solid var(--mantine-color-slate-6); }
+.priceRow:last-child { border-bottom: none; }
+.priceRow > * { min-width: 0; }
+
 @media (max-width: 48em) {
+  .priceRow { grid-template-columns: minmax(0, 1fr) auto; margin: 6px 0; border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; padding: 8px 12px; }
+  .priceRow:last-child { border-bottom: 1px solid var(--mantine-color-slate-5); }
+  .priceRow > :first-child { grid-column: 1 / -1; }
   .hit { margin: 10px 12px; border: 1px solid var(--mantine-color-slate-5); border-radius: 8px; padding: 10px 12px; }
   .hit:last-child { border-bottom: 1px solid var(--mantine-color-slate-5); }
   .craftRow, .craftRowShort { grid-template-columns: minmax(0, 1fr); padding: 10px 12px; }

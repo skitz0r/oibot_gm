@@ -5,6 +5,7 @@ import { CardHeader, PageTitle, fail } from "../components/Page";
 import { useLive } from "../hooks/useLive";
 import { usePoll } from "../hooks/usePoll";
 import { SourceBadge, Who } from "../components/loot/shared";
+import { ItemName } from "../components/ItemName";
 
 /** The guild's award log, for everyone logged in to this guild (D2; nothing of it is public). Officers can switch on
  *  the scores — tier, source, the bot's pick, who recorded it, the precedent's reason — which the server sends only to
@@ -40,7 +41,7 @@ export function LootLogPage({ meta }: { meta: Meta }) {
               {shown.map((r, i) => (
                 <Table.Tr key={i} style={{ background: r.mine ? "var(--mantine-color-slate-6)" : undefined }}>
                   <Table.Td><Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>{r.date_label}</Text></Table.Td>
-                  <Table.Td><Text size="sm">{r.item}</Text></Table.Td>
+                  <Table.Td><Text size="sm"><ItemName id={r.item_id} name={r.item} /></Text></Table.Td>
                   <Table.Td><Group gap={4} wrap="nowrap"><Who meta={meta} name={r.character} cls={r.cls} spec={r.spec} />{r.offspec && <Text size="xs" c="dimmed">OS</Text>}</Group></Table.Td>
                   <Table.Td><Text size="xs" c="dimmed">{r.boss}</Text></Table.Td>
                   {scores && <>

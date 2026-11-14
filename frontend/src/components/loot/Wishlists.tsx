@@ -4,6 +4,7 @@ import { api, type Meta, type WishCharacter } from "../../api";
 import { CardHeader, fail, ok } from "../Page";
 import { useLive } from "../../hooks/useLive";
 import { Who } from "./shared";
+import { ItemName } from "../ItemName";
 
 interface Wanted { key: string; name: string; item_id: number; boss: string | null; wants: { character: string; cls: string; spec: string; rank: number; offspec: boolean }[] }
 interface Overview { people: { uid: string; display_name: string; test: boolean; characters: WishCharacter[] }[]; items: Wanted[]; max: number }
@@ -41,7 +42,7 @@ export function Wishlists({ meta }: { meta: Meta }) {
               {data.items.length === 0 && <Table.Tr><Table.Td colSpan={2}><Text size="sm" c="dimmed">No wishlists yet — members build theirs on the Me page or with /me wishlist.</Text></Table.Td></Table.Tr>}
               {data.items.map((w) => (
                 <Table.Tr key={w.key}>
-                  <Table.Td><Text size="sm" fw={600}>{w.name}</Text>{w.boss && <Text size="xs" c="dimmed">{w.boss}</Text>}</Table.Td>
+                  <Table.Td><Text size="sm" fw={600}><ItemName id={w.item_id} name={w.name} /></Text>{w.boss && <Text size="xs" c="dimmed">{w.boss}</Text>}</Table.Td>
                   <Table.Td>
                     <Group gap="md" wrap="wrap">
                       {w.wants.map((x) => (
@@ -107,7 +108,7 @@ export function Wishlists({ meta }: { meta: Meta }) {
               {p.characters.map((c) => (
                 <Group key={c.label} gap="xs" wrap="wrap" pl="sm">
                   <Who meta={meta} name={c.label} cls={c.cls} spec={c.spec} />
-                  <Text size="xs" c="dimmed">{c.entries.map((e) => `${e.rank}. ${e.name}${e.offspec ? " (OS)" : ""}${e.received ? " ✓" : ""}`).join(" · ")}</Text>
+                  <Text size="xs" c="dimmed">{c.entries.map((e, i) => <span key={e.key}>{i ? " · " : ""}{e.rank}. <ItemName id={e.item_id} name={e.name} />{e.offspec ? " (OS)" : ""}{e.received ? " ✓" : ""}</span>)}</Text>
                 </Group>
               ))}
             </Stack>

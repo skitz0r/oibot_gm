@@ -455,7 +455,7 @@ def test_professions_page_is_the_finder_with_officer_maintenance():
     assert 'path="/professions"' in app and '{ to: "/professions", label: "Professions"' in app
     assert "/api/professions/find" in src and "Who can make what" in src
     assert "Nobody has registered" in src and "no recipes on record — the crafter adds them on the Me page" in src
-    assert 'useLive(load, ["member", "config"])' in src
+    assert 'useLive(load, ["member", "config", "prices"])' in src
     # armory link §4.3–4.4 / design §5.64: recipes are the game's — Rename… / Merge… are retired, the page prints the server's
     # sentences (the empty answer, "Nobody in the guild makes … yet.", "And N more recipes match.") and never composes them
     assert "Rename…" not in src and "Merge…" not in src and "/api/professions/rename" not in src and "/api/professions/merge" not in src
@@ -629,3 +629,77 @@ def test_armory_link_pages_preview_and_print_only_the_servers_sentences():
     assert ">Realm type<" in guild and ">Kind<" not in guild
     # D5 — a puppet's characters never offer the armory: Members gates the mark and the actions on !r.test
     assert "{!r.test && armory.actions(c, r.uid)" in page and "{!r.test && <ArmoryMark c={c} />}" in page
+
+
+# auction prices §4.6: the pages that print item names, and the one place in each that is not a link (a button's label —
+# a link can't sit inside a button; the button opens the item's tiers)
+ITEM_PAGES = ("pages/Professions.tsx", "pages/LootLog.tsx", "components/loot/Tonight.tsx", "components/loot/History.tsx",
+              "components/loot/Items.tsx", "components/loot/Wishlists.tsx", "components/loot/MyLoot.tsx")
+ITEM_NAME_NOT_A_LINK = {"components/loot/Items.tsx": 'onClick={() => setOpen(i.key)}>{i.name}</Button>'}
+# a JSX child printing an item row's name: `{r.item}` anywhere, `{x.name}` on the pages whose `.name` rows are items
+# (never `${…}` inside a template string — a title — nor `={…}` — an attribute)
+ITEM_CHILD = re.compile(r"(?<![$=\w])\{\s*[\w!?.]+\.item\s*\}")
+NAME_CHILD = re.compile(r"(?<![$=\w])\{\s*(?:i|it|w|e|r)\.name\s*\}")
+
+
+def test_item_names_link_through_one_component():
+    """Auction prices §4.6 (D4, C12): every item name with an id on the Professions page, the loot pages and wishlists is
+    ItemName — a plain link built from /api/meta `item_url` alone (new tab, no referrer), else plain text. No page builds
+    an item address itself or loads a third-party script or tooltip."""
+    item = _code_only((SRC / "components" / "ItemName.tsx").read_text())
+    assert 'target="_blank"' in item and 'rel="noopener noreferrer"' in item
+    assert 'template.replace("{id}", String(id))' in item and "template && id ?" in item, "no id or no template: plain text"
+    assert "setItemUrl(m.item_url)" in (SRC / "App.tsx").read_text()
+    for f in sorted(SRC.rglob("*.ts*")):
+        text = f.read_text()
+        assert "wowhead" not in text.lower(), f"{f.relative_to(SRC)}: the address comes from the server's template"
+        assert "<script" not in text and "tooltip.js" not in text.lower(), f.relative_to(SRC)
+    for rel in ITEM_PAGES:
+        code = _code_only((SRC / rel).read_text())
+        assert "<ItemName " in code, rel
+        code = code.replace(ITEM_NAME_NOT_A_LINK.get(rel, "\0"), "")
+        hits = ITEM_CHILD.findall(code) + ([] if rel == "pages/Professions.tsx" else NAME_CHILD.findall(code))
+        assert not hits, f"{rel}: an item name printed outside ItemName: {hits}"
+    prof = _code_only((SRC / "pages" / "Professions.tsx").read_text())
+    for link in ("<ItemName id={r.makes.id} name={r.makes.name} />", "<ItemName id={x.id} name={x.name} />", "<ItemName id={p.id} name={p.name} />"):
+        assert link in prof, link
+
+
+def test_professions_page_prints_the_servers_price_words():
+    """Auction prices §4.4–4.5: the cost to make (a line per reagent, then the server's sentence and what a craft makes)
+    and the price box print the server's fields; the page composes no sentence about a price and writes no money. The
+    status line is once per card; with prices off the owner reads the server's one line. Cards below sm."""
+    src = _code_only((SRC / "pages" / "Professions.tsx").read_text())
+    assert "{r.cost && <CostLines cost={r.cost} />}" in src and "!r.cost &&" in src, "the plain reagents line only without a cost"
+    for field in ("cost.sentence", "cost.made_words", "x.unit_words", "x.total_words", "r.cost.sentence", "r.cost.made_words"):
+        assert field in src, field
+    assert "What does it go for?" in src and "/api/prices/find?q=${encodeURIComponent(text)}" in src
+    assert "found.message" in src and "found.more" in src and "found.words" in src and "p.low_words" in src
+    assert "want.current === d.q.trim()" in src, "an answer for text no longer in the box is dropped"
+    assert "{pricesOn && <PriceBox " in src and "{!pricesOn && meta.prices?.words &&" in src
+    assert 'useLive(load, ["member", "config", "prices"])' in src
+    assert src.count(">{priceWords}<") == 2, "how recent the prices are: once on the finder's card, once on What the guild makes"
+    from test_copy import tsx_strings
+    reads = " ".join(s for _, s in tsx_strings(SRC / "pages" / "Professions.tsx"))
+    for composed in ("Cost to make", "Prices as of", "none listed", "at least", "six hours", "out of date"):
+        assert composed not in reads, f"the server says {composed!r}"
+    assert not re.search(r"\b\d+[gsc]\b|copper|toLocaleString", src), "money arrives as words"
+    css = (SRC / "pages" / "professions.module.css").read_text()
+    phone = css.split("@media (max-width: 48em)", 1)[1]
+    assert ".priceRow { grid-template-columns: minmax(0, 1fr) auto;" in phone and "border-radius: 8px" in phone
+
+
+def test_market_card_picks_the_auction_house_with_the_servers_sentences():
+    """Auction prices §4.1: Config › Settings shows the auction house card under the guild card where the version has
+    auction houses; the owner sees the choices with their sample prices, confirms with the server's sentences, and can
+    turn prices off; a stale page (409) reloads; the open choices register with the server switcher's guard."""
+    config = (SRC / "pages" / "Config.tsx").read_text()
+    assert config.index("<ArmoryGuildCard />") < config.index("{meta.armory && meta.prices?.market && <MarketCard />}")
+    card = _code_only((SRC / "components" / "MarketCard.tsx").read_text())
+    assert not re.search(r"message:\s*[`\"'\[]", card), "a confirm message written in the browser"
+    for words in ("Pick the auction house…", "Turn prices off…", "Pick this one…"):
+        assert words in card, words
+    assert '{ choices: true }' in card and "preview: true" in card and "p.sentences.join" in card and "d.clear_sentences.join" in card
+    assert "rev: d.rev" in card and "e.status === 409" in card and "e.status === 404" in card
+    assert "c.listings_words" in card and "s.low_words" in card and "choices.words" in card and "<ItemName id={s.id}" in card
+    assert 'useDirty("market", choices !== null)' in card and '["config", "prices"]' in card
