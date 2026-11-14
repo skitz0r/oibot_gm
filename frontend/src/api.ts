@@ -190,6 +190,8 @@ export interface PriceHistory {
   id: number; name: string; spans: { id: string; label: string }[]; span: string;
   points: { t: number; when: string; low: number | null; high: number | null; words: string }[];
   low: number | null; high: number | null; low_words: string; high_words: string; sentences: string[];
+  /** the span's start and the server's now (epoch seconds): the chart's x axis */
+  since: number; until: number;
 }
 /** GET /api/admin/market: the guild's auction house (officers read, the owner picks). `words` = the choice in words (or what
  *  is missing), `prices` = how recent the prices are, `clear_sentences` = Turn prices off…'s confirm. */

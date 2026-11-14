@@ -598,19 +598,21 @@ def _point_json(reg, p: price_history.Point) -> dict:
 def chart(reg, item_id: int, span: str, *, now: datetime | None = None) -> dict:
     """The chart's data for one item over one of SPANS (BLOCKING: reads the history file): its points (epoch seconds,
     the time in the Clock rule's words, lowest / highest in copper, the lowest in words; low None = nothing listed from
-    then: a gap) and the span's lowest and highest. No points while prices don't show, without history, or for a file
+    then: a gap), the span's lowest and highest, and `since` / `until` = the span's start and the server's now in epoch
+    seconds (the chart's x axis: the page reads no clock of its own). No points while prices don't show, without history, or for a file
     that can't be read. An unknown span is refused."""
     from .registry import RegistryError
 
     if str(span) not in SPANS:
         raise RegistryError(NOT_A_SPAN)
     span = str(span)
-    out = {"span": span, "points": [], "low": None, "high": None, "low_words": NONE_LISTED, "high_words": NONE_LISTED}
+    now = now or discord_auctions._now()
+    days = SPANS[span][0]
+    out = {"span": span, "points": [], "low": None, "high": None, "low_words": NONE_LISTED, "high_words": NONE_LISTED,
+           "since": int((now - timedelta(days=days)).timestamp()), "until": int(now.timestamp())}
     key = discord_auctions.history_key(reg)
     if key is None or not _shown(reg):
         return out
-    now = now or discord_auctions._now()
-    days = SPANS[span][0]
     try:
         pts = price_history.points(key, item_id, now - timedelta(days=days), now)
         s = price_history.span(key, item_id, days, now)

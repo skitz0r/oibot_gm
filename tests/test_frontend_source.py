@@ -728,6 +728,12 @@ def test_the_prices_tab():
     assert "<svg" in chart and "var(--mantine-" in chart
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b", chart), "theme colours only"
     assert "toLocale" not in chart and "new Date(" not in chart, "the chart's labels are the server's words"
+    for clock in ("Date.now", "performance.now", "Date("):
+        assert clock not in chart and clock not in page, f"x runs over the server's since..until, never the browser's clock ({clock})"
+    assert "data.since" in chart and "data.until" in chart, "the span's start and end are the server's"
+    assert "pts.length === 0" in chart and "pts.length < 2" not in chart, "one point is a held line; only no point has no frame"
+    assert "key={i}" in chart and "key={p.t}" not in chart, "band keys by index (two points may share a time)"
+    assert "span={span}" in page and "busy={" in page, "the switch shows the span pressed while its answer loads"
     pkg = (root / "frontend" / "package.json").read_text()
     assert not any(lib in pkg for lib in ("recharts", "@mantine/charts", "chart.js", "d3")), "no chart library (C17)"
     assert "function PriceBox(" in (SRC / "pages" / "Professions.tsx").read_text(), "the Professions page keeps its box (D2)"

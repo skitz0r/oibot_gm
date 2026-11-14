@@ -368,6 +368,7 @@ def test_history_of_a_watched_item(w, market_on):
     assert d["sentences"] == prices.history_sentences(w.reg, PLAGUEBLOOM)
     assert d["sentences"][0] == "Lowest in the last 7 days: 12s 40c · highest: 19s 2c"
     assert d["span"] == "30" and d["points"] and (d["low"], d["high"]) == (1240, 1902) and d["low_words"] == "12s 40c"
+    assert d["until"] - d["since"] == 30 * 86400 and abs(d["until"] - t.timestamp()) < 60, "the span's start and the server's now"
     assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=14", headers=h).status_code == 400, "an unknown span"
     assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}", headers=h).json()["span"] == "7", "7 days unless asked"
     assert w.c.get("/api/prices/history?id=plaguebloom&span=7", headers=h).status_code == 400, "an id that isn't a number"

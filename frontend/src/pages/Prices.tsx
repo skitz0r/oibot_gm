@@ -141,7 +141,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
                     <Stack gap="sm" className={css.panel}>
                       {hist === null || hist.id !== r.id ? <Text size="sm" c="dimmed">Loading…</Text> : (
                         <>
-                          <PriceChart data={hist} onSpan={changeSpan} />
+                          <PriceChart data={hist} onSpan={changeSpan} span={span} busy={span !== hist.span} />
                           {hist.sentences.map((s) => <Text key={s} size="sm">{s}</Text>)}
                         </>
                       )}

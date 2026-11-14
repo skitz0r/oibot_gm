@@ -22,22 +22,25 @@ const RING = "var(--mantine-color-body)";
 /** A watched item's lowest price over one span (price watch §4.3, C5, C12, C17), drawn by the site itself as inline SVG:
  *  a step line (a price holds until the next point), broken where nothing was listed (a gap, never a zero), a faint band
  *  from the lowest to the highest on a folded day, the span's highest and lowest as the two price labels and the first and
- *  last point's time as the time labels — every label the server's words; `t` is only the x position. A hover or the
- *  arrow keys read one point out (its time and price, the server's words). With fewer than two points there is no frame:
- *  the page prints the server's sentences alone. The span switch's labels are the server's. */
-export function PriceChart({ data, onSpan, busy }: { data: PriceHistory; onSpan: (span: string) => void; busy?: boolean }) {
+ *  last point's time as the time labels — every label the server's words; `t` is only the x position, over the server's
+ *  `since` .. `until` (the span's start and the server's now: the page reads no clock of its own). A hover or the arrow
+ *  keys read one point out (its time and price, the server's words; the first point of a span reads the span's start).
+ *  One point is a held line to `until` (a price unchanged all span); with no point, or nothing listed all span, there is
+ *  no frame: the page prints the server's sentences alone. The span switch's labels are the server's; it shows `span`,
+ *  the span pressed, while that span's answer loads (`busy`). */
+export function PriceChart({ data, onSpan, span, busy }: { data: PriceHistory; onSpan: (span: string) => void; span?: string; busy?: boolean }) {
   const { ref, width } = useElementSize();
   const [active, setActive] = useState<number | null>(null);
   const pts = data.points;
   const label = data.sentences.join(" ") || data.name;
 
   const switcher = pts.length > 0 && data.spans.length > 1 && (
-    <SegmentedControl size="xs" value={data.span} onChange={onSpan} disabled={busy} aria-label="How far back"
+    <SegmentedControl size="xs" value={span ?? data.span} onChange={onSpan} disabled={busy} aria-label="How far back"
       data={data.spans.map((s) => ({ value: s.id, label: s.label }))} style={{ alignSelf: "flex-start" }} />
   );
-  if (pts.length < 2) return switcher ? <Stack gap="xs">{switcher}</Stack> : null;
-
   const lows = pts.flatMap((p) => (p.low == null ? [] : [p.low]));
+  if (pts.length === 0 || lows.length === 0) return switcher ? <Stack gap="xs">{switcher}</Stack> : null;  // nothing to draw: never NaN
+
   const highs = pts.flatMap((p) => (p.high == null ? (p.low == null ? [] : [p.low]) : [p.high]));
   const lo = Math.min(...lows, ...(data.low == null ? [] : [data.low]));
   const hi = Math.max(...highs, ...(data.high == null ? [] : [data.high]));
@@ -46,8 +49,8 @@ export function PriceChart({ data, onSpan, busy }: { data: PriceHistory; onSpan:
   const yMin = lo - pad;
   const yMax = hi + pad;
 
-  const t0 = pts[0].t;
-  const t1 = Math.max(pts[pts.length - 1].t, Math.floor(Date.now() / 1000), t0 + 1);  // the last price holds until now
+  const t0 = data.since;
+  const t1 = Math.max(data.until, t0 + 1);  // the last price holds until the server's now
   const plotW = Math.max(width - GUTTER - RIGHT, 40);
   const plotH = H - TOP - BOTTOM;
   const x = (t: number) => GUTTER + ((t - t0) / (t1 - t0)) * plotW;
@@ -64,7 +67,7 @@ export function PriceChart({ data, onSpan, busy }: { data: PriceHistory; onSpan:
     drawing = true;
   });
   const bands = pts.flatMap((p, i) => (p.low != null && p.high != null && p.high > p.low
-    ? [<rect key={p.t} x={x(p.t)} width={Math.max(x(next(i)) - x(p.t), 1)} y={y(p.high)} height={y(p.low) - y(p.high)} fill={LINE} fillOpacity={0.18} />]
+    ? [<rect key={i} x={x(p.t)} width={Math.max(x(next(i)) - x(p.t), 1)} y={y(p.high)} height={y(p.low) - y(p.high)} fill={LINE} fillOpacity={0.18} />]
     : []));
 
   const first = pts[0];

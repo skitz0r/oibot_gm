@@ -535,7 +535,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   break where nothing was listed, never a drop to zero; on older days a faint band from that day's lowest to its
   highest), with **7 days** · **30 days** · **90 days** · **1 year**, the highest and lowest of the span at its side and
   the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time and
-  price. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'
+  price (the first point reads the span's start, with the price the item had then). A price that didn't change all span is
+  a flat line across it. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'
   and, while the record is young, *"The bot has kept prices since Sat 7 Nov."*) and **Stop watching**. A watch is your own
   preference: it happens at once, with no confirm, and the same list shows in `/price`. You need to be registered to keep
   one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction

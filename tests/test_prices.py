@@ -574,7 +574,8 @@ def test_history_is_hidden_when_prices_are(reg, clock):
     reg.clear_market("Owner", by_id=OWNER)
     assert prices.history_sentences(reg, PLAGUEBLOOM, now=NOW) == []
     c = prices.chart(reg, PLAGUEBLOOM, "30", now=NOW)
-    assert c == {"span": "30", "points": [], "low": None, "high": None, "low_words": "none listed", "high_words": "none listed"}
+    assert c == {"span": "30", "points": [], "low": None, "high": None, "low_words": "none listed", "high_words": "none listed",
+                 "since": int((NOW - 30 * DAY).timestamp()), "until": int(NOW.timestamp())}, "the span's start and end even with no points"
 
 
 def test_a_broken_history_file_reads_as_none(reg, clock):
@@ -601,6 +602,9 @@ def test_chart_points(reg, clock):
     assert c["points"][0]["t"] == int((NOW - 7 * DAY).timestamp()), "the price carried to the span's start"
     assert c["points"][0]["when"] == "Fri 6 Nov 12:00 PM" and c["points"][0]["words"] == "15s"
     assert (c["low"], c["high"], c["low_words"], c["high_words"]) == (1240, 1500, "12s 40c", "15s")
+    assert (c["since"], c["until"]) == (int((NOW - 7 * DAY).timestamp()), int(NOW.timestamp())), "the x axis: the span's start to the server's now"
+    clock.t = NOW + timedelta(minutes=5)
+    assert prices.chart(reg, PLAGUEBLOOM, "7")["until"] == int(clock.t.timestamp()), "now = the bot's clock"
     assert prices.chart(reg, PLAGUEBLOOM, "365", now=NOW)["points"][0]["low"] == 1500, "the year starts at the first kept"
     with pytest.raises(RegistryError, match="That isn't one of the spans."):
         prices.chart(reg, PLAGUEBLOOM, "14", now=NOW)

@@ -5230,12 +5230,13 @@ plan said "not on adoption").
   2c", the 30 days', "None listed in the last 7 days.", and "The bot has kept prices since <day>." while the record is
   under 30 days; `NO_HISTORY_YET` for a house with nothing kept or a file that can't be read; [] while prices are
   hidden), `chart(reg, item, span)` (points {t, when, low, high, words} — `when` in the Clock rule's words, a folded day
-  its UTC day alone — and the span's low / high in numbers and words), `SPANS` 7 days · 30 days · 90 days · 1 year,
+  its UTC day alone — the span's low / high in numbers and words, and `since` / `until` = the span's start and the
+  server's now in epoch seconds), `SPANS` 7 days · 30 days · 90 days · 1 year,
   `EMPTY_LIST_SITE` / `EMPTY_LIST_DISCORD`.
 - **The site**: `GET /api/prices/find` rows carry `watching`; `GET /api/prices/watching` → {rows, words, shown, max,
   empty, registered}; `POST /api/prices/watch` {id, on} → {message, rows} (a refusal 400 with its sentence; the quiet
   write publishes `member`, so the member's other tabs reload); `GET /api/prices/history?id=&span=` → {id, name, spans,
-  span, points, low, high, low_words, high_words, sentences} for a watched item only (403 otherwise, an unknown span
+  span, points, low, high, low_words, high_words, since, until, sentences} for a watched item only (403 otherwise, an unknown span
   400); every watch route is the session's own uid, 403 from MCP (C11), 404 without auction houses. The **Prices** tab
   (`pages/Prices.tsx`, `prices.module.css`) sits in the rail after Professions when `meta.prices.market`: the status
   sentence once, the search (**What does it go for?**, rows with **Watch** / **Stop watching**) while prices show, then
@@ -5243,10 +5244,11 @@ plan said "not on adoption").
   **Stop watching**; the empty sentence, or for a viewer without a record the refusal the server sent on a press. A
   press waits for the server and takes its list; a refusal is also a red toast. A card per row below sm. `PriceChart`
   draws at the container's real width: a step line of the lowest price broken where nothing was listed, a faint band
-  low → high on folded days, y over the span's low..high with padding (flat = mid-height), x from the first point to now,
+  low → high on folded days, y over the span's low..high with padding (flat = mid-height), x from the server's `since` (the span's start) to `until` (its now; the page reads no clock),
   the server's `high_words` / `low_words` and first / last `when` as labels (the last on a second row when they would
   meet), a pointer or arrow-key read-out of one point's `when` and `words`, Mantine colour variables only, an aria-label
-  from the server's sentences; fewer than two points = no frame. The page formats no money and no time.
+  from the server's sentences; one point is a held line to `until` (a price unchanged all span), and only no point — or
+  nothing listed all span — has no frame; the span switch shows the span pressed while its answer loads. The page formats no money and no time.
 - **Discord** (`flows_prices.py`, flow `price`): `/price item` optional; with an item the old answer plus **Watch** /
   **Stop watching** when it names one item while prices show (a press edits the answer in place); with no item **Your
   watch list** (a line per item, the status line once, a select) → one item's price line, history sentences, **Stop
