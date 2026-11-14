@@ -731,6 +731,9 @@ def test_the_prices_tab():
     for clock in ("Date.now", "performance.now", "Date("):
         assert clock not in chart and clock not in page, f"x runs over the server's since..until, never the browser's clock ({clock})"
     assert "data.since" in chart and "data.until" in chart, "the span's start and end are the server's"
+    assert "if (p.low == null) { drawing = false; return; }" in chart, "a null low breaks the line: nothing listed or not read (F-5)"
+    assert "${shown.when} · ${shown.words}" in chart, "the read-out prints the server's words (not read, none listed, a price)"
+    assert "unread: boolean" in (SRC / "api.ts").read_text()
     assert "pts.length === 0" in chart and "pts.length < 2" not in chart, "one point is a held line; only no point has no frame"
     assert "key={i}" in chart and "key={p.t}" not in chart, "band keys by index (two points may share a time)"
     assert "span={span}" in page and "busy={" in page, "the switch shows the span pressed while its answer loads"

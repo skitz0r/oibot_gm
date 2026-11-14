@@ -427,10 +427,24 @@ def member(reg):
 
 
 def keep(reg, at, table: dict[int, Price]):
-    """The selected house's history keeps `table` at feed time `at`."""
+    """The selected house's history keeps `table` at feed time `at`, the house read all along: the table kept before is
+    re-read every GAP_AFTER up to `at`, so no stretch reads as unread (a test wanting one calls price_history.record)."""
+    import sqlite3
+
     from oibot_gm import price_history
 
-    assert price_history.record(discord_auctions.history_key(reg), at, table) >= 0
+    key = discord_auctions.history_key(reg)
+    p = price_history.path(key)
+    if p.exists():
+        with sqlite3.connect(p) as con:
+            last_at = con.execute("SELECT last_at FROM meta").fetchone()[0]
+            before = {item: Price(low=low, qty=qty) for item, low, qty in con.execute("SELECT item, low, qty FROM last") if low is not None}
+        con.close()
+        t = datetime.fromtimestamp(last_at, timezone.utc) + price_history.GAP_AFTER
+        while int(t.timestamp()) < int(at.timestamp()):  # whole seconds, as the file keeps them
+            price_history.record(key, t, before)
+            t += price_history.GAP_AFTER
+    assert price_history.record(key, at, table) >= 0
 
 
 def test_watch_and_unwatch_sentences(reg, clock, member):
@@ -609,6 +623,22 @@ def test_chart_points(reg, clock):
     assert prices.chart(reg, PLAGUEBLOOM, "365", now=NOW)["points"][0]["low"] == 1500, "the year starts at the first kept"
     with pytest.raises(RegistryError, match="That isn't one of the spans."):
         prices.chart(reg, PLAGUEBLOOM, "14", now=NOW)
+
+
+def test_an_unread_stretch_reads_not_read(reg, clock):
+    from oibot_gm import price_history
+
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    key = discord_auctions.history_key(reg)
+    price_history.record(key, NOW - 30 * DAY, {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    price_history.record(key, NOW - 10 * DAY, {PLAGUEBLOOM: Price(low=1500, qty=4)})  # 20 days the bot didn't read
+    c = prices.chart(reg, PLAGUEBLOOM, "30", now=NOW)
+    assert prices.NOT_READ == "not read"
+    assert [(p["low"], p["high"], p["words"], p["unread"]) for p in c["points"]] == [
+        (1500, 1500, "15s", False), (None, None, "not read", True), (1500, 1500, "15s", False)]
+    assert c["points"][1]["when"].endswith((" AM", " PM")), "an unread stretch starts at a time, not a day"
+    assert prices.chart(reg, PLAGUEBLOOM, "7", now=NOW)["points"] == [
+        {**c["points"][2], "t": int((NOW - 7 * DAY).timestamp()), "when": reg.local12(NOW - 7 * DAY)}], "read since: no break"
 
 
 def test_a_folded_day_reads_as_the_day_alone(reg, clock):

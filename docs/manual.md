@@ -533,7 +533,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   listed, newest first; an empty list says *"You aren't watching anything yet. Search for an item above and press
   Watch."* (while prices aren't shown, just *"You aren't watching anything yet."*, in `/price` too). Open a row to see its price over time: a line of the lowest price (a price holds until the next change; a
   break where nothing was listed, never a drop to zero; on older days a faint band from that day's lowest to its
-  highest), with **7 days** · **30 days** · **90 days** · **1 year**, the highest and lowest of the span at its side and
+  highest; a stretch when the bot didn't read the auction house is a break too, read *not read*), with **7 days** · **30 days** · **90 days** · **1 year**, the highest and lowest of the span at its side and
   the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time and
   price (the first point reads the span's start, with the price the item had then). A price that didn't change all span is
   a flat line across it. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'

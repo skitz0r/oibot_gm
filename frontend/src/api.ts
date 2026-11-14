@@ -188,7 +188,8 @@ export interface WatchList { rows: PriceRow[]; words: string; shown: boolean; ma
  *  highest as numbers and words; `sentences` = the 7- and 30-day sentences (and since when the bot has kept prices). */
 export interface PriceHistory {
   id: number; name: string; spans: { id: string; label: string }[]; span: string;
-  points: { t: number; when: string; low: number | null; high: number | null; words: string }[];
+  /** `unread` = the bot didn't read the house from `t` (low / high null, words "not read"): a break, as nothing listed */
+  points: { t: number; when: string; low: number | null; high: number | null; words: string; unread: boolean }[];
   low: number | null; high: number | null; low_words: string; high_words: string; sentences: string[];
   /** the span's start and the server's now (epoch seconds): the chart's x axis */
   since: number; until: number;

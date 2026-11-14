@@ -279,10 +279,10 @@ WATCH_ROUTES = (("get", "/api/prices/watching"), ("post", "/api/prices/watch"), 
 
 
 def keep(reg, at, table):
-    """The selected house's history keeps `table` at feed time `at`."""
-    from oibot_gm import price_history
+    """The selected house's history keeps `table` at feed time `at`, the house read all along (test_prices.keep)."""
+    from test_prices import keep as keep_read
 
-    assert price_history.record(discord_auctions.history_key(reg), at, table) >= 0
+    keep_read(reg, at, table)
 
 
 def stranger(w, uid=300_000_000_000_000_777):

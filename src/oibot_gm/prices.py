@@ -514,6 +514,7 @@ EMPTY_LIST_DISCORD = "You aren't watching anything yet. Use /price with an item 
 EMPTY_LIST_HIDDEN = "You aren't watching anything yet."  # prices hidden: nothing can be watched, so no search is pointed at
 NO_HISTORY_YET = "The bot hasn't kept any prices for this auction house yet."
 NOT_A_SPAN = "That isn't one of the spans."
+NOT_READ = "not read"  # a chart point: from here the bot didn't read the auction house (a break in the line)
 SHORT_HISTORY = timedelta(days=30)  # kept for less than this: the history says since when
 
 
@@ -590,16 +591,18 @@ def history_sentences(reg, item_id: int, *, now: datetime | None = None) -> list
 
 
 def _point_json(reg, p: price_history.Point) -> dict:
+    if p.unread:  # the bot didn't read the house from here: a break, read "not read"
+        return {"t": int(p.at.timestamp()), "when": reg.local12(p.at), "low": None, "high": None, "words": NOT_READ, "unread": True}
     # a folded day is one UTC day (price_history's fold): read as that day alone, never shifted into the guild's zone
     when = fmt12(p.at.astimezone(timezone.utc), "%a %d %b") if p.qty is None else reg.local12(p.at)
     return {"t": int(p.at.timestamp()), "when": when, "low": p.low, "high": p.high,
-            "words": money(p.low) if p.low is not None else NONE_LISTED}
+            "words": money(p.low) if p.low is not None else NONE_LISTED, "unread": False}
 
 
 def chart(reg, item_id: int, span: str, *, now: datetime | None = None) -> dict:
     """The chart's data for one item over one of SPANS (BLOCKING: reads the history file): its points (epoch seconds,
     the time in the Clock rule's words, lowest / highest in copper, the lowest in words; low None = nothing listed from
-    then: a gap), the span's lowest and highest, and `since` / `until` = the span's start and the server's now in epoch
+    then: a gap; `unread` = the bot didn't read the house from then: a gap whose words are NOT_READ), the span's lowest and highest, and `since` / `until` = the span's start and the server's now in epoch
     seconds (the chart's x axis: the page reads no clock of its own). No points while prices don't show, without history, or for a file
     that can't be read. An unknown span is refused."""
     from .registry import RegistryError
@@ -626,7 +629,7 @@ def chart(reg, item_id: int, span: str, *, now: datetime | None = None) -> dict:
     return out
 
 
-__all__ = ["EMPTY_LIST_DISCORD", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
+__all__ = ["EMPTY_LIST_DISCORD", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

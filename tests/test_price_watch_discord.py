@@ -47,7 +47,10 @@ def harness(reg, uid=UID, name="Brindlewick"):
 
 
 def keep(reg, at, table):
-    assert price_history.record(discord_auctions.history_key(reg), at, table) >= 0
+    """The selected house's history keeps `table` at feed time `at`, the house read all along (test_prices.keep)."""
+    from test_prices import keep as keep_read
+
+    keep_read(reg, at, table)
 
 
 def lines(h) -> list[str]:

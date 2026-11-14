@@ -5208,13 +5208,18 @@ plan said "not on adoption").
   `out/auctions/history/`, named from the house's full key (namespace, ruleset, house; `discord_auctions.history_key`).
   Tables: `meta` (the first and last kept feed time), `changes` (item, at, low, high, qty; a change has high = low and a
   qty, a folded day high ≥ low and no qty; low NULL = nothing listed from then), `last` (each item's last kept low and
-  qty, the comparison base). `record(key, at, prices)` writes a row only for an item whose lowest price or quantity
-  differs from the last kept (an item that had listings and has none gets a NULL row), once per feed time — a time not
-  later than the last kept writes nothing; check and write in one immediate transaction. `points(key, item, since,
-  until)` carries the last value before `since` in at `since`; `span(key, item, days, now)` → (lowest, highest) of the
-  hourly lowest prices, time with nothing listed counting for neither; `kept_since`; `fold(now)` over every file (picked
-  or not): rows older than 90 days → one lowest / highest per item per UTC day, days older than a year dropped (P2), a
-  file left empty or whose newest feed time is past a year deleted. A broken file raises `HistoryError`.
+  qty, the comparison base), `unread` (start, stop: a stretch of more than `GAP_AFTER` = 3 hours between two kept feed
+  times — the house switched away and back, prices off, the bot down, or a feed answering "not modified" for hours; the
+  table is added on open to a file made before it). `record(key, at, prices)` writes a row only for an item whose lowest
+  price or quantity differs from the last kept (an item that had listings and has none gets a NULL row), once per feed
+  time — a time not later than the last kept writes nothing; check, write and the unread stretch before it in one
+  immediate transaction. `points(key, item, since, until)` carries the last value before `since` in at `since`; for every
+  unread stretch the item went into with a value, a point at its start (clamped to `since`; `unread`, no price) and, unless
+  the item changed at its end, a point there with the value it resumed with — a short history never reads as a quiet one
+  (final review F-5); `span(key, item, days, now)` → (lowest, highest) of the hourly lowest prices, time with nothing
+  listed or unread counting for neither; `kept_since`; `fold(now)` over every file (picked or not): rows older than 90
+  days → one lowest / highest per item per UTC day, days older than a year dropped (P2), unread stretches kept as they
+  are but those ended before the year, a file left empty or whose newest feed time is past a year deleted. A broken file raises `HistoryError`.
 - **The feed** (`discord_auctions`): `refresh` keeps every new table taken as the guild's (and an adopted shared one,
   T1-a) with `_keep` in a thread; a failure keeps the price table and warns ops at most once an hour (`HISTORY_FAILED`,
   kind `history`). Not on a 304, not for a read discarded because the market changed. `auctions_tick` starts the fold
@@ -5229,7 +5234,8 @@ plan said "not on adoption").
   otherwise; an unnamed id reads `UNNAMED`), `history_sentences` ("Lowest in the last 7 days: 12s 40c · highest: 19s
   2c", the 30 days', "None listed in the last 7 days.", and "The bot has kept prices since <day>." while the record is
   under 30 days; `NO_HISTORY_YET` for a house with nothing kept or a file that can't be read; [] while prices are
-  hidden), `chart(reg, item, span)` (points {t, when, low, high, words} — `when` in the Clock rule's words, a folded day
+  hidden), `chart(reg, item, span)` (points {t, when, low, high, words, unread} — an unread point's words `NOT_READ` "not
+  read", its low / high null — — `when` in the Clock rule's words, a folded day
   its UTC day alone — the span's low / high in numbers and words, and `since` / `until` = the span's start and the
   server's now in epoch seconds), `SPANS` 7 days · 30 days · 90 days · 1 year,
   `EMPTY_LIST_SITE` / `EMPTY_LIST_DISCORD`, and `EMPTY_LIST_HIDDEN` "You aren't watching anything yet." on both while
@@ -5244,7 +5250,8 @@ plan said "not on adoption").
   **Your watch list** — a row per item opened in place to `components/PriceChart.tsx`, the server's sentences and
   **Stop watching**; the empty sentence, or for a viewer without a record the refusal the server sent on a press. A
   press waits for the server and takes its list; a refusal is also a red toast. A card per row below sm. `PriceChart`
-  draws at the container's real width: a step line of the lowest price broken where nothing was listed, a faint band
+  draws at the container's real width: a step line of the lowest price broken where nothing was listed or the bot read
+  nothing (both have a null low), a faint band
   low → high on folded days, y over the span's low..high with padding (flat = mid-height), x from the server's `since` (the span's start) to `until` (its now; the page reads no clock),
   the server's `high_words` / `low_words` and first / last `when` as labels (the last on a second row when they would
   meet), a pointer or arrow-key read-out of one point's `when` and `words`, Mantine colour variables only, an aria-label

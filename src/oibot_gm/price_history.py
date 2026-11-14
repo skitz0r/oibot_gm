@@ -3,9 +3,12 @@
 One SQLite file per auction house under `out/auctions/history/` (derived, foreign data — never the data repo), named from
 the house's full key (namespace, ruleset, house). `record` keeps a row only for an item whose lowest price or quantity
 listed differs from the last kept (an item that had listings and has none now gets a row with no price), once per feed
-time: a feed time not later than the last kept writes nothing. `points` / `span` read an item's rows with the price
-carried in from before the span; `fold` (once a day) turns rows older than KEEP_FULL into one lowest and one highest per
-item per UTC day and drops days older than KEEP_DAILY — but each item's last value before that year stays as the
+time: a feed time not later than the last kept writes nothing. A stretch of more than GAP_AFTER between two kept feed
+times is kept as unread (the bot learned nothing then: the house switched away and back, prices off, the bot down, or a
+feed answering "not modified" for hours). `points` / `span` read an item's rows with the price carried in from before
+the span, and break the line over an unread stretch (final review F-5: a short history never reads as a quiet one);
+`fold` (once a day) turns rows older than KEEP_FULL into one lowest and one highest per
+item per UTC day and drops days older than KEEP_DAILY (and unread stretches that ended before it) — but each item's last value before that year stays as the
 carried start while the house is still read (controller ruling P2); a file whose newest feed time is older than a year,
 or that holds no row, is deleted.
 
@@ -26,13 +29,16 @@ log = logging.getLogger(__name__)
 
 KEEP_FULL = timedelta(days=90)  # every change
 KEEP_DAILY = timedelta(days=365)  # one lowest and one highest per item per day; nothing older
+GAP_AFTER = timedelta(hours=3)  # more than this between two kept feed times = time the bot never read
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (one INTEGER PRIMARY KEY CHECK (one = 1), first_at INTEGER NOT NULL, last_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS changes (item INTEGER NOT NULL, at INTEGER NOT NULL, low INTEGER, high INTEGER, qty INTEGER,
                                     PRIMARY KEY (item, at)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS last (item INTEGER PRIMARY KEY, low INTEGER, qty INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS unread (start INTEGER PRIMARY KEY, stop INTEGER NOT NULL) WITHOUT ROWID;
 """
+# `unread` came after the first files were made: the IF NOT EXISTS above adds it to an older file when it is opened.
 
 
 class HistoryError(Exception):
@@ -42,11 +48,12 @@ class HistoryError(Exception):
 @dataclass(frozen=True)
 class Point:
     """A change (`high == low`, `qty` = how many listed) or a folded day (`at` = the day's start, `qty` None).
-    `low is None` = nothing listed from `at`."""
+    `low is None` = nothing listed from `at`; `unread` = the bot didn't read the house from `at` (low, high, qty None)."""
     at: datetime
     low: int | None
     high: int | None
     qty: int | None
+    unread: bool = False
 
 
 @dataclass(frozen=True)
@@ -115,6 +122,8 @@ def _record_rows(con: sqlite3.Connection, t: int, prices: dict[int, Price]) -> i
     row = con.execute("SELECT first_at, last_at FROM meta").fetchone()
     if row is not None and t <= row[1]:
         return 0
+    if row is not None and t - row[1] > GAP_AFTER.total_seconds():
+        con.execute("INSERT OR REPLACE INTO unread (start, stop) VALUES (?, ?)", (row[1], t))
     last = {item: (low, qty) for item, low, qty in con.execute("SELECT item, low, qty FROM last")}
     rows: list[tuple] = []
     for item, pr in prices.items():
@@ -151,26 +160,51 @@ def _read(key: tuple, fn):
 
 def points(key: tuple, item_id: int, since: datetime, until: datetime) -> list[Point]:
     """An item's kept points from `since` to `until`, oldest first; the first is the last one kept before `since`,
-    moved to `since` (carried forward). [] when the item has nothing kept by `until`."""
+    moved to `since` (carried forward). [] when the item has nothing kept by `until`.
+
+    Every unread stretch overlapping the window, for an item that had a value going into it, adds a point at the
+    stretch's start (moved to `since` when it began before; low / high / qty None, `unread`) and — when the item has no
+    change of its own at the stretch's end and that end is within the window — a point there with the value it resumed
+    with. An item with nothing listed going in gets no extra point."""
     item, a, b = int(item_id), _secs(since), _secs(until)
 
+    def standing(con, t: int):
+        """The item's value after the read at `t` (its last row at or before it), or None."""
+        return con.execute("SELECT at, low, high, qty FROM changes WHERE item = ? AND at <= ? ORDER BY at DESC LIMIT 1",
+                           (item, t)).fetchone()
+
     def go(con):
-        out: list[Point] = []
+        rows = con.execute("SELECT at, low, high, qty FROM changes WHERE item = ? AND at >= ? AND at <= ? ORDER BY at",
+                           (item, a, b)).fetchall()
         before = con.execute("SELECT low, high, qty FROM changes WHERE item = ? AND at < ? ORDER BY at DESC LIMIT 1",
                              (item, a)).fetchone()
-        if before is not None:
-            out.append(Point(since, *before))
-        for at, low, high, qty in con.execute("SELECT at, low, high, qty FROM changes WHERE item = ? AND at >= ? AND at <= ?"
-                                              " ORDER BY at", (item, a, b)):
-            out.append(Point(_time(at), low, high, qty))
-        return out
+        gaps = []  # (start, stop) the item went into with a value
+        for start, stop in con.execute("SELECT start, stop FROM unread WHERE start < ? AND stop > ? ORDER BY start", (b, a)).fetchall():
+            into = standing(con, start)
+            if into is not None and into[1] is not None:
+                gaps.append((start, stop))
+        out: list[tuple[int, int, Point]] = []  # (at, order, point): at one time a value comes before a break
+        if before is not None and not any(s <= a < e for s, e in gaps):  # a window opening unread starts with the break
+            out.append((a, 0, Point(since, *before)))
+        at_set = {r[0] for r in rows}
+        for at, low, high, qty in rows:
+            if not any(s < at < e for s, e in gaps):  # nothing was read inside a stretch (a folded day's start may fall there)
+                out.append((at, 0, Point(_time(at), low, high, qty)))
+        for s, e in gaps:
+            start = max(s, a)
+            out.append((start, 1, Point(_time(start), None, None, None, unread=True)))
+            if e <= b and e not in at_set:
+                back = standing(con, e)
+                out.append((e, 0, Point(_time(e), back[1], back[2], back[3])))
+        out.sort(key=lambda x: (x[0], x[1]))
+        return [p for _at, _o, p in out]
 
     return _read(key, go) or []
 
 
 def span(key: tuple, item_id: int, days: int, now: datetime) -> Span:
-    """The lowest and the highest of the item's lowest prices over the last `days` days; time with nothing listed counts
-    for neither; both None when nothing was listed throughout."""
+    """The lowest and the highest of the item's lowest prices over the last `days` days; time with nothing listed and
+    time the bot didn't read count for neither; both None when nothing was listed (or read) throughout."""
     pts = points(key, item_id, now - timedelta(days=days), now)
     lows = [p.low for p in pts if p.low is not None]
     highs = [p.high for p in pts if p.high is not None]
@@ -199,6 +233,7 @@ def _fold_file(p: Path, now: datetime) -> None:
             with con:
                 _fold_days(con, full_cut)
                 _drop_year(con, daily_cut)
+                con.execute("DELETE FROM unread WHERE stop < ?", (daily_cut,))  # a stretch wholly past the year
                 if meta is not None and meta[0] < daily_cut:
                     con.execute("UPDATE meta SET first_at = ?", (daily_cut,))
             gone = con.execute("SELECT 1 FROM changes LIMIT 1").fetchone() is None
@@ -250,4 +285,4 @@ def fold(now: datetime) -> None:
             log.exception("price history %s not folded", p.name)
 
 
-__all__ = ["HistoryError", "KEEP_DAILY", "KEEP_FULL", "Point", "Span", "fold", "kept_since", "path", "points", "record", "root", "span"]
+__all__ = ["GAP_AFTER", "HistoryError", "KEEP_DAILY", "KEEP_FULL", "Point", "Span", "fold", "kept_since", "path", "points", "record", "root", "span"]
