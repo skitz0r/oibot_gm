@@ -4,7 +4,14 @@ Registry — no rule lives here.
 - `GET /api/prices/find?q=` (every member): the price search (prices.search) → {rows [{id, name, low_words, qty, words}],
   total, words (how recent the prices are, prices.status_sentence for this reader), more (prices.more_words when rows are
   left out, else ""), message (the answer in lines:
-  prices.answer_lines — MCP's price_check reads it)}. 404 on a version with no auction houses.
+  prices.answer_lines — MCP's price_check reads it)}. 404 on a version with no auction houses. A row's `watching` = on the
+  viewer's own watch list (always false from MCP).
+- The viewer's own watch list (price watch §4.2, §4.3; the session's uid, never a parameter; every route 403 from MCP —
+  C11 — and 404 without auction houses): `GET /api/prices/watching` → {rows [{id, name, low_words, qty, words}] (names
+  alone while prices are hidden), words, shown, max, empty, registered}; `POST /api/prices/watch` {id, on} → {message,
+  rows} (prices.watch / unwatch in a thread: one quiet commit whose SAVE_LISTENERS publish `member`, so the member's
+  other tabs reload; a refusal 400); `GET /api/prices/history?id=&span=` → {id, name, spans, **prices.chart, sentences}
+  for a watched item only (403 otherwise, C6; an unknown span 400), both history reads in one thread.
 - `GET /api/admin/market` (officers read) + `POST /api/admin/market` (owner): the guild's auction house.
   `{choices: true}` → the houses the owner may pick (discord_auctions.house_choices: a Blizzard read in a thread;
   `words` = why the list is empty, else "");
@@ -26,13 +33,15 @@ from fastapi.responses import JSONResponse
 
 from .. import auctions, discord_auctions, prices
 from .. import ops as ops_mod
-from ..registry import ConfigChanged, RegistryError
+from ..registry import WATCH_MAX, ConfigChanged, RegistryError
 
 log = logging.getLogger(__name__)
 
 FIND_LIMIT = 25  # items the price search returns; `total` counts every match
 MARKET_ACTOR = ("Picking the guild's auction house is the owner's decision: from MCP it needs OIBOT_MCP_ACTOR set to the "
                 "owner's Discord id.")
+OWN_LIST = "A watch list is its member's own."  # every watch route refuses an MCP caller (price watch C11)
+WATCH_FIRST = "Watch the item first to see its history."  # history shows for watched items only (C6)
 
 
 def _low(low: int | None) -> str:
@@ -76,10 +85,73 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
             raise HTTPException(404, auctions.NO_AUCTIONS_WORDS)
         shown, total = prices.search(reg, q, FIND_LIMIT)
         owner = bool(v.owner)
-        return {"q": q, "rows": [{"id": p.id, "name": p.name, "low_words": _low(p.low), "qty": p.qty, "words": prices.price_words(p)} for p in shown],
+        mine = set() if v.via == "mcp" else set(reg.watching(v.uid))  # a watch list is its member's own: never through MCP (C11)
+        return {"q": q, "rows": [{"id": p.id, "name": p.name, "low_words": _low(p.low), "qty": p.qty, "words": prices.price_words(p),
+                                  "watching": p.id in mine} for p in shown],
                 "total": total, "words": prices.status_sentence(reg, owner),
                 "more": prices.more_words(total - len(shown)) if shown and total > len(shown) else "",
                 "message": "\n".join(prices.answer_lines(reg, shown, total, owner)) if q.strip() else ""}
+
+    # ---- the member's own watch list and a watched item's history (price watch §4.2, §4.3): the session's own uid only
+    def own_list(v) -> None:
+        if not v.reg.profile.auctions:
+            raise HTTPException(404, auctions.NO_AUCTIONS_WORDS)
+        if v.via == "mcp":
+            raise HTTPException(403, OWN_LIST)
+
+    def shown_now(reg) -> bool:
+        return discord_auctions.state(reg) in ("fresh", "stale")
+
+    def watch_rows(reg, uid: int) -> list[dict]:
+        if not shown_now(reg):  # prices hidden (C16): the names alone
+            return [{"id": p.id, "name": p.name, "low_words": "", "qty": 0, "words": ""} for p in prices.watch_list(reg, uid)]
+        return [{"id": p.id, "name": p.name, "low_words": _low(p.low), "qty": p.qty, "words": prices.price_words(p)}
+                for p in prices.watch_list(reg, uid)]
+
+    @app.get("/api/prices/watching")
+    async def prices_watching(request: Request):
+        """The viewer's own watch list, newest first: rows priced while prices show, else names alone (`shown` false)."""
+        v = await who(request)
+        own_list(v)
+        reg = v.reg
+        m = reg.members.get(v.uid)
+        return {"rows": watch_rows(reg, v.uid), "words": prices.status_sentence(reg, bool(v.owner)),
+                "shown": shown_now(reg), "max": WATCH_MAX, "empty": prices.EMPTY_LIST_SITE,
+                "registered": m is not None and not m.test}
+
+    @app.post("/api/prices/watch")
+    async def prices_watch(request: Request):
+        """`{id, on: true}` → watch the item; `{id, on: false}` → stop. The sentence and the fresh list; a refusal 400."""
+        v, d = await body(request)
+        own_list(v)
+        item, on = d.get("id"), d.get("on")
+        if isinstance(item, bool) or not isinstance(item, int) or not isinstance(on, bool):
+            return JSONResponse({"error": prices.NO_MATCH}, status_code=400)
+        verb = prices.watch if on else prices.unwatch
+        try:
+            message = await asyncio.to_thread(verb, v.reg, v.uid, item)  # one quiet commit (C14); SAVE_LISTENERS → `member`
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": message, "rows": watch_rows(v.reg, v.uid)}
+
+    @app.get("/api/prices/history")
+    async def prices_history(request: Request, id: str = "", span: str = "7"):  # noqa: A002 — the page's own word
+        """A watched item's chart over one span and its history sentences (C5); an item not on the list 403 (C6)."""
+        v = await who(request)
+        own_list(v)
+        reg = v.reg
+        try:
+            item = int(id)
+        except ValueError:
+            return JSONResponse({"error": prices.NO_MATCH}, status_code=400)
+        if not prices.is_watching(reg, v.uid, item):
+            raise HTTPException(403, WATCH_FIRST)
+        try:
+            chart, sentences = await asyncio.to_thread(lambda: (prices.chart(reg, item, span), prices.history_sentences(reg, item)))
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"id": item, "name": prices.names(reg).get(item) or prices.UNNAMED,
+                "spans": [{"id": k, "label": label} for k, (_days, label) in prices.SPANS.items()], **chart, "sentences": sentences}
 
     # ---- the guild's auction house: officers read, the owner picks / clears
     def market_state(v) -> dict:

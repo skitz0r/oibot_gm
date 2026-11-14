@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
 
@@ -135,7 +135,7 @@ def test_find_returns_rows_total_and_words(w, market_on):
     priced(w.reg, {BAR: Price(low=489998, qty=30)}, at=now())
     d = w.c.get("/api/prices/find?q=arcanite%20bar", headers=h).json()
     assert d["rows"][0] == {"id": BAR, "name": "Arcanite Bar", "low_words": "48g 99s 98c", "qty": 30,
-                            "words": "Arcanite Bar: lowest price 48g 99s 98c, 30 listed."}
+                            "words": "Arcanite Bar: lowest price 48g 99s 98c, 30 listed.", "watching": False}
     assert d["total"] >= 1 and d["words"].startswith("Prices as of ")
     assert d["message"].splitlines()[:2] == [d["words"], "Arcanite Bar: lowest price 48g 99s 98c, 30 listed."]
     d = w.c.get("/api/prices/find?q=dreamfoil", headers=h).json()
@@ -269,3 +269,211 @@ def test_wowhead_links_forever_items():
     assert forever.item_url == "https://www.wowhead.com/forever/item={id}"
     assert wowhead(SimpleNamespace(id=28830), tbc_p) == "https://www.wowhead.com/tbc/item=28830"
     assert wowhead(SimpleNamespace(id=0), forever) is None and wowhead(None, forever) is None
+
+
+# ------------------------------------------------------------------ the watch list and the price history (price watch §4.2, §4.3)
+
+PLAGUEBLOOM = 13466
+UNNAMED_ID = 900_001  # an id the bot could name when it was watched; its name is gone since
+WATCH_ROUTES = (("get", "/api/prices/watching"), ("post", "/api/prices/watch"), ("get", "/api/prices/history"))
+
+
+def keep(reg, at, table):
+    """The selected house's history keeps `table` at feed time `at`."""
+    from oibot_gm import price_history
+
+    assert price_history.record(discord_auctions.history_key(reg), at, table) >= 0
+
+
+def stranger(w, uid=300_000_000_000_000_777):
+    """Someone in the server with no record here."""
+    from test_people_web import person
+
+    w.bot.directory.members[(1, uid)] = person(uid)
+    assert uid not in w.reg.members
+    return uid
+
+
+def test_watch_then_list_then_stop(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4), BAR: Price(low=489998, qty=30)}, at=now())
+    d = w.c.get("/api/prices/watching", headers=h).json()
+    assert d == {"rows": [], "words": prices.status_sentence(w.reg, False), "shown": True, "max": 25, "empty": prices.EMPTY_LIST_SITE,
+                 "registered": True}
+    r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    assert r.status_code == 200, r.text
+    row = {"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "15s", "qty": 4, "words": "Plaguebloom: lowest price 15s, 4 listed."}
+    assert r.json() == {"message": "You're watching Plaguebloom.", "rows": [row]}
+    r = w.c.post("/api/prices/watch", json={"id": BAR, "on": True}, headers=h)
+    assert [x["id"] for x in r.json()["rows"]] == [BAR, PLAGUEBLOOM], "newest first"
+    d = w.c.get("/api/prices/watching", headers=h).json()
+    assert d["rows"] == r.json()["rows"] and d["rows"][1] == row
+    r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": False}, headers=h)
+    assert r.json() == {"message": "You've stopped watching Plaguebloom.", "rows": d["rows"][:1]}
+    assert w.reg.watching(m.discord_id) == [BAR]
+    for bad in ({"id": "plaguebloom", "on": True}, {"on": True}, {"id": True, "on": True}):
+        assert w.c.post("/api/prices/watch", json=bad, headers=h).status_code == 400, bad
+
+
+def test_the_list_without_prices_shows_names_only(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now() - timedelta(hours=30))  # a day old: not shown (C16)
+    d = w.c.get("/api/prices/watching", headers=h).json()
+    assert d["shown"] is False and d["rows"] == [{"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "", "qty": 0, "words": ""}]
+
+
+def test_find_rows_say_whether_you_watch(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4), BAR: Price(low=489998, qty=30)}, at=now())
+    w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    [row] = [x for x in w.c.get("/api/prices/find?q=plaguebloom", headers=h).json()["rows"] if x["id"] == PLAGUEBLOOM]
+    assert row["watching"] is True
+    assert all(x["watching"] is False for x in w.c.get("/api/prices/find?q=arcanite%20bar", headers=h).json()["rows"])
+    u = stranger(w)
+    rows = w.c.get("/api/prices/find?q=plaguebloom", headers=as_user(w, u)).json()["rows"]
+    assert rows and all(x["watching"] is False for x in rows), "someone with no record watches nothing"
+
+
+def test_history_of_a_watched_item(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    t = now()
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=t)
+    for days, low in ((40, 1800), (10, 1500), (5, 1240), (3, 1902)):
+        keep(w.reg, t - timedelta(days=days), {PLAGUEBLOOM: Price(low=low, qty=3)})
+    w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    r = w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=30", headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["id"] == PLAGUEBLOOM and d["name"] == "Plaguebloom"
+    assert d["spans"] == [{"id": "7", "label": "7 days"}, {"id": "30", "label": "30 days"}, {"id": "90", "label": "90 days"},
+                          {"id": "365", "label": "1 year"}]
+    assert d["sentences"] == prices.history_sentences(w.reg, PLAGUEBLOOM)
+    assert d["sentences"][0] == "Lowest in the last 7 days: 12s 40c · highest: 19s 2c"
+    assert d["span"] == "30" and d["points"] and (d["low"], d["high"]) == (1240, 1902) and d["low_words"] == "12s 40c"
+    assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=14", headers=h).status_code == 400, "an unknown span"
+    assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}", headers=h).json()["span"] == "7", "7 days unless asked"
+    assert w.c.get("/api/prices/history?id=plaguebloom&span=7", headers=h).status_code == 400, "an id that isn't a number"
+
+
+def test_history_of_an_item_you_dont_watch_is_refused(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    keep(w.reg, now() - timedelta(days=2), {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    r = w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=7", headers=h)
+    assert r.status_code == 403 and r.json()["error"] == "Watch the item first to see its history."
+
+
+def test_an_unregistered_server_member_can_search_but_not_watch(w, market_on):
+    from oibot_gm.registry import WATCH_REGISTER_FIRST
+
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    u = stranger(w)
+    h = as_user(w, u)
+    assert w.c.get("/api/prices/find?q=plaguebloom", headers=h).status_code == 200
+    d = w.c.get("/api/prices/watching", headers=h).json()
+    assert d["rows"] == [] and d["registered"] is False
+    r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == WATCH_REGISTER_FIRST == "Register first with /register to keep a watch list."
+    assert u not in w.reg.members, "a watch never creates a record"
+
+
+def test_the_full_list_refusal(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    rec = w.reg.members[m.discord_id]
+    rec.watching = list(range(910_000, 910_025))
+    w.reg.save_quiet(rec, "seed: watch list changed")
+    r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == "Your watch list holds 25 items. Stop watching one first."
+    assert len(w.reg.watching(m.discord_id)) == 25 and PLAGUEBLOOM not in w.reg.watching(m.discord_id)
+
+
+def test_another_member_never_reads_your_list(w, market_on):
+    a, b = member(w, 0), member(w, 1)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    keep(w.reg, now() - timedelta(days=2), {PLAGUEBLOOM: Price(low=1500, qty=4)})
+    w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=as_user(w, a.discord_id))
+    hb = as_user(w, b.discord_id)
+    for q in ("", f"?uid={a.discord_id}", f"?member={a.discord_id}", f"?discord_id={a.discord_id}"):
+        assert w.c.get("/api/prices/watching" + q, headers=hb).json()["rows"] == [], q
+    assert w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=7&uid={a.discord_id}", headers=hb).status_code == 403
+    r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": False, "uid": a.discord_id, "member": a.discord_id}, headers=hb)
+    assert r.status_code == 200 and w.reg.watching(a.discord_id) == [PLAGUEBLOOM], "B's stop never touches A's list"
+    routes = {(method, r.path): r for r in w.c.app.routes if hasattr(r, "dependant") for method in r.methods}
+    for method, path in WATCH_ROUTES:
+        params = {p.name for p in routes[(method.upper(), path)].dependant.query_params}
+        assert params <= {"id", "span"}, (path, params)
+
+
+def test_mcp_is_refused_on_every_watch_route(w, market_on):
+    w.reg.add_character(OWNER, "Owner", "Ownerin", "Priest", "Holy", None, True)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    w.reg.watch(OWNER, PLAGUEBLOOM)  # the token's owner watches it on the site
+    for method, path in WATCH_ROUTES:
+        kw = {"json": {"id": PLAGUEBLOOM, "on": True}} if method == "post" else {"params": {"id": PLAGUEBLOOM, "span": "7"}}
+        r = getattr(w.c, method)(path, headers=MCP, **kw)
+        assert r.status_code == 403 and r.json()["error"] == "A watch list is its member's own.", path
+    d = w.c.get("/api/prices/find?q=plaguebloom", headers=MCP)
+    assert d.status_code == 200 and d.json()["rows"] and all(x["watching"] is False for x in d.json()["rows"])
+
+
+def test_a_broken_history_file_is_not_a_500(w, market_on):
+    from oibot_gm import price_history
+
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
+    p = price_history.path(discord_auctions.history_key(w.reg))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"this is not a database at all, not even close" * 40)
+    r = w.c.get(f"/api/prices/history?id={PLAGUEBLOOM}&span=7", headers=h)
+    assert r.status_code == 200 and r.json()["points"] == [] and r.json()["sentences"] == [prices.NO_HISTORY_YET]
+
+
+def test_an_unnamed_watched_item_lists_and_stops(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {UNNAMED_ID: Price(low=99, qty=1)}, at=now())
+    w.reg.watch(m.discord_id, UNNAMED_ID)
+    [row] = w.c.get("/api/prices/watching", headers=h).json()["rows"]
+    assert row["id"] == UNNAMED_ID and row["name"] == prices.UNNAMED and row["low_words"] == "99c"
+    d = w.c.get(f"/api/prices/history?id={UNNAMED_ID}&span=7", headers=h)
+    assert d.status_code == 200 and d.json()["name"] == prices.UNNAMED
+    r = w.c.post("/api/prices/watch", json={"id": UNNAMED_ID, "on": False}, headers=h)
+    assert r.json() == {"message": "You've stopped watching that item.", "rows": []}
+
+
+def test_tbc_has_none_of_it(tbc):
+    w = tbc
+    h = as_user(w, OWNER)
+    assert w.c.get("/api/prices/find?q=arcanite", headers=h).status_code == 404
+    for method, path in WATCH_ROUTES:
+        kw = {"json": {"id": BAR, "on": True}} if method == "post" else {"params": {"id": BAR, "span": "7"}}
+        r = getattr(w.c, method)(path, headers=h, **kw)
+        assert r.status_code == 404 and r.json()["error"] == "This game version has no auction houses.", path
+
+
+def test_no_watch_ever_reaches_ops_or_a_notice(w, market_on, monkeypatch):
+    from oibot_gm import inbox
+    from oibot_gm import registry as registry_mod
+
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    before = list(w.bot.ops.lines)
+    heard = []
+    monkeypatch.setattr(registry_mod, "SAVE_LISTENERS", [*registry_mod.SAVE_LISTENERS, lambda reg, kind, lines: heard.append(kind)])
+    for on in (True, False, True):
+        assert w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": on}, headers=h).status_code == 200
+    assert w.bot.ops.lines == before, "no ops line"
+    assert inbox.notices_of(w.reg, m.discord_id) == [], "no notice"
+    assert heard == ["member"] * 3, "the web's `member` topic: the member's other open tabs reload"

@@ -412,3 +412,9 @@ def test_price_tools_read_the_site_routes():
         assert {"price_check", "market"} <= tools and not {"set_market", "market_set", "clear_market"} & tools
     finally:
         ms.use(None)
+
+
+def test_no_tool_reads_or_changes_a_watch_list():
+    """A watch list is its member's own (price watch C11): no MCP tool reads or changes one."""
+    tools = {t.name for t in asyncio.run(ms.mcp.list_tools())}
+    assert not [t for t in tools if "watch" in t]
