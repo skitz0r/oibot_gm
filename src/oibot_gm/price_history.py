@@ -7,9 +7,9 @@ time: a feed time not later than the last kept writes nothing. A stretch of more
 times is kept as unread (the bot learned nothing then: the house switched away and back, prices off, the bot down, or a
 feed answering "not modified" for hours). `points` / `span` read an item's rows with the price carried in from before
 the span, and break the line over an unread stretch (final review F-5: a short history never reads as a quiet one);
-`fold` (once a day) turns rows older than KEEP_FULL into one lowest and one highest per
-item per UTC day and drops days older than KEEP_DAILY (and unread stretches that ended before it) — but each item's last value before that year stays as the
-carried start while the house is still read (controller ruling P2); a file whose newest feed time is older than a year,
+`fold` (once a day) turns rows older than KEEP_FULL into one lowest and one highest per item per UTC day and drops days
+older than KEEP_DAILY (and unread stretches that ended before it) — but each item's last value before that year stays
+as the carried start while the house is still read (controller ruling P2); a file whose newest feed time is older than a year,
 or that holds no row, is deleted. The fold writes FOLD_BATCH items at a time with a pause between, so a record waiting
 on the lock gets in (final review F-7); a fold cut short leaves a file that reads correctly and the next one finishes it.
 
@@ -183,7 +183,8 @@ def points(key: tuple, item_id: int, since: datetime, until: datetime) -> list[P
         before = con.execute("SELECT low, high, qty FROM changes WHERE item = ? AND at < ? ORDER BY at DESC LIMIT 1",
                              (item, a)).fetchone()
         gaps = []  # (start, stop) the item went into with a value
-        for start, stop in con.execute("SELECT start, stop FROM unread WHERE start < ? AND stop > ? ORDER BY start", (b, a)).fetchall():
+        overlapping = con.execute("SELECT start, stop FROM unread WHERE start < ? AND stop > ? ORDER BY start", (b, a)).fetchall()
+        for start, stop in overlapping:
             into = standing(con, start)
             if into is not None and into[1] is not None:
                 gaps.append((start, stop))
