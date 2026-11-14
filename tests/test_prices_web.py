@@ -479,6 +479,21 @@ def test_tbc_has_none_of_it(tbc):
         assert r.status_code == 404 and r.json()["error"] == "This game version has no auction houses.", path
 
 
+def test_without_blizzard_keys_the_watch_routes_404_as_price_does(w, market_on, monkeypatch):
+    """One gate on both surfaces (F-6): auctions.available, what /price uses — a Forever guild on a host without the keys."""
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
+    w.reg.watch(m.discord_id, PLAGUEBLOOM)
+    monkeypatch.setattr(armory, "available", lambda reg: False)
+    assert w.reg.profile.auctions, "the version has auction houses"
+    for method, path in WATCH_ROUTES:
+        kw = {"json": {"id": PLAGUEBLOOM, "on": False}} if method == "post" else {"params": {"id": PLAGUEBLOOM, "span": "7"}}
+        r = getattr(w.c, method)(path, headers=h, **kw)
+        assert r.status_code == 404 and r.json()["error"] == "This game version has no auction houses.", path
+    assert w.reg.watching(m.discord_id) == [PLAGUEBLOOM]
+
+
 def test_no_watch_ever_reaches_ops_or_a_notice(w, market_on, monkeypatch):
     from oibot_gm import inbox
     from oibot_gm import registry as registry_mod

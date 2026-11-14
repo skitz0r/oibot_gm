@@ -7,7 +7,7 @@ Registry — no rule lives here.
   prices.answer_lines — MCP's price_check reads it)}. 404 on a version with no auction houses. A row's `watching` = on the
   viewer's own watch list (always false from MCP).
 - The viewer's own watch list (price watch §4.2, §4.3; the session's uid, never a parameter; every route 403 from MCP —
-  C11 — and 404 without auction houses): `GET /api/prices/watching` → {rows [{id, name, low_words, qty, words}] (names
+  C11 — and 404 where auctions.available is false, the gate /price uses): `GET /api/prices/watching` → {rows [{id, name, low_words, qty, words}] (names
   alone while prices are hidden), words, shown, max, empty (EMPTY_LIST_SITE, or EMPTY_LIST_HIDDEN while hidden: the
   search card is hidden then), registered}; `POST /api/prices/watch` {id, on} → {message,
   rows} (prices.watch / unwatch in a thread: one quiet commit whose SAVE_LISTENERS publish `member`, so the member's
@@ -95,7 +95,7 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
 
     # ---- the member's own watch list and a watched item's history (price watch §4.2, §4.3): the session's own uid only
     def own_list(v) -> None:
-        if not v.reg.profile.auctions:
+        if not auctions.available(v.reg):  # the one gate Discord's /price uses too (the profile's `auctions:` and the keys)
             raise HTTPException(404, auctions.NO_AUCTIONS_WORDS)
         if v.via == "mcp":
             raise HTTPException(403, OWN_LIST)

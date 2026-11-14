@@ -5244,7 +5244,8 @@ plan said "not on adoption").
   empty, registered}; `POST /api/prices/watch` {id, on} → {message, rows} (a refusal 400 with its sentence; the quiet
   write publishes `member`, so the member's other tabs reload); `GET /api/prices/history?id=&span=` → {id, name, spans,
   span, points, low, high, low_words, high_words, since, until, sentences} for a watched item only (403 otherwise, an unknown span
-  400); every watch route is the session's own uid, 403 from MCP (C11), 404 without auction houses. The **Prices** tab
+  400); every watch route is the session's own uid, 403 from MCP (C11), 404 where `auctions.available` is false (no auction
+  houses, or no Blizzard keys on the host — the gate `/price` uses; final review F-6). The **Prices** tab
   (`pages/Prices.tsx`, `prices.module.css`) sits in the rail after Professions when `meta.prices.market`: the status
   sentence once, the search (**What does it go for?**, rows with **Watch** / **Stop watching**) while prices show, then
   **Your watch list** — a row per item opened in place to `components/PriceChart.tsx`, the server's sentences and

@@ -740,7 +740,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        404 where auctions.available is false); cost_json = a recipe row's `cost` (api_professions.entry_json; null without prices or
                        reagents — never "0c"); prices_meta = /api/meta.prices {on, state, words, market} (+ /api/meta.item_url); PRICE_LISTENERS →
                        publish("prices"). History's council view carries item_id (api_loot) so its names link.
-                       The watch list (§5.66; the session's own uid, 403 from MCP — C11 OWN_LIST, 404 without auction houses): find rows carry
+                       The watch list (§5.66; the session's own uid, 403 from MCP — C11 OWN_LIST, 404 where auctions.available is false — /price's gate): find rows carry
                        `watching`; GET /api/prices/watching → {rows (names alone while hidden), words, shown, max, empty, registered};
                        POST /api/prices/watch {id, on} → {message, rows} (prices.watch/unwatch in a thread; a refusal 400; the quiet write publishes
                        `member`); GET /api/prices/history?id=&span= → {id, name, spans, **prices.chart, sentences} for a watched item only
