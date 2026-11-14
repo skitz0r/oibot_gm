@@ -102,7 +102,7 @@ def test_the_consequences_name_what_was_found_and_what_changes(reg):
     assert "2026" in lines[0] and "T" not in lines[0].split("created ")[1], "a date in words, never ISO"
     assert "who is in the guild" in " ".join(lines) and len(lines) <= 3
     reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
-    other = armory.GuildFacts(id=999001, slug="stranger-hall", name="Stranger Hall", faction="Alliance", kind="PvP", members=1, created=facts().created)
+    other = armory.GuildFacts(id=999001, slug="stranger-hall", name="Stranger Hall", faction="Alliance", kind="PvP", ruleset_id=1, members=1, created=facts().created)
     lines = cq.armory_guild_consequence(reg, other)
     assert lines[0].startswith("Stranger Hall is an Alliance PvP guild with 1 member,") and "replaces Lantern Wardens" in lines[1]
     assert "already linked" in cq.armory_guild_consequence(reg, facts())[1]

@@ -239,6 +239,7 @@ class GameProfile:
     recipe_seed: dict[str, dict[str, Any]] = field(default_factory=dict)  # normalised name → {id, name, profession, skill}
     recipes: dict[int, RecipeDef] = field(default_factory=dict)  # recipes.yaml: the game's recipe list by id; empty = typed recipes
     armory: dict[str, Any] | None = None  # integrations.yaml `armory` {region, profile_namespace, static_namespace, classes, rulesets}; None = no armory
+    auctions: dict[str, Any] | None = None  # integrations.yaml `auctions` {dynamic_namespace, factions, reference_items}; None = no prices
     _spec_cache: dict[str, SpecInfo] = field(default_factory=dict)
 
     @classmethod
@@ -295,6 +296,7 @@ class GameProfile:
             recipe_seed=seed,
             recipes=load_recipes(root / "recipes.yaml"),
             armory=dict(integ["armory"]) if integ.get("armory") else None,
+            auctions=dict(integ["auctions"]) if integ.get("auctions") else None,
         )
 
     def __post_init__(self):

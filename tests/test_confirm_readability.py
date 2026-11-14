@@ -536,8 +536,8 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     from oibot_gm.armory import GuildFacts
 
     born = _dt(2026, 10, 26, 18, 0, tzinfo=_tz.utc)
-    wardens = GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", members=8, created=born)
-    hall = GuildFacts(id=999001, slug="the-long-hall-of-ash", name="The Long Hall of Ash", faction="Alliance", kind="Roleplay PvP", members=1, created=born)
+    wardens = GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", ruleset_id=2, members=8, created=born)
+    hall = GuildFacts(id=999001, slug="the-long-hall-of-ash", name="The Long Hall of Ash", faction="Alliance", kind="Roleplay PvP", ruleset_id=15, members=1, created=born)
     guild_names = {"Lantern", "The"}
     dump.add("armory_guild_consequence", "nothing linked yet", cq.armory_guild_consequence(reg, wardens), guild_names)
     dump.add("armory_guild_clear_consequence", "nothing linked", cq.armory_guild_clear_consequence(reg), guild_names)

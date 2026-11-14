@@ -63,7 +63,7 @@ class FakeArmory:
                                        "tamsin-pell": [dict(p) for p in TAMSIN_PROFS]}
         self.rows = list(ROWS)
         self.roster_stamp = STAMP
-        self.guild_facts = GuildFacts(id=WARDENS, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal",
+        self.guild_facts = GuildFacts(id=WARDENS, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", ruleset_id=2,
                                       members=8, created=datetime(2026, 10, 26, tzinfo=timezone.utc))
         self.fail: Exception | None = None
         self.calls: list[tuple] = []

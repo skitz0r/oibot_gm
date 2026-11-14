@@ -82,7 +82,7 @@ def test_guild_slug_from_a_typed_name():
 def test_guild_facts_from_the_fixture():
     a, fake = client({G: (200, fixture("guild"), {"Last-Modified": STAMP})})
     g = a.guild("lantern-wardens")
-    assert g == GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", members=8,
+    assert g == GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", ruleset_id=2, members=8,
                            created=datetime.fromtimestamp(1793012345, tz=timezone.utc))
     path, query, headers = fake.calls[0]
     assert query == {"namespace": "profile-forever-us", "locale": "en_US"}

@@ -97,6 +97,7 @@ class GuildFacts:
     name: str
     faction: str  # "Horde" | "Alliance" (the armory's own word)
     kind: str  # "PvP" | "Normal" | "Roleplay" | "Roleplay PvP" (the ruleset table; an id not in it = the armory's name)
+    ruleset_id: int  # the armory's ruleset id (the auction houses are listed per ruleset)
     members: int
     created: datetime  # UTC
 
@@ -237,8 +238,9 @@ class Armory:
     def _scrub(self, text: str, token: str | None) -> str:
         return text.replace(token, "<token>") if token else text
 
-    def _get(self, path: str, ns: str, since: str | None = None, missing: str = MISSING_WORDS) -> Fetched | Any:
-        """GET path → Fetched (`unchanged` on a 304 to `since`). Raises ArmoryMissing / ArmoryDown / ArmoryShape /
+    def get(self, path: str, ns: str, since: str | None = None, missing: str = MISSING_WORDS) -> Fetched:
+        """GET path in namespace `ns` → Fetched (`unchanged` on a 304 to `since`). Public: the auction boundary
+        (auctions.py) reads its own paths through it. Raises ArmoryMissing / ArmoryDown / ArmoryShape /
         ArmoryAccess, each raised outside any except block (no chained exception can carry a header)."""
         url = f"{HOST.format(region=self.region)}{path}?{urllib.parse.urlencode({'namespace': ns, 'locale': LOCALE})}"
         renewed = retried = False
@@ -293,7 +295,7 @@ class Armory:
     def guild(self, slug: str) -> GuildFacts:
         """The guild at `slug` (guild_slug of a typed name). Raises ArmoryMissing when there is none."""
         path = f"/data/wow/guild/{_in_path(slug)}"
-        d = self._get(path, self.profile_ns, missing=GUILD_MISSING_WORDS).data
+        d = self.get(path, self.profile_ns, missing=GUILD_MISSING_WORDS).data
         rs = _dict(d, "ruleset", path)
         rid = _int(rs, "id", path)
         try:
@@ -303,14 +305,14 @@ class Armory:
         _need(created is not None, path, "created_timestamp out of range")
         return GuildFacts(id=_int(d, "id", path), slug=_str(d, "slug", path), name=_str(d, "name", path),
                           faction=_str(_dict(d, "faction", path), "name", path),
-                          kind=self.rulesets.get(rid) or _str(rs, "name", path), members=_int(d, "member_count", path),
+                          kind=self.rulesets.get(rid) or _str(rs, "name", path), ruleset_id=rid, members=_int(d, "member_count", path),
                           created=created)
 
     def roster(self, slug: str, since: str | None = None) -> tuple[list[RosterRow] | Any, str | None]:
         """The guild's members → (rows, Last-Modified); on a 304 to `since`: (NOT_MODIFIED, the 304's Last-Modified, else
         `since`). The rank is not read."""
         path = f"/data/wow/guild/{_in_path(slug)}/roster"
-        got = self._get(path, self.profile_ns, since, missing=GUILD_MISSING_WORDS)
+        got = self.get(path, self.profile_ns, since, missing=GUILD_MISSING_WORDS)
         if got.unchanged:
             return NOT_MODIFIED, got.modified
         rows = []
@@ -326,7 +328,7 @@ class Armory:
         """A character's profile (`slug` = address(name, surname) or a roster row's slug); NOT_MODIFIED on a 304 to
         `since`. ArmoryMissing below level 10 or before the character's first logout."""
         path = f"/profile/wow/character/{_in_path(slug)}"
-        got = self._get(path, self.profile_ns, since, missing=CHARACTER_MISSING_WORDS)
+        got = self.get(path, self.profile_ns, since, missing=CHARACTER_MISSING_WORDS)
         if got.unchanged:  # the caller keeps its stored `modified` (== since, or the 304's own stamp: profiles share one time)
             return NOT_MODIFIED
         d = got.data
@@ -341,7 +343,7 @@ class Armory:
         secondaries); a profession the profile doesn't map is skipped. skill = the highest tier's skill points; recipes
         from every tier, once each, ids as the armory gives them (an id the recipe list lacks is kept)."""
         path = f"/profile/wow/character/{_in_path(slug)}/professions"
-        d = self._get(path, self.profile_ns, missing=CHARACTER_MISSING_WORDS).data
+        d = self.get(path, self.profile_ns, missing=CHARACTER_MISSING_WORDS).data
         out = []
         for group in ("primaries", "secondaries"):
             for p in _list(d, group, path, optional=True):

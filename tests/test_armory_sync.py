@@ -172,7 +172,7 @@ def test_roster_is_read_every_three_hours_and_survives_a_restart(reg, fake, bot,
 
 def test_a_strangers_guild_under_our_slug_stops_the_roster(reg, fake, bot, clock):
     link_guild(reg)
-    fake.guild_facts = GuildFacts(id=999, slug="lantern-wardens", name="Lantern Wardens", faction="Alliance", kind="PvP", members=2,
+    fake.guild_facts = GuildFacts(id=999, slug="lantern-wardens", name="Lantern Wardens", faction="Alliance", kind="PvP", ruleset_id=1, members=2,
                                   created=fake.guild_facts.created)
     assert run(discord_armory.roster_refresh(bot, reg)) is None
     assert fake.count("roster") == 0
@@ -309,7 +309,7 @@ def run_tick(bot, reg):
 
 
 def other_guild(fake):
-    return GuildFacts(id=777, slug="ember-court", name="Ember Court", faction="Horde", kind="Normal", members=3,
+    return GuildFacts(id=777, slug="ember-court", name="Ember Court", faction="Horde", kind="Normal", ruleset_id=2, members=3,
                       created=fake.guild_facts.created)
 
 

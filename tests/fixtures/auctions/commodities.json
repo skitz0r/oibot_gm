@@ -1,0 +1,11 @@
+{
+  "_links": {"self": {"href": "https://us.api.blizzard.com/data/wow/ruleset/1/auctions/2/commodities?namespace=dynamic-forever-us"}},
+  "auctions": [
+    {"id": 91000001, "item": {"id": 12360}, "quantity": 4, "unit_price": 489998, "time_left": "LONG"},
+    {"id": 91000002, "item": {"id": 3575}, "quantity": 20, "unit_price": 650, "time_left": "MEDIUM"},
+    {"id": 91000003, "item": {"id": 3575}, "quantity": 10, "unit_price": 700, "time_left": "SHORT"},
+    {"id": 91000004, "item": {"id": 13463}, "quantity": 7, "time_left": "LONG"},
+    {"id": 91000005, "item": {"id": 13463}, "quantity": 0, "unit_price": 900, "time_left": "LONG"},
+    {"id": 91000006, "item": {}, "quantity": 2, "unit_price": 900, "time_left": "LONG"}
+  ]
+}

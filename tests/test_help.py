@@ -626,7 +626,7 @@ def test_the_askers_record_names_each_characters_armory_link(reg, monkeypatch, t
     assert f"Bram Kettle: linked to the armory · Updated from the armory {when} · professions follow the armory" in s, "in the guild unknown: left out"
     assert "Pip: not linked to the armory" in s and '<member-text source="armory">' in s, "names are member text, in a block"
     assert "Thornwick: linked" not in s, "another member's link is never in the asker's record"
-    reg.set_armory_guild(GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", members=8,
+    reg.set_armory_guild(GuildFacts(id=418362, slug="lantern-wardens", name="Lantern Wardens", faction="Horde", kind="Normal", ruleset_id=2, members=8,
                                     created=datetime(2026, 10, 26, tzinfo=timezone.utc)), "Owner", by_id=OWNER)
     discord_armory._save_snapshot(reg, discord_armory._Snapshot(rows=[RosterRow(id=700101, name="Bram", surname="Kettle", slug="bram-kettle",
                                                                                   level=60, cls="Warrior")], taken_at=at, modified=None, guild_id=418362))

@@ -1,0 +1,15 @@
+{
+  "_links": {"self": {"href": "https://us.api.blizzard.com/data/wow/ruleset/1/auctions/2?namespace=dynamic-forever-us"}},
+  "auctions": [
+    {"id": 90000001, "item": {"id": 14047}, "buyout": 4099, "quantity": 1, "time_left": "LONG"},
+    {"id": 90000002, "item": {"id": 2447}, "buyout": 1000, "quantity": 3, "time_left": "MEDIUM"},
+    {"id": 90000003, "item": {"id": 12360}, "buyout": 520000, "quantity": 1, "time_left": "VERY_LONG"},
+    {"id": 90000004, "item": {"id": 12360}, "buyout": 979996, "quantity": 2, "time_left": "SHORT"},
+    {"id": 90000005, "item": {"id": 15211, "bonus_lists": [1180]}, "buyout": 25000, "quantity": 1, "time_left": "LONG"},
+    {"id": 90000006, "item": {"id": 13463}, "quantity": 5, "time_left": "LONG"},
+    {"id": 90000007, "item": {"id": 13463}, "buyout": 0, "quantity": 5, "time_left": "LONG"},
+    {"id": 90000008, "item": {"id": 13463}, "buyout": 3000, "quantity": 0, "time_left": "LONG"},
+    {"id": 90000009, "buyout": 3000, "quantity": 1, "time_left": "LONG"}
+  ],
+  "commodities": {"href": "https://us.api.blizzard.com/data/wow/ruleset/1/auctions/2/commodities?namespace=dynamic-forever-us"}
+}
