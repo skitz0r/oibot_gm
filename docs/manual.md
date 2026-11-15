@@ -543,6 +543,16 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction
   house picked, or the last prices more than a day old) there is no search and the list shows the items' names alone, with
   nothing to open; nothing new can be watched then (the answer says why), but **Stop watching** still works. On a phone each item and each search result is a card.
+- **Prep** (an experiment, the Movers card's third tab): materials from levelling zones that end up in high-level
+  consumables — plentiful while most people are still levelling, wanted once they raid. A row is a material of item
+  level 10 to 45 with at least 20 listed that goes, directly or through something crafted from it, into a consumable
+  of level 50 or more: what it goes into (*"Goes into 6 consumables: Flask of Petrification, Flask of the Titans and 4
+  more."*), its price here, how many are listed, what a vendor pays for it (the price can't fall far below that) and,
+  when Bargains compares it, how far under most materials it sits. The bot holds no list of "the right" consumables:
+  the game's recipe list and Blizzard's item levels decide, so a row says what the material is used for, never that the
+  thing is worth making. Reagents a vendor sells (vials, thread, dyes, flux) are left out. Under it, **Below vendor
+  price**: everything listed for less than a vendor pays, with the gain on each (*"+16c each"*) — only the cheapest
+  listing is known to be that low. Things to look into, not advice.
 - **Bargains** (an experiment, the Movers card's second tab): crafting materials that cost far less here than most
   materials do, measured against their **Classic** price. A new server holds much less coin than a mature Classic
   realm, so nearly everything is cheaper here; the card works out what most materials cost against Classic (*"Most of

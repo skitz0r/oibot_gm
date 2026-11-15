@@ -45,6 +45,7 @@ _LOCAL: dict[str, tuple[tuple, dict[int, str]]] = {}  # version → (the profile
 _FETCHED: dict[str, dict[int, str]] | None = None  # version → {id: name} looked up from Blizzard (the file); None = unread
 _GONE: dict[str, dict[int, float]] | None = None  # version → {id Blizzard has no item for: when it said so (epoch)}; None = unread
 _KINDS: dict[str, dict[int, str]] | None = None  # version → {id: Blizzard's item class in words; "" = asked, none given}; None = unread
+_LEVELS: dict[str, dict[int, tuple[int, int, int]]] | None = None  # version → {id: (item level, level needed, vendor price)}; None = unread
 GONE_RETRY = timedelta(days=7)  # an id Blizzard couldn't name is asked again after this long (a patch may add the item)
 _MERGED: dict[str, tuple[tuple, dict[int, str]]] = {}  # version → ((the local names, _GEN), local + fetched)
 _GEN = 0  # moves on every change to the looked-up names
@@ -53,7 +54,7 @@ _FILE_LOCK = threading.Lock()
 
 def reset_names() -> None:
     """Forget the names kept in memory (a restart; tests)."""
-    global _FETCHED, _GEN, _GONE, _KINDS
+    global _FETCHED, _GEN, _GONE, _KINDS, _LEVELS
     with _FILE_LOCK:
         _GEN += 1
         _LOCAL.clear()
@@ -61,8 +62,11 @@ def reset_names() -> None:
         _GONE = None
         _FETCHED = None
         _KINDS = None
+        _LEVELS = None
     _MOVERS.clear()  # the movers' answers were built from those names
     _BARGAINS.clear()
+    _GAPS.clear()
+    _PREP.clear()
 
 
 def _items_path() -> Path:
@@ -98,12 +102,46 @@ def kinds(reg) -> dict[int, str]:
     return _kinds_file().get(reg.profile.name) or {}
 
 
+def _levels_path() -> Path:
+    return discord_auctions.OUT / "items_levels.json"
+
+
+def _levels_file() -> dict[str, dict[int, tuple[int, int, int]]]:
+    global _LEVELS
+    if _LEVELS is None:
+        got: dict[str, dict[int, tuple[int, int, int]]] = {}
+        try:
+            d = json.loads(_levels_path().read_text(encoding="utf-8"))
+            got = {str(v): {int(k): (int(x[0]), int(x[1]), int(x[2])) for k, x in block.items()} for v, block in d.items()}
+        except FileNotFoundError:
+            pass
+        except Exception:  # noqa: BLE001 — a damaged file is read from Blizzard again
+            log.warning("item levels file unreadable; they are looked up again")
+        _LEVELS = got
+    return _LEVELS
+
+
+def levels(reg) -> dict[int, tuple[int, int, int]]:
+    """(item level, level needed, what a vendor pays in copper) per LISTED item the bot asked Blizzard about
+    (out/auctions/items_levels.json; zeros = none given). The recipe list's items are in the profile instead
+    (GameProfile.item_facts): `item_fact` reads both. Read it, never change it."""
+    return _levels_file().get(reg.profile.name) or {}
+
+
+def item_fact(reg, item_id: int) -> tuple[int, int, int] | None:
+    """An item's (item level, level needed, vendor price): the profile's generated facts first, else what the hourly
+    naming read; None = not known yet."""
+    held = reg.profile.item_facts.get(item_id)
+    return held[:3] if held is not None else levels(reg).get(item_id)
+
+
 def unkinded(reg, listed: dict[int, Price], limit: int) -> list[int]:
-    """Up to `limit` listed ids the bot names but whose class was never asked, most listed first."""
+    """Up to `limit` listed ids the bot names but whose class — or level and vendor price — was never asked, most
+    listed first."""
     if limit <= 0:
         return []
-    known, have = names(reg), kinds(reg)
-    ids = [i for i in listed if i in known and i not in have]
+    known, have, lv, held = names(reg), kinds(reg), levels(reg), reg.profile.item_facts
+    ids = [i for i in listed if i in known and (i not in have or (i not in lv and i not in held))]
     ids.sort(key=lambda i: (-listed[i].qty, i))
     return ids[:limit]
 
@@ -199,12 +237,20 @@ def unnamed(reg, listed: dict[int, Price], limit: int) -> list[int]:
     return ids[:limit]
 
 
-def remember(reg, found: dict[int, str], gone: set[int], kinds: dict[int, str] | None = None) -> None:
+def remember(reg, found: dict[int, str], gone: set[int], kinds: dict[int, str] | None = None,
+             levels: dict[int, tuple[int, int, int]] | None = None) -> None:
     """Keep the names (and item classes) looked up for the guild's version and write each file whole (a unique temp
     name, then a rename). BLOCKS on the write: call it through asyncio.to_thread."""
-    global _FETCHED, _GEN, _GONE, _KINDS
+    global _FETCHED, _GEN, _GONE, _KINDS, _LEVELS
     version = reg.profile.name
     with _FILE_LOCK:
+        if levels:
+            held_levels = _levels_file()
+            block = dict(held_levels.get(version) or {})
+            block.update({int(k): (int(x[0]), int(x[1]), int(x[2])) for k, x in levels.items()})
+            _LEVELS = {**held_levels, version: block}
+            _write_whole(_levels_path(), json.dumps({v: {str(k): list(x) for k, x in sorted(b.items())} for v, b in sorted(_LEVELS.items())},
+                                                    separators=(",", ":")), "item levels")
         if kinds:
             held_kinds = _kinds_file()
             block = dict(held_kinds.get(version) or {})
@@ -922,6 +968,7 @@ BARGAINS_HINT = ("Materials that cost far less here than most do, measured again
 BARGAINS_NONE = "No material is at least twice as cheap as most right now."
 
 _BARGAINS: dict[str, tuple[tuple, dict]] = {}  # guild key → (what it was computed from, the answer)
+_GAPS: dict[str, dict[int, float]] = {}  # guild key → {material: how many times under the typical ratio} of the last ready answer
 
 
 def _times_words(gap: float) -> str:
@@ -977,6 +1024,7 @@ def bargains(reg, *, now: datetime | None = None) -> dict:
         out["words"] = f"Too few materials are listed here to compare with {name} yet."
         return out
     typical = statistics.median(c[0] for c in compared)
+    _GAPS[reg.key] = {item: typical / ratio for ratio, item, _p, _there in compared}
     rows = []
     for ratio, item, p, there in compared:
         gap = typical / ratio
@@ -994,7 +1042,110 @@ def bargains(reg, *, now: datetime | None = None) -> dict:
     return out
 
 
-__all__ = ["MOVERS_TOP", "bargains", "BARGAINS_NONE", "BARGAIN_MIN_GAP", "MOVE_STEPS", "MOVERS_NONE", "kinds", "unkinded", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
+# ------------------------------------------------------------------ prep (2026-11-15)
+
+PREP_HINT = ("Materials from levelling zones that end up in level-{level} consumables: plentiful while people level, "
+             "wanted once they raid. Things to look into, not advice.")
+PREP_NONE = "No listed material from a levelling zone goes into a high-level consumable right now."
+PREP_NAMES = 2  # consumables named in "Goes into …"; the rest are counted
+BELOW_HINT = "Listed for less than a vendor pays. Only the cheapest listing is known to be that low."
+BELOW_NONE = "Nothing the bot knows a vendor price for is listed below it right now."
+
+_PREP: dict[str, tuple[tuple, dict]] = {}  # guild key → (what it was computed from, the answer)
+
+
+def _goes_into_words(ends: list[str]) -> str:
+    n = len(ends)
+    shown, rest = ends[:PREP_NAMES], n - PREP_NAMES
+    return (f"Goes into {n} consumable{'' if n == 1 else 's'}: {', '.join(shown)}"
+            f"{f' and {rest} more' if rest > 0 else ''}.")
+
+
+def prep(reg) -> dict:
+    """The Prep view (the owner's experiment, 2026-11-15) — BLOCKING like `bargains`, which it reads for the gap:
+    `rows` = the LEVELLING-ZONE materials that end up in high-level consumables: the materials group, named, ≥
+    MOVE_MIN_QTY listed, an item level inside the profile's `auctions.prep.material_levels`, not one a vendor sells
+    (`vendor_sold`), and — directly or through what is crafted from it — a reagent of a recipe whose product is of an
+    `end_classes` class with an item level (or level needed) ≥ `end_level`. No list of "the right" consumables: the
+    recipe list and Blizzard's item levels decide. Each row {id, name, now_words, qty, ends, uses_words ('Goes into 6
+    consumables: A, B and 4 more.'), vendor_words ('A vendor pays 10c.' | ""), gap, gap_words (Bargains' '24× cheaper
+    than most' | "")}; the widest gap first, then the most consumables. `below_rows` = every listed item priced under
+    what a vendor pays ({id, name, now_words, vendor_words, profit_words '+16c each', qty}; the largest share first).
+    → {ready, hint_words ("" = the version has no Prep), rows, none_words, below_rows, below_words, below_none, page}.
+    Not ready (no sentence) while prices are hidden. Answered once per price table and set of item facts."""
+    cfg = (reg.profile.auctions or {}).get("prep") or {}
+    out = {"ready": False, "hint_words": PREP_HINT.format(level=int(cfg["end_level"])) if cfg else "", "rows": [], "none_words": PREP_NONE,
+           "below_rows": [], "below_words": BELOW_HINT, "below_none": BELOW_NONE, "page": MOVERS_TOP}
+    if not cfg:
+        return out
+    t = discord_auctions.table(reg)
+    if t is None or not _shown(reg):
+        return out
+    ready_bargains = bargains(reg)["ready"]
+    gaps = _GAPS.get(reg.key) if ready_bargains else None
+    stamp = (t.at, len(names(reg)), len(kinds(reg)), len(levels(reg)), id(gaps))
+    hit = _PREP.get(reg.key)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    known, classes = names(reg), kinds(reg)
+    _rows, materials, group_of = _grouper(reg)
+    lo, hi = (int(x) for x in cfg["material_levels"])
+    end_level, end_classes = int(cfg["end_level"]), {str(c) for c in cfg.get("end_classes") or []}
+    vendor_sold = {int(i) for i in (cfg.get("vendor_sold") or {})}
+    used_by: dict[int, set[int]] = {}
+    for r in reg.profile.recipes.values():
+        if r.makes:
+            for x in r.reagents:
+                used_by.setdefault(int(x["id"]), set()).add(int(r.makes["id"]))
+
+    def is_end(item: int) -> bool:
+        held = reg.profile.item_facts.get(item)
+        cls = held[3] if held is not None else (classes.get(item) or "")
+        f = item_fact(reg, item)
+        return cls in end_classes and f is not None and max(f[0], f[1]) >= end_level
+
+    memo: dict[int, frozenset] = {}
+
+    def reach(item: int, seen: tuple = ()) -> frozenset:
+        if item in memo:
+            return memo[item]
+        got: set[int] = set()
+        for p in used_by.get(item, ()):
+            if p in seen:
+                continue
+            if is_end(p):
+                got.add(p)
+            got |= reach(p, (*seen, item))
+        memo[item] = frozenset(got)  # the recipe graph has no loops worth the care: a cut branch only loses a product
+        return memo[item]
+
+    rows, below = [], []
+    for item, p in t.prices.items():
+        if item not in known or p.low <= 0:
+            continue
+        f = item_fact(reg, item)
+        if f is not None and f[2] > p.low:
+            below.append(((f[2] - p.low) / p.low, {"id": item, "name": known[item], "now_words": money(p.low), "vendor_words": money(f[2]),
+                                                   "profit_words": f"+{money(f[2] - p.low)} each", "qty": p.qty}))
+        if (f is None or item not in used_by or item in vendor_sold or p.qty < price_history.MOVE_MIN_QTY or not lo <= f[0] <= hi
+                or materials is None or group_of(item) != materials):
+            continue
+        ends = sorted((known.get(e) or UNNAMED for e in reach(item)), key=str.casefold)
+        if not ends:
+            continue
+        gap = (gaps or {}).get(item)
+        rows.append({"id": item, "name": known[item], "now_words": money(p.low), "qty": p.qty, "ends": len(ends),
+                     "uses_words": _goes_into_words(ends), "vendor_words": f"A vendor pays {money(f[2])}." if f[2] else "",
+                     "gap": round(gap, 2) if gap else None,
+                     "gap_words": f"{_times_words(gap)} cheaper than most" if gap and gap >= BARGAIN_MIN_GAP else ""})
+    rows.sort(key=lambda r: (-(r["gap"] or 0), -r["ends"], r["name"].casefold()))
+    below.sort(key=lambda x: (-x[0], x[1]["name"].casefold()))
+    out.update(ready=True, rows=rows, below_rows=[r for _s, r in below])
+    _PREP[reg.key] = (stamp, out)
+    return out
+
+
+__all__ = ["MOVERS_TOP", "prep", "PREP_NONE", "BELOW_NONE", "levels", "item_fact", "bargains", "BARGAINS_NONE", "BARGAIN_MIN_GAP", "MOVE_STEPS", "MOVERS_NONE", "kinds", "unkinded", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

@@ -285,7 +285,7 @@ def test_naming_stops_quietly_on_a_failure_and_caps_per_fetch(reg, clock, monkey
     assert prices.names(reg)[901250] == "Kettle Part 901250"
     saved = json.loads(items_file().read_text(encoding="utf-8"))
     assert saved[reg.profile.name]["901250"] == "Kettle Part 901250"
-    assert not [p for p in items_file().parent.iterdir() if p.name not in ("items.json", "items_kinds.json") and p.is_file()], "written whole"
+    assert not [p for p in items_file().parent.iterdir() if p.name not in ("items.json", "items_kinds.json", "items_levels.json") and p.is_file()], "written whole"
     prices.reset_names()  # a restart: the file names them again
     assert prices.names(reg)[901250] == "Kettle Part 901250"
     # the next fetch names the rest; a 404 is not asked again in this process
@@ -1057,3 +1057,60 @@ def test_the_reference_file_is_read_once_a_day_and_a_failure_keeps_the_copy(reg,
     clock.t = NOW + timedelta(hours=1, minutes=1)
     run(tick())
     assert len(asked) == 3
+
+
+# ---- prep (2026-11-15): levelling-zone materials that end up in high-level consumables; listings below a vendor's price
+
+EEL, EEL_OIL, TITANS, VIAL_C, GROMSBLOOD = 13422, 13423, 13510, 8925, 8846
+
+
+def test_the_profile_carries_the_recipe_items_facts_and_the_vendor_list_names_real_reagents(reg):
+    facts = reg.profile.item_facts
+    assert facts[EEL][:3] == (45, 0, 10) and facts[EEL][3] == "Trade Goods" and facts[TITANS][:2] == (60, 50) and facts[TITANS][3] == "Consumable"
+    made_or_used = {}
+    for r in reg.profile.recipes.values():
+        for x in r.reagents:
+            made_or_used[int(x["id"])] = x["name"]
+    assert len(facts) >= 0.95 * len({*made_or_used, *(int(r.makes["id"]) for r in reg.profile.recipes.values() if r.makes)})
+    sold = reg.profile.auctions["prep"]["vendor_sold"]
+    assert {int(i): n for i, n in sold.items()} == {int(i): made_or_used[int(i)] for i in sold}, "every id is that reagent in the recipe list"
+    assert prices.item_fact(reg, EEL) == (45, 0, 10) and prices.item_fact(reg, 999999001) is None
+
+
+def test_prep_lists_levelling_materials_that_reach_a_high_level_consumable(reg, clock):
+    clock.t = NOW
+    odd = 970001
+    priced(reg, {EEL: Price(low=199, qty=600),          # level 45 → Stonescale Oil → flasks and potions
+                 VIAL_C: Price(low=399, qty=200),        # a vendor sells it
+                 GROMSBLOOD: Price(low=900, qty=300),    # level 50: not a levelling-zone material
+                 EEL_OIL: Price(low=200, qty=19),        # level 50 too, and one short of twenty listed
+                 PLAGUEBLOOM: Price(low=200, qty=50),    # under what a vendor pays (2s 50c)
+                 odd: Price(low=40, qty=5)}, at=NOW)     # named, facts read by the hourly naming: a vendor pays 1s
+    prices.remember(reg, {odd: "Odd Bauble"}, set(), {odd: "Miscellaneous"}, {odd: (12, 0, 100)})
+    p = prices.prep(reg)
+    assert p["ready"] is True and "level-50 consumables" in p["hint_words"] and "not advice" in p["hint_words"]
+    (row,) = p["rows"]
+    assert (row["id"], row["name"], row["now_words"], row["qty"], row["vendor_words"]) == (EEL, "Stonescale Eel", "1s 99c", 600, "A vendor pays 10c.")
+    assert row["ends"] >= 2 and row["uses_words"].startswith(f"Goes into {row['ends']} consumables: ") and row["uses_words"].endswith(" more.")
+    assert row["gap"] is None and row["gap_words"] == "", "no reference prices read: no gap"
+    assert [(r["id"], r["now_words"], r["vendor_words"], r["profit_words"]) for r in p["below_rows"]] == [
+        (odd, "40c", "1s", "+60c each"), (PLAGUEBLOOM, "2s", "2s 50c", "+50c each")]
+    assert prices._goes_into_words(["A"]) == "Goes into 1 consumable: A." and prices._goes_into_words(["A", "B", "C"]) == "Goes into 3 consumables: A, B and 1 more."
+    assert prices.prep(reg) is p, "answered once per price table"
+
+
+def test_prep_is_empty_handed_while_prices_are_hidden_and_absent_without_the_profile_block(reg, clock):
+    clock.t = NOW
+    p = prices.prep(reg)
+    assert p["ready"] is False and p["rows"] == [] and p["hint_words"] != ""
+    assert prices.prep(SimpleNamespace(profile=TBC))["hint_words"] == "", "no tab for a version without Prep"
+
+
+def test_the_item_page_gives_levels_and_the_vendor_price():
+    def fetch(url, headers):
+        return Reply(200, {}, json.dumps({"id": 7, "name": "Deep Eel", "item_class": {"name": "Trade Goods"}, "level": 45,
+                                          "required_level": 0, "sell_price": 10}).encode())
+
+    arm = Armory("us", "profile-forever-us", "static-forever-us", fetch=fetch, limiter=battlenet.Limiter(1000))
+    f = auctions.Client(arm, "dynamic-forever-us").item_facts(7)
+    assert f == ("Deep Eel", "Trade Goods", 45, 0, 10) and (f.level, f.sell) == (45, 10)

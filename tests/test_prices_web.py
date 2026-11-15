@@ -584,3 +584,19 @@ def test_bargains_on_tbc_is_404(tbc):
     w = tbc
     m = member(w)
     assert w.c.get("/api/prices/bargains", headers=as_user(w, m.discord_id)).status_code == 404
+
+
+def test_prep_route(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {13422: Price(low=199, qty=600)}, at=now())
+    r = w.c.get("/api/prices/prep", headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["ready"] is True and [x["id"] for x in d["rows"]] == [13422] and d["below_rows"] == []
+
+
+def test_prep_on_tbc_is_404(tbc):
+    w = tbc
+    m = member(w)
+    assert w.c.get("/api/prices/prep", headers=as_user(w, m.discord_id)).status_code == 404

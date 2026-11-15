@@ -192,7 +192,7 @@ def test_an_item_the_versions_own_pages_lack_is_named_from_the_fallback_namespac
     assert c.item_name(11) == "Forever Name" and asked == [("/data/wow/item/11", "static-forever-us")], "its own page: one request"
     assert c.item_name(22) == "Precision Bolt", "a 404 there: the fallback's name"
     assert c.item_name(33) is None, "no page in either: None"
-    assert c.item_facts(11) == ("Forever Name", None) and c.item_facts(33) is None, "a page without a class: the name alone"
+    assert c.item_facts(11) == ("Forever Name", None, 0, 0, 0) and c.item_facts(33) is None, "a page without a class: the name alone"
     assert Client(arm, NS).item_name(22) is None, "a version without a fallback: as before"
     live = auctions.client_for(SimpleNamespace(profile=FOREVER))
     assert live.names_fallback_ns == "static-classic1x-us" == FOREVER.auctions["names_fallback_namespace"].format(region="us")

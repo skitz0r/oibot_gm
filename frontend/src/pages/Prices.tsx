@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActionIcon, Button, Card, Group, SegmentedControl, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
 import { IconChevronDown, IconChevronRight, IconSearch } from "@tabler/icons-react";
-import { api, ApiError, type Bargains, type Meta, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type WatchList } from "../api";
+import { api, ApiError, type Bargains, type Meta, type Prep, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type WatchList } from "../api";
 import { ItemName } from "../components/ItemName";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { PriceChart, Sparkline, trendOf } from "../components/PriceChart";
@@ -18,7 +18,8 @@ import css from "./prices.module.css";
  *  every mover; the card picks among them (2026-11-15): a group (the server's `groups`, each with how many it holds), the order
  *  (by percent or by gold), the smallest move, and Show more past the first `page` rows. The card's second tab, Bargains
  *  (GET /api/prices/bargains, where the version has reference prices — `hint_words` not empty): materials far cheaper here than most,
- *  against another economy's prices; the server's rows and sentences, opening to the same chart. Every sentence, price and time is the server's words; the page composes
+ *  against another economy's prices; the server's rows and sentences, opening to the same chart. The third, Prep (GET
+ *  /api/prices/prep): levelling-zone materials that end up in high-level consumables, then what is listed below a vendor's price. Every sentence, price and time is the server's words; the page composes
  *  none. A press waits for the server and takes the list it answers; a refusal prints the server's sentence. With prices
  *  hidden the list shows names alone and opens nothing. The `prices` topic (a new table) and `member` (a watch from another
  *  tab) reload it. */
@@ -27,7 +28,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [words, setWords] = useState(meta.prices?.words || "");
   const [q, setQ] = useState("");
   const [found, setFound] = useState<PriceFind | null>(null);
-  type Where = "search" | "list" | "dips" | "rising" | "bargains";
+  type Where = "search" | "list" | "dips" | "rising" | "bargains" | "prep" | "below";
   const [openAt, setOpenAt] = useState<{ id: number; at: Where } | null>(null);  // the one open row, and in which card
   const open = openAt ? openAt.id : null;
   const setOpen = (id: number | null, at: Where = "list") => setOpenAt(id === null ? null : { id, at });
@@ -43,6 +44,9 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [tab, setTab] = useState("movers");
   const [bargains, setBargains] = useState<Bargains | null>(null);
   const [bargainPages, setBargainPages] = useState(1);
+  // the third tab (2026-11-15): levelling-zone materials that end up in high-level consumables, and what is listed below a vendor's price
+  const [prep, setPrep] = useState<Prep | null>(null);
+  const [prepPages, setPrepPages] = useState({ rows: 1, below: 1 });
   const winRef = useRef(win);
   winRef.current = win;
   const [span, setSpan] = useState("1");  // 24 hours first: where a price moved today shows
@@ -69,14 +73,16 @@ export function PricesPage({ meta }: { meta: Meta }) {
     .then((d) => { if (winRef.current === d.window) setMovers(d); }).catch(fail);
   const changeWindow = (w: string) => { setWin(w); loadMovers(w); };
   const loadBargains = () => api.get<Bargains>("/api/prices/bargains").then(setBargains).catch(fail);
+  const loadPrep = () => api.get<Prep>("/api/prices/prep").then(setPrep).catch(fail);
   const load = () => {
     loadList();
     loadMovers(winRef.current);
     loadBargains();
+    loadPrep();
     if (want.current) search(want.current);
     if (view.current.open !== null) loadHistory(view.current.open, view.current.span);
   };
-  useEffect(() => { loadList(); loadMovers(winRef.current); loadBargains(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadList(); loadMovers(winRef.current); loadBargains(); loadPrep(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
   useLive(load, ["prices", "member"], { every: 3000 });
   useEffect(() => { const t = setTimeout(() => search(q.trim()), 250); return () => clearTimeout(t); }, [q]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setHist(null); if (open !== null) loadHistory(open, span); }, [open]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -221,6 +227,72 @@ export function PricesPage({ meta }: { meta: Meta }) {
     );
   };
 
+  /** Prep: a row per material — what it goes into, its price here and the vendor's, Bargains' gap when it has one —
+   *  then what is listed below a vendor's price. */
+  const more = (left: number, press: () => void) => left > 0 && (
+    <Group px="md" py="xs">
+      <Button size="compact-sm" variant="default" onClick={press}>Show more ({left} left)</Button>
+    </Group>
+  );
+  const prepRows = (p: Prep) => {
+    const side = p.rows.slice(0, p.page * prepPages.rows);
+    const below = p.below_rows.slice(0, p.page * prepPages.below);
+    return (
+      <>
+        {p.rows.length === 0 ? <Text size="sm" c="dimmed" px="md" py="sm">{p.none_words}</Text> : (
+          <div className={css.list}>
+            {side.map((r) => (
+              <div key={r.id} className={css.item}>
+                <div className={`${css.mover} ${css.opens}`} onClick={() => toggle(r.id, "prep")}>
+                  <Group gap={6} wrap="nowrap" className={css.name}>
+                    {chevron(r.id, "prep")}
+                    <div className={css.name}>
+                      <Text size="sm" fw={600} className={css.name}><ItemName id={r.id} name={r.name} /></Text>
+                      <Text size="xs" c="dimmed" className={css.name}>{r.uses_words}</Text>
+                    </div>
+                  </Group>
+                  <div className={css.figures}>
+                    <Text size="sm">{r.now_words}</Text>
+                    <Text size="xs" c="dimmed">{r.qty} listed</Text>
+                  </div>
+                  <div className={css.change}>
+                    {r.gap_words && <Text size="sm" fw={700} c="teal.4">{r.gap_words}</Text>}
+                    {r.vendor_words && <Text size="xs" c="dimmed">{r.vendor_words}</Text>}
+                  </div>
+                </div>
+                {isOpen(r.id, "prep") && panel(r, mine.has(r.id))}
+              </div>
+            ))}
+            {more(p.rows.length - side.length, () => setPrepPages({ ...prepPages, rows: prepPages.rows + 1 }))}
+          </div>
+        )}
+        <Text size="xs" fw={700} c="dimmed" tt="uppercase" px="md" pt="md">Below vendor price</Text>
+        <Text size="xs" c="dimmed" px="md">{p.below_words}</Text>
+        {p.below_rows.length === 0 ? <Text size="sm" c="dimmed" px="md" py="sm">{p.below_none}</Text> : (
+          <div className={css.list}>
+            {below.map((r) => (
+              <div key={r.id} className={css.item}>
+                <div className={`${css.mover} ${css.opens}`} onClick={() => toggle(r.id, "below")}>
+                  <Group gap={6} wrap="nowrap" className={css.name}>
+                    {chevron(r.id, "below")}
+                    <Text size="sm" fw={600} className={css.name}><ItemName id={r.id} name={r.name} /></Text>
+                  </Group>
+                  <div className={css.figures}>
+                    <Text size="sm">{r.now_words} → {r.vendor_words}</Text>
+                    <Text size="xs" c="dimmed">{r.qty} listed</Text>
+                  </div>
+                  <Text size="sm" fw={700} c="teal.4" className={css.change}>{r.profit_words}</Text>
+                </div>
+                {isOpen(r.id, "below") && panel(r, mine.has(r.id))}
+              </div>
+            ))}
+            {more(p.below_rows.length - below.length, () => setPrepPages({ ...prepPages, below: prepPages.below + 1 }))}
+          </div>
+        )}
+      </>
+    );
+  };
+
   return (
     <Stack gap="lg" className={css.touch}>
       <PageTitle title="Prices" intro="The lowest price each item is listed for on the guild's auction house, and the items you keep an eye on." />
@@ -260,14 +332,16 @@ export function PricesPage({ meta }: { meta: Meta }) {
 
       {shown && movers !== null && (
         <Card>
-          <CardHeader title="Movers" hint={tab === "bargains" && bargains ? bargains.hint_words
+          <CardHeader title="Movers" hint={tab === "bargains" && bargains ? bargains.hint_words : tab === "prep" && prep ? prep.hint_words
             : `the price now against the item's usual price over the window; ${movers.floor_words}`} />
-          {bargains !== null && bargains.hint_words !== "" && (
+          {(bargains?.hint_words || prep?.hint_words) && (
             <Group px="md" pt="sm">
               <SegmentedControl size="sm" value={tab} onChange={setTab} aria-label="What to look at"
-                data={[{ value: "movers", label: "Movers" }, { value: "bargains", label: "Bargains" }]} />
+                data={[{ value: "movers", label: "Movers" }, ...(bargains?.hint_words ? [{ value: "bargains", label: "Bargains" }] : []),
+                  ...(prep?.hint_words ? [{ value: "prep", label: "Prep" }] : [])]} />
             </Group>
           )}
+          {tab === "prep" && prep !== null && prep.ready && prepRows(prep)}
           {tab === "bargains" && bargains !== null && (
             bargains.ready ? bargainRows(bargains) : (bargains.words && <Text size="sm" c="dimmed" px="md" py="sm">{bargains.words}</Text>)
           )}

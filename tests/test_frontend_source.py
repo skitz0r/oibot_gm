@@ -728,6 +728,9 @@ def test_the_prices_tab():
     # Bargains: the card's second tab, the server's rows and sentences
     for piece in ("/api/prices/bargains", "bargains.hint_words", "b.typical_words", "b.source_words", "b.none_words", "r.gap_words", "r.ref_words"):
         assert piece in page, piece
+    # Prep: the third tab, the server's rows and sentences
+    for piece in ("/api/prices/prep", "prep?.hint_words", "p.none_words", "p.below_words", "p.below_none", "r.uses_words", "r.profit_words"):
+        assert piece in page, piece
     # 2026-11-15: the card browses every mover — the server's groups, orders, steps, page size and empty sentence
     for piece in ("movers.groups.map(", "movers.sorts.map(", "movers.steps.map(", "movers?.none_words", "movers?.page", "r.diff_words", "Show more"):
         assert piece in page, piece

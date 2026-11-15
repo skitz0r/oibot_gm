@@ -31,6 +31,23 @@ auctions:
     name: Classic
     source: TradeSkillMaster
     url: "https://public-data.tradeskillmaster.com/classic/{region}/region/items.csv"
+  # Prep (2026-11-15): materials from levelling zones that end up in high-level consumables. A material = the
+  # materials group below with an item level inside material_levels; an end product = a recipe's product of an
+  # end_classes class whose item level (or level needed) is at least end_level, reached directly or through what is
+  # crafted from the material. vendor_sold = reagents a vendor sells without limit (never a find; ids checked against
+  # the recipe list by tests/test_prices.py). Compiled from the original game's vendors: unverified for Forever.
+  prep:
+    material_levels: [10, 45]
+    end_classes: ["Consumable"]
+    end_level: 50
+    vendor_sold: {159: Refreshing Spring Water, 1179: Ice Cold Milk, 2320: Coarse Thread, 2321: Fine Thread, 2324: Bleach,
+                  2325: Black Dye, 2604: Red Dye, 2605: Green Dye, 2678: Mild Spices, 2692: Hot Spices, 2880: Weak Flux,
+                  3371: Empty Vial, 3372: Leaded Vial, 3466: Strong Flux, 3713: Soothing Spices, 3857: Coal, 4289: Salt,
+                  4291: Silken Thread, 4340: Gray Dye, 4341: Yellow Dye, 4342: Purple Dye, 4399: Wooden Stock,
+                  4400: Heavy Stock, 4470: Simple Wood, 6260: Blue Dye, 6261: Orange Dye, 6530: Nightcrawlers,
+                  8343: Heavy Silken Thread, 8925: Crystal Vial, 10284: Simple Flour, 10290: Pink Dye,
+                  10647: Engineer's Ink, 14341: Rune Thread, 17034: Maple Seed, 17035: Stranglethorn Seed,
+                  17194: Holiday Spices, 18256: Imbued Vial, 18567: Elemental Flux}
   # The Movers card's item groups, by Blizzard's item class (the item page's `item_class.name`, read with the name).
   # Probed live 2026-11-14 over 620 movers: every one had a class. `reagents: true` = where a recipe's reagent goes when
   # its class is in no group (or not read yet). Anything else is "Other" (bags, quivers, pets, junk). Blizzard's Quest

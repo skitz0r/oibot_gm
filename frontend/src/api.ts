@@ -231,6 +231,15 @@ export interface Bargains {
   ready: boolean; words: string; hint_words: string; typical_words: string; source_words: string; rows: BargainRow[];
   page: number; none_words: string;
 }
+/** GET /api/prices/prep (an experiment, site only): `rows` = levelling-zone materials that end up in high-level
+ *  consumables (`uses_words` names them; `gap_words` = Bargains' gap when it has one, `vendor_words` = what a vendor
+ *  pays), `below_rows` = what is listed under a vendor's price. `hint_words` "" = the version has no Prep (no tab). */
+export interface PrepRow { id: number; name: string; now_words: string; qty: number; ends: number; uses_words: string; vendor_words: string; gap: number | null; gap_words: string }
+export interface BelowRow { id: number; name: string; now_words: string; vendor_words: string; profit_words: string; qty: number }
+export interface Prep {
+  ready: boolean; hint_words: string; rows: PrepRow[]; none_words: string;
+  below_rows: BelowRow[]; below_words: string; below_none: string; page: number;
+}
 /** GET /api/admin/market: the guild's auction house (officers read, the owner picks). `words` = the choice in words (or what
  *  is missing), `prices` = how recent the prices are, `clear_sentences` = Turn prices off…'s confirm. */
 export interface MarketState {

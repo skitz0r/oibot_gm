@@ -13,7 +13,7 @@ variants are keyed by the plain item id."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from oibot_gm import armory
 from oibot_gm.armory import _int, _need, _str
@@ -91,8 +91,8 @@ class Client:
                 _add(table, item, unit, qty)
         return table, got.modified
 
-    def item_facts(self, item_id: int) -> tuple[str, str | None] | None:
-        """An item's (name, class) from the static namespace (the naming step behind the price search), else — where the
+    def item_facts(self, item_id: int) -> "ItemFacts | None":
+        """An item's ItemFacts (name, class, levels, vendor price) from the static namespace (the naming step behind the price search), else — where the
         profile names one — from the fallback namespace (integrations.yaml `auctions.names_fallback_namespace`: the
         version's own pages lack some items that are listed); None when Blizzard has no item of that id in either (a
         404). The class is Blizzard's item class in words ('Trade Goods', 'Armor' — what Movers groups by), None when
@@ -107,7 +107,8 @@ class Client:
                 continue
             cls = d.get("item_class") if isinstance(d, dict) else None
             kind = cls.get("name") if isinstance(cls, dict) else None
-            return _str(d, "name", path), (kind if isinstance(kind, str) and kind else None)
+            return ItemFacts(_str(d, "name", path), kind if isinstance(kind, str) and kind else None,
+                             _whole(d.get("level")), _whole(d.get("required_level")), _whole(d.get("sell_price")))
         return None
 
     def item_name(self, item_id: int) -> str | None:
@@ -122,6 +123,20 @@ class Client:
 def available(reg) -> bool:
     """The guild's game version has auction houses (integrations.yaml `auctions`) and an armory the bot can sign in to."""
     return bool(reg.profile.auctions) and armory.available(reg)
+
+
+class ItemFacts(NamedTuple):
+    """What an item page says: its name, Blizzard's item class in words (None = none given), the item level, the level
+    needed to use it and what a vendor pays for it in copper (0 = not given)."""
+    name: str
+    kind: str | None = None
+    level: int = 0
+    required: int = 0
+    sell: int = 0
+
+
+def _whole(v) -> int:
+    return int(v) if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
 
 
 def client_for(reg) -> Client:

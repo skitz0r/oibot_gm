@@ -179,6 +179,15 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
             raise HTTPException(404, auctions.NO_AUCTIONS_WORDS)
         return await asyncio.to_thread(prices.bargains, v.reg)
 
+    @app.get("/api/prices/prep")
+    async def prices_prep(request: Request):
+        """Every member (an experiment, site only): levelling-zone materials that end up in high-level consumables, and
+        what is listed below a vendor's price (prices.prep, in a thread). 404 without auction houses."""
+        v = await who(request)
+        if not auctions.available(v.reg):
+            raise HTTPException(404, auctions.NO_AUCTIONS_WORDS)
+        return await asyncio.to_thread(prices.prep, v.reg)
+
     # ---- the guild's auction house: officers read, the owner picks / clears
     def market_state(v) -> dict:
         from ..consequences import market_clear_consequence
