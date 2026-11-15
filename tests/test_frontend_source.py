@@ -736,6 +736,10 @@ def test_the_prices_tab():
         assert piece in page, piece
     assert 'toggle(p.id, "search")' in page and 'isOpen(p.id, "search") && panel(' in page, "a search result opens its chart without watching"
     assert "<Sparkline data={r.spark}" in page, "the watch list's rows draw the server's 24-hour line"
+    # 2026-11-15: the watch list beside the search and Movers on a wide screen, first on a narrow one
+    sheet = (SRC / "pages" / "prices.module.css").read_text()
+    assert "css.cols" in page and "css.main" in page and "className={css.side}" in page
+    assert "position: sticky" in sheet and ".side { order: -1;" in sheet and "@media (min-width: 80em)" in sheet
     assert "r.spark.change_words" in page and "trendOf(r.spark.up)" in page, "the day's change beside the price, the server's words and direction"
     assert 'useState("1")' in page, "the chart opens on 24 hours"
     spark = _code_only((SRC / "components" / "PriceChart.tsx").read_text())

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActionIcon, Button, Card, Group, SegmentedControl, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
+import { ActionIcon, Button, Card, Group, SegmentedControl, Stack, Text, TextInput } from "@mantine/core";
 import { IconChevronDown, IconChevronRight, IconSearch } from "@tabler/icons-react";
 import { api, ApiError, type Bargains, type Meta, type Prep, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type WatchList } from "../api";
 import { ItemName } from "../components/ItemName";
@@ -298,6 +298,10 @@ export function PricesPage({ meta }: { meta: Meta }) {
       <PageTitle title="Prices" intro="The lowest price each item is listed for on the guild's auction house, and the items you keep an eye on." />
       {words && <Text size="sm" c="dimmed" mt={-8}>{words}</Text>}
 
+      {/* two columns on a wide screen (the owner, 2026-11-15): the search and Movers on the left, the watch list on the
+          right, staying in view while Movers scrolls; one column below that, the watch list first */}
+      <div className={shown ? css.cols : css.one}>
+      <div className={css.main}>
       {shown && (
         <Card>
           <CardHeader title="What does it go for?" hint="part of an item's name finds its lowest price" />
@@ -370,16 +374,17 @@ export function PricesPage({ meta }: { meta: Meta }) {
           )}
           {movers.ready && movers.words && <Text size="xs" c="dimmed" px="md" pt="sm">{movers.words}</Text>}
           {!movers.ready ? (movers.words && <Text size="sm" c="dimmed" px="md" py="sm">{movers.words}</Text>) : (
-            <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0}>
+            <div className={css.sides}>
               {moversSide("Dips", "dips", movers.dips, movers.dips_words)}
               {moversSide("Rising", "rising", movers.rising, movers.rising_words)}
-            </SimpleGrid>
+            </div>
           )}
           </>)}
         </Card>
       )}
+      </div>
 
-      <Card>
+      <Card className={css.side}>
         <CardHeader title="Your watch list" hint="only you see it; nothing pings you when a price moves" />
         {list === null && <Text size="sm" c="dimmed" px="md" py="sm">Loading…</Text>}
         {list !== null && rows.length === 0 && (
@@ -419,6 +424,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
           </div>
         )}
       </Card>
+      </div>
     </Stack>
   );
 }

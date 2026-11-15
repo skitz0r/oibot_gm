@@ -26,6 +26,24 @@
 .watch > * { min-width: 0; }
 .spark { display: flex; justify-content: center; }
 .listed { text-align: right; white-space: nowrap; }
+/* the page's columns (2026-11-15): one column, the watch list first; from 80em the search and Movers on the left and the
+   watch list on the right, staying in view (its own scroll when it is taller than the window) */
+.cols, .one { display: flex; flex-direction: column; gap: var(--mantine-spacing-lg); }
+.main { display: flex; flex-direction: column; gap: var(--mantine-spacing-lg); min-width: 0; }
+.main:empty { display: none; }
+.side { order: -1; min-width: 0; }
+.sides { display: grid; grid-template-columns: minmax(0, 1fr); }
+.sides > * { min-width: 0; }
+@media (min-width: 62em) and (max-width: 79.99em) {
+  .sides { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (min-width: 80em) {
+  .cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: start; }
+  .cols > .side { order: 0; position: sticky; top: var(--mantine-spacing-md); max-height: calc(100vh - 2 * var(--mantine-spacing-md)); overflow-y: auto; }
+  .cols > .side .watch { grid-template-columns: minmax(0, 1fr) 120px minmax(72px, auto); gap: 4px 12px; }
+  .cols > .side .listed { display: none; }
+  .cols > .side .panel { padding-left: 16px; }
+}
 .opens { cursor: pointer; }
 .opens:hover { background: var(--mantine-color-slate-7); }
 .panel { padding: 4px 16px 14px 46px; }
