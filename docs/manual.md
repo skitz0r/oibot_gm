@@ -537,8 +537,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   Watch."* (while prices aren't shown, just *"You aren't watching anything yet."*, in `/price` too). Open a row — of your list or of the search, watched or not — to see the item's price over time: a line of the lowest price (a price holds until the next change; a
   break where nothing was listed, never a drop to zero; on older days a faint band from that day's lowest to its
   highest; a stretch when the bot didn't read the auction house is a break too, read *not read*), with **24 hours** (shown first) · **7 days** · **30 days** · **90 days** · **1 year** — the line is green when the price ended the span higher than it began and red when lower; while the bot's record is younger than the span the chart starts where the record does —, the highest and lowest of the span at its side and
-  the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time and
-  price (the first point reads the span's start, with the price the item had then). A price that didn't change all span is
+  the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time,
+  price and how many were listed, shown beside the pointer (the first point reads the span's start, with the price the item had then). A price that didn't change all span is
   a flat line across it. Under the line, grey bars show **how many were listed** at each moment, on the same time axis,
   with the most of the span named at the side and each point's count in the read-out (*"Sat 14 Nov 3:00 PM · 12s 40c ·
   1,240 listed"*): a price that falls while the bars grow is more being listed, one that rises while they shrink is the

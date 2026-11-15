@@ -58,6 +58,8 @@ const INK = "var(--mantine-color-dimmed)";
 const CROSS = "var(--mantine-color-slate-3)";
 const RING = "var(--mantine-color-body)";
 const BARS = "var(--mantine-color-slate-3)";
+const TIP = "var(--mantine-color-slate-8)";
+const TIP_INK = "var(--mantine-color-text)";
 
 /** A watched item's lowest price over one span (price watch §4.3, C5, C12, C17), drawn by the site itself as inline SVG:
  *  a step line (a price holds until the next point), broken where nothing was listed (a gap, never a zero), a faint band
@@ -67,7 +69,8 @@ const BARS = "var(--mantine-color-slate-3)";
  *  keys read one point out (its time and price, the server's words; the first point of a span reads the span's start).
  *  Under the plot, where the points carry a quantity (2026-11-15): how many were listed, as bars on the same x axis —
  *  supply, the feed has no sales —, the span's most as the strip's label, the read-out adding the point's
- *  `listed_words`; no strip when no point has one (a span of folded days).
+ *  `listed_words`; no strip when no point has one (a span of folded days). The read-out is also drawn at the pointer,
+ *  beside the crosshair (time, then price · how many listed); the svg has no <title>, whose native tooltip covered it.
  *  One point is a held line to `until` (a price unchanged all span); with no point, or nothing listed all span, there is
  *  no frame: the page prints the server's sentences alone. The span switch's labels are the server's; it shows `span`,
  *  the span pressed, while that span's answer loads (`busy`). */
@@ -148,6 +151,18 @@ export function PriceChart({ data, onSpan, span, busy }: { data: PriceHistory; o
     setActive(Math.min(Math.max(to, 0), pts.length - 1));
   };
   const shown = active !== null ? pts[active] : null;
+  // the read-out at the pointer (the owner, 2026-11-15): the point's time, then its price and how many were listed —
+  // beside the crosshair, on its left when the right edge is near, above the point when there is room
+  const tip = (() => {
+    if (!shown) return null;
+    const words = `${shown.words}${shown.listed_words ? ` · ${shown.listed_words}` : ""}`;
+    const w = Math.min(Math.max(textWidth(shown.when), words.length * 7) + 16, Math.max(width - 4, 40));
+    const h = 40;
+    const px = x(shown.t);
+    const left = px + 10 + w > width - 2;
+    const py = shown.low != null ? y(shown.low) : TOP + plotH / 2;
+    return { words, w, h, x: Math.max(left ? px - 10 - w : px + 10, 2), y: Math.min(Math.max(py - h - 8, 2), TOP + plotH - h) };
+  })();
 
   return (
     <Stack gap="xs">
@@ -162,7 +177,7 @@ export function PriceChart({ data, onSpan, span, busy }: { data: PriceHistory; o
             onPointerDown={(e) => pick(e.clientX, e.currentTarget.getBoundingClientRect())}
             onPointerLeave={() => setActive(null)} onKeyDown={onKey}
             onFocus={() => setActive((a) => a ?? pts.length - 1)} onBlur={() => setActive(null)}>
-            <title>{label}</title>
+            {/* no <title>: the browser's own tooltip would cover the read-out at the pointer (the aria-label says it) */}
             <line x1={GUTTER} x2={GUTTER + plotW} y1={yHigh} y2={yHigh} stroke={GRID} strokeDasharray="3 4" />
             {!flat && <line x1={GUTTER} x2={GUTTER + plotW} y1={yLow} y2={yLow} stroke={GRID} strokeDasharray="3 4" />}
             <text x={GUTTER - 8} y={yHigh} dy="0.35em" textAnchor="end" fontSize={11} fill={INK}>{data.high_words}</text>
@@ -184,6 +199,13 @@ export function PriceChart({ data, onSpan, span, busy }: { data: PriceHistory; o
               <g pointerEvents="none">
                 <line x1={x(shown.t)} x2={x(shown.t)} y1={TOP} y2={volBase} stroke={CROSS} strokeWidth={1} />
                 {shown.low != null && <circle cx={x(shown.t)} cy={y(shown.low)} r={4.5} fill={LINE} stroke={RING} strokeWidth={2} />}
+                {tip && (
+                  <>
+                    <rect x={tip.x} y={tip.y} width={tip.w} height={tip.h} rx={6} fill={TIP} stroke={GRID} />
+                    <text x={tip.x + 8} y={tip.y + 15} fontSize={11} fill={INK}>{shown.when}</text>
+                    <text x={tip.x + 8} y={tip.y + 31} fontSize={12} fontWeight={700} fill={TIP_INK}>{tip.words}</text>
+                  </>
+                )}
               </g>
             )}
           </svg>

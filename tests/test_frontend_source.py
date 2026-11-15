@@ -752,6 +752,8 @@ def test_the_prices_tab():
     chart = _code_only((SRC / "components" / "PriceChart.tsx").read_text())
     # 2026-11-15: how many were listed, as bars under the line — the server's words, no strip without a quantity
     assert "most.listed_words" in chart and "shown.listed_words" in chart and "H + volH" in chart
+    # the read-out at the pointer: price and how many listed beside the crosshair, and no native tooltip over it
+    assert "tip.words" in chart and chart.count("<title>") == 1, "only the small line keeps a <title>"
     assert "<svg" in chart and "var(--mantine-" in chart
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b", chart), "theme colours only"
     assert "toLocale" not in chart and "new Date(" not in chart, "the chart's labels are the server's words"
