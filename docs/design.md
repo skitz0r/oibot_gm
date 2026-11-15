@@ -5111,7 +5111,7 @@ seller, no sales, no history.
   updates; a not-modified answer never does. `auctions_tick` on the scheduler's minute loop starts one background task per
   guild when due, and remembers the state it last saw: time alone turning the table stale or hidden is heard once (F-4); a
   failure keeps the last table and warns ops at most once per guild per hour. No DM, notice, post or ops line on success.
-  After each check the same task names up to 1,000 listed ids nothing local names (Blizzard's item endpoint) into
+  (An id Blizzard has no item for is remembered in `out/auctions/items_gone.json` across restarts and asked again after seven days: about half the listed ids have no item page, they are the most listed, and forgetting them at a restart stopped the naming — found live 2026-11-14.) After each check the same task names up to 1,000 listed ids nothing local names (Blizzard's item endpoint) into
   `out/auctions/items.json` per game version; an item Blizzard doesn't know is remembered per process only.
   `house_choices` (the owner's picker): the guild's ruleset from its armory page, then each faction house with listings,
   with its quantity listed in all and the reference items' prices; `pick_house` re-checks a pick against the armory

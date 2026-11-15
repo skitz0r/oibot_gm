@@ -804,3 +804,41 @@ def test_the_small_lines_change_words(reg, clock):
     keep(reg, NOW - timedelta(hours=1), {VIAL: Price(low=640, qty=9)})  # Plaguebloom delisted an hour ago
     s = prices.spark(reg, PLAGUEBLOOM)
     assert (s["change_words"], s["up"]) == ("", None), "nothing listed now: no change to state"
+
+
+def test_ids_blizzard_cannot_name_are_not_asked_again_after_a_restart(reg, clock, monkeypatch):
+    """Found live 2026-11-14: the ids Blizzard has no name for were forgotten at every restart, sat first in the queue
+    (most listed first) and were asked again each hour — so after a restart nothing new was ever named. They are kept
+    on disk now and asked again only after GONE_RETRY."""
+    dead = {910000 + i: Price(low=100, qty=1000 + i) for i in range(30)}      # the most listed: Blizzard names none
+    alive = {920000 + i: Price(low=100, qty=5) for i in range(5)}
+    priced(reg, {**dead, **alive})
+    fake = FakeNames({i: f"Cog {i}" for i in alive})
+    monkeypatch.setattr(discord_auctions, "_client", lambda r: fake)
+    monkeypatch.setattr(discord_auctions, "NAME_PER_FETCH", 30)
+    bot = SimpleNamespace(ops=FakeOps())
+    assert run(discord_auctions.name_items(bot, reg)) == 0 and len(fake.asked) == 30, "the first batch: all thirty have no name"
+    prices.reset_names()  # a restart
+    fake.asked.clear()
+    assert run(discord_auctions.name_items(bot, reg)) == 5, "the next batch moves on to ids it hasn't asked"
+    assert sorted(fake.asked) == sorted(alive), "none of the thirty is asked again"
+    gone = json.loads((items_file().parent / "items_gone.json").read_text(encoding="utf-8"))
+    assert sorted(int(k) for k in gone[reg.profile.name]) == sorted(dead)
+    assert not [p for p in items_file().parent.iterdir() if p.suffix == ".tmp"], "written whole"
+    # a later patch may add the item: asked again after GONE_RETRY, and then the note goes when it is named
+    prices.reset_names()
+    fake.asked.clear()
+    clock.t = NOW + prices.GONE_RETRY + timedelta(hours=1)
+    priced(reg, dead, at=clock.t)
+    fake.names[910000] = "Late Cog"
+    assert run(discord_auctions.name_items(bot, reg)) == 1 and len(fake.asked) == 30
+    assert prices.names(reg)[910000] == "Late Cog"
+    gone = json.loads((items_file().parent / "items_gone.json").read_text(encoding="utf-8"))
+    assert "910000" not in gone[reg.profile.name] and len(gone[reg.profile.name]) == 29
+
+
+def test_a_damaged_gone_file_is_only_a_slower_start(reg, clock, monkeypatch):
+    priced(reg, {910001: Price(low=100, qty=9)})
+    items_file().parent.mkdir(parents=True, exist_ok=True)
+    (items_file().parent / "items_gone.json").write_text("{not json", encoding="utf-8")
+    assert prices.unnamed(reg, {910001: Price(low=100, qty=9)}, 10) == [910001]

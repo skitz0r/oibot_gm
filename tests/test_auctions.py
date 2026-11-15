@@ -170,3 +170,27 @@ def test_a_house_list_without_its_auctions_key_raises_armory_shape():
     c, _ = client({IDX: (200, {"_links": {}})})
     with pytest.raises(ArmoryShape):
         c.houses(1)
+
+
+def test_an_item_the_versions_own_pages_lack_is_named_from_the_fallback_namespace():
+    """Found live 2026-11-14: the Forever item pages leave out most random-stat gear and ammunition (a 404), while the
+    same ids are named in the Classic Era pages. The profile names that namespace; the version's own page wins."""
+    asked = []
+
+    def fetch(url, headers):
+        u = urllib.parse.urlsplit(url)
+        ns = dict(urllib.parse.parse_qsl(u.query))["namespace"]
+        asked.append((u.path, ns))
+        pages = {("/data/wow/item/11", "static-forever-us"): "Forever Name", ("/data/wow/item/11", "static-classic1x-us"): "Old Name",
+                 ("/data/wow/item/22", "static-classic1x-us"): "Precision Bolt"}
+        name = pages.get((u.path, ns))
+        return Reply(200, {}, json.dumps({"id": 1, "name": name}).encode()) if name else Reply(404, {}, b"{}")
+
+    arm = Armory("us", "profile-forever-us", "static-forever-us", fetch=fetch, limiter=battlenet.Limiter(1000))
+    c = Client(arm, NS, "static-classic1x-us")
+    assert c.item_name(11) == "Forever Name" and asked == [("/data/wow/item/11", "static-forever-us")], "its own page: one request"
+    assert c.item_name(22) == "Precision Bolt", "a 404 there: the fallback's name"
+    assert c.item_name(33) is None, "no page in either: None"
+    assert Client(arm, NS).item_name(22) is None, "a version without a fallback: as before"
+    live = auctions.client_for(SimpleNamespace(profile=FOREVER))
+    assert live.names_fallback_ns == "static-classic1x-us" == FOREVER.auctions["names_fallback_namespace"].format(region="us")

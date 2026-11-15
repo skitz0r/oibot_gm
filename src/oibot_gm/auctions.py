@@ -62,8 +62,8 @@ def _add(table: dict[int, Price], item: int, unit: int, qty: int) -> None:
 class Client:
     """One region's auction houses in `dynamic_ns`, read through `arm` (an armory.Armory: its fetch, token and limiter)."""
 
-    def __init__(self, arm: armory.Armory, dynamic_ns: str):
-        self.arm, self.dynamic_ns = arm, dynamic_ns
+    def __init__(self, arm: armory.Armory, dynamic_ns: str, names_fallback_ns: str | None = None):
+        self.arm, self.dynamic_ns, self.names_fallback_ns = arm, dynamic_ns, names_fallback_ns
 
     def houses(self, ruleset_id: int) -> list[House]:
         """Every house of the ruleset (every faction's and the neutral ones), in the armory's order."""
@@ -92,14 +92,19 @@ class Client:
         return table, got.modified
 
     def item_name(self, item_id: int) -> str | None:
-        """An item's name from the static namespace (the naming step behind the price search); None when Blizzard has no
-        item of that id (a 404)."""
+        """An item's name from the static namespace (the naming step behind the price search), else — where the profile
+        names one — from the fallback namespace (integrations.yaml `auctions.names_fallback_namespace`: the version's own
+        pages lack some items that are listed); None when Blizzard has no item of that id in either (a 404)."""
         path = f"/data/wow/item/{int(item_id)}"
-        try:
-            d = self.arm.get(path, self.arm.static_ns).data
-        except armory.ArmoryMissing:
-            return None
-        return _str(d, "name", path)
+        for ns in (self.arm.static_ns, self.names_fallback_ns):
+            if not ns:
+                continue
+            try:
+                d = self.arm.get(path, ns).data
+            except armory.ArmoryMissing:
+                continue
+            return _str(d, "name", path)
+        return None
 
 
 # ------------------------------------------------------------------ per guild
@@ -116,7 +121,8 @@ def client_for(reg) -> Client:
     if not a:
         raise armory.ArmoryError(NO_AUCTIONS_WORDS, f"profile {reg.profile.name} has no auctions")
     arm = armory.client_for(reg)
-    return Client(arm, str(a["dynamic_namespace"]).format(region=arm.region))
+    fallback = a.get("names_fallback_namespace")
+    return Client(arm, str(a["dynamic_namespace"]).format(region=arm.region), str(fallback).format(region=arm.region) if fallback else None)
 
 
 def faction_houses(reg, houses: list[House], faction: str) -> list[House]:

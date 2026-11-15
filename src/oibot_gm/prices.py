@@ -43,7 +43,8 @@ NO_MATCH = "No item the bot knows has that name."
 
 _LOCAL: dict[str, tuple[tuple, dict[int, str]]] = {}  # version → (the profile's tables it was built from, names)
 _FETCHED: dict[str, dict[int, str]] | None = None  # version → {id: name} looked up from Blizzard (the file); None = unread
-_GONE: dict[str, set[int]] = {}  # version → ids Blizzard has no item for (this process only)
+_GONE: dict[str, dict[int, float]] | None = None  # version → {id Blizzard has no item for: when it said so (epoch)}; None = unread
+GONE_RETRY = timedelta(days=7)  # an id Blizzard couldn't name is asked again after this long (a patch may add the item)
 _MERGED: dict[str, tuple[tuple, dict[int, str]]] = {}  # version → ((the local names, _GEN), local + fetched)
 _GEN = 0  # moves on every change to the looked-up names
 _FILE_LOCK = threading.Lock()
@@ -51,18 +52,56 @@ _FILE_LOCK = threading.Lock()
 
 def reset_names() -> None:
     """Forget the names kept in memory (a restart; tests)."""
-    global _FETCHED, _GEN
+    global _FETCHED, _GEN, _GONE
     with _FILE_LOCK:
         _GEN += 1
         _LOCAL.clear()
         _MERGED.clear()
-        _GONE.clear()
+        _GONE = None
         _FETCHED = None
     _MOVERS.clear()  # the movers' answers were built from those names
 
 
 def _items_path() -> Path:
     return discord_auctions.OUT / "items.json"
+
+
+def _gone_path() -> Path:
+    return discord_auctions.OUT / "items_gone.json"
+
+
+def _gone() -> dict[str, dict[int, float]]:
+    """The ids Blizzard has no item for, kept ACROSS restarts (out/auctions/items_gone.json): forgotten at a restart they
+    sat first in the queue — most listed first — and were asked again every hour, so nothing new was ever named (found
+    live 2026-11-14). An entry older than GONE_RETRY is dropped, so the id is asked once more."""
+    global _GONE
+    if _GONE is None:
+        got: dict[str, dict[int, float]] = {}
+        try:
+            d = json.loads(_gone_path().read_text(encoding="utf-8"))
+            cut = discord_auctions._now().timestamp() - GONE_RETRY.total_seconds()
+            got = {str(v): {int(k): float(t) for k, t in block.items() if float(t) >= cut} for v, block in d.items()}
+        except FileNotFoundError:
+            pass
+        except Exception:  # noqa: BLE001 — a damaged file only means those ids are asked once more
+            log.warning("unnameable items file unreadable; those ids are asked again")
+        _GONE = got
+    return _GONE
+
+
+def _write_whole(path: Path, text: str, what: str) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=f".{path.stem}-", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.replace(tmp, path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+    except OSError:
+        log.exception("%s not saved", what)
 
 
 def _fetched() -> dict[str, dict[int, str]]:
@@ -115,7 +154,8 @@ def names(reg) -> dict[int, str]:
 def unnamed(reg, listed: dict[int, Price], limit: int) -> list[int]:
     """Up to `limit` listed ids that nothing names and Blizzard was not found lacking, most listed first."""
     known = names(reg)
-    gone = _GONE.get(reg.profile.name, set())
+    with _FILE_LOCK:
+        gone = _gone().get(reg.profile.name) or {}
     ids = [i for i in listed if i not in known and i not in gone]
     ids.sort(key=lambda i: (-listed[i].qty, i))
     return ids[:limit]
@@ -124,10 +164,21 @@ def unnamed(reg, listed: dict[int, Price], limit: int) -> list[int]:
 def remember(reg, found: dict[int, str], gone: set[int]) -> None:
     """Keep the names looked up for the guild's version and write the file whole (a unique temp name, then a rename).
     BLOCKS on the write: call it through asyncio.to_thread."""
-    global _FETCHED, _GEN
+    global _FETCHED, _GEN, _GONE
     version = reg.profile.name
     with _FILE_LOCK:
-        _GONE.setdefault(version, set()).update(gone)
+        held = _gone()
+        mine = dict(held.get(version) or {})
+        before = dict(mine)
+        stamp = discord_auctions._now().timestamp()
+        for i in gone:
+            mine.setdefault(int(i), stamp)
+        for i in found:  # named after all (a retry): no longer unnameable
+            mine.pop(int(i), None)
+        if mine != before:
+            _GONE = {**held, version: mine}
+            _write_whole(_gone_path(), json.dumps({v: {str(k): t for k, t in sorted(b.items())} for v, b in sorted(_GONE.items())},
+                                                  separators=(",", ":")), "unnameable items")
         if not found:
             return
         current = _fetched()
@@ -137,19 +188,7 @@ def remember(reg, found: dict[int, str], gone: set[int]) -> None:
         _GEN += 1
         text = json.dumps({v: {str(k): n for k, n in sorted(b.items())} for v, b in sorted(_FETCHED.items())},
                           separators=(",", ":"), ensure_ascii=False)
-        path = _items_path()
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(prefix=".items-", suffix=".tmp", dir=path.parent)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(text)
-                os.replace(tmp, path)
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
-        except OSError:
-            log.exception("item names not saved")
+        _write_whole(_items_path(), text, "item names")
 
 
 # ------------------------------------------------------------------ prices

@@ -19,3 +19,7 @@ auctions:
   factions: {Alliance: "Alliance Auction House", Horde: "Horde Auction House"}
   # Well-known stackables the owner's picker prices so a house can be matched against the game: Arcanite Bar, Dreamfoil, Runecloth.
   reference_items: [12360, 13463, 14047]
+  # Item names for the price search: the Forever item pages (the static namespace above) lack most random-stat gear and
+  # ammunition that IS listed (a 404), while the same ids are named in the Classic Era pages. Probed live 2026-11-14: of
+  # 100 listed ids nothing named, 86 were named only here, 2 nowhere. Asked only after the version's own page says no.
+  names_fallback_namespace: "static-classic1x-{region}"
