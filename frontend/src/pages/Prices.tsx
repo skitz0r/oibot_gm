@@ -50,6 +50,11 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [prepPages, setPrepPages] = useState({ rows: 1, below: 1 });
   const winRef = useRef(win);
   winRef.current = win;
+  // the watch list's own choices (the owner, 2026-11-15), Movers' selectors: how far back the small lines go, and the item group
+  const [watchWin, setWatchWin] = useState("24");
+  const watchWinRef = useRef(watchWin);
+  watchWinRef.current = watchWin;
+  const [watchGroup, setWatchGroup] = useState("all");
   const [span, setSpan] = useState("1");  // 24 hours first: where a price moved today shows
   const [hist, setHist] = useState<PriceHistory | null>(null);
   const [pressing, setPressing] = useState<Set<number>>(new Set());
@@ -69,7 +74,9 @@ export function PricesPage({ meta }: { meta: Meta }) {
       .then((d) => { if (view.current.open === d.id && view.current.span === d.span) setHist(d); })
       .catch((e) => { if (e instanceof ApiError && e.status === 400) setOpen(null); else fail(e); });  // an item the bot can't name any more
   };
-  const loadList = () => api.get<WatchList>("/api/prices/watching").then((d) => { setList(d); setWords(d.words); }).catch(fail);
+  const loadList = () => api.get<WatchList>(`/api/prices/watching?window=${encodeURIComponent(watchWinRef.current)}`)
+    .then((d) => { if ((d.window ?? "24") === watchWinRef.current) { setList(d); setWords(d.words); } }).catch(fail);
+  const changeWatchWindow = (w: string) => { setWatchWin(w); watchWinRef.current = w; loadList(); };
   const loadMovers = (w: string) => api.get<Movers>(`/api/prices/movers?window=${encodeURIComponent(w)}`)
     .then((d) => { if (winRef.current === d.window) setMovers(d); }).catch(fail);
   const changeWindow = (w: string) => { setWin(w); loadMovers(w); };
@@ -101,7 +108,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const press = async (id: number, on: boolean) => {
     setPressing((b) => new Set(b).add(id));
     try {
-      const d = await api.post<{ message: string; rows: PriceRow[] }>("/api/prices/watch", { id, on });
+      const d = await api.post<{ message: string; rows: PriceRow[] }>("/api/prices/watch", { id, on, window: watchWinRef.current });
       const mine = new Set(d.rows.map((r) => r.id));
       setList((l) => (l ? { ...l, rows: d.rows } : l));
       setFound((f) => (f ? { ...f, rows: f.rows.map((r) => ({ ...r, watching: mine.has(r.id) })) } : f));
@@ -122,8 +129,12 @@ export function PricesPage({ meta }: { meta: Meta }) {
     </Button>
   );
   const shown = list?.shown ?? !!meta.prices?.on;  // prices show (fresh or stale): search and history; else names alone
-  const rows = list?.rows || [];
-  const mine = new Set(rows.map((r) => r.id));
+  const allRows = list?.rows || [];
+  const mine = new Set(allRows.map((r) => r.id));
+  const watchGroups = (list?.groups || []).filter((g) => g.id === "all" || allRows.some((r) => r.group === g.id));  // only groups the list holds
+  const inGroup = watchGroups.some((g) => g.id === watchGroup) ? watchGroup : "all";  // a group emptied by Stop watching falls back to All
+  const rows = inGroup === "all" ? allRows : allRows.filter((r) => r.group === inGroup);
+  const watchWinLabel = list?.windows?.find((w) => w.id === (list.window ?? "24"))?.label || "24 hours";
   const isOpen = (id: number, at: Where) => shown && openAt?.id === id && openAt.at === at;
   const toggle = (id: number, at: Where) => setOpen(isOpen(id, at) ? null : id, at);
   const chevron = (id: number, at: Where) => (
@@ -398,6 +409,22 @@ export function PricesPage({ meta }: { meta: Meta }) {
       <Card className={css.side}>
         <CardHeader title="Your watch list" hint="only you see it; nothing pings you when a price moves" />
         {list === null && <Text size="sm" c="dimmed" px="md" py="sm">Loading…</Text>}
+        {shown && allRows.length > 0 && list?.windows && (
+          <Group px="md" pt="sm" gap="xs">
+            <SegmentedControl size="xs" value={watchWin} onChange={changeWatchWindow} disabled={watchWin !== (list.window ?? "24")} aria-label="Over how long"
+              data={list.windows.map((w) => ({ value: w.id, label: w.label }))} />
+          </Group>
+        )}
+        {allRows.length > 0 && watchGroups.length > 2 && (
+          <Group px="md" pt="xs" pb={4} gap={6}>
+            {watchGroups.map((g) => (
+              <Button key={g.id} size="compact-xs" radius="xl" variant={inGroup === g.id ? "filled" : "default"}
+                aria-pressed={inGroup === g.id} onClick={() => setWatchGroup(g.id)}>
+                {g.name} · {g.id === "all" ? allRows.length : allRows.filter((r) => r.group === g.id).length}
+              </Button>
+            ))}
+          </Group>
+        )}
         {list !== null && rows.length === 0 && (
           <Text size="sm" c="dimmed" px="md" py="sm">{!list.registered && refusal ? refusal : list.empty}</Text>
         )}
@@ -413,7 +440,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
                         {chevron(r.id, "list")}
                         <Text size="sm" fw={600} className={css.name}><ItemName id={r.id} name={r.name} /></Text>
                       </Group>
-                      <div className={css.spark}>{r.spark ? <Sparkline data={r.spark} label="Its lowest price over the last 24 hours" /> : null}</div>
+                      <div className={css.spark}>{r.spark ? <Sparkline data={r.spark} label={`Its lowest price over the last ${watchWinLabel}`} /> : null}</div>
                       <div className={css.figures}>
                         <Text size="sm" fw={600} c={r.qty ? undefined : "dimmed"}>{r.low_words}</Text>
                         {r.spark?.change_words && <Text size="xs" fw={700} style={{ color: trendOf(r.spark.up) }}>{r.spark.change_words}</Text>}

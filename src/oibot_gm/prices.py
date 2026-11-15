@@ -782,13 +782,40 @@ def _change_words(pct: int) -> str:
     return f"{'+' if pct > 0 else '−' if pct < 0 else ''}{abs(pct)}%"
 
 
-def spark(reg, item_id: int, *, now: datetime | None = None) -> dict | None:
+def watch_groups(reg) -> tuple[list[dict], object]:
+    """The watch list's item groups — Movers' own (All, the profile's by Blizzard's item class, Other) — and item id →
+    its group id."""
+    rows, _reagents, of = _grouper(reg)
+    return rows, of
+
+
+def spark(reg, item_id: int, *, now: datetime | None = None, window: str | None = None) -> dict | None:
     """A watched item's small line for its row in the list (BLOCKING: reads the history file): the last 24 hours
     (SPARK_SPAN; less while the history is younger) as {since, until, points [[epoch seconds, lowest in copper | None =
     nothing listed or not read from then]], change_words, up}. `change_words` = the price now against the first price of
     the stretch ('+12%' / '−8%' / '0%'; "" when nothing is listed now), `up` = True risen / False fallen / None neither —
     the line's colour. None when there is nothing to draw: prices don't show, no history, or nothing listed all day."""
-    c = chart(reg, item_id, SPARK_SPAN, now=now)
+    if window is None or str(window) == "24":
+        c = chart(reg, item_id, SPARK_SPAN, now=now)
+    else:  # the list's time choice (2026-11-15): Movers' windows — the same line over 6 hours, 12 hours or 7 days
+        from .registry import RegistryError
+
+        if str(window) not in WINDOWS:
+            raise RegistryError(NOT_A_WINDOW)
+        now = now or discord_auctions._now()
+        start = now - WINDOWS[str(window)][0]
+        c = {"since": int(start.timestamp()), "until": int(now.timestamp()), "points": []}
+        key = discord_auctions.history_key(reg)
+        if key is not None and _shown(reg):
+            try:
+                pts = price_history.points(key, item_id, start, now)
+                kept = price_history.kept_since(key)
+            except price_history.HistoryError:
+                log.warning("price history unreadable for %s", key, exc_info=True)
+                pts, kept = [], None
+            if kept is not None and int(kept.timestamp()) > c["since"]:
+                c["since"] = min(int(kept.timestamp()), c["until"])
+            c["points"] = [{"t": int(p.at.timestamp()), "low": p.low} for p in pts]
     lows = [p["low"] for p in c["points"] if p["low"] is not None]
     if not lows:
         return None
@@ -1158,4 +1185,4 @@ def prep(reg) -> dict:
 __all__ = ["MOVERS_TOP", "prep", "PREP_NONE", "BELOW_NONE", "levels", "item_fact", "bargains", "BARGAINS_NONE", "BARGAIN_MIN_GAP", "MOVE_STEPS", "MOVERS_NONE", "kinds", "unkinded", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
-           "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]
+           "price_words", "watch_groups", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

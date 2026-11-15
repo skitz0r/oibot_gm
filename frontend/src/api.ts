@@ -178,7 +178,7 @@ export interface PriceFind {
 /** One item's price (web/api_prices): `low_words` = its lowest price or "none listed", `qty` = how many are listed, `words` =
  *  the whole line; `watching` = on the viewer's own watch list (the search's rows only). While prices are hidden a watch
  *  list row carries its name alone (empty `low_words` and `words`). */
-export interface PriceRow { id: number; name: string; low_words: string; qty: number; words: string; watching?: boolean; spark?: PriceSpark | null }
+export interface PriceRow { id: number; name: string; low_words: string; qty: number; words: string; watching?: boolean; spark?: PriceSpark | null; group?: string }
 /** A watch list row's small line (prices.spark): the last 24 hours (less while the history is younger) as [epoch seconds, lowest in copper | null = nothing
  *  listed or not read from then] over `since` .. `until` — positions only; null = nothing to draw. */
 export interface PriceSpark {
@@ -194,6 +194,8 @@ export interface WatchList {
   /** when the bot last checked the auction house and when it checks next ("" while no prices show), and in how many
    *  seconds to ask again (a little after that check) */
   checked?: string; again_in?: number | null;
+  /** the list's choices, Movers' own: how far back each row's small line and change go, and the item groups (a row's `group`) */
+  window?: string; windows?: { id: string; label: string }[]; groups?: { id: string; name: string }[];
 }
 /** GET /api/prices/history (price watch §4.3, C5): a watched item over one span. `t` = epoch seconds (the x position only),
  *  `when` = the server's words for the point (a time, or a day alone for a folded day), `low` / `high` in copper (low null =

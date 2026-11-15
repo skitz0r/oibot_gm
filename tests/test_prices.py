@@ -826,6 +826,14 @@ def test_the_small_lines_change_words(reg, clock):
     keep(reg, NOW - timedelta(hours=5), {PLAGUEBLOOM: Price(low=900, qty=4), VIAL: Price(low=640, qty=9)})
     s = prices.spark(reg, PLAGUEBLOOM)
     assert (s["change_words"], s["up"]) == ("−40%", False)
+    # 2026-11-15: the list's time choice — Movers' windows: over 6 hours the price already stood at 9s (dropped 5 hours ago, carried in)
+    s6 = prices.spark(reg, PLAGUEBLOOM, window="6")
+    assert s6["until"] - s6["since"] == 6 * 3600 and [low for _t, low in s6["points"]] == [1500, 900] and s6["change_words"] == "−40%"
+    s3 = prices.spark(reg, PLAGUEBLOOM, window="168")
+    assert s3["since"] == int((NOW - 3 * DAY).timestamp()), "a history younger than the window starts where it does"
+    assert prices.spark(reg, PLAGUEBLOOM, window="24") == s
+    with pytest.raises(Exception, match="That isn't one of the windows."):
+        prices.spark(reg, PLAGUEBLOOM, window="9")
     s = prices.spark(reg, VIAL)
     assert (s["change_words"], s["up"]) == ("0%", None), "a price that held: no colour"
     keep(reg, NOW - timedelta(hours=1), {VIAL: Price(low=640, qty=9)})  # Plaguebloom delisted an hour ago

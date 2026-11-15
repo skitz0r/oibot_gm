@@ -305,13 +305,23 @@ def test_watch_then_list_then_stop(w, market_on):
     assert checked == (f"Last checked {w.reg.local12(t, '%I:%M %p')}. "
                        f"Next check about {w.reg.local12(t + discord_auctions.FETCH_EVERY, '%I:%M %p')}.")
     assert 600 < again <= 690, "a little after the next check"
+    # the list's choices, Movers' own: the window (how far back the small lines go) and the item groups
+    assert (d.pop("window"), d.pop("windows")) == ("24", [{"id": k, "label": v[1]} for k, v in prices.WINDOWS.items()])
+    groups = d.pop("groups")
+    assert groups[0] == {"id": "all", "name": "All"} and groups[-1] == {"id": "other", "name": "Other"}
     assert d == {"rows": [], "words": prices.status_sentence(w.reg, False), "shown": True, "max": 25, "empty": prices.EMPTY_LIST_SITE,
                  "registered": True}
     r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
     assert r.status_code == 200, r.text
     row = {"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "15s", "qty": 4, "words": "Plaguebloom: lowest price 15s, 4 listed.",
            "spark": None}  # no history kept yet: no small line
+    row["group"] = r.json()["rows"][0]["group"]
+    assert row["group"] in {g["id"] for g in groups}
     assert r.json() == {"message": "You're watching Plaguebloom.", "rows": [row]}
+    d7 = w.c.get("/api/prices/watching?window=168", headers=h).json()
+    assert d7["window"] == "168" and [x["id"] for x in d7["rows"]] == [PLAGUEBLOOM]
+    assert w.c.get("/api/prices/watching?window=9", headers=h).status_code == 400
+    assert w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True, "window": "9"}, headers=h).status_code == 400
     r = w.c.post("/api/prices/watch", json={"id": BAR, "on": True}, headers=h)
     assert [x["id"] for x in r.json()["rows"]] == [BAR, PLAGUEBLOOM], "newest first"
     d = w.c.get("/api/prices/watching", headers=h).json()
@@ -330,7 +340,8 @@ def test_the_list_without_prices_shows_names_only(w, market_on):
     w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
     priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now() - timedelta(hours=30))  # a day old: not shown (C16)
     d = w.c.get("/api/prices/watching", headers=h).json()
-    assert d["shown"] is False and d["rows"] == [{"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "", "qty": 0, "words": ""}]
+    assert d["shown"] is False and d["rows"] == [{"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "", "qty": 0, "words": "",
+                                                       "group": d["rows"][0]["group"]}]
     assert d["empty"] == prices.EMPTY_LIST_HIDDEN, "the search card is hidden: the empty list points at nothing"
     w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": False}, headers=h)
     d = w.c.get("/api/prices/watching", headers=h).json()
@@ -459,7 +470,7 @@ def test_another_member_never_reads_your_list(w, market_on):
     routes = {(method, r.path): r for r in w.c.app.routes if hasattr(r, "dependant") for method in r.methods}
     for method, path in WATCH_ROUTES:
         params = {p.name for p in routes[(method.upper(), path)].dependant.query_params}
-        assert params <= {"id", "span"}, (path, params)
+        assert params <= {"id", "span", "window"}, (path, params)  # window = how far back the small lines go, never whose list
 
 
 def test_mcp_is_refused_on_every_watch_route(w, market_on):

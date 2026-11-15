@@ -532,7 +532,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   for every member. At the top, **What does it go for?** — the same search as the Professions page's box: part of an
   item's name lists up to 25 items with their lowest price and how many are listed (or *none listed*) and how many more
   match, each with **Watch** (**Stop watching** when it is already on your list). The page says once how recent the
-  prices are (*Prices as of …*). **Your watch list** sits beside the search and Movers on a wide screen, on the right,
+  prices are (*Prices as of …*). **Your watch list** — with Movers' two choices above its rows: how far back each row's small line and change go
+  (**6 hours** · **12 hours** · **24 hours**, shown first · **7 days**) and, once it holds more than one kind of item, the
+  item group (**Materials**, **Consumables**, … each with how many of your items it holds) — sits beside the search and Movers on a wide screen, on the right,
   and stays in view while you scroll Movers (there its rows leave out how many are listed; open a row for that); on a
   narrower screen it is the first card. It has a row per item with its lowest price, how many are
   listed and, between the name and the price, a small line of its price over the last 24 hours with the day's change under the price (*+12%* in green when it rose, *−8%* in red when it fell), newest first; an empty list says *"You aren't watching anything yet. Search for an item above and press

@@ -102,15 +102,22 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
     def shown_now(reg) -> bool:
         return discord_auctions.state(reg) in ("fresh", "stale")
 
-    def watch_rows(reg, uid: int) -> list[dict]:
+    def watch_rows(reg, uid: int, window: str = "24") -> list[dict]:
+        """`window` = one of Movers' windows: how far back each row's small line and change go (unknown → RegistryError).
+        Each row's `group` = Movers' item group (the list's item-type choice, 2026-11-15)."""
+        if str(window) not in prices.WINDOWS:
+            raise RegistryError(prices.NOT_A_WINDOW)
+        _groups, group_of = prices.watch_groups(reg)
         if not shown_now(reg):  # prices hidden (C16): the names alone
-            return [{"id": p.id, "name": p.name, "low_words": "", "qty": 0, "words": ""} for p in prices.watch_list(reg, uid)]
+            return [{"id": p.id, "name": p.name, "low_words": "", "qty": 0, "words": "", "group": group_of(p.id)}
+                    for p in prices.watch_list(reg, uid)]
         return [{"id": p.id, "name": p.name, "low_words": _low(p.low), "qty": p.qty, "words": prices.price_words(p),
-                 "spark": prices.spark(reg, p.id)}  # the row's small line (BLOCKING: a history read each — callers use a thread)
+                 "group": group_of(p.id),
+                 "spark": prices.spark(reg, p.id, window=window)}  # the row's small line (BLOCKING: a history read each — callers use a thread)
                 for p in prices.watch_list(reg, uid)]
 
     @app.get("/api/prices/watching")
-    async def prices_watching(request: Request):
+    async def prices_watching(request: Request, window: str = "24"):
         """The viewer's own watch list, newest first: rows priced while prices show, else names alone (`shown` false)."""
         v = await who(request)
         own_list(v)
@@ -118,8 +125,15 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         m = reg.members.get(v.uid)
         shown = shown_now(reg)
         checked, again = discord_auctions.checked_words(reg)
-        return {"rows": await asyncio.to_thread(watch_rows, reg, v.uid), "words": prices.status_sentence(reg, bool(v.owner)),
+        try:
+            rows = await asyncio.to_thread(watch_rows, reg, v.uid, window)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"rows": rows, "words": prices.status_sentence(reg, bool(v.owner)),
                 "checked": checked, "again_in": again,
+                # the list's choices (2026-11-15), Movers' own: how far back the small lines go, and the item groups
+                "window": str(window), "windows": [{"id": k, "label": w[1]} for k, w in prices.WINDOWS.items()],
+                "groups": prices.watch_groups(reg)[0],
                 "shown": shown, "max": WATCH_MAX, "empty": prices.EMPTY_LIST_SITE if shown else prices.EMPTY_LIST_HIDDEN,
                 "registered": m is not None and not m.test}
 
@@ -131,12 +145,15 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         item, on = d.get("id"), d.get("on")
         if isinstance(item, bool) or not isinstance(item, int) or not isinstance(on, bool):
             return JSONResponse({"error": prices.NO_MATCH}, status_code=400)
+        window = str(d.get("window") or "24")  # the list's time choice, so the fresh rows keep it
+        if window not in prices.WINDOWS:
+            return JSONResponse({"error": prices.NOT_A_WINDOW}, status_code=400)
         verb = prices.watch if on else prices.unwatch
         try:
             message = await asyncio.to_thread(verb, v.reg, v.uid, item)  # one quiet commit (C14); SAVE_LISTENERS → `member`
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": message, "rows": await asyncio.to_thread(watch_rows, v.reg, v.uid)}
+        return {"message": message, "rows": await asyncio.to_thread(watch_rows, v.reg, v.uid, window)}
 
     @app.get("/api/prices/history")
     async def prices_history(request: Request, id: str = "", span: str = "1"):  # noqa: A002 — the page's own word
