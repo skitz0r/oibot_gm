@@ -723,8 +723,10 @@ def test_the_prices_tab():
     assert "<ItemName " in page and "<PriceChart" in page
     # 2026-11-14: a search row opens to the chart too (watched or not), and a watched row carries its small line
     # movers (an experiment): the server's two lists, every figure its words; a row opens the same panel
-    assert "/api/prices/movers" in page and 'moversSide("Dips", "dips", movers.dips, movers.dips_words)' in page
-    assert 'moversSide("Rising", "rising", movers.rising, movers.rising_words)' in page and "r.change_words" in page and "hist.used_in" in page
+    assert "/api/prices/movers" in page and 'moversSide("dips", movers.dips, movers.dips_words)' in page
+    # 2026-11-15: Dips and Rising are tabs — one list at a time, each tab with its count
+    assert "`Dips · ${chosenOf(movers.dips).length}`" in page and "`Rising · ${chosenOf(movers.rising).length}`" in page
+    assert 'moversSide("rising", movers.rising, movers.rising_words)' in page and "r.change_words" in page and "hist.used_in" in page
     # Bargains: the card's second tab, the server's rows and sentences
     for piece in ("/api/prices/bargains", "bargains.hint_words", "b.typical_words", "b.source_words", "b.none_words", "r.gap_words", "r.ref_words"):
         assert piece in page, piece
@@ -748,6 +750,8 @@ def test_the_prices_tab():
     assert 'useLive(' in page and '"prices"' in page
     assert "useDirty" not in page, "the tab has no edit mode"
     chart = _code_only((SRC / "components" / "PriceChart.tsx").read_text())
+    # 2026-11-15: how many were listed, as bars under the line — the server's words, no strip without a quantity
+    assert "most.listed_words" in chart and "shown.listed_words" in chart and "H + volH" in chart
     assert "<svg" in chart and "var(--mantine-" in chart
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b", chart), "theme colours only"
     assert "toLocale" not in chart and "new Date(" not in chart, "the chart's labels are the server's words"

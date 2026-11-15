@@ -32,11 +32,6 @@
 .main { display: flex; flex-direction: column; gap: var(--mantine-spacing-lg); min-width: 0; }
 .main:empty { display: none; }
 .side { order: -1; min-width: 0; }
-.sides { display: grid; grid-template-columns: minmax(0, 1fr); }
-.sides > * { min-width: 0; }
-@media (min-width: 62em) and (max-width: 79.99em) {
-  .sides { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-}
 @media (min-width: 80em) {
   .cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: start; }
   .cols > .side { order: 0; position: sticky; top: var(--mantine-spacing-md); max-height: calc(100vh - 2 * var(--mantine-spacing-md)); overflow-y: auto; }

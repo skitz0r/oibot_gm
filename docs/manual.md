@@ -539,7 +539,11 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   highest; a stretch when the bot didn't read the auction house is a break too, read *not read*), with **24 hours** (shown first) · **7 days** · **30 days** · **90 days** · **1 year** — the line is green when the price ended the span higher than it began and red when lower; while the bot's record is younger than the span the chart starts where the record does —, the highest and lowest of the span at its side and
   the first and last change's time under it. Point at the line, or press its arrow keys, to read one change's time and
   price (the first point reads the span's start, with the price the item had then). A price that didn't change all span is
-  a flat line across it. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'
+  a flat line across it. Under the line, grey bars show **how many were listed** at each moment, on the same time axis,
+  with the most of the span named at the side and each point's count in the read-out (*"Sat 14 Nov 3:00 PM · 12s 40c ·
+  1,240 listed"*): a price that falls while the bars grow is more being listed, one that rises while they shrink is the
+  supply being bought or pulled. It is what is listed, not what sold — Blizzard publishes no sales —, and days older than
+  90 days have no bars. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'
   and, while the record is young, *"The bot has kept prices since Sat 7 Nov."*) and **Watch** or **Stop watching**. A watch is your own
   preference: it happens at once, with no confirm, and the same list shows in `/price`. You need to be registered to keep
   one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction
@@ -565,8 +569,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   TradeSkillMaster's public figures for the whole Classic region, read once a day; the card says when. These are
   things to look into, not advice: a new economy floods low-level materials while everyone levels, and a material may
   simply matter less here than it did in Classic.
-- **Movers** (an experiment, on the site's Prices tab): between the search and your watch list, two lists — **Dips** and
-  **Rising** — over **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
+- **Movers** (an experiment, on the site's Prices tab): under the search, two tabs — **Dips** and
+  **Rising**, each with how many items it holds, one list shown at a time — over **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
   least 10% away from its *usual* price over that time, the biggest move first, 15 each way with **Show more** for the
   rest: the usual price → the price now, the change in percent and in gold, how many are listed, and how many recipes use
   the item. Above the lists you pick a group — **Materials** (shown first), **Consumables**, **Gear**, **Recipes**,

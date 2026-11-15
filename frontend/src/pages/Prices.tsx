@@ -13,7 +13,7 @@ import css from "./prices.module.css";
  *  watch list (GET /api/prices/watching), each row with its small 24-hour line and the day's change beside the price (Sparkline, the row's `spark`). A row of
  *  either — watched or not (the owner's decision 2026-11-14) — opens in place to the item's chart and the server's
  *  history sentences (GET /api/prices/history) with Watch / Stop watching; one row is open at a time. Between the two,
- *  Movers (GET /api/prices/movers, an experiment): Dips and Rising over 6 hours / 12 hours / 24 hours / 7 days — the price
+ *  Movers (GET /api/prices/movers, an experiment): Dips and Rising — two tabs, one list at a time, each with its count — over 6 hours / 12 hours / 24 hours / 7 days — the price
  *  now against the item's usual price over the window, each row opening to the same chart, with what recipes use it. The server sends
  *  every mover; the card picks among them (2026-11-15): a group (the server's `groups`, each with how many it holds), the order
  *  (by percent or by gold), the smallest move, and Show more past the first `page` rows. The card's second tab, Bargains
@@ -39,6 +39,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [sort, setSort] = useState("pct");
   const [step, setStep] = useState("10");
   const [pages, setPages] = useState({ dips: 1, rising: 1 });
+  const [side, setSide] = useState<"dips" | "rising">("dips");  // Dips and Rising are tabs (the owner, 2026-11-15): one list at a time
   const choose = (set: () => void) => { set(); setPages({ dips: 1, rising: 1 }); };
   // the card's second tab (2026-11-15): materials far cheaper here than most, against another economy's prices
   const [tab, setTab] = useState("movers");
@@ -143,13 +144,13 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const bigEnough = (r: MoverRow) => Math.abs(r.pct) >= Number(step);
   const moverCount = (id: string) => movers === null ? 0
     : [...movers.dips, ...movers.rising].filter((r) => bigEnough(r) && (id === "all" || r.group === id)).length;
-  const moversSide = (title: string, at: "dips" | "rising", all: MoverRow[], none: string) => {
-    const chosen = all.filter((r) => bigEnough(r) && (moverGroup === "all" || r.group === moverGroup));
+  const chosenOf = (all: MoverRow[]) => all.filter((r) => bigEnough(r) && (moverGroup === "all" || r.group === moverGroup));
+  const moversSide = (at: "dips" | "rising", all: MoverRow[], none: string) => {
+    const chosen = chosenOf(all);
     if (sort === "gold") chosen.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));  // the server's order is by percent
     const side = chosen.slice(0, (movers?.page ?? 15) * pages[at]);
     return (
     <div>
-      <Text size="xs" fw={700} c="dimmed" tt="uppercase" px="md" pt="sm">{title}</Text>
       {side.length === 0 ? <Text size="sm" c="dimmed" px="md" py="sm">{all.length === 0 ? none : movers?.none_words}</Text> : (
         <div className={css.list}>
           {side.map((r) => (
@@ -350,6 +351,12 @@ export function PricesPage({ meta }: { meta: Meta }) {
             bargains.ready ? bargainRows(bargains) : (bargains.words && <Text size="sm" c="dimmed" px="md" py="sm">{bargains.words}</Text>)
           )}
           {tab === "movers" && (<>
+          {movers.ready && (
+            <Group px="md" pt="sm">
+              <SegmentedControl size="sm" value={side} onChange={(v) => setSide(v as "dips" | "rising")} aria-label="Which way the price moved"
+                data={[{ value: "dips", label: `Dips · ${chosenOf(movers.dips).length}` }, { value: "rising", label: `Rising · ${chosenOf(movers.rising).length}` }]} />
+            </Group>
+          )}
           <Group px="md" pt="sm">
             <SegmentedControl size="xs" value={win} onChange={changeWindow} disabled={win !== movers.window} aria-label="Over how long"
               data={movers.windows.map((w) => ({ value: w.id, label: w.label }))} />
@@ -374,10 +381,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
           )}
           {movers.ready && movers.words && <Text size="xs" c="dimmed" px="md" pt="sm">{movers.words}</Text>}
           {!movers.ready ? (movers.words && <Text size="sm" c="dimmed" px="md" py="sm">{movers.words}</Text>) : (
-            <div className={css.sides}>
-              {moversSide("Dips", "dips", movers.dips, movers.dips_words)}
-              {moversSide("Rising", "rising", movers.rising, movers.rising_words)}
-            </div>
+            side === "dips" ? moversSide("dips", movers.dips, movers.dips_words) : moversSide("rising", movers.rising, movers.rising_words)
           )}
           </>)}
         </Card>

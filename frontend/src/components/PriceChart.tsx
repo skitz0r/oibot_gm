@@ -47,6 +47,9 @@ const GUTTER = 92;
 const TOP = 10;
 const BOTTOM = 40;
 const RIGHT = 8;
+/** The strip under the price plot: how many were listed, as bars (a quantity holds until the next point). */
+const VOL = 34;
+const VOL_GAP = 12;
 /** A label's width at 11 px, near enough to keep two labels apart (the words are the server's, measured by length). */
 const textWidth = (words: string) => words.length * 6.2;
 
@@ -54,6 +57,7 @@ const GRID = "var(--mantine-color-slate-5)";
 const INK = "var(--mantine-color-dimmed)";
 const CROSS = "var(--mantine-color-slate-3)";
 const RING = "var(--mantine-color-body)";
+const BARS = "var(--mantine-color-slate-3)";
 
 /** A watched item's lowest price over one span (price watch §4.3, C5, C12, C17), drawn by the site itself as inline SVG:
  *  a step line (a price holds until the next point), broken where nothing was listed (a gap, never a zero), a faint band
@@ -61,6 +65,9 @@ const RING = "var(--mantine-color-body)";
  *  last point's time as the time labels — every label the server's words; `t` is only the x position, over the server's
  *  `since` .. `until` (the span's start and the server's now: the page reads no clock of its own). A hover or the arrow
  *  keys read one point out (its time and price, the server's words; the first point of a span reads the span's start).
+ *  Under the plot, where the points carry a quantity (2026-11-15): how many were listed, as bars on the same x axis —
+ *  supply, the feed has no sales —, the span's most as the strip's label, the read-out adding the point's
+ *  `listed_words`; no strip when no point has one (a span of folded days).
  *  One point is a held line to `until` (a price unchanged all span); with no point, or nothing listed all span, there is
  *  no frame: the page prints the server's sentences alone. The span switch's labels are the server's; it shows `span`,
  *  the span pressed, while that span's answer loads (`busy`). */
@@ -93,6 +100,17 @@ export function PriceChart({ data, onSpan, span, busy }: { data: PriceHistory; o
   const x = (t: number) => GUTTER + ((t - t0) / (t1 - t0)) * plotW;
   const y = (v: number) => TOP + (1 - (v - yMin) / (yMax - yMin)) * plotH;
   const next = (i: number) => (i + 1 < pts.length ? pts[i + 1].t : t1);
+
+  // how many were listed: bars under the plot, each as wide as its quantity stood
+  const most = pts.reduce<(typeof pts)[number] | null>((m, p) => (p.qty != null && p.qty > 0 && (m === null || p.qty > (m.qty ?? 0)) ? p : m), null);
+  const volH = most ? VOL_GAP + VOL : 0;
+  const volBase = TOP + plotH + volH;  // the bars stand on this line
+  let bars = "";
+  if (most) pts.forEach((p, i) => {
+    if (p.qty == null || p.qty <= 0) return;
+    const top = (volBase - Math.max((p.qty / (most.qty as number)) * VOL, 1)).toFixed(1);
+    bars += ` M${x(p.t).toFixed(1)},${volBase} V${top} H${Math.max(x(next(i)), x(p.t) + 1).toFixed(1)} V${volBase} Z`;
+  });
 
   let path = "";
   let drawing = false;
@@ -135,11 +153,11 @@ export function PriceChart({ data, onSpan, span, busy }: { data: PriceHistory; o
     <Stack gap="xs">
       {switcher}
       <Text size="xs" c={shown ? undefined : "dimmed"} aria-live="polite" style={{ minHeight: 18 }}>
-        {shown ? `${shown.when} · ${shown.words}` : " "}
+        {shown ? `${shown.when} · ${shown.words}${shown.listed_words ? ` · ${shown.listed_words}` : ""}` : " "}
       </Text>
       <Box ref={ref} style={{ width: "100%" }}>
         {width > 0 && (
-          <svg width={width} height={H} role="img" aria-label={label} tabIndex={0} style={{ display: "block", touchAction: "pan-y" }}
+          <svg width={width} height={H + volH} role="img" aria-label={label} tabIndex={0} style={{ display: "block", touchAction: "pan-y" }}
             onPointerMove={(e) => pick(e.clientX, e.currentTarget.getBoundingClientRect())}
             onPointerDown={(e) => pick(e.clientX, e.currentTarget.getBoundingClientRect())}
             onPointerLeave={() => setActive(null)} onKeyDown={onKey}
@@ -151,13 +169,20 @@ export function PriceChart({ data, onSpan, span, busy }: { data: PriceHistory; o
             {!flat && <text x={GUTTER - 8} y={yLow} dy="0.35em" textAnchor="end" fontSize={11} fill={INK}>{data.low_words}</text>}
             {bands}
             <path d={path} fill="none" stroke={LINE} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-            <text x={GUTTER} y={TOP + plotH + 16} fontSize={11} fill={INK}>{first.when}</text>
+            {most && (
+              <>
+                <path d={bars} fill={BARS} fillOpacity={0.45} />
+                <line x1={GUTTER} x2={GUTTER + plotW} y1={volBase} y2={volBase} stroke={GRID} />
+                <text x={GUTTER - 8} y={volBase - VOL} dy="0.7em" textAnchor="end" fontSize={11} fill={INK}>{most.listed_words}</text>
+              </>
+            )}
+            <text x={GUTTER} y={volBase + 16} fontSize={11} fill={INK}>{first.when}</text>
             {last.when !== first.when && (
-              <text x={twoRows ? GUTTER : xLast} y={TOP + plotH + (twoRows ? 32 : 16)} textAnchor={twoRows ? "start" : "end"} fontSize={11} fill={INK}>{last.when}</text>
+              <text x={twoRows ? GUTTER : xLast} y={volBase + (twoRows ? 32 : 16)} textAnchor={twoRows ? "start" : "end"} fontSize={11} fill={INK}>{last.when}</text>
             )}
             {shown && (
               <g pointerEvents="none">
-                <line x1={x(shown.t)} x2={x(shown.t)} y1={TOP} y2={TOP + plotH} stroke={CROSS} strokeWidth={1} />
+                <line x1={x(shown.t)} x2={x(shown.t)} y1={TOP} y2={volBase} stroke={CROSS} strokeWidth={1} />
                 {shown.low != null && <circle cx={x(shown.t)} cy={y(shown.low)} r={4.5} fill={LINE} stroke={RING} strokeWidth={2} />}
               </g>
             )}

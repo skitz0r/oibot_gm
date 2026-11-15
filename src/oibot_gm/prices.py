@@ -721,18 +721,28 @@ def history_sentences(reg, item_id: int, *, now: datetime | None = None) -> list
     return lines
 
 
+def listed_words(qty: int) -> str:
+    """How many are listed, in words: '1,240 listed'."""
+    return f"{int(qty):,} listed"
+
+
 def _point_json(reg, p: price_history.Point) -> dict:
     if p.unread:  # the bot didn't read the house from here: a break, read "not read"
-        return {"t": int(p.at.timestamp()), "when": reg.local12(p.at), "low": None, "high": None, "words": NOT_READ, "unread": True}
+        return {"t": int(p.at.timestamp()), "when": reg.local12(p.at), "low": None, "high": None, "words": NOT_READ, "unread": True,
+                "qty": None, "listed_words": ""}
     # a folded day is one UTC day (price_history's fold): read as that day alone, never shifted into the guild's zone
     when = fmt12(p.at.astimezone(timezone.utc), "%a %d %b") if p.qty is None else reg.local12(p.at)
+    # how many were listed from this point (2026-11-15: the chart's bars under the line) — the feed has no sales, so this
+    # is supply, never trades; None on a folded day (the fold keeps no quantity), with nothing listed, and unread
+    qty = int(p.qty) if p.qty is not None and p.low is not None else None
     return {"t": int(p.at.timestamp()), "when": when, "low": p.low, "high": p.high,
-            "words": money(p.low) if p.low is not None else NONE_LISTED, "unread": False}
+            "words": money(p.low) if p.low is not None else NONE_LISTED, "unread": False,
+            "qty": qty, "listed_words": listed_words(qty) if qty is not None else ""}
 
 
 def chart(reg, item_id: int, span: str, *, now: datetime | None = None) -> dict:
     """The chart's data for one item over one of SPANS (BLOCKING: reads the history file): its points (epoch seconds,
-    the time in the Clock rule's words, lowest / highest in copper, the lowest in words; low None = nothing listed from
+    the time in the Clock rule's words, lowest / highest in copper, the lowest in words, `qty` / `listed_words` = how many were listed from then (None / "" on a folded day, with nothing listed, unread); low None = nothing listed from
     then: a gap; `unread` = the bot didn't read the house from then: a gap whose words are NOT_READ), the span's lowest and highest, and `since` / `until` = the span's start and the server's now in epoch
     seconds (the chart's x axis: the page reads no clock of its own). No points while prices don't show, without history, or for a file
     that can't be read. An unknown span is refused."""

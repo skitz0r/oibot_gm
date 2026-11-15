@@ -632,6 +632,9 @@ def test_chart_points(reg, clock):
     assert c["points"][0]["t"] == int((NOW - 7 * DAY).timestamp()), "the price carried to the span's start"
     assert c["points"][0]["when"] == "Fri 6 Nov 12:00 PM" and c["points"][0]["words"] == "15s"
     assert (c["low"], c["high"], c["low_words"], c["high_words"]) == (1240, 1500, "12s 40c", "15s")
+    # 2026-11-15: how many were listed from each point (the chart's bars); nothing listed carries none
+    assert [(p["qty"], p["listed_words"]) for p in c["points"]] == [(4, "4 listed"), (None, ""), (2, "2 listed")]
+    assert prices.listed_words(1240) == "1,240 listed"
     assert (c["since"], c["until"]) == (int((NOW - 7 * DAY).timestamp()), int(NOW.timestamp())), "the x axis: the span's start to the server's now"
     clock.t = NOW + timedelta(minutes=5)
     assert prices.chart(reg, PLAGUEBLOOM, "7")["until"] == int(clock.t.timestamp()), "now = the bot's clock"
@@ -652,6 +655,7 @@ def test_an_unread_stretch_reads_not_read(reg, clock):
     assert [(p["low"], p["high"], p["words"], p["unread"]) for p in c["points"]] == [
         (1500, 1500, "15s", False), (None, None, "not read", True), (1500, 1500, "15s", False)]
     assert c["points"][1]["when"].endswith((" AM", " PM")), "an unread stretch starts at a time, not a day"
+    assert (c["points"][1]["qty"], c["points"][1]["listed_words"]) == (None, ""), "unread: no count"
     assert prices.chart(reg, PLAGUEBLOOM, "7", now=NOW)["points"] == [
         {**c["points"][2], "t": int((NOW - 7 * DAY).timestamp()), "when": reg.local12(NOW - 7 * DAY)}], "read since: no break"
 
