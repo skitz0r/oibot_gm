@@ -91,10 +91,12 @@ class Client:
                 _add(table, item, unit, qty)
         return table, got.modified
 
-    def item_name(self, item_id: int) -> str | None:
-        """An item's name from the static namespace (the naming step behind the price search), else — where the profile
-        names one — from the fallback namespace (integrations.yaml `auctions.names_fallback_namespace`: the version's own
-        pages lack some items that are listed); None when Blizzard has no item of that id in either (a 404)."""
+    def item_facts(self, item_id: int) -> tuple[str, str | None] | None:
+        """An item's (name, class) from the static namespace (the naming step behind the price search), else — where the
+        profile names one — from the fallback namespace (integrations.yaml `auctions.names_fallback_namespace`: the
+        version's own pages lack some items that are listed); None when Blizzard has no item of that id in either (a
+        404). The class is Blizzard's item class in words ('Trade Goods', 'Armor' — what Movers groups by), None when
+        the page gives none."""
         path = f"/data/wow/item/{int(item_id)}"
         for ns in (self.arm.static_ns, self.names_fallback_ns):
             if not ns:
@@ -103,8 +105,15 @@ class Client:
                 d = self.arm.get(path, ns).data
             except armory.ArmoryMissing:
                 continue
-            return _str(d, "name", path)
+            cls = d.get("item_class") if isinstance(d, dict) else None
+            kind = cls.get("name") if isinstance(cls, dict) else None
+            return _str(d, "name", path), (kind if isinstance(kind, str) and kind else None)
         return None
+
+    def item_name(self, item_id: int) -> str | None:
+        """`item_facts`' name alone; None when Blizzard has no item of that id."""
+        facts = self.item_facts(item_id)
+        return facts[0] if facts else None
 
 
 # ------------------------------------------------------------------ per guild

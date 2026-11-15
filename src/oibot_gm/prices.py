@@ -44,6 +44,7 @@ NO_MATCH = "No item the bot knows has that name."
 _LOCAL: dict[str, tuple[tuple, dict[int, str]]] = {}  # version → (the profile's tables it was built from, names)
 _FETCHED: dict[str, dict[int, str]] | None = None  # version → {id: name} looked up from Blizzard (the file); None = unread
 _GONE: dict[str, dict[int, float]] | None = None  # version → {id Blizzard has no item for: when it said so (epoch)}; None = unread
+_KINDS: dict[str, dict[int, str]] | None = None  # version → {id: Blizzard's item class in words; "" = asked, none given}; None = unread
 GONE_RETRY = timedelta(days=7)  # an id Blizzard couldn't name is asked again after this long (a patch may add the item)
 _MERGED: dict[str, tuple[tuple, dict[int, str]]] = {}  # version → ((the local names, _GEN), local + fetched)
 _GEN = 0  # moves on every change to the looked-up names
@@ -52,13 +53,14 @@ _FILE_LOCK = threading.Lock()
 
 def reset_names() -> None:
     """Forget the names kept in memory (a restart; tests)."""
-    global _FETCHED, _GEN, _GONE
+    global _FETCHED, _GEN, _GONE, _KINDS
     with _FILE_LOCK:
         _GEN += 1
         _LOCAL.clear()
         _MERGED.clear()
         _GONE = None
         _FETCHED = None
+        _KINDS = None
     _MOVERS.clear()  # the movers' answers were built from those names
 
 
@@ -68,6 +70,41 @@ def _items_path() -> Path:
 
 def _gone_path() -> Path:
     return discord_auctions.OUT / "items_gone.json"
+
+
+def _kinds_path() -> Path:
+    return discord_auctions.OUT / "items_kinds.json"
+
+
+def _kinds_file() -> dict[str, dict[int, str]]:
+    global _KINDS
+    if _KINDS is None:
+        got: dict[str, dict[int, str]] = {}
+        try:
+            d = json.loads(_kinds_path().read_text(encoding="utf-8"))
+            got = {str(v): {int(k): str(c) for k, c in block.items()} for v, block in d.items()}
+        except FileNotFoundError:
+            pass
+        except Exception:  # noqa: BLE001 — a damaged file of item classes is read from Blizzard again
+            log.warning("item classes file unreadable; classes are looked up again")
+        _KINDS = got
+    return _KINDS
+
+
+def kinds(reg) -> dict[int, str]:
+    """Blizzard's item class per item id for the guild's game version ('Trade Goods', 'Armor', …; "" = the page gave
+    none), read with the names (out/auctions/items_kinds.json). An id not in it was never asked. Read it, never change it."""
+    return _kinds_file().get(reg.profile.name) or {}
+
+
+def unkinded(reg, listed: dict[int, Price], limit: int) -> list[int]:
+    """Up to `limit` listed ids the bot names but whose class was never asked, most listed first."""
+    if limit <= 0:
+        return []
+    known, have = names(reg), kinds(reg)
+    ids = [i for i in listed if i in known and i not in have]
+    ids.sort(key=lambda i: (-listed[i].qty, i))
+    return ids[:limit]
 
 
 def _gone() -> dict[str, dict[int, float]]:
@@ -161,12 +198,19 @@ def unnamed(reg, listed: dict[int, Price], limit: int) -> list[int]:
     return ids[:limit]
 
 
-def remember(reg, found: dict[int, str], gone: set[int]) -> None:
-    """Keep the names looked up for the guild's version and write the file whole (a unique temp name, then a rename).
-    BLOCKS on the write: call it through asyncio.to_thread."""
-    global _FETCHED, _GEN, _GONE
+def remember(reg, found: dict[int, str], gone: set[int], kinds: dict[int, str] | None = None) -> None:
+    """Keep the names (and item classes) looked up for the guild's version and write each file whole (a unique temp
+    name, then a rename). BLOCKS on the write: call it through asyncio.to_thread."""
+    global _FETCHED, _GEN, _GONE, _KINDS
     version = reg.profile.name
     with _FILE_LOCK:
+        if kinds:
+            held_kinds = _kinds_file()
+            block = dict(held_kinds.get(version) or {})
+            block.update({int(k): str(c or "") for k, c in kinds.items()})
+            _KINDS = {**held_kinds, version: block}
+            _write_whole(_kinds_path(), json.dumps({v: {str(k): c for k, c in sorted(b.items())} for v, b in sorted(_KINDS.items())},
+                                                   separators=(",", ":"), ensure_ascii=False), "item classes")
         held = _gone()
         mine = dict(held.get(version) or {})
         before = dict(mine)
@@ -704,7 +748,26 @@ WINDOWS: dict[str, tuple[timedelta, str]] = {"6": (timedelta(hours=6), "6 hours"
 NOT_A_WINDOW = "That isn't one of the windows."
 MOVE_MIN_PCT = 10  # a move smaller than this against the usual price is no mover
 MOVE_MIN_PRICE = 100  # copper: an item under one silver — usually or now — is no mover (a few copper tripling is noise)
-MOVERS_TOP = 15  # rows per list
+MOVERS_TOP = 15  # rows a list shows at first, and more with each "Show more"
+MOVE_STEPS = (10, 25, 50, 100)  # the card's "moved at least" choices, in percent; the first is MOVE_MIN_PCT
+MOVER_SORTS = (("pct", "By percent"), ("gold", "By gold"))
+ALL_GROUP = {"id": "all", "name": "All"}
+OTHER_GROUP = {"id": "other", "name": "Other"}
+MOVERS_NONE = "Nothing in this group has moved that much. Pick another group or a smaller move."
+
+
+def _groups(reg) -> tuple[list[dict], dict[str, str], str | None]:
+    """The profile's item groups for Movers (integrations.yaml `auctions.groups`: {id, name, classes — Blizzard's item
+    classes —, reagents: true on the one a recipe's reagent of no grouped class falls into}) → (the card's choices: All,
+    the profile's, Other; class → group id; the reagents' group id)."""
+    rows = list((reg.profile.auctions or {}).get("groups") or [])
+    by_class = {str(c): str(g["id"]) for g in rows for c in (g.get("classes") or [])}
+    reagents = next((str(g["id"]) for g in rows if g.get("reagents")), None)
+    return [ALL_GROUP, *({"id": str(g["id"]), "name": str(g["name"])} for g in rows), OTHER_GROUP], by_class, reagents
+
+
+def _diff_words(diff: int) -> str:
+    return f"{'+' if diff > 0 else '−'}{money(abs(diff))}"
 USED_IN_NAMES = 3  # recipes named in the "Used in …" sentence; the rest are counted
 
 _USES: dict[str, dict[int, list[str]]] = {}  # profile name → {item id: the names of the recipes it is a reagent of}
@@ -756,7 +819,7 @@ def movers(reg, window: str, *, now: datetime | None = None) -> dict:
     if now is not None:
         return _movers(reg, window, now=now)
     t = discord_auctions.table(reg)
-    stamp = (discord_auctions.history_key(reg), t.at if t else None, _shown(reg), len(names(reg)))
+    stamp = (discord_auctions.history_key(reg), t.at if t else None, _shown(reg), len(names(reg)), len(kinds(reg)))
     hit = _MOVERS.get((reg.key, str(window)))
     if hit is not None and hit[0] == stamp:
         return hit[1]
@@ -770,9 +833,13 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     """The items whose lowest price NOW is at least MOVE_MIN_PCT % away from their USUAL price over one of WINDOWS
     (price_history.moves: the middle value over the window, at least MOVE_MIN_QTY listed now, listed for half the
     window), both prices at least MOVE_MIN_PRICE (`floor_words` says the two floors) — BLOCKING: one read of the history file. → {window, windows [{id, label}], ready, words, dips, rising}:
-    the two lists hold at most MOVERS_TOP rows, the biggest move first, of {id, name, usual_words, now_words,
-    change_words ('−40%' / '+50%'), qty, uses (how many recipes it is a reagent of), uses_words}. Only items the bot can
-    name. A history younger than the window is ranked over what is kept (from two hours on) and `words` says over how
+    the two lists hold EVERY such item, the biggest move in percent first, as {id, name, usual_words, now_words,
+    change_words ('−40%' / '+50%'), pct, diff (copper, signed) and diff_words ('−20g' / '+2g 50s'), qty, uses (how many
+    recipes it is a reagent of), uses_words, group}. The page filters and sorts them (2026-11-15): `groups` (All, the
+    profile's item groups by Blizzard's item class, Other — an item whose class isn't read yet is Other unless a recipe
+    uses it) with `group` the one shown first, `sorts` (by percent, by gold), `steps` (moved at least …%), `page` (rows
+    shown at first and per Show more), `none_words` (the sentence for a choice that leaves a list empty). Only items the
+    bot can name. A history younger than the window is ranked over what is kept (from two hours on) and `words` says over how
     long; `ready` False with one sentence in `words` when less than that is kept; an empty list has its own sentence
     (`dips_words` / `rising_words`). Prices not shown, or a file that can't be read: not ready, no words. An unknown window is
     refused."""
@@ -783,7 +850,9 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     window = str(window)
     span, label = WINDOWS[window]
     out = {"window": window, "windows": [{"id": k, "label": v[1]} for k, v in WINDOWS.items()], "ready": False, "words": "",
-           "dips": [], "rising": [], "dips_words": "", "rising_words": "",
+           "dips": [], "rising": [], "dips_words": "", "rising_words": "", "groups": _groups(reg)[0], "group": ALL_GROUP["id"],
+           "sorts": [{"id": k, "label": v} for k, v in MOVER_SORTS], "steps": [{"id": str(s), "label": f"{s}%"} for s in MOVE_STEPS],
+           "page": MOVERS_TOP, "none_words": MOVERS_NONE,
            "floor_words": f"at least {price_history.MOVE_MIN_QTY} listed, from {money(MOVE_MIN_PRICE)}"}
     key = discord_auctions.history_key(reg)
     if key is None or not _shown(reg):
@@ -804,18 +873,23 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     if start - (now - span) > timedelta(minutes=1):  # a history younger than the window: ranked over what is kept, and said so
         label = _duration_words(now - start)
         out["words"] = f"Over the last {label}, all the bot has kept so far."
-    known, uses = names(reg), _uses(reg)
+    known, uses, classes = names(reg), _uses(reg), kinds(reg)
+    out["groups"], by_class, reagents = _groups(reg)
+    out["group"] = out["groups"][1]["id"] if len(out["groups"]) > 2 else ALL_GROUP["id"]
     rows = []
     for m in found:
         pct = _pct(m.usual, m.now) if m.usual > 0 else 0
         if abs(pct) < MOVE_MIN_PCT or m.item not in known or min(m.usual, m.now) < MOVE_MIN_PRICE:
             continue
         n = len(uses.get(m.item) or [])
+        group = by_class.get(classes.get(m.item) or "") or ((reagents if n else None) or OTHER_GROUP["id"])
         rows.append((pct, {"id": m.item, "name": known[m.item], "usual_words": money(m.usual), "now_words": money(m.now),
-                           "change_words": _change_words(pct), "qty": m.qty, "uses": n, "uses_words": _uses_count_words(n)}))
+                           "change_words": _change_words(pct), "pct": pct, "diff": m.now - m.usual,
+                           "diff_words": _diff_words(m.now - m.usual), "qty": m.qty, "uses": n,
+                           "uses_words": _uses_count_words(n), "group": group}))
     out["ready"] = True
-    out["dips"] = [r for _p, r in sorted((x for x in rows if x[0] < 0), key=lambda x: (x[0], x[1]["name"].casefold()))][:MOVERS_TOP]
-    out["rising"] = [r for _p, r in sorted((x for x in rows if x[0] > 0), key=lambda x: (-x[0], x[1]["name"].casefold()))][:MOVERS_TOP]
+    out["dips"] = [r for _p, r in sorted((x for x in rows if x[0] < 0), key=lambda x: (x[0], x[1]["name"].casefold()))]
+    out["rising"] = [r for _p, r in sorted((x for x in rows if x[0] > 0), key=lambda x: (-x[0], x[1]["name"].casefold()))]
     if not out["dips"]:
         out["dips_words"] = f"Nothing has dipped {MOVE_MIN_PCT}% or more in the last {label}."
     if not out["rising"]:
@@ -823,7 +897,7 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     return out
 
 
-__all__ = ["MOVERS_TOP", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
+__all__ = ["MOVERS_TOP", "MOVE_STEPS", "MOVERS_NONE", "kinds", "unkinded", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

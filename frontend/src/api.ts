@@ -205,15 +205,23 @@ export interface PriceHistory {
   used_in?: string;
 }
 /** GET /api/prices/movers (an experiment, site only): the items whose lowest price now is at least 10% off their usual
- *  price over the window (the middle value of the window; the floors are `floor_words`) — `dips` and `rising`, the biggest move
+ *  price over the window (the middle value of the window; the floors are `floor_words`) — `dips` and `rising`, EVERY such item, the biggest move in percent
  *  first, every figure the server's words. `ready` false + `words` = the kept history doesn't cover the window yet; an
  *  empty list has its own sentence. */
-export interface MoverRow { id: number; name: string; usual_words: string; now_words: string; change_words: string; qty: number; uses: number; uses_words: string }
+export interface MoverRow {
+  id: number; name: string; usual_words: string; now_words: string; change_words: string; qty: number; uses: number; uses_words: string;
+  /** the move in percent and in copper (signed, for the card's order and filter), the copper in words ('−20g'), the item's group id */
+  pct: number; diff: number; diff_words: string; group: string;
+}
 export interface Movers {
   window: string; windows: { id: string; label: string }[]; ready: boolean; words: string;
   dips: MoverRow[]; rising: MoverRow[]; dips_words: string; rising_words: string;
   /** the two floors in words ('at least 20 listed, from 1s') */
   floor_words: string;
+  /** the card's choices: item groups (All first, Other last) and the one shown first, the orders, the smallest moves in
+   *  percent, the rows shown at first and per Show more, the sentence for a choice that leaves a list empty */
+  groups: { id: string; name: string }[]; group: string; sorts: { id: string; label: string }[]; steps: { id: string; label: string }[];
+  page: number; none_words: string;
 }
 /** GET /api/admin/market: the guild's auction house (officers read, the owner picks). `words` = the choice in words (or what
  *  is missing), `prices` = how recent the prices are, `clear_sentences` = Turn prices off…'s confirm. */

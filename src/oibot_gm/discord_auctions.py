@@ -444,30 +444,50 @@ async def auctions_tick(bot, reg):
 # ------------------------------------------------------------------ item names (spec §4.3)
 
 
-def _name_batch(cli, ids: list[int]) -> tuple[dict[int, str], set[int]]:
-    """Look up each id's name in turn (BLOCKS) → (named, ids not to ask again in this process: no item there, or an odd
-    answer). The first other failure (Blizzard down, access refused, anything unexpected) stops it with what was named."""
+def _name_batch(cli, ids: list[int]) -> tuple[dict[int, str], set[int], dict[int, str]]:
+    """Look up each id's name and class in turn (BLOCKS) → (named, ids not to ask again: no item there, or an odd
+    answer, the named ids' classes — "" where the page gave none). The first other failure (Blizzard down, access
+    refused, anything unexpected) stops it with what was named."""
     found: dict[int, str] = {}
     gone: set[int] = set()
+    kinds: dict[int, str] = {}
     for i in ids:
         try:
-            name = cli.item_name(i)
+            facts = cli.item_facts(i)
         except armory.ArmoryShape as e:  # one odd answer: skipped like a 404, never asked first again every hour
             log.info("item %d not named: %s", i, e)
-            name = None
+            facts = None
         except Exception as e:  # noqa: BLE001 — naming is best effort: it stops quietly and goes on next hour
             log.info("item naming stopped after %d: %s", len(found), e if isinstance(e, ArmoryError) else type(e).__name__)
             break
-        if name:
-            found[i] = name
+        if facts and facts[0]:
+            found[i] = facts[0]
+            kinds[i] = facts[1] or ""
         else:
             gone.add(i)
-    return found, gone
+    return found, gone, kinds
+
+
+def _kind_batch(cli, ids: list[int]) -> dict[int, str]:
+    """The class of each id the bot already names (BLOCKS) → {id: class, "" = asked and none given, so it isn't asked
+    again}. The first failure that isn't one odd answer stops it with what was read."""
+    kinds: dict[int, str] = {}
+    for i in ids:
+        try:
+            facts = cli.item_facts(i)
+        except armory.ArmoryShape:
+            facts = None
+        except Exception as e:  # noqa: BLE001 — best effort, like the naming
+            log.info("item classes stopped after %d: %s", len(kinds), e if isinstance(e, ArmoryError) else type(e).__name__)
+            break
+        kinds[i] = (facts[1] if facts else None) or ""
+    return kinds
 
 
 async def name_items(bot, reg) -> int:
     """After a check, name up to NAME_PER_FETCH listed ids that nothing names, most listed first (the hourly check's own
-    background task, never a request path) → how many were named. A failure stops it quietly: no ops line. One naming
+    background task, never a request path) → how many were named. Each answer's item class is kept with it
+    (prices.kinds), and the rest of the NAME_PER_FETCH requests reads the class of listed items already named. A failure stops it quietly: no ops line. One naming
     per game version at a time; the names are kept per version (prices.remember)."""
     from . import prices  # prices reads this module's table
 
@@ -475,11 +495,16 @@ async def name_items(bot, reg) -> int:
     if t is None:
         return 0
     async with _lock(("names", reg.profile.name)):
+        cli = _client(reg)
         ids = prices.unnamed(reg, t.prices, NAME_PER_FETCH)
-        if not ids:
-            return 0
-        found, gone = await asyncio.to_thread(_name_batch, _client(reg), ids)
-        await asyncio.to_thread(prices.remember, reg, found, gone)
+        found, gone, kinds = (await asyncio.to_thread(_name_batch, cli, ids)) if ids else ({}, set(), {})
+        # what is left of the hour's requests reads the class of listed items the bot names but never asked about (the
+        # recipe list's items, and everything named before 2026-11-15) — Movers groups by it
+        more = prices.unkinded(reg, t.prices, NAME_PER_FETCH - len(ids))
+        if more:
+            kinds.update(await asyncio.to_thread(_kind_batch, cli, more))
+        if found or gone or kinds:
+            await asyncio.to_thread(prices.remember, reg, found, gone, kinds)
         return len(found)
 
 

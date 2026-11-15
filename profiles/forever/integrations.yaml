@@ -23,3 +23,13 @@ auctions:
   # ammunition that IS listed (a 404), while the same ids are named in the Classic Era pages. Probed live 2026-11-14: of
   # 100 listed ids nothing named, 86 were named only here, 2 nowhere. Asked only after the version's own page says no.
   names_fallback_namespace: "static-classic1x-{region}"
+  # The Movers card's item groups, by Blizzard's item class (the item page's `item_class.name`, read with the name).
+  # Probed live 2026-11-14 over 620 movers: every one had a class. `reagents: true` = where a recipe's reagent goes when
+  # its class is in no group (or not read yet). Anything else is "Other" (bags, quivers, pets, junk). Blizzard's Quest
+  # class covers flagged quest items only: a tradeable item a quest merely asks for keeps its own class.
+  groups:
+    - {id: materials, name: Materials, classes: ["Trade Goods", "Reagent"], reagents: true}
+    - {id: consumables, name: Consumables, classes: ["Consumable"]}
+    - {id: gear, name: Gear, classes: ["Armor", "Weapon"]}
+    - {id: recipes, name: Recipes, classes: ["Recipe"]}
+    - {id: quest, name: Quest, classes: ["Quest"]}

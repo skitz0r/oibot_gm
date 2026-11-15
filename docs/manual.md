@@ -545,8 +545,14 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   nothing to open; nothing new can be watched then (the answer says why), but **Stop watching** still works. On a phone each item and each search result is a card.
 - **Movers** (an experiment, on the site's Prices tab): between the search and your watch list, two lists — **Dips** and
   **Rising** — over **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
-  least 10% away from its *usual* price over that time, the biggest move first, up to 15 each way: the usual price → the
-  price now, the change in percent, how many are listed, and how many recipes use the item. The usual price is the middle
+  least 10% away from its *usual* price over that time, the biggest move first, 15 each way with **Show more** for the
+  rest: the usual price → the price now, the change in percent and in gold, how many are listed, and how many recipes use
+  the item. Above the lists you pick a group — **Materials** (shown first), **Consumables**, **Gear**, **Recipes**,
+  **Quest**, **Other** or **All**, each with how many items it holds —, the order (**By percent** or **By gold**: the
+  biggest difference in coin first, which brings up expensive items a percent ranking buries) and the smallest move to
+  show (**10%** · **25%** · **50%** · **100%**). The groups are Blizzard's own item classes; Quest holds only what the
+  game marks as a quest item, so a tradeable item a quest merely asks for stays in its own group. An item whose class the
+  bot hasn't read yet sits in Other (in Materials when a recipe uses it) until the next hourly check. The usual price is the middle
   value of the item's lowest price over the window, weighted by how long each price stood — so one odd listing for an
   hour moves nothing. Only items with at least 20 listed now, listed for at least half the window, and priced at one silver or more — usually and
   now — are ranked: a single cheap or wishful listing isn't a move, and neither is a few copper tripling. Open a row for the item's chart, the recipes it is used in (*"Used in Elixir of

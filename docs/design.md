@@ -5188,8 +5188,14 @@ words only. **Movers** (the owner's experiment, 2026-11-14, site only): `price_h
 item with ≥ `MOVE_MIN_QTY` (20; 5 until the first live look, 2026-11-14) listed now and its USUAL price over the window — the time-weighted middle value of its lowest
 price, unlisted and unread time counting for nothing, listed for at least half the window; None until the house's history
 covers the window (the `changes_at` index serves the one read). `prices.movers(reg, window)` ranks the named ones at least
-`MOVE_MIN_PCT` (10) % off their usual price, both prices at least `MOVE_MIN_PRICE` (1 silver), into `dips` / `rising` (≤ 15 each, the biggest first) with the server's words and
-how many recipes use the item (`used_in_words` on the history answer names them); `GET /api/prices/movers?window=6|12|24|168`.
+`MOVE_MIN_PCT` (10) % off their usual price, both prices at least `MOVE_MIN_PRICE` (1 silver), into `dips` / `rising` (EVERY mover since 2026-11-15, the biggest percent first — ≤ 15 each before) with the server's words and
+how many recipes use the item; each row also carries `pct`, `diff` / `diff_words` (the move in copper, "−20g") and `group`, and the answer the card's
+choices — `groups` (All · the profile's `auctions.groups` by Blizzard's item class · Other; `group` = the first profile group), `sorts`
+(percent | gold), `steps` (`MOVE_STEPS` 10 / 25 / 50 / 100 %), `page` (`MOVERS_TOP` 15: shown at first and per Show more) and `none_words` —
+which the page applies itself (a filter over one answer, no request). The class comes from the item page the naming step already
+reads (`auctions.Client.item_facts` → `prices.kinds`, out/auctions/items_kinds.json, "" = asked and none given); what is left of
+`NAME_PER_FETCH` each hour reads the class of listed items already named (`prices.unkinded`). An unread class = Other, or the
+`reagents: true` group when a recipe uses the item (`used_in_words` on the history answer names them); `GET /api/prices/movers?window=6|12|24|168`.
 No alert, no profit figure, no Discord or MCP form yet. **C6** (replaced by the owner 2026-11-14) history shows for ANY item the bot can name, watched or not: a search row
 opens to the same chart and sentences, `/price <item>` adds the history sentences to a one-item answer, and each row of the
 watch list carries a small line (`prices.spark`). The same day the owner asked for a 24-hour view and a brokerage-style row: `SPANS` gains "1" = 24 hours (the default span), the row's line covers the last 24 hours and carries `change_words` / `up` (now against the first price of the stretch — the line's and the figure's colour), and a chart whose history is younger than its span starts its x axis at the first kept read.

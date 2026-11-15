@@ -725,6 +725,9 @@ def test_the_prices_tab():
     # movers (an experiment): the server's two lists, every figure its words; a row opens the same panel
     assert "/api/prices/movers" in page and 'moversSide("Dips", "dips", movers.dips, movers.dips_words)' in page
     assert 'moversSide("Rising", "rising", movers.rising, movers.rising_words)' in page and "r.change_words" in page and "hist.used_in" in page
+    # 2026-11-15: the card browses every mover — the server's groups, orders, steps, page size and empty sentence
+    for piece in ("movers.groups.map(", "movers.sorts.map(", "movers.steps.map(", "movers?.none_words", "movers?.page", "r.diff_words", "Show more"):
+        assert piece in page, piece
     assert 'toggle(p.id, "search")' in page and 'isOpen(p.id, "search") && panel(' in page, "a search result opens its chart without watching"
     assert "<Sparkline data={r.spark}" in page, "the watch list's rows draw the server's 24-hour line"
     assert "r.spark.change_words" in page and "trendOf(r.spark.up)" in page, "the day's change beside the price, the server's words and direction"

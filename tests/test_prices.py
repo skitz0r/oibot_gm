@@ -50,6 +50,11 @@ class FakeNames:
         self.asked.append(item_id)
         return self.names.get(item_id)
 
+    def item_facts(self, item_id):
+        """The client's (name, class): these fakes give no class."""
+        name = self.item_name(item_id)
+        return (name, None) if name else None
+
 
 class FakeOps:
     def __init__(self):
@@ -280,14 +285,14 @@ def test_naming_stops_quietly_on_a_failure_and_caps_per_fetch(reg, clock, monkey
     assert prices.names(reg)[901250] == "Kettle Part 901250"
     saved = json.loads(items_file().read_text(encoding="utf-8"))
     assert saved[reg.profile.name]["901250"] == "Kettle Part 901250"
-    assert not [p for p in items_file().parent.iterdir() if p.name != "items.json" and p.is_file()], "written whole"
+    assert not [p for p in items_file().parent.iterdir() if p.name not in ("items.json", "items_kinds.json") and p.is_file()], "written whole"
     prices.reset_names()  # a restart: the file names them again
     assert prices.names(reg)[901250] == "Kettle Part 901250"
     # the next fetch names the rest; a 404 is not asked again in this process
     fake.asked.clear()
     del fake.names[900001]
     assert run(discord_auctions.name_items(bot, reg)) == 249
-    assert len(fake.asked) == 250
+    assert len(fake.asked) == 251 and fake.asked[-1] == BAR, "what is left of the hour asks the class of a listed item already named"
     fake.asked.clear()
     assert run(discord_auctions.name_items(bot, reg)) == 0 and fake.asked == []
     # a failure stops it quietly: what was named before it is kept, no ops line
@@ -303,13 +308,13 @@ def test_naming_stops_quietly_on_a_failure_and_caps_per_fetch(reg, clock, monkey
     prices.reset_names()
     reader = SimpleNamespace(
         table=lambda ruleset, house, since=None: ({700001: Price(low=5, qty=2)}, None),
-        item_name=lambda i: "Spare Cog")
+        item_facts=lambda i: ("Spare Cog", "Trade Goods"))
     monkeypatch.setattr(discord_auctions, "_client", lambda r: reader)
 
     async def tick():
         await (await discord_auctions.auctions_tick(bot, reg))
     run(tick())
-    assert prices.names(reg)[700001] == "Spare Cog"
+    assert prices.names(reg)[700001] == "Spare Cog" and prices.kinds(reg)[700001] == "Trade Goods", "the class is kept with the name"
 
 
 def test_a_malformed_item_is_skipped_and_naming_goes_on(reg, clock, monkeypatch):
@@ -721,7 +726,8 @@ def test_movers_ignore_small_moves_and_unnamed_items_and_cap_the_lists(reg, cloc
     assert m["rising_words"] == "Nothing has risen 10% or more in the last 6 hours."
     prices.remember(reg, {k: f"Kettle Part {k}" for k in fake}, set())
     m = prices.movers(reg, "6")
-    assert len(m["dips"]) == prices.MOVERS_TOP == 15 and m["dips"][0]["change_words"] == "−75%", "the biggest move first"
+    assert len(m["dips"]) == 40 and m["page"] == prices.MOVERS_TOP == 15, "every mover comes; the card shows a page at a time"
+    assert m["dips"][0]["change_words"] == "−75%", "the biggest move first"
     assert m["dips_words"] == "" and m["rising_words"] == "Nothing has risen 10% or more in the last 6 hours."
 
 
@@ -887,3 +893,62 @@ def test_movers_leave_out_cheap_items_and_thin_listings(reg, clock):
     assert [r["name"] for r in m["dips"]] == ["Rage Draught"] and m["rising"] == []
     assert (prices.MOVE_MIN_PRICE, discord_auctions and __import__("oibot_gm.price_history", fromlist=["x"]).MOVE_MIN_QTY) == (100, 20)
     assert m["floor_words"] == "at least 20 listed, from 1s"
+
+
+# ---- movers, browsed (2026-11-15): groups by Blizzard's item class, the move in gold, the card's choices
+
+
+def test_movers_carry_their_group_the_gold_difference_and_the_cards_choices(reg, clock):
+    clock.t = NOW
+    crate, robe, odd = 940001, 940002, 940003
+
+    def table(i):
+        late = i >= 5
+        return {PLAGUEBLOOM: Price(low=900 if late else 1500, qty=40),      # a reagent, class not read yet
+                BAR: Price(low=600000 if late else 400000, qty=30),         # class read: Trade Goods
+                crate: Price(low=20000 if late else 40000, qty=25),         # Consumable
+                robe: Price(low=250000 if late else 450000, qty=21),        # Armor
+                odd: Price(low=300 if late else 150, qty=50)}               # named, never asked, no recipe uses it
+
+    priced(reg, table(6), at=NOW)
+    prices.remember(reg, {crate: "Sealed Crate", robe: "Robe of Trials", odd: "Odd Bauble"}, set(),
+                    {BAR: "Trade Goods", crate: "Consumable", robe: "Armor"})
+    _read_hourly(reg, NOW - timedelta(hours=6), 6, table)
+    prices._MOVERS.clear()
+    m = prices.movers(reg, "6")
+    assert [(g["id"], g["name"]) for g in m["groups"]] == [("all", "All"), ("materials", "Materials"), ("consumables", "Consumables"),
+                                                         ("gear", "Gear"), ("recipes", "Recipes"), ("quest", "Quest"), ("other", "Other")]
+    assert m["group"] == "materials", "the first of the profile's groups is shown first"
+    assert [s["id"] for s in m["sorts"]] == ["pct", "gold"] and [s["label"] for s in m["steps"]] == ["10%", "25%", "50%", "100%"]
+    assert m["none_words"] == prices.MOVERS_NONE
+    by = {r["id"]: r for r in m["dips"] + m["rising"]}
+    assert {i: by[i]["group"] for i in by} == {PLAGUEBLOOM: "materials", BAR: "materials", crate: "consumables", robe: "gear", odd: "other"}
+    assert (by[robe]["pct"], by[robe]["diff"], by[robe]["diff_words"]) == (-44, -200000, "−20g")
+    assert (by[BAR]["pct"], by[BAR]["diff_words"]) == (50, "+20g") and by[odd]["diff_words"] == "+1s 50c"
+    assert [r["id"] for r in m["dips"]] == [crate, robe, PLAGUEBLOOM], "by percent; the card re-orders by gold itself"
+    # a class read later regroups the item: the answer is rebuilt
+    prices.remember(reg, {}, set(), {odd: "Quest", PLAGUEBLOOM: ""})
+    m = prices.movers(reg, "6")
+    by = {r["id"]: r for r in m["dips"] + m["rising"]}
+    assert by[odd]["group"] == "quest" and by[PLAGUEBLOOM]["group"] == "materials", "asked and none given: still a reagent"
+
+
+def test_the_hourly_naming_reads_the_class_of_items_already_named(reg, clock, monkeypatch):
+    listed = {PLAGUEBLOOM: Price(low=900, qty=40), 950001: Price(low=100, qty=5), 950002: Price(low=100, qty=90)}
+    priced(reg, listed)
+    prices.remember(reg, {950002: "Known Thing"}, set())
+    asked = []
+
+    def facts(i):
+        asked.append(i)
+        return {PLAGUEBLOOM: ("Plaguebloom", "Trade Goods"), 950001: ("New Thing", "Armor"), 950002: ("Known Thing", None)}[i]
+
+    monkeypatch.setattr(discord_auctions, "_client", lambda r: SimpleNamespace(item_facts=facts))
+    assert prices.unkinded(reg, listed, 10) == [950002, PLAGUEBLOOM], "named, never asked, most listed first"
+    assert run(discord_auctions.name_items(SimpleNamespace(ops=FakeOps()), reg)) == 1
+    assert asked == [950001, 950002, PLAGUEBLOOM], "the unnamed first, then the classes of the named"
+    assert prices.kinds(reg) == {PLAGUEBLOOM: "Trade Goods", 950001: "Armor", 950002: ""}
+    asked.clear()
+    assert run(discord_auctions.name_items(SimpleNamespace(ops=FakeOps()), reg)) == 0 and asked == [], "none is asked twice"
+    prices.reset_names()
+    assert prices.kinds(reg)[950001] == "Armor", "kept across a restart"

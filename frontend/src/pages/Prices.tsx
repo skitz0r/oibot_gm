@@ -14,7 +14,9 @@ import css from "./prices.module.css";
  *  either — watched or not (the owner's decision 2026-11-14) — opens in place to the item's chart and the server's
  *  history sentences (GET /api/prices/history) with Watch / Stop watching; one row is open at a time. Between the two,
  *  Movers (GET /api/prices/movers, an experiment): Dips and Rising over 6 hours / 12 hours / 24 hours / 7 days — the price
- *  now against the item's usual price over the window, each row opening to the same chart, with what recipes use it. Every sentence, price and time is the server's words; the page composes
+ *  now against the item's usual price over the window, each row opening to the same chart, with what recipes use it. The server sends
+ *  every mover; the card picks among them (2026-11-15): a group (the server's `groups`, each with how many it holds), the order
+ *  (by percent or by gold), the smallest move, and Show more past the first `page` rows. Every sentence, price and time is the server's words; the page composes
  *  none. A press waits for the server and takes the list it answers; a refusal prints the server's sentence. With prices
  *  hidden the list shows names alone and opens nothing. The `prices` topic (a new table) and `member` (a watch from another
  *  tab) reload it. */
@@ -29,6 +31,12 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const setOpen = (id: number | null, at: Where = "list") => setOpenAt(id === null ? null : { id, at });
   const [movers, setMovers] = useState<Movers | null>(null);
   const [win, setWin] = useState("24");
+  // Movers' choices (2026-11-15): the group (null = the server's first), the order, the smallest move, the pages shown per side
+  const [group, setGroup] = useState<string | null>(null);
+  const [sort, setSort] = useState("pct");
+  const [step, setStep] = useState("10");
+  const [pages, setPages] = useState({ dips: 1, rising: 1 });
+  const choose = (set: () => void) => { set(); setPages({ dips: 1, rising: 1 }); };
   const winRef = useRef(win);
   winRef.current = win;
   const [span, setSpan] = useState("1");  // 24 hours first: where a price moved today shows
@@ -117,10 +125,18 @@ export function PricesPage({ meta }: { meta: Meta }) {
   );
   /** One side of Movers: its rows (the item, its usual price → the price now, the change, how many are listed, how many
    *  recipes use it), or the server's sentence when nothing moved that way. */
-  const moversSide = (title: string, at: "dips" | "rising", side: MoverRow[], none: string) => (
+  const moverGroup = group ?? movers?.group ?? "all";
+  const bigEnough = (r: MoverRow) => Math.abs(r.pct) >= Number(step);
+  const moverCount = (id: string) => movers === null ? 0
+    : [...movers.dips, ...movers.rising].filter((r) => bigEnough(r) && (id === "all" || r.group === id)).length;
+  const moversSide = (title: string, at: "dips" | "rising", all: MoverRow[], none: string) => {
+    const chosen = all.filter((r) => bigEnough(r) && (moverGroup === "all" || r.group === moverGroup));
+    if (sort === "gold") chosen.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));  // the server's order is by percent
+    const side = chosen.slice(0, (movers?.page ?? 15) * pages[at]);
+    return (
     <div>
       <Text size="xs" fw={700} c="dimmed" tt="uppercase" px="md" pt="sm">{title}</Text>
-      {side.length === 0 ? <Text size="sm" c="dimmed" px="md" py="sm">{none}</Text> : (
+      {side.length === 0 ? <Text size="sm" c="dimmed" px="md" py="sm">{all.length === 0 ? none : movers?.none_words}</Text> : (
         <div className={css.list}>
           {side.map((r) => (
             <div key={r.id} className={css.item}>
@@ -136,15 +152,26 @@ export function PricesPage({ meta }: { meta: Meta }) {
                   <Text size="sm">{r.usual_words} → {r.now_words}</Text>
                   <Text size="xs" c="dimmed">{r.qty} listed</Text>
                 </div>
-                <Text size="sm" fw={700} c={at === "dips" ? "red.4" : "teal.4"} className={css.change}>{r.change_words}</Text>
+                <div className={css.change}>
+                  <Text size="sm" fw={700} c={at === "dips" ? "red.4" : "teal.4"}>{sort === "gold" ? r.diff_words : r.change_words}</Text>
+                  <Text size="xs" c="dimmed">{sort === "gold" ? r.change_words : r.diff_words}</Text>
+                </div>
               </div>
               {isOpen(r.id, at) && panel(r, mine.has(r.id))}
             </div>
           ))}
+          {chosen.length > side.length && (
+            <Group px="md" py="xs">
+              <Button size="compact-sm" variant="default" onClick={() => setPages({ ...pages, [at]: pages[at] + 1 })}>
+                Show more ({chosen.length - side.length} left)
+              </Button>
+            </Group>
+          )}
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   return (
     <Stack gap="lg" className={css.touch}>
@@ -189,7 +216,25 @@ export function PricesPage({ meta }: { meta: Meta }) {
           <Group px="md" pt="sm">
             <SegmentedControl size="xs" value={win} onChange={changeWindow} disabled={win !== movers.window} aria-label="Over how long"
               data={movers.windows.map((w) => ({ value: w.id, label: w.label }))} />
+            {movers.ready && (
+              <>
+                <SegmentedControl size="xs" value={sort} onChange={(v) => choose(() => setSort(v))} aria-label="Biggest move first"
+                  data={movers.sorts.map((s) => ({ value: s.id, label: s.label }))} />
+                <SegmentedControl size="xs" value={step} onChange={(v) => choose(() => setStep(v))} aria-label="Moved at least"
+                  data={movers.steps.map((s) => ({ value: s.id, label: s.label }))} />
+              </>
+            )}
           </Group>
+          {movers.ready && (
+            <Group px="md" pt="xs" gap={6}>
+              {movers.groups.map((g) => (
+                <Button key={g.id} size="compact-xs" radius="xl" variant={moverGroup === g.id ? "filled" : "default"}
+                  aria-pressed={moverGroup === g.id} onClick={() => choose(() => setGroup(g.id))}>
+                  {g.name} · {moverCount(g.id)}
+                </Button>
+              ))}
+            </Group>
+          )}
           {movers.ready && movers.words && <Text size="xs" c="dimmed" px="md" pt="sm">{movers.words}</Text>}
           {!movers.ready ? (movers.words && <Text size="sm" c="dimmed" px="md" py="sm">{movers.words}</Text>) : (
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0}>
