@@ -85,6 +85,13 @@ export function PricesPage({ meta }: { meta: Meta }) {
   };
   useEffect(() => { loadList(); loadMovers(winRef.current); loadBargains(); loadPrep(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
   useLive(load, ["prices", "member"], { every: 3000 });
+  // most checks find the same prices and publish nothing: ask again a little after the next one, so "Last checked" moves
+  const again = list?.again_in;
+  useEffect(() => {
+    if (!again) return;
+    const t = setTimeout(loadList, again * 1000);
+    return () => clearTimeout(t);
+  }, [list]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const t = setTimeout(() => search(q.trim()), 250); return () => clearTimeout(t); }, [q]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setHist(null); if (open !== null) loadHistory(open, span); }, [open]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -297,7 +304,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   return (
     <Stack gap="lg" className={css.touch}>
       <PageTitle title="Prices" intro="The lowest price each item is listed for on the guild's auction house, and the items you keep an eye on." />
-      {words && <Text size="sm" c="dimmed" mt={-8}>{words}</Text>}
+      {words && <Text size="sm" c="dimmed" mt={-8}>{words}{list?.checked ? ` · ${list.checked}` : ""}</Text>}
 
       {/* two columns on a wide screen (the owner, 2026-11-15): the search and Movers on the left, the watch list on the
           right, staying in view while Movers scrolls; one column below that, the watch list first */}

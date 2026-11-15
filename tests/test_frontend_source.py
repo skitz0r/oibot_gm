@@ -721,6 +721,7 @@ def test_the_prices_tab():
     for label in ("Watch", "Stop watching", "Your watch list"):
         assert label in page, label
     assert "<ItemName " in page and "<PriceChart" in page
+    assert "list?.checked" in page and "again * 1000" in page, "the last / next check beside Prices as of, asked again after the next check"
     # 2026-11-14: a search row opens to the chart too (watched or not), and a watched row carries its small line
     # movers (an experiment): the server's two lists, every figure its words; a row opens the same panel
     assert "/api/prices/movers" in page and 'moversSide("dips", movers.dips, movers.dips_words)' in page

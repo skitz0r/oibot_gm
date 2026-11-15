@@ -117,7 +117,9 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         reg = v.reg
         m = reg.members.get(v.uid)
         shown = shown_now(reg)
+        checked, again = discord_auctions.checked_words(reg)
         return {"rows": await asyncio.to_thread(watch_rows, reg, v.uid), "words": prices.status_sentence(reg, bool(v.owner)),
+                "checked": checked, "again_in": again,
                 "shown": shown, "max": WATCH_MAX, "empty": prices.EMPTY_LIST_SITE if shown else prices.EMPTY_LIST_HIDDEN,
                 "registered": m is not None and not m.test}
 

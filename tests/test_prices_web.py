@@ -299,6 +299,12 @@ def test_watch_then_list_then_stop(w, market_on):
     h = as_user(w, m.discord_id)
     priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4), BAR: Price(low=489998, qty=30)}, at=now())
     d = w.c.get("/api/prices/watching", headers=h).json()
+    # 2026-11-15: when the bot last checked and when it checks next, and in how long the page asks again
+    checked, again = d.pop("checked"), d.pop("again_in")
+    t = discord_auctions.table(w.reg).checked
+    assert checked == (f"Last checked {w.reg.local12(t, '%I:%M %p')}. "
+                       f"Next check about {w.reg.local12(t + discord_auctions.FETCH_EVERY, '%I:%M %p')}.")
+    assert 600 < again <= 690, "a little after the next check"
     assert d == {"rows": [], "words": prices.status_sentence(w.reg, False), "shown": True, "max": 25, "empty": prices.EMPTY_LIST_SITE,
                  "registered": True}
     r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)

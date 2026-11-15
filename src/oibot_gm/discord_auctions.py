@@ -287,6 +287,25 @@ def as_of_words(reg, *, stamp: bool = False) -> str:
     return words + STALE_TAIL if s == "stale" else words
 
 
+CLOCK_ONLY = "%I:%M %p"  # a time of today: '11:48 AM' (the Clock rule's formatter, the day left out)
+NEXT_DUE_WORDS = "The next check is due now."
+
+
+def checked_words(reg) -> tuple[str, int | None]:
+    """The Prices page's second status line (the owner, 2026-11-15) → (words, seconds until the page should ask again):
+    when the bot last checked the auction house and when it checks next — 'Last checked 11:48 AM. Next check about
+    11:58 AM.' The check is every FETCH_EVERY and Blizzard publishes about hourly, so most checks find the same prices:
+    'Prices as of' is the feed's time, this is the bot's. ("", None) while no prices show (off, waiting, old)."""
+    if state(reg) not in ("fresh", "stale"):
+        return "", None
+    checked = table(reg).checked
+    due = checked + FETCH_EVERY
+    left = int((due - _now()).total_seconds())
+    words = f"Last checked {reg.local12(checked, CLOCK_ONLY)}. "
+    words += f"Next check about {reg.local12(due, CLOCK_ONLY)}." if left > 0 else NEXT_DUE_WORDS
+    return words, max(left, 0) + 90  # the scheduler runs each minute: ask again a little after the check
+
+
 # ------------------------------------------------------------------ the check
 
 
@@ -632,4 +651,4 @@ async def pick_house(bot, reg, house_id: int, ruleset_id: int) -> House:
 
 
 __all__ = ["Choice", "HISTORY_FAILED", "HOUSES_CHANGED", "history_key", "NO_CHOICES", "HousesChanged", "NOT_A_CHOICE", "pick_house", "FETCH_EVERY", "HIDE_AFTER", "NAME_EVERY", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
-           "WAITING_WORDS", "as_of_words", "auctions_tick", "refresh_soon", "house_choices", "name_items", "price_of", "refresh", "reset_state", "state", "table"]
+           "WAITING_WORDS", "as_of_words", "checked_words", "auctions_tick", "refresh_soon", "house_choices", "name_items", "price_of", "refresh", "reset_state", "state", "table"]

@@ -189,7 +189,12 @@ export interface PriceSpark {
 }
 /** GET /api/prices/watching (price watch §4.2): the viewer's own list, newest first; `shown` = prices show now (else names
  *  alone); `empty` = the empty list's sentence; `registered` = the viewer has a record (watching needs one, C13). */
-export interface WatchList { rows: PriceRow[]; words: string; shown: boolean; max: number; empty: string; registered: boolean }
+export interface WatchList {
+  rows: PriceRow[]; words: string; shown: boolean; max: number; empty: string; registered: boolean;
+  /** when the bot last checked the auction house and when it checks next ("" while no prices show), and in how many
+   *  seconds to ask again (a little after that check) */
+  checked?: string; again_in?: number | null;
+}
 /** GET /api/prices/history (price watch §4.3, C5): a watched item over one span. `t` = epoch seconds (the x position only),
  *  `when` = the server's words for the point (a time, or a day alone for a folded day), `low` / `high` in copper (low null =
  *  nothing listed from then: a gap; high > low = a folded day's range), `words` = the lowest in words; the span's lowest and
