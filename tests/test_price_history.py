@@ -326,12 +326,20 @@ def test_moves_need_enough_listed_now_and_listed_for_half_the_window():
     assert [m.item for m in ph.moves(K, timedelta(hours=24), T0 + 24 * H, min_qty=1)] == [1, 2]
 
 
-def test_moves_are_none_until_the_history_covers_the_window():
-    assert ph.moves(K, timedelta(hours=6), T0) is None, "no file"
-    _hourly(T0, 5, lambda i: {1: P(100, 9)})
-    assert ph.moves(K, timedelta(hours=6), T0 + 5 * H) is None, "five hours kept: not a full six"
-    ph.record(K, T0 + 6 * H, {1: P(90, 9)})
-    assert [(m.usual, m.now) for m in ph.moves(K, timedelta(hours=6), T0 + 6 * H)] == [(100, 90)]
+def test_moves_over_what_is_kept_once_there_are_two_hours():
+    """A window the history doesn't cover yet is ranked over what IS kept, from two hours on (the owner, 2026-11-14:
+    waiting a full window was too strict on a volatile day); `moves_since` says from when."""
+    assert ph.moves(K, timedelta(hours=6), T0) is None and ph.moves_since(K, timedelta(hours=6), T0) is None, "no file"
+    _hourly(T0, 1, lambda i: {1: P(100, 9)})
+    assert ph.moves(K, timedelta(hours=6), T0 + H) is None and ph.moves_since(K, timedelta(hours=6), T0 + H) is None, "an hour kept: too little"
+    ph.record(K, T0 + 2 * H, {1: P(100, 9)})
+    ph.record(K, T0 + 3 * H, {1: P(80, 9)})
+    now = T0 + 3 * H
+    assert ph.moves_since(K, timedelta(hours=6), now) == T0, "three hours kept: from the first read"
+    assert [(m.usual, m.now) for m in ph.moves(K, timedelta(hours=6), now)] == [(100, 80)]
+    assert ph.moves_since(K, timedelta(hours=2), now) == now - 2 * H, "a window the history covers: its own start"
+    ph.record(K, T0 + 4 * H, {1: P(80, 9)})
+    assert ph.moves_since(K, timedelta(hours=1), T0 + 4 * H) == T0 + 3 * H, "a window shorter than two hours needs only itself"
 
 
 def test_unread_time_counts_for_nothing_in_a_move():

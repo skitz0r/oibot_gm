@@ -132,8 +132,9 @@ def faction_houses(reg, houses: list[House], faction: str) -> list[House]:
 
 
 def money(copper: int) -> str:
-    """Copper in gold, silver and copper words: 489998 → '48g 99s 98c'; zero parts dropped; 0 → '0c'."""
+    """Copper in gold, silver and copper words: 489998 → '48g 99s 98c'; a zero part at either end is dropped ('4g',
+    '75c', '4g 5s'), a zero BETWEEN gold and copper stays ('4g 0s 75c' — '4g 75c' reads like silver); 0 → '0c'."""
     copper = max(0, int(copper))
     g, rest = divmod(copper, 10000)
     s, c = divmod(rest, 100)
-    return " ".join(f"{n}{u}" for n, u in ((g, "g"), (s, "s"), (c, "c")) if n) or "0c"
+    return " ".join(f"{n}{u}" for n, u in ((g, "g"), (s, "s"), (c, "c")) if n or (u == "s" and g and c)) or "0c"

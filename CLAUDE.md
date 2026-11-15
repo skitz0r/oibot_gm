@@ -146,7 +146,7 @@ src/oibot_gm/
                        table(ruleset_id, house_id, since) → ({item id: Price} | None on a 304, Last-Modified) = listings ceil(buyout/qty) + stackables
                        unit_price, lowest wins, quantities summed, unusable rows ignored (C2), an empty house {} / item_name(id); BLOCKING (to_thread);
                        available(reg) (profile `auctions:` + armory.available), client_for, faction_houses (C1: the profile's name per faction, never
-                       the neutral house), money(copper) = THE "48g 99s 98c" (zero parts dropped, "0c"); NO_AUCTIONS_WORDS
+                       the neutral house), money(copper) = THE "48g 99s 98c" (a zero part at either end dropped, a zero between gold and copper kept: "4g 0s 75c"; "0c"); NO_AUCTIONS_WORDS
   discord_auctions.py  the price table (§5.65, discord_armory's pattern): out/auctions/<guild key>/prices.json (derived, never the data repo — C7;
                        written whole, loaded on first use); refresh(bot, reg, force=) at most hourly, conditional on Last-Modified (Table.at = the feed's
                        time: its Last-Modified, ≤ now, now without one — a 304 leaves it; Table.checked_at = the last check that worked, which drives
@@ -163,7 +163,7 @@ src/oibot_gm/
                        once a UTC day (_fold_daily: one background task, only where the profile has `auctions:`)
   price_history.py     (movers, 2026-11-14: moves(key, window, now, min_qty=MOVE_MIN_QTY 5) → [Move(item, usual, now, qty)] | None = each item listed now with the
                        time-weighted middle value of its lowest price over the window — unlisted / unread time counts for nothing, listed for half the
-                       window, None until the history covers it; the `changes_at` index; prices.movers ranks ≥ MOVE_MIN_PCT 10 % into dips / rising ≤ MOVERS_TOP 15)
+                       window; a history younger than the window is ranked over what is kept from MOVES_MIN_HISTORY 2 h on (moves_since = from when; prices.movers says 'Over the last 2 hours 40 minutes, all the bot has kept so far.'), None with less; the `changes_at` index; prices.movers ranks ≥ MOVE_MIN_PCT 10 % into dips / rising ≤ MOVERS_TOP 15)
                        the kept price history (§5.66, C2, C10), BLOCKING (callers to_thread): one SQLite file per AUCTION HOUSE (never per guild)
                        under out/auctions/history/ (never the data repo), path(key) from (namespace, ruleset, house); tables meta (first/last kept
                        feed time) · changes (item, at, low, high, qty: a change high = low; a folded day high ≥ low, qty NULL; low NULL = nothing

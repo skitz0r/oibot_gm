@@ -134,7 +134,8 @@ def test_money_words():
     assert money(10000) == "1g"
     assert money(0) == "0c"
     assert money(7) == "7c"
-    assert money(1000005) == "100g 5c"
+    assert money(1000005) == "100g 0s 5c", "a zero between gold and copper stays: '100g 5c' reads like silver"
+    assert money(40075) == "4g 0s 75c" and money(40000) == "4g" and money(40500) == "4g 5s" and money(75) == "75c"
 
 
 def test_tbc_has_no_auctions(monkeypatch):

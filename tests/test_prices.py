@@ -732,8 +732,15 @@ def test_movers_say_when_the_history_is_too_short_or_prices_are_hidden(reg, cloc
     priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=40)}, at=NOW)
     _read_hourly(reg, NOW - timedelta(hours=3), 3, lambda i: {PLAGUEBLOOM: Price(low=1500, qty=40)})
     m = prices.movers(reg, "6")
+    assert m["ready"] is True and m["words"] == "Over the last 3 hours, all the bot has kept so far.", "three hours kept: ranked over them"
+    clock.t = NOW - timedelta(hours=2)  # an hour after the first read: too little to rank
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=40)}, at=clock.t)
+    prices._MOVERS.clear()
+    m = prices.movers(reg, "6")
     assert m["ready"] is False and m["dips"] == [] and m["rising"] == []
-    assert m["words"] == f"The bot hasn't kept prices for 6 hours yet. It started {reg.local12(NOW - timedelta(hours=3))}."
+    assert m["words"] == f"The bot hasn't kept prices for 2 hours yet. It started {reg.local12(NOW - timedelta(hours=3))}."
+    clock.t = NOW
+    priced(reg, {PLAGUEBLOOM: Price(low=1500, qty=40)}, at=NOW)
     with pytest.raises(RegistryError):
         prices.movers(reg, "48")
     clock.t = NOW + timedelta(days=2)  # prices a day old: hidden
@@ -842,3 +849,18 @@ def test_a_damaged_gone_file_is_only_a_slower_start(reg, clock, monkeypatch):
     items_file().parent.mkdir(parents=True, exist_ok=True)
     (items_file().parent / "items_gone.json").write_text("{not json", encoding="utf-8")
     assert prices.unnamed(reg, {910001: Price(low=100, qty=9)}, 10) == [910001]
+
+
+def test_movers_over_a_young_history_say_how_long(reg, clock):
+    clock.t = NOW
+    def table(i):
+        return {PLAGUEBLOOM: Price(low=900 if i >= 2 else 1500, qty=40)}
+    priced(reg, table(3), at=NOW)
+    _read_hourly(reg, NOW - timedelta(hours=2, minutes=40), 2, table)   # reads at −2:40, −1:40, −0:40
+    prices._MOVERS.clear()
+    m = prices.movers(reg, "24")
+    assert m["ready"] is True and m["words"] == "Over the last 2 hours 40 minutes, all the bot has kept so far."
+    assert [(r["id"], r["change_words"]) for r in m["dips"]] == [(PLAGUEBLOOM, "−40%")]
+    assert m["rising_words"] == "Nothing has risen 10% or more in the last 2 hours 40 minutes."
+    assert prices._duration_words(timedelta(hours=1)) == "1 hour" and prices._duration_words(timedelta(days=3, hours=4, minutes=9)) == "3 days 4 hours"
+    assert prices._duration_words(timedelta(minutes=61)) == "1 hour 1 minute"

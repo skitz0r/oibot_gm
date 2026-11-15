@@ -733,6 +733,15 @@ def _uses_count_words(n: int) -> str:
     return "" if n <= 0 else "Used in 1 recipe" if n == 1 else f"Used in {n} recipes"
 
 
+def _duration_words(span: timedelta) -> str:
+    """'2 hours 40 minutes' / '1 hour' / '3 days 4 hours': the two largest parts, whole minutes."""
+    minutes = max(1, int(span.total_seconds() // 60))
+    days, rest = divmod(minutes, 1440)
+    hours, mins = divmod(rest, 60)
+    parts = [f"{n} {u}{'' if n == 1 else 's'}" for n, u in ((days, "day"), (hours, "hour"), (mins, "minute")) if n]
+    return " ".join(parts[:2])
+
+
 def _pct(usual: int, now: int) -> int:
     return round((now - usual) * 100 / usual)
 
@@ -762,8 +771,9 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     window) — BLOCKING: one read of the history file. → {window, windows [{id, label}], ready, words, dips, rising}:
     the two lists hold at most MOVERS_TOP rows, the biggest move first, of {id, name, usual_words, now_words,
     change_words ('−40%' / '+50%'), qty, uses (how many recipes it is a reagent of), uses_words}. Only items the bot can
-    name. `ready` False with one sentence in `words` when the kept history doesn't cover the window yet; an empty
-    list has its own sentence (`dips_words` / `rising_words`). Prices not shown, or a file that can't be read: not ready, no words. An unknown window is
+    name. A history younger than the window is ranked over what is kept (from two hours on) and `words` says over how
+    long; `ready` False with one sentence in `words` when less than that is kept; an empty list has its own sentence
+    (`dips_words` / `rising_words`). Prices not shown, or a file that can't be read: not ready, no words. An unknown window is
     refused."""
     from .registry import RegistryError
 
@@ -779,13 +789,19 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     now = now or discord_auctions._now()
     try:
         found = price_history.moves(key, span, now)
+        start = price_history.moves_since(key, span, now) if found is not None else None
         since = price_history.kept_since(key) if found is None else None
     except price_history.HistoryError:
         log.warning("price history unreadable for %s", key, exc_info=True)
         return out
-    if found is None:
-        out["words"] = (f"The bot hasn't kept prices for {label} yet. It started {reg.local12(since)}." if since is not None else NO_HISTORY_YET)
+    if found is None or start is None:
+        need = min(span, price_history.MOVES_MIN_HISTORY)
+        out["words"] = (f"The bot hasn't kept prices for {_duration_words(need)} yet. It started {reg.local12(since)}."
+                        if since is not None else NO_HISTORY_YET)
         return out
+    if start - (now - span) > timedelta(minutes=1):  # a history younger than the window: ranked over what is kept, and said so
+        label = _duration_words(now - start)
+        out["words"] = f"Over the last {label}, all the bot has kept so far."
     known, uses = names(reg), _uses(reg)
     rows = []
     for m in found:

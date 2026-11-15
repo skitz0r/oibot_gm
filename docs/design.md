@@ -5088,7 +5088,8 @@ seller, no sales, no history.
   `Price(low, qty)` — listings `ceil(buyout / quantity)`, stackables `unit_price`, the lowest of all rows and the
   quantities summed; a 304 on the listings answers "not modified" without reading the stackables. Every shape validated
   (`ArmoryShape`); the house INDEX without its `auctions` key is a shape error (an empty HOUSE without it is an empty
-  table). `money(copper)` = "48g 99s 98c" (zero parts dropped, "0c"). `available(reg)` = the profile's `auctions:` block
+  table). `money(copper)` = "48g 99s 98c" (a zero part at either end dropped, a zero between gold and copper kept — "4g 0s 75c",
+  the owner 2026-11-14; "0c"). `available(reg)` = the profile's `auctions:` block
   and the armory's keys; `faction_houses` matches the profile's house name per faction.
 - **Game data**: `integrations.yaml auctions: {dynamic_namespace, factions {Alliance, Horde: the house name},
   reference_items}` (Arcanite Bar, Dreamfoil, Runecloth — the picker's samples). tbc has no block: no price feature at all,

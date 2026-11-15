@@ -550,8 +550,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   value of the item's lowest price over the window, weighted by how long each price stood — so one odd listing for an
   hour moves nothing. Only items with at least 5 listed now, and listed for at least half the window, are ranked: a single
   cheap or wishful listing isn't a move. Open a row for the item's chart, the recipes it is used in (*"Used in Elixir of
-  the Mongoose, Major Mana Potion and 4 more."*) and **Watch**. Until the bot has kept prices for the whole window the
-  card says so (*"The bot hasn't kept prices for 7 days yet. It started Sat 14 Nov 2:51 PM."*). It shows moves, not
+  the Mongoose, Major Mana Potion and 4 more."*) and **Watch**. While the bot's record is younger than the window, it ranks over what it has kept and says over how long (*"Over the
+  last 2 hours 40 minutes, all the bot has kept so far."*); with under two hours kept the card says so instead (*"The bot
+  hasn't kept prices for 2 hours yet. It started Sat 14 Nov 2:17 PM."*). It shows moves, not
   advice: nothing pings you, and there is no profit figure.
 - **How long prices are kept**: the bot keeps every change of every item's lowest price and how many are listed — not
   only watched items — for 90 days; after that one lowest and one highest price per item per day, up to a year; nothing

@@ -190,6 +190,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
             <SegmentedControl size="xs" value={win} onChange={changeWindow} disabled={win !== movers.window} aria-label="Over how long"
               data={movers.windows.map((w) => ({ value: w.id, label: w.label }))} />
           </Group>
+          {movers.ready && movers.words && <Text size="xs" c="dimmed" px="md" pt="sm">{movers.words}</Text>}
           {!movers.ready ? (movers.words && <Text size="sm" c="dimmed" px="md" py="sm">{movers.words}</Text>) : (
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0}>
               {moversSide("Dips", "dips", movers.dips, movers.dips_words)}

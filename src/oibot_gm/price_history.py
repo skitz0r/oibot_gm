@@ -234,20 +234,42 @@ class Move:
 
 
 MOVE_MIN_QTY = 5  # fewer listed now is one person's listing, not a market
+MOVES_MIN_HISTORY = timedelta(hours=2)  # a window the history doesn't cover yet is ranked over what is kept, from this much on
+
+
+def _moves_start(con: sqlite3.Connection, a: int, b: int) -> int | None:
+    """Where a moves window really starts: its own start when the history reaches back that far, else the first kept
+    read when at least MOVES_MIN_HISTORY (or the whole window, if shorter) is kept; None = too little kept."""
+    meta = con.execute("SELECT first_at FROM meta").fetchone()
+    if meta is None:
+        return None
+    if meta[0] <= a:
+        return a
+    return meta[0] if b - meta[0] >= min(b - a, int(MOVES_MIN_HISTORY.total_seconds())) else None
+
+
+def moves_since(key: tuple, window: timedelta, now: datetime) -> datetime | None:
+    """From when `moves` compares for this window (later than the window's start while the history is younger than it);
+    None when too little is kept to rank."""
+    start = _read(key, lambda con: _moves_start(con, _secs(now - window), _secs(now)))
+    return _time(start) if start is not None else None
 
 
 def moves(key: tuple, window: timedelta, now: datetime, *, min_qty: int = MOVE_MIN_QTY) -> list[Move] | None:
     """Every item listed now (at least `min_qty` of it) with its USUAL price over the last `window`: the middle value of
     its lowest price, weighted by how long each price stood — so one odd read moves nothing. Time with nothing listed
     and time the bot didn't read count for nothing, and an item listed (and read) for less than half the window is left
-    out. By item id. None when the house's kept history doesn't reach back the whole window (or nothing is kept).
+    out. By item id. A history younger than the window is ranked over what is kept (`moves_since`), from
+    MOVES_MIN_HISTORY on; None when less than that is kept.
     ONE read of the file: the window's changes through the `changes_at` index, a carried start per candidate."""
     a, b = _secs(now - window), _secs(now)
 
     def go(con):
-        meta = con.execute("SELECT first_at FROM meta").fetchone()
-        if meta is None or meta[0] > a:
+        nonlocal a
+        start = _moves_start(con, a, b)
+        if start is None:
             return None
+        a = start
         listed = {item: (low, qty) for item, low, qty in
                   con.execute("SELECT item, low, qty FROM last WHERE low IS NOT NULL AND qty >= ?", (int(min_qty),))}
         inside: dict[int, list[tuple[int, int | None]]] = {}
