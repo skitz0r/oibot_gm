@@ -725,6 +725,9 @@ def test_the_prices_tab():
     # movers (an experiment): the server's two lists, every figure its words; a row opens the same panel
     assert "/api/prices/movers" in page and 'moversSide("Dips", "dips", movers.dips, movers.dips_words)' in page
     assert 'moversSide("Rising", "rising", movers.rising, movers.rising_words)' in page and "r.change_words" in page and "hist.used_in" in page
+    # Bargains: the card's second tab, the server's rows and sentences
+    for piece in ("/api/prices/bargains", "bargains.hint_words", "b.typical_words", "b.source_words", "b.none_words", "r.gap_words", "r.ref_words"):
+        assert piece in page, piece
     # 2026-11-15: the card browses every mover — the server's groups, orders, steps, page size and empty sentence
     for piece in ("movers.groups.map(", "movers.sorts.map(", "movers.steps.map(", "movers?.none_words", "movers?.page", "r.diff_words", "Show more"):
         assert piece in page, piece

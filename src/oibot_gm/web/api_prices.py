@@ -170,6 +170,15 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
+    @app.get("/api/prices/bargains")
+    async def prices_bargains(request: Request):
+        """Every member (an experiment, site only): the materials far cheaper here than most, against the version's
+        reference prices (prices.bargains; the kept file read in a thread). 404 without auction houses."""
+        v = await who(request)
+        if not auctions.available(v.reg):
+            raise HTTPException(404, auctions.NO_AUCTIONS_WORDS)
+        return await asyncio.to_thread(prices.bargains, v.reg)
+
     # ---- the guild's auction house: officers read, the owner picks / clears
     def market_state(v) -> dict:
         from ..consequences import market_clear_consequence

@@ -62,6 +62,7 @@ def reset_names() -> None:
         _FETCHED = None
         _KINDS = None
     _MOVERS.clear()  # the movers' answers were built from those names
+    _BARGAINS.clear()
 
 
 def _items_path() -> Path:
@@ -813,6 +814,18 @@ def _pct(usual: int, now: int) -> int:
 _MOVERS: dict[tuple, tuple[tuple, dict]] = {}  # (guild key, window) → (what it was computed from, the answer)
 
 
+def _grouper(reg):
+    """→ (the card's groups, the reagents' group id, item id → its group id): Blizzard's item class through the
+    profile's groups, else — for a recipe's reagent — the reagents' group, else Other."""
+    rows, by_class, reagents = _groups(reg)
+    classes, uses = kinds(reg), _uses(reg)
+
+    def of(item: int) -> str:
+        return by_class.get(classes.get(item) or "") or ((reagents if uses.get(item) else None) or OTHER_GROUP["id"])
+
+    return rows, reagents, of
+
+
 def movers(reg, window: str, *, now: datetime | None = None) -> dict:
     """`_movers`, answered once per price table: an open page asks again on every live event, and the answer only
     changes with a new table, a newly named item or another auction house."""
@@ -873,8 +886,8 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     if start - (now - span) > timedelta(minutes=1):  # a history younger than the window: ranked over what is kept, and said so
         label = _duration_words(now - start)
         out["words"] = f"Over the last {label}, all the bot has kept so far."
-    known, uses, classes = names(reg), _uses(reg), kinds(reg)
-    out["groups"], by_class, reagents = _groups(reg)
+    known, uses = names(reg), _uses(reg)
+    out["groups"], _reagents, group_of = _grouper(reg)
     out["group"] = out["groups"][1]["id"] if len(out["groups"]) > 2 else ALL_GROUP["id"]
     rows = []
     for m in found:
@@ -882,7 +895,7 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
         if abs(pct) < MOVE_MIN_PCT or m.item not in known or min(m.usual, m.now) < MOVE_MIN_PRICE:
             continue
         n = len(uses.get(m.item) or [])
-        group = by_class.get(classes.get(m.item) or "") or ((reagents if n else None) or OTHER_GROUP["id"])
+        group = group_of(m.item)
         rows.append((pct, {"id": m.item, "name": known[m.item], "usual_words": money(m.usual), "now_words": money(m.now),
                            "change_words": _change_words(pct), "pct": pct, "diff": m.now - m.usual,
                            "diff_words": _diff_words(m.now - m.usual), "qty": m.qty, "uses": n,
@@ -897,7 +910,91 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     return out
 
 
-__all__ = ["MOVERS_TOP", "MOVE_STEPS", "MOVERS_NONE", "kinds", "unkinded", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
+# ------------------------------------------------------------------ bargains (2026-11-15)
+
+BARGAIN_MIN_REF = 100  # copper: a material under one silver in the reference economy is not compared
+BARGAIN_MIN_SOLD = 1.0  # … nor one that sells less than once a day there (its price there is one seller's)
+BARGAIN_MIN_GAP = 2.0  # a bargain is at least this many times cheaper than most materials, against its reference price
+BARGAIN_MIN_ITEMS = 20  # fewer materials compared than this is no "most"
+BARGAIN_STALE = timedelta(days=7)  # a reference copy older than this is not compared
+BARGAINS_HINT = ("Materials that cost far less here than most do, measured against their {name} price. "
+                 "Things to look into, not advice: a new economy floods some materials.")
+BARGAINS_NONE = "No material is at least twice as cheap as most right now."
+
+_BARGAINS: dict[str, tuple[tuple, dict]] = {}  # guild key → (what it was computed from, the answer)
+
+
+def _times_words(gap: float) -> str:
+    return f"{gap:.0f}×" if gap >= 10 else f"{gap:.1f}×"
+
+
+def bargains(reg, *, now: datetime | None = None) -> dict:
+    """The materials whose lowest price here is far below where most materials sit against a REFERENCE economy's price
+    (integrations.yaml `auctions.reference`: for forever, TradeSkillMaster's Classic region market value, read daily —
+    price_reference) — BLOCKING on the first read of the kept file. Each compared material's ratio = its lowest price
+    here ÷ its reference price; `typical` = the middle ratio (a new economy holds less coin, so everything is cheaper:
+    only the gap to the typical ratio says anything); a bargain is ≥ BARGAIN_MIN_GAP times under it. Compared: the
+    materials group (the profile's `reagents: true` group), named, ≥ MOVE_MIN_QTY listed here, a reference price ≥
+    BARGAIN_MIN_REF selling ≥ BARGAIN_MIN_SOLD a day there. → {ready, words, hint_words, typical_words, source_words,
+    rows [{id, name, ref_words, now_words, gap, gap_words ('17× cheaper than most'), qty, uses, uses_words}] — the
+    widest gap first, every one —, page, none_words}. Not ready with one sentence in `words` when the file isn't read
+    yet, is older than BARGAIN_STALE or too few materials compare; no words while prices are hidden or the version has
+    no reference. Answered once per price table and reference copy."""
+    import statistics
+
+    from . import price_reference
+
+    ref_cfg = (reg.profile.auctions or {}).get("reference") or {}
+    name = str(ref_cfg.get("name") or "")
+    out = {"ready": False, "words": "", "hint_words": BARGAINS_HINT.format(name=name) if name else "", "typical_words": "",
+           "source_words": "", "rows": [], "page": MOVERS_TOP, "none_words": BARGAINS_NONE}
+    dest = discord_auctions.reference_path(reg)
+    t = discord_auctions.table(reg)
+    if dest is None or t is None or not _shown(reg):
+        return out
+    ref = price_reference.load(dest)
+    now = now or discord_auctions._now()
+    if ref is None:
+        out["words"] = f"The bot hasn't read {name} prices yet. It reads them once a day."
+        return out
+    if now - ref.read_at > BARGAIN_STALE:
+        out["words"] = f"The bot's {name} prices are too old to compare. It last read them {reg.local12(ref.read_at)}."
+        return out
+    stamp = (t.at, ref.read_at, len(names(reg)), len(kinds(reg)))
+    hit = _BARGAINS.get(reg.key)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    known, uses = names(reg), _uses(reg)
+    _rows, materials, group_of = _grouper(reg)
+    compared = []
+    for item, p in t.prices.items():
+        there = ref.values.get(item)
+        if (there is None or item not in known or p.qty < price_history.MOVE_MIN_QTY or p.low <= 0
+                or there[0] < BARGAIN_MIN_REF or there[1] < BARGAIN_MIN_SOLD or materials is None or group_of(item) != materials):
+            continue
+        compared.append((p.low / there[0], item, p, there[0]))
+    if len(compared) < BARGAIN_MIN_ITEMS:
+        out["words"] = f"Too few materials are listed here to compare with {name} yet."
+        return out
+    typical = statistics.median(c[0] for c in compared)
+    rows = []
+    for ratio, item, p, there in compared:
+        gap = typical / ratio
+        if gap < BARGAIN_MIN_GAP:
+            continue
+        n = len(uses.get(item) or [])
+        rows.append({"id": item, "name": known[item], "ref_words": money(there), "now_words": money(p.low), "gap": round(gap, 2),
+                     "gap_words": f"{_times_words(gap)} cheaper than most", "qty": p.qty, "uses": n, "uses_words": _uses_count_words(n)})
+    rows.sort(key=lambda r: (-r["gap"], r["name"].casefold()))
+    pct = max(1, round(typical * 100))
+    out.update(ready=True, rows=rows,
+               typical_words=f"Most of the {len(compared)} materials compared cost about {pct}% of their {name} price here.",
+               source_words=f"{name} prices are {ref_cfg.get('source') or 'the reference file'}'s, read {reg.local12(ref.read_at)}.")
+    _BARGAINS[reg.key] = (stamp, out)
+    return out
+
+
+__all__ = ["MOVERS_TOP", "bargains", "BARGAINS_NONE", "BARGAIN_MIN_GAP", "MOVE_STEPS", "MOVERS_NONE", "kinds", "unkinded", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
            "price_words", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

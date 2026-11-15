@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActionIcon, Button, Card, Group, SegmentedControl, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
 import { IconChevronDown, IconChevronRight, IconSearch } from "@tabler/icons-react";
-import { api, ApiError, type Meta, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type WatchList } from "../api";
+import { api, ApiError, type Bargains, type Meta, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type WatchList } from "../api";
 import { ItemName } from "../components/ItemName";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { PriceChart, Sparkline, trendOf } from "../components/PriceChart";
@@ -16,7 +16,9 @@ import css from "./prices.module.css";
  *  Movers (GET /api/prices/movers, an experiment): Dips and Rising over 6 hours / 12 hours / 24 hours / 7 days — the price
  *  now against the item's usual price over the window, each row opening to the same chart, with what recipes use it. The server sends
  *  every mover; the card picks among them (2026-11-15): a group (the server's `groups`, each with how many it holds), the order
- *  (by percent or by gold), the smallest move, and Show more past the first `page` rows. Every sentence, price and time is the server's words; the page composes
+ *  (by percent or by gold), the smallest move, and Show more past the first `page` rows. The card's second tab, Bargains
+ *  (GET /api/prices/bargains, where the version has reference prices — `hint_words` not empty): materials far cheaper here than most,
+ *  against another economy's prices; the server's rows and sentences, opening to the same chart. Every sentence, price and time is the server's words; the page composes
  *  none. A press waits for the server and takes the list it answers; a refusal prints the server's sentence. With prices
  *  hidden the list shows names alone and opens nothing. The `prices` topic (a new table) and `member` (a watch from another
  *  tab) reload it. */
@@ -25,7 +27,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [words, setWords] = useState(meta.prices?.words || "");
   const [q, setQ] = useState("");
   const [found, setFound] = useState<PriceFind | null>(null);
-  type Where = "search" | "list" | "dips" | "rising";
+  type Where = "search" | "list" | "dips" | "rising" | "bargains";
   const [openAt, setOpenAt] = useState<{ id: number; at: Where } | null>(null);  // the one open row, and in which card
   const open = openAt ? openAt.id : null;
   const setOpen = (id: number | null, at: Where = "list") => setOpenAt(id === null ? null : { id, at });
@@ -37,6 +39,10 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [step, setStep] = useState("10");
   const [pages, setPages] = useState({ dips: 1, rising: 1 });
   const choose = (set: () => void) => { set(); setPages({ dips: 1, rising: 1 }); };
+  // the card's second tab (2026-11-15): materials far cheaper here than most, against another economy's prices
+  const [tab, setTab] = useState("movers");
+  const [bargains, setBargains] = useState<Bargains | null>(null);
+  const [bargainPages, setBargainPages] = useState(1);
   const winRef = useRef(win);
   winRef.current = win;
   const [span, setSpan] = useState("1");  // 24 hours first: where a price moved today shows
@@ -62,13 +68,15 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const loadMovers = (w: string) => api.get<Movers>(`/api/prices/movers?window=${encodeURIComponent(w)}`)
     .then((d) => { if (winRef.current === d.window) setMovers(d); }).catch(fail);
   const changeWindow = (w: string) => { setWin(w); loadMovers(w); };
+  const loadBargains = () => api.get<Bargains>("/api/prices/bargains").then(setBargains).catch(fail);
   const load = () => {
     loadList();
     loadMovers(winRef.current);
+    loadBargains();
     if (want.current) search(want.current);
     if (view.current.open !== null) loadHistory(view.current.open, view.current.span);
   };
-  useEffect(() => { loadList(); loadMovers(winRef.current); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadList(); loadMovers(winRef.current); loadBargains(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
   useLive(load, ["prices", "member"], { every: 3000 });
   useEffect(() => { const t = setTimeout(() => search(q.trim()), 250); return () => clearTimeout(t); }, [q]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setHist(null); if (open !== null) loadHistory(open, span); }, [open]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -173,6 +181,46 @@ export function PricesPage({ meta }: { meta: Meta }) {
     );
   };
 
+  /** Bargains: a row per material — its price in the other economy → the price here, how far under most it sits. */
+  const bargainRows = (b: Bargains) => {
+    const side = b.rows.slice(0, b.page * bargainPages);
+    return (
+      <>
+        <Text size="xs" c="dimmed" px="md" pt="sm">{b.typical_words} {b.source_words}</Text>
+        {b.rows.length === 0 ? <Text size="sm" c="dimmed" px="md" py="sm">{b.none_words}</Text> : (
+          <div className={css.list}>
+            {side.map((r) => (
+              <div key={r.id} className={css.item}>
+                <div className={`${css.mover} ${css.opens}`} onClick={() => toggle(r.id, "bargains")}>
+                  <Group gap={6} wrap="nowrap" className={css.name}>
+                    {chevron(r.id, "bargains")}
+                    <div className={css.name}>
+                      <Text size="sm" fw={600} className={css.name}><ItemName id={r.id} name={r.name} /></Text>
+                      {r.uses_words && <Text size="xs" c="dimmed">{r.uses_words}</Text>}
+                    </div>
+                  </Group>
+                  <div className={css.figures}>
+                    <Text size="sm">{r.ref_words} → {r.now_words}</Text>
+                    <Text size="xs" c="dimmed">{r.qty} listed</Text>
+                  </div>
+                  <Text size="sm" fw={700} c="teal.4" className={css.change}>{r.gap_words}</Text>
+                </div>
+                {isOpen(r.id, "bargains") && panel(r, mine.has(r.id))}
+              </div>
+            ))}
+            {b.rows.length > side.length && (
+              <Group px="md" py="xs">
+                <Button size="compact-sm" variant="default" onClick={() => setBargainPages(bargainPages + 1)}>
+                  Show more ({b.rows.length - side.length} left)
+                </Button>
+              </Group>
+            )}
+          </div>
+        )}
+      </>
+    );
+  };
+
   return (
     <Stack gap="lg" className={css.touch}>
       <PageTitle title="Prices" intro="The lowest price each item is listed for on the guild's auction house, and the items you keep an eye on." />
@@ -212,7 +260,18 @@ export function PricesPage({ meta }: { meta: Meta }) {
 
       {shown && movers !== null && (
         <Card>
-          <CardHeader title="Movers" hint={`the price now against the item's usual price over the window; ${movers.floor_words}`} />
+          <CardHeader title="Movers" hint={tab === "bargains" && bargains ? bargains.hint_words
+            : `the price now against the item's usual price over the window; ${movers.floor_words}`} />
+          {bargains !== null && bargains.hint_words !== "" && (
+            <Group px="md" pt="sm">
+              <SegmentedControl size="sm" value={tab} onChange={setTab} aria-label="What to look at"
+                data={[{ value: "movers", label: "Movers" }, { value: "bargains", label: "Bargains" }]} />
+            </Group>
+          )}
+          {tab === "bargains" && bargains !== null && (
+            bargains.ready ? bargainRows(bargains) : (bargains.words && <Text size="sm" c="dimmed" px="md" py="sm">{bargains.words}</Text>)
+          )}
+          {tab === "movers" && (<>
           <Group px="md" pt="sm">
             <SegmentedControl size="xs" value={win} onChange={changeWindow} disabled={win !== movers.window} aria-label="Over how long"
               data={movers.windows.map((w) => ({ value: w.id, label: w.label }))} />
@@ -242,6 +301,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
               {moversSide("Rising", "rising", movers.rising, movers.rising_words)}
             </SimpleGrid>
           )}
+          </>)}
         </Card>
       )}
 

@@ -952,3 +952,108 @@ def test_the_hourly_naming_reads_the_class_of_items_already_named(reg, clock, mo
     assert run(discord_auctions.name_items(SimpleNamespace(ops=FakeOps()), reg)) == 0 and asked == [], "none is asked twice"
     prices.reset_names()
     assert prices.kinds(reg)[950001] == "Armor", "kept across a restart"
+
+
+# ---- bargains (2026-11-15): materials far cheaper here than most, against a reference economy's prices
+
+
+def _reference(reg, rows, *, at=None):
+    """Write the version's reference file as the daily read would: rows of (item id, market value, sold per day)."""
+    import os
+
+    dest = discord_auctions.reference_path(reg)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    filler = [(960000 + i, 5000, 9.0) for i in range(120)]  # the file must look like the real table (≥ 100 rows)
+    dest.write_text("itemId,name,marketValue,historical,avgSalePrice,saleRate,soldPerDay,updatedAt\n" + "".join(
+        f"{i},x,{v},0,0,0,{s},2026-11-13T08:38:52Z\n" for i, v, s in [*rows, *filler]), encoding="utf-8")
+    if at is not None:
+        os.utime(dest, (at.timestamp(), at.timestamp()))
+    return dest
+
+
+def test_bargains_rank_materials_against_the_typical_ratio(reg, clock):
+    from oibot_gm import price_reference
+
+    clock.t = NOW
+    assert reg.profile.auctions["reference"]["name"] == "Classic"
+    mats = [940100 + i for i in range(24)]  # 24 materials at a tenth of their reference price: the typical ratio
+    cheap, thin, rare, gear = 940201, 940202, 940203, 940204
+    table = {i: Price(low=100, qty=50) for i in mats}
+    table.update({cheap: Price(low=20, qty=300),      # 20c against 10s: fifty times cheaper, five times under most
+                  thin: Price(low=20, qty=19),         # one short of twenty listed here
+                  rare: Price(low=20, qty=300),        # sells less than once a day there
+                  gear: Price(low=20, qty=300),        # not a material
+                  PLAGUEBLOOM: Price(low=40, qty=80)})  # a reagent whose class was never read: 2.5× under most
+    priced(reg, table, at=NOW)
+    prices.remember(reg, {**{i: f"Ore {i}" for i in mats}, cheap: "Deep Eel", thin: "Thin Reed", rare: "Rare Moss", gear: "Old Helm"}, set(),
+                    {**{i: "Trade Goods" for i in mats}, cheap: "Trade Goods", thin: "Trade Goods", rare: "Trade Goods", gear: "Armor"})
+    assert prices.bargains(reg)["words"] == "The bot hasn't read Classic prices yet. It reads them once a day."
+    _reference(reg, [*[(i, 1000, 5.0) for i in mats], (cheap, 1000, 22.0), (thin, 1000, 5.0), (rare, 1000, 0.4), (gear, 1000, 5.0),
+                     (PLAGUEBLOOM, 1000, 3.0)], at=NOW - timedelta(hours=2))
+    b = prices.bargains(reg)
+    assert b["ready"] is True and b["words"] == ""
+    assert [(r["id"], r["ref_words"], r["now_words"], r["gap_words"], r["qty"]) for r in b["rows"]] == [
+        (cheap, "10s", "20c", "5.0× cheaper than most", 300), (PLAGUEBLOOM, "10s", "40c", "2.5× cheaper than most", 80)]
+    assert b["rows"][1]["uses_words"].startswith("Used in ")
+    assert b["typical_words"] == "Most of the 26 materials compared cost about 10% of their Classic price here."
+    assert b["source_words"] == f"Classic prices are TradeSkillMaster's, read {reg.local12(NOW - timedelta(hours=2))}."
+    assert "not advice" in b["hint_words"] and b["page"] == prices.MOVERS_TOP and b["none_words"] == prices.BARGAINS_NONE
+    assert prices._times_words(17.4) == "17×" and prices._times_words(2.0) == "2.0×"
+    # a copy too old is not compared; hidden prices say nothing; tbc has no reference
+    clock.t = NOW + timedelta(days=8)
+    priced(reg, table, at=clock.t)
+    prices._BARGAINS.clear()
+    b = prices.bargains(reg)
+    assert b["ready"] is False and b["words"] == f"The bot's Classic prices are too old to compare. It last read them {reg.local12(NOW - timedelta(hours=2))}."
+    assert price_reference.parse("itemId,marketValue,soldPerDay\n" + "".join(f"{i},50,1\n" for i in range(1, 201)))[7] == (50, 1.0)
+    with pytest.raises(price_reference.ReferenceFailed):
+        price_reference.parse("id,price\n1,2\n")
+
+
+def test_too_few_materials_is_not_a_comparison(reg, clock):
+    clock.t = NOW
+    priced(reg, {PLAGUEBLOOM: Price(low=40, qty=80)}, at=NOW)
+    _reference(reg, [(PLAGUEBLOOM, 1000, 3.0)], at=NOW)
+    b = prices.bargains(reg)
+    assert b["ready"] is False and b["words"] == "Too few materials are listed here to compare with Classic yet."
+
+
+def test_the_reference_file_is_read_once_a_day_and_a_failure_keeps_the_copy(reg, clock, monkeypatch):
+    from oibot_gm import price_reference
+
+    clock.t = NOW
+    asked = []
+    good = "itemId,marketValue,soldPerDay\n" + "".join(f"{i},50,1\n" for i in range(1, 201))
+
+    def fetch(url):
+        asked.append(url)
+        if len(asked) == 2:
+            raise OSError("down")
+        return good
+
+    monkeypatch.setattr(price_reference, "fetch_text", fetch)
+    dest = discord_auctions.reference_path(reg)
+
+    async def tick():
+        discord_auctions._reference_daily(reg)
+        for t in list(discord_auctions._RUNNING):
+            await t
+
+    run(tick())
+    assert asked == ["https://public-data.tradeskillmaster.com/classic/us/region/items.csv"] and len(price_reference.load(dest).values) == 200
+    run(tick())
+    assert len(asked) == 1, "not again within the hour"
+    discord_auctions.reset_state()  # a restart: the copy is young, nothing is read
+    run(tick())
+    assert len(asked) == 1
+    import os
+    old = (NOW - timedelta(hours=30)).timestamp()
+    os.utime(dest, (old, old))
+    discord_auctions.reset_state()
+    run(tick())
+    assert len(asked) == 2 and len(price_reference.load(dest).values) == 200, "a failed read keeps the last copy"
+    run(tick())
+    assert len(asked) == 2, "tried again only after an hour"
+    clock.t = NOW + timedelta(hours=1, minutes=1)
+    run(tick())
+    assert len(asked) == 3

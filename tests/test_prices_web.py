@@ -567,3 +567,20 @@ def test_movers_on_tbc_is_404(tbc):
     w = tbc
     m = member(w)
     assert w.c.get("/api/prices/movers", headers=as_user(w, m.discord_id)).status_code == 404
+
+
+def test_bargains_route(w, market_on):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=900, qty=40)}, at=now())
+    r = w.c.get("/api/prices/bargains", headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d == prices.bargains(w.reg) and d["ready"] is False and d["hint_words"] != ""
+    assert d["words"] == "The bot hasn't read Classic prices yet. It reads them once a day."
+
+
+def test_bargains_on_tbc_is_404(tbc):
+    w = tbc
+    m = member(w)
+    assert w.c.get("/api/prices/bargains", headers=as_user(w, m.discord_id)).status_code == 404

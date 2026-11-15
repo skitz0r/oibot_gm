@@ -543,6 +543,16 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction
   house picked, or the last prices more than a day old) there is no search and the list shows the items' names alone, with
   nothing to open; nothing new can be watched then (the answer says why), but **Stop watching** still works. On a phone each item and each search result is a card.
+- **Bargains** (an experiment, the Movers card's second tab): crafting materials that cost far less here than most
+  materials do, measured against their **Classic** price. A new server holds much less coin than a mature Classic
+  realm, so nearly everything is cheaper here; the card works out what most materials cost against Classic (*"Most of
+  the 140 materials compared cost about 12% of their Classic price here."*) and lists the ones at least twice as cheap
+  as that, the widest gap first: the Classic price → the price here, the gap (*"17× cheaper than most"*), how many are
+  listed, how many recipes use it. Open a row for the chart and **Watch**. Only materials with at least 20 listed here
+  that sell at least once a day in Classic, for a silver or more, are compared. The Classic prices are
+  TradeSkillMaster's public figures for the whole Classic region, read once a day; the card says when. These are
+  things to look into, not advice: a new economy floods low-level materials while everyone levels, and a material may
+  simply matter less here than it did in Classic.
 - **Movers** (an experiment, on the site's Prices tab): between the search and your watch list, two lists — **Dips** and
   **Rising** — over **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
   least 10% away from its *usual* price over that time, the biggest move first, 15 each way with **Show more** for the

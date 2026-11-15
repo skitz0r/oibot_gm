@@ -223,6 +223,14 @@ export interface Movers {
   groups: { id: string; name: string }[]; group: string; sorts: { id: string; label: string }[]; steps: { id: string; label: string }[];
   page: number; none_words: string;
 }
+/** GET /api/prices/bargains (an experiment, site only): the materials whose lowest price here is far under where most
+ *  materials sit against another economy's price (`ref_words`, e.g. Classic's), the widest gap first, every figure the
+ *  server's words. `hint_words` "" = the version has no reference prices (no tab); `ready` false + `words` = why not yet. */
+export interface BargainRow { id: number; name: string; ref_words: string; now_words: string; gap: number; gap_words: string; qty: number; uses: number; uses_words: string }
+export interface Bargains {
+  ready: boolean; words: string; hint_words: string; typical_words: string; source_words: string; rows: BargainRow[];
+  page: number; none_words: string;
+}
 /** GET /api/admin/market: the guild's auction house (officers read, the owner picks). `words` = the choice in words (or what
  *  is missing), `prices` = how recent the prices are, `clear_sentences` = Turn prices off…'s confirm. */
 export interface MarketState {

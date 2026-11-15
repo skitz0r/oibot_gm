@@ -178,6 +178,14 @@ src/oibot_gm/
                        value stays as the carried start — P2; unread stretches kept, those ended past the year dropped), a file empty or whose
                        newest feed time is past a year deleted; FOLD_BATCH items per write with FOLD_PAUSE_S between (a record's 5 s busy wait
                        always gets in — F-7; cut short = still readable, the next fold finishes); HistoryError
+  price_reference.py   Bargains' reference prices (2026-11-15), BLOCKING, knows no guild: fetch_text(url) (THE network read — tests refuse it in
+                       conftest), parse → {item id: (market value in copper, sold per day)} (columns itemId / marketValue / soldPerDay, ≥ 100 rows),
+                       refresh(url, dest) (kept whole), load(dest) → Reference(read_at, values) cached by mtime. integrations.yaml `auctions.reference`
+                       {name "Classic", source "TradeSkillMaster", url: the public Classic region items.csv}; discord_auctions.reference_path(reg) =
+                       out/auctions/reference/<version>.csv, _reference_daily from auctions_tick (once a day; a failed read keeps the copy, retried hourly).
+                       prices.bargains(reg) = the materials group's lowest price here ÷ the reference price against the MEDIAN ratio (typical): rows ≥
+                       BARGAIN_MIN_GAP 2× under it ('17× cheaper than most'), typical_words / source_words / hint_words / none_words; GET
+                       /api/prices/bargains (members, site only); the Movers card's second tab
   armory_seed.py       the seed (armory link §5.5, D8): propose(reg, roster, *, taken_at=) → Seed{sure, likely, none, unclaimed, rev} of
                        SeedRow{uid, member, label, cls, candidate, why same name|close name|display name, others} — PURE (no request, no write);
                        considered(m, c) = THE predicate (active, named, real member still here — the map counts over it too), unlinked ones proposed; sure = first name (case-folded) + class on exactly one

@@ -37,7 +37,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable, Literal
 
-from . import armory, auctions, price_history
+from . import armory, auctions, price_history, price_reference
 from .armory import ArmoryError
 from .auctions import House, Price
 from .registry import RegistryError
@@ -122,6 +122,9 @@ _SHARED: dict[tuple, Table] = {}  # (namespace, ruleset, house) → the last tab
 _LOCKS: dict[tuple, tuple[object, asyncio.Lock]] = {}
 _UNLOADED = object()
 _FOLD: dict = {"day": None}  # the UTC date of the last daily fold of the kept history (process-wide)
+_REFERENCE: dict[str, datetime] = {}  # game version → when its reference prices were last tried (process-wide)
+REFERENCE_EVERY = timedelta(hours=24)  # the reference file is read once a day (its source changes daily)
+REFERENCE_RETRY = timedelta(hours=1)  # … and tried again after this long when the read failed
 
 
 def reset_state() -> None:
@@ -130,6 +133,7 @@ def reset_state() -> None:
     _SHARED.clear()
     _LOCKS.clear()
     _FOLD["day"] = None
+    _REFERENCE.clear()
 
 
 def _st(reg) -> dict:
@@ -399,6 +403,45 @@ def _fold_daily() -> None:
     t.add_done_callback(_RUNNING.discard)
 
 
+def reference_path(reg) -> Path | None:
+    """Where the version's reference prices are kept (Bargains; integrations.yaml `auctions.reference`), None without one."""
+    if not (reg.profile.auctions or {}).get("reference"):
+        return None
+    return OUT / "reference" / f"{reg.profile.name}.csv"
+
+
+def _reference_daily(reg) -> None:
+    """Once a day per game version: ONE background task reading the reference price file (price_reference.refresh in a
+    thread). A copy younger than REFERENCE_EVERY is left alone (a restart reads nothing); a failed read keeps the last
+    copy, is logged, and is tried again after REFERENCE_RETRY. No ops line, no notice."""
+    dest = reference_path(reg)
+    if dest is None:
+        return
+    now = _now()
+    tried = _REFERENCE.get(reg.profile.name)
+    if tried is not None and now - tried < REFERENCE_RETRY:
+        return
+    _REFERENCE[reg.profile.name] = now
+    held = price_reference.load(dest)
+    if held is not None and now - held.read_at < REFERENCE_EVERY:
+        return
+    ref = reg.profile.auctions["reference"]
+    region = str((reg.profile.armory or {}).get("region") or "us")
+    url = str(ref["url"]).format(region=region)
+
+    async def go():
+        try:
+            n = await asyncio.to_thread(price_reference.refresh, url, dest)
+            log.info("reference prices read for %s: %d items", reg.profile.name, n)
+            _heard(reg)
+        except Exception as e:  # noqa: BLE001 — the last copy stays; tried again in an hour
+            log.warning("reference prices not read for %s: %s", reg.profile.name, type(e).__name__)
+
+    t = asyncio.get_running_loop().create_task(go())
+    _RUNNING.add(t)
+    t.add_done_callback(_RUNNING.discard)
+
+
 def _due(reg, m) -> bool:
     st = _st(reg)
     now = _now()
@@ -422,6 +465,7 @@ async def auctions_tick(bot, reg):
         _heard(reg)
     if reg.profile.auctions:  # the kept history's daily fold: every house's file, picked or not (no auction houses: none)
         _fold_daily()
+        _reference_daily(reg)
     m = _market(reg)
     if m is None or not auctions.available(reg):
         return None

@@ -5196,7 +5196,16 @@ which the page applies itself (a filter over one answer, no request). The class 
 reads (`auctions.Client.item_facts` → `prices.kinds`, out/auctions/items_kinds.json, "" = asked and none given); what is left of
 `NAME_PER_FETCH` each hour reads the class of listed items already named (`prices.unkinded`). An unread class = Other, or the
 `reagents: true` group when a recipe uses the item (`used_in_words` on the history answer names them); `GET /api/prices/movers?window=6|12|24|168`.
-No alert, no profit figure, no Discord or MCP form yet. **C6** (replaced by the owner 2026-11-14) history shows for ANY item the bot can name, watched or not: a search row
+No alert, no profit figure, no Discord or MCP form yet. **Bargains** (the owner's experiment, 2026-11-15, site only, the card's
+second tab): `price_reference` keeps ONE public CSV per game version (integrations.yaml `auctions.reference` {name, source, url}: for
+forever TradeSkillMaster's Classic region `items.csv` — static, no key, its terms name the public pricing files for automated reads;
+NexusHub's history API no longer answers and Blizzard gives no history, so there is no per-phase series) under
+out/auctions/reference/, read at most once a day from `auctions_tick` (`_reference_daily`: a copy under 24 h is left alone, a failed
+read keeps the last copy and retries in an hour; the request carries nothing about a guild). `prices.bargains(reg)` compares the
+materials group (named, ≥ `MOVE_MIN_QTY` listed here, a reference market value ≥ 1 silver selling ≥ once a day): ratio = lowest
+price here ÷ reference price, `typical` = the median ratio (the coin gap between the economies cancels), a bargain = ≥
+`BARGAIN_MIN_GAP` (2) times under it; rows with the server's words, the widest gap first; not ready with a sentence when the
+file is unread, older than 7 days or fewer than 20 materials compare. `GET /api/prices/bargains`. Candidates, never advice. **C6** (replaced by the owner 2026-11-14) history shows for ANY item the bot can name, watched or not: a search row
 opens to the same chart and sentences, `/price <item>` adds the history sentences to a one-item answer, and each row of the
 watch list carries a small line (`prices.spark`). The same day the owner asked for a 24-hour view and a brokerage-style row: `SPANS` gains "1" = 24 hours (the default span), the row's line covers the last 24 hours and carries `change_words` / `up` (now against the first price of the stretch — the line's and the figure's colour), and a chart whose history is younger than its span starts its x axis at the first kept read.
 **C7** at most 25 items (Discord's select). **C8** watching and stopping are instant, no confirm. **C9** the list lives on
