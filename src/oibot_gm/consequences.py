@@ -644,7 +644,7 @@ def market_consequence(reg: Registry, house) -> list[str]:
         return [f"The {house.name} is already the guild's auction house, so nothing changes."]
     change = (f"The guild's prices come from this {house.name} instead of the one picked before." if old is not None
               else f"The guild's prices come from the {house.name} from now on.")
-    return [change, "Members see them on the Professions page after the next hourly check.",
+    return [change, "Members see them on the Professions page within about ten minutes.",
             "You can pick another auction house or turn prices off at any time."]
 
 

@@ -303,18 +303,28 @@ def test_naming_stops_quietly_on_a_failure_and_caps_per_fetch(reg, clock, monkey
     assert run(discord_auctions.name_items(bot, reg)) == 3
     assert prices.names(reg)[800010] == "Lid 800010" and 800007 not in prices.names(reg)
     assert bot.ops.lines == []
-    # the hourly check names after it reads the table, in the same background task
+    # the check names after it reads the table, in the same background task — once an hour, though it checks every ten minutes
     discord_auctions.reset_state()
     prices.reset_names()
+    listed = {700001: Price(low=5, qty=2)}
+    asked = []
     reader = SimpleNamespace(
-        table=lambda ruleset, house, since=None: ({700001: Price(low=5, qty=2)}, None),
-        item_facts=lambda i: ("Spare Cog", "Trade Goods"))
+        table=lambda ruleset, house, since=None: (dict(listed), None),
+        item_facts=lambda i: (asked.append(i), (f"Spare Cog {i}", "Trade Goods"))[1])
     monkeypatch.setattr(discord_auctions, "_client", lambda r: reader)
 
     async def tick():
         await (await discord_auctions.auctions_tick(bot, reg))
     run(tick())
-    assert prices.names(reg)[700001] == "Spare Cog" and prices.kinds(reg)[700001] == "Trade Goods", "the class is kept with the name"
+    assert prices.names(reg)[700001] == "Spare Cog 700001" and prices.kinds(reg)[700001] == "Trade Goods", "the class is kept with the name"
+    listed[700002] = Price(low=7, qty=3)
+    for _ in range(5):  # the checks 10 to 50 minutes later read the table and name nothing
+        clock.t += discord_auctions.FETCH_EVERY
+        run(tick())
+    assert 700002 in discord_auctions.table(reg).prices and asked == [700001] and discord_auctions.NAME_EVERY == timedelta(hours=1)
+    clock.t += discord_auctions.FETCH_EVERY
+    run(tick())
+    assert asked == [700001, 700002] and prices.names(reg)[700002] == "Spare Cog 700002", "an hour after the last naming"
 
 
 def test_a_malformed_item_is_skipped_and_naming_goes_on(reg, clock, monkeypatch):

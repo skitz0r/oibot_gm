@@ -147,7 +147,7 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
 - **Lowest price** — the cheapest buyout listed on the guild's auction house, per item: what the cheapest one is up
   for right now, never what an item is "worth". **N listed** — how many are up in all. **None listed** — nothing with a
   buyout is up right now.
-- **Prices as of …** — how recent the auction house's own listings are, as the game reports them. The bot looks every hour; when the
+- **Prices as of …** — how recent the auction house's own listings are, as the game reports them. The bot looks every 10 minutes; when the
   auction house hasn't changed, the time stays. After six hours the line adds *more than
   six hours old*; after a day no price shows at all and the line says the prices are out of date.
 - **Cost to make** — a recipe's reagents at their lowest prices, added up, for one craft. When a reagent has none listed
@@ -572,7 +572,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   biggest difference in coin first, which brings up expensive items a percent ranking buries) and the smallest move to
   show (**10%** · **25%** · **50%** · **100%**). The groups are Blizzard's own item classes; Quest holds only what the
   game marks as a quest item, so a tradeable item a quest merely asks for stays in its own group. An item whose class the
-  bot hasn't read yet sits in Other (in Materials when a recipe uses it) until the next hourly check. The usual price is the middle
+  bot hasn't read yet sits in Other (in Materials when a recipe uses it) until the bot reads it (item names and classes are read once an hour). The usual price is the middle
   value of the item's lowest price over the window, weighted by how long each price stood — so one odd listing for an
   hour moves nothing. Only items with at least 20 listed now, listed for at least half the window, and priced at one silver or more — usually and
   now — are ranked: a single cheap or wishful listing isn't a move, and neither is a few copper tripling. Open a row for the item's chart, the recipes it is used in (*"Used in Elixir of

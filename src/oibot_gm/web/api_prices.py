@@ -22,7 +22,7 @@ Registry — no rule lives here.
   owner as actor (D8). 404 where auctions.available is false.
 - `cost_json` = a recipe's cost to make for the Professions page's rows (api_professions.entry_json): null without prices
   to show and for a recipe with no reagents (never a zero cost).
-- discord_auctions.PRICE_LISTENERS → publish("prices", guild): an open Professions page reloads after an hourly check.
+- discord_auctions.PRICE_LISTENERS → publish("prices", guild): an open Professions page reloads after a check that brought news.
 """
 from __future__ import annotations
 

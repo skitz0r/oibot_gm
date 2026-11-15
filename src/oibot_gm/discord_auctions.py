@@ -1,7 +1,9 @@
-"""The guild's price table and the hourly check that keeps it current (auction prices, spec §4.2, C3, C7, C10).
+"""The guild's price table and the check, every ten minutes, that keeps it current (auction prices, spec §4.2, C3, C7, C10).
 
 `refresh` reads the selected auction house (auctions.Client.table: its listings and its stackables, conditional on the
-last Last-Modified) at most once an hour; `auctions_tick` is the scheduler's hook (one background task per guild when
+last Last-Modified) at most every FETCH_EVERY (ten minutes since 2026-11-15, issue #8: Blizzard publishes about hourly at a
+minute nobody knows, nearly every check is a small not-modified answer, and prices are never more than about ten minutes
+behind a publish); `auctions_tick` is the scheduler's hook (one background task per guild when
 due — the minute loop never waits for Blizzard); `house_choices` is the owner's picker (the guild's ruleset from its
 armory page, then each house of the guild's faction, C1). Module functions taking the client, like discord_armory.py.
 
@@ -47,16 +49,17 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "out" / "auctions"  # read at call time (tests point it elsewhere)
 
-FETCH_EVERY = timedelta(hours=1)
+FETCH_EVERY = timedelta(minutes=10)  # the check; conditional, so most answers are a not-modified (issue #8). A failed check is tried again at the next one
+NAME_EVERY = timedelta(hours=1)  # item naming stays hourly per game version: NAME_PER_FETCH was sized for an hour
 STALE_AFTER = timedelta(hours=6)  # C3: shown, marked stale
 HIDE_AFTER = timedelta(hours=24)  # C10: not shown at all
 WARN_EVERY = timedelta(hours=1)  # one ops warning per guild per hour
-NAME_PER_FETCH = 1000  # listed ids named from Blizzard after each check, most listed first (≤ 10 a second: under two minutes, in the background)
+NAME_PER_FETCH = 1000  # listed ids named from Blizzard once per NAME_EVERY, most listed first (≤ 10 a second: under two minutes, in the background)
 
 # the words (spec §3): what a reader sees when there is no price to show, and why
 OFF_WORDS = "Prices are off until the owner picks the guild's auction house on the Config page."
-WAITING_WORDS = "Prices haven't been read from the auction house yet. The bot reads it every hour."
-OLD_WORDS = "Prices are out of date: the last ones read are more than a day old. The bot tries again every hour."
+WAITING_WORDS = "Prices haven't been read from the auction house yet. The bot reads it every 10 minutes."
+OLD_WORDS = "Prices are out of date: the last ones read are more than a day old. The bot tries again every 10 minutes."
 STALE_TAIL = " — more than six hours old"
 LINK_FIRST = "Link the server to its guild in the game first, then pick its auction house."
 NO_CHOICES = "No auction house of the guild's faction has anything listed right now. Try again in a while."
@@ -125,6 +128,7 @@ _FOLD: dict = {"day": None}  # the UTC date of the last daily fold of the kept h
 _REFERENCE: dict[str, datetime] = {}  # game version → when its reference prices were last tried (process-wide)
 REFERENCE_EVERY = timedelta(hours=24)  # the reference file is read once a day (its source changes daily)
 REFERENCE_RETRY = timedelta(hours=1)  # … and tried again after this long when the read failed
+_NAMED_AT: dict[str, datetime] = {}  # game version → when the check last started an item naming (memory: a restart names at its first check)
 
 
 def reset_state() -> None:
@@ -134,6 +138,7 @@ def reset_state() -> None:
     _LOCKS.clear()
     _FOLD["day"] = None
     _REFERENCE.clear()
+    _NAMED_AT.clear()
 
 
 def _st(reg) -> dict:
@@ -307,11 +312,11 @@ _RUNNING: set[asyncio.Task] = set()  # background reads started by a pick (kept 
 
 async def refresh_soon(bot, reg) -> asyncio.Task:
     """After the owner picks an auction house (the site or Discord): its first read, off the request. The picker's own
-    read is usually taken as it is (no request). A failure is logged; the hourly check tries again."""
+    read is usually taken as it is (no request). A failure is logged; the next check tries again."""
     async def go():
         try:
             await refresh(bot, reg)
-        except Exception:  # noqa: BLE001 — the hourly check tries again
+        except Exception:  # noqa: BLE001 — the next check tries again
             log.exception("first price read for %s failed", reg.key)
 
     t = asyncio.get_running_loop().create_task(go())
@@ -322,10 +327,10 @@ async def refresh_soon(bot, reg) -> asyncio.Task:
 
 
 async def refresh(bot, reg, *, force: bool = False) -> str:
-    """Read the selected auction house when due (an hour since the guild's last check — `checked_at` —, or `force`) →
+    """Read the selected auction house when due (FETCH_EVERY since the guild's last check — `checked_at` —, or `force`) →
     "updated" (new prices, or a new feed time bringing a stale / hidden table back to fresh) | "unchanged" (not due, a
     not-modified answer, the same prices on a fresh table, or the market changed while it ran) | "off" | "failed".
-    Another guild's read of the same house within the hour is taken instead of a request."""
+    Another guild's read of the same house within FETCH_EVERY is taken instead of a request."""
     m = _market(reg)
     if m is None or not auctions.available(reg):
         return "off"
@@ -448,9 +453,20 @@ def _due(reg, m) -> bool:
     key = _house_key(reg, m.ruleset_id, m.house_id)
     tried = st["tried"]
     if tried is not None and tried[0] == key and now - tried[1] < FETCH_EVERY:
-        return False  # tried this hour (worked or not): a failure waits an hour; a house picked since is read now
+        return False  # tried within FETCH_EVERY (worked or not): a failure waits for the next check; a house picked since is read now
     t = table(reg)
     return t is None or now - t.checked >= FETCH_EVERY
+
+
+def _naming_due(reg) -> bool:
+    """The check names items once per NAME_EVERY per game version (two guilds of a version share the names): True, and
+    stamped, when it is time and the guild has a table to name from."""
+    now = _now()
+    last = _NAMED_AT.get(reg.profile.name)
+    if table(reg) is None or (last is not None and now - last < NAME_EVERY):
+        return False
+    _NAMED_AT[reg.profile.name] = now
+    return True
 
 
 async def auctions_tick(bot, reg):
@@ -476,9 +492,9 @@ async def auctions_tick(bot, reg):
 
     async def go():
         try:
-            if await refresh(bot, reg) in ("updated", "unchanged"):
+            if await refresh(bot, reg) in ("updated", "unchanged") and _naming_due(reg):
                 await name_items(bot, reg)
-        except Exception:  # noqa: BLE001 — the hourly check never takes the scheduler down
+        except Exception:  # noqa: BLE001 — the check never takes the scheduler down
             log.exception("auctions tick failed for %s", reg.key)
 
     st["task"] = asyncio.get_running_loop().create_task(go())
@@ -536,7 +552,7 @@ def _kind_batch(cli, ids: list[int]) -> tuple[dict[int, str], dict[int, tuple[in
 
 
 async def name_items(bot, reg) -> int:
-    """After a check, name up to NAME_PER_FETCH listed ids that nothing names, most listed first (the hourly check's own
+    """Once an hour after a check (auctions_tick's _naming_due), name up to NAME_PER_FETCH listed ids that nothing names, most listed first (the check's own
     background task, never a request path) → how many were named. Each answer's item class is kept with it
     (prices.kinds), and the rest of the NAME_PER_FETCH requests reads the class of listed items already named. A failure stops it quietly: no ops line. One naming
     per game version at a time; the names are kept per version (prices.remember)."""
@@ -615,5 +631,5 @@ async def pick_house(bot, reg, house_id: int, ruleset_id: int) -> House:
     raise RegistryError(NOT_A_CHOICE)
 
 
-__all__ = ["Choice", "HISTORY_FAILED", "HOUSES_CHANGED", "history_key", "NO_CHOICES", "HousesChanged", "NOT_A_CHOICE", "pick_house", "FETCH_EVERY", "HIDE_AFTER", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
+__all__ = ["Choice", "HISTORY_FAILED", "HOUSES_CHANGED", "history_key", "NO_CHOICES", "HousesChanged", "NOT_A_CHOICE", "pick_house", "FETCH_EVERY", "HIDE_AFTER", "NAME_EVERY", "NAME_PER_FETCH", "OFF_WORDS", "OLD_WORDS", "PRICE_LISTENERS", "STALE_AFTER", "Table",
            "WAITING_WORDS", "as_of_words", "auctions_tick", "refresh_soon", "house_choices", "name_items", "price_of", "refresh", "reset_state", "state", "table"]

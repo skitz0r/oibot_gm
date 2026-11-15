@@ -5102,10 +5102,15 @@ seller, no sales, no history.
   `clear_armory_guild` always does, in their own commit; the link's or unlink's audit line then ends "; prices turned off"
   (Discord's /gm config armory and the site's route, MCP through it — final review F-3). `market_words` = the choice in words or what is missing.
 - **The table** (`discord_auctions.py`): `out/auctions/<guild key>/prices.json` written whole, loaded on first use;
-  `refresh` at most once an hour per guild (conditional on the stored Last-Modified). `Table.at` = the feed's time: the
+  `refresh` at most every `FETCH_EVERY` per guild (conditional on the stored Last-Modified) — ten minutes since 2026-11-15
+  (issue #8; an hour before): Blizzard publishes about hourly at a minute nobody knows, so nearly every check is a small
+  not-modified answer and prices are never more than about ten minutes behind a publish. A failed check is tried again
+  at the next one (the ops warning stays one per guild per hour); item naming stays hourly per game version
+  (`NAME_EVERY`, `_naming_due`: `NAME_PER_FETCH` was sized for an hour); the history is keyed on the feed's time, so
+  the extra checks add no rows. `Table.at` = the feed's time: the
   answer's Last-Modified, never later than now, now when it gives none or it can't be read; a not-modified answer leaves
   it, so a feed that stalls ages into stale and hidden (final review F-2). `Table.checked_at` = the last check that worked
-  (an update or a not-modified answer; a file from before loads with checked = at): the hourly schedule and the shared
+  (an update or a not-modified answer; a file from before loads with checked = at): the schedule and the shared
   read go by it. `state` off | waiting | fresh | stale (6 h) | old (24 h, not shown), from `at`; two guilds on one house
   share one read within the hour; a read whose market changed under it is discarded. `PRICE_LISTENERS` hear new prices AND
   a new feed time that changes the state (stale / hidden back to fresh, hidden to stale) on the same prices, so an open page
