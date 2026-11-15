@@ -685,7 +685,7 @@ def test_movers_rank_dips_and_risers_with_the_servers_words(reg, clock):
     def table(i):
         late = i >= 20
         return {PLAGUEBLOOM: Price(low=900 if late else 1500, qty=40), VIAL: Price(low=640, qty=200),
-                BAR: Price(low=600000 if late else 400000, qty=12)}
+                BAR: Price(low=600000 if late else 400000, qty=30)}
 
     priced(reg, table(24), at=NOW)
     _read_hourly(reg, start, 24, table)
@@ -710,7 +710,7 @@ def test_movers_ignore_small_moves_and_unnamed_items_and_cap_the_lists(reg, cloc
     def table(i):
         late = i >= 5
         t = {PLAGUEBLOOM: Price(low=1400 if late else 1500, qty=40)}  # −7%: under the 10% line
-        t.update({k: Price(low=(50 + n) if late else 200, qty=9) for n, k in enumerate(fake)})  # 40 big dips nothing names
+        t.update({k: Price(low=(500 + n) if late else 2000, qty=29) for n, k in enumerate(fake)})  # 40 big dips nothing names
         return t
 
     priced(reg, table(6), at=NOW)
@@ -864,3 +864,26 @@ def test_movers_over_a_young_history_say_how_long(reg, clock):
     assert m["rising_words"] == "Nothing has risen 10% or more in the last 2 hours 40 minutes."
     assert prices._duration_words(timedelta(hours=1)) == "1 hour" and prices._duration_words(timedelta(days=3, hours=4, minutes=9)) == "3 days 4 hours"
     assert prices._duration_words(timedelta(minutes=61)) == "1 hour 1 minute"
+
+
+def test_movers_leave_out_cheap_items_and_thin_listings(reg, clock):
+    """The owner, 2026-11-14 (after the first live look): an item under one silver — usually or now — is no mover
+    (a few copper tripling topped the list), and neither is one with fewer than 20 listed (one seller's wishful price)."""
+    clock.t = NOW
+    cheap, fell_under, thin, real = 930001, 930002, 930003, 930004
+
+    def table(i):
+        late = i >= 5
+        return {cheap: Price(low=43 if late else 3, qty=400),            # 3c → 43c: under a silver throughout
+                fell_under: Price(low=21 if late else 169, qty=4000),    # 1s 69c → 21c: under a silver now
+                thin: Price(low=50583 if late else 580, qty=19),         # 19 listed: one short
+                real: Price(low=14999 if late else 30000, qty=20)}       # 3g → 1g 49s 99c, exactly 20 listed
+
+    priced(reg, table(6), at=NOW)
+    prices.remember(reg, {cheap: "Stale Wedge", fell_under: "River Eel", thin: "Odd Crate", real: "Rage Draught"}, set())
+    _read_hourly(reg, NOW - timedelta(hours=6), 6, table)
+    prices._MOVERS.clear()
+    m = prices.movers(reg, "6")
+    assert [r["name"] for r in m["dips"]] == ["Rage Draught"] and m["rising"] == []
+    assert (prices.MOVE_MIN_PRICE, discord_auctions and __import__("oibot_gm.price_history", fromlist=["x"]).MOVE_MIN_QTY) == (100, 20)
+    assert m["floor_words"] == "at least 20 listed, from 1s"

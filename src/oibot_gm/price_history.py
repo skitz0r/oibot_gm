@@ -233,7 +233,7 @@ class Move:
     qty: int
 
 
-MOVE_MIN_QTY = 5  # fewer listed now is one person's listing, not a market
+MOVE_MIN_QTY = 20  # fewer listed now is one or two sellers' listings, not a market (5 at first: single sellers' wishful prices topped the list)
 MOVES_MIN_HISTORY = timedelta(hours=2)  # a window the history doesn't cover yet is ranked over what is kept, from this much on
 
 

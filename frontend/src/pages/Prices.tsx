@@ -185,7 +185,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
 
       {shown && movers !== null && (
         <Card>
-          <CardHeader title="Movers" hint="the price now against the item's usual price over the window; at least 5 listed" />
+          <CardHeader title="Movers" hint={`the price now against the item's usual price over the window; ${movers.floor_words}`} />
           <Group px="md" pt="sm">
             <SegmentedControl size="xs" value={win} onChange={changeWindow} disabled={win !== movers.window} aria-label="Over how long"
               data={movers.windows.map((w) => ({ value: w.id, label: w.label }))} />

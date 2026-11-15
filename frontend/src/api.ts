@@ -205,13 +205,15 @@ export interface PriceHistory {
   used_in?: string;
 }
 /** GET /api/prices/movers (an experiment, site only): the items whose lowest price now is at least 10% off their usual
- *  price over the window (the middle value of the window; at least 5 listed now) — `dips` and `rising`, the biggest move
+ *  price over the window (the middle value of the window; the floors are `floor_words`) — `dips` and `rising`, the biggest move
  *  first, every figure the server's words. `ready` false + `words` = the kept history doesn't cover the window yet; an
  *  empty list has its own sentence. */
 export interface MoverRow { id: number; name: string; usual_words: string; now_words: string; change_words: string; qty: number; uses: number; uses_words: string }
 export interface Movers {
   window: string; windows: { id: string; label: string }[]; ready: boolean; words: string;
   dips: MoverRow[]; rising: MoverRow[]; dips_words: string; rising_words: string;
+  /** the two floors in words ('at least 20 listed, from 1s') */
+  floor_words: string;
 }
 /** GET /api/admin/market: the guild's auction house (officers read, the owner picks). `words` = the choice in words (or what
  *  is missing), `prices` = how recent the prices are, `clear_sentences` = Turn prices off…'s confirm. */

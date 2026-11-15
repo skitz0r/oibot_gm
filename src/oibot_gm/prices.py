@@ -703,6 +703,7 @@ WINDOWS: dict[str, tuple[timedelta, str]] = {"6": (timedelta(hours=6), "6 hours"
                                              "24": (timedelta(hours=24), "24 hours"), "168": (timedelta(days=7), "7 days")}
 NOT_A_WINDOW = "That isn't one of the windows."
 MOVE_MIN_PCT = 10  # a move smaller than this against the usual price is no mover
+MOVE_MIN_PRICE = 100  # copper: an item under one silver — usually or now — is no mover (a few copper tripling is noise)
 MOVERS_TOP = 15  # rows per list
 USED_IN_NAMES = 3  # recipes named in the "Used in …" sentence; the rest are counted
 
@@ -768,7 +769,7 @@ def movers(reg, window: str, *, now: datetime | None = None) -> dict:
 def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     """The items whose lowest price NOW is at least MOVE_MIN_PCT % away from their USUAL price over one of WINDOWS
     (price_history.moves: the middle value over the window, at least MOVE_MIN_QTY listed now, listed for half the
-    window) — BLOCKING: one read of the history file. → {window, windows [{id, label}], ready, words, dips, rising}:
+    window), both prices at least MOVE_MIN_PRICE (`floor_words` says the two floors) — BLOCKING: one read of the history file. → {window, windows [{id, label}], ready, words, dips, rising}:
     the two lists hold at most MOVERS_TOP rows, the biggest move first, of {id, name, usual_words, now_words,
     change_words ('−40%' / '+50%'), qty, uses (how many recipes it is a reagent of), uses_words}. Only items the bot can
     name. A history younger than the window is ranked over what is kept (from two hours on) and `words` says over how
@@ -782,7 +783,8 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     window = str(window)
     span, label = WINDOWS[window]
     out = {"window": window, "windows": [{"id": k, "label": v[1]} for k, v in WINDOWS.items()], "ready": False, "words": "",
-           "dips": [], "rising": [], "dips_words": "", "rising_words": ""}
+           "dips": [], "rising": [], "dips_words": "", "rising_words": "",
+           "floor_words": f"at least {price_history.MOVE_MIN_QTY} listed, from {money(MOVE_MIN_PRICE)}"}
     key = discord_auctions.history_key(reg)
     if key is None or not _shown(reg):
         return out
@@ -806,7 +808,7 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     rows = []
     for m in found:
         pct = _pct(m.usual, m.now) if m.usual > 0 else 0
-        if abs(pct) < MOVE_MIN_PCT or m.item not in known:
+        if abs(pct) < MOVE_MIN_PCT or m.item not in known or min(m.usual, m.now) < MOVE_MIN_PRICE:
             continue
         n = len(uses.get(m.item) or [])
         rows.append((pct, {"id": m.item, "name": known[m.item], "usual_words": money(m.usual), "now_words": money(m.now),

@@ -545,8 +545,8 @@ def test_movers_route(w, market_on):
 
     m = member(w)
     h = as_user(w, m.discord_id)
-    late = {PLAGUEBLOOM: Price(low=900, qty=40), BAR: Price(low=600000, qty=12)}
-    early = {PLAGUEBLOOM: Price(low=1500, qty=40), BAR: Price(low=400000, qty=12)}
+    late = {PLAGUEBLOOM: Price(low=900, qty=40), BAR: Price(low=600000, qty=30)}
+    early = {PLAGUEBLOOM: Price(low=1500, qty=40), BAR: Price(low=400000, qty=30)}
     priced(w.reg, late, at=now())
     key = discord_auctions.history_key(w.reg)
     for i in range(25):

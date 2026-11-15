@@ -548,8 +548,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   least 10% away from its *usual* price over that time, the biggest move first, up to 15 each way: the usual price → the
   price now, the change in percent, how many are listed, and how many recipes use the item. The usual price is the middle
   value of the item's lowest price over the window, weighted by how long each price stood — so one odd listing for an
-  hour moves nothing. Only items with at least 5 listed now, and listed for at least half the window, are ranked: a single
-  cheap or wishful listing isn't a move. Open a row for the item's chart, the recipes it is used in (*"Used in Elixir of
+  hour moves nothing. Only items with at least 20 listed now, listed for at least half the window, and priced at one silver or more — usually and
+  now — are ranked: a single cheap or wishful listing isn't a move, and neither is a few copper tripling. Open a row for the item's chart, the recipes it is used in (*"Used in Elixir of
   the Mongoose, Major Mana Potion and 4 more."*) and **Watch**. While the bot's record is younger than the window, it ranks over what it has kept and says over how long (*"Over the
   last 2 hours 40 minutes, all the bot has kept so far."*); with under two hours kept the card says so instead (*"The bot
   hasn't kept prices for 2 hours yet. It started Sat 14 Nov 2:17 PM."*). It shows moves, not

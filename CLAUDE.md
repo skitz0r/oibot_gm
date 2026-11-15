@@ -161,9 +161,9 @@ src/oibot_gm/
                        guild's — and an adopted shared read (T1-a) — is kept by _keep (price_history.record in a thread; a failure keeps the table,
                        HISTORY_FAILED one ops warn per guild per hour, kind history); not on a 304 nor a discarded read; auctions_tick starts the fold
                        once a UTC day (_fold_daily: one background task, only where the profile has `auctions:`)
-  price_history.py     (movers, 2026-11-14: moves(key, window, now, min_qty=MOVE_MIN_QTY 5) → [Move(item, usual, now, qty)] | None = each item listed now with the
+  price_history.py     (movers, 2026-11-14: moves(key, window, now, min_qty=MOVE_MIN_QTY 20) → [Move(item, usual, now, qty)] | None = each item listed now with the
                        time-weighted middle value of its lowest price over the window — unlisted / unread time counts for nothing, listed for half the
-                       window; a history younger than the window is ranked over what is kept from MOVES_MIN_HISTORY 2 h on (moves_since = from when; prices.movers says 'Over the last 2 hours 40 minutes, all the bot has kept so far.'), None with less; the `changes_at` index; prices.movers ranks ≥ MOVE_MIN_PCT 10 % into dips / rising ≤ MOVERS_TOP 15)
+                       window; a history younger than the window is ranked over what is kept from MOVES_MIN_HISTORY 2 h on (moves_since = from when; prices.movers says 'Over the last 2 hours 40 minutes, all the bot has kept so far.'), None with less; the `changes_at` index; prices.movers ranks ≥ MOVE_MIN_PCT 10 % with both prices ≥ MOVE_MIN_PRICE 1 silver into dips / rising ≤ MOVERS_TOP 15; floor_words)
                        the kept price history (§5.66, C2, C10), BLOCKING (callers to_thread): one SQLite file per AUCTION HOUSE (never per guild)
                        under out/auctions/history/ (never the data repo), path(key) from (namespace, ruleset, house); tables meta (first/last kept
                        feed time) · changes (item, at, low, high, qty: a change high = low; a folded day high ≥ low, qty NULL; low NULL = nothing
