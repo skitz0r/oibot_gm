@@ -495,7 +495,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   recent the prices are, and a menu of the items. Pick one to see its price, the lowest and highest price of the last 7
   and 30 days (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*), **Stop watching** and **Back**. Nobody else,
   officers included, can see your list. The site's **Guild** tab shows which items the guild's members watch and how many
-  watch each (*"3 members watching"*), never who. It holds 25 items (*"Your watch list holds 25 items. Stop
+  watch each (*"3 members watching"*), never who. It holds 100 items (*"Your watch list holds 100 items. Stop
   watching one first."*), and you need to be registered to keep one. Nothing pings or messages you when a price moves:
   open the list when you want to look. While prices aren't shown, the list shows the items' names alone, and nothing new
   can be watched until they are (**Stop watching** still works).
@@ -555,7 +555,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   90 days have no bars. Under it the same sentences as Discord (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*, the 30 days'
   and, while the record is young, *"The bot has kept prices since Sat 7 Nov."*) and **Watch** or **Stop watching**. A watch is your own
   preference: it happens at once, with no confirm, and the same list shows in `/price`. You need to be registered to keep
-  one (*"Register first with /register to keep a watch list."*); it holds 25 items. While prices aren't shown (no auction
+  one (*"Register first with /register to keep a watch list."*); it holds 100 items, and `/price` shows the newest 25 with a line saying so — the site shows them all. While prices aren't shown (no auction
   house picked, or the last prices more than a day old) there is no search and the list shows the items' names alone, with
   nothing to open; nothing new can be watched then (the answer says why), but **Stop watching** still works. On a phone each item and each search result is a card.
 - **Prep** (an experiment, the Movers card's third tab): materials from levelling zones that end up in high-level
@@ -578,8 +578,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   TradeSkillMaster's public figures for the whole Classic region, read once a day; the card says when. These are
   things to look into, not advice: a new economy floods low-level materials while everyone levels, and a material may
   simply matter less here than it did in Classic.
-- **Movers** (an experiment, on the site's Prices tab): under the search, two tabs — **Dips** and
-  **Rising**, each with how many items it holds, one list shown at a time — over **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
+- **Movers** (an experiment, on the site's Prices tab): under the search, four tabs — **Dips**,
+  **Rising**, **Climbing** and **Sliding**, each with how many items it holds, one list shown at a time — over **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
   least 10% away from its *usual* price over that time, the biggest move first, 15 each way with **Show more** for the
   rest: the usual price → the price now, the change in percent and in gold, how many are listed, and how many recipes use
   the item. Above the lists you pick a group — **Materials** (shown first), **Consumables**, **Gear**, **Recipes**,
@@ -589,7 +589,12 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   game marks as a quest item, so a tradeable item a quest merely asks for stays in its own group. An item whose class the
   bot hasn't read yet sits in Other (in Materials when a recipe uses it) until the bot reads it (item names and classes are read once an hour). The usual price is the middle
   value of the item's lowest price over the window, weighted by how long each price stood — so one odd listing for an
-  hour moves nothing. Only items with at least 20 listed now, listed for at least half the window, and priced at one silver or more — usually and
+  hour moves nothing. **Climbing** and **Sliding** answer another question: did the price go *one way the whole time*?
+  The window is cut into steps — every hour over 6 hours, every 2 hours over 12, every 4 hours over 24, every day over
+  7 days — and an item is listed when its price rose (Climbing) or fell (Sliding) from each step to the next and stands
+  no worse now. One step may stand still; a single step the other way takes it off the list. Its row shows the price in
+  the first step → the price now, which must differ by 10% or more. While the bot has kept less than the window it uses
+  the whole steps it has, from three on, and says over how long. Only items with at least 20 listed now, listed for at least half the window, and priced at one silver or more — usually and
   now — are ranked: a single cheap or wishful listing isn't a move, and neither is a few copper tripling. Open a row for the item's chart, the recipes it is used in (*"Used in Elixir of
   the Mongoose, Major Mana Potion and 4 more."*) and **Watch**. While the bot's record is younger than the window, it ranks over what it has kept and says over how long (*"Over the
   last 2 hours 40 minutes, all the bot has kept so far."*); with under two hours kept the card says so instead (*"The bot

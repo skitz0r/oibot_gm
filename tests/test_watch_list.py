@@ -69,8 +69,8 @@ def run_in_threads(*fns) -> list:
 
 
 def test_the_words():
-    assert WATCH_MAX == 25
-    assert WATCH_FULL == "Your watch list holds 25 items. Stop watching one first."
+    assert WATCH_MAX == 100
+    assert WATCH_FULL == "Your watch list holds 100 items. Stop watching one first."
     assert WATCH_REGISTER_FIRST == "Register first with /register to keep a watch list."
 
 
@@ -113,20 +113,20 @@ def test_a_test_puppet_is_refused_like_nobody(reg):
     assert reg.watching(puppet.discord_id) == [] and reg.unwatch(puppet.discord_id, 13466) is False
 
 
-def test_the_26th_is_refused(reg, member):
-    for i in range(25):
+def test_the_101st_is_refused(reg, member):
+    for i in range(100):
         reg.watch(UID, 1000 + i)
-    with pytest.raises(RegistryError, match="Your watch list holds 25 items. Stop watching one first."):
+    with pytest.raises(RegistryError, match="Your watch list holds 100 items. Stop watching one first."):
         reg.watch(UID, 2000)
-    assert len(reg.watching(UID)) == 25
+    assert len(reg.watching(UID)) == 100
     assert reg.watch(UID, 1003) is False, "one already on a full list is not refused"
 
 
-def test_two_presses_at_24_keep_at_most_25(reg, member):
-    for i in range(24):
+def test_two_presses_at_99_keep_at_most_100(reg, member):
+    for i in range(99):
         reg.watch(UID, 1000 + i)
     results = run_in_threads(lambda: try_watch(reg, UID, 3001), lambda: try_watch(reg, UID, 3002))
-    assert len(reg.watching(UID)) == 25 and sorted(results) == ["full", "ok"]
+    assert len(reg.watching(UID)) == 100 and sorted(results) == ["full", "ok"]
 
 
 def test_the_write_is_quiet(reg, member, monkeypatch):

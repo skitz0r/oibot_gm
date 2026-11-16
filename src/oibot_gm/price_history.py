@@ -303,6 +303,74 @@ def moves(key: tuple, window: timedelta, now: datetime, *, min_qty: int = MOVE_M
     return _read(key, go)
 
 
+@dataclass(frozen=True)
+class Trend:
+    """An item's lowest price step by step over a window (movers' Climbing / Sliding): `values` = the middle value of
+    each step, oldest first, copper; the price now and how many are listed now."""
+    item: int
+    values: tuple[int, ...]
+    now: int
+    qty: int
+
+
+TREND_MIN_STEPS = 3  # fewer kept steps than this is no trend
+
+
+def trends(key: tuple, window: timedelta, steps: int, now: datetime, *, min_qty: int = MOVE_MIN_QTY) -> tuple[list[Trend], int] | None:
+    """Every item listed now (at least `min_qty` of it) with its price in each of the window's `steps` equal steps: the
+    middle value of its lowest price in the step, weighted by how long each price stood (as `moves`). An item with a
+    step it wasn't listed in, or the bot didn't read, is left out. → (the items by id, how many steps): a history
+    younger than the window gives the steps it covers whole, counted back from now; None with fewer than
+    TREND_MIN_STEPS. ONE read of the file, as `moves`."""
+    a, b = _secs(now - window), _secs(now)
+    size = (b - a) // int(steps)
+
+    def go(con):
+        meta = con.execute("SELECT first_at FROM meta").fetchone()
+        if meta is None or size <= 0:
+            return None
+        n = min(int(steps), (b - max(a, meta[0])) // size)
+        if n < TREND_MIN_STEPS:
+            return None
+        edges = [b - k * size for k in range(n, -1, -1)]
+        a0 = edges[0]
+        listed = {item: (low, qty) for item, low, qty in
+                  con.execute("SELECT item, low, qty FROM last WHERE low IS NOT NULL AND qty >= ?", (int(min_qty),))}
+        inside: dict[int, list[tuple[int, int | None]]] = {}
+        for item, at, low in con.execute("SELECT item, at, low FROM changes WHERE at > ? AND at <= ? ORDER BY at", (a0, b)):
+            if item in listed:
+                inside.setdefault(item, []).append((at, low))
+        gaps = con.execute("SELECT start, stop FROM unread WHERE start < ? AND stop > ? ORDER BY start", (b, a0)).fetchall()
+
+        def read_seconds(s: int, e: int) -> int:
+            return (e - s) - sum(max(0, min(e, stop) - max(s, start)) for start, stop in gaps)
+
+        out = []
+        for item in sorted(listed):
+            before = con.execute("SELECT low FROM changes WHERE item = ? AND at <= ? ORDER BY at DESC LIMIT 1", (item, a0)).fetchone()
+            line = [(a0, before[0] if before else None), *inside.get(item, [])]
+            values = []
+            for lo, hi in zip(edges, edges[1:]):
+                stood: list[tuple[int, int]] = []
+                for (s, low), (e, _next) in zip(line, [*line[1:], (b, None)]):
+                    s, e = max(s, lo), min(e, hi)
+                    if low is not None and e > s and (secs := read_seconds(s, e)) > 0:
+                        stood.append((low, secs))
+                if not stood:
+                    break
+                half, run = sum(secs for _low, secs in stood) / 2, 0
+                for low, secs in sorted(stood):
+                    run += secs
+                    if run >= half:
+                        values.append(low)
+                        break
+            if len(values) == n:
+                out.append(Trend(item=item, values=tuple(values), now=listed[item][0], qty=listed[item][1]))
+        return out, n
+
+    return _read(key, go)
+
+
 def _day(s: int) -> int:
     return s - s % 86400
 

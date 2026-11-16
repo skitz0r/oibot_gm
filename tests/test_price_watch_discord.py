@@ -195,7 +195,7 @@ def test_the_full_list_and_the_unregistered_refusals(reg, market_on):  # noqa: F
 
 def test_a_long_list_stays_whole_lines_under_discords_limit(reg, market_on, monkeypatch):  # noqa: F811
     register(reg)
-    long = {700_000 + i: f"A Remarkably Long Item Name For Testing Number {i:02d} Of The Watch List" for i in range(WATCH_MAX)}
+    long = {700_000 + i: f"A Remarkably Long Item Name For Testing Number {i:02d} Of The Watch List" for i in range(25)}
     real = prices.names
     monkeypatch.setattr(prices, "names", lambda reg: {**real(reg), **long})
     priced(reg, {i: Price(low=99_999_999, qty=999) for i in long}, at=now())
@@ -206,7 +206,22 @@ def test_a_long_list_stays_whole_lines_under_discords_limit(reg, market_on, monk
     got = lines(h)
     assert len(h.text) <= 2000 and got[-1].startswith("and ") and got[-1].endswith(" more items")
     assert all(x.endswith("listed.") for x in got[2:-1]), "never a cut line"
-    assert len(h._items()[0].options) == WATCH_MAX
+    assert len(h._items()[0].options) == 25
+
+
+def test_a_list_past_discords_select_shows_the_newest_and_says_so(reg, market_on, monkeypatch):  # noqa: F811
+    register(reg)
+    many = {710_000 + i: f"Item {i:02d}" for i in range(30)}
+    real = prices.names
+    monkeypatch.setattr(prices, "names", lambda reg: {**real(reg), **many})
+    priced(reg, {i: Price(low=100, qty=9) for i in many}, at=now())
+    for i in many:
+        reg.watch(UID, i)
+    h = harness(reg)
+    run(FLOWS["price"](h.command(), reg))
+    assert "These are your newest 25 of 30. The site's Prices tab shows them all." in lines(h)
+    opts = h._items()[0].options
+    assert len(opts) == 25 and opts[0].label == "Item 29" and opts[-1].label == "Item 05", "newest first"
 
 
 def test_prices_off_shows_names_and_no_history(reg, market_on):  # noqa: F811

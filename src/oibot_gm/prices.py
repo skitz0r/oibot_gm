@@ -873,6 +873,24 @@ MOVER_SORTS = (("pct", "By percent"), ("gold", "By gold"))
 ALL_GROUP = {"id": "all", "name": "All"}
 OTHER_GROUP = {"id": "other", "name": "Other"}
 MOVERS_NONE = "Nothing in this group has moved that much. Pick another group or a smaller move."
+# Climbing / Sliding (the owner, 2026-11-15): a price that went ONE way step after step over the window.
+# window → (how many steps, the step in words)
+TREND_STEPS: dict[str, tuple[int, str]] = {"6": (6, "every hour"), "12": (6, "every 2 hours"), "24": (6, "every 4 hours"),
+                                           "168": (7, "every day")}
+TREND_FLAT = 1  # steps that may stand still; a step the other way is never allowed
+
+
+def _trend_way(t) -> int:
+    """+1 = its price rose step after step and stands no lower now, −1 = it fell and stands no higher, 0 = neither.
+    At most TREND_FLAT steps stood still."""
+    diffs = [b - a for a, b in zip(t.values, t.values[1:])]
+    if sum(1 for d in diffs if d == 0) > TREND_FLAT:
+        return 0
+    if all(d >= 0 for d in diffs) and t.now >= t.values[-1]:
+        return 1
+    if all(d <= 0 for d in diffs) and t.now <= t.values[-1]:
+        return -1
+    return 0
 
 
 def _groups(reg) -> tuple[list[dict], dict[str, str], str | None]:
@@ -981,7 +999,8 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     window = str(window)
     span, label = WINDOWS[window]
     out = {"window": window, "windows": [{"id": k, "label": v[1]} for k, v in WINDOWS.items()], "ready": False, "words": "",
-           "dips": [], "rising": [], "dips_words": "", "rising_words": "", "groups": _groups(reg)[0], "group": ALL_GROUP["id"],
+           "dips": [], "rising": [], "dips_words": "", "rising_words": "",
+           "climbing": [], "sliding": [], "climbing_words": "", "sliding_words": "", "trend_words": "", "groups": _groups(reg)[0], "group": ALL_GROUP["id"],
            "sorts": [{"id": k, "label": v} for k, v in MOVER_SORTS], "steps": [{"id": str(s), "label": f"{s}%"} for s in MOVE_STEPS],
            "page": MOVERS_TOP, "none_words": MOVERS_NONE,
            "floor_words": f"at least {price_history.MOVE_MIN_QTY} listed, from {money(MOVE_MIN_PRICE)}"}
@@ -991,6 +1010,7 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
     now = now or discord_auctions._now()
     try:
         found = price_history.moves(key, span, now)
+        trend = price_history.trends(key, span, TREND_STEPS[window][0], now) if found is not None else None
         start = price_history.moves_since(key, span, now) if found is not None else None
         since = price_history.kept_since(key) if found is None else None
     except price_history.HistoryError:
@@ -1025,6 +1045,34 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
         out["dips_words"] = f"Nothing has dipped {MOVE_MIN_PCT}% or more in the last {label}."
     if not out["rising"]:
         out["rising_words"] = f"Nothing has risen {MOVE_MIN_PCT}% or more in the last {label}."
+    # Climbing / Sliding: the same rows, measured from the price in the first step to the price now
+    steps, step_words = TREND_STEPS[window]
+    if trend is None:
+        need = _duration_words(span / steps * price_history.TREND_MIN_STEPS)
+        out["climbing_words"] = out["sliding_words"] = f"The bot needs {need} of prices to see a steady move here."
+        return out
+    items, kept = trend
+    over = label if kept == steps else _duration_words(span / steps * kept)
+    out["trend_words"] = (f"Its price went one way {step_words} over the last {over}, and one step may stand still. "
+                          "The figures are the price then and the price now.")
+    steady = []
+    for t in items:
+        way = _trend_way(t)
+        first = t.values[0]
+        pct = _pct(first, t.now) if first > 0 else 0
+        if not way or pct * way < MOVE_MIN_PCT or t.item not in known or min(first, t.now) < MOVE_MIN_PRICE:
+            continue
+        n = len(uses.get(t.item) or [])
+        steady.append((pct, {"id": t.item, "name": known[t.item], "usual_words": money(first), "now_words": money(t.now),
+                             "change_words": _change_words(pct), "pct": pct, "diff": t.now - first,
+                             "diff_words": _diff_words(t.now - first), "qty": t.qty, "uses": n,
+                             "uses_words": _uses_count_words(n), "group": group_of(t.item)}))
+    out["sliding"] = [r for _p, r in sorted((x for x in steady if x[0] < 0), key=lambda x: (x[0], x[1]["name"].casefold()))]
+    out["climbing"] = [r for _p, r in sorted((x for x in steady if x[0] > 0), key=lambda x: (-x[0], x[1]["name"].casefold()))]
+    if not out["climbing"]:
+        out["climbing_words"] = f"Nothing has climbed {step_words} over the last {over}."
+    if not out["sliding"]:
+        out["sliding_words"] = f"Nothing has slid {step_words} over the last {over}."
     return out
 
 

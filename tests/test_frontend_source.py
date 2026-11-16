@@ -732,6 +732,10 @@ def test_the_prices_tab():
     assert "/api/prices/movers" in page and 'moversSide("dips", movers.dips, movers.dips_words)' in page
     # 2026-11-15: Dips and Rising are tabs — one list at a time, each tab with its count
     assert "`Dips · ${chosenOf(movers.dips).length}`" in page and "`Rising · ${chosenOf(movers.rising).length}`" in page
+    # 2026-11-15: Climbing / Sliding — a price that went one way step after step — are two more tabs on the same rows
+    assert 'moversSide("climbing", movers.climbing, movers.climbing_words)' in page and "movers.trend_words" in page
+    assert 'moversSide("sliding", movers.sliding, movers.sliding_words)' in page
+    assert "`Climbing · ${chosenOf(movers.climbing).length}`" in page and "`Sliding · ${chosenOf(movers.sliding).length}`" in page
     assert 'moversSide("rising", movers.rising, movers.rising_words)' in page and "r.change_words" in page and "hist.used_in" in page
     # Bargains: the card's second tab, the server's rows and sentences
     for piece in ("/api/prices/bargains", "bargains.hint_words", "b.typical_words", "b.source_words", "b.none_words", "r.gap_words", "r.ref_words"):
@@ -779,5 +783,5 @@ def test_the_prices_tab():
     assert "@media (max-width: 48em)" in css, "a card per row below sm"
     from test_copy import tsx_strings
     reads = " ".join(s for _, s in tsx_strings(SRC / "pages" / "Prices.tsx"))
-    for composed in ("Prices as of", "none listed", "aren't watching", "Register first", "holds 25", "kept prices since", "Lowest in the last"):
+    for composed in ("Prices as of", "none listed", "aren't watching", "Register first", "holds 100", "kept prices since", "Lowest in the last"):
         assert composed not in reads, f"the server says {composed!r}"

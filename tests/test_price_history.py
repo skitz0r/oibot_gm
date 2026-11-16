@@ -352,3 +352,39 @@ def test_unread_time_counts_for_nothing_in_a_move():
 def test_an_item_with_nothing_listed_now_is_no_mover():
     _hourly(T0, 12, lambda i: {1: P(100, 29)} if i < 12 else {})
     assert ph.moves(K, timedelta(hours=12), T0 + 12 * H) == []
+
+
+# ---- trends (2026-11-15): an item's price step by step over a window (movers' Climbing / Sliding)
+
+
+def test_trends_give_each_steps_middle_price():
+    # item 1 climbs 10 an hour, item 2 falls, item 3 has one silly listing for part of an hour
+    _hourly(T0, 6, lambda i: {1: P(100 + 10 * i, 29), 2: P(200 - 10 * i, 29), 3: P(70, 29)})
+    ph.record(K, T0 + 2 * H + timedelta(minutes=10), {1: P(120, 29), 2: P(180, 29), 3: P(5, 29)})
+    ph.record(K, T0 + 2 * H + timedelta(minutes=20), {1: P(120, 29), 2: P(180, 29), 3: P(70, 29)})
+    items, n = ph.trends(K, timedelta(hours=6), 6, T0 + 6 * H)
+    got = {t.item: t for t in items}
+    assert n == 6
+    assert (got[1].values, got[1].now, got[1].qty) == ((100, 110, 120, 130, 140, 150), 160, 29)
+    assert got[2].values == (200, 190, 180, 170, 160, 150) and got[2].now == 140
+    assert got[3].values == (70,) * 6, "one odd read moves no step"
+
+
+def test_trends_leave_out_an_item_missing_from_a_step_and_thin_listings():
+    def table(i):
+        t = {1: P(100, 29), 2: P(100, 19)}
+        if i != 3:
+            t[3] = P(100, 29)                    # item 3: nothing listed through the fourth hour
+        return t
+    _hourly(T0, 6, table)
+    assert [t.item for t in ph.trends(K, timedelta(hours=6), 6, T0 + 6 * H)[0]] == [1]
+    assert [t.item for t in ph.trends(K, timedelta(hours=6), 6, T0 + 6 * H, min_qty=1)[0]] == [1, 2]
+
+
+def test_trends_over_a_young_history_count_the_whole_steps_kept():
+    assert ph.trends(K, timedelta(hours=6), 6, T0) is None, "no file"
+    _hourly(T0, 2, lambda i: {1: P(100 + i, 29)})
+    assert ph.trends(K, timedelta(hours=6), 6, T0 + 2 * H) is None, "two steps kept: too few"
+    ph.record(K, T0 + 3 * H, {1: P(103, 29)})
+    items, n = ph.trends(K, timedelta(hours=6), 6, T0 + 3 * H + timedelta(minutes=30))
+    assert n == 3 and items[0].values == (100, 101, 102) or items[0].values == (101, 102, 103)

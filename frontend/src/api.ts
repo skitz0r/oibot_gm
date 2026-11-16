@@ -230,6 +230,9 @@ export interface MoverRow {
 export interface Movers {
   window: string; windows: { id: string; label: string }[]; ready: boolean; words: string;
   dips: MoverRow[]; rising: MoverRow[]; dips_words: string; rising_words: string;
+  /** Climbing / Sliding: items whose price went ONE way step after step over the window (`trend_words` says the step);
+   *  the same rows, `usual_words` = the price in the first step. An empty list has its own sentence. */
+  climbing: MoverRow[]; sliding: MoverRow[]; climbing_words: string; sliding_words: string; trend_words: string;
   /** the two floors in words ('at least 20 listed, from 1s') */
   floor_words: string;
   /** the card's choices: item groups (All first, Other last) and the one shown first, the orders, the smallest moves in

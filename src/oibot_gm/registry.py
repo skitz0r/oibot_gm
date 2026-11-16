@@ -181,8 +181,8 @@ class Absence(BaseModel):
     created_at: str = Field(default_factory=now)
 
 
-WATCH_MAX = 25  # Discord's select holds 25 (price watch C7)
-WATCH_FULL = "Your watch list holds 25 items. Stop watching one first."
+WATCH_MAX = 100  # 25 at first, Discord's select (price watch C7); the owner, 2026-11-15: /price shows the newest 25 (flows_prices.LIST_SHOWN), the site all
+WATCH_FULL = "Your watch list holds 100 items. Stop watching one first."
 WATCH_REGISTER_FIRST = "Register first with /register to keep a watch list."
 
 

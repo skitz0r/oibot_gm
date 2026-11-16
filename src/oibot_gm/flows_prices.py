@@ -30,6 +30,11 @@ BACK = "Back"
 LIST_HEADING = "**Your watch list**"
 PICK = "Pick an item"
 SCREEN_MAX = 2000  # Discord's message limit
+LIST_SHOWN = 25  # Discord's select holds 25: /price shows the newest, the site's Prices tab the whole list
+
+
+def newest_words(shown: int, total: int) -> str:
+    return f"These are your newest {shown} of {total}. The site's Prices tab shows them all."
 
 
 def _esc(text: str) -> str:
@@ -127,8 +132,10 @@ class PriceWizard(Wizard):
             await self.finish(interaction, empty if _registered(reg, self.owner_id) else WATCH_REGISTER_FIRST)
             return
         shown = _shown(reg)
+        total, rows = len(rows), rows[:LIST_SHOWN]  # newest first
         items = [_esc(prices.price_words(p) if shown else p.name) for p in rows]
-        text = self._screen([LIST_HEADING, prices.status_sentence(reg, self.owner, stamp=True)], items, " items")
+        text = self._screen([LIST_HEADING, prices.status_sentence(reg, self.owner, stamp=True),
+                             newest_words(len(rows), total) if total > len(rows) else ""], items, " items")
 
         async def picked(i: discord.Interaction, values: list[str]) -> None:
             await self.item(i, int(values[0]))

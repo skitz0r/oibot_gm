@@ -309,7 +309,7 @@ def test_watch_then_list_then_stop(w, market_on):
     assert (d.pop("window"), d.pop("windows")) == ("24", [{"id": k, "label": v[1]} for k, v in prices.WINDOWS.items()])
     groups = d.pop("groups")
     assert groups[0] == {"id": "all", "name": "All"} and groups[-1] == {"id": "other", "name": "Other"}
-    assert d == {"rows": [], "words": prices.status_sentence(w.reg, False), "shown": True, "max": 25, "empty": prices.EMPTY_LIST_SITE,
+    assert d == {"rows": [], "words": prices.status_sentence(w.reg, False), "shown": True, "max": 100, "empty": prices.EMPTY_LIST_SITE,
                  "registered": True, "shared": True}
     r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
     assert r.status_code == 200, r.text
@@ -448,11 +448,11 @@ def test_the_full_list_refusal(w, market_on):
     h = as_user(w, m.discord_id)
     priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())
     rec = w.reg.members[m.discord_id]
-    rec.watching = list(range(910_000, 910_025))
+    rec.watching = list(range(910_000, 910_100))
     w.reg.save_quiet(rec, "seed: watch list changed")
     r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
-    assert r.status_code == 400 and r.json()["error"] == "Your watch list holds 25 items. Stop watching one first."
-    assert len(w.reg.watching(m.discord_id)) == 25 and PLAGUEBLOOM not in w.reg.watching(m.discord_id)
+    assert r.status_code == 400 and r.json()["error"] == "Your watch list holds 100 items. Stop watching one first."
+    assert len(w.reg.watching(m.discord_id)) == 100 and PLAGUEBLOOM not in w.reg.watching(m.discord_id)
 
 
 def test_the_guild_list_counts_and_never_names(w, market_on):

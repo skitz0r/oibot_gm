@@ -28,7 +28,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [words, setWords] = useState(meta.prices?.words || "");
   const [q, setQ] = useState("");
   const [found, setFound] = useState<PriceFind | null>(null);
-  type Where = "search" | "list" | "guild" | "dips" | "rising" | "bargains" | "prep" | "below";
+  type Where = "search" | "list" | "guild" | "dips" | "rising" | "climbing" | "sliding" | "bargains" | "prep" | "below";
   const [openAt, setOpenAt] = useState<{ id: number; at: Where } | null>(null);  // the one open row, and in which card
   const open = openAt ? openAt.id : null;
   const setOpen = (id: number | null, at: Where = "list") => setOpenAt(id === null ? null : { id, at });
@@ -38,9 +38,10 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [group, setGroup] = useState<string | null>(null);
   const [sort, setSort] = useState("pct");
   const [step, setStep] = useState("10");
-  const [pages, setPages] = useState({ dips: 1, rising: 1 });
-  const [side, setSide] = useState<"dips" | "rising">("dips");  // Dips and Rising are tabs (the owner, 2026-11-15): one list at a time
-  const choose = (set: () => void) => { set(); setPages({ dips: 1, rising: 1 }); };
+  const [pages, setPages] = useState({ dips: 1, rising: 1, climbing: 1, sliding: 1 });
+  type Side = "dips" | "rising" | "climbing" | "sliding";  // Climbing / Sliding (2026-11-15): one way step after step over the window
+  const [side, setSide] = useState<Side>("dips");  // Dips and Rising are tabs (the owner, 2026-11-15): one list at a time
+  const choose = (set: () => void) => { set(); setPages({ dips: 1, rising: 1, climbing: 1, sliding: 1 }); };
   // the card's second tab (2026-11-15): materials far cheaper here than most, against another economy's prices
   const [tab, setTab] = useState("movers");
   const [bargains, setBargains] = useState<Bargains | null>(null);
@@ -182,11 +183,12 @@ export function PricesPage({ meta }: { meta: Meta }) {
   /** One side of Movers: its rows (the item, its usual price → the price now, the change, how many are listed, how many
    *  recipes use it), or the server's sentence when nothing moved that way. */
   const moverGroup = group ?? movers?.group ?? "all";
+  const steadySide = side === "climbing" || side === "sliding";
   const bigEnough = (r: MoverRow) => Math.abs(r.pct) >= Number(step);
   const moverCount = (id: string) => movers === null ? 0
-    : [...movers.dips, ...movers.rising].filter((r) => bigEnough(r) && (id === "all" || r.group === id)).length;
+    : (steadySide ? [...movers.climbing, ...movers.sliding] : [...movers.dips, ...movers.rising]).filter((r) => bigEnough(r) && (id === "all" || r.group === id)).length;
   const chosenOf = (all: MoverRow[]) => all.filter((r) => bigEnough(r) && (moverGroup === "all" || r.group === moverGroup));
-  const moversSide = (at: "dips" | "rising", all: MoverRow[], none: string) => {
+  const moversSide = (at: Side, all: MoverRow[], none: string) => {
     const chosen = chosenOf(all);
     if (sort === "gold") chosen.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));  // the server's order is by percent
     const side = chosen.slice(0, (movers?.page ?? 15) * pages[at]);
@@ -209,7 +211,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
                   <Text size="xs" c="dimmed">{r.qty} listed</Text>
                 </div>
                 <div className={css.change}>
-                  <Text size="sm" fw={700} c={at === "dips" ? "red.4" : "teal.4"}>{sort === "gold" ? r.diff_words : r.change_words}</Text>
+                  <Text size="sm" fw={700} c={at === "dips" || at === "sliding" ? "red.4" : "teal.4"}>{sort === "gold" ? r.diff_words : r.change_words}</Text>
                   <Text size="xs" c="dimmed">{sort === "gold" ? r.change_words : r.diff_words}</Text>
                 </div>
               </div>
@@ -394,8 +396,9 @@ export function PricesPage({ meta }: { meta: Meta }) {
           {tab === "movers" && (<>
           {movers.ready && (
             <Group px="md" pt="sm">
-              <SegmentedControl size="sm" value={side} onChange={(v) => setSide(v as "dips" | "rising")} aria-label="Which way the price moved"
-                data={[{ value: "dips", label: `Dips · ${chosenOf(movers.dips).length}` }, { value: "rising", label: `Rising · ${chosenOf(movers.rising).length}` }]} />
+              <SegmentedControl size="sm" value={side} onChange={(v) => setSide(v as Side)} aria-label="Which way the price moved"
+                data={[{ value: "dips", label: `Dips · ${chosenOf(movers.dips).length}` }, { value: "rising", label: `Rising · ${chosenOf(movers.rising).length}` },
+                  { value: "climbing", label: `Climbing · ${chosenOf(movers.climbing).length}` }, { value: "sliding", label: `Sliding · ${chosenOf(movers.sliding).length}` }]} />
             </Group>
           )}
           <Group px="md" pt="sm">
@@ -421,8 +424,11 @@ export function PricesPage({ meta }: { meta: Meta }) {
             </Group>
           )}
           {movers.ready && movers.words && <Text size="xs" c="dimmed" px="md" pt="sm">{movers.words}</Text>}
+          {movers.ready && steadySide && movers.trend_words && <Text size="xs" c="dimmed" px="md" pt="sm">{movers.trend_words}</Text>}
           {!movers.ready ? (movers.words && <Text size="sm" c="dimmed" px="md" py="sm">{movers.words}</Text>) : (
-            side === "dips" ? moversSide("dips", movers.dips, movers.dips_words) : moversSide("rising", movers.rising, movers.rising_words)
+            side === "climbing" ? moversSide("climbing", movers.climbing, movers.climbing_words)
+            : side === "sliding" ? moversSide("sliding", movers.sliding, movers.sliding_words)
+            : side === "dips" ? moversSide("dips", movers.dips, movers.dips_words) : moversSide("rising", movers.rising, movers.rising_words)
           )}
           </>)}
         </Card>

@@ -1136,3 +1136,60 @@ def test_the_item_page_gives_levels_and_the_vendor_price():
     arm = Armory("us", "profile-forever-us", "static-forever-us", fetch=fetch, limiter=battlenet.Limiter(1000))
     f = auctions.Client(arm, "dynamic-forever-us").item_facts(7)
     assert f == ("Deep Eel", "Trade Goods", 45, 0, 10) and (f.level, f.sell) == (45, 10)
+
+
+# ---- Climbing / Sliding (2026-11-15): a price that went one way step after step over the window
+
+
+def test_movers_name_what_climbed_or_slid_step_after_step(reg, clock):
+    clock.t = NOW
+    start = NOW - timedelta(hours=6)
+
+    def table(i):
+        return {PLAGUEBLOOM: Price(low=1000 + 100 * i, qty=40),                       # up every hour
+                BAR: Price(low=600000 - 20000 * i, qty=30),                           # down every hour
+                VIAL: Price(low=[600, 700, 650, 800, 900, 1000, 1100][i], qty=200)}   # up, but with a step back
+
+    priced(reg, table(6), at=NOW)
+    _read_hourly(reg, start, 6, table)
+    m = prices.movers(reg, "6")
+    (up,) = m["climbing"]
+    assert (up["id"], up["usual_words"], up["now_words"], up["change_words"]) == (PLAGUEBLOOM, "10s", "16s", "+60%")
+    (down,) = m["sliding"]
+    assert (down["id"], down["usual_words"], down["now_words"], down["change_words"]) == (BAR, "60g", "48g", "−20%")
+    assert set(up) == set(m["rising"][0] if m["rising"] else up), "the same row as Movers'"
+    assert m["trend_words"] == ("Its price went one way every hour over the last 6 hours, and one step may stand still. "
+                                "The figures are the price then and the price now.")
+    assert m["climbing_words"] == m["sliding_words"] == ""
+
+
+def test_a_steady_move_allows_one_still_step_and_needs_ten_percent(reg, clock):
+    clock.t = NOW
+    start = NOW - timedelta(hours=6)
+
+    def table(i):
+        return {PLAGUEBLOOM: Price(low=[1000, 1100, 1100, 1200, 1300, 1400, 1500][i], qty=40),   # one hour stood still
+                BAR: Price(low=[400000, 410000, 410000, 410000, 420000, 430000, 440000][i], qty=30),  # two did
+                VIAL: Price(low=1000 + 10 * i, qty=200)}                                       # every hour, but 6% in all
+
+    priced(reg, table(6), at=NOW)
+    _read_hourly(reg, start, 6, table)
+    m = prices.movers(reg, "6")
+    assert [r["id"] for r in m["climbing"]] == [PLAGUEBLOOM] and m["sliding"] == []
+    assert m["sliding_words"] == "Nothing has slid every hour over the last 6 hours."
+
+
+def test_a_steady_move_over_a_young_history_says_how_long(reg, clock):
+    clock.t = NOW
+    table = lambda i: {PLAGUEBLOOM: Price(low=1000 + 100 * i, qty=40)}  # noqa: E731
+    priced(reg, table(2), at=NOW)
+    _read_hourly(reg, NOW - timedelta(hours=2), 2, table)
+    m = prices.movers(reg, "6")
+    assert m["ready"] is True and m["climbing"] == [] and m["trend_words"] == ""
+    assert m["climbing_words"] == m["sliding_words"] == "The bot needs 3 hours of prices to see a steady move here."
+    clock.t = NOW + timedelta(hours=2)
+    priced(reg, table(4), at=clock.t)
+    _read_hourly(reg, NOW + timedelta(hours=1), 1, lambda i: table(3 + i))
+    m = prices.movers(reg, "6", now=clock.t)
+    assert [r["id"] for r in m["climbing"]] == [PLAGUEBLOOM]
+    assert m["trend_words"].startswith("Its price went one way every hour over the last 4 hours,")
