@@ -207,6 +207,8 @@ class Member(BaseModel):
     test: bool = False  # seeded by /gm test: the bot puppets them (DMs go to the roster channel; officers answer for them)
     # the member's own watch list (price watch §4.2): item ids, newest first, at most WATCH_MAX; read by nobody else (C11) — but as a COUNT per item on the guild's list (prices.guild_watch, 2026-11-15), never who
     watching: list[int] = Field(default_factory=list)
+    # the member's own choice (2026-11-15): True = their items count for nothing on the guild's list (prices.guild_watch)
+    watch_hidden: bool = False
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
 
@@ -1614,6 +1616,24 @@ class Registry:
         if m is None or item not in m.watching:
             return False
         m.watching = [i for i in m.watching if i != item]
+        self.save_quiet(m, f"{m.display_name}: watch list changed")
+        return True
+
+    def watch_shared(self, discord_id: int) -> bool:
+        """Do the member's watched items count on the guild's list? Their own choice, shared until they hide it."""
+        m = self._watcher(discord_id)
+        return m is not None and not m.watch_hidden
+
+    @_member_write
+    def set_watch_shared(self, discord_id: int, on: bool) -> bool:
+        """The member's own choice to count on the guild's list (on) or not (off). True = changed, False = already so
+        (no write). Refused without a record (WATCH_REGISTER_FIRST). One quiet commit, as `watch`."""
+        m = self._watcher(discord_id)
+        if m is None:
+            raise RegistryError(WATCH_REGISTER_FIRST)
+        if m.watch_hidden == (not on):
+            return False
+        m.watch_hidden = not on
         self.save_quiet(m, f"{m.display_name}: watch list changed")
         return True
 

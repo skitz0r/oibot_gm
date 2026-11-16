@@ -535,7 +535,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   match, each with **Watch** (**Stop watching** when it is already on your list). The page says once how recent the
   prices are (*Prices as of …*). **Your watch list** — two tabs, **Yours** and **Guild**: the Guild tab lists every item a member of the guild watches,
   the most watched first, with how many watch it (*"3 members watching"*) and never who; open a row for its chart and **Watch**
-  (*"Nobody in the guild is watching anything yet."* while it is empty). Both tabs have Movers' two choices above their rows: how far back each row's small line and change go
+  (*"Nobody in the guild is watching anything yet."* while it is empty). On **Yours**, the switch **Share with the guild**
+  decides whether your items count there: on to start with, and off takes them out at once (*"Your items are hidden from the
+  guild's list."*). Both tabs have Movers' two choices above their rows: how far back each row's small line and change go
   (**6 hours** · **12 hours** · **24 hours**, shown first · **7 days**) and, once it holds more than one kind of item, the
   item group (**Materials**, **Consumables**, … each with how many of your items it holds) — sits beside the search and Movers on a wide screen, on the right,
   and stays in view while you scroll Movers (there its rows leave out how many are listed; open a row for that); on a

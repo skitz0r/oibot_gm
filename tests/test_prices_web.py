@@ -310,7 +310,7 @@ def test_watch_then_list_then_stop(w, market_on):
     groups = d.pop("groups")
     assert groups[0] == {"id": "all", "name": "All"} and groups[-1] == {"id": "other", "name": "Other"}
     assert d == {"rows": [], "words": prices.status_sentence(w.reg, False), "shown": True, "max": 25, "empty": prices.EMPTY_LIST_SITE,
-                 "registered": True}
+                 "registered": True, "shared": True}
     r = w.c.post("/api/prices/watch", json={"id": PLAGUEBLOOM, "on": True}, headers=h)
     assert r.status_code == 200, r.text
     row = {"id": PLAGUEBLOOM, "name": "Plaguebloom", "low_words": "15s", "qty": 4, "words": "Plaguebloom: lowest price 15s, 4 listed.",
@@ -473,6 +473,20 @@ def test_the_guild_list_counts_and_never_names(w, market_on):
         assert str(m.discord_id) not in r.text and w.reg.members[m.discord_id].display_name not in r.text
     assert w.c.get("/api/prices/guild-watching?window=9", headers=hb).status_code == 400
     assert w.c.get("/api/prices/guild-watching", headers=MCP).status_code == 403
+    # the member's own switch: hidden items count for nothing, and come back when shared again
+    ha = as_user(w, a.discord_id)
+    assert w.c.get("/api/prices/watching", headers=ha).json()["shared"] is True, "shared until hidden"
+    r = w.c.post("/api/prices/watch/share", json={"on": False}, headers=ha)
+    assert r.status_code == 200 and r.json() == {"message": "Your items are hidden from the guild's list.", "shared": False}
+    d = w.c.get("/api/prices/guild-watching", headers=ha).json()
+    assert [(x["id"], x["watchers"]) for x in d["rows"]] == [(PLAGUEBLOOM, 1)]
+    assert w.c.get("/api/prices/watching", headers=ha).json()["shared"] is False
+    assert [x["id"] for x in w.c.get("/api/prices/watching", headers=ha).json()["rows"]] == [PLAGUEBLOOM, BAR], "their own list is untouched"
+    r = w.c.post("/api/prices/watch/share", json={"on": True}, headers=ha)
+    assert r.json() == {"message": "Your items count on the guild's list.", "shared": True}
+    assert len(w.c.get("/api/prices/guild-watching", headers=ha).json()["rows"]) == 2
+    assert w.c.post("/api/prices/watch/share", json={"on": "yes"}, headers=ha).status_code == 400
+    assert w.c.post("/api/prices/watch/share", json={"on": False}, headers=MCP).status_code == 403
     w.reg.member_left(a.discord_id, True)  # someone who left the server counts for nothing
     d = w.c.get("/api/prices/guild-watching", headers=hb).json()
     assert [(x["id"], x["watchers"]) for x in d["rows"]] == [(PLAGUEBLOOM, 1)]

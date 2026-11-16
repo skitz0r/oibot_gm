@@ -693,6 +693,16 @@ GUILD_WATCH_TOP = 50  # the guild's list shows this many items at most, the most
 GUILD_WATCH_EMPTY = "Nobody in the guild is watching anything yet."
 
 
+WATCH_SHARED_WORDS = "Your items count on the guild's list."
+WATCH_HIDDEN_WORDS = "Your items are hidden from the guild's list."
+
+
+def share_watch(reg, discord_id: int, on: bool) -> str:
+    """The member's own choice to count on the guild's list → the sentence (also when it was already so)."""
+    reg.set_watch_shared(discord_id, bool(on))
+    return WATCH_SHARED_WORDS if on else WATCH_HIDDEN_WORDS
+
+
 def watchers_words(n: int) -> str:
     return "1 member watching" if n == 1 else f"{n} members watching"
 
@@ -703,7 +713,7 @@ def guild_watch(reg) -> list[tuple[ItemPrice, int]]:
     only (no test puppet, nobody who left); priced while prices show, else names alone, as watch_list."""
     counts: dict[int, int] = {}
     for m in reg.members.values():
-        if m.test or getattr(m, "left_at", None):
+        if m.test or getattr(m, "left_at", None) or m.watch_hidden:  # hidden = the member's own choice (Registry.set_watch_shared)
             continue
         for i in set(m.watching):
             counts[int(i)] = counts.get(int(i), 0) + 1
@@ -1210,4 +1220,4 @@ def prep(reg) -> dict:
 __all__ = ["MOVERS_TOP", "prep", "PREP_NONE", "BELOW_NONE", "levels", "item_fact", "bargains", "BARGAINS_NONE", "BARGAIN_MIN_GAP", "MOVE_STEPS", "MOVERS_NONE", "kinds", "unkinded", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
-           "price_words", "watch_groups", "guild_watch", "watchers_words", "GUILD_WATCH_EMPTY", "GUILD_WATCH_TOP", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]
+           "price_words", "watch_groups", "guild_watch", "share_watch", "WATCH_SHARED_WORDS", "WATCH_HIDDEN_WORDS", "watchers_words", "GUILD_WATCH_EMPTY", "GUILD_WATCH_TOP", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

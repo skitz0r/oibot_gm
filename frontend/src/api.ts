@@ -196,6 +196,8 @@ export interface WatchList {
   checked?: string; again_in?: number | null;
   /** the list's choices, Movers' own: how far back each row's small line and change go, and the item groups (a row's `group`) */
   window?: string; windows?: { id: string; label: string }[]; groups?: { id: string; name: string }[];
+  /** the viewer's own choice: their items count on the guild's list (POST /api/prices/watch/share {on}) */
+  shared?: boolean;
 }
 /** GET /api/prices/guild-watching: the items the guild's members watch, the most watched first — a count per item
  *  (`watchers`, `watchers_words` "3 members watching"), never who. */

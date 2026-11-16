@@ -135,7 +135,8 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
                 "window": str(window), "windows": [{"id": k, "label": w[1]} for k, w in prices.WINDOWS.items()],
                 "groups": prices.watch_groups(reg)[0],
                 "shown": shown, "max": WATCH_MAX, "empty": prices.EMPTY_LIST_SITE if shown else prices.EMPTY_LIST_HIDDEN,
-                "registered": m is not None and not m.test}
+                "registered": m is not None and not m.test,
+                "shared": reg.watch_shared(v.uid)}  # the member's own choice: their items count on the guild's list
 
     def guild_rows(reg, window: str) -> list[dict]:
         """The guild's list: watch_rows' row + `watchers` / `watchers_words` — a count, never who (BLOCKING, as watch_rows)."""
@@ -165,6 +166,21 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"rows": rows, "window": str(window), "shown": shown_now(reg), "empty": prices.GUILD_WATCH_EMPTY}
+
+    @app.post("/api/prices/watch/share")
+    async def prices_watch_share(request: Request):
+        """`{on}` → the viewer's own items count on the guild's list (true) or are hidden from it (false). The sentence
+        and the choice; a refusal 400 (no record). One quiet commit whose SAVE_LISTENERS publish `member`."""
+        v, d = await body(request)
+        own_list(v)
+        on = d.get("on")
+        if not isinstance(on, bool):
+            return JSONResponse({"error": prices.NO_MATCH}, status_code=400)
+        try:
+            message = await asyncio.to_thread(prices.share_watch, v.reg, v.uid, on)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": message, "shared": v.reg.watch_shared(v.uid)}
 
     @app.post("/api/prices/watch")
     async def prices_watch(request: Request):

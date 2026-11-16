@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActionIcon, Button, Card, Group, SegmentedControl, Stack, Text, TextInput } from "@mantine/core";
+import { ActionIcon, Button, Card, Group, SegmentedControl, Stack, Switch, Text, TextInput } from "@mantine/core";
 import { IconChevronDown, IconChevronRight, IconSearch } from "@tabler/icons-react";
 import { api, ApiError, type Bargains, type Meta, type Prep, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type GuildWatch, type WatchList } from "../api";
 import { ItemName } from "../components/ItemName";
@@ -128,6 +128,18 @@ export function PricesPage({ meta }: { meta: Meta }) {
     } finally {
       setPressing((b) => { const n = new Set(b); n.delete(id); return n; });
     }
+  };
+
+  /** Share with the guild: the member's own choice whether their items count on the guild's list. */
+  const [sharing, setSharing] = useState(false);
+  const share = async (on: boolean) => {
+    setSharing(true);
+    try {
+      const d = await api.post<{ message: string; shared: boolean }>("/api/prices/watch/share", { on });
+      setList((l) => (l ? { ...l, shared: d.shared } : l));
+      loadGuild();
+      ok(d.message);
+    } catch (e) { fail(e); } finally { setSharing(false); }
   };
 
   const watchButton = (r: { id: number }, on: boolean) => (
@@ -419,11 +431,17 @@ export function PricesPage({ meta }: { meta: Meta }) {
 
       <Card className={css.side}>
         <CardHeader title={onGuild ? "The guild's watch list" : "Your watch list"}
-          hint={onGuild ? "what members watch and how many, never who" : "the guild sees which items are watched, never by whom; nothing pings you when a price moves"} />
+          hint={onGuild ? "what members watch and how many, never who" : "nothing pings you when a price moves"} />
         {list !== null && (
           <Group px="md" pt="sm">
             <SegmentedControl size="sm" value={watchTab} onChange={(t) => setWatchTab(t as "mine" | "guild")} aria-label="Whose watch list"
               data={[{ value: "mine", label: `Yours · ${ownRows.length}` }, { value: "guild", label: guild ? `Guild · ${guild.rows.length}` : "Guild" }]} />
+          </Group>
+        )}
+        {!onGuild && list?.registered && (
+          <Group px="md" pt="sm">
+            <Switch size="sm" checked={list.shared ?? true} disabled={sharing} onChange={(e) => share(e.currentTarget.checked)}
+              label="Share with the guild" description="Your items count on the Guild tab, never with your name." />
           </Group>
         )}
         {(onGuild ? guild === null : list === null) && <Text size="sm" c="dimmed" px="md" py="sm">Loading…</Text>}
