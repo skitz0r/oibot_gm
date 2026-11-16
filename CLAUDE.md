@@ -765,7 +765,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        `member`); GET /api/prices/history?id=&span= → {id, name, spans, **prices.chart, sentences} for any item the bot
                        can name, watched or not (the owner's decision 2026-11-14, replacing C6; an unnamed id only when it is on the viewer's
                        own list, else 400 NO_MATCH; the answer's `used_in` = prices.used_in_words;
-                       GET /api/prices/movers?window=6|12|24|168 → prices.movers (members, site only — an experiment: dips / rising against the
+                       GET /api/prices/movers?window=3|6|12|24|168 → prices.movers (members, site only — an experiment: dips / rising against the
                        usual price over the window, one history read in a thread; an unknown window 400; 404 where auctions.available is false); an unknown span 400); the chart's spans = prices.SPANS (24 hours first — the default — then 7 / 30 / 90 days, 1 year; a history younger than the span starts the x axis where the history does); a watch list row carries `spark` = prices.spark (the last 24 hours, with change_words '+12%' and up = the line's colour; before 2026-11-14 the last seven days
                        as [t, low | null] over since..until, None with nothing to draw — the page's Sparkline; read in the routes' thread)
   web/api_memory.py    install_memory_api (design §5.61): GET /api/memories (officers: search, channel, member, paging), POST

@@ -538,7 +538,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   (*"Nobody in the guild is watching anything yet."* while it is empty). On **Yours**, the switch **Share with the guild**
   decides whether your items count there: on to start with, and off takes them out at once (*"Your items are hidden from the
   guild's list."*). Both tabs have Movers' two choices above their rows: how far back each row's small line and change go
-  (**6 hours** · **12 hours** · **24 hours**, shown first · **7 days**) and, once it holds more than one kind of item, the
+  (**3 hours** · **6 hours** · **12 hours** · **24 hours**, shown first · **7 days**) and, once it holds more than one kind of item, the
   item group (**Materials**, **Consumables**, … each with how many of your items it holds) — sits beside the search and Movers on a wide screen, on the right,
   and stays in view while you scroll Movers (there its rows leave out how many are listed; open a row for that); on a
   narrower screen it is the first card. It has a row per item with its lowest price, how many are
@@ -579,7 +579,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   things to look into, not advice: a new economy floods low-level materials while everyone levels, and a material may
   simply matter less here than it did in Classic.
 - **Movers** (an experiment, on the site's Prices tab): under the search, four tabs — **Dips**,
-  **Rising**, **Climbing** and **Sliding**, each with how many items it holds, one list shown at a time — over **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
+  **Rising**, **Climbing** and **Sliding**, each with how many items it holds, one list shown at a time — over **3 hours** · **6 hours** · **12 hours** · **24 hours** · **7 days**. A row is an item whose lowest price *now* is at
   least 10% away from its *usual* price over that time, the biggest move first, 15 each way with **Show more** for the
   rest: the usual price → the price now, the change in percent and in gold, how many are listed, and how many recipes use
   the item. Above the lists you pick a group — **Materials** (shown first), **Consumables**, **Gear**, **Recipes**,
@@ -590,9 +590,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   bot hasn't read yet sits in Other (in Materials when a recipe uses it) until the bot reads it (item names and classes are read once an hour). The usual price is the middle
   value of the item's lowest price over the window, weighted by how long each price stood — so one odd listing for an
   hour moves nothing. **Climbing** and **Sliding** answer another question: did the price go *one way the whole time*?
-  The window is cut into steps — every hour over 6 hours, every 2 hours over 12, every 4 hours over 24, every day over
+  The window is cut into steps — every hour over 3 or 6 hours, every 2 hours over 12, every 4 hours over 24, every day over
   7 days — and an item is listed when its price rose (Climbing) or fell (Sliding) from each step to the next and stands
-  no worse now. One step may stand still; a single step the other way takes it off the list. Its row shows the price in
+  no worse now. One step may stand still (none over 3 hours, which has only three steps); a single step the other way takes it off the list. Its row shows the price in
   the first step → the price now, which must differ by 10% or more. While the bot has kept less than the window it uses
   the whole steps it has, from three on, and says over how long. Only items with at least 20 listed now, listed for at least half the window, and priced at one silver or more — usually and
   now — are ranked: a single cheap or wishful listing isn't a move, and neither is a few copper tripling. Open a row for the item's chart, the recipes it is used in (*"Used in Elixir of

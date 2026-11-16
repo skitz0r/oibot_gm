@@ -862,7 +862,8 @@ def spark(reg, item_id: int, *, now: datetime | None = None, window: str | None 
 
 # ------------------------------------------------------------------ movers (2026-11-14)
 
-WINDOWS: dict[str, tuple[timedelta, str]] = {"6": (timedelta(hours=6), "6 hours"), "12": (timedelta(hours=12), "12 hours"),
+WINDOWS: dict[str, tuple[timedelta, str]] = {"3": (timedelta(hours=3), "3 hours"),  # the owner, 2026-11-15
+                                             "6": (timedelta(hours=6), "6 hours"), "12": (timedelta(hours=12), "12 hours"),
                                              "24": (timedelta(hours=24), "24 hours"), "168": (timedelta(days=7), "7 days")}
 NOT_A_WINDOW = "That isn't one of the windows."
 MOVE_MIN_PCT = 10  # a move smaller than this against the usual price is no mover
@@ -875,16 +876,16 @@ OTHER_GROUP = {"id": "other", "name": "Other"}
 MOVERS_NONE = "Nothing in this group has moved that much. Pick another group or a smaller move."
 # Climbing / Sliding (the owner, 2026-11-15): a price that went ONE way step after step over the window.
 # window → (how many steps, the step in words)
-TREND_STEPS: dict[str, tuple[int, str]] = {"6": (6, "every hour"), "12": (6, "every 2 hours"), "24": (6, "every 4 hours"),
+TREND_STEPS: dict[str, tuple[int, str]] = {"3": (3, "every hour"), "6": (6, "every hour"), "12": (6, "every 2 hours"), "24": (6, "every 4 hours"),
                                            "168": (7, "every day")}
-TREND_FLAT = 1  # steps that may stand still; a step the other way is never allowed
+TREND_FLAT = 1  # steps that may stand still (none when there are only three steps); a step the other way is never allowed
 
 
 def _trend_way(t) -> int:
     """+1 = its price rose step after step and stands no lower now, −1 = it fell and stands no higher, 0 = neither.
     At most TREND_FLAT steps stood still."""
     diffs = [b - a for a, b in zip(t.values, t.values[1:])]
-    if sum(1 for d in diffs if d == 0) > TREND_FLAT:
+    if sum(1 for d in diffs if d == 0) > (TREND_FLAT if len(t.values) > price_history.TREND_MIN_STEPS else 0):
         return 0
     if all(d >= 0 for d in diffs) and t.now >= t.values[-1]:
         return 1
@@ -1053,7 +1054,8 @@ def _movers(reg, window: str, *, now: datetime | None = None) -> dict:
         return out
     items, kept = trend
     over = label if kept == steps else _duration_words(span / steps * kept)
-    out["trend_words"] = (f"Its price went one way {step_words} over the last {over}, and one step may stand still. "
+    still = ", and one step may stand still" if kept > price_history.TREND_MIN_STEPS else ""
+    out["trend_words"] = (f"Its price went one way {step_words} over the last {over}{still}. "
                           "The figures are the price then and the price now.")
     steady = []
     for t in items:

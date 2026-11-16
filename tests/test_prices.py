@@ -709,7 +709,7 @@ def test_movers_rank_dips_and_risers_with_the_servers_words(reg, clock):
     priced(reg, table(24), at=NOW)
     _read_hourly(reg, start, 24, table)
     m = prices.movers(reg, "24")
-    assert m["window"] == "24" and [w["label"] for w in m["windows"]] == ["6 hours", "12 hours", "24 hours", "7 days"]
+    assert m["window"] == "24" and [w["label"] for w in m["windows"]] == ["3 hours", "6 hours", "12 hours", "24 hours", "7 days"]
     assert m["ready"] is True and m["words"] == ""
     (dip,) = m["dips"]
     assert (dip["id"], dip["name"], dip["usual_words"], dip["now_words"], dip["change_words"], dip["qty"]) == (
@@ -1193,3 +1193,23 @@ def test_a_steady_move_over_a_young_history_says_how_long(reg, clock):
     m = prices.movers(reg, "6", now=clock.t)
     assert [r["id"] for r in m["climbing"]] == [PLAGUEBLOOM]
     assert m["trend_words"].startswith("Its price went one way every hour over the last 4 hours,")
+
+
+def test_three_hours_is_a_window_and_its_steady_move_allows_no_still_step(reg, clock):
+    clock.t = NOW
+    start = NOW - timedelta(hours=3)
+
+    def table(i):
+        return {PLAGUEBLOOM: Price(low=1000 + 100 * i, qty=40),               # up every hour
+                BAR: Price(low=[400000, 400000, 450000, 500000][i], qty=30),  # one of three hours stood still
+                VIAL: Price(low=[1000, 1000, 1000, 600][i], qty=200)}         # dipped against its usual price
+
+    priced(reg, table(3), at=NOW)
+    _read_hourly(reg, start, 3, table)
+    m = prices.movers(reg, "3")
+    assert m["window"] == "3" and m["ready"] is True and m["words"] == ""
+    assert [r["id"] for r in m["dips"]] == [VIAL]
+    assert [r["id"] for r in m["climbing"]] == [PLAGUEBLOOM]
+    assert m["trend_words"] == ("Its price went one way every hour over the last 3 hours. "
+                                "The figures are the price then and the price now.")
+    assert prices.spark(reg, PLAGUEBLOOM, window="3")["change_words"] == "+30%"
