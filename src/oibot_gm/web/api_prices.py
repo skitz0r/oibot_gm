@@ -137,6 +137,35 @@ def install_prices_api(app: FastAPI, bot, *, who, body, need_owner, publish=None
                 "shown": shown, "max": WATCH_MAX, "empty": prices.EMPTY_LIST_SITE if shown else prices.EMPTY_LIST_HIDDEN,
                 "registered": m is not None and not m.test}
 
+    def guild_rows(reg, window: str) -> list[dict]:
+        """The guild's list: watch_rows' row + `watchers` / `watchers_words` — a count, never who (BLOCKING, as watch_rows)."""
+        if str(window) not in prices.WINDOWS:
+            raise RegistryError(prices.NOT_A_WINDOW)
+        _groups, group_of = prices.watch_groups(reg)
+        shown = shown_now(reg)
+        out = []
+        for p, n in prices.guild_watch(reg):
+            row = {"id": p.id, "name": p.name, "low_words": _low(p.low) if shown else "", "qty": p.qty if shown else 0,
+                   "words": prices.price_words(p) if shown else "", "group": group_of(p.id),
+                   "watchers": n, "watchers_words": prices.watchers_words(n)}
+            if shown:
+                row["spark"] = prices.spark(reg, p.id, window=window)
+            out.append(row)
+        return out
+
+    @app.get("/api/prices/guild-watching")
+    async def prices_guild_watching(request: Request, window: str = "24"):
+        """Every member (the owner, 2026-11-15; site only, 403 from MCP as the other watch routes): the items the
+        guild's members watch and how many watch each, the most watched first — never who watches what."""
+        v = await who(request)
+        own_list(v)
+        reg = v.reg
+        try:
+            rows = await asyncio.to_thread(guild_rows, reg, window)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"rows": rows, "window": str(window), "shown": shown_now(reg), "empty": prices.GUILD_WATCH_EMPTY}
+
     @app.post("/api/prices/watch")
     async def prices_watch(request: Request):
         """`{id, on: true}` → watch the item; `{id, on: false}` → stop. The sentence and the fresh list; a refusal 400."""

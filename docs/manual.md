@@ -493,8 +493,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   pressing it puts the item on your watch list at once and says so (*"You're watching Plaguebloom."*); press again to
   take it off. `/price` with no item shows **Your watch list**: each item's lowest price and how many are listed, how
   recent the prices are, and a menu of the items. Pick one to see its price, the lowest and highest price of the last 7
-  and 30 days (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*), **Stop watching** and **Back**. The list is
-  yours alone: nobody else, officers included, can see it. It holds 25 items (*"Your watch list holds 25 items. Stop
+  and 30 days (*"Lowest in the last 7 days: 12s 40c · highest: 19s 2c"*), **Stop watching** and **Back**. Nobody else,
+  officers included, can see your list. The site's **Guild** tab shows which items the guild's members watch and how many
+  watch each (*"3 members watching"*), never who. It holds 25 items (*"Your watch list holds 25 items. Stop
   watching one first."*), and you need to be registered to keep one. Nothing pings or messages you when a price moves:
   open the list when you want to look. While prices aren't shown, the list shows the items' names alone, and nothing new
   can be watched until they are (**Stop watching** still works).
@@ -532,7 +533,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   for every member. At the top, **What does it go for?** — the same search as the Professions page's box: part of an
   item's name lists up to 25 items with their lowest price and how many are listed (or *none listed*) and how many more
   match, each with **Watch** (**Stop watching** when it is already on your list). The page says once how recent the
-  prices are (*Prices as of …*). **Your watch list** — with Movers' two choices above its rows: how far back each row's small line and change go
+  prices are (*Prices as of …*). **Your watch list** — two tabs, **Yours** and **Guild**: the Guild tab lists every item a member of the guild watches,
+  the most watched first, with how many watch it (*"3 members watching"*) and never who; open a row for its chart and **Watch**
+  (*"Nobody in the guild is watching anything yet."* while it is empty). Both tabs have Movers' two choices above their rows: how far back each row's small line and change go
   (**6 hours** · **12 hours** · **24 hours**, shown first · **7 days**) and, once it holds more than one kind of item, the
   item group (**Materials**, **Consumables**, … each with how many of your items it holds) — sits beside the search and Movers on a wide screen, on the right,
   and stays in view while you scroll Movers (there its rows leave out how many are listed; open a row for that); on a

@@ -197,6 +197,9 @@ export interface WatchList {
   /** the list's choices, Movers' own: how far back each row's small line and change go, and the item groups (a row's `group`) */
   window?: string; windows?: { id: string; label: string }[]; groups?: { id: string; name: string }[];
 }
+/** GET /api/prices/guild-watching: the items the guild's members watch, the most watched first — a count per item
+ *  (`watchers`, `watchers_words` "3 members watching"), never who. */
+export interface GuildWatch { rows: (PriceRow & { watchers: number; watchers_words: string })[]; window: string; shown: boolean; empty: string }
 /** GET /api/prices/history (price watch §4.3, C5): a watched item over one span. `t` = epoch seconds (the x position only),
  *  `when` = the server's words for the point (a time, or a day alone for a folded day), `low` / `high` in copper (low null =
  *  nothing listed from then: a gap; high > low = a folded day's range), `words` = the lowest in words; the span's lowest and

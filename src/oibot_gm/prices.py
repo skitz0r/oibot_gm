@@ -689,6 +689,31 @@ def watch_list(reg, discord_id: int) -> list[ItemPrice]:
     return out
 
 
+GUILD_WATCH_TOP = 50  # the guild's list shows this many items at most, the most watched first
+GUILD_WATCH_EMPTY = "Nobody in the guild is watching anything yet."
+
+
+def watchers_words(n: int) -> str:
+    return "1 member watching" if n == 1 else f"{n} members watching"
+
+
+def guild_watch(reg) -> list[tuple[ItemPrice, int]]:
+    """What the guild watches (the owner, 2026-11-15) → (item, how many members watch it), the most watched first, then
+    by name; at most GUILD_WATCH_TOP. A COUNT, never who: no member, name or id leaves here. Members in the server
+    only (no test puppet, nobody who left); priced while prices show, else names alone, as watch_list."""
+    counts: dict[int, int] = {}
+    for m in reg.members.values():
+        if m.test or getattr(m, "left_at", None):
+            continue
+        for i in set(m.watching):
+            counts[int(i)] = counts.get(int(i), 0) + 1
+    named = names(reg)
+    shown = _shown(reg)
+    rows = [(named.get(i) or UNNAMED, i, n) for i, n in counts.items()]
+    rows.sort(key=lambda r: (-r[2], r[0].casefold(), r[1]))
+    return [(_item(reg, i, name) if shown else ItemPrice(id=i, name=name, low=None, qty=0), n) for name, i, n in rows[:GUILD_WATCH_TOP]]
+
+
 def _span_sentence(s: price_history.Span, words: str) -> str:
     """'Lowest in the last 7 days: 12s 40c · highest: 19s 2c' / 'None listed in the last 7 days.'"""
     if s.low is None:
@@ -1185,4 +1210,4 @@ def prep(reg) -> dict:
 __all__ = ["MOVERS_TOP", "prep", "PREP_NONE", "BELOW_NONE", "levels", "item_fact", "bargains", "BARGAINS_NONE", "BARGAIN_MIN_GAP", "MOVE_STEPS", "MOVERS_NONE", "kinds", "unkinded", "MOVE_MIN_PCT", "NOT_A_WINDOW", "WINDOWS", "movers", "used_in_words", "EMPTY_LIST_DISCORD", "SPARK_SPAN", "spark", "EMPTY_LIST_HIDDEN", "EMPTY_LIST_SITE", "NOT_A_SPAN", "NOT_READ", "NO_HISTORY_YET", "SPANS", "UNNAMED", "chart", "history_sentences",
            "is_watching", "unwatch", "watch", "watch_list", "Cost", "CostLine", "HELP_ITEMS", "HELP_RECIPES", "HELP_WORDS", "ItemPrice", "NONE_LISTED", "NO_MATCH", "OWNER_LINK_WORDS", "OWNER_OFF_WORDS", "PRICE_LINES", "answer_lines", "choice_description",
            "choices_words", "cost_line", "help_hit", "help_section", "named_items", "named_recipes","item_price", "listings_words", "price_answer", "sample_names", "sample_rows", "more_words", "cost_sentence", "made_words", "names",
-           "price_words", "watch_groups", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]
+           "price_words", "watch_groups", "guild_watch", "watchers_words", "GUILD_WATCH_EMPTY", "GUILD_WATCH_TOP", "recipe_cost", "remember", "reset_names", "search", "status_sentence", "unnamed"]

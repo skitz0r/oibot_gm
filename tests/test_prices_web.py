@@ -455,6 +455,29 @@ def test_the_full_list_refusal(w, market_on):
     assert len(w.reg.watching(m.discord_id)) == 25 and PLAGUEBLOOM not in w.reg.watching(m.discord_id)
 
 
+def test_the_guild_list_counts_and_never_names(w, market_on):
+    a, b = member(w, 0), member(w, 1)
+    priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4), BAR: Price(low=489998, qty=30)}, at=now())
+    hb = as_user(w, b.discord_id)  # as_user sets the one session cookie: the last call is who asks
+    d = w.c.get("/api/prices/guild-watching", headers=hb).json()
+    assert d == {"rows": [], "window": "24", "shown": True, "empty": "Nobody in the guild is watching anything yet."}
+    for who, i in ((a, BAR), (a, PLAGUEBLOOM), (b, PLAGUEBLOOM)):
+        r = w.c.post("/api/prices/watch", json={"id": i, "on": True}, headers=as_user(w, who.discord_id))
+        assert r.status_code == 200, r.text
+    r = w.c.get("/api/prices/guild-watching?window=168", headers=hb)
+    d = r.json()
+    assert [(x["id"], x["watchers"], x["watchers_words"]) for x in d["rows"]] == [
+        (PLAGUEBLOOM, 2, "2 members watching"), (BAR, 1, "1 member watching")], "the most watched first"
+    assert d["window"] == "168" and d["rows"][0]["low_words"] == "15s" and "group" in d["rows"][0]
+    for m in (a, b):  # a count, never who
+        assert str(m.discord_id) not in r.text and w.reg.members[m.discord_id].display_name not in r.text
+    assert w.c.get("/api/prices/guild-watching?window=9", headers=hb).status_code == 400
+    assert w.c.get("/api/prices/guild-watching", headers=MCP).status_code == 403
+    w.reg.member_left(a.discord_id, True)  # someone who left the server counts for nothing
+    d = w.c.get("/api/prices/guild-watching", headers=hb).json()
+    assert [(x["id"], x["watchers"]) for x in d["rows"]] == [(PLAGUEBLOOM, 1)]
+
+
 def test_another_member_never_reads_your_list(w, market_on):
     a, b = member(w, 0), member(w, 1)
     priced(w.reg, {PLAGUEBLOOM: Price(low=1500, qty=4)}, at=now())

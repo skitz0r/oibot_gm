@@ -205,7 +205,7 @@ class Member(BaseModel):
     # Officers then see "left the server" and may Remove record (Registry.remove_record) — members never delete themselves (D29)
     left_at: Optional[str] = None
     test: bool = False  # seeded by /gm test: the bot puppets them (DMs go to the roster channel; officers answer for them)
-    # the member's own watch list (price watch §4.2): item ids, newest first, at most WATCH_MAX; read by nobody else (C11)
+    # the member's own watch list (price watch §4.2): item ids, newest first, at most WATCH_MAX; read by nobody else (C11) — but as a COUNT per item on the guild's list (prices.guild_watch, 2026-11-15), never who
     watching: list[int] = Field(default_factory=list)
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActionIcon, Button, Card, Group, SegmentedControl, Stack, Text, TextInput } from "@mantine/core";
 import { IconChevronDown, IconChevronRight, IconSearch } from "@tabler/icons-react";
-import { api, ApiError, type Bargains, type Meta, type Prep, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type WatchList } from "../api";
+import { api, ApiError, type Bargains, type Meta, type Prep, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type GuildWatch, type WatchList } from "../api";
 import { ItemName } from "../components/ItemName";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { PriceChart, Sparkline, trendOf } from "../components/PriceChart";
@@ -28,7 +28,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const [words, setWords] = useState(meta.prices?.words || "");
   const [q, setQ] = useState("");
   const [found, setFound] = useState<PriceFind | null>(null);
-  type Where = "search" | "list" | "dips" | "rising" | "bargains" | "prep" | "below";
+  type Where = "search" | "list" | "guild" | "dips" | "rising" | "bargains" | "prep" | "below";
   const [openAt, setOpenAt] = useState<{ id: number; at: Where } | null>(null);  // the one open row, and in which card
   const open = openAt ? openAt.id : null;
   const setOpen = (id: number | null, at: Where = "list") => setOpenAt(id === null ? null : { id, at });
@@ -55,6 +55,9 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const watchWinRef = useRef(watchWin);
   watchWinRef.current = watchWin;
   const [watchGroup, setWatchGroup] = useState("all");
+  // the card's second tab (the owner, 2026-11-15): what the guild's members watch, a count per item, never who
+  const [watchTab, setWatchTab] = useState<"mine" | "guild">("mine");
+  const [guild, setGuild] = useState<GuildWatch | null>(null);
   const [span, setSpan] = useState("1");  // 24 hours first: where a price moved today shows
   const [hist, setHist] = useState<PriceHistory | null>(null);
   const [pressing, setPressing] = useState<Set<number>>(new Set());
@@ -76,7 +79,9 @@ export function PricesPage({ meta }: { meta: Meta }) {
   };
   const loadList = () => api.get<WatchList>(`/api/prices/watching?window=${encodeURIComponent(watchWinRef.current)}`)
     .then((d) => { if ((d.window ?? "24") === watchWinRef.current) { setList(d); setWords(d.words); } }).catch(fail);
-  const changeWatchWindow = (w: string) => { setWatchWin(w); watchWinRef.current = w; loadList(); };
+  const loadGuild = () => api.get<GuildWatch>(`/api/prices/guild-watching?window=${encodeURIComponent(watchWinRef.current)}`)
+    .then((d) => { if (d.window === watchWinRef.current) setGuild(d); }).catch(fail);
+  const changeWatchWindow = (w: string) => { setWatchWin(w); watchWinRef.current = w; loadList(); loadGuild(); };
   const loadMovers = (w: string) => api.get<Movers>(`/api/prices/movers?window=${encodeURIComponent(w)}`)
     .then((d) => { if (winRef.current === d.window) setMovers(d); }).catch(fail);
   const changeWindow = (w: string) => { setWin(w); loadMovers(w); };
@@ -84,13 +89,14 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const loadPrep = () => api.get<Prep>("/api/prices/prep").then(setPrep).catch(fail);
   const load = () => {
     loadList();
+    loadGuild();
     loadMovers(winRef.current);
     loadBargains();
     loadPrep();
     if (want.current) search(want.current);
     if (view.current.open !== null) loadHistory(view.current.open, view.current.span);
   };
-  useEffect(() => { loadList(); loadMovers(winRef.current); loadBargains(); loadPrep(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadList(); loadGuild(); loadMovers(winRef.current); loadBargains(); loadPrep(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
   useLive(load, ["prices", "member"], { every: 3000 });
   // most checks find the same prices and publish nothing: ask again a little after the next one, so "Last checked" moves
   const again = list?.again_in;
@@ -114,6 +120,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
       setFound((f) => (f ? { ...f, rows: f.rows.map((r) => ({ ...r, watching: mine.has(r.id) })) } : f));
       setRefusal("");
       if (!on && openAt?.id === id && openAt.at === "list") setOpen(null);  // its list row is gone
+      loadGuild();
       ok(d.message);
     } catch (e) {
       if (e instanceof ApiError && e.status === 400) setRefusal(e.message);
@@ -129,8 +136,12 @@ export function PricesPage({ meta }: { meta: Meta }) {
     </Button>
   );
   const shown = list?.shown ?? !!meta.prices?.on;  // prices show (fresh or stale): search and history; else names alone
-  const allRows = list?.rows || [];
-  const mine = new Set(allRows.map((r) => r.id));
+  const ownRows = list?.rows || [];
+  const mine = new Set(ownRows.map((r) => r.id));
+  const onGuild = watchTab === "guild";
+  const listAt: Where = onGuild ? "guild" : "list";
+  const allRows: (PriceRow & { watchers_words?: string })[] = onGuild ? guild?.rows || [] : ownRows;  // the tab's rows: the choices below work on either
+  const emptyWords = onGuild ? guild?.empty : list ? (!list.registered && refusal ? refusal : list.empty) : undefined;
   const watchGroups = (list?.groups || []).filter((g) => g.id === "all" || allRows.some((r) => r.group === g.id));  // only groups the list holds
   const inGroup = watchGroups.some((g) => g.id === watchGroup) ? watchGroup : "all";  // a group emptied by Stop watching falls back to All
   const rows = inGroup === "all" ? allRows : allRows.filter((r) => r.group === inGroup);
@@ -407,8 +418,15 @@ export function PricesPage({ meta }: { meta: Meta }) {
       </div>
 
       <Card className={css.side}>
-        <CardHeader title="Your watch list" hint="only you see it; nothing pings you when a price moves" />
-        {list === null && <Text size="sm" c="dimmed" px="md" py="sm">Loading…</Text>}
+        <CardHeader title={onGuild ? "The guild's watch list" : "Your watch list"}
+          hint={onGuild ? "what members watch and how many, never who" : "the guild sees which items are watched, never by whom; nothing pings you when a price moves"} />
+        {list !== null && (
+          <Group px="md" pt="sm">
+            <SegmentedControl size="sm" value={watchTab} onChange={(t) => setWatchTab(t as "mine" | "guild")} aria-label="Whose watch list"
+              data={[{ value: "mine", label: `Yours · ${ownRows.length}` }, { value: "guild", label: guild ? `Guild · ${guild.rows.length}` : "Guild" }]} />
+          </Group>
+        )}
+        {(onGuild ? guild === null : list === null) && <Text size="sm" c="dimmed" px="md" py="sm">Loading…</Text>}
         {shown && allRows.length > 0 && list?.windows && (
           <Group px="md" pt="sm" gap="xs">
             <SegmentedControl size="xs" value={watchWin} onChange={changeWatchWindow} disabled={watchWin !== (list.window ?? "24")} aria-label="Over how long"
@@ -425,20 +443,23 @@ export function PricesPage({ meta }: { meta: Meta }) {
             ))}
           </Group>
         )}
-        {list !== null && rows.length === 0 && (
-          <Text size="sm" c="dimmed" px="md" py="sm">{!list.registered && refusal ? refusal : list.empty}</Text>
+        {emptyWords !== undefined && rows.length === 0 && (
+          <Text size="sm" c="dimmed" px="md" py="sm">{emptyWords}</Text>
         )}
         {rows.length > 0 && (
           <div className={css.list}>
             {rows.map((r) => {
-              const opened = isOpen(r.id, "list");
+              const opened = isOpen(r.id, listAt);
               return (
                 <div key={r.id} className={css.item}>
                   {shown ? (
-                    <div className={`${css.watch} ${css.opens}`} onClick={() => toggle(r.id, "list")}>
+                    <div className={`${css.watch} ${css.opens}`} onClick={() => toggle(r.id, listAt)}>
                       <Group gap={6} wrap="nowrap" className={css.name}>
-                        {chevron(r.id, "list")}
-                        <Text size="sm" fw={600} className={css.name}><ItemName id={r.id} name={r.name} /></Text>
+                        {chevron(r.id, listAt)}
+                        <div className={css.name}>
+                          <Text size="sm" fw={600} className={css.name}><ItemName id={r.id} name={r.name} /></Text>
+                          {onGuild && r.watchers_words && <Text size="xs" c="dimmed">{r.watchers_words}</Text>}
+                        </div>
                       </Group>
                       <div className={css.spark}>{r.spark ? <Sparkline data={r.spark} label={`Its lowest price over the last ${watchWinLabel}`} /> : null}</div>
                       <div className={css.figures}>
@@ -450,12 +471,12 @@ export function PricesPage({ meta }: { meta: Meta }) {
                   ) : (
                     <div className={css.row}>
                       <Text size="sm" fw={600} className={css.name}><ItemName id={r.id} name={r.name} /></Text>
-                      <Text size="sm" c="dimmed">{r.low_words}</Text>
+                      <Text size="sm" c="dimmed">{onGuild ? r.watchers_words : r.low_words}</Text>
                       <Text size="sm" c="dimmed" />
-                      <Group justify="flex-end" className={css.actions}>{watchButton(r, true)}</Group>
+                      <Group justify="flex-end" className={css.actions}>{mine.has(r.id) ? watchButton(r, true) : null}</Group>
                     </div>
                   )}
-                  {opened && panel(r, true)}
+                  {opened && panel(r, mine.has(r.id))}
                 </div>
               );
             })}

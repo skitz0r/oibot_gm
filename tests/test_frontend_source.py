@@ -723,6 +723,8 @@ def test_the_prices_tab():
     assert "<ItemName " in page and "<PriceChart" in page
     # 2026-11-15: the watch list takes Movers' time and item-group choices (the server's windows and groups)
     assert "list.windows.map(" in page and "watchGroups.map(" in page and "window: watchWinRef.current" in page
+    # 2026-11-15: the Guild tab — what members watch and how many, never who
+    assert "/api/prices/guild-watching" in page and "r.watchers_words" in page and "never who" in page
     assert "list?.checked" in page and "again * 1000" in page, "the last / next check beside Prices as of, asked again after the next check"
     # 2026-11-14: a search row opens to the chart too (watched or not), and a watched row carries its small line
     # movers (an experiment): the server's two lists, every figure its words; a row opens the same panel
