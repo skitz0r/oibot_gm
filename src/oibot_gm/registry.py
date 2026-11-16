@@ -3198,9 +3198,8 @@ class Registry:
     def professions_refusal(self, c: "RegisteredCharacter | None", entries: list[dict] | None = None) -> str | None:
         """THE synced-character rule (spec §5.3, R2), one sentence: a linked character whose professions follow the armory
         refuses any change to them — the stored list (the armory's, unchecked by hand rules) may ride along unchanged with
-        another edit of the row. `entries` None = a change whatever it is (plain text's profession fields). The write
-        (set_professions) and every preview (consequences.profession_consequence, professions.op_rows /
-        preview_sentences) ask this same check, so no preview offers what the write refuses. None = editable."""
+        another edit of the row. `entries` None = a change whatever it is. The write
+        (set_professions) and every preview (consequences.profession_consequence) ask this same check, so no preview offers what the write refuses. None = editable."""
         if c is None or c.armory is None or not c.profession_sync:
             return None
         said = f"{c.label}'s professions come from the armory, so turn on Keep professions by hand to edit them."

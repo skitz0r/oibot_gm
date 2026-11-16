@@ -307,13 +307,16 @@ def test_a_clicked_eyes_stays_as_the_mark_of_the_answer(gate):
     assert msg.reacts == ["👀"] and len(gate.bot.handled) == 1
 
 
-def test_the_question_names_profession_asks_and_news():
-    """Retune 2026-10-30: "does anyone have the pattern X?" scored 56% and "i just got the leatherworking pattern X" 66%
-    in #professions — under the reply line. Probed with these sentences: 96–97% each, banter unchanged at ≤15%."""
+def test_the_question_takes_profession_asks_and_leaves_profession_news():
+    """Retune 2026-10-30: "does anyone have the pattern X?" is a question the bot answers. The owner, 2026-11-16: the bot
+    reads professions from the armory, so "i have every merchant favor enchant" is chat between people — it used to get
+    "Which recipes do you mean?" in #professions. scripts/listen_probe.py checks both against the decision service."""
     q = db.LISTEN_QUESTION
     assert "who has, can make or craft a pattern, recipe or item" in q and "even when it is addressed to everyone" in q
-    assert "got, learned or can now make a pattern or recipe" in q
-    assert "recipe or pattern the writer has, learned or got" in db.LISTEN_CRITERIA["true"]
+    assert "has, got, learned or can now make a pattern, recipe or enchant" in q and "not for the bot" in q
+    assert "a recipe learned" not in q and "is something the bot records" not in q
+    assert "recipe" not in db.LISTEN_CRITERIA["true"].split("or tells it")[1]
+    assert "what they have, learned, got or can now make" in db.LISTEN_CRITERIA["false"]
 
 
 def test_unsure_in_a_watch_channel_and_below_are_quiet(gate):
@@ -430,7 +433,7 @@ def test_a_listened_message_reads_the_name_everywhere(gate):
 
 def test_listening_words_cover_professions(gate):
     from oibot_gm import discord_bot as db
-    assert "professions" in db.LISTEN_BOT_WORDS and "notable recipes" in db.LISTEN_BOT_WORDS
+    assert "professions" in db.LISTEN_BOT_WORDS and "never takes them from chat" in db.LISTEN_BOT_WORDS
     assert "who can make" in db.LISTEN_QUESTION
     assert {"recipe", "craft", "who can make", "profession", "skill"} <= set(db.LISTEN_GLOSSARY)
     assert not {"leatherworking", "alchemy", "tailoring"} & set(db.LISTEN_GLOSSARY), "game data lives in the profile"

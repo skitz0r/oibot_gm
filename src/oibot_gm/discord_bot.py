@@ -127,27 +127,28 @@ def wowhead(item, profile: GameProfile | None = None) -> str | None:
 LISTEN_BOT_WORDS = ("This is the guild's Discord bot for World of Warcraft raids. It runs raid signups and rosters: when a raid "
                     "runs, who joined, who is rostered, who is on the bench, when the roster locks and who must confirm. It records "
                     "absences, and it knows every member's characters: who plays which class and spec, their main and alts, their "
-                    "rank and attendance. It knows each character's professions, their skill and the notable recipes they make, "
-                    "and who can make a thing. It runs the loot council and members' wishlists, "
+                    "rank and attendance. It looks up each character's professions, their skill and who can make a thing; "
+                    "it reads them from the game and never takes them from chat. It runs the loot council and members' wishlists, "
                     "and explains the guild's loot and roster rules. It answers questions about itself and how to use it. It never "
                     "joins chat between people, game talk or jokes.")
 LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or act on `message.text`? Yes when it asks something "
                    "the bot knows (when a raid runs, who is rostered, what class or spec someone plays, a member's characters, rank or "
                    "attendance, who can make or craft something, which professions or recipes someone has, a loot or roster rule, "
                    "how the bot works) or tells the bot something it records (an absence, a signup answer, a character or spec "
-                   "change, a profession, a skill level or a recipe learned), even without naming the bot. "
+                   "change), even without naming the bot. "
                    "A message asking who has, can make or craft a pattern, recipe or item is a question the bot answers from its "
-                   "records, even when it is addressed to everyone. A message saying the writer got, learned or can now make a "
-                   "pattern or recipe, or reached a skill, is something the bot records. "
+                   "records, even when it is addressed to everyone. A message saying the writer has, got, learned or can now make a "
+                   "pattern, recipe or enchant, or reached a skill, is news for the people in the channel and not for the bot "
+                   "(the owner, 2026-11-16: the bot reads professions from the game itself): No. "
                    "No when it is conversation between people, game talk, a joke, a link, or a reply to another person. "
                    "`memory` lists things members said that the bot remembers and can repeat; a message asking about one of "
                    "them is for the bot. "
                    "`bot` says what the bot does; `channel` says where it was written (the bot's job there, the channel's own "
                    "topic and its category); `recent` is the chat just before, for context only.")
-LISTEN_CRITERIA = {"true": "The message asks who can make something or what the bot knows, or tells it a profession, skill, "
-                           "recipe or pattern the writer has, learned or got.",
+LISTEN_CRITERIA = {"true": "The message asks who can make something or what the bot knows, or tells it an absence, a signup "
+                           "answer or a character change.",
                    "false": "The message is people talking to each other about the game itself, a joke, a link or a reply to "
-                            "someone else."}
+                            "someone else, or someone saying what they have, learned, got or can now make."}
 # the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things; listen_state adds the game
 # version's profession names from the profile (game version is data)
 LISTEN_GLOSSARY = ["sheet", "signup", "join", "bench", "no thanks", "roster", "rostered", "regular", "lock", "confirm",

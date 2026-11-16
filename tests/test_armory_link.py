@@ -465,8 +465,8 @@ def test_every_preview_of_a_synced_character_refuses_in_the_writes_words(reg, fa
     for field, value in (("profession", "cooking 100"), ("recipe_add", a_listed_leatherworking_recipe(reg, c).name),
                          ("recipe_remove", c.professions[0].recipes[0].name), ("profession_remove", "leatherworking")):
         op = configops.ConfigOp(op="character", member="Tessa", character="Bram Kettle", field=field, value=value)
-        out = configops.describe(reg, op, by_id=TESSA)
-        assert said in str(out) and "recorded" not in str(out), (field, out)
+        out = configops.describe(reg, op, by_id=TESSA)  # plain text writes no profession at all (the owner, 2026-11-16)
+        assert configops.PROFESSIONS_NOT_HERE in str(out) and "recorded" not in str(out), (field, out)
 
 
 def test_the_officers_fix_list_shows_held_off_list_recipes_and_never_a_synced_character(reg, fake, bot, clock):

@@ -178,7 +178,7 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
   confirm_for: target, member, value=yes|no — on a LOCKED run, record someone's answer to their Confirm / Can't make it ask, or to a
     fill ask they were sent (they said so out of band: "Xanthe confirmed for tonight"; no = can't make it, the seat is freed and the fill
     engine looks for cover).
-Members (officers for anyone; a member for their OWN characters, member empty): character: member, character=<their character's name>, field=add|spec|offspec|name|rank|main|retire|delete|flex|profession|profession_remove|recipe_add|recipe_remove, value:
+Members (officers for anyone; a member for their OWN characters, member empty): character: member, character=<their character's name>, field=add|spec|offspec|name|rank|main|retire|delete|flex, value:
     add: character = the new name, value = "Class Spec [Offspec]", text = main|alt (optional; "as my main" = main);
       a PLANNED character (no name yet) is add with character EMPTY: "plan my main as a Holy Priest" → field=add,
       character empty, value="Priest Holy", text=main ("plan an alt: Mage Frost" → text=alt; re-planning a main replaces it);
@@ -187,12 +187,6 @@ Members (officers for anyone; a member for their OWN characters, member empty): 
       (roster placements go; "delete"/"remove" ≠ "retire", which keeps its history);
     flex: value = extra roles it can play beyond its spec/offspec, comma list of tank|healer|melee|ranged, or "none"
       ("I can also tank on Xanthe" → flex, value "tank"; the whole list is replaced). A class never changes: retire and add.
-    profession: value = "<profession> [skill]" ("Rhoz is a 300 leatherworker" → character=Rhoz, field=profession, value="leatherworking 300";
-      a profession already on record keeps its skill when none is said); profession_remove: value = the profession ("drop enchanting on Jonnie");
-    recipe_add / recipe_remove: value = the recipe's name exactly as written ("I can make Devilsaur Gauntlets on Rhoz", "I just learned …"),
-      text = the profession when the member names one ("… with cooking"); a recipe name is member text, never changed or guessed;
-      when the member's character has no profession on record that makes things, fill `text` with the profession you believe makes the
-      recipe (Leatherworking, Tailoring, …) — it is shown to them as a guess and recorded only on their Apply; never leave it out when you know
   application: member=<the applicant: display name, mention or their character's name from the open applications list>,
     value=accept|decline, reason=<optional note sent to the applicant> — decide an open application (accept registers
     their character as main, rank trial; either way they get a DM and the review card updates).
@@ -212,15 +206,12 @@ Test bench (officer): test: value="seed <N>" | "seed all" (puppet members; all =
     answered that sheet; blank run = the only live one) | "clear".
 Resolving a run: "tonight's run" / "the Barrow Deeps run" = the live run of that raid on that day in the live-runs list; when several fit, ask which.
 A member is named by display name, mention or one of their characters. A request with several parts becomes several ops, in the order asked.
-The requester's own record ("I'll be away", "my main", "I can't make tonight", "I confirm", "I can make X", "I'm a 300 leatherworker"):
-  leave member EMPTY — the bot fills in the requester itself. "i can make red leather boots" → ONE op: op=character,
-  field=recipe_add, value="red leather boots", member and character EMPTY (the bot picks their crafter; when the member's character has
-  no profession on record that makes things, text = the profession you believe makes it, e.g. "leatherworking" — shown to them as a
-  guess and recorded only on their Apply; never leave it out when you know); "I just hit 300
-  leatherworking" → op=character, field=profession, value="leatherworking 300"; "drop enchanting on Jonster" → op=character,
-  character=Jonster, field=profession_remove, value="enchanting"; "I no longer make X" / "forget X on Jonster" → field=recipe_remove.
+The requester's own record ("I'll be away", "my main", "I can't make tonight", "I confirm"):
+  leave member EMPTY — the bot fills in the requester itself.
   field is NEVER empty on a character op: pick the one that matches, or ask. Who may do what, and where, is decided by the bot after you answer; write the ops as asked, never refuse or widen them.
-Not settable here (say so): handing the guild to a new owner (slash only, by design: over chat or MCP it would give the guild
+Not settable here (say so): a character's professions, skill or recipes — NEVER an op, whoever asks ("I have X", "I learned X",
+  "I'm a 300 leatherworker", "add X to Rhoz" change nothing): reply that a character linked to the armory updates by itself and
+  any other is edited with /me professions or on the site's Me page; handing the guild to a new owner (slash only, by design: over chat or MCP it would give the guild
   away). A recurring schedule's regulars ARE settable (op regular); there is no standing availability (members answer each run's
   sheet — regulars too: nobody is answered for them).
 """
@@ -241,7 +232,7 @@ class ConfigOp(BaseModel):
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
-    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex|profession|profession_remove|recipe_add|recipe_remove (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
+    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
@@ -1211,37 +1202,12 @@ def _flex_roles(value: str) -> list[str]:
     return list(dict.fromkeys(ROLE_WORDS[w] for w in words))
 
 
+# the owner, 2026-11-16: professions come from the armory, so chat only LOOKS THEM UP. The four fields plain text once wrote
+# are refused in code too, should the parser still write one — the editors are /me professions and the Me page
 PROFESSION_FIELDS = ("profession", "profession_remove", "recipe_add", "recipe_remove")
-CHARACTER_FIELDS = ("Say what to change on the character: add | spec | offspec | name | rank | main | retire | delete | flex | profession | "
-                    "profession_remove | recipe_add | recipe_remove.")
-
-
-def after_op(reg: Registry, op: ConfigOp) -> Registry:
-    """The registry as `op` would leave it, for READING the next change of the same request (describe, the diff's
-    sentences) — never written, the live records untouched. Only a profession change on a character moves it (a recipe
-    said with its profession in one breath lands on that profession: "I am 265 LW with the ironfeather recipes" is one
-    card, not a card and a question — the 2026-11-11 report); every other op, and one that cannot apply, returns `reg`."""
-    if op.op != "character" or (op.field or "").strip().lower() not in PROFESSION_FIELDS:
-        return reg
-    import copy
-
-    from .registry import Profession
-
-    try:
-        uid, m = _character_member(reg, op)
-        if m is None:
-            return reg
-        rows, _ = _character_rows(reg, m, op)
-    except (RegistryError, ValueError):
-        return reg
-    m2 = m.model_copy(deep=True)
-    c = next((x for x in m2.characters if x.label == rows[0]["label"]), None)
-    if c is None:
-        return reg
-    c.professions = [Profession.model_validate(p) for p in rows[0]["professions"]]
-    view = copy.copy(reg)
-    view.members = {**reg.members, uid: m2}
-    return view
+PROFESSIONS_NOT_HERE = ("Professions and recipes aren't changed by message. A character linked to the armory updates by itself. "
+                        "Edit any other with /me professions or on the Me page.")
+CHARACTER_FIELDS = "Say what to change on the character: add | spec | offspec | name | rank | main | retire | delete | flex."
 
 
 def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
@@ -1253,6 +1219,8 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
     who = m.display_name if m else "you"
     if not f:  # the parser left the field empty: say what the fields are, never guess one
         raise RegistryError(CHARACTER_FIELDS)
+    if f in PROFESSION_FIELDS:
+        raise RegistryError(PROFESSIONS_NOT_HERE)
     cur = next((c for c in m.active() if c.matches(label)), None) if (label and m) else None
     if f == "add":
         cls, spec, off = _class_spec(reg, value)
@@ -1269,16 +1237,8 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
         main = slot == "main"
         return ([{"name": name, "surname": surname.strip() or None, "cls": cls, "spec": spec, "offspec": off, "main": main}],
                 f"{who}: add {label} ({what}, {'main' if main else 'alt'})")
-    if cur is None and not label and m is not None and f in ("profession", "profession_remove", "recipe_add", "recipe_remove"):
-        from . import professions
-
-        cur = professions.default_character(reg, m, f)  # "I can make X": the player's main, or their one crafter
     if cur is None:
         raise RegistryError(f"{who} has no active character named {label or '?'} (theirs: {', '.join(c.label for c in m.active()) if m else 'none'})")
-    if f in ("profession", "profession_remove", "recipe_add", "recipe_remove"):
-        from . import professions
-
-        return professions.op_rows(reg, cur, f, value, (op.text or "").strip() or None)
     if f == "spec":
         return [{"label": cur.label, "cls": cur.cls, "spec": value, "offspec": cur.offspec}], f"{cur.label}: spec {cur.spec} → {value}"
     if f == "offspec":
@@ -2162,9 +2122,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
     """Human-readable 'current → new' for the diff, without applying. `channel`: where the request was made (a channel
     id, None = DMs, PLAIN_WEB), when known — the plain op warns when it takes plain text away from there.
     `strict`: a people / run action the registry refuses raises its RegistryError instead of returning the refusal as a
-    line, so a caller can list it as refused (no Apply) rather than as a proposed change. `by_id`: who asks — the four
-    profession fields read as the confirm's sentences, "your" on the asker's own record (professions.preview_sentences);
-    a recipe whose profession the bot can't tell prints the question alone (professions.NeedsProfession)."""
+    line, so a caller can list it as refused (no Apply) rather than as a proposed change. `by_id`: who asks."""
     cfg = reg.config
     if isinstance(op, MergedOp):
         return "; ".join(describe(reg, p, channel) for p in op.parts) + " (saved together)"
@@ -2325,10 +2283,6 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
         except RegistryError as e:
             if strict:
                 raise
-            from .professions import NeedsProfession
-
-            if isinstance(e, NeedsProfession):
-                return str(e)
             return f"{op.op} {op.target or op.member or op.value or ''}: {e}".strip()
     return str(op)
 
@@ -2442,12 +2396,6 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
 
         _, m = _character_member(reg, op)
         rows, line = _character_rows(reg, m, op)
-        f = (op.field or "").strip().lower()
-        if m is not None and f in PROFESSION_FIELDS:  # professions touch no seat: the confirm's sentences, nothing else
-            from . import professions
-
-            c = next(x for x in m.active() if x.label == rows[0]["label"])
-            return "\n".join(professions.preview_sentences(reg, m, c, f, rows, by_id=by_id))
         ripple = rc.character_preview(reg, rc.RaidStore(reg.store, reg.key), m, rc.character_changes(reg, m, rows)) if m is not None else []
         return line + "".join(f" · {r}" for r in ripple)
     if op.op == "absence_clear":
@@ -4526,7 +4474,7 @@ PURE_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "schedul
 def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None = None, channel=PLAIN_WEB, *, by_id: int | None = None) -> Described:
     """The structured preview of a batch: ops coalesced exactly as apply_ops will write them (one line per write), each
     with its parts (current → new, in words), the refusal its apply would give (dry-run on a shadow copy), its warn flag
-    and consequences. Never mutates the live config. `by_id`: who asks (describe's profession sentences say "your")."""
+    and consequences. Never mutates the live config. `by_id`: who asks."""
     d = Described(refused=list(refused or []))
     with reg.config_lock:  # a consistent copy: the config verbs write under this lock (previews may run in a worker thread)
         sh = reg.shadow()

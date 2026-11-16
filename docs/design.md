@@ -3910,7 +3910,14 @@ game's; `fix_unmatched` picks the listed recipe for, or removes, one typed befor
 verb `professions`), linted by tests/test_confirm_readability.py. The import boundary
 (`importers/professions.py`: `detect`, `parse`, `FORMATS`) recognises nothing yet; no paste box shows until it does.
 
-**Plain text.** No new op: the `character` op (own record, `bind_self`, already in the parity matrix) gains four fields —
+**Plain text — RETIRED 2026-11-16 (the owner).** With the armory link the bot reads professions from the game, and its
+replies to "I have X" in #professions were disruptive ("Which recipes do you mean?" to a member telling the channel what
+they had learned). Chat now only looks professions up: the four fields below are refused with
+`configops.PROFESSIONS_NOT_HERE`, the parser is told they are not settable, `professions.op_rows`, `NeedsProfession`,
+`preview_sentences`, `configops.after_op` and `ProfessionPickView` are removed, and the listening question treats what a
+writer has, learned or can make as chat between people. What follows is the design as it was.
+
+**Plain text (as built, before the retirement).** No new op: the `character` op (own record, `bind_self`, already in the parity matrix) gains four fields —
 `profession` ("Rhoz is a 300 leatherworker"; a new profession without a number is recorded with its skill not said, one on record keeps its skill),
 `profession_remove` ("drop enchanting on Jonnie"), `recipe_add` / `recipe_remove` ("I just learned Devilsaur Gauntlets on
 Rhoz"; value = the name as written, member text, never interpreted; `text` = the profession when the member names one).

@@ -445,25 +445,10 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   there — press **Keep professions by hand** in `/me char` (or on the Me page) to edit them — and no edit buttons.
   When both trades are taken it says so (*"Two trades are taken. Cooking, First Aid and Fishing are open."*) and offers
   only those.
-  Or tell the bot (a DM, an @mention, or a channel it listens in): "Rhoz is a 300 leatherworker", "Rhoz is a
-  leatherworker" (a new profession with no number is recorded with its skill not said; saying it again with a number
-  sets the skill), "I just
-  learned Devilsaur Gauntlets on Rhoz", "take Devilsaur Gauntlets off Rhoz", "remove enchanting from Jonnie". It shows the
-  change and waits for your **Apply**, like any change to your record; for a character whose professions follow the
-  armory it says to turn on **Keep professions by hand** first, and changes nothing. You need not name the character: "I can make
-  Ironfeather Shoulders" goes to your one character that makes things, else to your main, and the bot asks which only when
-  two of your characters could hold it. The bot looks the recipe up in the game's list, so it knows which profession
-  makes it: the whole name in any case, or enough of it ("ironf shoulders"); when part of a name fits several recipes
-  it names up to five (*"Did you mean Devilsaur Gauntlets or Devilsaur Leggings?"*) and changes nothing. Taking a
-  recipe off works the same way over the recipes that character has ("I can't make ironfeather any more"). If the
-  character doesn't have that profession yet and could still take it, the change records both, and says so before
-  you confirm (*"Thornwick has no Leatherworking on record yet. Apply records Leatherworking on Thornwick and adds Green
-  Dragonscale Breastplate to the recipes Thornwick makes."*); say the skill later. The bot asks only when the game has a recipe of that
-  name in two professions the character holds, or could take (*"Which profession makes Radiant Gloves?"*), with a
-  list of the professions to pick from — only you can pick, nothing changes until you do, and the list expires after ten
-  minutes; say "… with tailoring" to skip the question. Say the profession and its recipes in one message ("I am 265
-  Leatherworking with the Ironfeather Shoulders recipe") and both are on the one change it shows: no question. The change it shows before **Apply** is in sentences, like
-  the editor's (*"Your Leatherworking gains Devilsaur Gauntlets."*). A character has at most two trade professions (Alchemy,
+  The bot does not take professions or recipes from a message. In chat it only looks them up ("who can make a
+  Mooncloth Bag?"). Say "I just learned Devilsaur Gauntlets" in a channel it listens in and it stays quiet; ask it
+  outright to record one and it answers *"Professions and recipes aren't changed by message. A character linked to the
+  armory updates by itself. Edit any other with /me professions or on the Me page."* A character has at most two trade professions (Alchemy,
   Blacksmithing, Enchanting, Engineering, Leatherworking, Tailoring, Herbalism, Mining and Skinning count); Cooking,
   First Aid and Fishing are free. A recipe is one of the game's own recipes for that profession: the bot takes the
   game's spelling, and refuses a name the game doesn't have (*"Devilsaur Gauntlet isn't a recipe in the game's list."*)
@@ -471,8 +456,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   recipes to Mining (its smelting), Herbalism, Skinning and Fishing too. Recipes typed before the bot knew the game's
   list were matched to it once, when the bot started; one the list doesn't have stays on the record as it was written,
   still names its crafter, and every save keeps it until an officer fixes it on the Professions page. Officers do the same for anyone: on the Members page the
-  character's ⋮ › **Professions…** opens the same editor, and the search box there finds recipe names too; in plain
-  text, naming the character, where their changes act (§8c). Professions belong to the character: they stay with it
+  character's ⋮ › **Professions…** opens the same editor, and the search box there finds recipe names too. Professions belong to the character: they stay with it
   when you change your main, and a retired character is no longer named as a crafter. Reading an addon's export of your
   professions is planned; nothing is imported yet. Anyone in the guild can then ask who can make a thing (§10a).
 - **Who can make a thing, in Discord**: `/professions who` — start typing the recipe's name and pick it from the
@@ -1925,9 +1909,9 @@ and links are left alone. Each listening channel is one of two:
 The bot judges a message with what it knows about the room: its own job there (the signup channel, the officers'
 channel) and the channel's topic and category in Discord — so give a listening channel a topic ("General chat about the
 game", "Raid signups and questions") and the bot reads it in that light.
-A channel for professions is set like any listening channel: "listen in #professions" with *Replies*, and plain text
-there left at *Own record only*. Then "just hit 300 leatherworking on Rhoz" becomes your change to Apply, and "anyone able
-to make a Mooncloth Bag?" gets an answer, with no tag.
+A channel for professions is set like any listening channel: "listen in #professions" with *Replies*. Then "anyone able
+to make a Mooncloth Bag?" gets an answer, with no tag, and "just hit 300 leatherworking on Rhoz" is left alone: the bot
+reads professions from the armory, not from chat.
 
 The owner turns it on in plain text ("listen in #signups", "only watch #general", "stop listening in #signups"), or on
 the Ops page's **Plain-text permissions** tab: the table has a **Listening** column, a *Watches* or *Replies* badge on each listening channel,

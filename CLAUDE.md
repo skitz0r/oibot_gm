@@ -526,8 +526,8 @@ src/oibot_gm/
                        every match (the total); list_hits = the list alone through the same tiers (the wizard's select, plain text); who_can_make reads
                        search ('#<id>' = a picked recipe); nobody_sentence / NOT_A_RECIPE / answer_lines (+ more_sentence) = its words; crafters_of(reg, pid);
                        visible = active character, not a puppet, not left; has_recipes(reg, pid) (the list's, R7, else ProfessionDef.makes);
-                       op_rows = the plain-text `character` op's four profession fields → a table row + its describe line (with the list a recipe_add
-                       resolves against it: did_you_mean for several names, NeedsProfession only for two listed professions, one candidate never asked);
+                       chat only LOOKS UP (the owner, 2026-11-16: professions come from the armory) — no plain-text write of a profession, skill or
+                       recipe (op_rows, NeedsProfession and the picker are gone; configops.PROFESSIONS_NOT_HERE is the refusal);
                        fix_unmatched(reg, uid, label, pid, name, recipe_id|None, by, by_id=, preview=) = the officers' fix for a recipe typed before the
                        list (Pick the recipe… / Remove; rename_recipe / merge_recipe and their routes are retired, §5.64 C7), unmatched(reg) = those
                        recipes for the officers' card (off_list: no id, an id the list lacks or gives elsewhere — an armory one kept by hand; never a
@@ -603,8 +603,10 @@ src/oibot_gm/
                        flows_config._save_settings = the settings wizards' (timezone, about) Save through apply_ops.
                        Phase 3 (§5.44): config_summary(reg, bot, audience) → [SummarySection] (owner: host_facts) + summary_text; the `comp` structured
                        kind → comp_target ops → Registry.set_comp_targets; schedule_pause_sentence; the timezone CONSEQUENCE_HOOK
-                       Professions (§5.60): the `character` op's fields profession | profession_remove | recipe_add | recipe_remove (value = "Leatherworking 300"
-                       or the recipe name as written, `text` = the profession when two could make it) → professions.op_rows; own record, no new op
+                       Professions (the owner, 2026-11-16): NOT written from plain text — the schema tells the parser so ("Not settable here") and
+                       _character_rows refuses the four old fields (PROFESSION_FIELDS) with PROFESSIONS_NOT_HERE; the editors are /me professions and the
+                       Me page, a linked character follows the armory. The listening gate (discord_bot.LISTEN_QUESTION / LISTEN_CRITERIA) treats "I have /
+                       learned / can make X" as chat between people; scripts/listen_probe.py's NEWS set guards it (under 50 %)
   cli.py               `oibot roster|loot|demo|discord`; root logger → out/oibot.log (rotating) + stderr
   mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, plain_change …)
                        that call the RUNNING bot's /api/* over HTTP as the OWNER OF THE CHOSEN GUILD (every tool's optional `guild` = key or name,
@@ -628,10 +630,8 @@ src/oibot_gm/
                        set_comp_target (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change, /gm config plain (the D37 READ view, registered here); handle_change for every
                        plain-text path (ConfigConfirmView re-authorizes the presser; diff_text = the diff's body: setup ops as configops.describe_ops(…).as_discord(),
-                       other ops their preview_line — a profession field its confirm sentences, by_id = the asker; refusals end with configops.plain_footer;
-                       guild name when many_guilds); ProfessionPickView = the clarification when a recipe's profession is unclear
-                       (professions.NeedsProfession): a select bound to the asker, 10 min, pending_views-mirrored, the pick applied as Apply
-                       does (§5.60); policy_show_messages
+                       other ops their preview_line; refusals end with configops.plain_footer;
+                       guild name when many_guilds); policy_show_messages
                        (≤3 text messages + one Compiled reading embed ≤15 rules); PolicyEditModal append-only past 4000
   news.py              news review (design §5.26): keyword filter of #news webhook embeds (profiles/<v>/news.yaml version_terms + raid names +
                        guild news_keywords) → <guild>/news.jsonl (dedupe by url); Proposal/ProposalStore (<guild>/proposals/<id>.yaml,

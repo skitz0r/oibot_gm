@@ -244,9 +244,10 @@ def test_run_open_stamp_in_the_proposed_changes_embed(reg, value):
 
 # ---- a people action the registry refuses is a refusal, not a proposed change (design §5.60 follow-up)
 
-def test_the_schema_names_the_profession_fields_so_the_parser_fills_field():
+def test_the_schema_names_the_character_fields_so_the_parser_fills_field():
     desc = ConfigOp.model_fields["field"].description
-    assert "character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex|profession|profession_remove|recipe_add|recipe_remove" in desc
+    assert "character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming" in desc
+    assert "recipe_add" not in desc, "professions are not written from a message (the owner, 2026-11-16)"
 
 
 def test_a_character_op_without_a_field_is_refused_not_proposed(reg):
@@ -268,179 +269,27 @@ def test_a_character_op_without_a_field_is_refused_not_proposed(reg):
     assert "view" not in kw or kw["view"] is None, "no Apply button on a refusal"
 
 
-# ---- a recipe whose profession the bot can't tell: a picker bound to the asker, then both recorded (design §5.60 follow-up)
+# ---- professions are looked up, never written from a message (the owner, 2026-11-16)
 
-def _bare_crafter(reg):
+def test_a_profession_said_in_a_message_is_refused_once_with_no_apply(reg):
     from oibot_gm.registry import Registry
 
     m = reg.members[Registry.TEST_BASE]
-    return m, m.main.label
-
-
-def test_a_recipe_with_no_profession_is_answered_with_a_picker_not_a_refusal(reg):
-    m, label = _bare_crafter(reg)
-    log = []
-    op = ConfigOp(op="character", member=f"<@{m.discord_id}>", character=label, field="recipe_add", value="Radiant Gloves")
-
-    async def go():
-        it = interaction(m.discord_id, log, officer=True)
-        req = ConfigRequest(kind="change", reply="", ops=[op])
-        await discord_policy.handle_change(it, reg, None, None, Feed(), "i can make a radiant gloves", bot=it.client, channel=OPS_CH, req=req)
-    asyncio.run(go())
-    kind, content, kw = log[-1]
-    assert "⛔" not in content
-    assert content == (f"Which profession makes Radiant Gloves?\nPicking one records it on {label} and adds the recipe. "
-                       "Nothing changes until you pick.")
-    view = kw["view"]
-    assert isinstance(view, discord_policy.ProfessionPickView) and view.timeout == 600
-    assert [o.label for o in view.select.options] == ["Blacksmithing", "Tailoring"], "the game's list gives the recipe to both"
-
-
-def test_one_profession_that_makes_the_recipe_is_the_card_not_a_picker(reg):
-    """Green Dragonscale Breastplate is a Leatherworking recipe only: one candidate is never a question (task 2 carry)."""
-    m, label = _bare_crafter(reg)
-    log = []
-    op = ConfigOp(op="character", member=f"<@{m.discord_id}>", character=label, field="recipe_add", value="Green Dragonscale Breastplate")
-
-    async def go():
-        it = interaction(m.discord_id, log, officer=True)
-        await discord_policy.handle_change(it, reg, None, None, Feed(), "i can make a green dragonscale breastplate", bot=it.client, channel=OPS_CH,
-                                           req=ConfigRequest(kind="change", reply="", ops=[op]))
-    asyncio.run(go())
-    kind, content, kw = log[-1]
-    assert isinstance(kw["view"], discord_policy.ConfigConfirmView)
-    assert f"Apply records Leatherworking on {label}" in kw["embed"].description
-
-
-def _pick_view(reg, m, label, feed):
-    from oibot_gm import professions
-
-    op = ConfigOp(op="character", member=f"<@{m.discord_id}>", character=label, field="recipe_add", value="Radiant Gloves")
-    try:
-        configops.describe(reg, op, OPS_CH, strict=True)
-    except professions.NeedsProfession as e:
-        need = e
-    return discord_policy.ProfessionPickView(reg, op, need, None, feed, m.discord_id, m.display_name, OPS_CH)
-
-
-def test_the_pick_records_both_and_says_so(reg):
-    m, label = _bare_crafter(reg)
-    feed, log = Feed(), []
-
-    async def go():
-        view = _pick_view(reg, m, label, feed)
-        await view.picked(interaction(m.discord_id, log), ["tailoring"])
-    asyncio.run(go())
-    c = next(c for c in reg.members[m.discord_id].active() if c.label == label)
-    lw = next(p for p in c.professions if p.id == "tailoring")
-    assert lw.skill is None and [r.name for r in lw.recipes] == ["Radiant Gloves"]
-    assert log[0][0] == "edit_message" and log[-1] == ("edit", f"{label} now has Tailoring on record and makes Radiant Gloves.",
-                                                      {"view": None, "embed": None})
-    assert len(feed.lines) == 1 and "plain-text change" in feed.lines[0][1], "one ops line"
-
-
-def test_another_users_pick_is_refused_and_a_changed_record_is_said(reg):
-    m, label = _bare_crafter(reg)
-    other = reg.test_members()[1]
-    feed, log = Feed(), []
-
-    async def go():
-        view = _pick_view(reg, m, label, feed)
-        await view.picked(interaction(other.discord_id, log), ["tailoring"])
-        assert log == [("send", f"Only {m.display_name} can pick this.", {"ephemeral": True})] and not view.busy
-        log.clear()
-        reg.save_character_table(m.discord_id, [{"label": label, "professions": [{"id": "alchemy", "skill": 100}, {"id": "mining", "skill": 100}]}], "t", officer=True)
-        await view.picked(interaction(m.discord_id, log), ["tailoring"])
-        assert log == [("edit_message", f"{label}'s record changed since the question. Say it again.", {"view": None, "embed": None})]
-    asyncio.run(go())
-
-
-def test_a_profession_and_its_recipe_in_one_request_are_one_card_and_no_picker(reg):
-    """The 2026-11-11 report: "I am 265 LW with ironfeather shoulder recipes" became an Apply card for the profession
-    AND a picker for the recipe; the Apply then made the picker refuse. Each change is read as the earlier ones leave
-    the record: the recipe lands on the profession the same request records."""
-    m, label = _bare_crafter(reg)
-    feed, log = Feed(), []
+    label = m.main.label
+    before = [p.model_dump() for p in m.main.professions]
     who = f"<@{m.discord_id}>"
     ops = [ConfigOp(op="character", member=who, character=label, field="profession", value="Leatherworking 265"),
-           ConfigOp(op="character", member=who, character=label, field="recipe_add", value="Ironfeather Shoulders"),
-           ConfigOp(op="character", member=who, character=label, field="recipe_add", value="Ironfeather Breastplate")]
+           ConfigOp(op="character", member=who, character=label, field="recipe_add", value="Ironfeather Shoulders")]
+    log = []
 
     async def go():
         it = interaction(m.discord_id, log, officer=True)
-        await discord_policy.handle_change(it, reg, None, None, feed, "i am 265 LW with ironfeather shoulder/chest recipes", bot=it.client,
+        await discord_policy.handle_change(it, reg, None, None, Feed(), "i am 265 LW with the ironfeather shoulders recipe", bot=it.client,
                                            channel=OPS_CH, req=ConfigRequest(kind="change", reply="", ops=ops))
-        assert len(log) == 1, "one reply: the card, no picker beside it"
-        kind, content, kw = log[0]
-        view, body = kw["view"], kw["embed"].description
-        assert isinstance(view, discord_policy.ConfigConfirmView)
-        assert "⛔" not in body and "Which profession" not in body and "no Leatherworking on record" not in body, body
-        assert "Leatherworking gains Ironfeather Shoulders." in body and "Leatherworking gains Ironfeather Breastplate." in body, body
-        await view.press_apply(interaction(m.discord_id, log, officer=True))
     asyncio.run(go())
-    c = next(c for c in reg.members[m.discord_id].active() if c.label == label)
-    assert [(p.id, p.skill, [r.name for r in p.recipes]) for p in c.professions] == [("leatherworking", 265, ["Ironfeather Shoulders", "Ironfeather Breastplate"])]
-    assert "⛔" not in log[-1][1], log[-1]
-
-
-def test_a_pick_still_applies_when_the_record_changed_but_the_pick_fits(reg):
-    """The picker's guard: a record changed since the question refuses only a pick that no longer fits (the bot's own
-    Apply from the same request recorded the profession the person then picks)."""
-    m, label = _bare_crafter(reg)
-    feed, log = Feed(), []
-
-    async def go():
-        view = _pick_view(reg, m, label, feed)
-        reg.save_character_table(m.discord_id, [{"label": label, "professions": [{"id": "tailoring", "skill": 265}]}], "t", officer=True)
-        await view.picked(interaction(m.discord_id, log), ["tailoring"])
-    asyncio.run(go())
-    c = next(c for c in reg.members[m.discord_id].active() if c.label == label)
-    lw = next(p for p in c.professions if p.id == "tailoring")
-    assert lw.skill == 265 and [r.name for r in lw.recipes] == ["Radiant Gloves"]
-    assert log[-1] == ("edit", f"{label}'s Tailoring gains Radiant Gloves.", {"view": None, "embed": None})
-
-
-def test_the_picker_expires_like_the_confirm(reg):
-    m, label = _bare_crafter(reg)
-    edits = []
-
-    async def editor(**kw):
-        edits.append(kw)
-
-    async def go():
-        view = _pick_view(reg, m, label, Feed())
-        view.bind(editor)
-        await view.on_timeout()
-    asyncio.run(go())
-    assert edits == [{"content": discord_policy.EXPIRED, "embed": None, "view": None}]
-
-
-def test_the_picker_says_it_only_adds_the_recipe_when_both_choices_are_on_record(reg):
-    from oibot_gm import professions
-
-    m, label = _bare_crafter(reg)
-    reg.save_character_table(m.discord_id, [{"label": label, "professions": [{"id": "blacksmithing", "skill": 300}, {"id": "tailoring", "skill": 300}]}], "t", officer=True)
-    op = ConfigOp(op="character", member=f"<@{m.discord_id}>", character=label, field="recipe_add", value="Radiant Gloves")
-    with pytest.raises(professions.NeedsProfession) as e:
-        configops.describe(reg, op, OPS_CH, strict=True)
-    view = discord_policy.ProfessionPickView(reg, op, e.value, None, Feed(), m.discord_id, m.display_name, OPS_CH)
-    assert view.text == (f"Which profession makes Radiant Gloves?\nPicking one adds the recipe to that profession on {label}. "
-                         "Nothing changes until you pick.")
-    assert [o.label for o in view.select.options] == ["Blacksmithing", "Tailoring"]
-
-
-def test_a_failed_apply_after_a_pick_writes_the_warn_line(reg, monkeypatch):
-    m, label = _bare_crafter(reg)
-    feed, log = Feed(), []
-
-    async def refuse(*a, **k):
-        raise configops.RegistryError("A character has two trade professions — drop one first.")
-
-    monkeypatch.setattr(configops, "apply_async", refuse)
-
-    async def go():
-        view = _pick_view(reg, m, label, feed)
-        await view.picked(interaction(m.discord_id, log), ["tailoring"])
-    asyncio.run(go())
-    assert log[-1][1] == "A character has two trade professions — drop one first."
-    assert feed.lines and feed.lines[-1][0] == "warn" and "refused: A character has two trade professions" in feed.lines[-1][1]
+    assert len(log) == 1, "one reply"
+    kind, content, kw = log[0]
+    assert "⛔" in content and content.count(configops.PROFESSIONS_NOT_HERE) == 1, content
+    assert kw.get("view") is None, "no Apply button, no picker"
+    assert [p.model_dump() for p in reg.members[m.discord_id].main.professions] == before
+    assert not hasattr(discord_policy, "ProfessionPickView")
