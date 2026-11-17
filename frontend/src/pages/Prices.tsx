@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActionIcon, Button, Card, Group, SegmentedControl, Stack, Switch, Text, TextInput } from "@mantine/core";
+import { ActionIcon, Button, Card, Group, CloseButton, SegmentedControl, Stack, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconChevronDown, IconChevronRight, IconSearch } from "@tabler/icons-react";
 import { api, ApiError, type Bargains, type Meta, type Prep, type MoverRow, type Movers, type PriceFind, type PriceHistory, type PriceRow, type GuildWatch, type WatchList } from "../api";
 import { ItemName } from "../components/ItemName";
@@ -56,6 +56,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const watchWinRef = useRef(watchWin);
   watchWinRef.current = watchWin;
   const [watchGroup, setWatchGroup] = useState("all");
+  const [watchQ, setWatchQ] = useState("");  // the watch list's type-ahead filter
   // the card's second tab (the owner, 2026-11-15): what the guild's members watch, a count per item, never who
   const [watchTab, setWatchTab] = useState<"mine" | "guild">("mine");
   const [guild, setGuild] = useState<GuildWatch | null>(null);
@@ -131,7 +132,7 @@ export function PricesPage({ meta }: { meta: Meta }) {
     }
   };
 
-  /** Share with the guild: the member's own choice whether their items count on the guild's list. */
+  /** Visibility, Public | Private (the owner, 2026-11-16; a switch "Share with the guild" before): the member's own choice whether their items count on the guild's list. */
   const [sharing, setSharing] = useState(false);
   const share = async (on: boolean) => {
     setSharing(true);
@@ -157,7 +158,9 @@ export function PricesPage({ meta }: { meta: Meta }) {
   const emptyWords = onGuild ? guild?.empty : list ? (!list.registered && refusal ? refusal : list.empty) : undefined;
   const watchGroups = (list?.groups || []).filter((g) => g.id === "all" || allRows.some((r) => r.group === g.id));  // only groups the list holds
   const inGroup = watchGroups.some((g) => g.id === watchGroup) ? watchGroup : "all";  // a group emptied by Stop watching falls back to All
-  const rows = inGroup === "all" ? allRows : allRows.filter((r) => r.group === inGroup);
+  const typed = watchQ.trim().toLowerCase();  // the type-ahead: part of a name, on the rows already here
+  const named = typed ? allRows.filter((r) => r.name.toLowerCase().includes(typed)) : allRows;
+  const rows = inGroup === "all" ? named : named.filter((r) => r.group === inGroup);
   const watchWinLabel = list?.windows?.find((w) => w.id === (list.window ?? "24"))?.label || "24 hours";
   const isOpen = (id: number, at: Where) => shown && openAt?.id === id && openAt.at === at;
   const toggle = (id: number, at: Where) => setOpen(isOpen(id, at) ? null : id, at);
@@ -439,15 +442,25 @@ export function PricesPage({ meta }: { meta: Meta }) {
         <CardHeader title={onGuild ? "The guild's watch list" : "Your watch list"}
           hint={onGuild ? "what members watch and how many, never who" : "nothing pings you when a price moves"} />
         {list !== null && (
-          <Group px="md" pt="sm">
+          <Group px="md" pt="sm" justify="space-between" gap="xs">
             <SegmentedControl size="sm" value={watchTab} onChange={(t) => setWatchTab(t as "mine" | "guild")} aria-label="Whose watch list"
               data={[{ value: "mine", label: `Yours · ${ownRows.length}` }, { value: "guild", label: guild ? `Guild · ${guild.rows.length}` : "Guild" }]} />
+            {!onGuild && list.registered && (
+              <Tooltip multiline w={240} label="Public: your items count on the Guild tab, never with your name. Private: they count for nothing there.">
+                <Group gap={6} wrap="nowrap">
+                  <Text size="xs" c="dimmed">Visibility</Text>
+                  <SegmentedControl size="xs" value={(list.shared ?? true) ? "public" : "private"} disabled={sharing} aria-label="Visibility"
+                    onChange={(v) => share(v === "public")} data={[{ value: "public", label: "Public" }, { value: "private", label: "Private" }]} />
+                </Group>
+              </Tooltip>
+            )}
           </Group>
         )}
-        {!onGuild && list?.registered && (
+        {allRows.length > 0 && (
           <Group px="md" pt="sm">
-            <Switch size="sm" checked={list.shared ?? true} disabled={sharing} onChange={(e) => share(e.currentTarget.checked)}
-              label="Share with the guild" description="Your items count on the Guild tab, never with your name." />
+            <TextInput size="xs" style={{ flex: 1 }} leftSection={<IconSearch size={14} />} placeholder="Filter this list by name" value={watchQ}
+              aria-label="Filter this list by name" onChange={(e) => setWatchQ(e.currentTarget.value)}
+              rightSection={watchQ ? <CloseButton size="sm" aria-label="Clear the filter" onClick={() => setWatchQ("")} /> : null} />
           </Group>
         )}
         {(onGuild ? guild === null : list === null) && <Text size="sm" c="dimmed" px="md" py="sm">Loading…</Text>}
@@ -462,13 +475,16 @@ export function PricesPage({ meta }: { meta: Meta }) {
             {watchGroups.map((g) => (
               <Button key={g.id} size="compact-xs" radius="xl" variant={inGroup === g.id ? "filled" : "default"}
                 aria-pressed={inGroup === g.id} onClick={() => setWatchGroup(g.id)}>
-                {g.name} · {g.id === "all" ? allRows.length : allRows.filter((r) => r.group === g.id).length}
+                {g.name} · {g.id === "all" ? named.length : named.filter((r) => r.group === g.id).length}
               </Button>
             ))}
           </Group>
         )}
-        {emptyWords !== undefined && rows.length === 0 && (
+        {emptyWords !== undefined && allRows.length === 0 && (
           <Text size="sm" c="dimmed" px="md" py="sm">{emptyWords}</Text>
+        )}
+        {allRows.length > 0 && rows.length === 0 && (
+          <Text size="sm" c="dimmed" px="md" py="sm">No item on this list has “{watchQ.trim()}” in its name. Clear the filter to see them all.</Text>
         )}
         {rows.length > 0 && (
           <div className={css.list}>

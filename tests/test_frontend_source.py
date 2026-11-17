@@ -724,7 +724,11 @@ def test_the_prices_tab():
     # 2026-11-15: the watch list takes Movers' time and item-group choices (the server's windows and groups)
     assert "list.windows.map(" in page and "watchGroups.map(" in page and "window: watchWinRef.current" in page
     # 2026-11-15: the Guild tab — what members watch and how many, never who
-    assert "/api/prices/watch/share" in page and "Share with the guild" in page and "list.shared" in page
+    assert "/api/prices/watch/share" in page and "list.shared" in page
+    # 2026-11-16: the switch is Visibility · Public | Private on the tabs' line, and the list has a type-ahead filter above the time and group choices
+    assert "Share with the guild\"" not in page and 'aria-label="Visibility"' in page and '"Public"' in page and '"Private"' in page
+    assert 'placeholder="Filter this list by name"' in page and "r.name.toLowerCase().includes(typed)" in page
+    assert page.index("Filter this list by name") < page.index("list.windows.map(") < page.index("watchGroups.map(")
     assert "/api/prices/guild-watching" in page and "r.watchers_words" in page and "never who" in page
     assert "list?.checked" in page and "again * 1000" in page, "the last / next check beside Prices as of, asked again after the next check"
     # 2026-11-14: a search row opens to the chart too (watched or not), and a watched row carries its small line
