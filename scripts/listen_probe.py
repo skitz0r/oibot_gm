@@ -25,9 +25,13 @@ from oibot_gm.llm import decisions  # noqa: E402
 
 BAIT = ["does anyone have the pattern for devilsaur gauntlets?", "anyone able to enchant crusader on my sword?",
         "who can make a mooncloth bag", "when does Barrow Deeps run this week?", "what class is Rhoz playing?",
-        "who is our jewelcrafter?", "i can't make thursday", "what day do the horde runs happen?"]
+        "who is our jewelcrafter?", "i can't make thursday", "what day do the horde runs happen?",
+        # 2026-11-18: spoken to by name, and "does <character> have <a recipe>" (a real miss at 16 %)
+        "bot does al lions have limited invulnerability potion",
+        "bot does al lions have any useful alchemy recipes", "hey bot what's the cheapest arcanite bar"]
 BANTER = ["lol nice pull", "gg everyone, great raid", "that boss is so annoying", "anyone watching the game tonight?",
-          "brb food", "we wiped at 2% again, classic", "haha same", "did you see the new patch notes"]
+          "brb food", "we wiped at 2% again, classic", "haha same", "did you see the new patch notes",
+          "the bot is being dumb today lol", "lol that guy is such a bot", "does anyone have a spare limited invulnerability potion for tonight"]
 NEWS = ["i just got the leatherworking pattern for hide of the wild", "i have every merchant favor enchant",
         "just hit 300 leatherworking on my hunter", "i can make devilsaur gauntlets now", "learned crusader today"]
 

@@ -129,13 +129,19 @@ LISTEN_BOT_WORDS = ("This is the guild's Discord bot for World of Warcraft raids
                     "absences, and it knows every member's characters: who plays which class and spec, their main and alts, their "
                     "rank and attendance. It looks up each character's professions, their skill and who can make a thing; "
                     "it reads them from the game and never takes them from chat. It runs the loot council and members' wishlists, "
-                    "and explains the guild's loot and roster rules. It answers questions about itself and how to use it. It never "
-                    "joins chat between people, game talk or jokes.")
+                    "and explains the guild's loot and roster rules. It answers questions about itself and how to use it. People call "
+                    "it 'bot' or 'the bot'. It never joins chat between people, game talk or jokes.")
 LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or act on `message.text`? Yes when it asks something "
-                   "the bot knows (when a raid runs, who is rostered, what class or spec someone plays, a member's characters, rank or "
+                   "the bot knows (when or on what day a raid or run happens, who is rostered, what class or spec someone plays, a member's characters, rank or "
                    "attendance, who can make or craft something, which professions or recipes someone has, a loot or roster rule, "
                    "how the bot works) or tells the bot something it records (an absence, a signup answer, a character or spec "
                    "change), even without naming the bot. "
+                   "A message that speaks TO the bot — it opens with or calls 'bot', 'hey bot', 'the bot' and then asks or tells "
+                   "it something (the owner, 2026-11-18) — is for the bot whatever it asks: Yes. A message that only talks ABOUT "
+                   "the bot to other people ('the bot is slow today') is not. "
+                   "A message asking whether a named member or character has, knows or can make a potion, item, pattern or "
+                   "recipe asks about that character's professions: Yes. A message asking people for an item itself (a spare one, "
+                   "to buy, borrow or be sent) is between people: No. "
                    "A message asking who has, can make or craft a pattern, recipe or item is a question the bot answers from its "
                    "records, even when it is addressed to everyone. A message saying the writer has, got, learned or can now make a "
                    "pattern, recipe or enchant, or reached a skill, is news for the people in the channel and not for the bot "
@@ -145,8 +151,8 @@ LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or 
                    "them is for the bot. "
                    "`bot` says what the bot does; `channel` says where it was written (the bot's job there, the channel's own "
                    "topic and its category); `recent` is the chat just before, for context only.")
-LISTEN_CRITERIA = {"true": "The message asks who can make something or what the bot knows, or tells it an absence, a signup "
-                           "answer or a character change.",
+LISTEN_CRITERIA = {"true": "The message speaks to the bot by calling it 'bot', or asks who can make something, whether someone "
+                           "has or knows a recipe, when or what day a raid or run happens, or what else the bot knows, or tells it an absence, a signup answer or a character change.",
                    "false": "The message is people talking to each other about the game itself, a joke, a link or a reply to "
                             "someone else, or someone saying what they have, learned, got or can now make."}
 # the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things; listen_state adds the game

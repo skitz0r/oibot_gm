@@ -1900,7 +1900,8 @@ asks first.
 tagged or not, and answers what is clearly for it — "when does Barrow Deeps run this week?", "I can't make Thursday" —
 exactly as if you had @mentioned it, under the same rules for that channel. A decision service judges each message
 "is this for the bot?"; it only answers yes or no and never writes anything, and chat between people, game talk, jokes
-and links are left alone. Each listening channel is one of two:
+and links are left alone. Starting a message with "bot" ("bot does Mara have the Free Action Potion recipe?", "hey bot
+when is the next raid") counts as speaking to it; talking *about* the bot to other people doesn't. Each listening channel is one of two:
 - **Watches** — the bot only notes what it would have answered and says nothing. Start here, read what it would have
   done, then switch to *Replies*.
 - **Replies** — the bot answers. When it is unsure a message is for it, it adds 👀 instead; the writer clicks the 👀
