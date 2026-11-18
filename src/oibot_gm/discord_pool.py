@@ -297,7 +297,6 @@ def absences_card(reg: Registry) -> discord.Embed:
                 break
             text += ("\n" if text else "") + line
         e.add_field(name="Upcoming", value=text, inline=False)  # D28: names + days in words
-    e.set_footer(text="Also: /me absent add · the Me page on the website")
     return e
 
 
@@ -534,7 +533,6 @@ def plain_read_text(reg: Registry, table: dict, here) -> str:
         label = "#" + c["name"] if c.get("name") else "<#" + str(c["id"]) + ">"
         kept = remembers.get(str(c["id"]))
         lines.append(f"• {label}: {LISTEN_WORDS.get(c['mode'], c['mode'])} — listening" + (f", {MEMORY_WORDS[kept].lower()}" if kept in MEMORY_WORDS else ""))
-    lines += ["", "-# The owner edits this on the site (Ops › Plain-text permissions). Refusals say who may and where."]
     return "\n".join(lines)
 
 

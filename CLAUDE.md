@@ -559,6 +559,9 @@ src/oibot_gm/
                        notes), nothing about what is NOT there; HelpAnswer.page (a PAGES key) → page_link = '-# See it all on the [Professions page](<url>).'
                        (officers' pages for an officer only; off for the site's box — help_answer(link=False)); `commands` only when the asker must DO
                        something, never a slash command for a read; `officer_view` = the public-channel footer only when officer data was asked for;
+                       page_words(reg, key) = a page's name as a link inside text code writes ("…and N more — the [Professions page](<url>) has them all.");
+                       small print (the review of 2026-11-18): no standing how-to under a reply or card, nothing about what does NOT happen ("no DM",
+                       "nothing to do"), no slash command for a read where a page shows it; empty fields and mechanics notes in the snapshot are never volunteered;
                        officers' `config` section = configops.summary_text(config_summary(audience)) (owner: Host too);
                        `prices` section (every member, §5.65: prices.help_section, gated by prices.help_hit alone — code computes, the model words it);
                        `who` section (every member, any channel: who plays what + rank, named members first, no officer marks; an officer

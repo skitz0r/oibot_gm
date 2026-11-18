@@ -459,11 +459,11 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   character's ⋮ › **Professions…** opens the same editor, and the search box there finds recipe names too. Professions belong to the character: they stay with it
   when you change your main, and a retired character is no longer named as a crafter. Reading an addon's export of your
   professions is planned; nothing is imported yet. Anyone in the guild can then ask who can make a thing (§10a).
-- **Who can make a thing, in Discord**: `/professions who` — start typing the recipe's name and pick it from the
+- **Who can make a thing**: the **Professions** page, or just ask the bot. In Discord `/professions who` does the same — start typing the recipe's name and pick it from the
   game's whole list of recipes (the ones somebody in the guild makes come first; two recipes with one name are told
   apart by their category); the answer names its crafters, highest skill first, and only you see it. Nobody is
-  pinged: ask them yourself. A recipe nobody makes yet says so (*"Nobody in the guild makes Ironfeather Shoulders
-  yet."*) and how a crafter adds theirs; a name the game doesn't have gets *"That isn't a recipe in the game's list."*
+  pinged. A recipe nobody makes yet says so (*"Nobody in the guild makes Ironfeather Shoulders
+  yet."*); a name the game doesn't have gets *"That isn't a recipe in the game's list."*
   When the guild has prices (§8, the guild's auction house), a recipe's answer also says its cost to make at the lowest
   prices listed (*"Cost to make: at least 3g 20s — 1 reagent has none listed."*), with how recent the prices are. `/professions list`
   — pick a profession and see everyone who has it, highest skill first, with their specialization (Tribal, Gnomish,
@@ -2663,7 +2663,7 @@ an officer), **policy** (each doc,
 compiled or not; the text when you name it), **auras** (the whole buffs table, the game's defaults + the guild's changes — members get this one too) and the
 **test bench**. An officer's snapshot always carries one index line with counts (open applications, proposals to
 decide (proposed or failed), unconfirmed characters, unanswered confirmations, fill asks, who is away this week) and says which sections
-were left out, so the answer can tell you what to ask for. An officer who names a member (display name or character)
+were left out, so that when an answer needs one of them it can say what to ask for. An officer who names a member (display name or character)
 or an applicant gets their record too, absence reasons included. Members never get other people's reasons,
 applications, ops, precedents, proposals or who holds which privilege.
 
@@ -2715,4 +2715,4 @@ wrong claim is fixed by an officer's **Move to another member…**; it reads no 
 ignores the in-game rank; a character that just joined the guild reads *not in the guild* until the next roster read (up
 to three hours); bulk linking is reviewed on demand and never runs by itself, and on Discord `/roster armory` links only
 the sure matches (the likely ones, the guild characters no record is linked to and **Give to a member…** are on the site's Members
-page); plain text can't link, unlink or move a character. If you ask for one of these, say so plainly.
+page); plain text can't link, unlink or move a character. If you ask for one of these, the bot says it can't.

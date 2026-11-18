@@ -22,7 +22,7 @@ function Line({ meta, professions, compact, member, synced }: { meta: Meta; prof
   const cap = meta.professions?.skill_cap || 300;
   if (!professions || professions.length === 0)
     return <Text size="xs" c="dimmed">{synced ? "the armory shows no professions for this character" : member
-      ? `no professions on record — ${member} adds them on the Me page or with /me professions`
+      ? `no professions on record — ${member} adds them on the Me page`
       : "no professions on record — add them with Professions… in this row's ⋮"}</Text>;
   const tip = (p: Profession) => [p.skill == null ? `${name(p.id)} · skill not said yet` : p.skill >= cap ? `${name(p.id)}, at the cap` : name(p.id),
     p.specialization, p.recipes.length ? `${p.recipes.length} recipe${p.recipes.length === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");

@@ -20,6 +20,7 @@ from collections.abc import Sequence
 import discord
 
 from . import auctions, discord_auctions, prices
+from . import help as help_mod
 from .flows_armory import bounded
 from .registry import WATCH_REGISTER_FIRST, Registry, RegistryError
 from .wizard import Opt, Wizard, flow
@@ -33,8 +34,9 @@ SCREEN_MAX = 2000  # Discord's message limit
 LIST_SHOWN = 25  # Discord's select holds 25: /price shows the newest, the site's Prices tab the whole list
 
 
-def newest_words(shown: int, total: int) -> str:
-    return f"These are your newest {shown} of {total}. The site's Prices tab shows them all."
+def newest_words(shown: int, total: int, page: str = "Prices page") -> str:
+    """`page` = help.page_words(reg, "prices"): the page's name as a link."""
+    return f"These are your newest {shown} of {total}. The {page} shows them all."
 
 
 def _esc(text: str) -> str:
@@ -135,7 +137,7 @@ class PriceWizard(Wizard):
         total, rows = len(rows), rows[:LIST_SHOWN]  # newest first
         items = [_esc(prices.price_words(p) if shown else p.name) for p in rows]
         text = self._screen([LIST_HEADING, prices.status_sentence(reg, self.owner, stamp=True),
-                             newest_words(len(rows), total) if total > len(rows) else ""], items, " items")
+                             newest_words(len(rows), total, help_mod.page_words(reg, "prices")) if total > len(rows) else ""], items, " items")
 
         async def picked(i: discord.Interaction, values: list[str]) -> None:
             await self.item(i, int(values[0]))

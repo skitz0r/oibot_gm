@@ -53,7 +53,7 @@ OUTCOMES: dict[str, str] = {
     "withdrawn": "Closed at your request.",
 }
 OUTCOME_LABELS: dict[str, str] = {"stands": "The award stands", "corrected": "Corrected", "noted": "Noted for next time", "withdrawn": "Withdrawn"}
-NOT_YOURS = "That award isn't one of yours — you can ask about your own loot only (My loot on the Me page, or /me view)."
+NOT_YOURS = "That award isn't one of yours — you can ask about your own loot only, under My loot on the Me page."
 FROM_MCP = "A loot question is a member's own words: they ask from /me loot-ask or the Me page. MCP can read and resolve them."
 # fn(guild_key, appeal_id) after every appeal save (open, card posted, resolved): the web's `loot:appeals` topic
 APPEAL_LISTENERS: list = []
@@ -216,7 +216,7 @@ def open_consequence(reg: Registry, award) -> str:
     name = award.item_name or f"item {award.item_id}"
     where = "in a thread in the officers' channel" if (reg.config.roster_channel_id or reg.config.ops_channel_id) else "on the officers' Loot page"
     return (f"Your words about {name} go to the officers as written, {where}. "
-            "Their answer comes back as a notice on your Me page and in /me view. "
+            "Their answer comes back as a notice on your Me page. "
             "You get one question per award, and it can't be edited once sent.")
 
 
@@ -387,7 +387,7 @@ async def open_appeal(bot, reg: Registry, uid: int, aid: str, text, *, by: str, 
     posted = await post_card(bot, reg, ap)
     await ops_mod.audited(bot.ops, reg, by, f"loot question from {ap.member_name} about {ap.item} ({ap.character})" + ("" if posted else " — no officer channel: it waits on Loot › Appeals"),
                           via=via, by_id=by_id)
-    return ap, "Sent to the council. Their answer will show on your Me page and in /me view (no DM)."
+    return ap, "Sent to the council. Their answer will show on your Me page."
 
 
 async def resolve_appeal(bot, reg: Registry, aid: str, outcome, *, note: str | None = None, by: str, by_id: int | None, via: str = "discord") -> tuple[Appeal, str]:
@@ -413,9 +413,9 @@ def card_embed(reg: Registry, ap: Appeal) -> discord.Embed:
     if done:
         e.add_field(name="Resolved", value=f"{OUTCOME_LABELS.get(ap.outcome or '', ap.outcome)} · by {ap.resolved_by or 'an officer'} · {reg.local12(ap.resolved_at) if ap.resolved_at else ''}"[:1000],
                     inline=False)
-        e.set_footer(text="The member sees the outcome on their Me page. Nobody was DMed.")
+        e.set_footer(text="The member sees the outcome on their Me page.")
     else:
-        e.set_footer(text="Officers: Details shows the council's record (only to you). Resolve closes it and tells the member on their Me page — no DM.")
+        e.set_footer(text="Officers: Details shows the council's record (only to you). Resolve closes it and tells the member on their Me page.")
     return e
 
 

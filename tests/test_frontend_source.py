@@ -431,7 +431,7 @@ def test_professions_line_and_editor_on_me_and_members():
     assert "Badge" not in line and "notable" not in line, "no recipe chips on the row: icons and skill (the tooltip: specialization, count)"
     assert "p.specialization" in line and "p.recipes.length" in line
     assert "no professions on record — add them with Professions… in this row's ⋮" in line
-    assert "no professions on record — ${member} adds them on the Me page or with /me professions" in line
+    assert "no professions on record — ${member} adds them on the Me page`" in line and "/me professions" not in line
     ed = (SRC / "components" / "ProfessionsEditor.tsx").read_text()
     assert "preview: true" in ed and "sentences" in ed and "NumberInput" in ed and "skill_cap" in ed and "trade_slots" in ed
     assert "A gathering trade has no recipes." in ed and "has no recipes.`" in ed

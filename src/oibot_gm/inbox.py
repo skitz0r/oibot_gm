@@ -15,6 +15,12 @@ from __future__ import annotations
 
 from . import ops as ops_mod
 from . import raidcycle as rc
+
+
+def _me_page(reg) -> str:
+    from . import help as help_mod  # late: help imports this module's readers
+
+    return help_mod.page_words(reg, "me")
 from .registry import Member, Registry, RegistryError
 
 # the one sentence for the DM toggle (design B2): the Me page's card, `/me view`, `/me dms`, the officers' DM column and the
@@ -106,7 +112,7 @@ def inbox_lines(reg: Registry, rs, uid: int, limit: int = 6) -> list[str]:
             lines.append(f"❓ {a['title']}: {a['raid']} {a['when']} as {a['character']}" + (f" — by {a['deadline']}" if a["deadline"] else "") + f" ({where})")
     for n in notices_of(reg, uid, unread=True):
         lines.append(f"• {n['text']}")
-    return lines[:limit] + ([f"-# +{len(lines) - limit} more on the Me page"] if len(lines) > limit else [])
+    return lines[:limit] + ([f"-# +{len(lines) - limit} more on the {_me_page(reg)}"] if len(lines) > limit else [])
 
 
 # ---------------------------------------------------------------- on behalf (B5)

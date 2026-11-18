@@ -520,7 +520,7 @@ def test_mcp_attendance_draft_and_export(mocked):
 
 def test_me_view_has_the_attendance_line():
     src = (Path(__file__).resolve().parents[1] / "src" / "oibot_gm" / "discord_registry.py").read_text()
-    assert 'e.add_field(name="Attendance", value=(await asyncio.to_thread(reg.attendance_text, m))' in src, \
+    assert 'e.add_field(name="Attendance", value=await asyncio.to_thread(reg.attendance_text, m), inline=True)' in src, \
         "the attendance line, computed off the event loop (it parses the run files)"
 
 

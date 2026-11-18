@@ -216,7 +216,6 @@ class LootMixin:
         groups = [_group_block(reg, ico, r, gi, show_missing=False) for r in rosters for gi in range(len(r.groups or [])) if r.groups[gi]]
         e = discord.Embed(title=f"⚔ {label}{run_title(reg, ev)}", colour=TEAL,
                           description=(f"<t:{int(ev.start.timestamp())}:F> · {sum(len(r.selected) for r in rosters)} rostered\n\n" + "\n\n".join(groups))[:3800])
-        e.set_footer(text="loot council: tick drops (or let the companion do it) → Distribute → Confirm · /raid end for the summary")
         msg = await ch.send(embed=e)
         thread = await msg.create_thread(name=(("rehearsal · " if session.test else "loot · ") + label + run_title(reg, ev))[:100])
         return thread.id

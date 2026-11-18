@@ -14,6 +14,7 @@ import discord
 from discord import app_commands
 
 from . import guild_routing, inbox, ops as ops_mod
+from . import help as help_mod
 from .profiles import GameProfile
 from .registry import DECISION_NOTE_MAX, is_superuser, GUILD_KEY_RE, RANKS, Registry, RegistryError
 from .store import GitStore
@@ -368,7 +369,8 @@ def overview_embed(reg: Registry, ico, *, officer: bool) -> discord.Embed | None
     if s["alts"]:
         e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
     asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
-    e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
+    if asks:
+        e.set_footer(text="Recruiting ask: " + ", ".join(asks))
     return e
 
 
@@ -472,8 +474,7 @@ def registration_card(reg: Registry) -> discord.Embed:
                       description=f"{apply}\n\n"
                                   "**Members:**\n**Register / plan my main** — class, spec, optional offspec, and the name if the character exists (leave it blank before launch; your role follows the spec).\n"
                                   "**Add an alt** — same flow for an alt.\n**My status** — what the bot has for you.\n\n"
-                                  "Keyboard route: `/apply`, `/me plan …`, `/me char`, `/me view`. Away for a while? `/me absent add` or the card in the absences channel.")
-    e.set_footer(text="Your Discord account is your identity. Newcomers apply first; members register and add alts.")
+                                  "Away for a while? `/me absent add` or the card in the absences channel.")
     return e
 
 
@@ -667,7 +668,7 @@ async def settle_application(client, reg: Registry, discord_id: int, accept: boo
     try:
         user = await client.fetch_user(a.discord_id)
         if accept:
-            await user.send(f"✅ Your application for **{a.label}** to {reg.config.name} was accepted. You're registered as a trial; `/me view` shows your status."
+            await user.send(f"✅ Your application for **{a.label}** to {reg.config.name} was accepted. You're registered as a trial. Your record is on the {help_mod.page_words(reg, 'me')}."
                             + (f"\n\n{note}" if note else ""))
         else:
             await user.send(f"Your application for **{a.label}** to {reg.config.name} wasn't accepted this time." + (f"\n\n{note}" if note else "")
@@ -866,15 +867,15 @@ def profession_choices(guilds) -> list[app_commands.Choice[str]]:
     return [app_commands.Choice(name=n, value=v) for v, n in seen.items()][:25]
 
 
-MORE_LINE = "…and {n} more — the Professions page has them all."
+MORE_LINE = "…and {n} more — the {page} has them all."  # {page} = help.page_words(reg, "professions"): a link
 
 
-def fit_lines(blocks: list[tuple[str, list[str]]], footer: str | None = None, budget: int = 1900) -> str:
+def fit_lines(blocks: list[tuple[str, list[str]]], footer: str | None = None, budget: int = 1900, page: str = "Professions page") -> str:
     """A finder's reply under Discord's 2000 characters: each (header, crafter lines) block in order while the budget
     lasts, then the footer; whatever is left out is counted in one closing MORE_LINE (a block cut before its header counts its lines, at least 1)."""
     out: list[str] = []
     used = len(footer) + 1 if footer else 0
-    reserve = len(MORE_LINE.format(n=99999)) + 1
+    reserve = len(MORE_LINE.format(n=99999, page=page)) + 1
     left = 0
     for head, rows in blocks:
         if left or used + len(head) + 1 + reserve > budget:
@@ -891,7 +892,7 @@ def fit_lines(blocks: list[tuple[str, list[str]]], footer: str | None = None, bu
     if footer:
         out.append(footer)
     if left:  # the last line, so a cut reply ends on where the rest is
-        out.append(MORE_LINE.format(n=left))
+        out.append(MORE_LINE.format(n=left, page=page))
     return "\n".join(out)
 
 
@@ -1095,22 +1096,23 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if regular:  # the recurring schedules they're a regular of, as a person reads them (never a series key)
             e.add_field(name="Regular on", value="\n".join(f"{reg.series_label(k)} ({c.label})" for k, c in regular)[:1000], inline=False)
         primary, flex = reg.roles_of(m)
-        e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me char` → Flex adds more", inline=True)
-        e.add_field(name="DMs", value=("off — " + inbox.DM_OFF_SENTENCE if m.dm_opt_out else "on") + "\n-# `/me dms` switches them", inline=True)
+        e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") , inline=True)
+        e.add_field(name="DMs", value=("off — " + inbox.DM_OFF_SENTENCE if m.dm_opt_out else "on"), inline=True)
         box = inbox.inbox_lines(reg, interaction.client.raids.store(reg), m.discord_id) if hasattr(interaction.client, "raids") else []
         if box:  # asks to answer, then the unread notices (D26: outcomes are told here and on the Me page — never by DM)
             e.insert_field_at(0, name="Inbox", value="\n".join(box)[:1000], inline=False)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(reg.span_label(a.start, a.end) for a in ups) or "none", inline=True)
-        e.add_field(name="Attendance", value=(await asyncio.to_thread(reg.attendance_text, m)) + "\n-# the Me page lists each run", inline=True)  # D49 (bench counts here; parses run files: off the loop)
+        e.add_field(name="Attendance", value=await asyncio.to_thread(reg.attendance_text, m), inline=True)  # D49 (bench counts here; parses run files: off the loop)
         from .loot_ops import guild_ctx, loot_block, member_awards
 
         got = member_awards(reg, guild_ctx(interaction.client, reg), m, 10)
-        e.add_field(name="Loot", value=loot_block(reg, got, ico) or "nothing yet — `/me wishlist` to say what you want", inline=False)
+        e.add_field(name="Loot", value=loot_block(reg, got, ico) or "Nothing received yet.", inline=False)
         wished = sum(len(c.wishlist) for c in m.active())
         if wished:
             e.add_field(name="Wishlist", value=f"{wished} item(s) across your characters · `/me wishlist`", inline=True)
-        e.set_footer(text="Sheets: answer each run in the signup channel (Join / Bench / No thanks). Your loot and wishlist are on the Me page too.")
+        if link := help_mod.page_link(reg, "me", False):  # the full record: one link, no standing how-to (2026-11-18)
+            e.add_field(name="\u200b", value=link, inline=False)
         view = None
         if regular:  # D7: a member can step down from a series' regulars themselves (volunteering is a request to officers)
             view = discord.ui.View(timeout=600)
@@ -1162,12 +1164,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         hits = pr.who_can_make(reg, recipe, None)  # every match: fit_lines shows what fits and counts the rest
         if not hits:
             await interaction.response.send_message(pr.NOT_A_RECIPE if reg.profile.has_recipe_list
-                                                    else "Nobody has registered that recipe yet — crafters add theirs with /me professions.", ephemeral=True)
+                                                    else "Nobody has registered that recipe yet.", ephemeral=True)
             return
         from . import prices
         esc = discord.utils.escape_markdown
         if len(hits) == 1 and not hits[0].crafters:  # a recipe of the game's list nobody makes: not the same answer as "not a recipe"
-            text = f"{pr.nobody_sentence(esc(hits[0].name))} A crafter adds it with /me professions."
+            text = pr.nobody_sentence(esc(hits[0].name))
             if cost := prices.cost_line(reg, hits[0].recipe):
                 text += f"\n{cost}\n{prices.status_sentence(reg, False, stamp=True)}."
             await interaction.response.send_message(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
@@ -1180,10 +1182,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             if cost := prices.cost_line(reg, e.recipe):  # prices on and the recipe has reagents: its cost to make
                 head, costed = f"{head}\n{cost}", True
             blocks.append((head, [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" for c in e.crafters] or [pr.nobody_sentence(esc(e.name))]))
-        footer = "Names only — ask them. Crafters add theirs with /me professions."
-        if costed:
-            footer = f"{prices.status_sentence(reg, False, stamp=True)}.\n{footer}"
-        await interaction.response.send_message(fit_lines(blocks, footer), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        footer = f"{prices.status_sentence(reg, False, stamp=True)}." if costed else ""
+        await interaction.response.send_message(fit_lines(blocks, footer, page=help_mod.page_words(reg, "professions")), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     async def professions_list(interaction: discord.Interaction, profession: str):
         reg, interaction = await need(interaction)
@@ -1196,11 +1196,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         cs = pr.crafters_of(reg, d.id)
         if not cs:
-            await interaction.response.send_message(f"Nobody has registered {d.name} yet. A crafter adds it with /me professions or on the Me page.", ephemeral=True)
+            await interaction.response.send_message(f"Nobody has registered {d.name} yet. A crafter adds it on the {help_mod.page_words(reg, 'me')}.", ephemeral=True)
             return
         esc = discord.utils.escape_markdown
         head = f"**{d.name}** · {len(cs)} crafter{'s' if len(cs) != 1 else ''}"
-        text = fit_lines([(head, [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" + (f" · {c.specialization}" if c.specialization else "") for c in cs])])
+        text = fit_lines([(head, [f"• **{esc(c.label)}** — {esc(c.member)} · {pr.skill_words(c.skill)}" + (f" · {c.specialization}" if c.specialization else "") for c in cs])], page=help_mod.page_words(reg, "professions"))
         await interaction.response.send_message(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     professions_list = app_commands.describe(profession="which profession")(professions_list)

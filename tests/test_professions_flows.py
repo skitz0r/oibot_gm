@@ -324,7 +324,7 @@ def test_professions_who_for_a_listed_recipe_nobody_makes(reg):
     ix = _ix(reg)
     asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="#" + str(reg.profile.recipes_named("ironfeather shoulders")[0].id)))
     text, kw = ix.response.sent[0]
-    assert text == "Nobody in the guild makes Ironfeather Shoulders yet. A crafter adds it with /me professions." and kw["ephemeral"]
+    assert text == "Nobody in the guild makes Ironfeather Shoulders yet." and kw["ephemeral"]
     ix = _ix(reg)
     asyncio.run(_cmd(tree, "professions who").callback(ix, recipe="ironfeather shoulders"))
     assert ix.response.sent[0][0] == text, "typed, not picked: the same answer"

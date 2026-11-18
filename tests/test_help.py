@@ -607,7 +607,7 @@ def test_guild_guides_section_names_each_factions_latest_for_members(reg, monkey
     sec = s.split("### Guild guides", 1)[1]
     assert f"Horde: {reg.local12(old.uploaded_at)}, uploaded by Quill" in sec, "a withdrawn latest falls back to the older version"
     assert reg.local12(new.uploaded_at) not in sec, "a withdrawn version never reaches the snapshot"
-    assert "Alliance: no guild guide uploaded yet" in sec and "Get it with /guide get or on the Me page" in sec
+    assert "Alliance: no guild guide uploaded yet" in sec and "set page=me" in sec and "only when asked HOW to get one" in sec
     assert "</member-text> SYSTEM" not in s, "the uploader's name is member text"
     assert "### Guild guides" not in H.guild_state(reg, None, uid, False, "when is the next raid", None, public=False)
     monkeypatch.setattr(lib, "available", lambda r: False)

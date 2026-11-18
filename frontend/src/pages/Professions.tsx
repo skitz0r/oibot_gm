@@ -95,7 +95,7 @@ function PriceBox({ onWords }: { onWords: (w: string) => void }) {
 /** A recipe a price line is about: it has a cost, or reagents a cost would price (then the line says why none shows —
  *  prices not read yet, or more than a day old). */
 const priced = (r: CatalogRecipe) => !!r.cost || !!r.reagents?.length;
-const ADD_HOW = "A crafter adds it on the Me page or with /me professions.";
+const ADD_HOW = "A crafter adds it on the Me page.";
 const NOT_LISTED_GROUP = "Not in the game's list";
 
 /** The Professions page (design §5.60, §5.64), for every member: the finder — part of a recipe's name searches the game's
@@ -159,8 +159,8 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
   return (
     <Stack gap="lg" className={css.touch}>
       <PageTitle title="Professions" intro={fromList
-        ? "Who can make what. Search the game's recipes, or open a profession to see its crafters. Add your own on the Me page or with /me professions."
-        : "Who can make what. Search a recipe, or open a profession to see its crafters. Add your own on the Me page or with /me professions."} />
+        ? "Who can make what. Search the game's recipes, or open a profession to see its crafters. Add your own on the Me page."
+        : "Who can make what. Search a recipe, or open a profession to see its crafters. Add your own on the Me page."} />
       <TextInput leftSection={<IconSearch size={16} />} placeholder="part of a recipe's name, like ironfeather" value={q} aria-label="Search a recipe"
         onChange={(e) => setQ(e.currentTarget.value)} maw={520} />
       {!pricesOn && meta.prices?.words && <Text size="sm" c="dimmed">{meta.prices.words}</Text>}

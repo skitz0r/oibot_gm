@@ -35,7 +35,7 @@ class AskWizard(Wizard):
         older = (f"Your newest {SELECT_MAX} awards — older awards: on the site (Me › My loot › Ask the council).\n"
                  if len(self.awards) > SELECT_MAX else "")  # Discord's select holds 25; the site pages through all of them
         await self.show(interaction, older + "Pick the award your question is about. Your words go to the officers as you write them; their answer comes "
-                                     "back as a notice on your Me page and in `/me view` (no DM).\n-# One question per award. The Me page (My loot › Ask the council) does the same.",
+                                     "back as a notice on your Me page. One question per award.",
                         self.select("Pick the award…", opts, self.picked), self.button("Cancel", self.cancel))
 
     async def picked(self, interaction: discord.Interaction, values: list[str]) -> None:
@@ -93,7 +93,7 @@ async def me_loot_ask(interaction: discord.Interaction, reg: Registry, *, award:
     mine = [(aid, a) for aid, a in appeals.own_awards(reg, guild_ctx(interaction.client, reg), m) if aid not in asked]
     if not mine:
         await interaction.response.send_message("No award to ask about: nothing recorded for you yet, or you've asked about each one already "
-                                                "(the answers are on your Me page and in `/me view`).", ephemeral=True)
+                                                "(the answers are on your Me page).", ephemeral=True)
         return
     wiz = AskWizard(reg, uid, interaction.user.display_name, mine)
     if award and award in wiz.awards:

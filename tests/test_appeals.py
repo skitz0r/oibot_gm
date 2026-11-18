@@ -271,7 +271,7 @@ def test_me_loot_ask_wizard_picks_writes_reviews_and_sends(a):
 
     async def go():
         await FLOWS["me_loot_ask"](h.command(), a.reg)
-        assert "Pick the award" in h.text and "no DM" in h.text
+        assert "Pick the award" in h.text and "notice on your Me page" in h.text and "no DM" not in h.text
         await h.pick("Pick the award…", a.aid)
         assert h.modal is not None, "the select opens the one prose modal"
         await h.submit(h.modal, text="too short")

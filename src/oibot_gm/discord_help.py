@@ -121,7 +121,7 @@ def guide_text(reg, key: str, user_id: int | None = None) -> str:
     if key == "register":
         where = f"<#{cfg.registration_channel_id}>" if cfg.registration_channel_id else "the registration card an officer posts"
         sheets = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "the signup channel"
-        return f"**How to register**\nNew to the guild? Apply first (`/apply` or **Apply to join**); members register and add alts:\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters.\n4. There is nothing else to fill in: answer each run's sheet in {sheets} (Join / Bench / No thanks). `/me view` shows what the bot has on you."
+        return f"**How to register**\nNew to the guild? Apply first (`/apply` or **Apply to join**); members register and add alts:\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters.\n4. There is nothing else to fill in: answer each run's sheet in {sheets} (Join / Bench / No thanks)."
     if key == "signups":
         parts = chunk_text(manual_section("## 4"), 1800)  # the start of the section, cut on a paragraph, and where the rest is
         return (parts[0] + ("\n\n-# The rest: `/help` → topic *Raids, sheets, lock, confirm and fill*." if len(parts) > 1 else "")) if parts else "See `/help` → topic *Raids, sheets, lock, confirm and fill*."
@@ -252,7 +252,6 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         url = help_mod.site_url(reg, "/app/help") if reg is not None else None
         if url:  # the whole manual, every section, on the site (officer sections tagged, D38)
             e.add_field(name="The manual", value=f"[Read every section on the site]({url})", inline=False)
-        e.set_footer(text="Buttons: #register card (Register / Add an alt / My status) · sheets (Join / Bench / No thanks; locked: Can't make it) · DMs (Confirm / Can't make it, fill: Confirm / Can't make it)")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     @tree.command(name="ask", description="Ask the bot how something works or what to do next (it answers from its own manual and your record)")

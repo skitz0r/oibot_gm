@@ -191,7 +191,7 @@ class RegisterWizard(Wizard):
         what = f"{'Registered' if name else 'Planned'} {'main' if self.slot == 'main' else 'alt'}: **{c.label}** · {_specline(c.spec, c.offspec)}"
         roles = (f" · roles: {self.roles[0]}" + (f" (+{', '.join(self.roles[1:])})" if len(self.roles) > 1 else "")) if self.roles else ""
         tail = " An officer will confirm the character." if name else " Add the name at launch with `/me char` → Name."
-        await self.finish(interaction, f"✅ {what}{roles}.{tail} `/me view` shows everything.")
+        await self.finish(interaction, f"✅ {what}{roles}.{tail}")
         await _emit(interaction, reg, f"**{m.display_name}** {'registered' if name else 'planned'} {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ', alt'})"
                     + (f" · roles {self.roles}" if self.roles else "") + ("" if not name else " — pending confirmation"))
 

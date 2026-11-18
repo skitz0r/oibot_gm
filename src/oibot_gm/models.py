@@ -136,7 +136,7 @@ class LootRecommendation(BaseModel):
 
     primary: str = Field(description="Character name of the recommended recipient")
     alternates: list[str] = Field(default_factory=list, description="Up to two runners-up, in order")
-    justification: str = Field(description="2-4 sentences, cite policy rule numbers like [R3]")
+    justification: str = Field(description="1-2 sentences: why this candidate, citing a policy rule like [R3] when one decided it; never restate how the score is computed")
     cites_rules: list[int] = Field(default_factory=list)
     close_call: bool = Field(description="True if the top two are within a whisker")
     deviates_from_score: bool = Field(description="True if primary is not the top base score")

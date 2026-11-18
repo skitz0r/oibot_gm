@@ -216,8 +216,8 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     rows_field()
     if state != "locked":
         return e, None
-    e.set_footer(text=("test run · " if test else "") + ("Rostered? answer your DM. Not rostered? nothing to do." if rc.run_confirms(reg, ev)
-                                                       else "Rostered? you're in — press Can't make it if that changes. Not rostered? nothing to do."))
+    e.set_footer(text=("test run · " if test else "") + ("Rostered? answer your DM." if rc.run_confirms(reg, ev)
+                                                       else "Rostered? you're in — press Can't make it if that changes."))
     v = discord.ui.View(timeout=None)
     v.add_item(SignupButton(reg.key, ev.key, "cant"))
     return e, v

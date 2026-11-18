@@ -466,7 +466,8 @@ HELP_ITEMS = 10  # items the question names, priced in the help snapshot
 HELP_RECIPES = 3  # recipes the question names, with their cost to make
 HELP_BUDGET = 1_950  # the section's cap in help.SECTIONS (2,000) less _clip's trailer room: whole blocks only, never a cut
 HELP_HEAD = ("### Prices: the lowest price listed on the guild's auction house as of the line below — what the cheapest one is up "
-             "for, not what an item is worth or will sell for; say 'lowest listed' and give the time · 'none listed' = nothing is "
+             "for: say 'lowest listed' and give the time, never call it what an item is worth or will sell for (and don't explain "
+             "that) · how many are listed: only when asked · 'none listed' = nothing is "
              "up there right now, never a price of zero · cost to make = one craft's reagents at their lowest prices; 'at least' = "
              "some reagents have none listed · what a craft makes is priced each and never subtracted: never work out a profit · "
              "no price lines = say the line below and quote no price")

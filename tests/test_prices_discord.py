@@ -298,7 +298,7 @@ def test_a_version_without_auction_houses_has_no_price_anywhere_in_discord(reg, 
     # /professions who reads exactly as it did before prices (tbc has no professions: its one sentence, no cost line)
     ix = _ix(reg)
     run(_cmd(tree, "professions who").callback(ix, recipe="mooncloth bag"))
-    assert ix.response.sent[0][0] == "Nobody has registered that recipe yet — crafters add theirs with /me professions."
+    assert ix.response.sent[0][0] == "Nobody has registered that recipe yet."
     # /gm config armory: the version has no armory, so no hub and no auction house button
     h = harness(reg, rs)
     run(FLOWS["armory_guild"](h.command(), reg))

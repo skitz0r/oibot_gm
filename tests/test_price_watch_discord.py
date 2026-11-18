@@ -219,7 +219,7 @@ def test_a_list_past_discords_select_shows_the_newest_and_says_so(reg, market_on
         reg.watch(UID, i)
     h = harness(reg)
     run(FLOWS["price"](h.command(), reg))
-    assert "These are your newest 25 of 30. The site's Prices tab shows them all." in lines(h)
+    assert "These are your newest 25 of 30. The Prices page shows them all." in lines(h)
     opts = h._items()[0].options
     assert len(opts) == 25 and opts[0].label == "Item 29" and opts[-1].label == "Item 05", "newest first"
 

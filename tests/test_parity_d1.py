@@ -787,3 +787,25 @@ def test_team_member_is_not_a_plain_text_op(reg):
     assert not allowed and refused == ["team_member isn't something plain text can do"]
     with pytest.raises(configops.RegistryError):
         configops.apply(reg, ConfigOp(op="team_member", target="bd-1", member="Ashvane"), "Owner", True)
+
+
+def test_small_print_says_only_what_the_reader_acts_on_and_a_page_is_a_link(reg, monkeypatch):
+    """The review of 2026-11-18 (the owner: "all / your judgement"): no standing how-to under a reply, nothing about what doesn't
+    happen, no slash command for a read where a page shows it, and a page named by code is a link."""
+    import inspect
+
+    from oibot_gm import appeals, discord_registry, flows_appeal, flows_prices, inbox, raid_views
+
+    assert help_mod.page_words(reg, "me") == "Me page", "no site address: the name alone"
+    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
+    me = f"[Me page](<https://gm.example/app/me?g={reg.key}>)"
+    assert help_mod.page_words(reg, "me") == me
+    blocks = [(f"**Recipe {i}**", ["• **Mara** — Mara · 300"]) for i in range(200)]
+    last = discord_registry.fit_lines(blocks, page=help_mod.page_words(reg, "professions")).splitlines()[-1]
+    assert last.startswith("…and ") and last.endswith(f"more — the [Professions page](<https://gm.example/app/professions?g={reg.key}>) has them all.")
+    assert flows_prices.newest_words(25, 30, help_mod.page_words(reg, "prices")).endswith(f"The [Prices page](<https://gm.example/app/prices?g={reg.key}>) shows them all.")
+    for mod, gone in ((raid_views, "nothing to do"), (discord_registry, "Names only — ask them"), (discord_registry, "primary role preference"),
+                      (discord_registry, "Keyboard route"), (appeals, "and in /me view"), (appeals, "Nobody was DMed"), (flows_appeal, "`/me view`"), (inbox, "more on the Me page\"")):
+        assert gone not in inspect.getsource(mod), (mod.__name__, gone)
+    s = help_mod.SYSTEM
+    assert "never volunteer them" in s and "never list what else you could tell" in s and "explaining your own behaviour" not in s
