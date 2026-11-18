@@ -398,17 +398,19 @@ class HelpMixin:
         return officer_only_channel(reg, channel)
 
     def private_note(self, reg) -> str:
-        """The line under an officer's answer in a public channel: where the officer view is."""
+        """The line under an officer's answer in a public channel WHEN the question asked for officer data (HelpAnswer.officer_view;
+        under every such answer until 2026-11-18): where the officer view is."""
         where = f"<#{reg.config.ops_channel_id}>" if reg.config.ops_channel_id else "the ops channel"
         return f"-# Posted where members read it, so this is the member view — officers can ask in {where} or by DM for the officer view."
 
     async def help_answer(self, reg, user_id: int, officer: bool, question: str, may_act: bool = False, public: bool = False,
-                          data: str | None = None, conversation: str | None = None, memory: str | None = None):
+                          data: str | None = None, conversation: str | None = None, memory: str | None = None, link: bool = True):
         """The answer text; None outside the ask audience (the caller shows the static guide). `may_act`: plain text
         may act for this person here — a message the model reads as a request to DO something returns ACT instead
         (the caller hands it to the change flow), so a plain question costs one model call. `public`: the reply is
         posted where members read it (not reply_private) — an officer then gets the member-level snapshot (no
-        officer sections, no officer index, no other people's reasons) and a line saying where the officer view is.
+        officer sections, no officer index, no other people's reasons) and, when the question asked for officer data, a line saying where the
+        officer view is. `link`: the answer's page (help.page_link) is added as a Discord link — off for the site's box, which prints plain text.
         `data`: a surface's own facts for the question (the loot council's proposals, asked in its thread) — an
         officer's private snapshot only, in a <data> block. `conversation`: the recent exchange with this person
         (conversation.context_block — one fenced data block, design §5.51). `memory`: the <memory> block
@@ -443,9 +445,12 @@ class HelpMixin:
         text = ans.answer.strip()
         if ans.commands:
             text += "\n\n" + " · ".join(f"`{c}`" for c in ans.commands[:4])
+        page = help_mod.page_link(reg, ans.page, officer and not public) if link else None  # where members read the reply, never an officers' page
+        if page:
+            text += "\n" + page
         if ans.for_officer:
             text += "\n-# This needs an officer."
-        if public:
+        if public and ans.officer_view:
             note = self.private_note(reg)
             return text[:1950 - len(note) - 1] + "\n" + note
         return text[:1950]

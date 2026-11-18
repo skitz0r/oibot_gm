@@ -245,7 +245,7 @@ export function ProfessionsPage({ meta }: { meta: Meta }) {
               <Stack gap="md">
                 <Card>
                   {p.crafters.length === 0 ? (
-                    <Text size="sm" c="dimmed" px="md" py="sm">Nobody has registered {p.name} yet. A crafter adds it on the Me page, with /me professions, or by saying so in the professions channel.</Text>
+                    <Text size="sm" c="dimmed" px="md" py="sm">Nobody has registered {p.name} yet. A crafter adds it on the Me page.</Text>
                   ) : (
                     <div className={css.crafters}>
                       {p.crafters.map((c) => {

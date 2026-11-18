@@ -60,16 +60,52 @@ def test_help_answer_in_public_uses_the_member_view_and_says_where_the_officer_v
 
     def fake_answer(provider, tree, reg_, rs_, uid, officer, question, extras=None, public=False):
         seen.append(help_mod.guild_state(reg_, rs_, uid, officer, question, extras, public=public) + f"\nextras ops: {extras.ops if extras else None}")
-        return help_mod.HelpAnswer(answer="Nobody you need to know about.")
+        return help_mod.HelpAnswer(answer="Nobody you need to know about.", officer_view=flag[0])
 
+    flag = [True]
     monkeypatch.setattr(help_mod, "answer", fake_answer)
     bot = HelpBot(reg, rs)
     q = "who's away next week and why? any ops errors?"
     text = asyncio.run(bot.help_answer(reg, OWNER, True, q, public=True))
     assert "hospital appointment" not in seen[0] and "ops secret line" not in seen[0]
     assert text.startswith("Nobody you need to know about.") and f"officers can ask in <#{OPS_CH}> or by DM for the officer view" in text
+    assert "set officer_view=true" in seen[0], "the snapshot tells the model when to raise the flag"
     text = asyncio.run(bot.help_answer(reg, OWNER, True, q))
     assert "hospital appointment" in seen[1] and "ops secret line" in seen[1] and "officer view" not in text
+    # 2026-11-18: the line is there only when the question asked for officer data — a recipe question in #general gets none
+    flag[0] = False
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "what can Mara make?", public=True)) == "Nobody you need to know about."
+
+
+def test_an_answer_links_the_page_with_the_full_view_and_keeps_commands_for_doing(reg, rs, monkeypatch):
+    """The owner, 2026-11-18: a full view is a link to the site, never a slash command; the answer says the fact, not where it came from."""
+    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
+    out = {}
+    monkeypatch.setattr(help_mod, "answer", lambda *a, **k: help_mod.HelpAnswer(answer="Mara has 33 Alchemy recipes.", **out))
+    bot = HelpBot(reg, rs)
+    member = next(m.discord_id for m in reg.members.values() if m.discord_id != OWNER)
+    out.update(page="professions")
+    link = f"-# See it all on the [Professions page](<https://gm.example/app/professions?g={reg.key}>)."
+    assert asyncio.run(bot.help_answer(reg, member, False, "what can Mara make?")) == "Mara has 33 Alchemy recipes.\n" + link
+    assert asyncio.run(bot.help_answer(reg, member, False, "what can Mara make?", link=False)) == "Mara has 33 Alchemy recipes.", "the site's box prints plain text"
+    out.update(page="members")  # an officers' page: linked for an officer, never for a member
+    assert asyncio.run(bot.help_answer(reg, member, False, "q")) == "Mara has 33 Alchemy recipes."
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "q")).endswith("[Members page](<https://gm.example/app/members?g=" + reg.key + ">).")
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "q", public=True)) == "Mara has 33 Alchemy recipes.", "where members read the reply: no officers' page"
+    out.update(page="a page the model made up")
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "q")) == "Mara has 33 Alchemy recipes."
+    monkeypatch.delenv("OIBOT_WEB_URL")
+    out.update(page="professions")
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "q")) == "Mara has 33 Alchemy recipes.", "no site address, no link"
+    # the model's instructions: the answer first, no account of where a fact comes from, a page for more, commands only to act
+    s = help_mod.SYSTEM
+    for words in ("the first sentence IS the answer", "never say where a\nfact comes from or how it is kept", "set `page` to the site page with the full view",
+                  "Never point at a slash command for something that only shows data"):
+        assert words in s, words
+    assert "name the exact command or button, and use" not in s
+    fields = help_mod.HelpAnswer.model_fields
+    assert "Empty for a question that only reads data" in fields["commands"].description
+    assert all(k in fields["page"].description for k in help_mod.PAGES)
 
 
 # officer_only_channel / reply_private on stand-in Discord objects

@@ -84,7 +84,7 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   the raid's size, limits and aims. Alts and offspecs don't add to the headcount; they show as who could cover a role.
 - **Your record** — your characters (name, spec, offspec, extra roles, which is your main, their professions) and your
   absences. You keep it on the Me page or with `/me char` and `/me absent`; professions are set from the character's
-  **Professions…** on the Me page or by telling the bot. Officers can edit it for you, and they set your rank.
+  **Professions…** on the Me page; a character linked to the armory keeps them up to date by itself. Officers can edit it for you, and they set your rank.
 - **Profession / skill** — a character's trade (Alchemy, Leatherworking…) and how far along it is, a number from 1 to 300
   (or not said yet, when a recipe was recorded first).
 - **Recipes** — what a character can make. A character linked to the armory has its whole recipe book read from the
@@ -2629,22 +2629,20 @@ An @mention in a question reads as that person's name, for every way you ask (an
 the bot listens in).
 
 **Who can make what** is open to every member the same way: "who can make Devilsaur Gauntlets?", "any alchemists?",
-"who has the highest tailoring?" are answered from the characters' records (§3 *Professions*) — each profession's crafters
-with their skill, their level when the character is linked to the armory, and how many recipes are on record — names
+"who has the highest tailoring?" are answered with the crafters of what you asked about, highest skill first — names
 only, nobody pinged. The question has to name a profession or a recipe of the game's list: its whole name, two words
 that sit together in it (*"can anyone do fiery weapon?"*), or an enchant by the word after its dash (*"the crusader
-enchant"*). A character whose professions follow the armory has its whole recipe book read from the game, so a recipe
-it doesn't show is one it doesn't know: the bot says so plainly. Only for a character kept by hand does it add how the
-crafter records a recipe. A recipe of the game's list nobody makes gets *"Nobody in the guild makes … yet."*; a name the
+enchant"*). A character linked to the armory that doesn't show a recipe doesn't know it: the answer is a plain no.
+Only for a character kept by hand, asked about a recipe it lacks, does the answer add that the crafter can put it on the Me page. A recipe of the game's list nobody makes gets *"Nobody in the guild makes … yet."*; a name the
 game doesn't have gets *"That isn't a recipe in the game's list."* *"What tailoring recipes does <character> know?"*
-lists that character's first sixty and points at the Professions page for the rest. Retired
+gives the count and the recipes that matter for the question, with a link to the Professions page for the rest. Retired
 characters, puppets and people who left the server are never named.
 
 **What a thing costs** is open to every member too, once the owner has picked the guild's auction house (§8): "how much
 is an Arcanite Bar right now?", "what do arcanite bars cost?", "how much does it cost to make Transmute: Arcanite?". The
 question has to ask about a price (*price*, *cost*, *worth*, *how much*, *auction*, *cheapest*) and name an item by its
-whole name or a recipe of the game's list. The bot answers from the same prices `/price` reads: how recent they are,
-then up to ten named items with their lowest price listed on the guild's auction house and how many are listed — or
+whole name or a recipe of the game's list. A price answer gives the time of the prices,
+then up to ten named items with their lowest price listed on the guild's auction house — or
 *none listed* when nothing is up right now — and, for a named recipe, each reagent at its lowest price, what one craft
 makes priced each, and its cost to make (*"at least …"* when a reagent has none listed). The numbers are computed in
 code; the answer only words them, says "lowest listed" with the time, and never calls a price what an item is worth or
@@ -2673,12 +2671,18 @@ a DM, `/ask` and `/gm change` (only you see the answer), the ops, applications a
 role can see (the analytics channel when you made it officer-only — the bot's own role, or the bot let in by name,
 doesn't count as a member; a channel where you let one member in by name counts as public unless that member is an
 officer the bot can check). An officer who @mentions the bot anywhere else —
-#general, a public analytics channel — gets the member view, because everyone there reads the answer, and the reply
-says so: ask in the ops channel or by DM for the officer view. The same holds when that message is a change: the
+#general, a public analytics channel — gets the member view, because everyone there reads the answer; when the question
+asked for something only officers see, the reply says so: ask in the ops channel or by DM for the officer view. The same holds when that message is a change: the
 bot's clarifying questions there are written from the member view too. Anyone who asks where others read the reply
 also gets their *own* absence reasons left out of it (ask by DM to see them). Text people typed (news titles, applicants'
-answers, reasons) is handed to the model as quoted data, never as instructions. The answer only ever *points* at
-commands — a change is a separate step you Apply (plain text, §8c).
+answers, reasons) is handed to the model as quoted data, never as instructions. The answer never changes anything —
+a change is a separate step you Apply (plain text, §8c).
+
+**How an answer reads.** The first sentence is the answer. A question about data (who makes what, who is rostered, what
+something costs) gets the facts and stops: it doesn't explain where the bot got them, and it doesn't finish with a list
+of what isn't there. When there is more than fits, a small line under the answer links the page of the site that has
+it all (*See it all on the Professions page.*) — an officers' page only for an officer, and only where officers alone read the reply. A command or a button is named
+only when you have to do something yourself. On the site's *Tell the bot* box the answer has no link.
 
 A newcomer who writes to the bot (a DM or an @mention) while applications are open gets the **Apply to join** button
 on the reply; it opens the same application as the registration card, right there. *How to apply* in the static guide

@@ -419,13 +419,13 @@ def help_section(ask) -> list[str]:
         return unfence(text, "member-text").replace("\n", " ").strip()
 
     out = ["### Who can make what: professions with their crafters (highest skill first), each as character (member, skill, "
-           "specialization when their recipes show one, level when known, how the record is kept, recipes on record) · `armory` = the whole recipe book is read from the "
-           "game about every hour: a recipe not shown for that crafter is one they do NOT know — say so plainly, never "
-           "suggest asking them or adding it · `by hand` = the crafter typed their recipes and may know more: only for them say "
-           "it can be added on the Me page or with /me professions (never by saying it in chat) · "
+           "specialization when their recipes show one, level when known, how the record is kept, recipes on record) · `armory` / `by hand` are for YOUR reasoning, never words for the answer: with "
+           "`armory` the whole recipe book is known, so a recipe not shown for that crafter is one they do NOT know — answer a flat no, "
+           "without saying why you are sure and without suggesting they be asked or it be added · with `by hand` they may know more: only "
+           "when the question is about a recipe such a crafter lacks, add that it can be put on the Me page (never by saying it in chat) · "
+           "asked what someone can make: the count, then the recipes that matter for the question, and page=professions · "
            "then the recipes of the game's list the question names with who makes them · a recipe the game's list doesn't "
-           f"have: say \"{NOT_A_RECIPE}\" · a listed recipe nobody makes: say so (\"{nobody_sentence('<name>')}\") and, when "
-           "every crafter of that profession is `armory`, that this is certain"]
+           f"have: say \"{NOT_A_RECIPE}\" · a listed recipe nobody makes: \"{nobody_sentence('<name>')}\" and nothing after it"]
     books: list[tuple] = []  # (character, profession def, recipes) for the crafters the question names
     q = norm_recipe(ask.question or "")
     hits = search(reg, ask.question or "", HELP_HITS)
@@ -458,7 +458,7 @@ def help_section(ask) -> list[str]:
     for c, d, recipes in named[:3]:
         names = [safe(r.name) for r in recipes]
         out.append(f"{safe(c.label)}'s {d.name} recipes ({len(names)}): " + ", ".join(names[:HELP_BOOK])
-                   + (f" and {len(names) - HELP_BOOK} more (the Professions page has them all)" if len(names) > HELP_BOOK else ""))
+                   + (f" and {len(names) - HELP_BOOK} more (set page=professions for the rest)" if len(names) > HELP_BOOK else ""))
     out += rest
     return out
 

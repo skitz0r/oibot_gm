@@ -555,6 +555,10 @@ src/oibot_gm/
                        day its UTC day alone), low, high, words, unread (NOT_READ "not read", low/high null)} + the span's low/high and their words + since / until = the span's start and the server's now), SPANS 7 · 30 · 90 days · 1 year,
                        EMPTY_LIST_SITE / EMPTY_LIST_DISCORD (EMPTY_LIST_HIDDEN on both while prices are hidden: no search to point at)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
+                       the answer's shape (the owner, 2026-11-18; SYSTEM): the fact first, never where it comes from (armory / by hand are reasoning
+                       notes), nothing about what is NOT there; HelpAnswer.page (a PAGES key) → page_link = '-# See it all on the [Professions page](<url>).'
+                       (officers' pages for an officer only; off for the site's box — help_answer(link=False)); `commands` only when the asker must DO
+                       something, never a slash command for a read; `officer_view` = the public-channel footer only when officer data was asked for;
                        officers' `config` section = configops.summary_text(config_summary(audience)) (owner: Host too);
                        `prices` section (every member, §5.65: prices.help_section, gated by prices.help_hit alone — code computes, the model words it);
                        `who` section (every member, any channel: who plays what + rank, named members first, no officer marks; an officer
