@@ -472,6 +472,21 @@ def test_a_professions_question_names_an_enchant_by_the_word_after_its_dash(reg)
     assert "Nobody in the guild makes Enchant Weapon - Crusader yet." in text and "Grand Crusader" not in text
 
 
+def test_a_professions_question_names_what_a_recipe_makes_a_plural_or_a_kind(reg):
+    """2026-11-19, asked in chat: "Who can do arcanite bar transmutes" — the recipe is Transmute: Arcanite, its name has
+    neither "bar" nor a plural, and the section stayed out of the answer."""
+    import types
+    _real(reg)
+    q = "Who can do arcanite bar transmutes"
+    assert pr.help_hit(reg, q) and [e.name for e in pr.phrase_hits(reg, q, tails=True)] == ["Transmute: Arcanite"]
+    assert "Nobody in the guild makes Transmute: Arcanite yet." in "\n".join(pr.help_section(types.SimpleNamespace(reg=reg, question=q)))
+    assert pr.help_hit(reg, "who has flasks")
+    flasks = [e.name for e in pr.phrase_hits(reg, "who has flasks", tails=True)]
+    assert flasks and all(n.startswith("Flask of") for n in flasks), "a one-word category said alone is that kind's recipes"
+    assert pr.phrase_hits(reg, "who has flasks") == [], "the finder's own search is as before"
+    assert not pr.help_hit(reg, "the first boss") and not pr.help_hit(reg, "is the bar open tonight")
+
+
 # ---- specializations, read from the recipes a character knows (2026-11-13: the armory reports none) ----
 
 def test_every_specialization_recipe_is_on_the_games_list_in_its_profession_and_in_one_specialization_only():

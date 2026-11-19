@@ -459,7 +459,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   character's ⋮ › **Professions…** opens the same editor, and the search box there finds recipe names too. Professions belong to the character: they stay with it
   when you change your main, and a retired character is no longer named as a crafter. Reading an addon's export of your
   professions is planned; nothing is imported yet. Anyone in the guild can then ask who can make a thing (§10a).
-- **Who can make a thing**: the **Professions** page, or just ask the bot. In Discord `/professions who` does the same — start typing the recipe's name and pick it from the
+- **Who can make a thing**: the **Professions** page, or just ask the bot — by the recipe's name or part of it, by what
+  it makes ("who can do arcanite bar transmutes" finds *Transmute: Arcanite*), or by a kind of thing ("who has flasks"). In Discord `/professions who` does the same — start typing the recipe's name and pick it from the
   game's whole list of recipes (the ones somebody in the guild makes come first; two recipes with one name are told
   apart by their category); the answer names its crafters, highest skill first, and only you see it. Nobody is
   pinged. A recipe nobody makes yet says so (*"Nobody in the guild makes Ironfeather Shoulders
@@ -2565,7 +2566,12 @@ capped by a monthly budget the owner sets (`OIBOT_BUDGET_USD`, per calendar mont
 plain-text requests may use at most half of it each, so they can't spend what loot night needs. `/gm status` shows
 this month's spend. The budget is one for the whole bot: if it ever looks after several servers, they share it (D45),
 and the owner's Agents page shows each server's part of the month's spend. When it is used up, the bot says "The bot's
-monthly budget for Claude is used up; the host raises it. Slash commands, the sheets and the site keep working."
+monthly budget for Claude is used up; the host raises it. Slash commands, the sheets and the site keep working." When
+only questions have used their half, a question is answered with "This kind of request has used its share of the bot's
+monthly Claude budget; the host raises it. Slash commands, the sheets and the site keep working." and the officers get
+a line in the ops channel. To keep a question cheap the bot doesn't read this whole manual for each one: it gets the
+manual's contents list, answers a question about the guild's data straight from the records, and for a how-to reads
+only the few parts that cover it — one or two small requests an answer, a few cents at most.
 
 ## 10a. Asking the bot questions
 

@@ -438,6 +438,8 @@ class HelpMixin:
                                             **({"memory": memory} if memory else {}))
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
+            if type(e).__name__ == "BudgetExceeded":  # its sentence is written for the asker (provider.complete): nothing "went wrong"
+                return str(e)
             return "Something went wrong answering that; the officers have been told. `/help` lists what I do."
         if may_act and ans.acts:
             return ACT

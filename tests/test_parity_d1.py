@@ -809,3 +809,63 @@ def test_small_print_says_only_what_the_reader_acts_on_and_a_page_is_a_link(reg,
         assert gone not in inspect.getsource(mod), (mod.__name__, gone)
     s = help_mod.SYSTEM
     assert "never volunteer them" in s and "never list what else you could tell" in s and "explaining your own behaviour" not in s
+
+
+def test_the_manual_reaches_the_model_in_parts_it_asks_for(reg, rs, monkeypatch):
+    """2026-11-19: the whole manual in every prompt cost about $0.28 an answer and spent the month's share in eleven.
+    The model gets the contents list; a how-to answer reads the parts it names and the parts the question's words match."""
+    parts = help_mod.manual_parts()
+    whole = help_mod.MANUAL.read_text()
+    assert len(parts) > 60 and max(len(p["body"]) for p in parts) < 3 * help_mod.PART_CHARS
+    assert sum(len(p["body"]) for p in parts) > 0.97 * len(whole.split("\n## ", 1)[1]), "no text is lost between the parts"
+    index = help_mod.manual_index()
+    assert len(index) < 16_000 and all(f"  {p['id']} · " in index for p in parts)
+    system = help_mod.SYSTEM.format(manual=index, commands="")
+    assert len(system) < 25_000 and "contents list is NOT the manual" in system
+    first = parts[0]["id"]
+    text = help_mod.manual_read([first, "no such part"])
+    assert text.startswith(f"### {first} ") and parts[0]["body"] in text
+    assert help_mod.manual_read(["nope"]) == "" and len(help_mod.manual_read([p["id"] for p in parts])) < help_mod.READ_CHARS + 3 * help_mod.PART_CHARS
+    assert any(p.startswith("3.") for p in help_mod.manual_match("how do I watch the price of an item", 6))
+    calls = []
+    monkeypatch.setattr(help_mod, "system_prompt", lambda tree: system)
+
+    class Provider:
+        def __init__(self, *answers):
+            self.answers = list(answers)
+
+        def complete(self, workload, system, user, schema):
+            calls.append(user)
+            return self.answers.pop(0)
+
+    A = help_mod.HelpAnswer
+    got = help_mod.answer(Provider(A(answer="Mara.")), None, reg, rs, OWNER, True, "who is the main tank?", None, False)
+    assert got.answer == "Mara." and len(calls) == 1 and "## Manual parts" not in calls[0], "a data question is one small request"
+    calls.clear()
+    got = help_mod.answer(Provider(A(answer="", how_to=True, read=[first]), A(answer="Press Join.", read=["4.1"])), None, reg, rs, OWNER, True, "how do I sign up?", None, False)
+    assert got.answer == "Press Join." and len(calls) == 2, "the second step is the last: a second `read` is not followed"
+    assert "## Manual parts" in calls[1] and parts[0]["body"] in calls[1] and calls[1].rstrip().endswith("</question>")
+    calls.clear()
+    help_mod.answer(Provider(A(answer="", how_to=True), A(answer="ok")), None, reg, rs, OWNER, True, "how do I watch the price of an item?", None, False)
+    assert len(calls) == 2 and "## Manual parts" in calls[1], "a how-to with no part named still reads what the question's words match"
+
+
+def test_a_spent_budget_is_said_in_its_own_sentence(reg, rs, monkeypatch):
+    """2026-11-19: the asker read "Something went wrong" while the cause was the month's share."""
+    from oibot_gm.llm.provider import BudgetExceeded
+
+    def spent(*a, **k):
+        raise BudgetExceeded("This kind of request has used its share of the bot's monthly Claude budget; the host raises it.")
+
+    monkeypatch.setattr(help_mod, "answer", spent)
+    bot = HelpBot(reg, rs)
+    told = []
+
+    async def emit(cfg, level, line):
+        told.append(line)
+
+    bot.ops.emit = emit
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "who can make flasks?")) == "This kind of request has used its share of the bot's monthly Claude budget; the host raises it."
+    monkeypatch.setattr(help_mod, "answer", lambda *a, **k: 1 / 0)
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "q")).startswith("Something went wrong answering that")
+    assert len(told) == 2 and "BudgetExceeded" in told[0], "the officers' ops line is written either way"

@@ -149,6 +149,8 @@ class _Index:
     by_key: dict   # key → [RecipeDef]
     pairs: dict    # (word, next word) of a name → [RecipeDef]: a sentence that names part of a recipe (phrase_hits)
     tails: dict    # the one word after a name's dash → [(the name's first word, RecipeDef)] ("the crusader enchant")
+    kinds: dict = field(default_factory=dict)  # a one-word category's singular ("flask", "elixir"; five letters or more) → [RecipeDef]: "who has flasks"
+    made: dict = field(default_factory=dict)  # (word, next word) of what a recipe MAKES, when its own name lacks the pair → [RecipeDef] ("arcanite bar" → Transmute: Arcanite)
 
 
 _INDEX: dict[int, _Index] = {}
@@ -172,7 +174,17 @@ def _index(profile) -> _Index:
             hw, tw = norm_recipe(head).split(), norm_recipe(tail).split()
             if dash and hw and len(tw) == 1 and _telling(tw[0]):
                 tails.setdefault(tw[0], []).append((hw[0], r))
-        ix = _Index(recipes, tuple((r, tuple(r.key.split()), frozenset(r.key.split())) for r in recipes.values()), by_key, pairs, tails)
+        kinds: dict[str, list] = {}
+        for r in recipes.values():
+            cw = [_one(w) for w in norm_recipe(r.category).split()]
+            if len(cw) == 1 and len(cw[0]) >= 5:
+                kinds.setdefault(cw[0], []).append(r)
+        made: dict[tuple, list] = {}
+        for r in recipes.values():
+            mw = norm_recipe((r.makes or {}).get("name") or "").split()
+            for pair in {(a, b) for a, b in zip(mw, mw[1:]) if _telling(a) and _telling(b)} - set(pairs):
+                made.setdefault(pair, []).append(r)
+        ix = _Index(recipes, tuple((r, tuple(r.key.split()), frozenset(r.key.split())) for r in recipes.values()), by_key, pairs, tails, kinds, made)
         _INDEX[id(recipes)] = ix
     return ix
 
@@ -185,12 +197,26 @@ def _telling(word: str) -> bool:
     return len(word) >= 3 and word not in PAIR_SKIP
 
 
+def _one(w: str) -> str:
+    """A word with a plural's s dropped (flasks → flask; glass and bus stay)."""
+    return w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+
+
+def _sentence_pairs(text: str) -> set[tuple]:
+    """Each two neighbouring words of a sentence, as typed and with a plural's s dropped ("arcanite bar transmutes" →
+    also (bar, transmute)): people say "transmutes" and "flasks", the game's names mostly don't."""
+    wl = norm_recipe(text).split()
+    one = [_one(w) for w in wl]
+    return set(zip(wl, wl[1:])) | set(zip(one, one[1:]))
+
+
 def phrase_hits(reg: Registry, text: str, limit: int = 10, *, tails: bool = False) -> list[CatalogEntry]:
     """The recipes of the game's list a SENTENCE names by part of their name: two words next to each other in the
     sentence that are next to each other in the recipe's name ("can anyone do fiery weapon?" → Enchant Weapon - Fiery
     Weapon, which nobody calls by its whole name). `tails` (the help answer): the one word after a name's dash counts
     too when the sentence also has a word starting with the name's first word ("the crusader enchant" → Enchant
-    Weapon - Crusader). Recipes somebody makes first, then by name; none without a list."""
+    Weapon - Crusader), and so do a plural and two neighbouring words of what a recipe MAKES ("arcanite bar transmutes"
+    → Transmute: Arcanite, 2026-11-19). Recipes somebody makes first, then by name; none without a list."""
     if not reg.profile.has_recipe_list:
         return []
     wl = norm_recipe(text).split()
@@ -198,6 +224,9 @@ def phrase_hits(reg: Registry, text: str, limit: int = 10, *, tails: bool = Fals
     found = {r.id: r for pair in zip(wl, wl[1:]) for r in ix.pairs.get(pair, ())}
     if tails:
         found.update({r.id: r for w in wl for first, r in ix.tails.get(w, ()) if any(x.startswith(first) for x in wl)})
+        found.update({r.id: r for pair in _sentence_pairs(text) for r in (*ix.pairs.get(pair, ()), *ix.made.get(pair, ()))})  # plurals, and what a recipe makes
+        if not found:  # a kind of thing alone ("who has flasks"): that category's recipes, the ones somebody makes first
+            found.update({r.id: r for w in wl for r in ix.kinds.get(_one(w), ())})
     if not found:
         return []
     made = {e.id: e for e in catalog(reg) if e.recipe is not None}
@@ -397,7 +426,8 @@ def help_hit(reg: Registry, q: str) -> bool:
         words = set(q.split())
         ix = _index(reg.profile)
         wl = q.split()
-        return any(len(kw) > 1 and ks <= words for _, kw, ks in ix.rows) or any(pair in ix.pairs for pair in zip(wl, wl[1:]))
+        return (any(len(kw) > 1 and ks <= words for _, kw, ks in ix.rows) or any(pair in ix.pairs for pair in zip(wl, wl[1:]))
+                or any(pair in ix.pairs or pair in ix.made for pair in _sentence_pairs(q)) or any(_one(w) in ix.kinds for w in wl))  # "arcanite bar transmutes": what a recipe makes, a plural
     return False
 
 

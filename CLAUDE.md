@@ -534,7 +534,7 @@ src/oibot_gm/
                        character whose professions follow the armory; none without a list), migrated_line; HELP_WORDS / help_hit / help_section = the help section
                        (every member-typed name through unfence). With the list the section (2026-11-13) = a line per crafter (member, skill,
                        level when linked, `armory` | `by hand`, a recipe COUNT — never a recipe book), the question's recipes (search, then
-                       phrase_hits = two neighbouring words of a name, or with tails= an enchant's one word after its dash + "enchant…"), then the
+                       phrase_hits = two neighbouring words of a name, or with tails= an enchant's one word after its dash + "enchant…", a plural, two neighbouring words of what a recipe MAKES ("arcanite bar transmutes" → Transmute: Arcanite) and, alone, a one-word category ("flasks") — 2026-11-19), then the
                        first HELP_BOOK recipes of a crafter the question names; `armory` = a recipe not shown is one they don't know (the header
                        says so); without a list _help_section_registered = as before.
                        Names only: nothing pings, DMs, tracks a request or reads a website. Game data: profiles/<v>/professions.yaml (GameProfile.professions,
@@ -555,6 +555,12 @@ src/oibot_gm/
                        day its UTC day alone), low, high, words, unread (NOT_READ "not read", low/high null)} + the span's low/high and their words + since / until = the span's start and the server's now), SPANS 7 · 30 · 90 days · 1 year,
                        EMPTY_LIST_SITE / EMPTY_LIST_DISCORD (EMPTY_LIST_HIDDEN on both while prices are hidden: no search to point at)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
+                       the manual is PROGRESSIVELY read (2026-11-19: the whole manual in every prompt was ~108K tokens, $0.28 an answer — the
+                       month's help share gone in 11 answers): manual_parts = each section's whole blocks grouped to PART_CHARS (ids '4.3'),
+                       manual_index = the contents list in the system prompt (id · the bold lead-ins), HelpAnswer.how_to / .read → answer()'s
+                       second and last request with manual_read(ids, question=) = the parts named + manual_match's (the question's words,
+                       rarest first; code) — a data question is ONE request, a how-to two; never put the whole manual back in a prompt;
+                       help_answer returns BudgetExceeded's own sentence (never "Something went wrong");
                        the answer's shape (the owner, 2026-11-18; SYSTEM): the fact first, never where it comes from (armory / by hand are reasoning
                        notes), nothing about what is NOT there; HelpAnswer.page (a PAGES key) → page_link = '-# See it all on the [Professions page](<url>).'
                        (officers' pages for an officer only; off for the site's box — help_answer(link=False)); `commands` only when the asker must DO
