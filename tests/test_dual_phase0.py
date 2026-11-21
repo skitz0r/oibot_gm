@@ -417,9 +417,43 @@ def test_config_confirm_view_expires_in_words_and_its_buttons_carry_the_guild(re
     ed = Editor()
     view.bind(ed)
     run(view.on_timeout())
-    assert ed.edits == [{"content": discord_policy.EXPIRED, "embed": None, "view": None}] and view.token not in discord_policy.PENDING_CONFIRMS
+    assert ed.edits == [{"content": discord_policy.TIMED_OUT, "embed": None, "view": None}] and view.token not in discord_policy.PENDING_CONFIRMS, "no way to delete it: it says what happened"
     run(view.on_timeout())  # twice is harmless
     assert len(ed.edits) == 1
+
+
+def test_a_proposed_change_nobody_answers_deletes_itself(reg):
+    """The owner, 2026-11-21: an unanswered confirm card turned into "Expired — say it again." under a member's chat.
+    Now the card is deleted at its timeout; words only when Discord won't delete it, and they say what happened."""
+    import types
+
+    class Sent:
+        def __init__(self, fail=False):
+            self.id, self.channel, self.flags = 77, types.SimpleNamespace(id=5), types.SimpleNamespace(ephemeral=False)
+            self.edits, self.deleted, self.fail = [], 0, fail
+
+        async def edit(self, **kw):
+            self.edits.append(kw)
+
+        async def delete(self):
+            if self.fail:
+                raise RuntimeError("gone")
+            self.deleted += 1
+
+    req = ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="dm", value="off")])
+    view = discord_policy.ConfigConfirmView(reg, req, None, None, OWNER, "Owner", None)
+    sent = Sent()
+    view.bind(sent)
+    run(view.on_timeout())
+    run(view.on_timeout())
+    assert sent.deleted == 1 and sent.edits == [] and view.token not in discord_policy.PENDING_CONFIRMS
+    view = discord_policy.ConfigConfirmView(reg, req, None, None, OWNER, "Owner", None)
+    sent = Sent(fail=True)
+    view.bind(sent)
+    run(view.on_timeout())
+    assert sent.edits == [{"content": discord_policy.TIMED_OUT, "embed": None, "view": None}]
+    for text in (discord_policy.TIMED_OUT, discord_policy.READING_TIMED_OUT, discord_policy.EXPIRED_RESTART, discord_policy.BUTTON_GONE):
+        assert "xpired" not in text and "again" not in text and text.endswith("."), text
 
 
 def test_compile_confirm_view_expires_too(reg):
@@ -431,7 +465,7 @@ def test_compile_confirm_view_expires_too(reg):
     ed = Editor()
     view.bind(ed)
     run(view.on_timeout())
-    assert ed.edits[-1]["content"] == discord_policy.EXPIRED and ed.edits[-1]["view"] is None
+    assert ed.edits[-1]["content"] == discord_policy.READING_TIMED_OUT and ed.edits[-1]["view"] is None, "a reading stays, in words: its draft still waits"
 
 
 def test_a_press_after_a_restart_says_so_instead_of_interaction_failed(reg):

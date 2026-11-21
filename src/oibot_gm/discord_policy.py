@@ -31,8 +31,13 @@ class PolicyContext:
 
 # ---------------------------------------------------------------- pending confirms that survive a restart gracefully (§2.9)
 
-EXPIRED = "Expired — say it again."
-EXPIRED_RESTART = "Expired after a restart — nothing was changed. Say it again."
+# What a confirm that nobody answered says (the owner, 2026-11-21: "Expired — say it again." told nobody what had
+# happened). A proposed change nobody pressed is DELETED at its timeout — no text; TIMED_OUT is only what it reads when
+# Discord won't delete it. Each sentence says what happened and what is true now.
+TIMED_OUT = "Nobody pressed Apply or Cancel in time. Nothing was changed."
+READING_TIMED_OUT = "Nobody confirmed this reading in time. The draft is still waiting on the Policy page."
+EXPIRED_RESTART = "The bot restarted before anyone pressed a button. Nothing was changed."
+BUTTON_GONE = "That button no longer works. Nothing was changed."
 PENDING_CONFIRMS: dict[str, "PendingView"] = {}  # token -> the live diff / reading; process memory by design (a restart forgets them)
 PENDING_KEEP = 50  # finished entries kept so a late press on an applied diff still answers "each change applies once"
 
@@ -68,10 +73,13 @@ class CfgApplyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"cfgap
 
 class PendingView(discord.ui.View):
     """A View whose buttons are CfgApplyButtons bound to this instance by a token. `bind(editor)` gives it the way to
-    edit its own message (a Message.edit, a WebhookMessage.edit or edit_original_response) so `on_timeout` can turn
-    the buttons into EXPIRED; `press(interaction, action)` dispatches to `press_<action>`."""
+    edit its own message (a Message.edit, a WebhookMessage.edit or edit_original_response) so `on_timeout` can take
+    the buttons off — the message reads TIMEOUT_TEXT, or is deleted when DELETE_ON_TIMEOUT; `press(interaction, action)`
+    dispatches to `press_<action>`."""
 
     ACTIONS: tuple[str, ...] = ()
+    TIMEOUT_TEXT = TIMED_OUT
+    DELETE_ON_TIMEOUT = False
 
     def __init__(self, reg: Registry, timeout: float):
         super().__init__(timeout=timeout)
@@ -80,6 +88,7 @@ class PendingView(discord.ui.View):
         self.reg = reg
         self.token = secrets.token_urlsafe(12)
         self.editor = None
+        self.deleter = None
         for a in self.ACTIONS:
             item = CfgApplyButton(reg.key, self.token, a)
             self.add_item(item)
@@ -95,32 +104,42 @@ class PendingView(discord.ui.View):
 
         msg = sent if hasattr(sent, "channel") and hasattr(sent, "id") else getattr(sent, "resource", None)
         owner = getattr(sent, "__self__", None)  # interaction.edit_original_response: the ephemeral reply, by its interaction
+        # how the message deletes itself at its timeout: the Message's own delete, or the interaction's original response
+        self.deleter = getattr(owner, "delete_original_response", None) if edit is sent else getattr(sent, "delete", None) or getattr(getattr(sent, "resource", None), "delete", None)
         if msg is not None and getattr(getattr(msg, "channel", None), "id", None) and not getattr(getattr(msg, "flags", None), "ephemeral", False):
             pending_views.track(f"pv:{self.token}", channel_id=msg.channel.id, message_id=msg.id)
         elif owner is not None:
             pending_views.track_interaction(f"pv:{self.token}", owner)
         return self
 
-    async def expire(self, text: str = EXPIRED) -> None:
-        """Buttons off, the text says to say it again. Called by on_timeout; safe to call twice."""
+    async def expire(self, text: str | None = None) -> None:
+        """Nobody pressed in time: the message is deleted (DELETE_ON_TIMEOUT — a proposed change nobody answered leaves
+        nothing behind), else — or when Discord won't delete it — its buttons go and it reads `text` (TIMEOUT_TEXT).
+        Called by on_timeout; safe to call twice."""
         from . import pending_views
 
         PENDING_CONFIRMS.pop(self.token, None)
         pending_views.untrack(f"pv:{self.token}")
         if self.editor is None:
             return
+        editor, deleter, self.editor, self.deleter = self.editor, self.deleter, None, None
+        if self.DELETE_ON_TIMEOUT and deleter is not None:
+            try:
+                await deleter()
+                return
+            except Exception as e:  # noqa: BLE001 — gone already, or not ours to delete: say it in words instead
+                log.debug("confirm view expiry delete failed: %s", e)
         try:
-            await self.editor(content=text, embed=None, view=None)
+            await editor(content=text or self.TIMEOUT_TEXT, embed=None, view=None)
         except Exception as e:  # noqa: BLE001 — the message may be gone; nothing was changed either way
             log.debug("confirm view expiry edit failed: %s", e)
-        self.editor = None
 
     async def on_timeout(self) -> None:
-        await self.expire(EXPIRED)
+        await self.expire()
 
     async def press(self, interaction: discord.Interaction, action: str) -> None:
         if action not in self.ACTIONS:
-            await interaction.response.send_message(EXPIRED, ephemeral=True)
+            await interaction.response.send_message(BUTTON_GONE, ephemeral=True)
             return
         await getattr(self, f"press_{action}")(interaction)
         if self.is_finished():
@@ -144,9 +163,10 @@ class CompileConfirmView(PendingView):
     text the reading was compiled from: both buttons refuse once the document no longer reads that way (someone
     edited it since — this reading is stale); `previous` is the text before the edit, Discard's fallback when the
     pending entry is gone. The buttons are CfgApplyButtons (a press after a restart says so; a timeout says
-    EXPIRED)."""
+    READING_TIMED_OUT — the draft is on disk and still waits on the Policy page)."""
 
     ACTIONS = ("confirm", "discard")
+    TIMEOUT_TEXT = READING_TIMED_OUT
 
     def __init__(self, ps: policy_mod.PolicyStore, doc: str, compiled, previous: str, ops: Ops, reg: Registry, text: str | None = None):
         super().__init__(reg, timeout=900)
@@ -276,10 +296,12 @@ class ConfigConfirmView(PendingView):
     each run a board op touches, as the diff showed it (configops.board_revs) — Apply refuses a board changed since.
     Single-flight: the first Apply claims the view before anything awaits (buttons gone, "Applying…"); a second press
     (a double click, another officer) and a Cancel mid-apply are refused, so nothing is applied twice. The buttons are
-    CfgApplyButtons (`cfgapply.<gk>:<token>:apply|cancel`): a timeout edits the diff to EXPIRED, a press after a
-    restart answers EXPIRED_RESTART — never Discord's "interaction failed"."""
+    CfgApplyButtons (`cfgapply.<gk>:<token>:apply|cancel`): a timeout DELETES the diff (nothing was changed and
+    nothing is left to read; TIMED_OUT only when it can't be deleted), a press after a restart answers
+    EXPIRED_RESTART — never Discord's "interaction failed"."""
 
     ACTIONS = ("apply", "cancel")
+    DELETE_ON_TIMEOUT = True
 
     def __init__(self, reg: Registry, req: configops.ConfigRequest, ps: policy_mod.PolicyStore, ops: Ops, requester_id: int, requester: str, channel,
                  revs: dict[str, str] | None = None):
@@ -377,7 +399,8 @@ def _reply_private(bot, reg: Registry, message: discord.Message) -> bool:
 
 
 async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.PolicyStore, provider, ops: Ops, text: str, *, bot, channel,
-                        req: configops.ConfigRequest | None = None, to_help: bool | None = None, conversation: str | None = None):
+                        req: configops.ConfigRequest | None = None, to_help: bool | None = None, conversation: str | None = None,
+                        hold=None):
     """Shared by /gm change, @mentions and DMs. `interaction_or_message` is an Interaction (deferred) or a Message;
     `channel`: where it was asked (channel id, None = DMs) — Registry.may_plain decides per op what may act there;
     `req`: an already parsed request (the router parsed first). Refused ops are listed; the rest can still apply.
@@ -385,7 +408,10 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     of the parser's short reply; by default in an act channel and on /gm change (elsewhere help already answered).
     `conversation`: the recent exchange (conversation.context_block); None = recalled here — a Discord reply to one of
     the bot's plain-text messages continues that exchange, else the same person in the same place within the window
-    (design §5.51). Every reply is remembered with the bot's message id; a /gm change shares the channel's ring."""
+    (design §5.51). Every reply is remembered with the bot's message id; a /gm change shares the channel's ring.
+    `hold`: an async fn(req) for a message the bot only OVERHEARD (listening, 2026-11-21): a request that would change
+    something is handed to it instead of being answered — nothing is posted; the writer's 👀 click brings it back here
+    with `req`. Questions are answered as ever."""
     from . import conversation as conv_mod
 
     is_msg = isinstance(interaction_or_message, discord.Message)
@@ -440,6 +466,9 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if not req.ops:
         keep(await send(req.reply[:1900] or "Nothing to change.", ephemeral=True), req.reply or "Nothing to change.")
         return
+    if hold is not None:  # overheard: no diff and no refusal under a message that never spoke to the bot
+        await hold(req)
+        return
     raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
     allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)
     # a people or run action the registry already refuses (an unknown field, a character that isn't theirs) is a refusal,
@@ -478,7 +507,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     view = apply_button(confirm)
     sent = await send(req.reply[:500] if req.reply else None, embed=e, view=view, ephemeral=True)
     keep(sent, ((req.reply or "") + "\nProposed changes (shown with Apply; nothing written yet):\n" + body).strip())
-    # how the view edits its own message when it expires (EXPIRED): the reply Message, or the interaction's original response
+    # how the view deletes (else edits) its own message when nobody presses: the reply Message, or the interaction's original response
     confirm.bind(sent if is_msg else getattr(interaction_or_message, "edit_original_response", None))
 
 

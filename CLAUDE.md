@@ -234,7 +234,10 @@ src/oibot_gm/
                        ListenMixin (design §5.59): listen_message = the gate run LAST in on_message for an untagged message in a listened channel
                        (PlainPolicy.listen) → decisions.noul on listen_state (LISTEN_BOT_WORDS + raids + glossary + 2 recent + the message, data only)
                        with LISTEN_QUESTION; ≥ LISTEN_SURE (0.8): reply → plain_text as an @mention, watch → recorded; ≥ LISTEN_MAYBE (0.5): reply →
-                       👀 and the AUTHOR's 👀 click (on_raw_reaction_add, 10 min) → plain_text; LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
+                       👀 and the AUTHOR's 👀 click (on_raw_reaction_add, LISTEN_ASK_S 1 hour) → plain_text; an overheard message that
+                       parses to a CHANGE is never answered with a card (the owner, 2026-11-21): plain_text(hold=) → handle_change(hold=) →
+                       _listen_hold = 👀 only + the parsed request kept, the author's click → handle_change(req=) shows the diff, no click →
+                       the 👀 comes off, nothing posted; an overheard question is answered as before; LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
                        50 verdicts (memory, text ≤120) and out/listen.jsonl rows WITHOUT text; no key → one ops warn per guild per hour. Never a DM;
                        LISTEN_LISTENERS fn(guild key) on every verdict → the web's officers-only `listen` topic (the Ops page's Recent decisions)
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
@@ -642,7 +645,9 @@ src/oibot_gm/
                        TYPED changes through ops_change(guild, changes, preview) → POST /api/ops/change (`confirmed`; preview=True returns the Described lines);
                        set_comp_target (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change, /gm config plain (the D37 READ view, registered here); handle_change for every
-                       plain-text path (ConfigConfirmView re-authorizes the presser; diff_text = the diff's body: setup ops as configops.describe_ops(…).as_discord(),
+                       plain-text path (ConfigConfirmView re-authorizes the presser; a diff nobody presses in 10 min DELETES itself —
+                       PendingView.expire, DELETE_ON_TIMEOUT; words only where it can't: TIMED_OUT / READING_TIMED_OUT / EXPIRED_RESTART /
+                       BUTTON_GONE each say what happened and what is true now, never "Expired — say it again"; diff_text = the diff's body: setup ops as configops.describe_ops(…).as_discord(),
                        other ops their preview_line; refusals end with configops.plain_footer;
                        guild name when many_guilds); policy_show_messages
                        (≤3 text messages + one Compiled reading embed ≤15 rules); PolicyEditModal append-only past 4000

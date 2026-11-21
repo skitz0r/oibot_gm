@@ -187,7 +187,7 @@ class Bot(db.ListenMixin):
         self.user = types.SimpleNamespace(id=BOT_ID)
         self.handled = []
 
-    async def plain_text(self, message, reg, text, channel, memory=None):
+    async def plain_text(self, message, reg, text, channel, memory=None, hold=None):
         self.handled.append((message.id, text, channel))
 
     async def news_message(self, message):
@@ -440,3 +440,48 @@ def test_listening_words_cover_professions(gate):
     dec = gate.run(0.93, message(gate.g.me.discord_id, text="who can make a bag?"))
     words = dec.states[0]["guild"]["words"]
     assert {d.name.lower() for d in gate.g.reg.profile.professions.values()} <= set(words) and "leatherworking" in words
+
+
+# ---- an overheard change waits behind a 👀 (the owner, 2026-11-21)
+
+def test_an_overheard_change_is_only_an_eyes_until_its_writer_clicks(gate, monkeypatch):
+    """A member chatting ("can't rly play this weekend") got a public confirm card, then "Expired — say it again.".
+    Now a sure message that turns out to ask for a CHANGE posts nothing: 👀 on their message, the parsed request kept;
+    the writer's click shows the proposed change, anyone else's does nothing, and no click takes the 👀 off again."""
+    me, other = gate.g.me.discord_id, gate.g.other.discord_id
+    req = configops.ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="dm", value="off")])
+
+    async def plain_text(message, reg, text, channel, memory=None, hold=None):
+        await hold(req)  # what handle_change does with a change when the message was only overheard
+
+    monkeypatch.setattr(gate.bot, "plain_text", plain_text)
+    shown = []
+
+    async def handle_change(message, reg, ps, provider, ops, text, *, bot, channel, req=None, **kw):
+        shown.append((message.id, text, channel, req, kw))
+
+    monkeypatch.setattr(db, "handle_change", handle_change)
+    gate.bot.policies = types.SimpleNamespace(store=lambda reg: None)
+    gate.bot.ctx = types.SimpleNamespace(provider=None)
+    msg = message(me, text="can't rly play this weekend")
+    gate.run(0.92, msg)
+    assert msg.reacts == ["👀"] and shown == [] and gate.bot.listen_recent(gate.g.reg)[0]["did"] == "asked"
+    react(gate.bot, msg, other)
+    assert shown == []
+    react(gate.bot, msg, me)
+    assert shown == [(msg.id, msg.content, SIGNUP_CH, req, {})], "the request parsed then, no hold: the card shows now"
+    react(gate.bot, msg, me)
+    assert len(shown) == 1
+
+    quiet = message(me, text="out this weekend")
+    gate.run(0.92, quiet)
+    asyncio.run(gate.bot._listen_expire(quiet.id, delay=0))
+    assert quiet.reacts == [("removed", "👀", BOT_ID)] and len(shown) == 1, "no click: the 👀 comes off and nothing was ever said"
+
+    async def no_reactions(emoji):
+        raise RuntimeError("no Add Reactions")
+
+    barred = message(me, text="away friday")
+    barred.add_reaction = no_reactions
+    gate.run(0.92, barred)
+    assert gate.bot.listen_recent(gate.g.reg)[0]["did"] == "quiet" and barred.id not in gate.bot._listen()["asks"]

@@ -17,7 +17,7 @@ import pytest
 from conftest import OWNER
 
 from oibot_gm import configops, conversation, discord_policy, help as help_mod
-from oibot_gm.configops import ConfigRequest
+from oibot_gm.configops import ConfigOp, ConfigRequest
 
 OPS_CH = 900_101
 OTHER_CH = 900_102
@@ -313,3 +313,21 @@ def test_memory_writes_nothing_to_the_store(reg, data_root):
     assert len(conversation.recall(reg, OPS_CH, OWNER)) == 2
     assert _snapshot(Path(data_root)) == before
     assert not any("conversation" in k for k in before)
+
+
+def test_an_overheard_change_is_handed_to_hold_and_nothing_is_posted(reg):
+    """handle_change(hold=): a request that would change something goes to `hold` with the parsed request — no diff,
+    no refusal; a question is still answered (listening, the owner 2026-11-21)."""
+    held, replies = [], []
+
+    async def hold(req):
+        held.append(req)
+
+    change = ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="dm", value="off")])
+    asyncio.run(discord_policy.handle_change(message(OWNER, 21, replies=replies, next_id=31), reg, None, CapturingProvider(change), None, "dms off",
+                                             bot=bot_stub(), channel=OPS_CH, to_help=False, hold=hold))
+    assert held == [change] and replies == []
+    question = ConfigRequest(kind="question", reply="Tuesday.", questions=[])
+    asyncio.run(discord_policy.handle_change(message(OWNER, 22, replies=replies, next_id=32), reg, None, CapturingProvider(question), None, "when?",
+                                             bot=bot_stub(), channel=OPS_CH, to_help=False, hold=hold))
+    assert len(held) == 1 and replies == ["Tuesday."]

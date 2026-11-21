@@ -1409,9 +1409,11 @@ edits that new family and leaves the one it shared alone.
   question, and a plain question ("who is rostered tonight?") gets the same answer `/ask` would give. Whoever presses
   Apply needs the rights for the change (§8c); a slow change (a lock, fill DMs, a compile, a proposal) is acknowledged
   at once — the buttons go, the diff reads *Applying…* and turns into the result when it is done, and a second press
-  (or Cancel) by anyone is refused, so nothing applies twice. A diff nobody presses within ten minutes turns into
-  *Expired — say it again.*; a press on a diff (or a policy reading) from before a bot restart answers *Expired after a
-  restart — nothing was changed* instead of Discord's "interaction failed". When something breaks inside a change,
+  (or Cancel) by anyone is refused, so nothing applies twice. A diff nobody presses within ten minutes is deleted:
+  nothing was changed, and nothing is left in the channel. A policy reading nobody confirms in fifteen minutes reads
+  *Nobody confirmed this reading in time. The draft is still waiting on the Policy page.* A press on a diff (or a
+  policy reading) from before a bot restart answers *The bot restarted before anyone pressed a button. Nothing was
+  changed.* instead of Discord's "interaction failed". When something breaks inside a change,
   every surface says the same thing — *Something went wrong and nothing was changed. The owner has the details.* — and
   the owner gets the details in the ops channel and a DM; when the model itself can't be reached (a bad API key, no
   network, the provider down) the sentence is *The model isn't reachable right now, so I couldn't read that. Nothing was
@@ -1907,7 +1909,10 @@ when is the next raid") counts as speaking to it; talking *about* the bot to oth
   done, then switch to *Replies*.
 - **Replies** — the bot answers. When it is unsure a message is for it, it adds 👀 instead; the writer clicks the 👀
   within the hour to ask, and anyone else's click does nothing. When the hour passes with no click the bot takes its 👀
-  off again, so a 👀 you can still see is one that still works.
+  off again, so a 👀 you can still see is one that still works. A message the bot only overheard never gets a change
+  proposed under it: when it reads as something to record (an absence, a signup answer), the bot adds 👀 and posts
+  nothing. The writer clicks the 👀 to see the proposed change with Apply and Cancel; with no click the 👀 comes off
+  after the hour and nothing was said or changed. An overheard question is answered straight away, as before.
 The bot judges a message with what it knows about the room: its own job there (the signup channel, the officers'
 channel) and the channel's topic and category in Discord — so give a listening channel a topic ("General chat about the
 game", "Raid signups and questions") and the bot reads it in that light.

@@ -442,9 +442,16 @@ class ListenMixin:
                 self._listen()["asks"][message.id] = {"guild": reg.key, "channel": cid, "author": message.author.id, "text": text,
                                                       "message": message, "memory": judged, "expires": time.monotonic() + LISTEN_ASK_S}
                 asyncio.get_running_loop().create_task(self._listen_expire(message.id))
+        held: list[bool] = []  # set when the message turned out to ask for a CHANGE: 👀 only, nothing posted
+
+        async def hold(req) -> None:
+            held.append(await self._listen_hold(message, reg, text, cid, req))
+
         try:
             if did == "replied":
-                await self.plain_text(message, reg, text, cid, memory=judged)
+                await self.plain_text(message, reg, text, cid, memory=judged, hold=hold)
+                if held:
+                    did = "asked" if held[0] else "quiet"
         finally:
             # the capture comes AFTER the reply, the 👀 and the watch verdict (an embedding and a git commit never
             # hold up an answer); `judged` came from the recall before, so the reply saw the same memories. The
@@ -521,6 +528,22 @@ class ListenMixin:
         except Exception as e:  # noqa: BLE001
             log.warning("memory: warm-up failed (%s)", type(e).__name__)
 
+    async def _listen_hold(self, message, reg, text: str, cid: int, req) -> bool:
+        """An overheard message that would CHANGE something (an absence, an answer): the bot posts nothing — it adds 👀
+        and keeps the parsed request; the writer's click within the window shows the proposed change with Apply /
+        Cancel, as an @mention would have (the owner, 2026-11-21: a member chatting about their weekend got a public
+        confirm card, then "Expired"). No click: the 👀 comes off and nothing was said. False when the 👀 can't be added
+        (then the bot stays quiet)."""
+        try:
+            await message.add_reaction(LISTEN_EYES)
+        except Exception as e:  # noqa: BLE001 — no Add Reactions there: stay quiet, never a card instead
+            log.warning("listen: 👀 not added in %s (%s)", cid, type(e).__name__)
+            return False
+        self._listen()["asks"][message.id] = {"guild": reg.key, "channel": cid, "author": message.author.id, "text": text, "message": message,
+                                              "req": req, "expires": time.monotonic() + LISTEN_ASK_S}
+        asyncio.get_running_loop().create_task(self._listen_expire(message.id))
+        return True
+
     async def _listen_expire(self, message_id: int, delay: float | None = None) -> None:
         """The window closed with no click from the writer: forget the ask and take the bot's own 👀 off the message, so
         a 👀 still on a message is one that still works. A click in time already popped the ask: nothing to do. A
@@ -549,6 +572,10 @@ class ListenMixin:
         reg = self.registries.by_key.get(ask["guild"])
         if reg is None or reg.listen_mode(ask["channel"]) != "reply":
             return  # listening was turned off (or to watch) since the 👀
+        if ask.get("req") is not None:  # a held change (_listen_hold): the diff with Apply / Cancel, now that they asked
+            await handle_change(ask["message"], reg, self.policies.store(reg), self.ctx.provider, self.ops, ask["text"], bot=self,
+                                channel=ask["channel"], req=ask["req"])
+            return
         await self.plain_text(ask["message"], reg, ask["text"], ask["channel"], memory=ask.get("memory"))
 
 
@@ -1223,7 +1250,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             log.warning("memory: recall failed (%s)", type(e).__name__)
             return []
 
-    async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None) -> None:
+    async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None, hold=None) -> None:
         """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).
         An "act" channel (ops/analytics by default): configops.parse first — a change becomes the diff + Apply, a
         question gets the parser's own reply from the live config (one model call either way). Elsewhere (DMs and
@@ -1231,8 +1258,11 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         only then, and only if the person could act here, is it parsed into a change — a plain question costs one call,
         a change two. Outside the ask audience a person who may act on their own record is parsed directly. A newcomer
         who must apply (Registry.must_apply) while applications are open gets the persistent Apply to join button on the
-        reply, so the application wizard opens straight from the chat (typed class/spec is never parsed)."""
+        reply, so the application wizard opens straight from the chat (typed class/spec is never parsed).
+        `hold`: set by the listening gate for a message that never addressed the bot — a change is held behind a 👀
+        instead of shown (handle_change's `hold`)."""
         mode = reg.plain_mode(channel)
+        hold_kw = {"hold": hold} if hold is not None else {}  # only the listening gate sets it: every other call is as before
         if mode == "ignore":
             return
         uid = message.author.id
@@ -1244,7 +1274,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         provider, ps = self.ctx.provider, self.policies.store(reg)
         if mode == "act" and provider is not None:
             async with message.channel.typing():
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, **hold_kw)
             return
         # the snapshot and the parser context follow who can READ the reply: an officer asking where members read it
         # gets the member view (help_answer adds where the officer view is)
@@ -1267,7 +1297,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
                     await message.reply(await configops.report_error(self.ops, reg.config, e, "plain-text parse"), allowed_mentions=quiet)
                     return
                 if req.kind == "change" and req.ops:
-                    await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req, conversation=convo)
+                    await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req, conversation=convo, **hold_kw)
                 else:
                     await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
                 return
@@ -1276,7 +1306,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             mem_kw = {"memory": mem.memory_block(memory, mem.guild_tz(reg))} if memory else {}
             answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw)
             if answer == HELP_ACT:
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo)
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, **hold_kw)
                 return
         if answer is None:  # outside the ask audience: static guide only
             await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)

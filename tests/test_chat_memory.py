@@ -290,7 +290,7 @@ class Bot(db.ListenMixin):
         self.user = types.SimpleNamespace(id=BOT_ID)
         self.handled = []
 
-    async def plain_text(self, message, reg, text, channel, memory=None):
+    async def plain_text(self, message, reg, text, channel, memory=None, hold=None):
         self.handled.append((message.id, text, channel, memory))
 
     async def news_message(self, message):
@@ -652,7 +652,7 @@ def test_the_capture_comes_after_the_reply_and_the_verdict_says_it_was_kept(gate
     order = []
     real_plain, real_remember = gate.bot.plain_text, gate.svc.remember
 
-    async def plain_text(message, reg, text, channel, memory=None):
+    async def plain_text(message, reg, text, channel, memory=None, hold=None):
         order.append(("reply", gate.svc.count(gate.reg)))
         await real_plain(message, reg, text, channel, memory=memory)
 
