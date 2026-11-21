@@ -646,8 +646,10 @@ src/oibot_gm/
                        set_comp_target (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change, /gm config plain (the D37 READ view, registered here); handle_change for every
                        plain-text path (ConfigConfirmView re-authorizes the presser; a diff nobody presses in 10 min DELETES itself —
-                       PendingView.expire, DELETE_ON_TIMEOUT; words only where it can't: TIMED_OUT / READING_TIMED_OUT / EXPIRED_RESTART /
-                       BUTTON_GONE each say what happened and what is true now, never "Expired — say it again"; diff_text = the diff's body: setup ops as configops.describe_ops(…).as_discord(),
+                       PendingView.expire, DELETE_ON_TIMEOUT; a policy reading nobody confirms in 15 min UNWINDS its edit as Discard would
+                       (CompileConfirmView.on_timeout → policy.discard_pending, one ops line; only the edit it showed: same text, same
+                       compiled_at) and is deleted too; words only where Discord won't delete: TIMED_OUT / READING_TIMED_OUT / READING_DROPPED /
+                       EXPIRED_RESTART / BUTTON_GONE each say what happened and what is true now, never "Expired — say it again"; diff_text = the diff's body: setup ops as configops.describe_ops(…).as_discord(),
                        other ops their preview_line; refusals end with configops.plain_footer;
                        guild name when many_guilds); policy_show_messages
                        (≤3 text messages + one Compiled reading embed ≤15 rules); PolicyEditModal append-only past 4000

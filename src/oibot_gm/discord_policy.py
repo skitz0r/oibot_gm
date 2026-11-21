@@ -35,7 +35,8 @@ class PolicyContext:
 # happened). A proposed change nobody pressed is DELETED at its timeout — no text; TIMED_OUT is only what it reads when
 # Discord won't delete it. Each sentence says what happened and what is true now.
 TIMED_OUT = "Nobody pressed Apply or Cancel in time. Nothing was changed."
-READING_TIMED_OUT = "Nobody confirmed this reading in time. The draft is still waiting on the Policy page."
+READING_TIMED_OUT = "Nobody confirmed this reading in time."  # its edit was changed or settled elsewhere: nothing to drop
+READING_DROPPED = "Nobody confirmed this reading in time. The edit was dropped and the policy reads as before."
 EXPIRED_RESTART = "The bot restarted before anyone pressed a button. Nothing was changed."
 BUTTON_GONE = "That button no longer works. Nothing was changed."
 PENDING_CONFIRMS: dict[str, "PendingView"] = {}  # token -> the live diff / reading; process memory by design (a restart forgets them)
@@ -162,16 +163,35 @@ class CompileConfirmView(PendingView):
     in policy.PENDING (begin_edit / compile_pending — the site, MCP and plain text share it). `text` is the exact
     text the reading was compiled from: both buttons refuse once the document no longer reads that way (someone
     edited it since — this reading is stale); `previous` is the text before the edit, Discard's fallback when the
-    pending entry is gone. The buttons are CfgApplyButtons (a press after a restart says so; a timeout says
-    READING_TIMED_OUT — the draft is on disk and still waits on the Policy page)."""
+    pending entry is gone. The buttons are CfgApplyButtons (a press after a restart says so).
+    A reading nobody confirms in time UNWINDS its edit (the owner, 2026-11-21): on_timeout discards the pending edit
+    exactly as Discard would — the previous text is back, other officers can edit again — and deletes the message.
+    Only the edit this reading showed: a draft edited since (the text differs) or compiled again (another
+    compiled_at — a newer reading is open) is left alone."""
 
     ACTIONS = ("confirm", "discard")
     TIMEOUT_TEXT = READING_TIMED_OUT
+    DELETE_ON_TIMEOUT = True
 
     def __init__(self, ps: policy_mod.PolicyStore, doc: str, compiled, previous: str, ops: Ops, reg: Registry, text: str | None = None):
         super().__init__(reg, timeout=900)
         self.ps, self.doc, self.compiled, self.previous, self.ops = ps, doc, compiled, previous, ops
         self.text = text if text is not None else ps.read(doc)
+        self.stamp = (ps.load_pending(doc) or {}).get("compiled_at")  # which compile this reading is: a later one is not ours to drop
+
+    async def on_timeout(self) -> None:
+        dropped = False
+        try:
+            held = self.ps.load_pending(self.doc)
+            if held is not None and held.get("compiled_at") == self.stamp and self.ps.read(self.doc) == self.text:
+                await asyncio.to_thread(policy_mod.discard_pending, self.ps, self.doc, "the bot, nobody confirmed its reading in time")
+                dropped = True
+                if self.ops is not None:
+                    await self.ops.emit(self.reg.config, "info", f"The {self.doc} policy edit by {held.get('by') or 'an officer'} was dropped: nobody confirmed "
+                                                                 f"its reading within {int(self.timeout or 0) // 60} minutes. The policy reads as before.")
+        except Exception as e:  # noqa: BLE001 — the draft then waits on the Policy page as before; the message still goes
+            log.warning("policy reading timeout: the %s edit was not dropped (%s)", self.doc, type(e).__name__)
+        await self.expire(READING_DROPPED if dropped else None)
 
     async def _stale(self, interaction: discord.Interaction) -> bool:
         if self.ps.read(self.doc) == self.text:

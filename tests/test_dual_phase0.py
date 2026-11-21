@@ -465,7 +465,42 @@ def test_compile_confirm_view_expires_too(reg):
     ed = Editor()
     view.bind(ed)
     run(view.on_timeout())
-    assert ed.edits[-1]["content"] == discord_policy.READING_TIMED_OUT and ed.edits[-1]["view"] is None, "a reading stays, in words: its draft still waits"
+    assert ed.edits[-1]["content"] == discord_policy.READING_TIMED_OUT and ed.edits[-1]["view"] is None, "no edit was waiting: nothing to drop"
+
+
+def test_a_reading_nobody_confirms_unwinds_its_edit(reg):
+    """The owner, 2026-11-21: a policy reading that times out drops its edit as Discard would (the previous text back,
+    nothing left waiting) and its message is deleted — but only the edit it showed, never a draft edited since."""
+    from oibot_gm import policy as policy_mod
+    from oibot_gm.policy import LootCompiled, PolicyStore
+
+    class Sent:
+        def __init__(self):
+            self.deleted = 0
+
+        async def edit(self, **kw):
+            raise AssertionError("deleted, never edited")
+
+        async def delete(self):
+            self.deleted += 1
+
+    ps = PolicyStore(reg.store, reg.key)
+    before = ps.read("loot")
+    policy_mod.begin_edit(ps, "loot", before + "\n- Tanks first on tank trinkets.", "Owner", by_id=OWNER)
+    assert ps.load_pending("loot") is not None and ps.read("loot") != before
+    view = discord_policy.CompileConfirmView(ps, "loot", LootCompiled(rules=[], summary="x"), before, None, reg, text=ps.read("loot"))
+    sent = Sent()
+    view.bind(sent)
+    run(view.on_timeout())
+    assert ps.read("loot") == before and ps.load_pending("loot") is None and sent.deleted == 1
+
+    policy_mod.begin_edit(ps, "loot", before + "\n- One.", "Owner", by_id=OWNER)
+    view = discord_policy.CompileConfirmView(ps, "loot", LootCompiled(rules=[], summary="x"), before, None, reg, text=ps.read("loot"))
+    policy_mod.begin_edit(ps, "loot", before + "\n- One.\n- Two.", "Owner", by_id=OWNER)  # edited since, on the site
+    sent = Sent()
+    view.bind(sent)
+    run(view.on_timeout())
+    assert ps.read("loot").rstrip().endswith("- Two.") and ps.load_pending("loot") is not None and sent.deleted == 1, "a draft edited since is not this reading's to drop"
 
 
 def test_a_press_after_a_restart_says_so_instead_of_interaction_failed(reg):

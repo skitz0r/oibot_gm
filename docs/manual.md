@@ -1410,8 +1410,9 @@ edits that new family and leaves the one it shared alone.
   Apply needs the rights for the change (§8c); a slow change (a lock, fill DMs, a compile, a proposal) is acknowledged
   at once — the buttons go, the diff reads *Applying…* and turns into the result when it is done, and a second press
   (or Cancel) by anyone is refused, so nothing applies twice. A diff nobody presses within ten minutes is deleted:
-  nothing was changed, and nothing is left in the channel. A policy reading nobody confirms in fifteen minutes reads
-  *Nobody confirmed this reading in time. The draft is still waiting on the Policy page.* A press on a diff (or a
+  nothing was changed, and nothing is left in the channel. A policy reading nobody confirms in fifteen minutes is dropped
+  with its edit, exactly as **Discard** would: the previous text is back, the reading is deleted, and the ops channel
+  gets one line saying so. A draft edited again since (on the site, say) is left alone. A press on a diff (or a
   policy reading) from before a bot restart answers *The bot restarted before anyone pressed a button. Nothing was
   changed.* instead of Discord's "interaction failed". When something breaks inside a change,
   every surface says the same thing — *Something went wrong and nothing was changed. The owner has the details.* — and
