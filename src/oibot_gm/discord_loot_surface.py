@@ -138,6 +138,17 @@ class LootSurfaceMixin:
             log.warning("loot card edit failed (%s): %s", mid, e)
             return False
 
+    async def _loot_delete(self, ch, mid: int | None) -> bool:
+        if ch is None or not mid:
+            return False
+        try:
+            msg = ch.get_partial_message(mid) if hasattr(ch, "get_partial_message") else await ch.fetch_message(mid)
+            await msg.delete()
+            return True
+        except Exception as e:  # noqa: BLE001 — it stays, without its button
+            log.warning("loot prompt delete failed (%s): %s", mid, e)
+            return await self._loot_edit(ch, mid, view=None)
+
     async def _loot_cards_save(self, session: LootSession, update: dict, drop: list[str] = (), message: str = "cards") -> None:
         async with self.loot_lock(*session.key):
             for k in drop:
@@ -494,7 +505,7 @@ class LootSurfaceMixin:
         if not w or live:
             if have:
                 st.pop(reg.key, None)
-                await self._loot_edit(have.get("channel"), have.get("message"), content="📡 No longer waiting — the held drops went to the council, or the ops channel lists them as not recorded.", view=None)
+                await self._loot_delete(have.get("channel"), have.get("message"))  # the prompt has nothing left to offer: it goes
             return
         if have is not None and have.get("since") == w["since"]:
             return

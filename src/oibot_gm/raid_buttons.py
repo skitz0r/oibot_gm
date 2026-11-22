@@ -18,6 +18,7 @@ import re
 import discord
 
 from . import raidcycle as rc
+from .wizard import fade
 from .consequences import consequence, ended_line
 from .guild_routing import resolve_button
 from .registry import RegistryError
@@ -335,7 +336,7 @@ async def remind_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> N
 async def reopen_press(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
     """The closed card's Reopen (a run ended by mistake, within the hour; never a cancelled run — D19)."""
     if ev is None:
-        await interaction.response.send_message("That run is gone.", ephemeral=True)
+        await interaction.response.send_message("This run was removed, so it can't be reopened.", ephemeral=True)
         return
     why = rc.reopen_refusal(reg, ev)
     if why:
@@ -369,7 +370,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid(?:
         reg, interaction = await resolve_button(interaction, self.gk, lambda r: _live(bot, r, self.key))
         if not reg:
             if not interaction.response.is_done():
-                await interaction.response.send_message("This sheet is closed." if not interaction.guild_id else "Not configured here.", ephemeral=True)
+                await interaction.response.send_message("This sheet is closed." if not interaction.guild_id else "This server isn't set up with the bot, so this button does nothing here.", ephemeral=True)
             return
         rs = bot.raids.store(reg)
         ev = rs.events.get(self.key)
@@ -390,7 +391,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid(?:
                 await interaction.response.send_message("The sheet is still open — press **No thanks** instead.", ephemeral=True)
                 return
             if not ev.seat_of(m):
-                await interaction.response.send_message("You're not rostered for this run — nothing to do.", ephemeral=True)
+                await interaction.response.send_message("You're not rostered for this run, so there is no seat to give up.", ephemeral=True)
                 return
             await bot.apply_signup(interaction, reg, rs, ev, m, None, "out")
             return
@@ -398,7 +399,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid(?:
             await interaction.response.send_message(rc.LOCKED_JOIN, ephemeral=True)
             return
         if len(m.active()) > 1:  # Join, Bench and No thanks all take the character (a Bench on an alt is a different fill candidate)
-            await interaction.response.send_message(f"**{rc.LABELS[self.status]}** as which character?", view=character_picker(bot, reg, rs, ev, m, self.status), ephemeral=True)
+            await interaction.response.send_message(f"**{rc.LABELS[self.status]}** as which character?", view=fade(character_picker(bot, reg, rs, ev, m, self.status), interaction), ephemeral=True)
             return
         await bot.apply_signup(interaction, reg, rs, ev, m, None, self.status)
 
@@ -496,13 +497,13 @@ class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill(?:\.
         rs = bot.raids.store(reg) if reg else None
         ev = rs.events.get(self.key) if rs else None
         if not ev or ev.state in ("done", "cancelled"):
-            await interaction.response.send_message("That raid is closed — thanks anyway.", ephemeral=True)
+            await interaction.response.send_message("This run has ended or was cancelled, so there is no seat to answer for.", ephemeral=True)
             return
         ask = next((a for a in ev.fill_asks if a.discord_id == self.uid and a.open), None)
         if not ask:
             last = next((a for a in reversed(ev.fill_asks) if a.discord_id == self.uid), None)
             closed = last is not None and last.phase == "prelock" and last.answer in ("released", "expired")
-            await interaction.response.send_message("That question closed when the roster locked — nothing changed." if closed else "Already answered (or the gap was filled).", ephemeral=True)
+            await interaction.response.send_message("This question closed when the roster locked, so your press changed nothing." if closed else "This seat question was already answered or the seat was filled. Your press changed nothing.", ephemeral=True)
             return
         line = rc.apply_fill_answer(reg, rs, ev, ask, self.answer == "yes")
         await show_answer(card, interaction, line)
@@ -530,7 +531,7 @@ class PlaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"place(?:
         reg, interaction = await resolve_button(interaction, self.gk, self._asked)
         if not reg:
             if not interaction.response.is_done():
-                await interaction.response.send_message("That question has closed — nothing changed." if not interaction.guild_id else "Not configured here.", ephemeral=True)
+                await interaction.response.send_message("This question is already closed, so your press changed nothing." if not interaction.guild_id else "This server isn't set up with the bot, so this button does nothing here.", ephemeral=True)
             return
         if not await bot.may_answer_for(interaction, reg, self.uid):
             await interaction.response.send_message("That question was for someone else.", ephemeral=True)
@@ -668,7 +669,7 @@ class LootStartButton(discord.ui.DynamicItem[discord.ui.Button], template=r"loot
         reg, interaction = await resolve_button(interaction, self.gk)
         if reg is None:
             if not interaction.response.is_done():
-                await interaction.response.send_message("Not configured here.", ephemeral=True)
+                await interaction.response.send_message("This server isn't set up with the bot, so this button does nothing here.", ephemeral=True)
             return
         from . import guild_routing
 

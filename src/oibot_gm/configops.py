@@ -38,6 +38,8 @@ def user_error(e: BaseException) -> str:
     name or a traceback in a reply."""
     if isinstance(e, (RegistryError, ValueError)):
         return str(e) or GENERIC_ERROR
+    if type(e).__name__ == "BudgetExceeded":  # llm.provider: its sentence is written for the asker — nothing went wrong
+        return str(e)
     if is_model_error(e):
         return MODEL_ERROR
     return GENERIC_ERROR
@@ -3075,7 +3077,7 @@ async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps, by_id: in
     line = await asyncio.to_thread(apply, reg, op, by, True, ps, None, None, by_id) if text is not None else f"{doc} policy: compiling the current text"
     provider = getattr(getattr(bot, "ctx", None), "provider", None)
     if provider is None and doc != "persona":
-        return line + " — no LLM to compile it right now (/gm policy reload once there is)"
+        return line + " — the bot can't read sentences right now, so there is no reading yet (`/gm policy reload` makes one once it can)"
     try:
         compiled, _ = await asyncio.to_thread(policy_mod.compile_pending, ps, doc, provider)
     except policy_mod.PolicyPendingError as e:  # someone edited the doc while it compiled: their text stays, compile again
@@ -3087,7 +3089,7 @@ async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps, by_id: in
         if held is not None:
             ps._dump_pending(doc, held)
             ps.store.commit(f"{ps.key}: policy {doc}: the pending edit before the failed compile restored")
-        raise RegistryError(f"could not compile the {doc} policy ({type(e).__name__}); " + ("the text is back as it was — try again in a minute" if text is not None else "nothing changed"))
+        raise RegistryError(f"The bot couldn't compile the {doc} policy. " + ("The text is back as it was. Try again in a minute." if text is not None else "Nothing changed."))
     amb = len(getattr(compiled, "ambiguities", None) or [])
     return (line.replace(" (compile pending)", "") + f" — my reading: {compiled_count(compiled)} item(s)" + (f", {amb} question(s)" if amb else "")
             + ", waiting for Confirm or Discard")

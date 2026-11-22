@@ -218,7 +218,7 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
         raise RegistryError(f"{m.display_name} isn't on this run's side of the test bench — a test run takes its puppets and its tester only.")
     allowed = {a["key"] for a in rc.member_actions(reg, ev, m)}
     if key not in allowed:
-        raise RegistryError(f"That no longer applies to {m.display_name} on {rc.run_words(reg, ev)} — look again.")
+        raise RegistryError(f"That no longer applies to {m.display_name} on {rc.run_words(reg, ev)} any more.")
     if key in ("join", "bench", "no_thanks"):
         status = {"join": "in", "bench": "sub", "no_thanks": "out"}[key]
         line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id)

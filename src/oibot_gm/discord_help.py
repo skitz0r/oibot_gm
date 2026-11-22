@@ -168,7 +168,7 @@ class GuideSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"guide(?:
         reg, interaction = await guild_routing.resolve_button(interaction, self.gk)
         if not reg:
             if not interaction.response.is_done():
-                await interaction.response.send_message("Not configured here.", ephemeral=True)
+                await interaction.response.send_message("This server isn't set up with the bot, so this button does nothing here.", ephemeral=True)
             return
         key = values[0]
         if key == "apply":
@@ -420,7 +420,7 @@ class HelpMixin:
             return None  # caller shows the static guide
         provider = self.ctx.provider
         if provider is None:
-            return "I can't answer free-form questions right now (no LLM configured). `/help` lists what I do."
+            return "The bot can't read sentences right now, so it can't answer questions. The slash commands and the site keep working."
         rs = self.raids.store(reg)
         try:
             extras = self.help_extras(reg, officer and not public)
@@ -440,7 +440,7 @@ class HelpMixin:
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             if type(e).__name__ == "BudgetExceeded":  # its sentence is written for the asker (provider.complete): nothing "went wrong"
                 return str(e)
-            return "Something went wrong answering that; the officers have been told. `/help` lists what I do."
+            return "Something went wrong, so I couldn't answer. The officers have the details."
         if may_act and ans.acts:
             return ACT
         text = ans.answer.strip()

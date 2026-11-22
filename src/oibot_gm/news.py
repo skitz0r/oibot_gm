@@ -227,7 +227,7 @@ def already_text(p: "Proposal", when=None) -> str:
     success (design §3.4 X2). `when` formats the time per surface (Discord: `stamp`; the site: Registry.local12)."""
     verb = "approved" if p.state == "approved" else "dismissed"
     at = (when or stamp)(p.decided_at) if p.decided_at else ""
-    return f"{p.decided_by or 'Someone'} already {verb} it" + (f" on {at}" if at else "") + ", so there is nothing to do."
+    return f"{p.decided_by or 'Someone'} already {verb} it" + (f" on {at}" if at else "") + "."
 
 
 class AlreadyDecided(ProposalError):

@@ -66,7 +66,7 @@ def test_a_repeated_decision_names_who_decided_first(reg):
     ps.move(p.id, "approved", "Kessa", officer=True, job=False, by_id=5)
     with pytest.raises(AlreadyDecided) as e:
         ps.move(p.id, "approved", "Jonny", officer=True, job=False, by_id=6)
-    assert str(e.value).startswith("Kessa already approved it on <t:") and str(e.value).endswith(", so there is nothing to do."), "Discord's stamp by default"
+    assert str(e.value).startswith("Kessa already approved it on <t:") and str(e.value).endswith(":f>."), "Discord's stamp by default"
     site = news.already_text(e.value.p, reg.local12)
     assert "<t:" not in site and (" AM" in site or " PM" in site), "the site's words are 12-hour guild time"
     assert ps.get(p.id).decided_by == "Kessa", "the first decider stays on record"

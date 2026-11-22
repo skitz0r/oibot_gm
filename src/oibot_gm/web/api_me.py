@@ -208,7 +208,7 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
         rs, ev = run_of(v, str(d.get("run") or ""))
         key = str(d.get("action") or "")
         if d.get("rev") and d["rev"] != rc.member_state_rev(ev, m):
-            return JSONResponse({"error": rc.member_change_words(v.reg, ev, m) + " — look again.", "rev": rc.member_state_rev(ev, m)}, status_code=409)
+            return JSONResponse({"error": rc.member_change_words(v.reg, ev, m) + ".", "rev": rc.member_state_rev(ev, m)}, status_code=409)
         try:
             line = await inbox.do_member_action(bot, v.reg, rs, ev, m, key, character=(d.get("character") or None), note=d.get("note"),
                                                 by=v.name, by_id=v.uid, via=v.via)

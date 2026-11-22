@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 PROMPT = "You're in more than one server I look after. Which one is this for?"
 OFF_MARK = " (plain text off here)"  # D41: a server whose plain-text policy ignores DMs is listed, marked — never hidden
-EXPIRED = "No server picked. Ask again any time."
+EXPIRED = "Nobody picked a server in time, so nothing was done."  # only when Discord won't delete the picker (2026-11-21)
 PICKER_TIMEOUT_S = 120
 MAX_LABEL = 80
 EDIT_WAIT_S = 1.0
@@ -87,8 +87,11 @@ async def choose_guild(target, regs: list, prompt: str = PROMPT, timeout: float 
         msg = await target.reply(prompt, view=view, allowed_mentions=discord.AllowedMentions.none())
         view.message = msg
 
-        async def expire():
-            await msg.edit(content=EXPIRED, view=None)
+        async def expire():  # nobody picked: the question goes; words only when it can't be deleted
+            try:
+                await msg.delete()
+            except Exception:  # noqa: BLE001
+                await msg.edit(content=EXPIRED, view=None)
         if not await view.wait_for_pick(timeout, expire):
             return None, None
         try:
@@ -110,7 +113,10 @@ async def choose_guild(target, regs: list, prompt: str = PROMPT, timeout: float 
             await target.edit_original_response(content=content, view=None)
 
     async def expire():
-        await edit(EXPIRED)
+        try:
+            await (sent.delete() if sent is not None else target.delete_original_response())
+        except Exception:  # noqa: BLE001
+            await edit(EXPIRED)
     if not await view.wait_for_pick(timeout, expire):
         return None, None
     try:  # the question stays readable without its buttons; the command answers the press itself — within Discord's

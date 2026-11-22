@@ -247,7 +247,7 @@ class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs(?:
 
         reg = channel_card_guild(interaction, self.gk)  # a channel-only card: strict, never a DM fallback
         if not reg:
-            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            await interaction.response.send_message("This server isn't set up with the bot, so this button does nothing here.", ephemeral=True)
             return
         if self.action == "new":  # the same wizard as /me absent add: pick the first day and how long, nothing typed
             await FLOWS["absence"](interaction, reg)
@@ -678,7 +678,7 @@ class SetupMixin:
         except discord.NotFound:
             status = {"state": "dead", "text": "The invite is dead (expired or deleted) — the homepage's Join button fails. Create a new one.", "checked": now}
         except Exception as e:  # noqa: BLE001 — a blip isn't a dead invite
-            return {"state": "unknown", "text": f"Couldn't check the invite ({type(e).__name__}).", "checked": None}
+            return {"state": "unknown", "text": "Couldn't check the invite.", "checked": None}
         cache[reg.key] = {"url": url, "at": now, "status": status}
         return status
 
@@ -1164,7 +1164,7 @@ class LootWishButton(discord.ui.DynamicItem[discord.ui.Button], template=r"lootw
 
         reg = channel_card_guild(interaction, self.gk)
         if not reg:
-            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            await interaction.response.send_message("This server isn't set up with the bot, so this button does nothing here.", ephemeral=True)
             return
         from .wizard_flows import FLOWS
 

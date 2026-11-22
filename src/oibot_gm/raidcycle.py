@@ -2072,8 +2072,7 @@ def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[
             if other:
                 released.append(other)
             if a.channel == "web":
-                reg.notify(a.discord_id, "ask_closed", f"The seat question for {run_words(reg, ev)} closed at {reg.local12(t)} without your answer. "
-                           "Nothing to do.", run=ev.key)
+                reg.notify(a.discord_id, "ask_closed", f"The seat question for {run_words(reg, ev)} closed at {reg.local12(t)} without your answer.", run=ev.key)
         rs.save(ev, f"fill expired {len(expired)}")
     return expired, released
 
@@ -3718,7 +3717,7 @@ def close_parallel(reg: Registry, rs: "RaidStore", ev: RaidEvent, ask: FillAsk) 
         a.answer, a.answered_at, a.answered_by = "released", now(), None
         ev.log.append(f"fill: {a.display_name}'s ask withdrawn ({ask.display_name} said yes first)")
         if a.channel == "web":
-            reg.notify(a.discord_id, "ask_closed", f"Never mind the seat question for {run_words(reg, ev)} — someone else took the seat first. Nothing to do.", run=ev.key)
+            reg.notify(a.discord_id, "ask_closed", f"Never mind the seat question for {run_words(reg, ev)} — someone else took the seat first.", run=ev.key)
     if gone:
         rs.save(ev, f"fill: parallel ask(s) closed for {ask.display_name}'s yes")
     return gone
@@ -3734,7 +3733,7 @@ def seat_gone(reg: Registry, ev: RaidEvent, uid: int, why: str, *, notice: bool 
     if not notice or why in ("declined", "callout", "callout (test)", "officer"):
         return
     reason = RELEASE_NOTICE.get(why, why)
-    reg.notify(uid, "released", f"Your seat on {run_words(reg, ev)} was released ({reason}). Nothing to do — if that's wrong, tell an officer.", run=ev.key)
+    reg.notify(uid, "released", f"Your seat on {run_words(reg, ev)} was released ({reason}). If that's wrong, tell an officer.", run=ev.key)
 
 
 def leftover_notices(reg: Registry, ev: RaidEvent) -> int:
@@ -3770,7 +3769,7 @@ def cancel_notices(reg: Registry, ev: RaidEvent, by: str, by_id: int | None = No
     who.pop(by_id, None)
     with reg.store.batch(f"{reg.key}: notices — {ev.key} cancelled"):
         for uid, seated in who.items():
-            reg.notify(uid, "cancelled", f"{run_words(reg, ev)} was cancelled by {by}." + (" Your seat is released — nothing to do." if seated else " Nothing to do."), run=ev.key)
+            reg.notify(uid, "cancelled", f"{run_words(reg, ev)} was cancelled by {by}." + (" Your seat is released." if seated else ""), run=ev.key)
     return len(who)
 
 

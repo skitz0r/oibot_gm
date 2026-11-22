@@ -271,7 +271,7 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
             return JSONResponse({"error": "text required (or changes: [{kind, target, fields}])"}, status_code=400)
         provider = getattr(getattr(bot, "ctx", None), "provider", None)
         if provider is None:
-            return JSONResponse({"error": "the LLM provider is off (ANTHROPIC_API_KEY unset)"}, status_code=503)
+            return JSONResponse({"error": "The bot can't read sentences right now — use the controls on this page."}, status_code=503)
         try:
             # the Tell the bot box's own last exchanges (the site keeps no server memory — design §5.51): one fenced block
             from .. import conversation

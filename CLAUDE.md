@@ -33,7 +33,12 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
   list, card or section names what is missing and how to fill it (never "none yet" / "not set" / "none" / "—" alone); a bare
   dash in a table cell or an icon column stays (the Iconography rule — no words beside icons), and a review diff's "not set →
   #loot" is a value, not an empty state. A tooltip adds only why or where; a number's owner is in its label. Read-aloud test: a
-  raid leader who never saw the code gets it first time. `tests/test_copy.py` lints it; the only exceptions are the operator
+  raid leader who never saw the code gets it first time. **Edge states (the owner's review, 2026-11-21):** a screen nobody
+  answered (a timeout, a restart) is DELETED, not worded — wizard.Wizard.on_timeout, pending_views, guild_picker,
+  discord_policy.PendingView; a plain timed View goes out through wizard.fade so its buttons come off; where words must stay
+  they are a full sentence saying what happened and what is true now — never "Expired", "that/it" with nothing to point at,
+  a "Nothing to do." / "look again" / "say it again" tail, or a code word (LLM, token, an exception's type);
+  `tests/test_quiet_edges.py` pins it. `tests/test_copy.py` lints it; the only exceptions are the operator
   surfaces (the Host card, the Agents page) and code a person types or pastes — an `ALLOW` entry each, scoped and reasoned.
 - **Confirm rule (user decision 2026-10-26):** a confirm sentence — anything a `decide` screen, a `useConfirm`, a review diff or a
   preview prints before a press (consequences.py, inbox.action_consequence, every `*_consequence` / `*_effects` / `*_sentence` /

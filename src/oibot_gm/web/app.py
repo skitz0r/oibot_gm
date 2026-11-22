@@ -242,6 +242,19 @@ def not_member_page(infos: list[dict] | dict) -> str:
             + '<p class="small"><a class="plain" href="/auth/logout">Log out</a></p></div></body></html>')
 
 
+LOGIN_SLOW = "Signing in took too long, so Discord's sign-in ran out."
+LOGIN_REFUSED = "Discord didn't complete the sign-in."
+LOGIN_BROKEN = "This sign-in link is no longer valid."
+
+
+def login_problem_page(text: str) -> str:
+    """A sign-in that didn't finish (the sweep of 2026-11-21: these were bare 400s reading "bad state" / "login took
+    too long; start again"): one sentence saying what happened, and Log in."""
+    return (PAGE_HEAD.replace("{title}", "oibot_GM") + '<div class="head"><h1>Not signed in</h1></div>'
+            + f"<p>{html.escape(text)}</p>"
+            + '<div class="btns"><a class="btn login" href="/auth/login">Log in</a></div></div></body></html>')
+
+
 def unsure_page(retry_href: str) -> str:
     """A page request whose guild lookup Discord didn't answer (K4): say so, Try again (the same page), Log out."""
     return (PAGE_HEAD.replace("{title}", "oibot_GM") + '<div class="head"><h1>Discord didn&#x27;t answer</h1></div>'
@@ -677,21 +690,21 @@ def create_app(bot) -> FastAPI:
         try:
             st = signer.loads(state)
         except BadSignature:
-            raise HTTPException(400, "bad state")
+            return HTMLResponse(login_problem_page(LOGIN_BROKEN), status_code=400)
         try:
             issued = float(st.get("t") or 0)
         except (TypeError, ValueError):
             issued = 0.0
         if not (0 <= time.time() - issued <= STATE_TTL_S):
-            raise HTTPException(400, "login took too long; start again")
+            return HTMLResponse(login_problem_page(LOGIN_SLOW), status_code=400)
         nonce = request.cookies.get(NONCE_COOKIE) or ""
         same_browser = bool(nonce) and secrets.compare_digest(hashlib.sha256(nonce.encode()).hexdigest(), str(st.get("n") or ""))
         if not code:
-            raise HTTPException(400, "Discord refused the login")
+            return HTMLResponse(login_problem_page(LOGIN_REFUSED), status_code=400)
         async with httpx.AsyncClient(timeout=15) as hc:
             tok = await hc.post(f"{DISCORD_API}/oauth2/token", data={"client_id": client_id, "client_secret": client_secret, "grant_type": "authorization_code", "code": code, "redirect_uri": f"{public_url}/auth/callback"})
             if tok.status_code != 200:
-                raise HTTPException(400, "Discord refused the login")
+                return HTMLResponse(login_problem_page(LOGIN_REFUSED), status_code=400)
             me = await hc.get(f"{DISCORD_API}/users/@me", headers={"Authorization": f"Bearer {tok.json()['access_token']}"})
         u = me.json()
         name = u.get("global_name") or u["username"]
@@ -715,9 +728,9 @@ def create_app(bot) -> FastAPI:
         try:
             t = signer.loads((form.get("ticket") or [""])[0])
         except BadSignature:
-            raise HTTPException(400, "bad ticket; start again")
+            return HTMLResponse(login_problem_page(LOGIN_BROKEN), status_code=400)
         if t.get("k") != "confirm" or not (0 <= time.time() - float(t.get("t") or 0) <= CONFIRM_TTL_S):
-            raise HTTPException(400, "that took too long; start again")
+            return HTMLResponse(login_problem_page(LOGIN_SLOW), status_code=400)
         resp = RedirectResponse(safe_next(t.get("next")), status_code=303)
         resp.set_cookie(COOKIE, signer.dumps({"uid": t["uid"], "name": t["name"], "iat": time.time()}), httponly=True, secure=public_url.startswith("https"), samesite="lax", max_age=SESSION_MAX_AGE_S)
         return resp

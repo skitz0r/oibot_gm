@@ -155,7 +155,7 @@ class AbsenceClearWizard(Wizard):
             return
         hit = next((a for a in ups if a.start == start), None) if start else (ups[0] if len(ups) == 1 else None)
         if start and hit is None:
-            await self.finish(interaction, "That absence is no longer on file (cleared meanwhile) — nothing to do.")
+            await self.finish(interaction, "That absence was already cleared.")
             return
         if hit is not None:
             await self.ask(interaction, hit.start)
@@ -176,7 +176,7 @@ class AbsenceClearWizard(Wizard):
         m = self.reg.members.get(self.member_id)
         a = next((x for x in (m.absences if m else []) if x.start == start), None)
         if a is None:
-            await self.finish(interaction, "That absence is no longer on file (cleared meanwhile) — nothing to do.")
+            await self.finish(interaction, "That absence was already cleared.")
             return
         self.draft["start"] = a.start
         whose = f"**{self.member_name}**'s" if self.officer else "Your"

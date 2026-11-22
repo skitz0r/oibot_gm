@@ -231,7 +231,7 @@ def test_channel_only_cards_resolve_their_server_strictly(duo, monkeypatch):
         seen.append(("anywhere", reg.key))
         return False
     client = types.SimpleNamespace(registries=duo.guilds, is_officer_anywhere=anywhere)
-    cards = [(dr.ApplicationButton("accept", 5, None), "Officers only."), (discord_pool.AbsenceButton("new", None), "Not configured here."),
+    cards = [(dr.ApplicationButton("accept", 5, None), "Officers only."), (discord_pool.AbsenceButton("new", None), "This server isn't set up with the bot, so this button does nothing here."),
              (discord_news.ProposalButton(None, "260101-abcd", "approve"), "Officers only.")]  # old ids (no guild): the server decides
     for card, refusal in cards:
         for server in (None, 999):  # a DM, an unconfigured server

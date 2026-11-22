@@ -604,8 +604,8 @@ class RaidMixin:
     def _ask_closed_text(reg, ev, a) -> str:
         label = run_label(reg, ev)
         if ev.state == "cancelled":
-            return f"Cancelled — {label} was cancelled. Nothing to do."
-        return f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — the run is {ev.state} now. Nothing to do."
+            return f"Cancelled — {label} was cancelled."
+        return f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — the run is {ev.state} now."
 
     def plan_lock(self, reg, key: str) -> asyncio.Lock:
         """One officer send per run at a time (two presses of Ask never ask anyone twice). Keyed (guild, run): two
@@ -669,7 +669,7 @@ class RaidMixin:
             other = rc.release_partner(reg, rs, ev, ask, because=f"{ask.display_name}'s ask was withdrawn")
             rs.save(ev, f"ask to {ask.display_name} withdrawn by {by}")
         why = f"withdrawn by an officer ({by})"
-        await self.edit_ask_card(reg, ask.dm_channel_id, ask.dm_message_id, f"Never mind the {'swap' if ask.swap else 'seat'} question for {run_label(reg, ev)} — {why}. Nothing to do.")
+        await self.edit_ask_card(reg, ask.dm_channel_id, ask.dm_message_id, f"Never mind the {'swap' if ask.swap else 'seat'} question for {run_label(reg, ev)} — {why}.")
         if other is not None:
             await self.withdraw_ask(reg, ev, other, f"{ask.display_name}'s half of the swap was withdrawn")
         await self.post_run_update(reg, ev, f"↩️ {by} withdrew the ask to {ask.display_name}")
@@ -726,10 +726,10 @@ class RaidMixin:
         await self.post_run_update(reg, ev, f"↩️ withdrew the ask to {ask.display_name} ({because})")
 
     async def close_ask_card(self, reg, ev, ask, because: str) -> bool:
-        """Edit one fill / pre-lock ask's DM card to its final state ("Never mind … — <because>. Nothing to do.", no
+        """Edit one fill / pre-lock ask's DM card to its final state ("Never mind … — <because>.", no
         buttons): every path that closes an ask without the member's press (their own No thanks / callout / absence,
         expiry, the lock closing pre-lock asks, a withdrawn partner) ends the card this way — never a new DM."""
-        text = f"Never mind the {'swap' if ask.swap else 'seat'} question for **{reg.raid_def(ev.instance).get('name', ev.instance)}** <t:{int(ev.start.timestamp())}:F> — {because}. Nothing to do."
+        text = f"Never mind the {'swap' if ask.swap else 'seat'} question for **{reg.raid_def(ev.instance).get('name', ev.instance)}** <t:{int(ev.start.timestamp())}:F> — {because}."
         return await self.edit_ask_card(reg, ask.dm_channel_id, ask.dm_message_id, text)
 
     async def after_fill_answer(self, reg, rs, ev, ask, line: str) -> None:
@@ -743,7 +743,7 @@ class RaidMixin:
         else:  # D14: a parallel ask the yes closed (rc.close_parallel) — its DM card says so, buttons gone
             for tw in rc.parallel_linked(ev, ask):
                 if tw.answer == "released":
-                    await self.edit_ask_card(reg, tw.dm_channel_id, tw.dm_message_id, f"Never mind the seat question for {run_label(reg, ev)} — someone else said yes first. Nothing to do.")
+                    await self.edit_ask_card(reg, tw.dm_channel_id, tw.dm_message_id, f"Never mind the seat question for {run_label(reg, ev)} — someone else said yes first.")
         if ask.held:  # the first yes of a tied pair: nothing changed yet, the partner's answer decides
             await self.post_run_update(reg, ev, f"🧩 {line}")
             await self.refresh_cards(reg, ev)
@@ -989,10 +989,10 @@ class RaidMixin:
             if ev.state != "locked" or ask.get("answer") is not None:
                 # closed while this DM was in flight (a cancel collects the cards it edits before this one had an id;
                 # a freed seat closes the ask): the card goes to its final state at once — never a live Confirm
-                await self.edit_ask_card(reg, cid, mid, f"Cancelled — {run_label(reg, ev)} was cancelled. Nothing to do." if ev.state == "cancelled"
-                                         else f"{run_label(reg, ev)} is {ev.state} — nothing to do." if ev.state != "locked"
-                                         else f"Your seat on {run_label(reg, ev)} was released. Nothing to do — if that's wrong, tell an officer."
-                                         if ask.get("answer") == "released" else f"Already answered — nothing to do for {run_label(reg, ev)}.")
+                await self.edit_ask_card(reg, cid, mid, f"Cancelled — {run_label(reg, ev)} was cancelled." if ev.state == "cancelled"
+                                         else f"{run_label(reg, ev)} is {ev.state} now." if ev.state != "locked"
+                                         else f"Your seat on {run_label(reg, ev)} was released. If that's wrong, tell an officer."
+                                         if ask.get("answer") == "released" else f"You already answered for {run_label(reg, ev)}.")
         elif not ok:  # a failed DM is a channel change, never an answer: the ask waits on the site, same deadline
             ask["channel"] = "web"
             reg.save(m, f"{m.display_name}'s confirmation for {ev.team} waits on the site (DM failed)")
@@ -1309,7 +1309,7 @@ class RaidMixin:
         if not ask or not ask.get("dm"):
             return False
         reason = RELEASE_WHY.get(why, why)
-        return await self.edit_ask_card(reg, ask["dm"][0], ask["dm"][1], f"Your seat on {run_label(reg, ev)} was released ({reason}). Nothing to do — if that's wrong, tell an officer.")
+        return await self.edit_ask_card(reg, ask["dm"][0], ask["dm"][1], f"Your seat on {run_label(reg, ev)} was released ({reason}). If that's wrong, tell an officer.")
 
     async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True, *, notice: bool = True) -> None:
         """A rostered member is out after lock: free the seat, edit their ask card, post it, ask the bench to fill.
@@ -1409,7 +1409,7 @@ class RaidMixin:
         rc.cancel_notices(reg, ev, by, by_id)  # the Me page's notice for everyone on it (D26) — nobody is DMed
         label = run_label(reg, ev)
         for cid, mid in cards + [(a.dm_channel_id, a.dm_message_id) for a in fills]:
-            await self.edit_ask_card(reg, cid, mid, f"Cancelled — {label} was cancelled. Nothing to do.")
+            await self.edit_ask_card(reg, cid, mid, f"Cancelled — {label} was cancelled.")
         await self.refresh_sheet(reg, ev)
         await self.refresh_cards(reg, ev)
         await self.post_run_update(reg, ev, f"🛑 run cancelled by {by}" + (f": {reason}" if reason else "")
@@ -1418,7 +1418,7 @@ class RaidMixin:
         sig = self.get_channel(ev.channel_id) if notify and ev.channel_id else None
         if sig is not None:
             try:  # fixed text: the reason is for officers, never echoed publicly
-                await sig.send(f"🛑 {label} is cancelled." + (" Rostered seats are released — nothing to do." if fx["locked"] else " Nothing to do."),
+                await sig.send(f"🛑 {label} is cancelled." + (" Rostered seats are released." if fx["locked"] else ""),
                                allowed_mentions=discord.AllowedMentions.none())
                 posted = True
             except Exception as e:  # noqa: BLE001
@@ -1490,8 +1490,8 @@ class RaidMixin:
                 continue
             cid, mid = self.card_ids(msg)
             if ask.get("answer") is not None or ev.state != "locked":  # closed while this DM was in flight
-                await self.edit_ask_card(reg, cid, mid, f"Cancelled — {run_label(reg, ev)} was cancelled. Nothing to do." if ev.state == "cancelled"
-                                         else f"Already answered — nothing to do for {run_label(reg, ev)}.")
+                await self.edit_ask_card(reg, cid, mid, f"Cancelled — {run_label(reg, ev)} was cancelled." if ev.state == "cancelled"
+                                         else f"You already answered for {run_label(reg, ev)}.")
                 continue
             sent += 1
             prev = ask.get("dm")

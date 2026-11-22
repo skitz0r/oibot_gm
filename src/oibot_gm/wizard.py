@@ -30,6 +30,24 @@ from .registry import CLOCK12, MAX_ABSENCE_DAYS, Registry, RegistryError
 
 log = logging.getLogger(__name__)
 
+TIMED_OUT = "This screen closed because nobody pressed anything for ten minutes. Nothing was changed."
+
+
+def fade(view, interaction):
+    """A plain timed View under an interaction's reply: when its time runs out its buttons come off, so nobody presses
+    a dead one (Discord's "This interaction failed"). Returns the view (None stays None)."""
+    if view is None:
+        return None
+
+    async def on_timeout() -> None:
+        try:
+            await interaction.edit_original_response(view=None)
+        except Exception as e:  # noqa: BLE001 — the reply is gone or its token died: nothing left to press either way
+            log.debug("fade: buttons not removed (%s)", e)
+
+    view.on_timeout = on_timeout
+    return view
+
 # Discord limits (the API refuses payloads past these; `lint` checks them offline)
 MAX_OPTIONS, MAX_MODAL_ITEMS, MAX_LABEL, MAX_DESCRIPTION, MAX_TITLE, MAX_BUTTON = 25, 5, 45, 100, 45, 80
 WIZARD_TIMEOUT_S = 600  # an interaction token lives 15 minutes; expiring first lets the wizard say it expired
@@ -236,10 +254,13 @@ class Wizard(discord.ui.View):
         untrack(f"wiz:{id(self)}")
         if self._closed or not self._last:
             return
-        try:
-            await self._last.edit_original_response(content=self._body("This wizard expired; nothing was changed. Run the command again to start over."), embed=None, view=None)
-        except discord.HTTPException:
-            pass
+        try:  # nobody pressed in time: the screen goes (it was private); words only when Discord won't delete it
+            await self._last.delete_original_response()
+        except Exception:  # noqa: BLE001
+            try:
+                await self._last.edit_original_response(content=self._body(TIMED_OUT), embed=None, view=None)
+            except discord.HTTPException:
+                pass
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
         log.exception("wizard %s failed", self.title, exc_info=error)

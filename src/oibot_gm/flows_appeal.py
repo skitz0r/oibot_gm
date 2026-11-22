@@ -120,7 +120,7 @@ async def appeal_resolve(interaction: discord.Interaction, reg: Registry, *, aid
         await interaction.response.send_message(str(e), ephemeral=True)
         return
     if ap is None or ap.state != "open":
-        why = "That question is gone." if ap is None else (f"Already resolved by {ap.resolved_by or 'an officer'}: {appeals.OUTCOME_LABELS.get(ap.outcome or '', ap.outcome)}.")
+        why = "This question was removed, so there is nothing to resolve." if ap is None else (f"Already resolved by {ap.resolved_by or 'an officer'}: {appeals.OUTCOME_LABELS.get(ap.outcome or '', ap.outcome)}.")
         await interaction.response.send_message(why, ephemeral=True)
         if ap is not None:
             await appeals.update_card(bot, reg, ap)  # a stale card catches up

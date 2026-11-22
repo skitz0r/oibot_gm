@@ -93,7 +93,7 @@ export function ProfessionsEditor({ meta, label, professions, onSave, onCancel, 
       const r = await onSave(entries(), { preview: false });
       ok(r.message || said.join("\n") || `${label}'s professions are saved.`);
       onSaved?.();
-    } catch (e) { setError((e as Error).message || "Something went wrong"); } finally { setBusy(false); }
+    } catch (e) { setError((e as Error).message || "The site couldn't finish that. Reload the page to see what was saved."); } finally { setBusy(false); }
   }
 
   return (

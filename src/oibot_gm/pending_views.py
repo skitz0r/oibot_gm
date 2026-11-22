@@ -1,7 +1,8 @@
 """Leftover screens after a restart (dual interfaces §2.9, design §5.45): every open wizard (wizard.Wizard) and every
 plain-text diff / policy reading (discord_policy.PendingView) is written to `out/pending_views.jsonl` while it waits, and
-removed when it finishes, expires or is pressed. On the next `on_ready` the bot edits each one left over to "The bot
-restarted; nothing was changed. Run the command again." — a channel message by its id, an ephemeral reply through its
+removed when it finishes, expires or is pressed. On the next `on_ready` the bot DELETES each one left over (2026-11-21:
+a screen that changed nothing leaves nothing behind); one that already saved something, or that Discord won't delete,
+is edited to RESTARTED_SAVED / RESTARTED — a channel message by its id, an ephemeral reply through its
 interaction webhook while Discord still accepts the token (15 minutes). `live_count()` is what GET /api/agents/quiet
 counts (a restart now would cut a person off mid-screen).
 
@@ -21,8 +22,8 @@ log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / "out" / "pending_views.jsonl"
 TOKEN_LIFE_S = 15 * 60 - 30  # an interaction token edits its reply for 15 minutes
-RESTARTED = "The bot restarted; nothing was changed. Run the command again."
-RESTARTED_SAVED = "The bot restarted — what you saved stays; run the command again to continue."  # a hub that already wrote
+RESTARTED = "The bot restarted while this was open. Nothing was changed."  # only when Discord won't delete the screen (2026-11-21)
+RESTARTED_SAVED = "The bot restarted while this was open. What you saved is kept."  # a hub that already wrote: it stays, in words
 
 _live: dict[str, dict] = {}
 _lock = threading.Lock()
@@ -109,10 +110,21 @@ async def restore_pending_views(bot, now: float | None = None) -> int:
                 ch = bot.get_channel(int(e["channel_id"]))
                 if ch is None:
                     continue
-                await ch.get_partial_message(int(e["message_id"])).edit(content=words, embed=None, view=None)
+                msg = ch.get_partial_message(int(e["message_id"]))
+                try:  # a screen that changed nothing leaves nothing behind; one that saved says so
+                    if e.get("saved"):
+                        raise LookupError
+                    await msg.delete()
+                except Exception:  # noqa: BLE001
+                    await msg.edit(content=words, embed=None, view=None)
             elif e.get("app_id") and e.get("token") and now - float(e.get("at") or 0) < TOKEN_LIFE_S:
                 hook = discord.Webhook.partial(int(e["app_id"]), str(e["token"]), client=bot)
-                await hook.edit_message("@original", content=(f"**{e['title']}**\n" if e.get("title") else "") + words, embed=None, view=None)
+                try:
+                    if e.get("saved"):
+                        raise LookupError
+                    await hook.delete_message("@original")
+                except Exception:  # noqa: BLE001
+                    await hook.edit_message("@original", content=(f"**{e['title']}**\n" if e.get("title") else "") + words, embed=None, view=None)
             else:
                 continue
             done += 1

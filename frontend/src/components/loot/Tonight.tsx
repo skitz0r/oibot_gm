@@ -139,7 +139,7 @@ function CouncilBlock({ meta, run, c, onState, goItems, many }: { meta: Meta; ru
   async function confirmRest() {
     try {
       const pv = await api.post<{ preview: string; batch_rev: string }>(url("confirm"), body({ preview: true }));
-      if (pv.batch_rev !== c.batch_rev) { fail(new Error("The picks changed since this card was drawn — look again.")); return; }
+      if (pv.batch_rev !== c.batch_rev) { fail(new Error("The picks changed since this card was drawn.")); return; }
       if (!(await ask({ title: `Confirm the rest (${c.proposals.length})`, message: pv.preview, confirmLabel: "Record" }))) return;
       await go("confirm-all", "confirm", { batch_rev: c.batch_rev });
     } catch (e) { fail(e); }

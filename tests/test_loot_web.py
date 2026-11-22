@@ -745,7 +745,7 @@ def test_add_to_my_wishlist_button_opens_the_wizard_on_its_item(reg, rs):
         assert "**Robe of Tests**" in h.text
         h.guild_id = 999  # another server: nobody's card
         await LootWishButton(GUILD, "90001").callback(h.command())
-        assert "Not configured here" in h.text
+        assert "isn't set up with the bot" in h.text
     asyncio.run(go())
 
 

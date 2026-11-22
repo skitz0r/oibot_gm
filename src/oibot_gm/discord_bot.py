@@ -690,7 +690,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         else:
             print("[ops:error]", msg)
         try:
-            text = "Something went wrong; the owner has been notified." if reg else "Something went wrong; it has been logged."
+            text = configops.GENERIC_ERROR
             if target.response.is_done():
                 await target.followup.send(text, ephemeral=True)
             else:

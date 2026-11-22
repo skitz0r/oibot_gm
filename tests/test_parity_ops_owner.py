@@ -193,7 +193,7 @@ def test_policy_persona_is_shown_back_and_waits_for_confirm(reg):
 def test_policy_append_without_an_llm_still_saves(reg):
     ps = PolicyStore(reg.store, reg.key)
     line = asyncio.run(configops.apply_async(reg, ConfigOp(op="policy_append", doc="comp", text="keep Ash with Bright"), "Officer", False, ps, bot=Bot(None)))
-    assert line.startswith("comp policy saved as a draft") and "no LLM to compile" in line
+    assert line.startswith("comp policy saved as a draft") and "can't read sentences right now" in line
     assert ps.read("comp").rstrip().endswith("- keep Ash with Bright")
 
 

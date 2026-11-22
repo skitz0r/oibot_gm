@@ -15,6 +15,7 @@ from conftest import DUO_SERVER, GUILD, GUILD2, MemberDirectory, same_run
 
 from oibot_gm import discord_help, discord_news, discord_pool, discord_registry as dr, flows_register, guild_picker, guild_routing
 from oibot_gm import raid_views, raidcycle as rc
+from oibot_gm import configops
 from oibot_gm.discord_bot import OibotGM
 from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.discord_registry import Guilds
@@ -284,7 +285,7 @@ def test_an_old_button_with_several_guilds_uses_its_matcher(duo, monkeypatch):
     assert ("place", GUILD2, True) in bot.did, "one guild matches: no question"
     nobody = Itx(bot)
     run(PlaceButton(None, "nothing-here", PUPPET, "yes").callback(nobody))
-    assert nobody.said == ["That question has closed — nothing changed."], "no match: the button's own closed line"
+    assert nobody.said == ["This question is already closed, so your press changed nothing."], "no match: the button's own closed line"
 
 
 def test_an_old_button_matching_both_guilds_asks_which(duo):
@@ -597,7 +598,7 @@ def test_a_command_failing_after_the_picker_reaches_the_chosen_guild_and_answers
         return i, press
     i, press = run(go())
     assert i.extras["guild"] == GUILD2 and errs and errs[0][:2] == (GUILD2, "error") and "boom" in errs[0][2]
-    assert press.said == ["Something went wrong; the owner has been notified."] and press.response.is_done()
+    assert press.said == [configops.GENERIC_ERROR] and press.response.is_done()
     assert i.said == [guild_picker.PROMPT], "nothing more under the picker itself"
 
 
@@ -606,7 +607,7 @@ def test_an_error_with_no_guild_never_claims_the_owner_was_told(duo):
     i = Itx(dm_bot(duo))
     i.command = None
     run(OibotGM._on_command_error(owner, i, RuntimeError("boom")))
-    assert i.said == ["Something went wrong; it has been logged."]
+    assert i.said == [configops.GENERIC_ERROR]
 
 
 def test_a_guild_that_ignores_dms_is_listed_marked_and_never_silent(duo, monkeypatch):

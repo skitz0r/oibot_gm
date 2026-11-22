@@ -112,7 +112,7 @@ async def loot_press(interaction: discord.Interaction, btn) -> None:
         return
     handler = ACTIONS.get(btn.action)
     if handler is None:
-        await say(interaction, "That button is from another version — run /raid loot for fresh cards.")
+        await say(interaction, "This card is from before a bot update, so its buttons no longer work. `/raid loot` posts current cards.")
         return
     await handler(interaction, bot, reg, session if session is not None else btn.sid, btn)
 
@@ -143,7 +143,7 @@ async def _press_scores(interaction, bot, reg, session, btn) -> None:
 async def _press_end(interaction, bot, reg, session, btn) -> None:
     rs, ev = bot.loot_run(session)
     if ev is None:
-        await say(interaction, "That council's run is gone.")
+        await say(interaction, "This council's run was removed, so its cards no longer work.")
         return
     await end_decide(interaction, bot, reg, rs, ev)
 
@@ -369,7 +369,7 @@ async def loot_pick(interaction: discord.Interaction, pick, values: list[str]) -
         p = session.pending(kind.split(".", 1)[1])
         await say(interaction, why_not_text(p, value) if p is not None else "That pick isn't pending any more.")
         return
-    await say(interaction, "That menu is from another version — run /raid loot for fresh cards.")
+    await say(interaction, "This card is from before a bot update, so its menu no longer works. `/raid loot` posts current cards.")
 
 
 # ---------------------------------------------------------------- the reason modals (persistent ids)
@@ -518,7 +518,7 @@ async def _press_guest(interaction, bot, reg, target, btn) -> None:
     """'Record <name> as a guest': the override / correction the officer submitted, with the unknown name accepted."""
     held = bot._surface()["reasons"].pop((reg.key, btn.sid, btn.drop, interaction.user.id, "guest"), None)
     if not held:
-        await say(interaction, "That expired — pick them again with Override… (or Correct…).")
+        await say(interaction, "The bot no longer has that guest pick, so nothing was recorded. Press Override… or Correct… on the card to pick the guest again.")
         return
     await loot_modal_submit(interaction, held["ids"], {"who": held["who"], "reason": held["reason"]}, guest_ok=True)
 
@@ -627,7 +627,7 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
     except RegistryError as e:
         await say(interaction, f"⛔ {_err(e)}")
         return
-    await say(interaction, "That box is from another version — nothing was changed.")
+    await say(interaction, "This box is from before a bot update, so nothing was changed.")
 
 
 async def _refreshed_submit(bot, reg, session, interaction, e) -> None:
@@ -1090,7 +1090,7 @@ async def open_gm_precedents(interaction: discord.Interaction, reg: Registry, **
     async def picked(i: discord.Interaction, values: list[str]) -> None:
         p = by_id.get(values[0])
         if p is None:
-            await wiz.finish(i, "That precedent is gone.")
+            await wiz.finish(i, "This precedent was removed, so there is nothing to retire.")
             return
         wiz.draft["pick"] = p["import_id"]
         await wiz.show(i, line(p) + "\n-# Retiring keeps it on record; the bot stops citing it.", wiz.button("Retire…", retire, discord.ButtonStyle.danger),

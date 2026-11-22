@@ -243,7 +243,7 @@ async def compile_and_confirm(interaction: discord.Interaction, reg: Registry, p
     pending reading (policy.compile_pending, off the loop) and show it with Confirm / Discard."""
     send = interaction.followup.send if followup or interaction.response.is_done() else interaction.response.send_message
     if provider is None and doc != "persona":  # the persona's reading is its own text: no model needed
-        await send("Saved as a draft. No LLM available to compile; run `/gm policy reload` when it is.", ephemeral=True)
+        await send("Saved as a draft. The bot can't read sentences right now, so there is no reading to confirm yet. `/gm policy reload` makes one once it can.", ephemeral=True)
         return
     try:
         await asyncio.to_thread(policy_mod.compile_pending, ps, doc, provider)
@@ -383,7 +383,7 @@ class ConfigConfirmView(PendingView):
                 continue
             configops.refresh_revs(self.reg, self.revs, raids, stale, before)  # this request's own write (a pin, a move…) is not someone else's change
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
-        text = guild_prefix(self.reg) + (text or "Nothing applied.")
+        text = guild_prefix(self.reg) + (text or "None of these changes could be applied.")
         if refused:
             text = configops.plain_footer(text[:1850])
         try:
@@ -442,7 +442,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         return await interaction_or_message.followup.send(content, **kw)
 
     if provider is None and req is None:
-        await send("Plain-text changes need the LLM; use the slash commands or the site.", ephemeral=True)
+        await send("The bot can't read sentences right now, so it can't take changes in plain text. The slash commands and the site keep working.", ephemeral=True)
         return
     author = interaction_or_message.author if is_msg else interaction_or_message.user
     if await left_server(bot, reg, author):
@@ -480,11 +480,11 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
             keep(await send(answer[:1950], ephemeral=True), answer[:1950])
             return
     if req.kind == "question" or req.questions:
-        keep(await send((req.reply + ("\n" + "\n".join(f"• {q}" for q in req.questions) if req.questions else ""))[:1900] or "Could you say that another way?", ephemeral=True),
+        keep(await send((req.reply + ("\n" + "\n".join(f"• {q}" for q in req.questions) if req.questions else ""))[:1900] or "I couldn't tell what you want changed. Name the raid, person or setting, and what it should become.", ephemeral=True),
              req.reply, req.questions)
         return
     if not req.ops:
-        keep(await send(req.reply[:1900] or "Nothing to change.", ephemeral=True), req.reply or "Nothing to change.")
+        keep(await send(req.reply[:1900] or "I didn't find a change to make in that message.", ephemeral=True), req.reply or "I didn't find a change to make in that message.")
         return
     if hold is not None:  # overheard: no diff and no refusal under a message that never spoke to the bot
         await hold(req)

@@ -5,7 +5,7 @@ import { notifications } from "@mantine/notifications";
 export const ok = (message: React.ReactNode) => notifications.show({ message: typeof message === "string" && message.includes("\n") ? <span style={{ whiteSpace: "pre-line" }}>{message}</span> : message, color: "teal" });
 /** A refusal as a red toast; a multi-line server message (a seed result naming each refusal) keeps its line breaks, as `ok`'s does. */
 export const fail = (e: unknown) => {
-  const m = (e as Error).message || "Something went wrong";
+  const m = (e as Error).message || "The site couldn't finish that. Reload the page to see what was saved.";
   notifications.show({ message: m.includes("\n") ? <span style={{ whiteSpace: "pre-line" }}>{m}</span> : m, color: "red" });
 };
 

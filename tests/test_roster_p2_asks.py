@@ -278,5 +278,5 @@ def test_pressing_yes_on_a_prelock_ask_that_closed_at_lock_says_so(reg, rs):
     client = SimpleNamespace(registries=SimpleNamespace(for_interaction=lambda i: reg), raids=SimpleNamespace(store=lambda r: rs), may_answer_for=may_answer_for)
     itx = SimpleNamespace(client=client, user=SimpleNamespace(id=p["Kael"].discord_id), response=SimpleNamespace(send_message=send_message))
     run(views.FillButton(reg.key, ev.key, p["Kael"].discord_id, "yes").callback(itx))
-    assert said == ["That question closed when the roster locked — nothing changed."]
+    assert said == ["This question closed when the roster locked, so your press changed nothing."]
     assert str(p["Kael"].discord_id) not in ev.signups

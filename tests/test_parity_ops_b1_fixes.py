@@ -132,7 +132,7 @@ class Bot:
 def test_failed_compile_puts_the_text_back_and_drops_the_draft(reg):
     ps = PolicyStore(reg.store, reg.key)
     before = ps.read("loot")
-    with pytest.raises(RegistryError, match="could not compile the loot policy .RuntimeError.; the text is back as it was"):
+    with pytest.raises(RegistryError, match="The bot couldn't compile the loot policy. The text is back as it was. Try again in a minute."):
         asyncio.run(configops.apply_async(reg, ConfigOp(op="policy", doc="loot", field="replace", text="# Loot\n\n1. Everything to the tank."), "Officer", False, ps, bot=Bot(Boom())))
     assert ps.read("loot") == before and policy_mod.pending(ps, "loot") is None
 
@@ -143,10 +143,10 @@ def test_failed_compile_keeps_an_earlier_pending_edit(reg):
     original = ps.read("loot")
     policy_mod.begin_edit(ps, "loot", "# Loot\n\n1. First draft.", "Officer")
     draft = ps.read("loot")
-    with pytest.raises(RegistryError, match="the text is back as it was"):
+    with pytest.raises(RegistryError, match="The text is back as it was"):
         asyncio.run(configops.apply_async(reg, ConfigOp(op="policy_append", doc="loot", text="tanks first"), "Officer", False, ps, bot=Bot(Boom())))
     assert ps.read("loot") == draft and policy_mod.pending(ps, "loot")["previous"] == original
     # compile-only: nothing was written, nothing changes
-    with pytest.raises(RegistryError, match="nothing changed"):
+    with pytest.raises(RegistryError, match="Nothing changed"):
         asyncio.run(configops.apply_async(reg, ConfigOp(op="policy", doc="loot", field="compile"), "Officer", False, ps, bot=Bot(Boom())))
     assert ps.read("loot") == draft and policy_mod.pending(ps, "loot")["compiled"] is None

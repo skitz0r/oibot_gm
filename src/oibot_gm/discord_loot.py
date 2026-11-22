@@ -251,7 +251,7 @@ class LootMixin:
 
     def _changed(self, session: LootSession, fallback: str) -> LootChanged:
         last = session.last_change()
-        return LootChanged(f"{fallback} ({last}) — look again." if last else f"{fallback} — look again.")
+        return LootChanged(f"{fallback} ({last})." if last else f"{fallback}.")
 
     def loot_check_live(self, session: LootSession) -> None:
         """Every verb, right after taking the session lock: a council that ended meanwhile (end_run archived and forgot

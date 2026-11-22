@@ -499,7 +499,7 @@ class AppealButton(discord.ui.DynamicItem[discord.ui.Button], template=r"appeal(
             from .loot_ops import guild_ctx
 
             ap = store_of(reg).get(self.aid)
-            text = details_text(reg, guild_ctx(interaction.client, reg), ap) if ap else "That question is gone."
+            text = details_text(reg, guild_ctx(interaction.client, reg), ap) if ap else "This question was removed, so there is nothing to resolve."
             await interaction.response.send_message(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
             return
         from .wizard_flows import FLOWS

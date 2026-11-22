@@ -53,7 +53,7 @@ export function Recruitment({ channels }: { channels: { id: string; name: string
       setData(fresh);
       const inviteError = (r.results || []).find((x) => !x.ok && /Invite not created/.test(x.line))?.line ?? null;
       const other = (r.results || []).filter((x) => !x.ok && x.line !== inviteError);
-      if (other.length || (r.error && !r.applied?.length)) setError(other[0]?.line || r.error || "not saved");
+      if (other.length || (r.error && !r.applied?.length)) setError(other[0]?.line || r.error || "The recruitment settings were not saved.");
       else if (inviteError) {  // "Saved. Invite not created: …" — the rest landed; only the channel stays in the draft
         setError(`Saved. ${inviteError}`);
         setD({ open: fresh.open, note: fresh.note, invite_url: fresh.invite_url, member_role_ids: [...fresh.member_role_ids], questions: fresh.questions.map((q) => ({ ...q, hint: q.hint ?? "" })) });

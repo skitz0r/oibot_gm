@@ -18,6 +18,7 @@ from . import help as help_mod
 from .profiles import GameProfile
 from .registry import DECISION_NOTE_MAX, is_superuser, GUILD_KEY_RE, RANKS, Registry, RegistryError
 from .store import GitStore
+from .wizard import fade
 from .wizard_flows import FLOWS
 
 RANK_CHOICES = [app_commands.Choice(name=r, value=r) for r in RANKS]
@@ -436,7 +437,7 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg(?
         reg, interaction = await guild_routing.resolve_button(interaction, self.gk)
         if not reg:
             if not interaction.response.is_done():
-                await interaction.response.send_message("Not configured here.", ephemeral=True)
+                await interaction.response.send_message("This server isn't set up with the bot, so this button does nothing here.", ephemeral=True)
             return
         if self.action == "status":
             m = reg.members.get(interaction.user.id)
@@ -1131,7 +1132,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 await i.response.send_message(f"✅ {n} notice(s) marked read.", ephemeral=True)
             seen.callback = mark_read
             view.add_item(seen)
-        await interaction.response.send_message(embed=e, ephemeral=True, **({"view": view} if view else {}))
+        await interaction.response.send_message(embed=e, ephemeral=True, **({"view": fade(view, interaction)} if view else {}))
 
     @me.command(name="dms", description="DMs from the bot on or off (off: your asks wait on the Me page)")
     @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
@@ -1253,7 +1254,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         from .flows_roster import confirm_pending_view
 
         e.set_footer(text=f"★ main · ⏳ unconfirmed ({len(pend)})")
-        view = confirm_pending_view(reg, len(pend))
+        view = fade(confirm_pending_view(reg, len(pend)), interaction)
         await interaction.response.send_message(embed=e, view=view or discord.utils.MISSING, ephemeral=True)
 
     @roster.command(name="confirm", description="Confirm registered characters: pick from the unconfirmed ones, one after another")
@@ -1291,7 +1292,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         # always ephemeral (design §2.8): officers get *Post to #roster* for the officer version, never a public reply by accident
         view = overview_post_view(reg, ico) if officer_view and reg.config.roster_channel_id else None
-        await interaction.response.send_message(embed=e, ephemeral=True, **({"view": view} if view else {}))
+        await interaction.response.send_message(embed=e, ephemeral=True, **({"view": fade(view, interaction)} if view else {}))
 
     @roster.command(name="comp", description="Aims: what readiness compares the guild with, per role, class or spec (limits stay the owner's)")
     async def roster_comp(interaction: discord.Interaction):

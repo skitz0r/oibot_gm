@@ -124,7 +124,7 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
         need_owner(v)
         hook = getattr(bot, "news_webhook", None)
         if hook is None:
-            raise HTTPException(503, "the bot isn't connected")
+            raise HTTPException(503, "The bot isn't connected to Discord right now, so this can't be done. It reconnects on its own.")
         res = await hook(v.reg, create=bool(d.get("create", True)))
         if res.get("created"):
             await ops_mod.audited(bot.ops, v.reg, v.name, "created the news webhook", via=v.via, by_id=v.uid)
@@ -224,7 +224,7 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
             raise HTTPException(403, "MCP never issues a companion token (its value would land in a transcript) — issue it on the site or with /gm config companion.")
         issue = getattr(bot, "issue_companion", None)
         if issue is None:
-            raise HTTPException(503, "the bot isn't connected")
+            raise HTTPException(503, "The bot isn't connected to Discord right now, so this can't be done. It reconnects on its own.")
         try:
             res = await issue(v.reg, str(d.get("label") or ""), v.name, by_id=v.uid, via=v.via)
         except (RegistryError, ValueError) as e:
@@ -241,7 +241,7 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
         need_owner(v)
         revoke = getattr(bot, "revoke_companion", None)
         if revoke is None:
-            raise HTTPException(503, "the bot isn't connected")
+            raise HTTPException(503, "The bot isn't connected to Discord right now, so this can't be done. It reconnects on its own.")
         try:
             line = await revoke(v.reg, str(d.get("id") or ""), v.name, by_id=v.uid, via=v.via)
         except (RegistryError, ValueError) as e:

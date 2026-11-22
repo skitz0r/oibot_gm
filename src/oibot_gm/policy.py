@@ -335,7 +335,7 @@ def compile_pending(ps: PolicyStore, doc: str, provider: Provider) -> tuple[Base
     reading is its own text (no model call). Returns (compiled, the reading as text)."""
     _check_doc(doc)
     if doc != "persona" and provider is None:
-        raise PolicyPendingError("the LLM provider is off (ANTHROPIC_API_KEY unset): nothing can compile the policy now")
+        raise PolicyPendingError("The bot can't read sentences right now, so nothing can compile the policy.")
     start, text = ps.load_pending(doc), ps.read(doc)
     compiled = ps.compile(doc, provider, text)
     with ps.store.lock:

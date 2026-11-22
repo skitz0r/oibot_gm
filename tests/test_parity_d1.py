@@ -867,5 +867,5 @@ def test_a_spent_budget_is_said_in_its_own_sentence(reg, rs, monkeypatch):
     bot.ops.emit = emit
     assert asyncio.run(bot.help_answer(reg, OWNER, True, "who can make flasks?")) == "This kind of request has used its share of the bot's monthly Claude budget; the host raises it."
     monkeypatch.setattr(help_mod, "answer", lambda *a, **k: 1 / 0)
-    assert asyncio.run(bot.help_answer(reg, OWNER, True, "q")).startswith("Something went wrong answering that")
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "q")).startswith("Something went wrong, so I couldn't answer.")
     assert len(told) == 2 and "BudgetExceeded" in told[0], "the officers' ops line is written either way"
