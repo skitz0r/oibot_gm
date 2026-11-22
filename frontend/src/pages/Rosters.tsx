@@ -45,9 +45,12 @@ export function RostersPage({ meta }: { meta: Meta }) {
 
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const zone = meta.timezones?.flatMap((g) => g.items).find((i) => i.value === data.tz)?.label || data.tz;  // the zone in words, as on Raids
+  const nights = nightsOf(data.raids);
   return (
     <Stack gap="lg" className={rosterCss.touch}>  {/* phone: every control 44 px (rosters.module.css) */}
-      <PageTitle title="Rosters" intro={`Each raid's runs, soonest first: answer for someone, shape the board, lock, fill. Times in ${zone}.`} />
+      <PageTitle title="Rosters" intro={`Every run with a sheet is a card, soonest first: answer for someone, shape the board, lock, fill. Under them, each raid's schedule, regulars and history. Times in ${zone}.`} />
+      {nights.map((n) => <NightCard key={n[0].e.key} runs={n} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
+      {nights.length === 0 && <Card><Box p="md"><Text size="sm" c="dimmed">No run has a sheet right now. Open the next run or start an ad hoc run on a raid's card below.</Text></Box></Card>}
       {data.raids.map((r) => <RaidCard key={r.id} r={r} others={data.raids.filter((x) => x.id !== r.id).map((x) => ({ id: x.id, name: x.name }))} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
       {data.orphans.length > 0 && (
         <Card><Box p="md"><Eyebrow plain>Sheets not tied to a raid</Eyebrow>{data.orphans.map((e) => <Text key={e.key} size="sm">{runName(e)} · {e.state_word || meta.run_states[e.state] || e.state}</Text>)}</Box></Card>
@@ -378,15 +381,47 @@ function Regulars({ r, meta, people, onAct, busy }: { r: RaidRuns; meta: Meta; p
   );
 }
 
-/** One raid: its header (the schedules in words, Open next run, Start an ad hoc run…), "When it runs" (the Raids card's
- *  block from the same server fields, with the upcoming runs and their Open), then every live run as a card in time
- *  order — open or locked, soonest first, never a test run — and the tabs for what isn't live: Regulars · History ·
- *  Test (only once a test run exists). Design §5.56. */
+type Night = { e: Sheet; raid: RaidRuns }[];
+
+/** Every live run of every raid (open or locked, never a test run) as NIGHTS in time order (the owner, 2026-11-22):
+ *  a run is a night of its own, and a follow-on run (design §5.62) joins its lead's night — one card for the pair,
+ *  the lead first. A follow-on whose lead is no longer live stands alone. */
+function nightsOf(raids: RaidRuns[]): Night[] {
+  const all = raids.flatMap((raid) => [...raid.open, ...raid.locked].filter((e) => !e.test).map((e) => ({ e, raid })));
+  all.sort((a, b) => Date.parse(a.e.starts_at) - Date.parse(b.e.starts_at));
+  const byKey = new Map(all.map((x) => [x.e.key, x]));
+  const nights = new Map<string, Night>();
+  for (const x of all) {
+    let lead = x;
+    for (let i = 0; i < 4 && lead.e.follows && byKey.has(lead.e.follows); i++) lead = byKey.get(lead.e.follows)!;
+    nights.set(lead.e.key, [...(nights.get(lead.e.key) || [lead]), ...(lead === x ? [] : [x])]);
+  }
+  return [...nights.values()];
+}
+
+/** One night's card: the raid's picture and name over its sheet; a lead and its follow-on share the card ("Hyjal Summit,
+ *  then Barrow Deeps"), each sheet then named by its raid. */
+function NightCard({ runs, meta, people, busy, onAct, onBoard, onReload }: { runs: Night; meta: Meta; people: Person[]; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
+  const several = runs.length > 1;
+  return (
+    <Card>
+      <RaidHeader id={runs[0].raid.id} name={runs.map((x) => x.raid.name).join(", then ")} meta={runs.map((x) => `${x.raid.size}-player`).join(", then ")} />
+      <Stack gap="md" p="md">
+        {runs.map(({ e, raid }) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people}
+          badge={several ? <Text size="lg" fw={800} c="dimmed">{raid.name}</Text> : undefined} />)}
+      </Stack>
+    </Card>
+  );
+}
+
+/** One raid's standing card, under the nights: its header (the schedules in words, Open next run, Start an ad hoc run…),
+ *  "When it runs" (the Raids card's block from the same server fields, with the upcoming runs and their Open), and the
+ *  tabs for what isn't live: Regulars · History · Test (only once a test run exists). Its live runs are the night cards
+ *  above (NightCard). Design §5.56. */
 function RaidCard({ r, others, meta, people, busy, onAct, onBoard, onReload }: { r: RaidRuns; others: { id: string; name: string }[]; meta: Meta; people: Person[]; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
   const scheds = (r.schedules || []).filter((s) => s.active && s.kind !== "pickup");
   const recurring = scheds.filter((s) => s.class !== "adhoc");
   // test runs (the test bench's rehearsals and comp sandboxes) live on their own Test tab, never among the real sheets (B9)
-  const runs = [...r.open, ...r.locked].filter((e) => !e.test).sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
   const tests = [...r.open, ...r.locked].filter((e) => e.test);
   const metaLine = [`${r.size}-player`, scheds.length ? scheds.map((s) => `${s.name}, ${s.label}`).join(" · ") : "no schedule yet — add one on the Raids page"].join(" · ");
   const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
@@ -406,7 +441,6 @@ function RaidCard({ r, others, meta, people, busy, onAct, onBoard, onReload }: {
           <WhenItRuns r={r} owner={false} here upcoming={r.upcoming.length ? <UpcomingRows r={r} busy={busy} onAct={onAct} /> : undefined}
             nothing={<>No run coming up: no schedule opens a sheet for this raid. Add one on the <Anchor component={Link} to="/raids" size="sm">Raids page</Anchor>, or start an ad hoc run here.</>} />
         </Box>
-        {runs.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people} />)}
         <Tabs defaultValue={first}>
           <Tabs.List>
             <Tabs.Tab value="regulars">Regulars · {regulars}</Tabs.Tab>

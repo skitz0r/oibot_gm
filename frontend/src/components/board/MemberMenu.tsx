@@ -82,7 +82,8 @@ export function MemberMenu({ run, uid, name, onDone, moves }: { run: string; uid
   );
 }
 
-/** "Answer for someone…" beside the joiners: a member who isn't on the sheet (or anyone) → the same filtered list as buttons. */
+/** "Answer for someone…" beside the joiners: a member with NO answer on the sheet yet (the owner, 2026-11-22: someone who
+ *  answered is changed from their row's ⋮, never offered here — SheetCard filters `people`) → the same filtered list as buttons. */
 export function SomeoneElse({ run, people, onDone }: { run: string; people: Person[]; onDone: () => Promise<void> | void }) {
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
@@ -100,7 +101,7 @@ export function SomeoneElse({ run, people, onDone }: { run: string; people: Pers
       <Modal opened={open} onClose={close} title="Answer for someone" centered>
         <Stack gap="sm">
           <Select label="Member" placeholder="Pick a member" searchable value={uid} onChange={setUid}
-            data={people.map((p) => ({ value: p.uid, label: p.display_name }))} nothingFoundMessage="nobody by that name" />
+            data={people.map((p) => ({ value: p.uid, label: p.display_name }))} nothingFoundMessage={people.length ? "Nobody without an answer has that name." : "Everyone has an answer on this sheet. Change one from the menu on their row."} />
           {uid && !list && <Loader size="xs" />}
           {list && <Text size="xs" c="dimmed">Now: {list.now}</Text>}
           {list && list.actions.length === 0 && <Text size="sm" c="dimmed">Nothing applies to them on this run.</Text>}

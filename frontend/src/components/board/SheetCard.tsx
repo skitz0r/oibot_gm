@@ -133,7 +133,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           </Tooltip>
         )}
         <Box style={{ flex: "1 1 auto" }} />
-        {e.live && people && !e.lead && <SomeoneElse run={e.key} people={people} onDone={onReload} />}
+        {e.live && people && !e.lead && <SomeoneElse run={e.key} people={people.filter((p) => !signups.some((s) => s.uid === p.uid))} onDone={onReload} />}
       </Group>
       {locked && e.confirms !== false && conf.length > 0 && (
         <Group gap="md" mt={6} align="center">

@@ -188,6 +188,22 @@ def test_rosters_page_reads_by_its_shape():
         assert not re.search(r'(?:color|c)=\{?"yellow', f), "amber marks a value changed from the default; Rosters has none"
 
 
+def test_the_rosters_page_is_a_card_per_night_in_time_order():
+    """The owner, 2026-11-22: every live run is its own card across raids, soonest first; a lead and its follow-on
+    share one; the raid cards under them keep the schedule, regulars and history and draw no live sheet."""
+    page = (SRC / "pages" / "Rosters.tsx").read_text()
+    nights, raid = page[page.index("function nightsOf"):page.index("function NightCard")], page[page.index("function RaidCard"):]
+    assert "raids.flatMap" in nights and "starts_at" in nights and "e.follows" in nights and "!e.test" in nights
+    assert page.index("<NightCard") < page.index("<RaidCard") and "No run has a sheet right now." in page
+    assert raid.count("<SheetCard") == 1 and "tests.map" in raid, "a raid's card draws only its test sheets"
+
+
+def test_answer_for_someone_offers_only_members_without_an_answer():
+    """The owner, 2026-11-22: someone with a recorded answer (Join, Bench or No thanks) is changed from their row's menu."""
+    card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
+    assert "<SomeoneElse run={e.key} people={people.filter((p) => !signups.some((s) => s.uid === p.uid))}" in card
+
+
 def _code_only(text: str) -> str:
     """The file without its comments (// … and /* … */, JSX {/* … */} included) — a comment may name a word, code may not."""
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)

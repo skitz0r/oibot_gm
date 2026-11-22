@@ -4538,8 +4538,9 @@ profile first_open (2026-12-09) already makes a Tuesday schedule's first run 202
 (`rc.follow_words_of`), never from the request — Open on a run already open never claims one. The Raids page's schedule editor
 (`ScheduleCard`) has a **Then** row — *then, the same night* (every other raid, *No follow-on*) and *its rosters* — sent in
 the diff-only Save as `follow`. The Rosters page's *Start an ad hoc run…* has *Then, the same night* / *Its rosters* and the
-preview's `follow_line` as is. The follow-on's card sits under its own raid on the Rosters page (a deviation from
-spec §4.3, which put it under the lead): each raid's section lists its own runs. The run cards say "then …" on a lead and "after …" on a follow-on, whose counts line reads "answers on
+preview's `follow_line` as is. Since 2026-11-22 (the owner) the Rosters page is a card per
+NIGHT across raids, soonest first (Rosters.tsx nightsOf / NightCard): a run is its own card and a follow-on shares its lead's, under it (spec §4.3);
+the raid cards below keep the schedule, regulars, history and test sheets and draw no live sheet. The run cards say "then …" on a lead and "after …" on a follow-on, whose counts line reads "answers on
 the Hyjal Summit sheet" and which has no *Answer for someone…*. The Me page's row: the title with then / after, *Leaving after
 Hyjal Summit…* (the server's `leave_consequence` in the confirm, an optional note, `/out`) and *I'm staying* (`/stay`). A
 lead's *Can't make it…* confirm (`web/api_me.cant_consequence(…, follow_seated)`) adds "Your Barrow Deeps place goes too." when

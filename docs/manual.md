@@ -812,8 +812,8 @@ follow-on would land on the same time is refused (*"That night already has a Bar
 time."*). The lead's sheet is the night's sheet (*Hyjal Summit, then Barrow Deeps ×2*, with the second start); the
 follow-on has no sheet and no answers of its own — they follow the lead's, and answering it directly says *"Answer on
 the Hyjal Summit sheet. It covers the whole night."* Its health shows on the lead's card as one line (*Barrow Deeps
-follow-on* short, with the role icon and a number). The Rosters page shows it as its own card, *after Hyjal Summit*, that
-*answers on the Hyjal Summit sheet*.
+follow-on* short, with the role icon and a number). The Rosters page shows the pair in one card, *Hyjal Summit, then Barrow Deeps*:
+the lead's sheet first, the follow-on's under it, *after Hyjal Summit*, which *answers on the Hyjal Summit sheet*.
 The lead's lock locks both: the follow-on prefers the lead's rostered, so the 10s are the 20 split in two and bench
 joiners only cover gaps (a tank or healer the 20 can't give twice); first come applies to the lead only. A follow-on
 can't be locked on its own while its lead is open (*"Lock Hyjal Summit — its lock builds the follow-on too"*), and it
@@ -1171,7 +1171,7 @@ Deeps on Tue 9 Dec. No callout is recorded. They see it on their Me page."* — 
 pressed something meanwhile it says so first (*"Kestrel is now Bench as Kestrel (since 5:12 PM) — keep going?"*).
 On your own record it is your own answer, so the screen promises no notice. On
 the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
-list, and **Answer for someone…** beside the run's headcount does it for anyone not on it. Plain text ("Kestrel can't make it tonight,
+list, and **Answer for someone…** beside the run's headcount does it for anyone who hasn't answered yet (its list leaves out everyone with an answer on the sheet). Plain text ("Kestrel can't make it tonight,
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
 `callout=false`) do the same. Whatever an officer records for someone reaches them as a **notice** on their Me page and
 in `/me view` ("Jon set you to No thanks for Barrow Deeps Tue 7:30 PM"), and an open DM card of theirs is edited to
