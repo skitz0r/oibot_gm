@@ -29,6 +29,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const locked = e.state !== "open";
   const n = e.needs;
   const signups = e.signups || [];
+  const rostersN = locked ? e.n_rosters : (e.rosters_expected || 1);  // before the lock: the rosters the run expects (10 × 2), not the ones built
   const joined = signups.filter((s) => s.status === "in");
   // the role counts: who joined before the lock; after it the roster itself — the board's groups, counted once
   const roles = Object.fromEntries(meta.roles.map((r) => [r, 0])) as Record<string, number>;
@@ -109,7 +110,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
 
       {/* one headcount with its owner, the role counts, one short line, Answer for someone… beside the joiners */}
       <Group gap="md" mt="sm" align="center" wrap="wrap">
-        <Text fw={800} style={{ fontSize: 26, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{locked ? e.rostered : joined.length}<Text span c="dimmed" fw={500} size="md"> / {e.size}{e.n_rosters > 1 ? ` × ${e.n_rosters}` : ""} {locked ? "rostered" : "joined"}</Text></Text>
+        <Text fw={800} style={{ fontSize: 26, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{locked ? e.rostered : joined.length}<Text span c="dimmed" fw={500} size="md"> / {e.size}{rostersN > 1 ? ` × ${rostersN}` : ""} {locked ? "rostered" : "joined"}</Text></Text>
         {anyone && <RoleCounts meta={meta} counts={roles} size={18} />}
         {anyone && isShort && (
           <Group gap={6} wrap="wrap" align="center">

@@ -349,7 +349,7 @@ export interface Confirmation { uid: string | null; display_name: string; charac
 export interface RegularAnswer { uid: string; display_name: string; character: string; cls: string; spec: string; role: string; status: string | null; source: string | null; signed_as: string | null }
 export interface Sheet {
   key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; state_word?: string; live: boolean; fill_state: string;
-  counts: Record<string, number>; rostered: number; n_rosters: number;
+  counts: Record<string, number>; rostered: number; n_rosters: number; /** the rosters the run expects up front (its schedule's rosters per run): what the count and the board show before the lock */ rosters_expected?: number;
   /** recurring (has a series and regulars) or ad hoc (first come); `confirms` false = Join is the commitment */
   kind?: "recurring" | "adhoc"; series?: string | null; series_name?: string | null; confirms?: boolean; test?: boolean;
   /** who `not_answered` lists: the series' regulars, everyone (no regulars set yet), the test bench, or nobody (ad hoc) */

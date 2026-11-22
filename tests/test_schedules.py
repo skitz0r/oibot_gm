@@ -507,3 +507,28 @@ def test_the_raids_route_says_when_a_raid_runs_from_the_runs_themselves(api, reg
     raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
     assert raid["next_run"]["schedule"] == "Wednesday", "a paused schedule opens nothing: the next run is the other schedule's"
     assert len(raid["live_runs"]) == 1, "the run already open from the paused schedule keeps its sheet"
+
+
+def test_a_declared_second_roster_is_placeable_and_built_once_the_joiners_need_it(reg, rs):
+    """The owner, 2026-11-22 (a Hyjal → Barrow Deeps ×2 night showed 10 board places for 18 joiners): before the lock
+    the board draws every roster the run expects; the lock builds the declared roster as soon as the joiners no longer
+    fit in fewer, even with tanks for one — and empty rosters drawn on the board never force one."""
+    opened(reg)
+    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
+    reg.set_schedule(RID, "default", {"rosters": 2}, "t")
+    t = rc.slot_starts(reg, RID, reg.now_local(), 24 * 14)[0][1]
+    ev = rc.open_run(reg, rs, RID, t, by="t")
+    k, bounds = rc.groups_per_roster(reg, 10), reg.role_bounds(RID, 10)
+    assert len(rc.board_layout(reg, ev)) == 2 * k, "20 places before anyone is placed"
+    roles = by_role(reg)
+    few = roles["tank"][:1] + roles["healer"][:2] + roles["melee"][:4]
+    join(reg, rs, ev, few)
+    assert rc.how_many_rosters(reg, rc.players_for(reg, ev), 10, bounds, want=2) == 1  # 7 fit in one roster
+    ev.layout = [[few[0].display_name]] + [[] for _ in range(2 * k - 1)]  # a drag saved the padded board
+    assert rc._solve_run(reg, rs, ev, whatif=False)[2] == 1, "the empty second roster forces nothing"
+    join(reg, rs, ev, roles["melee"][4:] + roles["ranged"])
+    players = rc.players_for(reg, ev)
+    assert 10 < len(players) < 20 and rc.how_many_rosters(reg, players, 10, bounds) == 1
+    assert rc.how_many_rosters(reg, players, 10, bounds, want=2) == 2, "the joiners no longer fit in one: the declared roster is built"
+    _players, rosters, n = rc._solve_run(reg, rs, ev, whatif=False)
+    assert n == 2 and len(rosters) == 2 and sum(len(r.selected) for r in rosters) == len(players)

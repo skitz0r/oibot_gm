@@ -2392,13 +2392,17 @@ def _capable(players: list[Player], role: str, reg: Registry) -> int:
 
 def how_many_rosters(reg: Registry, players: list[Player], size: int, rb: dict, want: int = 1) -> int:
     """How many runs to build: as many full runs as the Join answers support (bodies), or the `want` rosters the
-    schedule declares up front when that is more — either way never more than the tank/healer minimums per run allow."""
+    schedule declares up front when that is more — never more than the tank/healer minimums per run allow, EXCEPT
+    (the owner, 2026-11-22) that a declared roster is built as soon as the joiners no longer fit in fewer: 18 joiners
+    of a 10-player ×2 run make two rosters even with tanks for one, and the short seats stay open to fill (the
+    solver caps each roster's minimum at what the joiners supply)."""
     signed = [p for p in players if p.status == "signed"]
     n = min(MAX_ROSTERS_PER_SLOT, max(len(signed) // size, want))
     for role in ("tank", "healer"):
         if rb[role]["min"]:
             n = min(n, _capable(signed, role, reg) // rb[role]["min"])
-    return max(1, n)
+    declared = min(MAX_ROSTERS_PER_SLOT, want, -(-len(signed) // size))
+    return max(1, n, declared)
 
 
 ORDINALS = ("first", "second", "third", "fourth", "fifth")
@@ -2550,7 +2554,8 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     k = groups_per_roster(reg, size)
     layout = [[n for n in g if n in names] for g in (ev.layout or [])]
     placed = {n: gi for gi, g in enumerate(layout) for n in g}
-    n_rosters = max(how_many_rosters(reg, players, size, rb, want=run_rosters(reg, ev)), -(-len(layout) // k) if any(layout) else 1)
+    used = max((gi for gi, g in enumerate(layout) if g), default=-1) + 1  # groups up to the last one holding someone: empty rosters drawn on the board force nothing
+    n_rosters = max(how_many_rosters(reg, players, size, rb, want=run_rosters(reg, ev)), -(-used // k) if used else 1)
     strategy = strategy or ev.split_strategy or (reg.config.team(ev.team) or {}).get("split_policy") or rd.get("split_policy") or "balanced"
     bonus = seat_bonus(reg, rs, ev, players)
     lead = lead_of(rs, ev)
@@ -2641,13 +2646,16 @@ def groups_per_roster(reg: Registry, size: int) -> int:
 
 def board_layout(reg: Registry, ev: RaidEvent) -> list[list[str]]:
     """The board as it stands, flat groups across rosters: the locked roster(s), else the officers' layout.
-    Always padded to whole rosters so (roster, group) addresses are stable."""
+    Always padded to whole rosters so (roster, group) addresses are stable — and, before the lock, to every roster the
+    run expects (the owner, 2026-11-22: a 10-player ×2 run shows 20 places, not 10)."""
     n = groups_per_roster(reg, run_size(reg, ev))
     if ev.state != "open" and ev.all_rosters:
         flat = [list(g) for r in ev.all_rosters for g in (list(r.groups) + [[] for _ in range(n - len(r.groups))])[:max(n, len(r.groups))]]
+        expected = 1
     else:
         flat = [list(g) for g in (ev.layout or [])]
-    want = max(n, -(-len(flat) // n) * n)
+        expected = run_rosters(reg, ev) if ev.state == "open" else 1
+    want = max(n * expected, -(-len(flat) // n) * n)
     return flat + [[] for _ in range(want - len(flat))]
 
 

@@ -780,7 +780,11 @@ wait, autofill, DM on open, split policy) — anything it doesn't set follows th
   settings.
 Each schedule also says how many **rosters** a run expects (1–4). With 2, the sheet advertises 2 × the raid's size
 (20 seats for a 10-player raid), the health check and the fill engine measure against two rosters, and the lock aims
-for two — as far as the tanks and healers who joined allow (it never builds a roster its minimums can't fill). A
+for two. The board on the Rosters page shows every roster the run expects before the lock (a 10-player ×2 run has 20
+places, *Roster 1* and *Roster 2*), and the count reads *18 / 10 × 2 joined*. The lock builds the second roster as soon
+as more people joined than one roster holds, even when the tanks or healers who joined only cover one: the missing
+seats stay open and are filled like any short seat. With one roster's worth of joiners or fewer it builds a second
+roster only when the tanks and healers allow two. A
 schedule can be **paused** (nothing opens from it). Runs from a schedule other than the raid's own run times carry
 its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same minute are two runs.
 
