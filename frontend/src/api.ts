@@ -373,7 +373,7 @@ export interface Sheet {
     bosses?: { done: number; total: number | null; all_down: boolean; text: string } | null };
   /** follow-on runs: `follow` = the run after this one the same night (its raid NAME), `lead` = the run this one follows (its signup is the lead's);
    *  `leaving` = who leaves after the lead (names); `when` is words from the server */
-  follows?: string | null; followed_by?: string | null; follow?: { raid: string; rosters: number; key: string; when: string } | null;
+  follows?: string | null; followed_by?: string | null; follow?: { raid: string; rosters: number; key: string; when: string; at?: string } | null;
   lead?: { raid: string; key: string } | null; leaving?: string[];
 }
 /** A raid's run open or locked now (never a test run), in words — the "When it runs" block on Raids and Rosters. */

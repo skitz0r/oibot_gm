@@ -54,7 +54,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const seatsN = (e.plan?.seats || []).length;  // seats the planner works on (before lock: the tank/healer minimums)
   const asksN = (e.plan?.seats || []).filter((st) => st.options.length).length;
   const name = runName(e as unknown as Sheet);
-  const hints = e.health?.hints || [];  // who could cover the short roles: the server's lines ("not on the sheet" said once, with every role it covers)
+  const hints = e.health?.hints || [];  // who could cover the short roles: the server's lines ("Could tank or heal: … (no answer yet)" said once for every role it covers; the line names the role, so no icon beside it)
   const placed = (e.board?.rosters || []).reduce((k, r) => k + r.groups.reduce((m, g) => m + g.length, 0), 0);
   const missing = e.health?.no_provider_buffs || [];
   const bench = signups.filter((s) => s.status === "sub"), outs = signups.filter((s) => s.status === "out"), away = e.absences || [];
@@ -83,7 +83,12 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
     ? (seatsN ? `${seatsN} seat${seatsN === 1 ? "" : "s"} short of the tank/healer minimums — ${asksN} suggestion${asksN === 1 ? "" : "s"}; nothing is sent until you press Send` : "the tank/healer minimums are covered by who joined and the regulars yet to answer")
     : (isShort ? `${(n?.headcount || 0)} short — ${asksN} suggestion${asksN === 1 ? "" : "s"}` : "every seat is taken");
   // a follow-on run (design §5.62): the lead names what follows it, the follow-on its lead
-  const facts = [e.follow ? `then ${e.follow.raid} ×${e.follow.rosters} at ${e.follow.when}` : e.lead ? `after ${e.lead.raid}` : null, e.kind === "adhoc" ? W.first_come : e.series_name, e.confirms === false ? W.no_confirmations : null, locked ? e.rel : e.timeline ? `locks ${e.timeline.lock}` : null].filter(Boolean).join(" · ");
+  // (the owner's review, 2026-11-22) the lead says what follows in words ("then two Barrow Deeps rosters at 9:30 PM");
+  // the follow-on says only what is its own — it is answered, rostered first-come and locked with its lead
+  const then = e.follow ? `then ${e.follow.rosters > 1 ? `${["", "one", "two", "three", "four"][e.follow.rosters] || e.follow.rosters} ${e.follow.raid} rosters` : e.follow.raid} at ${e.follow.at || e.follow.when}` : null;
+  const facts = (e.lead
+    ? [`after ${e.lead.raid}`, locked ? e.rel : "locks with it"]
+    : [then, e.kind === "adhoc" ? W.first_come : e.series_name, e.confirms === false ? W.no_confirmations : null, locked ? e.rel : e.timeline ? `locks ${e.timeline.lock}` : null]).filter(Boolean).join(" · ");
 
   return (
     <Box id={`run-${e.key}`} p="md" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 10, scrollMarginTop: 16, background: "var(--mantine-color-slate-8)" }}>
@@ -123,7 +128,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           </Group>
         )}
         {e.lead
-          ? <Text size="sm" c="dimmed">answers on the {e.lead.raid} sheet</Text>
+          ? <Text size="sm" c="dimmed">Signups come from the {e.lead.raid} sheet.</Text>
           : !anyone && <Text size="sm" c="dimmed">Nobody has joined yet — the sheet is in Discord, or answer for someone here.</Text>}
         {(e.double_booked || []).length > 0 && <Tooltip label={e.double_booked!.join(", ")}><Badge variant="light" color="gray" tt="none">double-booked {e.double_booked!.length}</Badge></Tooltip>}
         {!locked && joined.length > 0 && missing.length > 0 && (
@@ -147,7 +152,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       )}
       {/* who could cover a short role (officers): the server's words, one line per short role, under the counts */}
       {!locked && hints.length > 0 && (
-        <Stack gap={0} mt={4}>{hints.map((h) => <Group key={h.roles.join()} gap={6} wrap="nowrap">{h.roles.map((role) => <GameIcon key={role} meta={meta} kind="role" id={role} size={14} title={role} />)}<Text size="xs" c="dimmed">{h.hint}</Text></Group>)}</Stack>
+        <Stack gap={0} mt={4}>{hints.map((h) => <Text key={h.roles.join()} size="xs" c="dimmed">{h.hint}</Text>)}</Stack>
       )}
 
       {locked && <NightBlock e={e} meta={meta} onFill={() => setFillOpen(true)} />}

@@ -47,8 +47,8 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   time, who signed up early, and being a regular (each with a weight the owner sets per raid or schedule on the Raids
   page). An ad hoc run is first come instead.
 - **Rostered** — you have a place on a locked run's roster. On a recurring run you are asked to Confirm or say Can't
-  make it (by DM, or on your Me page) unless the owner turned confirmations off — then a run says *no confirmations —
-  Join is the commitment*. A joiner the lock left out reads **not rostered** (on the Me page too). The marks beside a
+  make it (by DM, or on your Me page) unless the owner turned confirmations off — then a run says *nobody is asked to
+  confirm*. A joiner the lock left out reads **not rostered** (on the Me page too). The marks beside a
   rostered name are the Discord card's: ✅ confirmed · ⏳ waiting · ❌ can't make it · ⌛ no answer in time.
 - **A run's state** — one word on every surface: *open for signup*, *locked — the roster stands*, *finished* (it ended)
   or *cancelled*.
@@ -817,7 +817,7 @@ time."*). The lead's sheet is the night's sheet (*Hyjal Summit, then Barrow Deep
 follow-on has no sheet and no answers of its own — they follow the lead's, and answering it directly says *"Answer on
 the Hyjal Summit sheet. It covers the whole night."* Its health shows on the lead's card as one line (*Barrow Deeps
 follow-on* short, with the role icon and a number). The Rosters page shows the pair in one card, *Hyjal Summit, then Barrow Deeps*:
-the lead's sheet first, the follow-on's under it, *after Hyjal Summit*, which *answers on the Hyjal Summit sheet*.
+the lead's sheet first, the follow-on's under it, *after Hyjal Summit*, and says *Signups come from the Hyjal Summit sheet.*
 The lead's lock locks both: the follow-on prefers the lead's rostered, so the 10s are the 20 split in two and bench
 joiners only cover gaps (a tank or healer the 20 can't give twice); first come applies to the lead only. A follow-on
 can't be locked on its own while its lead is open (*"Lock Hyjal Summit — its lock builds the follow-on too"*), and it
@@ -856,8 +856,8 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   asked to bring. A non-regular's Join
   stays a Join; they are rostered after regulars and are the first asked when a seat frees.
 - **Fill seats…** asks the bench first, then the regulars who haven't answered, then other members (each ask says how
-  it reaches them — *from the bench* / *a regular, no answer yet* / *not a regular* / *declared flex* / *offspec* /
-  *brings an alt*, the same words on the site, the Discord screens and the health card's "who could cover"; on an ad hoc
+  it reaches them — *from the bench* / *a regular, no answer yet* / *not a regular* / *extra role* / *offspec* /
+  *on an alt*, the same words on the site, the Discord screens and the health card's "who could cover"; on an ad hoc
   run or a schedule with no regulars yet, where everyone counts, it says *no answer yet* — nobody is called a regular there). The DM says only what the bot
   knows: "you haven't answered the sheet" — never that you're free that night. See *Suggestions* below for short tanks and
   healers.
@@ -897,7 +897,7 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
 - **Who counts.** Before lock: who joined, plus (on a recurring schedule with regulars) the regulars who haven't
   answered and aren't away — they are expected anyway, so the suggestions go beyond them — plus anyone already asked and
   not yet answered. After lock: who is rostered.
-- **Cheapest first**, each with a reason written by the bot (e.g. "short 1 healer · Ana's declared flex Holy · DPS
+- **Cheapest first**, each with a reason written by the bot (e.g. "short 1 healer · Ana can also play Holy · DPS
   stays 6 of 5 minimum"): someone on **Bench** who plays the role or a joiner's **declared flex role** (*/me plan
   roles*) · a joiner's **offspec** or a **regular who hasn't answered** · an **alt** of the role (never one already
   rostered on this raid in the same lockout) · a **member who isn't a regular**. When every seat is already taken,

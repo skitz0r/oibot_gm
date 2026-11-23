@@ -663,7 +663,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     kind = rc.run_kind(reg, ev)
     series = rc.run_series(reg, ev)
     head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · {kind}" + (f" ({reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
-             + ("" if rc.run_confirms(reg, ev) else " · no confirmations (Join is the commitment)")
+             + ("" if rc.run_confirms(reg, ev) else " · nobody is asked to confirm")
              + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else "")
              + (f" · then {then}" if (then := rc.follow_words_of(reg, ev)) else "")
              + (f" · after {after} (a follow-on: its answers are the lead's)" if (after := rc.lead_name_of(reg, ev)) else ""))
@@ -706,8 +706,8 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
         def hint(r: dict) -> str:
             if is_officer:
                 return r["hint"]
-            if r["hint"].startswith("not on the sheet"):
-                return "members not on the sheet could cover"
+            if r.get("off"):
+                return "members with no answer yet could cover"
             return " · ".join(f"{len(v)} {rc.ASK_HOW.get(k, k)}" for k, v in r["cover"].items() if v) or r["hint"]
         covers = [f"{r['role']} {r['have']}/{r['need']} ({hint(r)})" for r in hd["roles"] if r["need"] and r["have"] < r["need"] and r["hint"]]
         if covers:

@@ -85,7 +85,7 @@ def test_worked_example_at_sheet_open(reg, rs):
     assert [opt[0].display_name for opt in tank.options[1:]] == ["Gorm"], "the alternate: a non-regular main of the role"
     a = healer.options[0]
     assert [(x.display_name, x.kind, x.spec) for x in a] == [("Ana", "flex", "Holy")], "a declared flex role before an alt or a new body"
-    assert "Ana's declared flex Holy" in a[0].why and "DPS stays 6 of 5 minimum" in a[0].why
+    assert "Ana can also play Holy" in a[0].why and "DPS stays 6 of 5 minimum" in a[0].why
     alts = [(opt[0].display_name, opt[0].kind, opt[0].character) for opt in healer.options[1:]]
     assert alts == [("Wren", "alt", "Fern"), ("Pip", "other", "Pip")], "two alternates: Wren brings Fern, then Pip"
     assert "not saved this lockout" in healer.options[1][0].why

@@ -75,7 +75,7 @@ def test_member_health_card_leaves_out_the_officer_parts(reg, rs):
     member = views.health_layout(reg, rs, ev, team, ico, officer=False)
     body = text_of(member)
     assert "**Short**" in body and "locks <t:" in body, "the counts and what is short stay"
-    for hidden in ("**Suggested**", "**Haven't answered**", "Kael", "Ana", "Brannoc", "a regular, hasn't answered", "declared flex"):
+    for hidden in ("**Suggested**", "**Haven't answered**", "Kael", "Ana", "Brannoc", "a regular, hasn't answered", "extra role"):
         assert hidden not in body, hidden
     assert not ids(member), "no officer buttons on a member's card"
 

@@ -190,7 +190,7 @@ def test_split_rosters_compare_in_words_never_numbers():
 
 
 def test_the_health_hints_use_the_fill_screens_words(reg, rs):
-    """Who could cover a short role reads as the fill modal does ("from the bench: A"), never "+1 sub"."""
+    """Who could cover a short role names the role and uses the fill modal's words ("Could heal: A (from the bench)"), never "+1 sub"."""
     from conftest import by_role
 
     ev = open_test_run(reg, rs)
@@ -198,7 +198,7 @@ def test_the_health_hints_use_the_fill_screens_words(reg, rs):
     join(reg, rs, ev, roles["tank"][:2] + roles["melee"] + roles["ranged"])
     join(reg, rs, ev, roles["healer"][:1], status="sub")
     healer = next(r for r in rc.health_data(reg, ev, rc.run_team(reg, ev))["roles"] if r["role"] == "healer")
-    assert healer["need"] and healer["hint"].startswith(f"{rc.ASK_HOW['sub']}: ") and "+" not in healer["hint"], healer["hint"]
+    assert healer["need"] and healer["hint"].startswith("Could heal: ") and healer["hint"].endswith(f"({rc.ASK_HOW['sub']})") and "+" not in healer["hint"], healer["hint"]
 
 
 def test_the_confirmations_off_sentence_is_one_constant_on_every_discord_card(reg, rs, monkeypatch):
@@ -333,9 +333,9 @@ def test_place_the_rest_refuses_a_board_that_changed_since_it_was_drawn(reg, rs,
 
 
 def test_who_could_cover_says_not_on_the_sheet_once_for_every_role_it_covers():
-    roles = [{"role": "tank", "have": 0, "need": 2, "hint": "not on the sheet: A, B"},
-             {"role": "healer", "have": 1, "need": 3, "hint": "not on the sheet: B, C"},
-             {"role": "melee", "have": 0, "need": 1, "hint": "from the bench: D"},
+    roles = [{"role": "tank", "have": 0, "need": 2, "hint": "Could tank: A, B (no answer yet)", "off": ["A", "B"]},
+             {"role": "healer", "have": 1, "need": 3, "hint": "Could heal: B, C (no answer yet)", "off": ["B", "C"]},
+             {"role": "melee", "have": 0, "need": 1, "hint": rc.could_line(["melee"], [(["D"], "from the bench"), (["E"], "extra role")])},
              {"role": "ranged", "have": 3, "need": 2, "hint": ""}]
-    assert rc.cover_hints(roles) == [{"roles": ["melee"], "hint": "from the bench: D"},
-                                     {"roles": ["tank", "healer"], "hint": "not on the sheet: A, B, C"}]
+    assert rc.cover_hints(roles) == [{"roles": ["melee"], "hint": "Could play melee: D (from the bench) · E (extra role)"},
+                                     {"roles": ["tank", "healer"], "hint": "Could tank or heal: A, B, C (no answer yet)"}]

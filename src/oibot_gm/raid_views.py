@@ -555,8 +555,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
     if short:
         body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] - r['have']}" for r in short))
         hints = [x["hint"] for x in rc.cover_hints(short)] if officer else []  # names of who could cover: officers only; "not on the sheet" once
-        if hints:
-            body.append("-# " + " · ".join(hints))  # `-#` only renders at the start of a line
+        body.extend("-# " + x for x in hints)  # a line each ("Could tank: … · …" has its own dots); `-#` only renders at the start of a line
     fshort = rc.follow_short(reg, ev)  # the follow-on's tanks and healers, counted on this sheet's Join answers
     if fshort:
         fid = rc.follow_dict(reg, ev)["instance"]

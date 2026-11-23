@@ -29,7 +29,7 @@ LABELS = {"in": "Join", "sub": "Bench", "out": "No thanks"}
 # a run's state in words — the card's badge, History, the fill state, the Me page, the closed Discord cards
 RUN_STATE_WORDS = {"open": "open for signup", "locked": "locked — the roster stands", "done": "finished", "cancelled": "cancelled"}
 # the one sentence for a run whose rostered aren't asked to confirm (ad hoc by default, D5) — every surface
-NO_CONFIRMATIONS = "no confirmations — Join is the commitment"
+NO_CONFIRMATIONS = "nobody is asked to confirm"
 # how an ad hoc run seats people (D4)
 FIRST_COME = "first come, first rostered"
 # the board's list of joiners who hold no seat: before the lock nobody is placed yet, after it they aren't rostered
@@ -113,7 +113,7 @@ class FillAsk(BaseModel):
     character: str  # what they'd play
     spec: str
     reason: str  # "short 1 healer", "short 2" — the member's DM shows it
-    why: Optional[str] = None  # the code-written reason officers see (role_plan): "short 1 healer · Ana's declared flex Holy · DPS stays 6 of 5 minimum"
+    why: Optional[str] = None  # the code-written reason officers see (role_plan): "short 1 healer · Ana can also play Holy · DPS stays 6 of 5 minimum"
     asked_at: str = Field(default_factory=now)
     answer: Optional[str] = None  # yes | no | expired | released (the paired ask fell through) | withdrawn (an officer closed it) | cancelled (the run was)
     answered_at: Optional[str] = None
@@ -1655,7 +1655,7 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
         if c and role in (c.flex or []):
             sp = spec_for_role(reg, p["cls"], p["offspec"] if p["offspec"] != p["spec"] else None, role)
             if sp and sp != p["spec"]:
-                return "flex", p["character"], sp, f"{first}'s declared flex {sp}"
+                return "flex", p["character"], sp, f"{first} can also play {sp}"
         if p["offspec"] and p["offspec"] != p["spec"]:
             try:
                 if role_of(p["cls"], p["offspec"]) == role:
@@ -1902,7 +1902,15 @@ def send_batch(plan: Plan, picks: dict | None = None, limit: int | None = None) 
 # THE words for how an ask (or a would-be cover) reaches someone (FillAsk.kind): the fill screens on both surfaces, the
 # thread lines, the health hints and the site's fill modal and Detail (meta.ask_kinds) — design §5.56 phase 2
 ASK_HOW = {"sub": "from the bench", "regular": "a regular, no answer yet", "unanswered": "no answer yet", "other": "not a regular",
-           "flex": "declared flex", "offspec": "offspec", "alt": "brings an alt"}
+           "flex": "extra role", "offspec": "offspec", "alt": "on an alt"}
+# what a role's cover DOES, for "Could tank: …" (the owner's review, 2026-11-22: "declared flex: Rhoz" never said what for)
+COULD = {"tank": "tank", "healer": "heal", "melee": "play melee", "ranged": "play ranged"}
+
+
+def could_line(roles: list[str], groups: list[tuple[list[str], str]]) -> str:
+    """'Could tank: Rhoz (extra role) · Trun (on an alt)' — who could cover the short role(s), each group with how
+    (ASK_HOW's words). One sentence-shaped line that names the role itself: no icon stands in for it."""
+    return f"Could {' or '.join(COULD.get(r, r) for r in roles)}: " + " · ".join(f"{', '.join(names)} ({how})" for names, how in groups)
 
 
 def batch_lines(asks: list[FillAsk]) -> list[str]:
@@ -2195,12 +2203,16 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
             cover["sub"] = [sg.display_name for sg in subs if sg.role == r]
         coverable = sum(len(v) for v in cover.values())
         level = "green" if not n or have >= n else ("amber" if have + coverable >= n else "red")
-        # who could cover, in the fill screens' words (ASK_HOW: "from the bench: A, B · offspec: C") — never a code key
-        hint = " · ".join(f"{ASK_HOW.get(k, k)}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
-        if n and have < n and not coverable:
-            off = [m.display_name for m, _c in run_pool(reg, ev) if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())]
-            hint = (NOT_ON_SHEET + ", ".join(off[:3])) if off else "nobody can cover it — recruit"
-        roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover})
+        # who could cover, in the fill screens' words (could_line + ASK_HOW: "Could tank: A, B (from the bench) · C (offspec)")
+        # — never a code key; `off` = members with no answer on the sheet who play the role, only when nobody on it could
+        hint, off = "", []
+        if n and have < n:
+            if coverable:
+                hint = could_line([r], [([x.split(" (")[0] for x in v[:3]], ASK_HOW.get(k, k)) for k, v in cover.items() if v])
+            else:
+                off = [m.display_name for m, _c in run_pool(reg, ev) if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())][:3]
+                hint = could_line([r], [(off, ASK_HOW["unanswered"])]) if off else f"Nobody registered could {COULD.get(r, r)}. Recruit one."
+        roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "off": off, "cover": cover})
     buffs = []
     for b in profile.party_buffs():
         providers = [s.display_name for s in ins if b.provided_by(profile.spec(s.cls, s.spec))]
@@ -2212,24 +2224,22 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
             "expected_from": expected_from(reg, ev), "kind": run_kind(reg, ev)}
 
 
-NOT_ON_SHEET = "not on the sheet: "
-
-
 def cover_hints(roles: list[dict]) -> list[dict]:
-    """The short roles' "who could cover" lines (health_data's per-role `hint`), with the roles that only members NOT on
-    the sheet could cover said once: [{roles: [role, …], hint}] — "not on the sheet: A, B, C" listed under each short role
-    read as the same line twice on the health card and the site. Code builds it; the surfaces print it."""
+    """The short roles' "who could cover" lines (health_data's per-role `hint`), with the roles that only members with NO
+    answer on the sheet could cover said once: [{roles: [role, …], hint}] — "Could tank or heal: A, B, C (no answer
+    yet)"; the same names under each short role read as one line twice on the health card and the site. Code builds
+    it; the surfaces print it."""
     out, off_roles, off_names = [], [], []
     for r in roles:
         if not (r.get("need") and r["have"] < r["need"] and r.get("hint")):
             continue
-        if r["hint"].startswith(NOT_ON_SHEET):
+        if r.get("off"):
             off_roles.append(r["role"])
-            off_names += [n for n in r["hint"][len(NOT_ON_SHEET):].split(", ") if n not in off_names]
+            off_names += [n for n in r["off"] if n not in off_names]
         else:
             out.append({"roles": [r["role"]], "hint": r["hint"]})
     if off_roles:
-        out.append({"roles": off_roles, "hint": NOT_ON_SHEET + ", ".join(off_names[:5])})
+        out.append({"roles": off_roles, "hint": could_line(off_roles, [(off_names[:5], ASK_HOW["unanswered"])])})
     return out
 
 

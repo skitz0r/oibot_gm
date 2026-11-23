@@ -190,7 +190,7 @@ def test_adhoc_expects_nobody_and_reminds_nobody(reg, rs):
     run(bot.post_health(reg, rs, ev, None, nudge=True))
     assert not bot.dms and not ev.nudged
     body = text_of(views.health_layout(reg, rs, ev, rc.run_team(reg, ev), ico))
-    assert "No answer" not in body and "no confirmations" in body
+    assert "No answer" not in body and rc.NO_CONFIRMATIONS in body
     embed, _ = views.sheet_message(reg, ev, rc.run_team(reg, ev), ico)
     assert embed.footer.text.startswith("First come, first rostered") and "confirm by" not in embed.description
 

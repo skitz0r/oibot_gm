@@ -509,7 +509,7 @@ def test_the_raids_route_says_when_a_raid_runs_from_the_runs_themselves(api, reg
     assert len(raid["live_runs"]) == 1, "the run already open from the paused schedule keeps its sheet"
 
 
-def test_a_declared_second_roster_is_placeable_and_built_once_the_joiners_need_it(reg, rs):
+def test_a_declared_second_roster_is_placeable_and_built_once_the_joiners_need_it(reg, rs, monkeypatch):
     """The owner, 2026-11-22 (a Hyjal → Barrow Deeps ×2 night showed 10 board places for 18 joiners): before the lock
     the board draws every roster the run expects; the lock builds the declared roster as soon as the joiners no longer
     fit in fewer, even with tanks for one — and empty rosters drawn on the board never force one."""
@@ -520,6 +520,9 @@ def test_a_declared_second_roster_is_placeable_and_built_once_the_joiners_need_i
     ev = rc.open_run(reg, rs, RID, t, by="t")
     k, bounds = rc.groups_per_roster(reg, 10), reg.role_bounds(RID, 10)
     assert len(rc.board_layout(reg, ev)) == 2 * k, "20 places before anyone is placed"
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    sheet = next(e for x in TestClient(web.create_app(FakeBot(reg, rs))).get("/api/rosters", headers=bearer()).json()["raids"] if x["id"] == RID for e in x["open"])
+    assert [len(b["groups"]) for b in sheet["board"]["rosters"]] == [k, k] and sheet["rosters_expected"] == 2, "the site's board draws both rosters"
     roles = by_role(reg)
     few = roles["tank"][:1] + roles["healer"][:2] + roles["melee"][:4]
     join(reg, rs, ev, few)

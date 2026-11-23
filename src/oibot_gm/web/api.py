@@ -954,7 +954,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 # the lead on the follow-on, and who leaves after the lead
                 "follows": ev.follows, "followed_by": ev.followed_by,
                 "follow": ({"raid": reg.raid_def(ft["instance"]).get("name", ft["instance"]), "rosters": int(ft.get("rosters") or 1), "key": ev.followed_by,
-                            "when": t12(reg, rc.follow_start(reg, ev.instance, ev.start))} if (ft := rc.follow_dict(reg, ev)) else None),
+                            "when": t12(reg, rc.follow_start(reg, ev.instance, ev.start)),
+                            # `at` = the clock alone when it starts the lead's day (the lead's card already says the day)
+                            "at": (clock12(reg, fs) if (fs := rc.follow_start(reg, ev.instance, ev.start)).astimezone(reg.tz).date() == ev.start.astimezone(reg.tz).date() else t12(reg, fs))}
+                           if (ft := rc.follow_dict(reg, ev)) else None),
                 "lead": ({"raid": rc.lead_name_of(reg, ev), "key": ev.follows} if ev.follows else None),
                 "leaving": [reg.members[u].display_name for u in ev.leaving if u in reg.members],
                 "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state)}  # the state in words (meta.run_states), History and the drawer print it
@@ -964,7 +967,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         soft, hard, confirm = run_times(reg, ev, t)
         conf_rows = rc.confirmations(reg, ev) if ev.all_rosters else []
-        board_rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], rc.run_size(reg, ev))
+        board_rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev))
         absences = [{"display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "signed": str(m.discord_id) in ev.signups}
                     for m in reg.members.values() for a in m.absences if a.start <= day <= a.end]
         busy = rc.conflicts(rs, ev) if live else {}
@@ -1276,7 +1279,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     def board_reply(reg, ev):
         t = rc.run_team(reg, ev)
-        rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], rc.run_size(reg, ev))
+        rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev))
         return {"board": board_json(reg, ev, rosters, rc.confirmations(reg, ev) if ev.all_rosters else []), "needs": rc.needs(reg, ev, t), "rev": rc.board_rev(reg, ev)}
 
     def stale(v, ev):
