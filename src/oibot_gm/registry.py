@@ -21,7 +21,7 @@ from typing import Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from .constants import RANK_ORDER, ROLES
+from .constants import RANK_ORDER, ROLES, hours_words
 from .profiles import GameProfile
 from .store import GitStore
 
@@ -1411,6 +1411,98 @@ def write_out_timing(row: dict, rd: dict) -> dict:
     return out
 
 
+# the lift's words for one timing value (lift_timing's lines, the start's ops line), in SCHEDULE_TIMING's order
+_TIMING_HOURS_WORDS = {"signup_lead_hours": "sheet opens {} before", "nudge_hours_before": "reminder {} before",
+                       "lock_hours_before": "locks {} before", "confirm_hours_before": "confirm-by {} before", "fill_ask_hours": "a fill ask waits {}"}
+_TIMING_BOOL_WORDS = {"nudge": "reminder", "autofill": "automatic fill", "open_dm": "opening DM", "confirm": "confirmations"}
+
+
+def timing_words(values: dict) -> str:
+    """'reminder 3 days before, confirmations off': the timing values held in `values`, in SCHEDULE_TIMING's order."""
+    out = []
+    for k in SCHEDULE_TIMING:
+        if k not in values:
+            continue
+        if k in _TIMING_HOURS_WORDS:
+            out.append(_TIMING_HOURS_WORDS[k].format(hours_words(values[k])))
+        else:
+            out.append(f"{_TIMING_BOOL_WORDS[k]} {'on' if parse_bool(values[k]) else 'off'}")
+    return ", ".join(out)
+
+
+def timing_line(moved: list[str], dropped: list[str]) -> str:
+    """The start's one ops line for lift_timing's lines (Registry.migrate_schedules → timing_saved)."""
+    return ("Sheet timing now belongs to each schedule. " + ("Moved: " + " · ".join(moved) + ". " if moved else "")
+            + ("Dropped, with no schedule to take it: " + " · ".join(dropped) + "." if dropped else "")).strip()
+
+
+def lift_timing(cfg: "GuildConfig", raids: dict, skip=frozenset()) -> tuple[list[str], list[str], bool]:
+    """An older guild.yaml held sheet timing (SCHEDULE_TIMING) on each raid; phase 2 keeps it on each schedule (C7).
+    Every readable stored entry gets its nine values written out (write_out_timing) against what its raid read then
+    (the profile's raid + the old override), every timing key leaves every raid override (an override left empty is
+    dropped), and every live run dict without `fill_ask_hours` (and not a test run) is stamped with the value the old
+    merge gave its raid, so ask_deadline reads the same. A raid with game run times and timing but no stored entry
+    gets a `default` entry holding that timing. Raids in `skip` (lift_schedules refused them) are left exactly as they
+    are. → (moved: "Hyjal Summit · tuesday: reminder 3 days before" per schedule that took a value from its raid,
+    dropped: "Barrow Deeps: reminder 36 hours before" per raid whose timing no schedule takes, owed: anything changed).
+    Idempotent; pure on cfg."""
+    raids = raids or {}
+
+    def name(rid):
+        return (raids.get(rid) or {}).get("name") or rid
+
+    held = {rid: {k: o[k] for k in SCHEDULE_TIMING if k in o} for rid, o in cfg.raids.items() if rid not in skip and isinstance(o, dict)}
+    held = {rid: h for rid, h in held.items() if h}
+    rds: dict = {}  # the old merge per raid, read before anything moves
+
+    def rd_of(rid):
+        if rid not in rds:
+            rds[rid] = effective_raid(raids.get(rid, {}) or {}, _raid_override_of(cfg, rid))
+        return rds[rid]
+
+    moved, dropped, owed = [], [], False
+    led, entries = set(), []
+    for e in cfg.schedules:
+        rid = _lead_raid(e)
+        if rid in skip or unread_schedule(e) is not None:
+            entries.append(e)
+            continue
+        led.add(rid)
+        _, row = from_stored_schedule(e)
+        out = to_stored_schedule(rid, write_out_timing(row, rd_of(rid)))
+        owed = owed or out != e
+        entries.append(out)
+        if schedule_class(row.get("kind")) != "recurring":
+            continue  # a pickup row read ADHOC_DEFAULTS, never its raid's timing
+        derived = bool({"signup_lead_hours", "lock_hours_before"} & set(row))  # its own reminder was derived, not the raid's
+        took = {k: out[k] for k in held.get(rid, {}) if k not in row and not (k == "nudge_hours_before" and derived)}
+        if took:
+            moved.append(f"{name(rid)} · {row.get('name') or row['id']}: {timing_words(took)}")
+    for rid, h in held.items():
+        if rid in led:
+            continue
+        if (raids.get(rid) or {}).get("slots"):  # the game's run times are its `default` schedule: that one takes the timing
+            entries.append(to_stored_schedule(rid, write_out_timing({"id": DEFAULT_SCHEDULE}, rd_of(rid))))
+            moved.append(f"{name(rid)} · {DEFAULT_SCHEDULE}: {timing_words(h)}")
+        else:
+            dropped.append(f"{name(rid)}: {timing_words(h)}")
+    for t in cfg.rosters:  # a live run read its raid's fill-ask wait when its dict had none (rc.ask_deadline): keep it
+        rid = t.get("instance")
+        if not isinstance(t, dict) or "fill_ask_hours" in t or t.get("test") or not rid or rid in skip:
+            continue
+        t["fill_ask_hours"] = float(rd_of(rid)["fill_ask_hours"])
+        owed = True
+    cfg.schedules = entries
+    for rid, h in held.items():
+        over = {k: v for k, v in cfg.raids[rid].items() if k not in h}
+        if over:
+            cfg.raids[rid] = over
+        else:
+            cfg.raids.pop(rid)
+        owed = True
+    return moved, dropped, owed
+
+
 def join_words(words: list[str]) -> str:
     return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1] if words else ""
 
@@ -2310,7 +2402,18 @@ class Registry:
         self.schedules_refused: list[str] = []  # a raid whose old keys couldn't be lifted: told as a warning, never saved as moved
         emptied: list[str] = []  # raids whose old keys held nothing: dropped, no line, but the file still owes the save
         self.schedules_lifted: list[str] = lift_schedules(cfg, raids, self.schedules_refused, emptied)
-        self._schedules_owed = bool(self.schedules_lifted or emptied)
+        self._lift_owed = bool(self.schedules_lifted or emptied)
+        # phase 2 (C7): an older file's raid-level sheet timing onto its schedules; a refused raid (its old keys still
+        # under the raid) keeps its timing too, so it reads as before
+        refused = {rid for rid, o in cfg.raids.items() if isinstance(o, dict) and {"slots", "schedules"} & set(o)}
+        try:  # on a copy: a value an older bot never should have stored leaves the whole file as it was, never a failed start
+            trial = cfg.model_copy(deep=True)
+            self.timing_moved, self.timing_dropped, timing_owed = lift_timing(trial, raids, refused)
+            cfg = trial
+        except (RegistryError, ValueError, TypeError) as e:
+            log.warning("schedules: the sheet timing of %s was not moved (%s)", self.key, e)
+            self.timing_moved, self.timing_dropped, timing_owed = [], [], False
+        self._schedules_owed = self._lift_owed or timing_owed
         self.schedules_unread: list[str] = []
         for e in cfg.schedules:
             why = unread_schedule(e)
@@ -2324,14 +2427,19 @@ class Registry:
     def migrate_schedules(self, by: str = "migration") -> list[str]:
         """Save an older file's lifted schedules (load_config) once: one commit when the load lifted anything, then
         nothing on later calls. → the lift's lines, [] when nothing was saved or no raid had a schedule to move (a raid
-        whose old keys held nothing is saved without a line). A preview copy never writes."""
+        whose old keys held nothing is saved without a line). The same commit carries the timing lift (lift_timing):
+        its ops line goes into `timing_saved` for the start hook. A preview copy never writes."""
         if getattr(self, "_shadow", False) or not (self.schedules_lifted or getattr(self, "_schedules_owed", False)):
             return []
         with self.config_lock:
             lines = self.schedules_lifted
-            self.save_config(f"schedules moved to the guild level (by {by})", notify=False)  # a failure keeps the lines: the next start tries again
-            self.schedules_lifted = []
-            self._schedules_owed = False
+            what = "schedules moved to the guild level" if getattr(self, "_lift_owed", True) else "sheet timing moved onto each schedule"
+            self.save_config(f"{what} (by {by})", notify=False)  # a failure keeps the lines: the next start tries again
+            moved, dropped = list(getattr(self, "timing_moved", [])), list(getattr(self, "timing_dropped", []))
+            if moved or dropped:
+                self.timing_saved = [*getattr(self, "timing_saved", []), timing_line(moved, dropped)]
+            self.schedules_lifted, self.timing_moved, self.timing_dropped = [], [], []
+            self._schedules_owed = self._lift_owed = False
         return lines
 
     def save_config(self, message: str, notify: bool = True) -> None:

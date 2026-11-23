@@ -34,3 +34,13 @@ def fmt12(dt, fmt: str = CLOCK12) -> str:
     import re
 
     return re.sub(r"\b0(\d) ([A-Z][a-z]{2})\b", r"\1 \2", re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", dt.strftime(fmt)))
+
+
+def hours_words(h) -> str:
+    """48 → '2 days', 168 → 'a week', 24 → '24 hours', 1 → '1 hour' (flows_config re-exports it; registry's lift words)."""
+    h = float(h)
+    if h == 168:
+        return "a week"
+    if h >= 48 and h % 24 == 0:
+        return f"{int(h // 24)} days"
+    return f"{h:g} hour{'' if h == 1 else 's'}"

@@ -539,6 +539,9 @@ class ListenMixin:
                 log.warning("schedules: migration of %s failed (%s)", reg.key, type(e).__name__)
             if lines:
                 await self.ops.emit(reg.config, "info", f"Schedules are now stored at guild level: {' · '.join(lines)}.")
+            timing, reg.timing_saved = list(getattr(reg, "timing_saved", None) or []), []
+            for line in timing:  # the raid-level sheet timing moved onto each schedule (registry.lift_timing): once
+                await self.ops.emit(reg.config, "info", line)
             refused, reg.schedules_refused = list(getattr(reg, "schedules_refused", None) or []), []
             for line in refused:  # one per raid left under its raid (it still reads as before)
                 await self.ops.emit(reg.config, "warn", line)

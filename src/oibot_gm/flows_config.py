@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo, available_timezones
 
 import discord
 
+from .constants import hours_words  # noqa: F401 — moved to constants (registry's lift words); re-exported here
 from .presets import PRESETS  # (key, name, opens, nudge, lock, confirm), shared with plain text
 from .registry import (ADHOC_DEFAULTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
                        RegistryError, parse_slots, schedule_def_of, schedule_value, schedules_of)
@@ -73,16 +74,6 @@ async def _owner_or_refuse(i: discord.Interaction, reg: Registry) -> bool:
 
 def num(x) -> str:
     return f"{float(x):g}"
-
-
-def hours_words(h) -> str:
-    """48 → '2 days', 168 → 'a week', 24 → '24 hours', 1 → '1 hour'."""
-    h = float(h)
-    if h == 168:
-        return "a week"
-    if h >= 48 and h % 24 == 0:
-        return f"{int(h // 24)} days"
-    return f"{num(h)} hour{'' if h == 1 else 's'}"
 
 
 HOURS = (1, 2, 3, 4, 6, 8, 12, 18, 24, 36, 48, 72, 96, 120, 168)

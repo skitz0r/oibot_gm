@@ -319,8 +319,12 @@ def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
     asyncio.run(OibotGM._schedules_migrate(bot))
     asyncio.run(OibotGM._schedules_migrate(bot))
     assert said[0] == ("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule.")
-    assert said[1][0] == "warn" and "late" in said[1][1]
-    assert len(said) == 2  # the warning is told once a start, not on every call
+    assert said[1] == ("info", TIMING_MOVED)  # phase 2: the raid-level timing went onto its schedule in the same save
+    assert said[2][0] == "warn" and "late" in said[2][1]
+    assert len(said) == 3  # the warning is told once a start, not on every call
+
+
+TIMING_MOVED = "Sheet timing now belongs to each schedule. Moved: Barrow Deeps · default: confirm-by 12 hours before."
 
 
 def _start(reg) -> list[tuple[str, str]]:
@@ -481,7 +485,8 @@ def test_the_lift_is_saved_before_anything_else_at_start(old_store, open_registr
     assert "schedules moved to the guild level" in _last_subject(old_store.root) and said == []
     reg.save_config("something else")  # ready's officer roles, say: nothing of the lift is left for it to carry
     asyncio.run(OibotGM._schedules_migrate(bot))
-    assert said == [("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule.")]
+    assert said == [("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule."),
+                    ("info", TIMING_MOVED)]
 
 
 # ---- going back to older code: scripts/lower_schedules.py
@@ -521,6 +526,20 @@ def _lower_script():
     return mod
 
 
+def _untimed(raids: dict) -> dict:
+    """The raids with every sheet timing value taken out, of the raid and of each of its schedules (a `default` row
+    left with nothing but its id is gone, as it was before it carried timing)."""
+    out = {}
+    for rid, o in raids.items():
+        o = {k: v for k, v in o.items() if k not in R.SCHEDULE_TIMING}
+        rows = [{k: v for k, v in r.items() if k not in R.SCHEDULE_TIMING} for r in o.pop("schedules", None) or []]
+        rows = [r for r in rows if r != {"id": "default"}]
+        if rows:
+            o["schedules"] = rows
+        out[rid] = o
+    return out
+
+
 def test_the_script_lowers_each_guild_once_and_this_code_lifts_it_again(old_store, open_registry, data_root):
     reg = open_registry(old_store)
     reg.migrate_schedules()
@@ -533,7 +552,10 @@ def test_the_script_lowers_each_guild_once_and_this_code_lifts_it_again(old_stor
     said = script.lower(data_root)
     assert len(said) == 1 and GUILD in said[0] and commit_count(old_store) == n0 + 1
     doc = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())
-    assert "schedules" not in doc and doc["raids"] == OLD["raids"]
+    assert "schedules" not in doc and _untimed(doc["raids"]) == _untimed(OLD["raids"])  # phase 2: timing rides on each schedule
+    assert not any(k in o for o in doc["raids"].values() for k in R.SCHEDULE_TIMING)
+    assert all(set(R.SCHEDULE_TIMING) <= set(row) for o in doc["raids"].values() for row in o.get("schedules") or [])
+    assert doc["raids"]["barrow_deeps"]["schedules"][0]["confirm_hours_before"] == 12
     assert "under each raid" in _last_subject(data_root)
     again = open_registry(GitStore(data_root, push=False))
     assert again.config.schedules == lifted and again.schedules_lifted

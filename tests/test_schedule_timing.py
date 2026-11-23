@@ -94,3 +94,170 @@ def test_a_schedule_edit_never_reaches_an_open_run(reg, rs):
     reg.set_schedule(RID, "tue", {"lock_hours_before": 36, "confirm_hours_before": 12}, "t")
     after = reg.config.roster(t["key"])
     assert {k: after[k] for k in keep} == keep
+
+
+# ---- Task 3: an older file's raid-level timing moves onto its schedules at start
+from datetime import datetime  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from oibot_gm.store import GitStore  # noqa: E402
+from test_guild_schedules import BAD_ROW, _last_subject, _start, _write_old, base_config, commit_count, open_registry  # noqa: E402,F401
+
+OLD_TIMING = {
+    "raids": {
+        "hyjal_summit_forever": {"nudge_hours_before": 72},
+        "barrow_deeps": {"nudge_hours_before": 36, "lockout_days": 7},
+    },
+    "schedules": [{"id": "tuesday", "lineup": [{"raid": "hyjal_summit_forever", "rosters": 1}], "kind": "weekly", "slots": ["Tue 18:30"]}],
+}
+
+
+@pytest.fixture
+def old_store_with(data_root):
+    """phase 1's old_store, parametrised by the file: conftest's guild.yaml with `cfg` on top, committed."""
+    def make(cfg: dict) -> GitStore:
+        _write_old(data_root, cfg)
+        return GitStore(data_root, push=False)
+    return make
+
+
+def test_lifting_timing_writes_it_out_and_drops_what_has_no_schedule(profile):
+    cfg = R.GuildConfig(**{**base_config(), **copy.deepcopy(OLD_TIMING)})
+    moved, dropped, owed = R.lift_timing(cfg, profile.raids)
+    e = cfg.schedules[0]
+    assert e["nudge_hours_before"] == 72 and e["signup_lead_hours"] == 120 and e["confirm"] is True
+    assert cfg.raids == {"barrow_deeps": {"lockout_days": 7}}
+    assert owed and moved == ["Hyjal Summit · tuesday: reminder 3 days before"]
+    assert dropped == ["Barrow Deeps: reminder 36 hours before"]
+    assert R.lift_timing(cfg, profile.raids) == ([], [], False)
+
+
+def test_an_old_file_reads_its_timing_at_once(old_store_with, open_registry):
+    reg = open_registry(old_store_with(OLD_TIMING))
+    assert reg.schedule_def("hyjal_summit_forever", "tuesday")["nudge_hours_before"] == 72
+    assert reg.timing_dropped and not any(k in (reg.config.raids.get("barrow_deeps") or {}) for k in R.SCHEDULE_TIMING)
+
+
+def test_the_timing_lift_is_committed_once(old_store_with, open_registry):
+    store = old_store_with(OLD_TIMING)
+    reg = open_registry(store)
+    n0 = commit_count(store)
+    reg.migrate_schedules()
+    assert commit_count(store) == n0 + 1 and reg.timing_saved
+    reg.migrate_schedules()
+    assert commit_count(store) == n0 + 1 and open_registry(store).timing_dropped == []
+
+
+def test_the_start_says_where_the_timing_went_once(old_store_with, open_registry):
+    store = old_store_with(OLD_TIMING)
+    reg = open_registry(store)
+    said = _start(reg) + _start(reg)
+    assert said == [("info", "Sheet timing now belongs to each schedule. Moved: Hyjal Summit · tuesday: reminder 3 days before. "
+                             "Dropped, with no schedule to take it: Barrow Deeps: reminder 36 hours before.")]
+    assert "sheet timing moved onto each schedule (by " in _last_subject(store.root)
+
+
+RICH = {  # an older file: phase-1 schedules, raid-level timing of every sort, a pickup and a schedule with its own opening
+    "raids": {
+        "hyjal_summit_forever": {"nudge_hours_before": 72, "confirm": False, "fill_ask_hours": 2},
+        "barrow_deeps": {"lock_hours_before": 12, "autofill": False, "open_dm": True, "notes": "kept"},
+    },
+    "schedules": [
+        {"id": "tuesday", "lineup": [{"raid": "hyjal_summit_forever", "rosters": 1}, {"raid": "barrow_deeps", "rosters": 2}], "kind": "weekly", "slots": ["Tue 18:30"]},
+        {"id": "early", "lineup": [{"raid": "hyjal_summit_forever", "rosters": 1}], "kind": "weekly", "slots": ["Sat 18:30"], "signup_lead_hours": 48},
+        {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 04:00"]},
+        {"id": "pug", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "kind": "pickup"},
+    ],
+}
+
+
+def test_every_schedule_reads_the_same_before_and_after(old_store_with, open_registry, profile):
+    """The old merge, computed by hand from the old file, equals the new read for every key of SCHEDULE_TIMING."""
+    old = R.GuildConfig(**{**base_config(), **copy.deepcopy(RICH)})
+    before = {}
+    for e in old.schedules:
+        rid, row = R.from_stored_schedule(e)
+        rd = R.effective_raid(profile.raids[rid], R._raid_override_of(old, rid))  # the old raid_def: the raid's timing in the merge
+        sd = R.schedule_def_of(rd, row["id"])
+        before[(rid, row["id"])] = {k: sd[k] for k in TIMING}
+    reg = open_registry(old_store_with(RICH))
+    for (rid, sid), want in before.items():
+        sd = reg.schedule_def(rid, sid)
+        assert {k: sd[k] for k in TIMING} == want, (rid, sid)
+    assert before[("hyjal_summit_forever", "tuesday")]["nudge_hours_before"] == 72
+    assert before[("barrow_deeps", "default")]["lock_hours_before"] == 12
+    assert not any(k in o for o in reg.config.raids.values() for k in TIMING)
+    assert reg.config.raids["barrow_deeps"] == {"notes": "kept"}
+    assert reg.timing_moved == [
+        "Hyjal Summit · tuesday: reminder 3 days before, a fill ask waits 2 hours, confirmations off",
+        "Hyjal Summit · early: a fill ask waits 2 hours, confirmations off",  # its reminder is halfway to its own opening
+        "Barrow Deeps · default: locks 12 hours before, automatic fill off, opening DM on",
+    ]  # the pickup read the first-come values, never its raid's
+    assert reg.timing_dropped == []
+
+
+def _live_run(key: str, start: datetime) -> dict:
+    """A run dict as ensure_run wrote it for a plain `default` run before Task 2: no fill_ask_hours (read live)."""
+    return {"key": key, "name": f"Hyjal Summit {key}", "size": 20, "schedule": start.strftime("%a %H:%M"), "instance": "hyjal_summit_forever",
+            "cutoff_soft_hours": 72.0, "cutoff_hard_hours": 24.0, "confirm_hours": 6.0, "open_days_before": 5.0, "reminders": "dm",
+            "open_dm": False, "autofill": True, "ephemeral": True, "schedule_id": "default", "kind": "recurring",
+            "series": "hyjal_summit_forever:default", "confirm": True}
+
+
+def test_a_live_run_keeps_its_fill_ask_wait(old_store_with, open_registry):
+    """A run dict opened from `default` without fill_ask_hours, its raid at fill_ask_hours 2 in the old file:
+    after the load, the run dict has fill_ask_hours 2 and rc.ask_deadline(reg, ev, at) is at + 2 hours."""
+    start = datetime(2026, 12, 15, 18, 30, tzinfo=ZoneInfo("America/Los_Angeles"))
+    store = old_store_with({"raids": {"hyjal_summit_forever": {"fill_ask_hours": 2, "slots": ["Tue 18:30"]}}, "rosters": [_live_run("hsf-1215-1830", start)]})
+    reg = open_registry(store)
+    assert reg.config.roster("hsf-1215-1830")["fill_ask_hours"] == 2
+    ev = rc.RaidEvent(key="hsf-1215-1830-x", team="hsf-1215-1830", instance="hyjal_summit_forever", starts_at=start.isoformat())
+    at = start - timedelta(days=1)
+    assert rc.ask_deadline(reg, ev, at) == at + timedelta(hours=2)
+    reg.migrate_schedules()
+    assert rc.ask_deadline(open_registry(store), ev, at) == at + timedelta(hours=2)
+
+
+def test_a_one_off_and_its_follow_on_are_untouched(old_store_with, open_registry):
+    """Two run dicts copied from big-guys-for's live pair (adhoc lead + `after` follow-on, both with fill_ask_hours):
+    after the load and migrate_schedules, config.rosters is byte-for-byte what the file held."""
+    after = {"key": "bd-1210-2130-after", "name": "Barrow Deeps · after Hyjal Summit Thu 10 Dec 6:30 PM", "size": 10, "schedule": "Thu 21:30",
+             "instance": "barrow_deeps", "cutoff_soft_hours": 6.0, "cutoff_hard_hours": 5.0, "confirm_hours": 4.0, "open_days_before": 7.0,
+             "reminders": "none", "open_dm": False, "autofill": True, "ephemeral": True, "schedule_id": "after", "kind": "adhoc", "series": None,
+             "confirm": False, "rosters": 2, "fill_ask_hours": 1.0, "split_policy": "balanced", "follows": "hsf-1210-1830-adhoc"}
+    lead = {"key": "hsf-1210-1830-adhoc", "name": "Hyjal Summit · Ad hoc Thu 10 Dec 6:30 PM", "size": 20, "schedule": "Thu 18:30",
+            "instance": "hyjal_summit_forever", "cutoff_soft_hours": 3.0, "cutoff_hard_hours": 2.0, "confirm_hours": 1.0, "open_days_before": 7.0,
+            "reminders": "none", "open_dm": False, "autofill": True, "ephemeral": True, "schedule_id": "adhoc", "kind": "adhoc", "series": None,
+            "confirm": False, "rosters": 1, "fill_ask_hours": 1.0, "split_policy": "balanced", "follow": {"raid": "barrow_deeps", "rosters": 2},
+            "followed_by": "bd-1210-2130-after"}
+    held = [after, lead]
+    store = old_store_with({**OLD_TIMING, "rosters": copy.deepcopy(held)})
+    reg = open_registry(store)
+    assert reg.config.rosters == held
+    reg.migrate_schedules()
+    assert reg.config.rosters == held and open_registry(store).config.rosters == held
+
+
+def test_a_refused_raid_keeps_its_timing(old_store_with, open_registry):
+    """A raid whose old `schedules` key can't be lifted (phase 1's refused case) and that holds lock_hours_before 12:
+    the key stays in its override, the schedule still reads 12, and the raid is in neither moved nor dropped."""
+    reg = open_registry(old_store_with({"raids": {"barrow_deeps": {"lock_hours_before": 12, "slots": ["Tue 04:00"], "schedules": [BAD_ROW]}}}))
+    assert reg.schedules_refused
+    assert reg.config.raids["barrow_deeps"]["lock_hours_before"] == 12
+    assert reg.schedule_def("barrow_deeps", "default")["lock_hours_before"] == 12
+    assert not [x for x in reg.timing_moved + reg.timing_dropped if "Barrow Deeps" in x]
+
+
+def test_a_preview_copy_never_commits_the_timing_lift(old_store_with, open_registry):
+    """reg.shadow().migrate_schedules() writes no commit."""
+    store = old_store_with(OLD_TIMING)
+    reg = open_registry(store)
+    n0 = commit_count(store)
+    reg.shadow().migrate_schedules()
+    assert commit_count(store) == n0
+
+
+def test_hours_words_lives_in_constants_and_flows_config_re_exports_it():
+    from oibot_gm import constants, flows_config
+    assert flows_config.hours_words is constants.hours_words
+    assert [constants.hours_words(h) for h in (72, 36, 168, 1, 1.5)] == ["3 days", "36 hours", "a week", "1 hour", "1.5 hours"]
