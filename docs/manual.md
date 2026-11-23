@@ -808,7 +808,9 @@ With one roster's worth of joiners or fewer it builds a second
 roster only when the tanks and healers allow two. A
 schedule can be **paused** (nothing opens from it). The bot finds a schedule's run by the schedule and the start it
 was opened for, never by its key, so two schedules starting at the same minute are two runs, and a start whose run is
-already open, finished or cancelled never gets a second sheet — also after the guild's timezone changes.
+already open, finished or cancelled never gets a second sheet — also after the guild's timezone changes. A schedule
+that names a raid the game no longer has opens no runs at all, not even the raids it still has. Until it is changed or
+removed, the ops feed says so once an hour, naming the schedule and the raid; both are done on the Schedules page.
 
 **Recurring and ad hoc.** Every run is one or the other, and nobody sets it by hand — it follows the schedule's kind:
 - **Recurring** — weekly nights and days of each lockout. Opens by itself on its

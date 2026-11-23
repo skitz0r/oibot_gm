@@ -394,7 +394,10 @@ def test_a_schedule_with_a_raid_the_game_lacks_opens_nothing_and_warns_hourly(re
     sid = weekly(reg, HYJAL, t.strftime("%a %H:%M"), "night")
     reg.set_schedule(sid, {"follow": f"{RID} x1"}, "t")
     due(reg, HYJAL, t)  # the premise: the night is due while both raids are the game's
-    monkeypatch.delitem(reg.profile.raids, gone)
+    # a filtered COPY in place of the session-wide profile's dict: the undo puts the very same dict back, in its order
+    kept = {k: v for k, v in reg.profile.raids.items() if k != gone}
+    monkeypatch.setattr(reg.profile, "raids", kept)
+    monkeypatch.setattr(reg.base_profile, "raids", kept)
     bot, opened = _scheduler(reg, rs)
     clock = {"now": reg.now_local()}
     monkeypatch.setattr(reg, "now_local", lambda: clock["now"])
@@ -407,12 +410,26 @@ def test_a_schedule_with_a_raid_the_game_lacks_opens_nothing_and_warns_hourly(re
     assert all(not r["runs"] for sec in schedule_sections(reg) for r in sec["schedules"]), "the public page agrees"
     warns = [x for lvl, x in bot.ops.lines if lvl == "warn" and "opens no runs" in x]
     name = "Barrow Deeps" if gone == RID else "Hyjal Summit Forever"  # a raid the profile lacks: its id in words
-    first = "Hyjal Summit" if gone == RID else name
-    assert warns == [f"{first} · Raid nights opens no runs: {name} is no longer a raid "
-                     "of this game. Change its raids on the Raids page, or remove the schedule."]
+    assert warns == [f"Raid nights opens no runs: {name} is no longer a raid "
+                     "of this game. Change its raids on the Schedules page, or remove it there."]
     clock["now"] += timedelta(minutes=61)
     run(bot.scheduler_tick_guild(reg))
     assert len([x for lvl, x in bot.ops.lines if "opens no runs" in x]) == 2, "again after an hour, never every minute"
+
+
+@pytest.mark.parametrize("gone", [RID, HYJAL], ids=["a later raid left the game", "the first raid left the game"])
+def test_a_schedule_with_a_raid_the_game_lacks_can_be_removed(reg, monkeypatch, gone):
+    """The warning's fix works: the schedule comes off, whichever of its raids left the game."""
+    reg.set_raid_overrides(HYJAL, OPENED, "t")
+    reg.set_raid_overrides(RID, OPENED, "t")
+    sid = weekly(reg, HYJAL, "Tue 19:30", "night")
+    reg.set_schedule(sid, {"follow": f"{RID} x1"}, "t")
+    kept = {k: v for k, v in reg.profile.raids.items() if k != gone}
+    monkeypatch.setattr(reg.profile, "raids", kept)
+    monkeypatch.setattr(reg.base_profile, "raids", kept)
+    reg.remove_schedule(sid, "t")
+    assert sid not in {s["id"] for s in reg.all_schedules()}
+    assert sid not in {s["id"] for s in Registry(reg.store, reg.key, reg.base_profile).all_schedules()}, "saved"
 
 
 def test_a_run_dict_whose_open_was_cut_off_is_cleaned_after_an_hour(reg, rs):

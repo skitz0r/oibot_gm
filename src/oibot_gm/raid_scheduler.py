@@ -131,7 +131,8 @@ class RaidSchedulerMixin:
     async def _warn_gone_raids(self, reg, now) -> None:
         """An active schedule whose lineup names a raid the game profile no longer has opens nothing (rc.gone_raids: the
         whole occurrence, never a chain without that raid). ONE ops warn per (guild, schedule id) per hour, naming the
-        schedule, the raid and the fix."""
+        schedule by its name once, the raid that left the game and the fix (the Schedules page lists a schedule whatever
+        its raids; the Raids page doesn't list one whose first raid is gone)."""
         from .registry import schedule_name
 
         warned: dict = self.__dict__.setdefault("_gone_raids_warned", {})
@@ -145,10 +146,9 @@ class RaidSchedulerMixin:
             warned[key] = now
             names = [(getattr(reg, "base_profile", reg.profile).raids.get(r) or reg.config.raids.get(r) or {}).get("name") or r.replace("_", " ").title() for r in gone]
             words = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-            first = reg.raid_def(s["raid"]).get("name", s["raid"]) if s["raid"] in reg.profile.raids else names[0]
-            await self.ops.emit(reg.config, "warn", f"{first} · {schedule_name(s)} opens no runs: {words} "
+            await self.ops.emit(reg.config, "warn", f"{schedule_name(s)} opens no runs: {words} "
                                                     f"{'is' if len(names) == 1 else 'are'} no longer a raid of this game. "
-                                                    "Change its raids on the Raids page, or remove the schedule.")
+                                                    "Change its raids on the Schedules page, or remove it there.")
 
     async def _close_run(self, reg, rs, ev, now, exhausted_posted: set) -> None:
         """A locked run past its close: a loot council on it decides (LootMixin.loot_may_close — ended only idle 30 min
