@@ -699,6 +699,8 @@ bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,men
 
 **Surfaces.** Discord: `/gm config raid` → *Schedules* (section key `times`; a raid with only its run times opens straight on them, so the old flow is unchanged; list / add by kind / change name, rosters, cadence, behaviour, pause, remove; all in the draft, `sched_checked` refuses on the spot with the registry's own rules; Save lists per-schedule changes and each schedule's next three runs). `/raid open` offers *Next run* · *Another upcoming run…* (every recurring schedule's upcoming runs labelled by schedule name) · *Ad hoc run…* (a pickup template, or *One-off — pick a day and time*: `ADHOC_SCHEDULE`). Web: `/api/raids` carries `schedules` (`schedule_json`: machine forms for the editors plus `label`, `slot_labels`, `time_label`, `next` in words), `POST /api/admin/raid/schedule {instance, id, fields}` and `/api/admin/raid/schedule/remove`; `/api/raid/{rid}/open` takes `schedule` (`adhoc` = a one-off; a `when` with no schedule opens the upcoming run at exactly that time, else a one-off — `rc.open_schedule`, shared with plain text's `run_open`); the Raids page has a Schedules block per raid (`components/ScheduleCard.tsx`: class badge, regulars count, fields per class, each inherited value's source, confirmations, seat order), the Rosters page *Open next run* and *Start ad hoc run*. Plain text: `schedule_set` (field `<id>.<setting>`, `<id>.lockout` = "days at time") and `schedule_remove`; `run_open` takes a schedule id in `field`. MCP: `schedule_set`, `schedule_remove`, `open_run(schedule=)`; schedules come back in `list_raids` / `get_raid`. Help: the static *Raid schedule* guide lists each schedule's next three runs; `/ask` gets every schedule in words. Out of scope: two different instances under one signup.
 
+**Stored at guild level since 2026-11-22** (§5.67): the entries live in `guild.yaml: schedules:` with a lineup; `raid_def` still hands them back as `raids.<id>.schedules` / `slots`.
+
 ### 5.28 Applications in Discord (built 2026-09-27)
 
 **Decided by the owner.** Anyone joins the Discord server via a public invite; joining the *guild* is an application made in Discord (not on the web), with the guild's own questions. Apply replaces register for newcomers: someone with nothing registered is sent to apply; anyone already registered keeps `/register` for alts. The Apply button lives on the registration card. Declined applicants are never removed from the server.
@@ -4572,6 +4574,8 @@ leaving only); a follow-on of a follow-on; a per-member "first raid only" answer
 lead's groups onto the follow-on's board (a 20's groups say nothing about two 10s); a follow-on added to a run already open;
 the follow-on's shortfall line doesn't change the health card's colour.
 
+**Stored as a lineup since 2026-11-22** (§5.67): a schedule's `follow` is its lineup's second entry in `guild.yaml: schedules:`; every reader still sees `follow`.
+
 ### 5.63 Guide library: the guild's own leveling guides, issued per member (built 2026-11-09)
 
 **Why.** The owner: *"Author uploads guide with date (version) — encrypted with their battletag, which they supply —
@@ -5328,3 +5332,51 @@ not the value carried in from the day before. The site's pieces were checked in 
 officer, owner or tool view of who watches what; a chart image in Discord; history for a version without auction houses;
 history of anything but the lowest price and quantity listed; sale prices. The history file's real size after a week is
 still to be measured and recorded in the operator notes.
+
+### 5.67 Raids, events and schedules: schedules stored at guild level (phase 1 built 2026-11-22)
+
+**Why.** The owner's direction (2026-11-22): raids and schedules are distinct things. A schedule says WHEN one or more
+raids run; a raid says what the instance is. Until now a schedule lived under the raid it ran (`raids.<id>.schedules`,
+with the raid's own `slots` as the implicit `default` schedule, §5.27) and a second raid that night was the schedule's
+`follow` (§5.62). This phase moves where schedules are STORED and nothing else. Spec:
+`docs/superpowers/specs/2026-11-22-raids-events-schedules-design.md` (§5 storage, §9 phase 1); plan:
+`docs/superpowers/plans/2026-11-22-guild-level-schedules.md`.
+
+**The stored shape.** `guild.yaml: schedules:` (`GuildConfig.schedules`, typed `list` so an entry that isn't a mapping
+cannot stop the load) holds every schedule of the guild, each `{id, lineup: [{raid, rosters[, starts]}], name, kind,
+active, slots | days + time, <cadence overrides>, weights?, confirm?}`. The lineup is the lead first and at most
+`LINEUP_MAX` (2) raids: the old row's `rosters` is `lineup[0].rosters`, its `follow` is `lineup[1]`. `starts` (minutes
+after the lead) is kept by `parse_lineup` / `parse_follow` and read by nothing yet. A schedule is still addressed by
+(its first lineup raid, its id); a raid's `default` entry holds the raid's own run times as `slots`. `to_stored_schedule`
+(row → entry) and `from_stored_schedule` (entry → (raid, row)) are exact inverses. A raid's override in `raids:` no
+longer carries `schedules` or `slots`.
+
+**Reads are rebuilt in the old shape.** `Registry.raid_rows(raid)` = the raid's entries as `norm_schedule` rows in stored
+order; `Registry.raid_override(raid)` = `config.raids[raid]` plus `slots` (the `default` row's run times) and
+`schedules` (the other rows) exactly as an override looked before; `raid_def` merges THAT, so `schedules_of`,
+`schedule_def_of` and every caller (the cycle, the wizards, the site, plain text, MCP, help) read what they read before.
+The readers that showed a raid's stored changes (raid reset's words, the parser's context, the Raids page's changed
+list, help, the agents' profile view) read `raid_override`. Writes go through `_set_raid_rows` (the raid's block
+replaced where it stood, other raids' entries untouched); a raid write snapshots and restores both the override and the
+list on a refusal; `clear_raid_override` drops the raid's schedules too. The `raids:<id>` rev covers the raid's own
+entries; the `settings` rev ignores the list. An entry that can't be read (`unread_schedule`) is left in the file and
+skipped by every read and write.
+
+**The lift.** At every load `lift_schedules(cfg, raids, refused)` moves each raid's old `schedules` / `slots` keys into the
+list through the one per-raid conversion (`_lift_raid_of`: `default` first, then the stored order; what the list
+already holds wins; an empty `slots` kept only where it hides the game's run times), drops an override left empty and
+returns a line per raid moved ("Hyjal Summit: 1 schedule"). A raid it can't convert keeps its keys exactly and still
+reads as before; its sentence goes into `refused`. `Registry.schedules_lifted` / `schedules_refused` /
+`schedules_unread` keep what the load found; `Registry.migrate_schedules()` saves a lifted file once (one commit,
+"schedules moved to the guild level", never from a shadow; a later call writes nothing). Every raid write also runs
+`Registry._lift_raid` first, so a file edited by hand with the old keys is converted before it changes.
+
+**At start** (`_schedules_migrate`, after the recipes migration, per guild in a thread) three ops lines at most: one info
+line when a raid moved ("Schedules are now stored at guild level: …"), a warning per raid the lift refused, and one
+warning naming the stored entries that can't be read. Nothing else a person sees changed: no string, command, route,
+MCP tool, page or card. Going back to code from before this phase means reverting that data commit too.
+
+**Later phases** (spec §9) change what people see: timing written onto each schedule and dropped from the raid,
+officers editing schedules, guild-unique schedule ids with regulars keyed by them and no `default` schedule, events
+with their own identity and reschedule, lineups of up to four raids with a start each, then the pages, the Discord
+wizards and the words. Tests: `tests/test_guild_schedules.py`.
