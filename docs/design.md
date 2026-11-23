@@ -689,7 +689,7 @@ bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,men
 
 **Model.** `raids.<id>.schedules` (profile default or guild override; the list is replaced whole) holds entries `{id, name, kind, active, rosters, slots | days + time, <cadence overrides>}`; `Registry.schedules(raid)` = `schedules_of(raid_def)` returns them with every key present. Kinds: `weekly` (`slots`, the 'Tue 19:30' strings), `lockout` (`days` = day N of each lockout, 1 = the reset's calendar day, and `time`; windows = `first_open` + k × `lockout_days` calendar days, wall-clock times resolved by `wizard.resolve_local` — a skipped time moves past the gap, a doubled one takes the first pass), `pickup` (never opens by itself). Cadence fields (`SCHEDULE_CADENCE`: the four hours, `fill_ask_hours`, `nudge`, `autofill`, `open_dm`, `split_policy`) are optional and inherit the raid's, so the raid-level fields stay the defaults; `schedule_def(raid, sid)` = the raid dict with the schedule's overrides on top (a schedule that moves the opening or lock without its own nudge gets the halfway nudge again) and the schedule under `"schedule"` (its overrides under `"own"`). `rosters` (1–4): how many rosters a run expects.
 
-**Back-compat is the default schedule.** The raid's own `slots` ARE the implicit weekly schedule `default`: `schedules_of` lists it when the raid has slots (or stored settings for it), writing `default.slots` writes the raid's `slots`, removing `default` clears them, and its stored entry never carries slots. A raid with only slots behaves exactly as before: same `slot_starts`, same keys (`run_key`/`event_key` add `-<schedule id>` only for other schedules — so two schedules starting at the same minute are two runs), and `ensure_run` writes the same roster dict (the schedule fields — `schedule_id`, `rosters`, `fill_ask_hours`, `split_policy` — are added only for a non-default schedule or a default with settings of its own). Runs record `RaidEvent.schedule`.
+**Back-compat is the default schedule.** The raid's own `slots` ARE the implicit weekly schedule `default`: `schedules_of` lists it when the raid has slots (or stored settings for it), writing `default.slots` writes the raid's `slots`, removing `default` clears them, and its stored entry never carries slots (since §5.67 this holds only of the view `raid_def` rebuilds: the stored `default` entry in `guild.yaml: schedules:` carries the run times as its `slots`). A raid with only slots behaves exactly as before: same `slot_starts`, same keys (`run_key`/`event_key` add `-<schedule id>` only for other schedules — so two schedules starting at the same minute are two runs), and `ensure_run` writes the same roster dict (the schedule fields — `schedule_id`, `rosters`, `fill_ask_hours`, `split_policy` — are added only for a non-default schedule or a default with settings of its own). Runs record `RaidEvent.schedule`.
 
 **Cycle.** The scheduler's open step iterates `raidcycle.upcoming(lead=True)`: every active non-pickup schedule within its OWN signup lead. `ensure_run(schedule=)` takes the cadence from `schedule_def` (then `fit_cutoffs` squeezes it for a run opened late, as before). `run_rosters(ev)` = the run's expected N: `health_data` measures headcount against size × N and tank/healer minimums × N (so `needs()` and the fill engine do too), the open sheet advertises size × N seats, and `_solve_run` asks `how_many_rosters(want=N)` — max(bodies, N), still capped by the tank/healer minimums the joiners can fill. `ask_deadline` and the split strategy read the run's own `fill_ask_hours` / `split_policy` first.
 
@@ -4477,6 +4477,16 @@ follow-on while its lead is open: no health card, no lock of its own. The lock c
 Summit"; the signup-channel lock line adds " · after Hyjal Summit". After the lock the follow-on is an ordinary locked run:
 its own board, pins, fill asks (a must-act DM, as on any run), cards, updates thread and loot councils (`<key>-r1`, `-r2`).
 
+**A short role across several rosters (the rule set in review, 2026-11-22).** When a role is short across a run's rosters,
+every joiner who can play it is rostered before a seat of that role is left empty: the run is short by exactly what its
+rosters need less who joined, never more — on a follow-on and on any run with several rosters. `solver._add_role_bounds`
+keeps each roster's floor at `min(min, capable // rosters)` and, when the role is short, adds a total across the rosters
+of at least `min(min × rosters, capable)`, counting nobody forced out (an officer's pin out, always-bench, first come's
+late joiners), so the odd player the floor leaves free can't lose a seat to another role — not even to a lead's rostered
+player carrying `LEAD_SEAT_BONUS`. A role fully supplied, and each roster's maximum, are unchanged. Tests:
+`tests/test_follow_on_solver.py` (three tanks for two 10s, all three rostered) and `tests/test_schedules.py` (the same
+for tanks and healers on an ordinary ×2 run, and a pin out still honoured).
+
 **A Can't on the lead is the whole night**, on every path that frees a lead seat: `rc.free_seat` on a run with
 `followed_by` also frees the same member's seat on the locked follow-on (`notice=False`, idempotent — expired confirmations,
 a board's move to bench, a client-less fallback); `RaidMixin.drop_seated` notes the follow-on seat first and, after the
@@ -5371,7 +5381,7 @@ reads as before; its sentence goes into `refused`. `Registry.schedules_lifted` /
 "schedules moved to the guild level", never from a shadow; a later call writes nothing). Every raid write also runs
 `Registry._lift_raid` first, so a file edited by hand with the old keys is converted before it changes.
 
-**At start** (`_schedules_migrate`, after the recipes migration, per guild in a thread) three ops lines at most: one info
+**At start** (`_schedules_migrate`, after the recipes migration, per guild in a thread) three kinds of ops line: one info
 line when a raid moved ("Schedules are now stored at guild level: …"), a warning per raid the lift refused, and one
 warning naming the stored entries that can't be read. Nothing else a person sees changed: no string, command, route,
 MCP tool, page or card. Going back to code from before this phase means reverting that data commit too.
