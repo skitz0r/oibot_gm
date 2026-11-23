@@ -1440,6 +1440,18 @@ def timing_line(moved: list[str], dropped: list[str]) -> str:
             + ("Dropped, with no schedule to take it: " + " · ".join(dropped) + "." if dropped else "")).strip()
 
 
+def lift_failed_line(timing: bool = False, minimums: bool = False) -> str | None:
+    """The start's one ops WARNING when a lift at load failed (load_config keeps the file as it was): what was left as it
+    was, and how to fix it — two sentences, one line per guild, no exception text (the log line names the value). None
+    when both lifts went through."""
+    if not (timing or minimums):
+        return None
+    what = ("Sheet timing and the old role limits were left as they were" if timing and minimums
+            else "Sheet timing was left as it was" if timing else "The old role limits were left as they were")
+    return (f"{what} in guild.yaml, because a value there can't be read. "
+            "Find it in the bot's log, correct it by hand and restart the bot to move it.")
+
+
 def lift_timing(cfg: "GuildConfig", raids: dict, skip=frozenset()) -> tuple[list[str], list[str], bool]:
     """An older guild.yaml held sheet timing (SCHEDULE_TIMING) on each raid; phase 2 keeps it on each schedule (C7).
     Every readable stored entry gets its nine values written out (write_out_timing) against what its raid read then
@@ -1491,8 +1503,10 @@ def lift_timing(cfg: "GuildConfig", raids: dict, skip=frozenset()) -> tuple[list
         else:
             dropped.append(f"{name(rid)}: {timing_words(h)}")
     for t in cfg.rosters:  # a live run read its raid's fill-ask wait when its dict had none (rc.ask_deadline): keep it
+        if not isinstance(t, dict):
+            continue
         rid = t.get("instance")
-        if not isinstance(t, dict) or "fill_ask_hours" in t or t.get("test") or not rid or rid in skip:
+        if "fill_ask_hours" in t or t.get("test") or not rid or rid in skip:
             continue
         t["fill_ask_hours"] = float(rd_of(rid)["fill_ask_hours"])
         owed = True
@@ -2537,6 +2551,7 @@ class Registry:
         # phase 2 (C7): an older file's raid-level sheet timing onto its schedules; a refused raid (its old keys still
         # under the raid) keeps its timing too, so it reads as before
         refused = {rid for rid, o in cfg.raids.items() if isinstance(o, dict) and {"slots", "schedules"} & set(o)}
+        timing_failed = minimums_failed = False  # a lift that failed: told once at start as a warning (lift_failed_line)
         try:  # on a copy: a value an older bot never should have stored leaves the whole file as it was, never a failed start
             trial = cfg.model_copy(deep=True)
             self.timing_moved, self.timing_dropped, timing_owed = lift_timing(trial, raids, refused)
@@ -2544,6 +2559,7 @@ class Registry:
         except (RegistryError, ValueError, TypeError) as e:
             log.warning("schedules: the sheet timing of %s was not moved (%s)", self.key, e)
             self.timing_moved, self.timing_dropped, timing_owed = [], [], False
+            timing_failed = True
         # phase 2 (D16): an older file's comp limits and aims become one minimum per role or class, on a copy as above
         try:
             trial = cfg.model_copy(deep=True)
@@ -2553,6 +2569,9 @@ class Registry:
         except (RegistryError, ValueError, TypeError) as e:
             log.warning("schedules: the make-up of %s was not lifted (%s)", self.key, e)
             self.minimums_lifted, minimums_owed = [], False
+            minimums_failed = True
+        failed = lift_failed_line(timing_failed, minimums_failed)
+        self.lift_failed: list[str] = [failed] if failed else []
         self._schedules_owed = self._lift_owed or timing_owed or minimums_owed
         self.schedules_unread: list[str] = []
         for e in cfg.schedules:

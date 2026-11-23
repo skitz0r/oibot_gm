@@ -96,11 +96,16 @@ def test_a_member_is_still_refused(member_client, reg):
     ({"confirm": True}, TIMING_ON_SCHEDULE),
     ({"tank_min": 2}, "Set a role's minimum as a minimum: at least 2 tanks."),
     ({"comp": {"healer": {"min": 3}}}, "Set a role's minimum as a minimum: at least 3 healers."),
+    ({"comp": "healer 3"}, "not a map"),  # a string or a list: the same sentence, never a 500
+    ({"comp": [3]}, "not a map"),
 ])
 def test_raid_timing_and_role_limits_are_refused_whenever_present(officer_client, reg, fields, words):
     """configops._raid_ops (the Raids form, ops_from_fields "raid", MCP raid_set): present = refused, without comparing."""
     lock = reg.raid_def(RID)["lock_hours_before"]
     fields = {k: (lock if v == "same" else lock + 2 if v == "changed" else v) for k, v in fields.items()}
+    if words == "not a map":
+        from oibot_gm.registry import role_limit_refusal
+        words = role_limit_refusal("tank_min")
     with pytest.raises(RegistryError) as e:
         configops.ops_from_fields(reg, "raid", RID, dict(fields))
     assert str(e.value) == words
@@ -240,6 +245,26 @@ def test_set_minimum_on_a_run_says_minimums_belong_to_the_raid(w, reg, rs, monke
         ms.set_minimum(ev.key, "healer", min=3)
     with pytest.raises(ToolError, match="unknown raid"):
         ms.set_minimum("molten_core", "healer", min=3)
+
+
+def test_a_minimum_aimed_at_the_raids_name_reaches_the_raid_while_one_run_is_live(reg, rs):
+    """Only an exact run, event or roster key is MINIMUM_ON_RAID: a raid named by its name while exactly one of its
+    runs is live is the raid, never that run."""
+    from conftest import open_test_run
+
+    from oibot_gm.registry import MINIMUM_ON_RAID
+
+    ev = open_test_run(reg, rs)
+    name = reg.raid_def(RID)["name"]
+    assert configops._minimum_raid(reg, name) == RID
+    assert configops._minimum_raid(reg, name.upper()) == RID
+    for key in (ev.key, ev.team):
+        with pytest.raises(RegistryError) as e:
+            configops._minimum_raid(reg, key)
+        assert str(e.value) == MINIMUM_ON_RAID
+    ops = configops.ops_from_fields(reg, "comp", name, {"healer": {"min": 3}})
+    asyncio.run(configops.apply_ops(reg, ops, by="t", by_id=None))
+    assert reg.config.raids[RID]["minimums"]["healer"]["min"] == 3
 
 
 def test_the_raid_wizards_reset_goes_through_the_one_op_with_its_effects(reg, store, monkeypatch):

@@ -1347,18 +1347,20 @@ def _comp_current(reg: Registry, key: str) -> dict:
 
 
 def _minimum_raid(reg: Registry, key: str) -> str:
-    """A minimum's target: a raid id. A run's key (or roster key) is refused with MINIMUM_ON_RAID — a run reads its
-    raid's minimums — whatever surface named it; anything else is left to Registry.set_minimums ("no raid …")."""
+    """A minimum's target: a raid id, or a raid's name read as its id. Only an EXACT run key (or event key, or roster
+    key) is refused with MINIMUM_ON_RAID — a run reads its raid's minimums — whatever surface named it; a raid's name
+    is never mistaken for its one live run. Anything else is left to Registry.set_minimums ("no raid …")."""
+    from . import raidcycle as rc
     from .registry import MINIMUM_ON_RAID
 
     key = (key or "").strip()
     if key in reg.profile.raids:
         return key
-    try:
-        _rs, ev = _live_event(reg, key)
-    except RegistryError:
-        ev = None
-    if ev is not None or reg.config.roster(key) is not None:
+    named = [rid for rid in reg.profile.raids if key and str(reg.raid_def(rid).get("name") or "").lower() == key.lower()]
+    if len(named) == 1:
+        return named[0]
+    rs = rc.RaidStore(reg.store, reg.key)
+    if key and (key in rs.events or rs.for_team(key) is not None or reg.config.roster(key) is not None):
         raise RegistryError(MINIMUM_ON_RAID)
     return key
 
@@ -3966,7 +3968,8 @@ def _raid_ops(reg: Registry, inst: str, d: dict) -> list[ConfigOp]:
         if f.split("_")[0] in ("tank", "healer", "dps") and f.split("_")[-1] in ("min", "max") and f.count("_") == 1:
             raise RegistryError(role_limit_refusal(f, d[f]))
     if "comp" in d:
-        first = next(((r, b, v) for r, t in (d["comp"] or {}).items() if isinstance(t, dict) for b, v in t.items()), None)
+        comp = d["comp"] if isinstance(d["comp"], dict) else {}  # a string or a list: the same sentence, never a 500
+        first = next(((r, b, v) for r, t in comp.items() if isinstance(t, dict) for b, v in t.items()), None)
         raise RegistryError(role_limit_refusal(f"{first[0]}_{first[1]}", first[2]) if first else role_limit_refusal("tank_min"))
     for f in list(d):  # flat names (MCP, plain words): weight_<key>
         if f.startswith("weight_"):

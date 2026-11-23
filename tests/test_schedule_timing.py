@@ -285,3 +285,28 @@ def test_hours_words_lives_in_constants_and_flows_config_re_exports_it():
     from oibot_gm import constants, flows_config
     assert flows_config.hours_words is constants.hours_words
     assert [constants.hours_words(h) for h in (72, 36, 168, 1, 1.5)] == ["3 days", "36 hours", "a week", "1 hour", "1.5 hours"]
+
+
+@pytest.mark.parametrize("raid,words", [
+    ({"lock_hours_before": "soon"}, "Sheet timing was left as it was in guild.yaml"),
+    ({"comp": {"healer": {"min": "lots"}}}, "The old role limits were left as they were in guild.yaml"),
+    ({"lock_hours_before": "soon", "comp": {"healer": {"min": "lots"}}}, "Sheet timing and the old role limits were left as they were in guild.yaml"),
+])
+def test_a_lift_that_fails_at_load_is_one_warning_at_start(old_store_with, open_registry, raid, words):
+    """A timing or make-up lift that can't read a value keeps the file as it was (load_config) and the start tells the
+    ops channel once, as a warning: what was left, then how to fix it — one line for the guild."""
+    reg = open_registry(old_store_with({"raids": {"barrow_deeps": raid}}))
+    assert reg.config.raids["barrow_deeps"] == raid  # left as it was
+    said = _start(reg) + _start(reg)
+    warns = [t for level, t in said if level == "warn"]
+    assert len(warns) == 1 and warns[0].startswith(words)
+    assert warns[0].endswith("Find it in the bot's log, correct it by hand and restart the bot to move it.")
+    assert warns[0].count(". ") == 1  # two sentences
+
+
+def test_the_timing_lift_skips_a_run_entry_that_is_not_a_map(profile):
+    """lift_timing checks a run entry is a map before reading it: a stray value is left alone, never a crash."""
+    cfg = R.GuildConfig(**{**base_config(), **copy.deepcopy(OLD_TIMING)})
+    cfg.rosters = ["stray", {"key": "bd-x", "instance": "barrow_deeps"}]
+    R.lift_timing(cfg, profile.raids)
+    assert cfg.rosters[0] == "stray" and cfg.rosters[1]["fill_ask_hours"] > 0

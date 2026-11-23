@@ -529,7 +529,7 @@ class ListenMixin:
         """On ready, per guild: the lines of the save _schedules_save made, else Registry.migrate_schedules now (in a
         thread; saved once — a later start writes nothing and says nothing); one ops line when a raid moved, a warning
         per raid whose old schedules couldn't be moved (they still read from the raid; the warning says how to get out),
-        and one warning naming any stored schedule that can't be read (left in the file, skipped by every read)."""
+        one when the timing or make-up lift failed (registry.lift_failed_line), and one warning naming any stored schedule that can't be read (left in the file, skipped by every read)."""
         saved = self.__dict__.get("_schedules_saved") or {}
         for reg in self.registries.ordered():
             lines = saved.pop(reg.key, [])
@@ -544,6 +544,9 @@ class ListenMixin:
                 await self.ops.emit(reg.config, "info", line)
             refused, reg.schedules_refused = list(getattr(reg, "schedules_refused", None) or []), []
             for line in refused:  # one per raid left under its raid (it still reads as before)
+                await self.ops.emit(reg.config, "warn", line)
+            failed, reg.lift_failed = list(getattr(reg, "lift_failed", None) or []), []
+            for line in failed:  # a timing or make-up lift that failed at load: the file kept as it was (one line per guild)
                 await self.ops.emit(reg.config, "warn", line)
             unread, reg.schedules_unread = list(getattr(reg, "schedules_unread", None) or []), []
             if unread:
