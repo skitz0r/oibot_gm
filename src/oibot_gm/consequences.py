@@ -195,6 +195,32 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     return out
 
 
+def lineup_consequence(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) -> list[str]:
+    """The confirm of editing a run's lineup before the lock (rc.plan_lineup — nothing written), at most three
+    sentences: the new lineup; only when a removed raid held any, what goes with it — its board places and pins, and
+    the answers to leave before it; then that everyone's answer covers the new lineup (a schedule's run: and that its
+    schedule keeps its own, since a reader editing Tuesday's run may expect Tuesdays to change). A refusal is
+    rc.lineup_refusal's own sentence, not this."""
+    first = rc.first_part(rs, ev)
+    ch = rc.plan_lineup(reg, rs, first, lineup)
+    head, words = reg.follow_words(ch.lineup[0]), reg.later_words(ch.lineup[1:])
+    out = [f"The lineup becomes {head}, then {words}." if words else f"The run becomes {head} alone."]
+    places, leaving = sum(ch.dropped_places.values()), sum(ch.dropped_leaving.values())
+    if places or leaving:
+        held = [rs.events[k] for k in ch.removed if ch.dropped_places.get(k) or ch.dropped_leaving.get(k)]
+        raids = rc.join_words([reg.raid_def(p.instance).get("name", p.instance) for p in held])
+        it = "them" if len(held) > 1 else "it"
+        leave = _n(leaving, "answer") + f" to leave before {raids if not places else it}"
+        if places:
+            out.append(f"{_n(places, 'board place')} on {raids} {'is' if places == 1 else 'are'} dropped"
+                       + (f", with {leave}." if leaving else "."))
+        else:
+            out.append(f"{leave} {'goes' if leaving == 1 else 'go'} with {it}.")
+    out.append("Everyone's answer now covers the new lineup, and the schedule keeps its own." if first.schedule
+               else "Everyone's answer now covers the new lineup.")
+    return out
+
+
 def later_places_sentence(reg: Registry, held: list) -> str:
     """A first raid's Can't make it frees the member's seat on every later raid of the run they hold one on
     (rc.held_later): the one sentence that says so, naming them — the Me page's confirm (web/api_me.cant_consequence)

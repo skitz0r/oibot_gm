@@ -221,6 +221,9 @@ class RaidEvent(BaseModel):
     follows: Optional[str] = None
     followed_by: Optional[str] = None
     leaving: list[int] = Field(default_factory=list)
+    # a later raid taken out of its run's lineup before the lock (apply_lineup): cancelled, kept on file with its stamps
+    # for the record, and no longer a part of the run (event_parts leaves it out, so the part numbers stay unique)
+    dropped: bool = False
     last_proposal: Optional[dict] = None  # the last lock preview / split shown on any surface: {layout, strategy, rev, by, by_id, at, kind} — the same officer's plain-text "use it" falls back to it (configops._propose)
     log: list[str] = Field(default_factory=list)
     log_at: Optional[list[str]] = None  # ISO stamp per log line (RaidStore.save stamps new lines; "" = from before stamps were kept)
@@ -377,9 +380,9 @@ def same_event(a: "RaidEvent", b: "RaidEvent") -> bool:
 def event_parts(rs: "RaidStore", ev: "RaidEvent") -> list["RaidEvent"]:
     """Every part of `ev`'s run, any state, in order (part 0 first). A part has exactly one `event`, so it belongs to
     exactly one run; and every later part's dict is made by its first part's open (ensure_run), so one first part
-    holds one chain."""
+    holds one chain. A raid taken out of the lineup (`dropped`, apply_lineup) is no longer a part."""
     eid = event_id(ev)
-    parts = {e.key: e for e in rs.events.values() if event_id(e) == eid}
+    parts = {e.key: e for e in rs.events.values() if event_id(e) == eid and not e.dropped}
     parts.setdefault(ev.key, ev)
     return sorted(parts.values(), key=lambda e: (part_no(e), e.starts_at, e.key))
 
@@ -874,16 +877,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
             while pkey in keys:
                 pkey = new_run_key(reg, rs, e["raid"])
             keys.add(pkey)
-            frd, hours = reg.raid_def(e["raid"]), at / 60
-            pt = {**t, "key": pkey, "instance": e["raid"], "size": int(frd.get("size") or DEFAULT_RAID_SIZE),
-                  "name": f"{frd.get('name', e['raid'])} · after {rd.get('name', instance)} {reg.local12(start)}",
-                  "schedule": after_minutes(start, at).astimezone(reg.tz).strftime("%a %H:%M"), "schedule_id": FOLLOW_SCHEDULE, "series": None, "confirm": False,
-                  "rosters": int(e["rosters"]), "follows": key, "reminders": OFF, "open_dm": False,
-                  # its lock, nudge and confirm fall at the same instants as part 0's (its start is `at` minutes later)
-                  "cutoff_soft_hours": t["cutoff_soft_hours"] + hours, "cutoff_hard_hours": t["cutoff_hard_hours"] + hours, "confirm_hours": t["confirm_hours"] + hours,
-                  "part": k, "starts": at}
-            for f in ("lineup", "followed_by", "message_id", "channel_id", "thread_id"):  # never part 0's sheet nor its chain
-                pt.pop(f, None)
+            pt = _part_dict(reg, t, e, k, at, key=pkey, start=start)
             if parts:
                 parts[-1]["followed_by"] = pkey
             parts.append(pt)
@@ -893,6 +887,25 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     reg.config.rosters.append(t)
     reg.save_config(f"run {key} ({t['name']}) created by {by}" + (f" with {len(parts)} later raid{'s' if len(parts) > 1 else ''}" if parts else ""), notify=False)
     return t
+
+
+def _part_dict(reg: Registry, first: dict, entry: dict, k: int, offset: int, *, key: str, start: datetime) -> dict:
+    """The run dict of part `k` of a run (design §5.62): part 0's dict `first` with the entry's raid, size and rosters,
+    `follows` = part 0's key, `part` k, `starts` = `offset` minutes after part 0's `start`, the cut-offs part 0's shifted
+    by the offset (its lock, nudge and confirm fall at part 0's instants), no confirmations, no reminders, no DM at open,
+    no series, never part 0's sheet nor its chain (`followed_by` is the caller's). ensure_run and apply_lineup build
+    every later part through here."""
+    frd, hours = reg.raid_def(entry["raid"]), offset / 60
+    lead = reg.raid_def(first.get("instance")).get("name", first.get("instance"))
+    pt = {**first, "key": key, "instance": entry["raid"], "size": int(frd.get("size") or DEFAULT_RAID_SIZE),
+          "name": f"{frd.get('name', entry['raid'])} · after {lead} {reg.local12(start)}",
+          "schedule": after_minutes(start, offset).astimezone(reg.tz).strftime("%a %H:%M"), "schedule_id": FOLLOW_SCHEDULE, "series": None,
+          "confirm": False, "rosters": int(entry.get("rosters") or 1), "follows": first["key"], "reminders": OFF, "open_dm": False,
+          "cutoff_soft_hours": first["cutoff_soft_hours"] + hours, "cutoff_hard_hours": first["cutoff_hard_hours"] + hours,
+          "confirm_hours": first.get("confirm_hours", first["cutoff_hard_hours"]) + hours, "part": k, "starts": offset}
+    for f in ("lineup", "follow", "followed_by", "message_id", "channel_id", "thread_id"):  # never part 0's sheet nor its chain
+        pt.pop(f, None)
+    return pt
 
 
 def closed_run_refusal(rs: "RaidStore", ev: "RaidEvent | None") -> str | None:
@@ -1325,6 +1338,219 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
         for p in sorted(parts, key=lambda e: e is first):  # the first raid last: its save copies its answers onto the later raids
             rs.save(p, line)
     return moved
+
+
+# ---------------------------------------------------------------- the lineup of an open run (phase 3, Task 6)
+
+LINEUP_LOCKED = "The lineup is fixed once the roster locks."
+LINEUP_FIRST = "The first raid of a run can't change. Start a new run instead."
+LINEUP_GONE = "This game has no raid called {raid}. Pick another raid."
+LINEUP_SAME = "The run already has that lineup."
+LINEUP_OFFICER_ONLY = "Only an officer changes the raids of a run."
+
+
+class LineupChange(BaseModel):
+    """What an edit of a run's lineup does (plan_lineup; apply_lineup writes it): the new raids' entries ({raid, rosters,
+    starts}), the later parts taken out (their run keys), the new order of the run keys (index 0 the first part; None
+    = a new part, in `added`'s order), the parts whose roster count changes (run key → count), what each removed part
+    held — the people with a board place or a pin on it, and its answers to leave before it —, and the whole new
+    lineup with every entry's start in minutes after the first raid's (entry 0 at 0)."""
+
+    added: list[dict] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    order: list[Optional[str]] = Field(default_factory=list)
+    rosters: dict[str, int] = Field(default_factory=dict)
+    dropped_places: dict[str, int] = Field(default_factory=dict)
+    dropped_leaving: dict[str, int] = Field(default_factory=dict)
+    lineup: list[dict] = Field(default_factory=list)
+
+
+def _live_later(rs: "RaidStore", first: "RaidEvent") -> list["RaidEvent"]:
+    return [p for p in later_parts(rs, first) if p.state not in ("done", "cancelled")]
+
+
+def run_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent") -> list[dict]:
+    """The lineup a run plays now — [{raid, rosters, starts}], the first raid at 0, then each live later raid with its
+    minutes after the first — read from its run files (any raid of it stands for its first)."""
+    first = first_part(rs, ev)
+    out = [{"raid": first.instance, "rosters": int((reg.config.team(first.team) or {}).get("rosters") or 1), "starts": 0}]
+    for p in _live_later(rs, first):
+        at = p.starts or round((p.start - first.start).total_seconds() / 60)
+        out.append({"raid": p.instance, "rosters": int((reg.config.team(p.team) or {}).get("rosters") or 1), "starts": at})
+    return out
+
+
+def _parse_run_lineup(lineup) -> list[dict]:
+    """An edited lineup validated as a run's (parse_lineup's words said of a run, not a schedule): entry 0's own start
+    (0) dropped, then parse_lineup."""
+    from .registry import parse_lineup
+
+    rows = [dict(e) if isinstance(e, dict) else e for e in (lineup or [])]
+    if rows and isinstance(rows[0], dict) and rows[0].get("starts") in (0, "0"):
+        rows[0].pop("starts")
+    try:
+        full = parse_lineup(rows)
+    except RegistryError as e:
+        raise RegistryError(str(e).replace("A schedule can't run the same raid twice in one night.", "A run can't hold the same raid twice.")
+                            .replace("A schedule", "A run").replace("in a schedule", "in a run").replace("of a schedule", "of a run")
+                            .replace("the schedule's own time", "the run's own time")) from None
+    return full
+
+
+def lineup_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[dict]) -> str | None:
+    """Why `ev`'s run can't take `lineup` ([{raid, rosters[, starts]}], its first raid first), in one sentence, else
+    None — in this order: finished or cancelled (MOVE_CLOSED), locked (LINEUP_LOCKED), parse_lineup's refusals
+    (LINEUP_MAX_WORDS, a raid twice, a bad roster count), another first raid (LINEUP_FIRST), a raid the game profile
+    lacks (LINEUP_GONE), the starts out of order (LINEUP_ORDER), nothing that changes (LINEUP_SAME). Any raid of a run
+    answers for its first."""
+    first = first_part(rs, ev)
+    if first.state in ("done", "cancelled"):
+        return MOVE_CLOSED
+    if first.state != "open" or any(p.state == "locked" for p in later_parts(rs, first)):
+        return LINEUP_LOCKED
+    try:
+        full = _parse_run_lineup(lineup)
+    except RegistryError as e:
+        return str(e)
+    if full[0]["raid"] != first.instance:
+        return LINEUP_FIRST
+    for e in full:
+        if e["raid"] not in reg.profile.raids:
+            return LINEUP_GONE.format(raid=e["raid"])
+    try:
+        offsets = reg.lineup_offsets(full)
+    except RegistryError as e:
+        return str(e)
+    now_ = [(e["raid"], e["rosters"], at) for e, at in zip(full, offsets)]
+    if now_ == [(e["raid"], e["rosters"], e["starts"]) for e in run_lineup(reg, rs, first)]:
+        return LINEUP_SAME
+    return None
+
+
+def _board_people(p: "RaidEvent") -> int:
+    """How many people hold a board place or a pin on run `p` (a board place is a signup's display name in a group)."""
+    names = {n for g in (p.layout or []) for n in g}
+    for uid in p.pins:
+        sg = p.signups.get(str(uid))
+        names.add(sg.display_name if sg else f"#{uid}")
+    return len(names)
+
+
+def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[dict]) -> LineupChange:
+    """What `lineup` does to `ev`'s run (any raid of it stands for its first), worked out and nothing written: a live
+    later part whose raid is still in the lineup is KEPT (its run key, signups, pins, board and leaving answers),
+    moved to its new place; a raid new to the run is a new part; a live later part whose raid is gone is removed. Each
+    entry's start is its own `starts`, else the C12 default (Registry.lineup_offsets). The caller checks lineup_refusal
+    first."""
+    first = first_part(rs, ev)
+    full = _parse_run_lineup(lineup)
+    offsets = reg.lineup_offsets(full)
+    live = _live_later(rs, first)
+    by_raid = {p.instance: p for p in live}
+    raids = {e["raid"] for e in full}
+    ch = LineupChange(order=[first.key], lineup=[{**e, "starts": at} for e, at in zip(full, offsets)])
+    if full[0]["rosters"] != int((reg.config.team(first.team) or {}).get("rosters") or 1):
+        ch.rosters[first.key] = full[0]["rosters"]
+    for e in ch.lineup[1:]:
+        p = by_raid.get(e["raid"])
+        if p is None:
+            ch.order.append(None)
+            ch.added.append(dict(e))
+            continue
+        ch.order.append(p.key)
+        if e["rosters"] != int((reg.config.team(p.team) or {}).get("rosters") or 1):
+            ch.rosters[p.key] = e["rosters"]
+    for p in live:
+        if p.instance not in raids:
+            ch.removed.append(p.key)
+            ch.dropped_places[p.key] = _board_people(p)
+            ch.dropped_leaving[p.key] = len([u for u in p.leaving if str(u) in first.signups])
+    return ch
+
+
+def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: LineupChange, by: str) -> list[str]:
+    """THE write of an edited lineup (RaidMixin.edit_lineup holds every part's board lock and re-checks lineup_refusal).
+    Run keys never change: a kept part keeps its key, its run file and its own pins, board and leaving answers, and
+    takes its new `part`, `starts`, `starts_at` and `followed_by`; its run dict its new `part`, `starts`, weekday line,
+    cut-offs (part 0's shifted by its start), rosters and `followed_by`. A new raid is a new part: a dict from part 0's
+    (_part_dict, a fresh new_run_key) and its run file (open_event; part 0's save copies the answers onto it). A
+    removed part's run file is cancelled (`closed_at`, `dropped`, its open asks closed, the log line "removed from the
+    lineup by {by}") and its dict dropped — no notice, no card. Part 0's dict takes the whole `lineup` and its rosters;
+    part 0's signups are never touched, and every remaining later part still mirrors them (sync_parts, on part 0's
+    save, last). One save_config and one store batch. → the run keys of the run in their new order."""
+    first = first_part(rs, ev)
+    t0 = reg.config.team(first.team)
+    if t0 is None:
+        raise RegistryError(MOVE_CLOSED)
+    start = first.start
+    later = {p.key: p for p in later_parts(rs, first)}
+    words = reg.later_words(change.lineup[1:])
+    line = f"lineup changed by {by}: {reg.raid_def(first.instance).get('name', first.instance)}" + (f", then {words}" if words else " alone")
+    with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
+        chain: list[tuple[dict, "RaidEvent | None"]] = []
+        taken = {t["key"] for t in reg.config.rosters if isinstance(t, dict)}
+        for k, (key, e) in enumerate(zip(change.order[1:], change.lineup[1:]), start=1):
+            at, hours = int(e["starts"]), int(e["starts"]) / 60
+            if key is None:
+                pkey = new_run_key(reg, rs, e["raid"])
+                while pkey in taken:
+                    pkey = new_run_key(reg, rs, e["raid"])
+                taken.add(pkey)
+                t = _part_dict(reg, t0, e, k, at, key=pkey, start=start)
+                reg.config.rosters.append(t)
+                chain.append((t, None))
+                continue
+            p = later[key]
+            t = reg.config.team(p.team)
+            if t is None:  # its dict cleaned up under it: rebuilt from part 0's, under the part's own dict key
+                t = _part_dict(reg, t0, e, k, at, key=p.team, start=start)
+                reg.config.rosters.append(t)
+            t.update({"part": k, "starts": at, "rosters": int(e["rosters"]),
+                      "schedule": after_minutes(start, at).astimezone(reg.tz).strftime("%a %H:%M"),
+                      "cutoff_soft_hours": t0["cutoff_soft_hours"] + hours, "cutoff_hard_hours": t0["cutoff_hard_hours"] + hours,
+                      "confirm_hours": t0.get("confirm_hours", t0["cutoff_hard_hours"]) + hours})
+            chain.append((t, p))
+        for i, (t, _p) in enumerate(chain):
+            if i + 1 < len(chain):
+                t["followed_by"] = chain[i + 1][0]["key"]
+            else:
+                t.pop("followed_by", None)
+        if chain:
+            t0["followed_by"] = chain[0][0]["key"]
+            t0["lineup"] = [dict(e) for e in change.lineup]
+        else:
+            t0.pop("followed_by", None)
+            t0.pop("lineup", None)
+        t0.pop("follow", None)  # older code's one follow-on: the chain above is the run's lineup now
+        t0["rosters"] = int(change.lineup[0]["rosters"])
+        gone = {later[k].team for k in change.removed if k in later}
+        reg.config.rosters = [t for t in reg.config.rosters if not (isinstance(t, dict) and t.get("key") in gone)]
+        reg.save_config(f"run {first.key} {line}", notify=False)
+        for key in change.removed:
+            p = later[key]
+            p.prev_state, p.state, p.closed_at = p.state, "cancelled", now()
+            p.dropped, p.followed_by = True, None
+            for a in p.fill_asks:
+                if a.pending:
+                    a.answer, a.answered_at, a.held = "cancelled", now(), False
+            p.log.append(f"removed from the lineup by {by}")
+            rs.save(p, f"removed from the lineup by {by}")
+        evs: list[RaidEvent] = []
+        for t, p in chain:
+            at = after_minutes(start, int(t["starts"]))
+            if p is None:
+                p = open_event(reg, rs, t, at)
+            else:
+                p.part, p.starts = int(t["part"]), int(t["starts"])
+                place_run(reg, p, at)
+            evs.append(p)
+        for i, p in enumerate(evs):
+            p.followed_by = evs[i + 1].key if i + 1 < len(evs) else None
+            rs.save(p, f"part {p.part} of {first.key} after a lineup change")
+        first.followed_by = evs[0].key if evs else None
+        first.log.append(line)
+        rs.save(first, line)  # last: its save copies its answers onto every later part, the new ones included
+    return [first.key] + [p.key for p in evs]
 
 
 def rosters_copy(reg: Registry, instance: str, sid: str, n: int, rs=None) -> str:

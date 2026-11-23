@@ -1205,6 +1205,20 @@ same holds when a schedule's run time changes while its run is open: that night'
 the new one, and the next week opens at the new time. Lockouts, the alt filter and *also on another run* read the new
 start. The verb is the bot's own today (MCP and the site's run card get it with the run pages).
 
+**Changing the raids of an open run (officers).** Until the roster locks, one run's lineup can change: a raid added
+after the first, one taken out, the later raids put in another order, or a raid's number of rosters changed. The first
+raid stays (*"The first raid of a run can't change. Start a new run instead."*), the four-raid limit and the order of
+the starts hold as for a schedule, and a raid the game doesn't have is refused. Each raid without its own start begins
+when the one before it ends. Only that run changes — its schedule keeps its own lineup, and the confirm says so on a
+schedule's run. The first raid's answers are never touched, and every raid of the new lineup takes them, a new raid
+included (*"Everyone's answer now covers the new lineup."*). A raid that stays keeps its board, its pins and the answers
+to leave before it, in its new place. A raid taken out is cancelled with what it held: its board places and pins, and
+the answers to leave before it, all of which the confirm counts first (*"3 board places on Barrow Deeps are dropped,
+with 1 answer to leave before it."*). Nobody gets a DM or a notice: the sheet is edited in place to the new lineup
+(*Hyjal Summit, then Onyxia's Lair*), and the run's thread hears it. Once the roster locks the lineup is fixed (*"The
+lineup is fixed once the roster locks."*). Like moving a run, this is the bot's own verb today; the site and Discord get
+it with the run pages.
+
 Seat selection at lock is deterministic: the raid's minimums (filled first, never a stop), buff synergy, the comp policy's
 standing instructions, officer pins, and the schedule's **weights** (the raid's unless the schedule sets its own) —
 rank (core > raider > trial), main over alt, sat out last window (matched by member, so a Discord rename keeps it),

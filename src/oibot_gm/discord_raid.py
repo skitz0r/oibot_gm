@@ -1560,6 +1560,51 @@ class RaidMixin:
         await ops_mod.audited(self.ops, reg, by, what, via=via, by_id=by_id)
         return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own sheet timing is saved."]
 
+    async def edit_lineup(self, reg, rs, ev, lineup: list[dict], *, by: str, by_id: int | None = None, via: str = "discord",
+                          preview: bool = False) -> list[str]:
+        """THE edit of a run's lineup before the lock (phase 3, Task 6): add, remove or reorder its later raids, or
+        change a raid's roster count — any raid of it stands for its first. Officers, decided live (PRIV_LIVE; `by_id`
+        None = code acting on the guild's own behalf). Refused → RegistryError with rc.lineup_refusal's sentence,
+        nothing written. `preview` → the confirm's sentences (consequences.lineup_consequence). Else, under the board
+        lock of every raid of the run: rc.plan_lineup + rc.apply_lineup (run keys never change; a removed raid's run is
+        cancelled, its dict dropped); then the sheet is edited in place (same message), a removed raid's officer cards
+        and any open ask card on it are edited to their final state, one line in the run's thread, one audit line.
+        Nobody is DMed and nobody gets a notice: the sheet shows the new lineup. → the done line."""
+        from .consequences import lineup_consequence
+
+        if by_id is not None and (await guild_routing.resolve_role(self, reg, int(by_id), max_age=guild_routing.PRIV_LIVE)).role not in ("owner", "officer"):
+            raise RegistryError(rc.LINEUP_OFFICER_ONLY)
+        first = rc.first_part(rs, ev)
+        why = rc.lineup_refusal(reg, rs, first, lineup)
+        if why:
+            raise RegistryError(why)
+        if preview:
+            return lineup_consequence(reg, rs, first, lineup)
+        parts = rc.event_parts(rs, first)
+        async with contextlib.AsyncExitStack() as stack:
+            for key in sorted(p.key for p in parts):  # one order everywhere: no lock cycle with a cancel or a lock
+                await stack.enter_async_context(self.board_lock(reg, key))
+            why = rc.lineup_refusal(reg, rs, first, lineup)  # again, now that nothing else writes the run
+            if why:
+                raise RegistryError(why)
+            change = rc.plan_lineup(reg, rs, first, lineup)
+            removed = [rs.events[k] for k in change.removed]
+            cards = {p.key: [(a.dm_channel_id, a.dm_message_id) for a in p.fill_asks if a.pending and a.dm_message_id] for p in removed}
+            rc.apply_lineup(reg, rs, first, change, by)
+        name = reg.raid_def(first.instance).get("name", first.instance)
+        for p in removed:
+            raid = reg.raid_def(p.instance).get("name", p.instance)
+            for cid, mid in cards[p.key]:
+                await self.edit_ask_card(reg, cid, mid, f"{raid} was taken out of the {name} run, so this ask is closed.")
+            await self.refresh_cards(reg, p)
+        await self.refresh_sheet(reg, first)
+        words = reg.later_words(change.lineup[1:])
+        now_words = f"{name}, then {words}" if words else f"{name} alone"
+        await self.post_run_update(reg, first, f"🗂 lineup changed by {by}: {now_words}")
+        await ops_mod.audited(self.ops, reg, by, f"changed {first.key}'s lineup to {now_words}"
+                              + (f", removing {', '.join(change.removed)}" if change.removed else ""), via=via, by_id=by_id)
+        return [f"The run is now {now_words}."]
+
     async def remind(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
         """Remind the unconfirmed (design B2 levers, D15): re-send the Confirm / Can't DM to everyone rostered whose ask is
         still unanswered — against their EXISTING ask (never add_placement_ask again: that would reset asked_at and break

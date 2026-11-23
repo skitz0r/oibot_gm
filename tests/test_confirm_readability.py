@@ -760,6 +760,9 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     # ---- moving a run and its own sheet timing (phase 3, Task 5)
     reschedule_cases(reg, rs, runs, ms, dump)
 
+    # ---- editing a run's lineup before the lock (phase 3, Task 6)
+    lineup_cases(reg, rs, runs, ms, dump)
+
     dump.write()
     assert not dump.problems, f"{len(dump.problems)} confirm sentences break the Confirm rule:\n" + "\n".join(dump.problems)
 
@@ -803,6 +806,60 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     dump.add("reschedule_refusal", "closed", rc.reschedule_refusal(reg, rs, runs["cancelled"], one.start, None) or "")
     dump.add("reschedule_refusal", "timing on a locked run", rc.reschedule_refusal(reg, rs, runs["locked recurring, autofill on"], None, {"lock_hours_before": 6}) or "")
     dump.add("reschedule_event refusal", "a member", rc.MOVE_OFFICER_ONLY)
+
+
+def lineup_cases(reg, rs, runs, ms, dump):
+    """consequences.lineup_consequence across its cases (add, reorder, a roster count, remove with and without what the
+    removed raid held, a schedule's run) and rc.lineup_refusal's every sentence."""
+    hy, ony = "hyjal_summit_forever", "onyxias_lair"
+
+    def L(*raids):
+        return [{"raid": r, "rosters": 1} if isinstance(r, str) else {"raid": r[0], "rosters": r[1]} for r in raids]
+
+    def add(case, ev, lineup):
+        assert rc.lineup_refusal(reg, rs, ev, lineup) is None, case
+        dump.add("lineup_consequence", case, cq.lineup_consequence(reg, rs, ev, lineup))
+
+    three = runs["three raids, first"]  # Hyjal, then Barrow Deeps ×2, then Onyxia's Lair
+    add("reorder", three, L(hy, ony, (RID, 2)))
+    add("a roster count", three, L(hy, (RID, 1), ony))
+    add("remove, nothing on its board", three, L(hy, ony))
+    add("remove from a later raid", runs["three raids, third"], L(hy, (RID, 2)))
+    add("every later raid removed", three, L(hy))
+    start = (reg.now_local() + timedelta(days=12)).replace(hour=18, minute=30, second=0, microsecond=0)
+    solo = rc.open_run(reg, rs, hy, start, by="t", schedule=rc.ADHOC_SCHEDULE)
+    add("add", solo, L(hy, (RID, 2)))
+    add("add two", solo, L(hy, RID, ony))
+    add("a schedule's run, add", runs["open recurring"], L(RID, ony))
+    # what a removed raid held: board places and pins, answers to leave before it
+    held = rc.open_run(reg, rs, hy, start + timedelta(days=1), by="t", schedule=rc.ADHOC_SCHEDULE, lineup=L(RID, ony))
+    join(reg, rs, held, ms)
+    bd, on = rc.event_parts(rs, held)[1:]
+    bd.layout, bd.pins = [[m.display_name for m in ms[:5]]], {str(ms[6].discord_id): "out"}
+    rs.save(bd, "board")
+    add("remove, board places and a pin", held, L(hy, ony))
+    rc.leave_follow(reg, rs, bd, ms[8])
+    rc.leave_follow(reg, rs, bd, ms[9])
+    add("remove, board places and answers to leave before it", held, L(hy, ony))
+    on.layout = [[ms[0].display_name]]
+    rs.save(on, "board")
+    add("remove two, one place on the second", held, L(hy))
+    bd.layout, bd.pins, on.layout = None, {}, None
+    rs.save(bd, "board cleared")
+    rs.save(on, "board cleared")
+    add("remove, only answers to leave before it", held, L(hy, ony))
+    rc.leave_follow(reg, rs, on, ms[10])
+    add("remove two, answers to leave before each", held, L(hy))
+    # the refusals, one each
+    for case, ev, lineup in (("another first raid", three, L(RID, hy)), ("no such raid", three, L(hy, "nowhere")),
+                             ("five raids", three, L(hy, RID, ony, "nowhere", "elsewhere")), ("a raid twice", three, L(hy, RID, RID)),
+                             ("the same lineup", three, L(hy, (RID, 2), ony)),
+                             ("out of order", three, [{"raid": hy}, {"raid": RID, "starts": 300}, {"raid": ony, "starts": 200}]),
+                             ("locked", runs["locked recurring, autofill on"], L(RID, ony)), ("cancelled", runs["cancelled"], L(RID, ony))):
+        said = rc.lineup_refusal(reg, rs, ev, lineup)
+        assert said, case
+        dump.add("lineup_refusal", case, said)
+    dump.add("edit_lineup refusal", "a member", rc.LINEUP_OFFICER_ONLY)
 
 
 def armory_long_names(reg, rs, dump):
