@@ -282,9 +282,11 @@ def test_the_one_off_pair_keeps_its_keys_and_opens_nothing_new(data_root, old_st
 
 
 def test_an_old_key_is_never_read_for_its_time(data_root, old_store_with):
-    """'bd-1215-1830-tue-2026-12-15' whose run starts on the 16th: only its stamps say which occurrence it is."""
+    """'bd-1215-1830-tue-2026-12-15' whose run starts on the 19th: only its stamps say which occurrence it is. (Its start
+    is more than half a week from the 15th: a run stamped within half a week of a run time its schedule no longer
+    gives stands for it — night_run_of, Task 5 fix round 1 — whatever its key says.)"""
     t15 = _soon(30)
-    t16 = t15 + timedelta(days=1)
+    t16 = t15 + timedelta(days=4)
     team = f"bd-{t15:%m%d-%H%M}-tue"
     key = f"{team}-{t15.date().isoformat()}"
     cfg = {"raids": {RID: OPENED}, "schedules": [{"id": "tue", "lineup": [{"raid": RID, "rosters": 1}], "kind": "weekly",

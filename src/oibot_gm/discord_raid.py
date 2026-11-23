@@ -1552,7 +1552,8 @@ class RaidMixin:
         for uid in mv.told:  # an outcome, never a DM (the DM rule): the Me page and /me view say it — one member save each
             reg.notify(uid, "moved", f"{name} now starts {when}.", run=first.key)
         moved = first.start != old
-        line = (f"🕒 moved by {by} to {when}" if moved else f"🕒 sheet timing set by {by}") + (f" · {edited} open card(s) show the new time" if edited else "")
+        cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
+        line = (f"🕒 {name} moved by {by} to {when}" if moved else f"🕒 {name}: its own sheet timing set by {by}") + cards
         await self.post_run_update(reg, first, line)
         what = f"moved {first.key} from {reg.local12(old)} to {when}" if moved else f"set {first.key}'s own sheet timing"
         if moved and mv.timing:

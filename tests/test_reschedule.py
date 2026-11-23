@@ -303,7 +303,12 @@ def test_timing_lives_on_the_run_alone(reg, rs):
     bot = NightBot(reg, rs)
     stored = json.dumps(reg.config.schedules, sort_keys=True)
     lines = run(bot.reschedule_event(reg, rs, ev, timing={"lock_hours_before": 6}, by="o", by_id=OFFICER_ID, preview=True))
-    assert lines[0] == f"The sheet now locks {reg.local12(t - timedelta(hours=6))}." and lines[1] == "Answers stand."
+    assert lines[0] == f"For this run, the sheet locks {reg.local12(t - timedelta(hours=6))}." and lines[1] == "Answers stand."
+    only = cq.reschedule_consequence(reg, rs, ev, None, {"autofill": False})
+    assert only[0] == "For this run, automatic asks are off.", "the lock time didn't change, so it isn't named"
+    both = cq.reschedule_consequence(reg, rs, ev, t + timedelta(days=1), {"autofill": False, "lock_hours_before": 6})
+    assert both[0] == f"Barrow Deeps moves to {reg.local12(t + timedelta(days=1))} with its own lock time and automatic asks."
+    assert rc.reschedule_refusal(reg, rs, ev, None, {"lock_hours_before": rc.run_team(reg, ev)["cutoff_hard_hours"]}) == rc.TIMING_SAME
     run(bot.reschedule_event(reg, rs, ev, timing={"lock_hours_before": 6, "nudge": False, "autofill": False, "fill_ask_hours": 2},
                              by="o", by_id=OFFICER_ID))
     team = reg.config.roster(ev.team)
@@ -405,3 +410,78 @@ def test_the_confirm_says_it_locks_now_and_names_a_clash_of_people(reg, rs):
     lines = cq.reschedule_consequence(reg, rs, ev, later, None)
     assert lines[-1] == f"{people[0].display_name} and 2 others are also on Hyjal Summit {reg.local12(other.start)} that night."
     assert cq.reschedule_consequence(reg, rs, ev, ev.start + timedelta(days=1), None)[-1] == "You can move it again until it starts."
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def _schedule(reg, slots):
+    """A weekly schedule whose sheet opens 72 h before and locks 2 h before: a clock jump of a few days never locks."""
+    reg.set_raid_overrides(RID, OPENED, "t")
+    sid = weekly(reg, RID, slots)
+    reg.set_schedule(sid, {"signup_lead_hours": 72, "nudge_hours_before": 3, "lock_hours_before": 2, "confirm_hours_before": 1}, "t")
+    return sid
+
+
+def _first_of(reg, slot: str):
+    now = reg.now_local()
+    return next(t for _s, t in rc.upcoming(reg, RID, now, 24 * 21) if t - now >= timedelta(days=4) and t.strftime("%a %H:%M") == slot)
+
+
+@pytest.mark.parametrize("was, now_", [("Tue 23:30", "Wed 00:30"), ("Tue 19:30", "Wed 19:30")],
+                         ids=["across midnight", "another weekday"])
+def test_an_edited_run_time_in_another_day_opens_no_second_run(reg, rs, monkeypatch, was, now_):
+    sid = _schedule(reg, was)
+    t1 = _first_of(reg, was)
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _at(monkeypatch, reg, clock, t1 - timedelta(hours=71))
+    run(bot.scheduler_tick_guild(reg))
+    assert len(opened) == 1
+    r1 = rs.events[opened[0]]
+    reg.set_schedule(sid, {"slots": now_}, "t")
+    new = next(t for _s, t in rc.occurrences(reg, t1 - timedelta(hours=70), 24 * 5) if _s["id"] == sid)
+    assert new.strftime("%a %H:%M") == now_ and timedelta(0) < new - t1 < timedelta(days=2)
+    _at(monkeypatch, reg, clock, new - timedelta(hours=69))
+    assert t1 > reg.now_local(), "the premise: Tuesday's run hasn't started"
+    run(bot.scheduler_tick_guild(reg))
+    assert len(opened) == 1 and r1.start == t1, "one run that week, at its old time"
+    r1.state = "cancelled"
+    rs.save(r1, "harness")
+    _at(monkeypatch, reg, clock, new + timedelta(days=7) - timedelta(hours=71))
+    run(bot.scheduler_tick_guild(reg))
+    assert len(opened) == 2 and rs.events[opened[1]].start == new + timedelta(days=7), "the next week opens at the new time"
+
+
+def test_editing_one_of_two_run_times_still_opens_the_other(reg, rs, monkeypatch):
+    sid = _schedule(reg, ["Tue 19:30", "Thu 19:30"])
+    tue = _first_of(reg, "Tue 19:30")
+    thu = tue + timedelta(days=2)
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _at(monkeypatch, reg, clock, tue - timedelta(hours=71))
+    run(bot.scheduler_tick_guild(reg))
+    assert [rs.events[k].start for k in opened] == [tue]
+    reg.set_schedule(sid, {"slots": ["Wed 19:30", "Thu 19:30"]}, "t")
+    _at(monkeypatch, reg, clock, thu - timedelta(hours=71))
+    run(bot.scheduler_tick_guild(reg))
+    assert [rs.events[k].start for k in opened] == [tue, thu], "Wednesday is Tuesday's run; Thursday opens its own"
+
+
+def test_a_run_that_has_started_cant_move_or_take_timing(reg, rs):
+    ev = open_one_off(reg, rs, days=3)
+    ev.starts_at = (reg.now_local() - timedelta(minutes=10)).isoformat()
+    rs.save(ev, "harness: under way")
+    assert rc.reschedule_refusal(reg, rs, ev, reg.now_local() + timedelta(days=1), None) == rc.MOVE_STARTED
+    assert rc.reschedule_refusal(reg, rs, ev, None, {"autofill": False}) == rc.MOVE_STARTED
+
+
+def test_a_run_moved_onto_its_schedules_unopened_night_says_it_stands_for_it(reg, rs):
+    sid = _schedule(reg, "Tue 19:30")
+    t1 = _first_of(reg, "Tue 19:30")
+    ev = rc.open_run(reg, rs, RID, t1, schedule=sid)
+    t2 = t1 + timedelta(days=7)
+    lines = cq.reschedule_consequence(reg, rs, ev, t2, None)
+    assert lines[-1] == "That night's Raid nights run is this one." and len(lines) == 3
+    rc.reschedule(reg, rs, ev, start=t2, by="o")
+    assert rc.event_of_occurrence(rs, sid, rc.occurrence_stamp(reg, t2), reg=reg) is ev
+    assert cq.reschedule_consequence(reg, rs, ev, t2 + timedelta(hours=1), None)[-1] != "That night's Raid nights run is this one."

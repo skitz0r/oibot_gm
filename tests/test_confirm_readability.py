@@ -780,7 +780,24 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     add("open, answers", ev, ev.start + timedelta(hours=1))
     add("open, nobody answered", runs["open recurring, nobody joined"], runs["open recurring, nobody joined"].start + timedelta(hours=1))
     add("locked, the roster stands", runs["locked recurring, autofill on"], runs["locked recurring, autofill on"].start + timedelta(hours=2))
-    add("timing only", ev, None, {"lock_hours_before": 6})
+    add("timing only, the lock", ev, None, {"lock_hours_before": 6})
+    add("timing only, automatic asks", ev, None, {"autofill": False})
+    add("timing only, no reminder", ev, None, {"nudge": False})
+    add("timing only, the fill ask wait", ev, None, {"fill_ask_hours": 2})
+    add("timing only, confirm-by", ev, None, {"confirm_hours_before": 2})
+    add("timing only, two times", ev, None, {"lock_hours_before": 6, "nudge_hours_before": 12})
+    add("timing only, everything", ev, None, {"lock_hours_before": 6, "nudge_hours_before": 12, "confirm_hours_before": 2,
+                                              "nudge": False, "autofill": False, "fill_ask_hours": 2})
+    add("a move with its own lock time and automatic asks", ev, ev.start + timedelta(hours=1), {"lock_hours_before": 6, "autofill": False})
+    add("a move with everything", ev, ev.start + timedelta(hours=1), {"lock_hours_before": 6, "nudge_hours_before": 12, "confirm_hours_before": 2,
+                                                                     "nudge": False, "autofill": False, "fill_ask_hours": 2})
+    # onto the schedule's own night that hasn't opened yet: that night's run is this one
+    nxt = ev.start + timedelta(days=21)
+    while rc.event_of_occurrence(rs, ev.schedule, rc.occurrence_stamp(reg, nxt), reg=reg) is not None:
+        nxt += timedelta(days=7)
+    lines = cq.reschedule_consequence(reg, rs, ev, nxt, None)
+    assert lines[-1].startswith("That night's"), lines
+    dump.add("reschedule_consequence", "onto the schedule's unopened night", lines)
     add("its lock time has passed", runs["open ad hoc"], reg.now_local() + timedelta(hours=1))
     add("three raids, moved from a later raid", runs["three raids, third"], runs["three raids, first"].start + timedelta(hours=1))
     # people also on another run that night (a day no other run of the harness is near)
@@ -801,11 +818,13 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     for case, start, timing in (("past", reg.now_local() - timedelta(hours=2), None), ("same", one.start, None),
                                 ("clash", runs["open recurring, nobody joined"].start, None),
                                 ("order", None, {"nudge_hours_before": 1, "lock_hours_before": 6}),
-                                ("unknown timing", None, {"open_dm": True})):
+                                ("unknown timing", None, {"open_dm": True}),
+                                ("the same timing", None, {"lock_hours_before": rc.run_team(reg, one)["cutoff_hard_hours"]})):
         dump.add("reschedule_refusal", case, rc.reschedule_refusal(reg, rs, one, start, timing) or "")
     dump.add("reschedule_refusal", "closed", rc.reschedule_refusal(reg, rs, runs["cancelled"], one.start, None) or "")
     dump.add("reschedule_refusal", "timing on a locked run", rc.reschedule_refusal(reg, rs, runs["locked recurring, autofill on"], None, {"lock_hours_before": 6}) or "")
     dump.add("reschedule_event refusal", "a member", rc.MOVE_OFFICER_ONLY)
+    dump.add("reschedule_refusal", "started", rc.MOVE_STARTED)
 
 
 def lineup_cases(reg, rs, runs, ms, dump):

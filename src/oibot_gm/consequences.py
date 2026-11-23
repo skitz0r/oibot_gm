@@ -160,26 +160,80 @@ def before_first_open_sentence(reg: Registry, lineup: list[dict], start) -> str 
     return None
 
 
+TIMING_NAMES = {"cutoff_hard_hours": "lock time", "cutoff_soft_hours": "reminder time", "confirm_hours": "confirm-by",
+                "reminders": "reminder", "autofill": "automatic asks", "fill_ask_hours": "fill ask wait"}
+TIMING_ORDER_OF = tuple(TIMING_NAMES)
+
+
+def _words(text: str) -> int:
+    return len(text.split())
+
+
+def _timing_phrases(reg: Registry, start, changed: dict) -> list[str]:
+    """One phrase per run setting that changes, in the manual's words, with the new time where it is a time."""
+    out = []
+    for k in TIMING_ORDER_OF:
+        if k not in changed:
+            continue
+        v = changed[k]
+        if k == "cutoff_hard_hours":
+            out.append(f"the sheet locks {reg.local12(start - timedelta(hours=float(v)))}")
+        elif k == "cutoff_soft_hours":
+            out.append(f"the reminder goes out {reg.local12(start - timedelta(hours=float(v)))}")
+        elif k == "confirm_hours":
+            out.append(f"confirm-by is {reg.local12(start - timedelta(hours=float(v)))}")
+        elif k == "reminders":
+            out.append("the reminder is on" if v != rc.OFF else "there is no reminder")
+        elif k == "autofill":
+            out.append("automatic asks are on" if v else "automatic asks are off")
+        else:
+            out.append(f"a fill ask waits {rc.hours_words(float(v))}")
+    return out
+
+
+def _and(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: bool, changed: dict) -> str:
+    """The confirm's first sentence, built from what actually changes: the move, this run's own settings, or both."""
+    names = [TIMING_NAMES[k] for k in TIMING_ORDER_OF if k in changed
+             and not (k == "cutoff_soft_hours" and "reminders" in changed)]  # the reminder's time and switch: "reminder"
+    if moves:
+        head = f"{name} moves to {reg.local12(start)}"
+        if not names:
+            return head + "."
+        full = f"{head} with its own {_and(names)}."
+        return full if _words(full) <= 20 else f"{head} with its own sheet timing."
+    detail = "For this run, " + _and(_timing_phrases(reg, first.start, changed)) + "."
+    if _words(detail) <= 20:
+        return detail
+    listed = f"This run takes its own {_and(names)}."
+    return listed if _words(listed) <= 20 else "This run takes its own sheet timing."
+
+
 def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None) -> list[str]:
     """The confirm of moving a run (any raid of it stands for its first) to `start` and / or giving it its own `timing`
-    (rc.reschedule's preview — nothing written), at most three sentences: what changes, who is told, then the first of
-    the run locking at once, people also on another run that night, away answers worked out again, or that it can move
-    again. A refusal is rc.reschedule_refusal's own sentence, not this."""
+    (rc.reschedule's preview — nothing written), at most three sentences: what changes (the move, the run's own
+    settings that actually change, or both), who is told, then the first of: the run locking at once, the schedule's
+    not-yet-opened run of that start being this one, people also on another run that night, away answers worked out
+    again, or that it can move again. A refusal is rc.reschedule_refusal's own sentence, not this."""
     first = rc.first_part(rs, ev)
     mv = rc.reschedule(reg, rs, first, start=start, timing=timing, by="preview", save=False)
     name = reg.raid_def(first.instance).get("name", first.instance)
     moves = start is not None and start != first.start
-    if moves:
-        out = [f"{name} moves to {reg.local12(start)}."]
-    else:
-        lock_h = float(mv.timing.get("cutoff_hard_hours", rc.team_setting(rc.run_team(reg, first), "cutoff_hard_hours")))
-        out = [f"The sheet now locks {reg.local12(first.start - timedelta(hours=lock_h))}."]
+    out = [_what_changes(reg, name, first, start, moves, mv.timing)]
     stands = "The roster stands" if first.state == "locked" else "Answers stand"
     n = len(mv.told)
     out.append(f"{stands}." if n == 0 else f"{stands}, and the one who answered sees a notice." if n == 1
                else f"{stands}, and the {n} who answered see a notice.")
+    absorbed = rc.absorbed_schedule_run(reg, rs, first, start) if moves else None
     if mv.locks_now:
         out.append("It locks within a minute, because its lock time has passed.")
+    elif absorbed:
+        out.append(f"That night's {absorbed} run is this one.")
+    elif not moves:  # the start stays: nobody's night changes, and the timing is fixed at the lock
+        out.append("You can change it again until the roster locks.")
     elif mv.conflicts:
         uid, key = next(iter(mv.conflicts.items()))
         sg = first.signups.get(str(uid))

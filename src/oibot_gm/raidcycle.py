@@ -554,37 +554,37 @@ def event_of_occurrence(rs: "RaidStore", sid: str, occurrence: str, *, reg: Regi
 
 def night_run_of(reg: Registry, rs: "RaidStore", sid: str, occurrence: str) -> "RaidEvent | None":
     """The run of schedule `sid` that stands for `occurrence` because the schedule's run time was edited while it was
-    open: a run (any state) stamped with an occurrence on the SAME guild-local day that the schedule no longer gives,
-    paired with the nearest occurrence of that day no run is stamped with. Two run times on one day keep their own
-    runs (each is still the schedule's). None when there is no such run — the usual case, read without touching the
-    schedule."""
-    day = occurrence[:10]
-    cands = [e for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid
-             and e.occurrence and e.occurrence[:10] == day and e.occurrence != occurrence]
-    if not cands:
-        return None
+    open (Tue 7:30 PM → 8:00 PM, Tue → Wed, Tue 11:30 PM → Wed 12:30 AM): a run (any state) stamped with an occurrence
+    the schedule no longer gives, paired with the nearest occurrence it does give, no run is stamped with, within half
+    the schedule's period of it (half a week for weekly run times, half the lockout for days of each lockout). Each such
+    run stands for one occurrence at most, and an occurrence a run is stamped with keeps that run — so two run times in
+    a week (Tue + Thu) keep their own runs when one of them is edited. None when there is no such run — the usual case,
+    read without touching the schedule. (Nearest wins: a run time moved past another unchanged one of the same schedule
+    pairs with the nearer.)"""
+    q = datetime.fromisoformat(occurrence)
     try:
         sched = reg.schedule_entry(sid)
     except RegistryError:
         return None
-    from datetime import time as _time
-
-    start_of_day = datetime.combine(datetime.fromisoformat(day).date(), _time(0, 0), tzinfo=reg.tz)
-    current = sorted({occurrence_stamp(reg, t) for t in schedule_starts(reg, sched["raid"], sched, start_of_day, 25)
-                      if occurrence_stamp(reg, t)[:10] == day})
+    period_days = int(reg.raid_def(sched["raid"]).get("lockout_days") or 7) if sched.get("kind") == "lockout" else 7
+    half = timedelta(days=period_days / 2)
+    mine = [e for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid and e.occurrence]
+    cands = [e for e in mine if e.occurrence != occurrence and abs(datetime.fromisoformat(e.occurrence) - q) < half]
+    if not cands:
+        return None
+    lo = (q - 2 * half).replace(tzinfo=reg.tz)
+    current = {occurrence_stamp(reg, t) for t in schedule_starts(reg, sched["raid"], sched, lo, 4 * half.total_seconds() / 3600)}
     if occurrence not in current:
         return None
-    held = {e.occurrence for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid}
-    free = [o for o in current if o not in held]
+    held = {e.occurrence for e in mine}
+    free = sorted(o for o in current if o not in held)
     orphans = sorted((e for e in cands if e.occurrence not in current), key=lambda e: (e.occurrence, e.created_at))
-
-    def minutes(o: str) -> int:
-        return int(o[11:13]) * 60 + int(o[14:16])
-
     for e in orphans:
-        if not free:
-            break
-        pick = min(free, key=lambda o: (abs(minutes(o) - minutes(e.occurrence)), o))
+        at = datetime.fromisoformat(e.occurrence)
+        near = [o for o in free if abs(datetime.fromisoformat(o) - at) < half]
+        if not near:
+            continue
+        pick = min(near, key=lambda o: (abs(datetime.fromisoformat(o) - at), o))
         free.remove(pick)
         if pick == occurrence:
             return e
@@ -1161,11 +1161,13 @@ EVENT_TIMING = {"nudge_hours_before": "cutoff_soft_hours", "lock_hours_before": 
                 "autofill": "autofill"}
 MOVE_PAST = "That start is in the past. Pick a time from now on."
 MOVE_CLOSED = "This run is finished or cancelled, so it can't move."
+MOVE_STARTED = "This run has started, so it can't move."
+TIMING_SAME = "The run already has that timing."
 MOVE_CLASH = "{raid} already has a run at {when}. Pick another time."
 MOVE_SAME = "The run already starts then."
 TIMING_LOCKED = "The sheet timing is fixed once the roster locks. Move the start instead."
 TIMING_ORDER = "The reminder has to come before the lock, and confirm-by after it."
-TIMING_UNKNOWN = "A run's timing is its reminder, lock, confirm-by, fill asks and autofill."
+TIMING_UNKNOWN = "A run's timing is its reminder, lock, confirm-by, fill asks and automatic asks."
 MOVE_OFFICER_ONLY = "Only an officer moves a run or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
@@ -1209,25 +1211,34 @@ def _timing_values(timing: dict | None) -> dict:
     return out
 
 
+def timing_changes(reg: Registry, first: "RaidEvent", timing: dict | None) -> dict:
+    """The part of `timing` that changes the run (run dict keys → new values): a value equal to the run's own now is
+    dropped. RegistryError(TIMING_UNKNOWN) as _timing_values."""
+    team = run_team(reg, first)
+    return {k: v for k, v in _timing_values(timing).items() if (team.get(k) if k in team else team_setting(team, k)) != v}
+
+
 def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: datetime | None, timing: dict | None,
                        now: datetime | None = None) -> str | None:
     """Why `ev`'s run can't move to `start` / take `timing`, in one sentence, else None — in this order: finished or
-    cancelled (MOVE_CLOSED), a start more than PAST_GRACE_MINUTES ago (MOVE_PAST), nothing that changes (MOVE_SAME), its
+    cancelled (MOVE_CLOSED), already started (MOVE_STARTED: neither start nor timing), a start more than
+    PAST_GRACE_MINUTES ago (MOVE_PAST), nothing that changes (MOVE_SAME; TIMING_SAME for a timing-only no-op), its
     first raid already has another live run at that minute (MOVE_CLASH), timing on a locked run (TIMING_LOCKED), a
     reminder after the lock or a confirm-by before it (TIMING_ORDER). Any raid of a run answers for its first raid."""
     first = first_part(rs, ev)
     if first.state in ("done", "cancelled"):
         return MOVE_CLOSED
+    now = now or reg.now_local()
+    if first.start <= now:  # under way (a loot council may be live): neither its start nor its timing moves
+        return MOVE_STARTED
     try:
-        values = _timing_values(timing)
+        values = timing_changes(reg, first, timing)
     except RegistryError as e:
         return str(e)
-    if start is not None:
-        now = now or reg.now_local()
-        if start < now - timedelta(minutes=PAST_GRACE_MINUTES):
-            return MOVE_PAST
+    if start is not None and start < now - timedelta(minutes=PAST_GRACE_MINUTES):
+        return MOVE_PAST
     if (start is None or start == first.start) and not values:
-        return MOVE_SAME
+        return TIMING_SAME if start is None and timing else MOVE_SAME
     if start is not None and start != first.start:
         other = live_at(rs, first.instance, start, test=bool(first.test))
         if other is not None and not same_event(other, first):
@@ -1242,6 +1253,30 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
         if soft < hard or confirm > hard:
             return TIMING_ORDER
     return None
+
+
+def absorbed_schedule_run(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: datetime | None) -> str | None:
+    """A run of a schedule moved exactly onto another start that schedule gives and hasn't opened: from then on this run
+    stands for it (event_of_occurrence's moved-run case), so that start never opens a sheet of its own. → the
+    schedule's name to say so, else None."""
+    from .registry import schedule_name
+
+    first = first_part(rs, ev)
+    sid = first.schedule
+    if not sid or start is None or start == first.start:
+        return None
+    occ = occurrence_stamp(reg, start)
+    if occ == first.occurrence:
+        return None
+    try:
+        sched = reg.schedule_entry(sid)
+    except RegistryError:
+        return None
+    if start not in schedule_starts(reg, sched["raid"], sched, start, 1):
+        return None
+    if event_of_occurrence(rs, sid, occ, reg=reg) is not None:
+        return None
+    return schedule_name(sched)
 
 
 def recompute_absences(reg: Registry, ev: "RaidEvent") -> tuple[list[int], list[int]]:
@@ -1294,7 +1329,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     new = start if start is not None else old
     delta = new - old
     now_ = reg.now_local()
-    values = _timing_values(timing)
+    values = timing_changes(reg, first, timing)
     t0 = teams.get(first.key)
     if t0 is not None and values:
         t0.update(values)
@@ -1343,6 +1378,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
 # ---------------------------------------------------------------- the lineup of an open run (phase 3, Task 6)
 
 LINEUP_LOCKED = "The lineup is fixed once the roster locks."
+LINEUP_CLOSED = "This run is finished or cancelled, so its raids can't change."
 LINEUP_FIRST = "The first raid of a run can't change. Start a new run instead."
 LINEUP_GONE = "This game has no raid called {raid}. Pick another raid."
 LINEUP_SAME = "The run already has that lineup."
@@ -1399,13 +1435,13 @@ def _parse_run_lineup(lineup) -> list[dict]:
 
 def lineup_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[dict]) -> str | None:
     """Why `ev`'s run can't take `lineup` ([{raid, rosters[, starts]}], its first raid first), in one sentence, else
-    None — in this order: finished or cancelled (MOVE_CLOSED), locked (LINEUP_LOCKED), parse_lineup's refusals
+    None — in this order: finished or cancelled (LINEUP_CLOSED), locked (LINEUP_LOCKED), parse_lineup's refusals
     (LINEUP_MAX_WORDS, a raid twice, a bad roster count), another first raid (LINEUP_FIRST), a raid the game profile
     lacks (LINEUP_GONE), the starts out of order (LINEUP_ORDER), nothing that changes (LINEUP_SAME). Any raid of a run
     answers for its first."""
     first = first_part(rs, ev)
     if first.state in ("done", "cancelled"):
-        return MOVE_CLOSED
+        return LINEUP_CLOSED
     if first.state != "open" or any(p.state == "locked" for p in later_parts(rs, first)):
         return LINEUP_LOCKED
     try:
@@ -1481,7 +1517,7 @@ def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: Lineup
     first = first_part(rs, ev)
     t0 = reg.config.team(first.team)
     if t0 is None:
-        raise RegistryError(MOVE_CLOSED)
+        raise RegistryError(LINEUP_CLOSED)
     start = first.start
     later = {p.key: p for p in later_parts(rs, first)}
     words = reg.later_words(change.lineup[1:])

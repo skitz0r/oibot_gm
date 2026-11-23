@@ -1197,12 +1197,18 @@ lock time is then past locks it at the scheduler's next minute, and the confirm 
 also take its own **sheet timing** — the reminder, the lock, confirm-by, how long a fill ask waits and automatic asks —
 kept on that run alone (its schedule is never changed); once the roster locks only the start can move. The confirm
 reads, for example, *"Barrow Deeps moves to Wed 2 Dec 8:00 PM. Answers stand, and the 7 who answered see a notice. You
-can move it again until it starts."*; it names people also on another run that night when there are any. A run is refused
-in one sentence when it is finished or cancelled, when the start is in the past, when it already starts then, and when
-its raid already has another run at that minute. A moved run still counts as the run of the date its schedule gave it:
-that date never opens a second sheet, and the schedule's next runs open on time wherever the moved one now sits. The
-same holds when a schedule's run time changes while its run is open: that night's run keeps its old time and stands for
-the new one, and the next week opens at the new time. Lockouts, the alt filter and *also on another run* read the new
+can move it again until it starts."*; it names people also on another run that night when there are any. The first
+sentence says only what really changes: the move, this run's own settings (*"For this run, automatic asks are off."*),
+or both (*"… moves to Wed 2 Dec 8:00 PM with its own lock time."*). A run is refused in one sentence when it is finished
+or cancelled, when it has already started (*"This run has started, so it can't move."* — its timing doesn't change
+either), when the start is in the past, when nothing would change, and when its raid already has another run at that
+minute. A moved run still counts as the run of the date its schedule gave it: that date never opens a second sheet, and
+the schedule's next runs open on time wherever the moved one now sits. Moved exactly onto another night of its schedule
+that hasn't opened yet, it becomes that night's run, and the confirm says so (*"That night's Raid nights run is this
+one."*). The same holds when a schedule's run time changes while its run is open — a later hour, past midnight or
+another weekday: the open run keeps its old time and stands for the nearest new time within half a week (half the
+lockout for days of each lockout), so the week gets no second run, and the next week opens at the new time. A
+schedule with two run times keeps both: editing one never stops the other opening. Lockouts, the alt filter and *also on another run* read the new
 start. The verb is the bot's own today (MCP and the site's run card get it with the run pages).
 
 **Changing the raids of an open run (officers).** Until the roster locks, one run's lineup can change: a raid added

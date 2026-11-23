@@ -171,7 +171,7 @@ def test_the_first_raid_cannot_change_and_a_locked_run_refuses(bot, reg, rs):
         edit(bot, reg, rs, first, L(H, "extra_a"))
     first.state = "cancelled"
     rs.save(first, "cancelled")
-    assert rc.lineup_refusal(reg, rs, first, L(H, "extra_a")) == rc.MOVE_CLOSED
+    assert rc.lineup_refusal(reg, rs, first, L(H, "extra_a")) == rc.LINEUP_CLOSED
 
 
 def test_a_schedules_run_changes_alone(bot, reg, rs):
