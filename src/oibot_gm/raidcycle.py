@@ -1102,8 +1102,9 @@ def run_schedule_id(reg: Registry, ev: RaidEvent) -> str | None:
     """The id of the schedule a run came from today: its run dict's (the lift translated those), else its own stamp read
     through config.schedule_aliases — a run file the old `default` opened has none, a renamed duplicate the old id."""
     team = reg.config.team(ev.team) or {}
-    sid = team.get("schedule_id") or ev.schedule
-    return reg.config.schedule_aliases.get(f"{ev.instance}:{sid or 'default'}", sid)
+    if team.get("schedule_id"):
+        return team["schedule_id"]  # already today's id: never read through the aliases again
+    return reg.config.schedule_aliases.get(f"{ev.instance}:{ev.schedule or 'default'}", ev.schedule)
 
 
 def run_kind(reg: Registry, ev: RaidEvent) -> str:
@@ -1114,7 +1115,7 @@ def run_kind(reg: Registry, ev: RaidEvent) -> str:
     team = reg.config.team(ev.team) or {}
     if team.get("kind"):
         return team["kind"]
-    sid = team.get("schedule_id") or ev.schedule or reg.config.schedule_aliases.get(f"{ev.instance}:default")
+    sid = run_schedule_id(reg, ev)
     if sid == ADHOC_SCHEDULE:
         return "adhoc"
     try:

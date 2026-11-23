@@ -13,6 +13,7 @@ from oibot_gm.registry import ConfigChanged, RegistryError
 
 from conftest import GUILD, weekly
 from oibot_gm.registry import Registry
+from oibot_gm.store import GitStore
 from test_guild_schedules import base_config, commit_count
 
 
@@ -407,3 +408,71 @@ def test_the_script_refuses_a_live_run_the_older_code_cannot_find(old_store_with
     ev.state = "cancelled"
     rs.save(ev, "cancelled")
     assert _lower_script().lower(data_root, ids_only=True)[0].startswith(f"{GUILD}: moved the schedule ids back")
+
+
+# ---- fix round 2: an entry or a raid fixed after the first lift keeps its regulars
+def _fix_by_hand(data_root, fix) -> GitStore:
+    import yaml
+
+    p = data_root / GUILD / "guild.yaml"
+    doc = yaml.safe_load(p.read_text())
+    fix(doc)
+    p.write_text(yaml.safe_dump(doc, sort_keys=False))
+    return GitStore(data_root, push=False)
+
+
+def test_an_entry_fixed_after_the_first_lift_keeps_its_regulars(old_store_with, open_registry, data_root):
+    broken = {"id": "late", "lineup": [{"raid": RID, "rosters": 9}], "kind": "weekly", "slots": ["Wed 20:00"]}
+    store = old_store_with({"schedules": [*OI["schedules"], broken]}, members={NYX: ("Nyx", ["barrow_deeps:default", "barrow_deeps:late"])})
+    open_registry(store).migrate_schedules()
+
+    def fix(doc):
+        next(e for e in doc["schedules"] if e["id"] == "late")["lineup"][0]["rosters"] = 1  # the owner fixes it by hand
+
+    reg = open_registry(_fix_by_hand(data_root, fix))
+    assert reg.members[NYX].main.rosters == ["barrow-deeps", "late"] and reg.regulars_dropped == []
+    reg.migrate_schedules()
+    assert _keys_on_disk(store, NYX) == ["barrow-deeps", "late"] and reg.config.schedule_aliases["barrow_deeps:late"] == "late"
+
+
+def test_a_refused_raid_fixed_later_keeps_its_regulars(old_store_with, open_registry, data_root):
+    """Another raid filled the aliases at the first lift; the refused raid, fixed by hand, gets its own at the next start."""
+    store = old_store_with({**OI, "raids": {"hyjal_summit_forever": {"schedules": [{"id": "fri", "kind": "weekly", "slots": ["Fri 20:00"]}, BAD_ROW]}}},
+                           members={NYX: ("Nyx", ["barrow_deeps:default", "hyjal_summit_forever:fri"])})
+    reg = open_registry(store)
+    reg.migrate_schedules()
+    assert reg.config.schedule_aliases == {"barrow_deeps:default": "barrow-deeps"}
+    assert _keys_on_disk(store, NYX) == ["barrow-deeps", "hyjal_summit_forever:fri"]
+
+    def fix(doc):
+        doc["raids"]["hyjal_summit_forever"]["schedules"] = [{"id": "fri", "kind": "weekly", "slots": ["Fri 20:00"]}]
+
+    reg = open_registry(_fix_by_hand(data_root, fix))
+    assert reg.members[NYX].main.rosters == ["barrow-deeps", "fri"] and reg.regulars_dropped == []
+    reg.migrate_schedules()
+    assert _keys_on_disk(store, NYX) == ["barrow-deeps", "fri"]
+
+
+def test_a_schedule_made_now_has_its_alias_so_the_next_start_saves_nothing(reg, store, open_registry):
+    weekly(reg, RID, "Tue 19:30", "tue")
+    assert reg.config.schedule_aliases.get(f"{RID}:tue") == "tue"
+    again = open_registry(store)
+    assert not again._schedules_owed and again.ids_lifted == []
+
+
+def test_a_run_dicts_schedule_is_never_read_through_the_aliases_again(reg):
+    """Old barrow_deeps:tuesday became tuesday-2; a new `tuesday` of Barrow Deeps made later is its own schedule."""
+    weekly(reg, RID, "Tue 21:30", "tuesday-2")
+    reg.config.schedule_aliases["barrow_deeps:tuesday"] = "tuesday-2"
+    weekly(reg, RID, "Tue 19:30", "tuesday")
+    start = rc.next_runs_of(reg, RID, reg.schedule_entry("tuesday"), n=1)[0]
+    t = rc.ensure_run(reg, RID, start, schedule="tuesday")
+    ev = rc.RaidEvent(key=t["key"] + "-x", team=t["key"], instance=RID, starts_at=start.isoformat(), schedule="tuesday")
+    assert rc.run_schedule_id(reg, ev) == "tuesday" and rc.run_series(reg, ev) == "tuesday"
+    old = rc.RaidEvent(key="bd-1215-2130-tuesday-x", team="gone", instance=RID, starts_at=start.isoformat(), schedule="tuesday")
+    assert rc.run_schedule_id(reg, old) == "tuesday-2"  # a bare old stamp with no run dict reads through the alias
+
+
+def test_an_applicants_stray_key_goes_at_the_first_lift(old_store_with, open_registry):
+    store = old_store_with(OI, applicants={ANA: ("Ana", ["main", "barrow_deeps:default"])})
+    assert open_registry(store).applicants[ANA].schedules == ["barrow-deeps"]

@@ -1846,15 +1846,15 @@ def lift_schedule_ids(cfg: "GuildConfig", raids: dict) -> tuple[list[str], bool]
     """Phase 3: every schedule gets an id of its own across the guild, and there is no `default` schedule. Readable
     entries in stored order: an old `default` entry (a raid's own run times) becomes lifted_schedule_id(its raid),
     named DEFAULT_SCHEDULE_NAME unless it has a name, `kind: weekly`; an id an earlier entry already holds becomes
-    `<id>-2` …; each entry's old key "<raid>:<old id>" → its id goes into cfg.schedule_aliases (never overwritten; on
-    the first pass every entry, later only a renamed one). Every run dict (cfg.rosters) but a test run's has its
+    `<id>-2` …; the old key "<raid>:<old id>" → its id goes into cfg.schedule_aliases (never overwritten) for
+    every entry no alias answers for yet — an entry unread at an earlier start and fixed since gets its own then). Every run dict (cfg.rosters) but a test run's has its
     `series` and `schedule_id` translated through the aliases (a `default` or missing schedule id → the raid's lifted
     id). → (one line per renamed schedule, "Barrow Deeps · Raid nights is now barrow-deeps"; owed: anything changed).
     Idempotent: no `default`, no duplicate, aliases in place → ([], False). Pure on cfg (`raids` = the profile's, for
     names); Registry.remap_regulars translates the member files with the same aliases."""
     raids = raids or {}
     aliases = cfg.schedule_aliases
-    first = not aliases
+    values = set(aliases.values())  # the schedules an alias already answers for
     readable = [isinstance(e, dict) and unread_schedule(e) is None for e in cfg.schedules]
     others = {str(e.get("id")).strip().lower() for e, ok in zip(cfg.schedules, readable) if isinstance(e, dict) and e.get("id")
               and str(e.get("id")).strip().lower() != _OLD_DEFAULT}
@@ -1880,8 +1880,9 @@ def lift_schedule_ids(cfg: "GuildConfig", raids: dict) -> tuple[list[str], bool]
             name = (raids.get(rid) or {}).get("name") or rid
             _r, row = from_stored_schedule({**e, "id": old})
             lines.append(f"{name} · {schedule_name(row)} is now {new}")
-        if (first or new != old) and f"{rid}:{old}" not in aliases:
+        if new not in values and f"{rid}:{old}" not in aliases:  # per entry: one read only now (fixed by hand) gets its alias too
             aliases[f"{rid}:{old}"] = new
+            values.add(new)
             owed = True
         out.append(e)
     cfg.schedules = out
@@ -2868,7 +2869,8 @@ class Registry:
             keep = []
             for k in a.schedules:
                 if ":" not in k:
-                    keep.append(k)
+                    if k in ids or not first:  # a key that never named a schedule: gone at the first lift, as a member's
+                        keep.append(k)
                 elif k in aliases:
                     if aliases[k] not in keep:
                         keep.append(aliases[k])
@@ -5395,6 +5397,10 @@ class Registry:
                 if e["id"] in others:
                     raise RegistryError(ID_TAKEN.format(sid=e["id"]))
                 out.append(e)
+            values = set(self.config.schedule_aliases.values())
+            for e in out:  # a schedule made now has its alias at once (lift_schedule_ids would add it at the next start)
+                if e["id"] not in values:
+                    self.config.schedule_aliases.setdefault(f"{instance}:{e['id']}", e["id"])
             self._set_raid_rows(instance, out)
             self._check_raid(instance)
         except RegistryError:
