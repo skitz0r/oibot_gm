@@ -103,7 +103,7 @@ def test_raid_config_multi_section_edit_saves_in_one_commit(reg, store, owner):
 
 def test_a_refused_cadence_is_caught_in_its_section_and_writes_nothing(reg, store, owner):
     h = Harness(reg)
-    n0, before = commits(store), copy.deepcopy(reg.config.raids)
+    n0, before = commits(store), (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
 
     async def go():
         await open_raid(h, reg)
@@ -119,7 +119,7 @@ def test_a_refused_cadence_is_caught_in_its_section_and_writes_nothing(reg, stor
         assert "3 unsaved changes" in h.text  # opens, nudge and lock differ from what is stored; confirm doesn't
         await h.press("Cancel")
     asyncio.run(go())
-    assert reg.config.raids == before and commits(store) == n0
+    assert (reg.config.raids, reg.config.schedules) == before and commits(store) == n0
 
 
 def test_a_refusal_at_save_keeps_the_draft_and_leaves_config_and_git_untouched(reg, store, owner):
@@ -133,10 +133,10 @@ def test_a_refusal_at_save_keeps_the_draft_and_leaves_config_and_git_untouched(r
         await h.press("Save")
         assert "Save these changes" in h.text
         reg.set_raid_override("barrow_deeps", "lock_hours_before", 8, "someone else")  # the stored rules move under the wizard
-        n, stored = commits(store), copy.deepcopy(reg.config.raids)
+        n, stored = commits(store), (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
         await h.press("Save")
         assert "❌" in h.text and "Nothing was saved" in h.text and h.buttons() == ["Back to the sections", "Cancel"]
-        assert commits(store) == n and reg.config.raids == stored  # set_raid_overrides refused as a whole
+        assert commits(store) == n and (reg.config.raids, reg.config.schedules) == stored  # set_raid_overrides refused as a whole
         await h.press("Back to the sections")
         assert "unsaved change" in h.text  # the draft is kept
     asyncio.run(go())
@@ -145,7 +145,7 @@ def test_a_refusal_at_save_keeps_the_draft_and_leaves_config_and_git_untouched(r
 
 def test_cancel_from_the_hub_writes_nothing(reg, store, owner):
     h = Harness(reg)
-    n0, before = commits(store), copy.deepcopy(reg.config.raids)
+    n0, before = commits(store), (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
 
     async def go():
         await open_raid(h, reg)
@@ -156,7 +156,7 @@ def test_cancel_from_the_hub_writes_nothing(reg, store, owner):
         await h.press("Cancel")
         assert "nothing was changed" in h.text
     asyncio.run(go())
-    assert reg.config.raids == before and commits(store) == n0
+    assert (reg.config.raids, reg.config.schedules) == before and commits(store) == n0
 
 
 def test_run_times_add_and_remove_round_trip_through_parse_slots(reg, owner):

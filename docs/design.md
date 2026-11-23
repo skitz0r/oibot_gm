@@ -5379,19 +5379,36 @@ list on a refusal; `clear_raid_override` drops the raid's schedules too. The `ra
 entries; the `settings` rev ignores the list. An entry that can't be read (`unread_schedule`) is left in the file and
 skipped by every read and write.
 
-**The lift.** At every load `lift_schedules(cfg, raids, refused)` moves each raid's old `schedules` / `slots` keys into the
-list through the one per-raid conversion (`_lift_raid_of`: `default` first, then the stored order; what the list
-already holds wins; an empty `slots` kept only where it hides the game's run times), drops an override left empty and
-returns a line per raid moved ("Hyjal Summit: 1 schedule"). A raid it can't convert keeps its keys exactly and still
-reads as before; its sentence goes into `refused`. `Registry.schedules_lifted` / `schedules_refused` /
-`schedules_unread` keep what the load found; `Registry.migrate_schedules()` saves a lifted file once (one commit,
-"schedules moved to the guild level", never from a shadow; a later call writes nothing). Every raid write also runs
-`Registry._lift_raid` first, so a file edited by hand with the old keys is converted before it changes.
+**The lift.** At every load `lift_schedules(cfg, raids, refused, emptied)` moves each raid's old `schedules` / `slots`
+keys into the list through the one per-raid conversion (`_lift_raid_of`: `default` first, then the stored order; what
+the list already holds wins; an empty `slots` kept only where it hides the game's run times), drops an override left
+empty and returns a line per raid moved ("Hyjal Summit: 1 schedule"). A raid whose old keys held nothing
+(`schedules: None`, an empty `slots` where the game gives no run times) loses them without a line (`emptied`; the save
+still happens). A raid it can't convert keeps its keys exactly and still reads as before; its warning goes into
+`refused`. Every raid write runs the same conversion first (`Registry._lift_raid`), so a raid the lift refused can't
+take any raid write until its schedules are corrected by hand in `guild.yaml` or the raid is reset — the warning says
+so. `Registry.schedules_lifted` / `schedules_refused` / `schedules_unread` keep what the load found;
+`Registry.migrate_schedules()` saves a lifted file once (one commit, "schedules moved to the guild level", never from a
+shadow; a later call writes nothing). A file edited by hand with the old keys is converted by the next raid write.
 
-**At start** (`_schedules_migrate`, after the recipes migration, per guild in a thread) three kinds of ops line: one info
-line when a raid moved ("Schedules are now stored at guild level: …"), a warning per raid the lift refused, and one
-warning naming the stored entries that can't be read. Nothing else a person sees changed: no string, command, route,
-MCP tool, page or card. Going back to code from before this phase means reverting that data commit too.
+**At start** the lift is saved FIRST: `_schedules_save` (per guild in a thread) is the first thing `setup_hook` does,
+before the commands sync, the scheduler, the web app and `on_ready`'s officer-role pass, so no other save carries the
+lifted shape under its own message. On ready, `_schedules_migrate` (after the recipes migration) tells it in three kinds
+of ops line: one info line when a raid moved ("Schedules are now stored at guild level: …"), a warning per raid the lift
+refused (two sentences: the refusal, then how to get out), and one warning naming the stored entries that can't be
+read. Nothing else a person sees changed: no string, command, route, MCP tool, page or card.
+
+**Going back to older code.** Code from before this phase loads a lifted `guild.yaml` without an error, because
+`GuildConfig` ignores keys it doesn't know — and so it drops the `schedules` list: every raid falls back to the game
+profile's run times (none in `forever`), shows no schedules and opens no runs, and that code's next `save_config`
+rewrites the file without the list, after which the schedules exist only in git history. Reverting the data commit is
+not a way back once later commits touch the file. The way back is `scripts/lower_schedules.py` (a thin caller of
+`registry.lower_schedules`): it folds each raid's entries back into `raids.<raid>` in the old shape (`slots` = the
+`default` entry's run times, `schedules` = the rest, exactly what `raid_override` returns), removes the top-level list
+and commits once per guild, printing a line per guild; a guild with a stored entry that can't be read is refused and
+left as it was, the line naming the entry. `--dry-run` shows what would change; the data root is the path given, else
+`OIBOT_DATA_DIR`, else `../oibot_gm-data`. The order: stop the bot, run the script, then start the older code. (A
+follow-on's `starts` is written back too; older code ignores it.) This code lifts a lowered file again at its next start.
 
 **Later phases** (spec §9) change what people see: timing written onto each schedule and dropped from the raid,
 officers editing schedules, guild-unique schedule ids with regulars keyed by them and no `default` schedule, events

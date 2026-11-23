@@ -388,6 +388,12 @@ def test_a_preview_copy_never_commits_the_lift(old_store):
 
 ## Deploying (the owner's call, not a task)
 
-The first start on this code writes one commit per guild to the private data repo. Code from before this phase
-cannot read the lifted file, so going back means reverting that data commit as well as the code. Note the data
-repo's head before the restart.
+The first start on this code writes one commit per guild to the private data repo. Note the data repo's head before
+the restart.
+
+Going back: code from before this phase loads the lifted file without an error, but it ignores the top-level
+`schedules` list — every raid shows no schedules and opens no runs — and its next save writes `guild.yaml` without
+them, after which they exist only in git history. Reverting the data commit stops working once later commits touch
+the file. So, in this order: stop the bot, run `uv run python scripts/lower_schedules.py` (`--dry-run` first; it folds
+each raid's schedules and run times back under `raids.<raid>`, removes the list and commits once per guild, refusing a
+guild with an entry it can't read), then start the older code.

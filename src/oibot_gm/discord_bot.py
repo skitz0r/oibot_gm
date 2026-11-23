@@ -513,17 +513,30 @@ class ListenMixin:
             if res["matched"]:
                 await self.ops.emit(reg.config, "info", professions.migrated_line(res))
 
-    async def _schedules_migrate(self) -> None:
-        """At start, per guild in a thread: Registry.migrate_schedules (an older file's schedules, lifted at load, saved
-        once — a later start writes nothing and says nothing); one ops line when a raid moved, a warning per raid whose
-        old schedules couldn't be moved (they still read from the raid), and one warning naming any stored schedule that
-        can't be read (left in the file, skipped by every read)."""
+    async def _schedules_save(self) -> None:
+        """The FIRST thing setup_hook does, per guild in a thread: Registry.migrate_schedules (an older file's schedules,
+        lifted at load, saved once under its own message) before the web app, the scheduler or on_ready's officer-role
+        pass can save the lifted shape under theirs. The lines wait for _schedules_migrate to tell them once Discord is
+        ready; a failure leaves the save to _schedules_migrate."""
+        saved = self.__dict__.setdefault("_schedules_saved", {})
         for reg in self.registries.ordered():
             try:
-                lines = await asyncio.to_thread(reg.migrate_schedules)
+                saved[reg.key] = saved.get(reg.key, []) + await asyncio.to_thread(reg.migrate_schedules)
+            except Exception as e:  # noqa: BLE001 — a start never fails on it; _schedules_migrate tries again
+                log.warning("schedules: early save of %s failed (%s)", reg.key, type(e).__name__)
+
+    async def _schedules_migrate(self) -> None:
+        """On ready, per guild: the lines of the save _schedules_save made, else Registry.migrate_schedules now (in a
+        thread; saved once — a later start writes nothing and says nothing); one ops line when a raid moved, a warning
+        per raid whose old schedules couldn't be moved (they still read from the raid; the warning says how to get out),
+        and one warning naming any stored schedule that can't be read (left in the file, skipped by every read)."""
+        saved = self.__dict__.get("_schedules_saved") or {}
+        for reg in self.registries.ordered():
+            lines = saved.pop(reg.key, [])
+            try:
+                lines = lines + await asyncio.to_thread(reg.migrate_schedules)
             except Exception as e:  # noqa: BLE001 — a start never fails on it; the next start tries again
                 log.warning("schedules: migration of %s failed (%s)", reg.key, type(e).__name__)
-                lines = []
             if lines:
                 await self.ops.emit(reg.config, "info", f"Schedules are now stored at guild level: {' · '.join(lines)}.")
             refused, reg.schedules_refused = list(getattr(reg, "schedules_refused", None) or []), []
@@ -1384,6 +1397,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         return list(dict.fromkeys(ids))
 
     async def setup_hook(self):
+        await self._schedules_save()  # first: the lift's commit lands under its own message before anything else can save (§5.67)
         # One scope only, or Discord lists every command twice. Default: global (works in every server and in DMs;
         # new commands can take a while to propagate). OIBOT_COMMAND_SCOPE=guild (development) gives instant updates
         # in the test server and every configured server, but no DM commands — and an unconfigured server then has no
@@ -1425,7 +1439,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             self.loop.create_task(asyncio.to_thread(self._memory_rebuild))
         if not getattr(self, "_recipes_booted", False):  # armory link §4.3: typed recipes matched to the game's list, once a start
             self._recipes_booted = True
-            self.loop.create_task(self._start_migrations())  # + schedules lifted to the guild level, saved once
+            self.loop.create_task(self._start_migrations())  # + the schedules lift told (saved first in setup_hook)
         print(f"oibot_GM online as {self.user} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · loot sessions: {len(self.events)}")
         for err in self.registries.load_errors:  # a guild that didn't load has no ops channel to tell
             print(f"guild NOT loaded — {err}")

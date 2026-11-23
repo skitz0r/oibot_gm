@@ -161,7 +161,8 @@ def test_a_schedule_write_lifts_the_old_keys_and_a_removed_one_stays_gone(reg):
     assert reg.config.raids[RID] == {"notes": "old"}
 
 
-def test_a_refused_write_leaves_the_old_keys_where_they_were(reg):
+def test_a_schedule_refused_before_the_lift_leaves_the_old_keys_where_they_were(reg):
+    """Refused in schedule_value, before any raid write starts: the lift never runs."""
     _old_keys(reg)
     before = (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
     with pytest.raises(RegistryError):
@@ -378,3 +379,172 @@ def test_a_stored_entry_that_is_not_a_mapping_is_kept_skipped_and_named(data_roo
     assert "just some words" in on_disk and reg.raid_def("barrow_deeps")["slots"] == ["Thu 20:00"]
     warns = [t for lv, t in _start(reg) if lv == "warn"]
     assert len(warns) == 1 and "can't be read" in warns[0]
+
+
+def test_a_write_refused_after_the_lift_puts_the_old_keys_back(reg):
+    """The lift runs (old keys → rows), both fields parse, and the whole-raid check refuses the pair: the override and
+    the guild-level list are exactly as they were, old keys included."""
+    _old_keys(reg)
+    before = (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
+    with pytest.raises(RegistryError, match="confirmation deadline"):
+        reg.set_raid_overrides(RID, {"lock_hours_before": 1, "confirm_hours_before": 5}, "t")
+    assert (reg.config.raids, reg.config.schedules) == before
+
+
+# ---- the final review's fixes
+@pytest.mark.parametrize("field", ["rosters", "starts"])
+def test_a_unicode_digit_in_a_lineup_is_refused_in_words(field):
+    lineup = [{"raid": "a", "rosters": 1}, {"raid": "b", "rosters": 1}]
+    lineup[1][field] = "²"
+    with pytest.raises(RegistryError):
+        R.parse_lineup(lineup)
+
+
+def test_a_unicode_digit_as_a_follow_on_start_is_refused_in_words():
+    with pytest.raises(RegistryError):
+        R.parse_follow({"raid": OTHER, "starts": "²"})
+
+
+def test_a_stored_entry_with_a_unicode_digit_is_skipped_at_load(data_root, open_registry):
+    good = {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 19:30"]}
+    odd = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": "²"}], "kind": "weekly", "slots": ["Wed 20:00"]}
+    _write_old(data_root, {"schedules": [good, odd]})
+    reg = open_registry(GitStore(data_root, push=False))
+    assert [s["id"] for s in reg.schedules("barrow_deeps")] == ["default"]
+    assert len(reg.schedules_unread) == 1 and "late" in reg.schedules_unread[0]
+
+
+def test_editing_a_raid_keeps_its_block_before_a_later_raid(reg):
+    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule(OTHER, "wed", {"kind": "weekly", "slots": "Wed 20:00"}, "t")
+    reg.set_schedule(RID, "tue", {"name": "Tuesday"}, "t")
+    reg.set_schedule(RID, "sat", {"kind": "weekly", "slots": "Sat 20:00"}, "t")
+    assert [(e["lineup"][0]["raid"], e["id"]) for e in reg.config.schedules] == [(RID, "tue"), (RID, "sat"), (OTHER, "wed")]
+
+
+NOTHING_TO_MOVE = {"raids": {"barrow_deeps": {"notes": "kept", "schedules": None}, "onyxias_lair": {"slots": []}}}
+
+
+def test_a_raid_with_nothing_to_move_is_no_line():
+    cfg = R.GuildConfig(**{**base_config(), **copy.deepcopy(NOTHING_TO_MOVE)})
+    raids = {"barrow_deeps": {"name": "Barrow Deeps"}, "onyxias_lair": {"name": "Onyxia's Lair"}}  # the game gives neither run times
+    assert R.lift_schedules(cfg, raids) == []
+    assert cfg.raids == {"barrow_deeps": {"notes": "kept"}} and cfg.schedules == []
+
+
+def test_a_raid_with_nothing_to_move_is_still_saved_once_and_never_told(data_root, open_registry):
+    _write_old(data_root, NOTHING_TO_MOVE)
+    store = GitStore(data_root, push=False)
+    reg = open_registry(store)
+    n0 = commit_count(store)
+    said = _start(reg)
+    assert commit_count(store) == n0 + 1 and said == []
+    doc = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())
+    assert doc["raids"] == {"barrow_deeps": {"notes": "kept"}}
+    assert _start(open_registry(store)) == [] and commit_count(store) == n0 + 1
+
+
+def test_a_refused_raid_says_how_to_get_out_in_two_plain_sentences(data_root, open_registry):
+    _write_old(data_root, {"raids": {"barrow_deeps": {"slots": ["Tue 04:00"], "schedules": [BAD_ROW]}}})
+    said = _start(open_registry(GitStore(data_root, push=False)))
+    (level, text), = said
+    assert level == "warn" and _refusal() in text and "(" + _refusal() not in text
+    assert text.count(". ") == 1 and text.endswith(".")
+    assert "by hand" in text and "reset" in text
+
+
+def _last_subject(root) -> str:
+    return subprocess.run(["git", "log", "-1", "--format=%s"], cwd=root, check=True, capture_output=True, text=True).stdout
+
+
+def test_the_lift_is_saved_before_anything_else_at_start(old_store, open_registry):
+    """setup_hook saves the lift first, under its own message, before the web, the scheduler or ready can save; the
+    ready hook then tells it."""
+    import asyncio
+    import inspect
+    from types import SimpleNamespace
+
+    from oibot_gm.discord_bot import OibotGM
+
+    src = inspect.getsource(OibotGM.setup_hook)
+    first = src.index("_schedules_save")
+    assert all(first < src.index(x) for x in ("tree.sync", "scheduler()", "web_serve"))
+    reg = open_registry(old_store)
+    said: list[tuple[str, str]] = []
+
+    async def emit(cfg, level, text):
+        said.append((level, text))
+
+    bot = SimpleNamespace(registries=SimpleNamespace(ordered=lambda: [reg]), ops=SimpleNamespace(emit=emit))
+    asyncio.run(OibotGM._schedules_save(bot))
+    assert "schedules moved to the guild level" in _last_subject(old_store.root) and said == []
+    reg.save_config("something else")  # ready's officer roles, say: nothing of the lift is left for it to carry
+    asyncio.run(OibotGM._schedules_migrate(bot))
+    assert said == [("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule.")]
+
+
+# ---- going back to older code: scripts/lower_schedules.py
+OLD_FOLLOW = {"raids": {"barrow_deeps": {"notes": "x", "slots": ["Tue 19:30"],
+                                         "schedules": [{"id": "default", "rosters": 2, "lock_hours_before": 20},
+                                                       {"id": "alt", "kind": "weekly", "slots": ["Sat 20:00"], "rosters": 3,
+                                                        "follow": {"raid": "hyjal_summit_forever", "rosters": 2}}]}}}
+
+
+@pytest.mark.parametrize("old", [OLD, OLD_FOLLOW], ids=["plan", "follow-on"])
+def test_lift_then_lower_gives_back_the_old_shape(old):
+    cfg = R.GuildConfig(**{**base_config(), **copy.deepcopy(old)})
+    lifted = R.lift_schedules(cfg)
+    lowered = R.lower_schedules(cfg)
+    assert cfg.raids == old["raids"] and cfg.schedules == []
+    assert [x.split(":")[0] for x in lowered] == [x.split(":")[0] for x in lifted]
+
+
+def test_lowering_an_unreadable_entry_refuses_and_changes_nothing():
+    good = {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 19:30"]}
+    broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
+    cfg = R.GuildConfig(**{**base_config(), "raids": {"barrow_deeps": {"notes": "x"}}, "schedules": [good, broken]})
+    before = (copy.deepcopy(cfg.raids), copy.deepcopy(cfg.schedules))
+    with pytest.raises(RegistryError, match="late"):
+        R.lower_schedules(cfg)
+    assert (cfg.raids, cfg.schedules) == before
+
+
+def _lower_script():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "lower_schedules.py"
+    spec = importlib.util.spec_from_file_location("lower_schedules", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_script_lowers_each_guild_once_and_this_code_lifts_it_again(old_store, open_registry, data_root):
+    reg = open_registry(old_store)
+    reg.migrate_schedules()
+    lifted = copy.deepcopy(reg.config.schedules)
+    script = _lower_script()
+    n0 = commit_count(old_store)
+    dry = script.lower(data_root, dry_run=True)
+    assert len(dry) == 1 and GUILD in dry[0] and commit_count(old_store) == n0
+    assert yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())["schedules"] == lifted
+    said = script.lower(data_root)
+    assert len(said) == 1 and GUILD in said[0] and commit_count(old_store) == n0 + 1
+    doc = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())
+    assert "schedules" not in doc and doc["raids"] == OLD["raids"]
+    assert "under each raid" in _last_subject(data_root)
+    again = open_registry(GitStore(data_root, push=False))
+    assert again.config.schedules == lifted and again.schedules_lifted
+    assert len(script.lower(data_root)) == 1 and commit_count(old_store) == n0 + 1  # nothing left to lower: no commit
+
+
+def test_the_script_refuses_a_guild_with_an_unreadable_entry(data_root):
+    broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
+    _write_old(data_root, {"schedules": [broken]})
+    text = (data_root / GUILD / "guild.yaml").read_text()
+    store = GitStore(data_root, push=False)
+    n0 = commit_count(store)
+    said = _lower_script().lower(data_root)
+    assert len(said) == 1 and "late" in said[0] and "nothing" in said[0].lower()
+    assert (data_root / GUILD / "guild.yaml").read_text() == text and commit_count(store) == n0

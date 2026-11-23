@@ -967,7 +967,7 @@ def parse_follow(value) -> dict | None:
             return None
         if value.get("starts") is not None:
             st = value["starts"]
-            if isinstance(st, bool) or not isinstance(st, (int, str)) or not str(st).strip().isdigit() or int(st) < 1:
+            if isinstance(st, bool) or not isinstance(st, (int, str)) or not str(st).strip().isdecimal() or int(st) < 1:
                 raise RegistryError("A later raid starts a whole number of minutes after the first one.")
             starts = int(st)
     else:
@@ -1006,14 +1006,14 @@ def parse_lineup(value) -> list[dict]:
             raise RegistryError("A schedule can't run the same raid twice in one night.")
         seen.add(rid)
         n = e.get("rosters", 1)
-        if isinstance(n, bool) or not isinstance(n, (int, str)) or not str(n).strip().isdigit() or not 1 <= int(n) <= MAX_SCHEDULE_ROSTERS:
+        if isinstance(n, bool) or not isinstance(n, (int, str)) or not str(n).strip().isdecimal() or not 1 <= int(n) <= MAX_SCHEDULE_ROSTERS:
             raise RegistryError(f"A raid in a schedule holds 1 to {MAX_SCHEDULE_ROSTERS} rosters.")
         row = {"raid": rid, "rosters": int(n)}
         if e.get("starts") is not None:
             if i == 0:
                 raise RegistryError("The first raid of a schedule starts at the schedule's own time.")
             st = e["starts"]
-            if isinstance(st, bool) or not isinstance(st, (int, str)) or not str(st).strip().isdigit() or int(st) < 1:
+            if isinstance(st, bool) or not isinstance(st, (int, str)) or not str(st).strip().isdecimal() or int(st) < 1:
                 raise RegistryError("A later raid starts a whole number of minutes after the first one.")
             row["starts"] = int(st)
         out.append(row)
@@ -1127,13 +1127,16 @@ def _lift_raid_of(cfg: "GuildConfig", instance: str, game_slots: bool = True) ->
     return len(rows)
 
 
-def lift_schedules(cfg: "GuildConfig", raids: dict | None = None, refused: list | None = None) -> list[str]:
+def lift_schedules(cfg: "GuildConfig", raids: dict | None = None, refused: list | None = None, emptied: list | None = None) -> list[str]:
     """An older guild.yaml held schedules under each raid (`raids.<rid>.schedules`, and `slots` as the `default`
     schedule's run times): move them into cfg.schedules, raids in their stored order, and drop an override left empty.
-    → one line per raid moved ("Hyjal Summit: 1 schedule"), [] (nothing changed) when there was nothing to move. A raid
-    that can't be converted keeps its keys exactly as they were and still reads as before: it is never one of the
-    lines; its sentence (the raid's name and the refusal's own words) goes into `refused` when given. `raids` (the profile's raid table, optional) only names the raids and tells which ones the
-    game gives run times; the conversion reads cfg alone."""
+    → one line per raid moved ("Hyjal Summit: 1 schedule"), [] when no raid had a schedule to move. A raid whose old
+    keys held nothing (`schedules: None`, an empty `slots` where the game gives no run times) loses the keys but is
+    no line: its id goes into `emptied` when given, so the caller still owes a save. A raid that can't be converted
+    keeps its keys exactly as they were and still reads as before: it is never one of the lines; its warning (the
+    raid's name, the refusal's own words, and how to get out) goes into `refused` when given. `raids` (the profile's
+    raid table, optional) only names the raids and tells which ones the game gives run times; the conversion reads
+    cfg alone. lower_schedules is the way back."""
     raids = raids or {}
     lines = []
     for rid in list(cfg.raids):
@@ -1143,14 +1146,42 @@ def lift_schedules(cfg: "GuildConfig", raids: dict | None = None, refused: list 
         except RegistryError as e:
             if refused is not None:
                 why = str(e).rstrip(".")
-                refused.append(f"{name}: its schedules were not moved to guild level and still read from the raid ({why}).")
+                refused.append(f"{name}: its schedules were not moved to guild level, so they still read from the raid: {why}. "
+                               f"No setting of {name} can be saved until its schedules are corrected by hand in guild.yaml or the raid is reset.")
             continue
         if n is None:
             continue
         if not cfg.raids.get(rid):
             cfg.raids.pop(rid, None)
+        if not n:
+            if emptied is not None:
+                emptied.append(rid)
+            continue
         lines.append(f"{name}: {n} schedule{'' if n == 1 else 's'}")
     return lines
+
+
+def lower_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
+    """The way back to code from before schedules moved (scripts/lower_schedules.py, run with the bot stopped): every
+    raid's guild-level entries folded back into `cfg.raids[<raid>]` in the old shape (exactly what _raid_override_of
+    reads: `slots` = the `default` entry's run times, `schedules` = the rest), and cfg.schedules emptied. → one line per
+    raid ("Hyjal Summit: 1 schedule"), raids in the list's order. A stored entry that can't be read refuses the whole
+    guild (RegistryError naming the raid and the entry) before anything changes. `raids` (the profile's raid table,
+    optional) only names the raids. A file lowered and then read by this code is lifted again to the same list."""
+    raids = raids or {}
+    for e in cfg.schedules:
+        why = unread_schedule(e)
+        if why is not None:
+            rid = _lead_raid(e)
+            name = (raids.get(rid) or {}).get("name") or rid or "a schedule with no raid"
+            sid = e.get("id") if isinstance(e, dict) else None
+            raise RegistryError(f"{name} · {sid or 'no id'} can't be read: {why}")
+    order = list(dict.fromkeys(_lead_raid(e) for e in cfg.schedules))
+    counts = {rid: sum(1 for e in cfg.schedules if _lead_raid(e) == rid) for rid in order}
+    lowered = {rid: _raid_override_of(cfg, rid) for rid in order}
+    cfg.raids = {**cfg.raids, **lowered}
+    cfg.schedules = []
+    return [f"{(raids.get(rid) or {}).get('name') or rid}: {n} schedule{'' if n == 1 else 's'}" for rid, n in counts.items()]
 
 
 def schedule_value(field: str, value):
@@ -2223,7 +2254,9 @@ class Registry:
         cfg = GuildConfig(**yaml.safe_load(p.read_text()))
         raids = self.base_profile.raids
         self.schedules_refused: list[str] = []  # a raid whose old keys couldn't be lifted: told as a warning, never saved as moved
-        self.schedules_lifted: list[str] = lift_schedules(cfg, raids, self.schedules_refused)
+        emptied: list[str] = []  # raids whose old keys held nothing: dropped, no line, but the file still owes the save
+        self.schedules_lifted: list[str] = lift_schedules(cfg, raids, self.schedules_refused, emptied)
+        self._schedules_owed = bool(self.schedules_lifted or emptied)
         self.schedules_unread: list[str] = []
         for e in cfg.schedules:
             why = unread_schedule(e)
@@ -2236,13 +2269,15 @@ class Registry:
 
     def migrate_schedules(self, by: str = "migration") -> list[str]:
         """Save an older file's lifted schedules (load_config) once: one commit when the load lifted anything, then
-        nothing on later calls. → the lift's lines, [] when nothing was saved. A preview copy never writes."""
-        if getattr(self, "_shadow", False) or not self.schedules_lifted:
+        nothing on later calls. → the lift's lines, [] when nothing was saved or no raid had a schedule to move (a raid
+        whose old keys held nothing is saved without a line). A preview copy never writes."""
+        if getattr(self, "_shadow", False) or not (self.schedules_lifted or getattr(self, "_schedules_owed", False)):
             return []
         with self.config_lock:
             lines = self.schedules_lifted
             self.save_config(f"schedules moved to the guild level (by {by})", notify=False)  # a failure keeps the lines: the next start tries again
             self.schedules_lifted = []
+            self._schedules_owed = False
         return lines
 
     def save_config(self, message: str, notify: bool = True) -> None:

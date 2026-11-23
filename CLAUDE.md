@@ -290,9 +290,14 @@ src/oibot_gm/
                        from_stored_schedule (exact inverses), parse_lineup; raid_rows(raid) = its rows in the old shape, _set_raid_rows = THE write,
                        raid_override(raid) = config.raids[raid] + slots + schedules as an override looked before (raid_def merges it, so schedules_of
                        and every caller are unchanged; never read profile/config raids' schedules directly); the raids:<id> rev covers its entries;
-                       lift_schedules(cfg, raids, refused) = an older file's raids.<id>.schedules / slots moved at every load (schedules_lifted /
-                       schedules_refused / schedules_unread), migrate_schedules() saves it once at start (one commit; discord_bot._schedules_migrate
-                       = the ops lines), _lift_raid at every raid write; an unreadable entry (unread_schedule) stays in the file, skipped;
+                       lift_schedules(cfg, raids, refused, emptied) = an older file's raids.<id>.schedules / slots moved at every load (schedules_lifted /
+                       schedules_refused / schedules_unread), migrate_schedules() saves it once at start (one commit, FIRST in setup_hook:
+                       discord_bot._schedules_save; _schedules_migrate on ready = the ops lines), _lift_raid at every raid write (a raid the
+                       lift refused takes no raid write until fixed by hand or reset); an unreadable entry (unread_schedule) stays in the file, skipped;
+                       GOING BACK: older code loads a lifted file, DROPS the list (GuildConfig ignores unknown keys), shows no schedules and
+                       writes the file without them at its next save — so stop the bot, run scripts/lower_schedules.py (registry.lower_schedules:
+                       each raid's entries back under raids.<id> as raid_override reads them, the list removed, one commit per guild; an
+                       unreadable entry refuses that guild), then start the older code;
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
                        applies in Discord before registering: every first-character path checks it — Discord, plain text, the Me page);
                        PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check;
