@@ -238,7 +238,11 @@ def _add_seat_and_group_constraints(s: _Model) -> None:
 
 def _add_role_bounds(s: _Model) -> None:
     """Each role stays within its min/max per roster (over the whole pool for a single roster). The minimum is
-    capped at what the pool can supply per roster (`capable // rosters`) so a thin sheet still solves."""
+    capped at what the pool can supply per roster (`capable // rosters`) so a thin sheet still solves. With several
+    rosters a short role is also held across them (the rule set in review, 2026-11-22): together they seat at least
+    min(min × rosters, capable) — everyone who can play it is rostered before a seat of it is left empty, so the odd
+    one the per-roster floor leaves unconstrained never loses a seat to another role. A player forced out (an
+    officer's pin out, always-bench, first come's late joiners) is not counted as capable for that total."""
     for role, bounds in s.role_bounds.items():
         capable = sum(1 for p in s.players
                       if p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role))
@@ -247,6 +251,13 @@ def _add_role_bounds(s: _Model) -> None:
             if have:
                 s.m.Add(sum(have) >= min(bounds["min"], capable // s.rosters if s.rosters > 1 else capable))
                 s.m.Add(sum(have) <= bounds["max"])
+        if s.rosters > 1 and bounds["min"] and capable < bounds["min"] * s.rosters:
+            out = set(s.opts.force_out)
+            free = sum(1 for p in s.players if p.signup_name not in out
+                       and (p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role)))
+            total = _role_expr(s, role)
+            if total and free:
+                s.m.Add(sum(total) >= min(bounds["min"] * s.rosters, free))
 
 
 def _add_forces_pairs_and_pins(s: _Model) -> None:

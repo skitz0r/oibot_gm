@@ -509,6 +509,45 @@ def test_the_raids_route_says_when_a_raid_runs_from_the_runs_themselves(api, reg
     assert len(raid["live_runs"]) == 1, "the run already open from the paused schedule keeps its sheet"
 
 
+def _two_roster_run(reg, rs):
+    """A Barrow Deeps run whose schedule expects two rosters, opened the way the declared-roster test opens its run."""
+    reg.seed_test_members(30, "t")  # 4 tanks, 7 healers, 19 dps
+    opened(reg)
+    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
+    reg.set_schedule(RID, "default", {"rosters": 2}, "t")
+    t = rc.slot_starts(reg, RID, reg.now_local(), 24 * 14)[0][1]
+    return rc.open_run(reg, rs, RID, t, by="t")
+
+
+@pytest.mark.parametrize("role", ["tank", "healer"])
+def test_a_role_short_across_two_rosters_rosters_everyone_who_joined_for_it(reg, rs, role):
+    """The rule set in review (2026-11-22): when a role is short across a run's rosters, every joiner who can play it is
+    rostered before a seat of that role is left empty — the run is short by exactly what its rosters need less who
+    joined, never more. One fewer than two rosters need joins for the role, and more joiners than seats."""
+    ev = _two_roster_run(reg, rs)
+    need = 2 * int(reg.role_bounds(RID, 10)[role]["min"])
+    roles = by_role(reg)
+    few = roles[role][: need - 1]
+    join(reg, rs, ev, few + [m for r, ms in roles.items() if r != role for m in ms])
+    players, rosters, n = rc._solve_run(reg, rs, ev, whatif=False)
+    assert len(players) > 20 and n == 2 and [len(r.selected) for r in rosters] == [10, 10]
+    seated = {p.signup_name for r in rosters for p in r.selected}
+    assert {m.display_name for m in few} <= seated, f"every {role} who joined is rostered"
+
+
+def test_a_pin_out_still_benches_a_short_roles_joiner(reg, rs):
+    """An officer's pin beats the short-role rule: a tank pinned out stays out, and the other tanks who joined are
+    rostered."""
+    ev = _two_roster_run(reg, rs)
+    roles = by_role(reg)
+    few = roles["tank"][:3]
+    join(reg, rs, ev, few + [m for r, ms in roles.items() if r != "tank" for m in ms])
+    ev.pins[str(few[0].discord_id)] = "out"
+    _players, rosters, _n = rc._solve_run(reg, rs, ev, whatif=False)
+    seated = {p.signup_name for r in rosters for p in r.selected}
+    assert few[0].display_name not in seated and {m.display_name for m in few[1:]} <= seated
+
+
 def test_a_declared_second_roster_is_placeable_and_built_once_the_joiners_need_it(reg, rs, monkeypatch):
     """The owner, 2026-11-22 (a Hyjal → Barrow Deeps ×2 night showed 10 board places for 18 joiners): before the lock
     the board draws every roster the run expects; the lock builds the declared roster as soon as the joiners no longer

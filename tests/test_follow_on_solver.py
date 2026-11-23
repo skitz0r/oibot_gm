@@ -34,10 +34,11 @@ def test_the_splits_are_the_leads_roster(reg, rs):
     assert all((("dps" if role[n] in ("melee", "ranged") else role[n]) in short) for n in extra)
 
 
-def test_follow_on_builds_its_declared_second_roster_short_a_tank(reg, rs):
+def test_follow_on_rosters_every_tank_who_joined_when_two_rosters_are_a_tank_short(reg, rs):
     """The owner, 2026-11-22: a declared second roster is built as soon as the joiners no longer fit in one, even with
-    tanks for only one, and the short seats stay open to fill. Three tanks for two 10s (four needed): two full rosters,
-    and the missing tank is told where the code reports a shortfall — the run's needs and the lead's follow-on line."""
+    tanks for only one, and the short seats stay open to fill. Three tanks joined for two 10s (four needed): two rosters
+    of ten, all three tanks rostered across them (a lead dps never takes an off-lead tank's place), so the follow-on is
+    short exactly one tank — counted on the seats, not the Join answers."""
     reg.seed_test_members(24, "t")
     lead, fev = open_pair(reg, rs)
     ms = reg.test_members()
@@ -49,8 +50,11 @@ def test_follow_on_builds_its_declared_second_roster_short_a_tank(reg, rs):
     fev = rs.events[fev.key]
     rc.propose(reg, rs, fev)
     assert [len(r.selected) for r in fev.all_rosters] == [10, 10], "the joiners don't fit in one 10: the declared second roster is built"
-    assert rc.needs(reg, fev)["roles"] == {"tank": 1}, "the follow-on's needs name the tank the two rosters are short"
-    assert rc.follow_short(reg, lead) == {"tank": 1}, "the lead's health card says the follow-on is a tank short"
+    seated = {p.signup_name for r in fev.all_rosters for p in r.selected}
+    assert {m.display_name for m in tanks[:3]} <= seated, "every tank who joined is on a follow-on roster"
+    role = {p.signup_name: p.role for p in rc.players_for(reg, fev)}
+    need = 2 * int(reg.role_bounds(FOLLOW, rc.run_size(reg, fev))["tank"]["min"])
+    assert need - sum(1 for n in seated if role[n] == "tank") == 1, "the two rosters are short exactly one tank in total"
 
 
 def test_the_leads_board_beats_first_come_on_the_follow_on(reg, rs):
