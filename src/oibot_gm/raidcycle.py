@@ -2647,7 +2647,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     # only at lock (never for previews), skipped for big splits / sheets
     do_whatif = whatif and explain.whatif_allowed(n_rosters, len(players))
     tank_min = (opts.minimums or {}).get("tank", 0)
-    rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=do_whatif and i == 0, tank_min=tank_min) for i, r in enumerate(rosters)]
+    rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=do_whatif and i == 0, tank_min=tank_min, opts=opts) for i, r in enumerate(rosters)]
     return players, rosters, n_rosters
 
 

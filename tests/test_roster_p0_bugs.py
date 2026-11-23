@@ -268,10 +268,18 @@ def test_healer_policy_keeps_the_tank_minimum(reg, rs, monkeypatch):
     ev = open_test_run(reg, rs)
     join(reg, rs, ev, reg.test_members())
     seen = _capture_solve(monkeypatch)
+    from oibot_gm.roster import explain
+
+    whatifs = []
+    real_whatif = explain.solve
+    monkeypatch.setattr(explain, "solve", lambda profile, players, raid_id, opts: whatifs.append(opts) or real_whatif(profile, players, raid_id, opts))
     rc.propose(reg, rs, ev, save=False)
     rb = reg.role_bounds("barrow_deeps", rc.run_size(reg, ev))
     assert seen["opts"].minimums["healer"] == 3
     assert seen["opts"].minimums.get("tank") == rb["tank"]["min"], seen["opts"].minimums
+    assert whatifs, "the lock's bench what-ifs ran"
+    assert all(o.minimums == seen["opts"].minimums and o.raid_size == seen["opts"].raid_size for o in whatifs), \
+        "the what-ifs solve the roster the lock solved: its minimums and its size"
 
 
 def test_role_min_merge_is_per_role(reg):
@@ -294,6 +302,26 @@ def test_tank_advisory_reads_the_guild_minimum(reg):
     res2 = RosterResult(selected=players, benched=[], groups=[["A"]], group_reports=[], objective=0, synergy_value=0, role_counts={"tank": 1}, advisories=[])
     out2 = explain.annotate(reg.profile, players, "barrow_deeps", res2, whatif=False, tank_min=1)
     assert not any(a.startswith(("🔴 Tanks", "🟡 Tanks")) for a in out2.advisories), out2.advisories
+
+
+def test_bench_whatifs_carry_the_solves_options(reg, monkeypatch):
+    """A what-if ("closest to a seat") re-solves the roster the lock solved: its size, minimums, seat bonus and
+    lead's rostered — with the benched player brought in, never also kept out."""
+    from oibot_gm.models import Player, RosterResult
+    from oibot_gm.roster import explain
+    from oibot_gm.roster.solver import SolveOptions
+
+    a = Player(signup_name="A", pos=1, status="signed", cls="Warrior", spec="Protection", role="tank")
+    b = Player(signup_name="B", pos=2, status="signed", cls="Priest", spec="Holy", role="healer")
+    res = RosterResult(selected=[a], benched=[b], groups=[["A"]], group_reports=[], objective=0, synergy_value=0, role_counts={"tank": 1}, advisories=[])
+    seen = []
+    monkeypatch.setattr(explain, "solve", lambda profile, players, raid_id, opts: seen.append(opts) or res)
+    opts = SolveOptions(raid_size=10, minimums={"healer": 3, "Paladin": 1}, bonus={"A": 5}, lead_rostered=("A",),
+                        force_in=("A",), force_out=("B", "C"), time_limit_s=12.0)
+    explain.annotate(reg.profile, [a, b], "barrow_deeps", res, opts=opts)
+    (o,) = seen
+    assert (o.raid_size, o.minimums, o.bonus, o.lead_rostered) == (10, {"healer": 3, "Paladin": 1}, {"A": 5}, ("A",))
+    assert o.force_in == ("B",) and o.force_out == ("C",) and o.time_limit_s == explain.WHATIF_TIME_LIMIT_S
 
 
 # ---------------------------------------------------------------- fill after lock: no seat, no body; no switch to the spec they already play

@@ -5,6 +5,8 @@ Advisories are one-liners prefixed with a level dot (🔴/🟡/🟢) so cards an
 tables can render them as rows; the long explanations go to `details`."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..constants import RANK_ORDER
 from ..models import Player, RosterResult
 from ..profiles import GameProfile
@@ -22,10 +24,14 @@ def whatif_allowed(n_rosters: int, n_players: int) -> bool:
 
 
 def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: RosterResult, whatif: bool = True,
-             whatif_limit: int = WHATIF_MAX_BENCH, whatif_time_s: float = WHATIF_TIME_LIMIT_S, tank_min: int | None = None) -> RosterResult:
+             whatif_limit: int = WHATIF_MAX_BENCH, whatif_time_s: float = WHATIF_TIME_LIMIT_S, tank_min: int | None = None,
+             opts: SolveOptions | None = None) -> RosterResult:
     """`tank_min` = the run's tank minimum as the lock used it (Registry.role_bounds merged with the comp policy —
     raidcycle passes it, so guild comp overrides count); None (the /mock and demo paths, which have no guild) falls
-    back to the profile's `tank_needs` note count."""
+    back to the profile's `tank_needs` note count. `opts` = the options the roster was solved with: a bench what-if
+    re-solves with the same size, minimums, seat bonus, lead's rostered and pairs, the benched player brought in (and
+    no longer kept out); the seat and group placements (force_in, pins, prefer_group) belong to the joint solve and
+    are left out. None = the profile's defaults (the /mock and demo paths)."""
     raid = profile.raids[raid_id]
     adv: list[str] = []
     details: list[str] = []
@@ -64,7 +70,10 @@ def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: 
                   if whatif else [])
     for p in candidates:
         try:
-            alt = solve(profile, players, raid_id, SolveOptions(force_in=(p.signup_name,), time_limit_s=whatif_time_s))
+            base = opts or SolveOptions()
+            alt = solve(profile, players, raid_id, replace(base, force_in=(p.signup_name,), pins=None, prefer_group=None,
+                                                           force_out=tuple(n for n in base.force_out if n != p.signup_name),
+                                                           time_limit_s=whatif_time_s))
             whatif_map[p.signup_name] = alt.objective - result.objective
         except RuntimeError:
             whatif_map[p.signup_name] = -9999

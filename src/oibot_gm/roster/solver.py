@@ -41,9 +41,20 @@ class SolveOptions:
     bonus: dict[str, int] | None = None  # signup_name -> extra selection value (rank, main, sat-out, signup order)
     allow_offspec: bool = True  # let the solver switch players to their offspec to meet role minimums
     offspec_penalty: int = 8  # objective cost per switch
-    time_limit_s: float = 20.0
+    time_limit_s: float = 20.0  # the solve's budget, spent as deterministic time (DTIME_PER_SECOND): the same input, the same roster
     workers: int = 8
 
+
+# Repeatable solves (the final review of §5.67 phase 2): Preview lock and Lock solve the same input and must land on the
+# same roster even when the search stops before proving the best one. CP-SAT's default portfolio races its workers, so
+# what it holds at a wall-clock limit varies run to run; interleaved search is deterministic whatever the number of
+# workers (OR-tools 9.15 sat_parameters: interleave_search), and a deterministic-time limit stops it at the same work
+# on any machine under any load. DTIME_PER_SECOND turns a budget in seconds into deterministic time (measured on the
+# lock's 20- and 10-player models: about 6 units per wall second here). The wall-clock limit stays only as a safety
+# net, WALL_CEILING × the budget: a solve that reaches it is no longer repeatable, but a lock never hangs.
+RANDOM_SEED = 0
+DTIME_PER_SECOND = 6.0
+WALL_CEILING = 4.0
 
 DEFAULT_OPTIONS = SolveOptions()  # the shared default for solve()/solve_rosters(); never mutate it
 
@@ -562,10 +573,14 @@ def _balance_terms(s: _Model) -> None:
 
 
 def _run(s: _Model) -> tuple[cp_model.CpSolver, int]:
-    """Maximise seat quality + synergy + balance within the time limit; raise when nothing feasible was found."""
+    """Maximise seat quality + synergy + balance within the deterministic budget (the same input, the same answer);
+    raise when nothing feasible was found."""
     s.m.Maximize(sum(s.terms) + sum(s.synergy_terms) + sum(s.balance_terms))
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = s.opts.time_limit_s
+    solver.parameters.random_seed = RANDOM_SEED
+    solver.parameters.interleave_search = True
+    solver.parameters.max_deterministic_time = s.opts.time_limit_s * DTIME_PER_SECOND
+    solver.parameters.max_time_in_seconds = s.opts.time_limit_s * WALL_CEILING
     solver.parameters.num_workers = s.opts.workers
     status = solver.Solve(s.m)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
