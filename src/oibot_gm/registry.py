@@ -39,6 +39,7 @@ NOTICE_KINDS = ("not_rostered", "released", "answered_for_you", "cancelled", "sc
                 "appeal", "guide", "character", "moved")  # appeal: the council answered a member's question about an award (appeals.py, design §5.49);
 # guide: an officer withdrew the member's guild guide upload (guides/library.py, design §5.63);
 # character: an officer moved a character from one member to another (Registry.move_character, armory link §5.4)
+_NO_STAND = object()  # a run dict without `stands_for` in a raid write's snapshot (Registry._snapshot_raid)
 MAX_ABSENCE_DAYS = 120
 ABSENCE_REASON_MAX = 200  # an absence's reason (officer-only prose), capped at the verb so every surface refuses alike
 PLAYER_RANKS = ("trial", "raider", "core")
@@ -5198,16 +5199,23 @@ class Registry:
         import copy
 
         return (copy.deepcopy(self.config.raids.get(instance)), copy.deepcopy(self.config.schedules),
-                dict(self.config.schedule_aliases))
+                dict(self.config.schedule_aliases),
+                {t["key"]: t.get("stands_for", _NO_STAND) for t in self.config.rosters if isinstance(t, dict) and t.get("key")})
 
     def _restore_raid(self, instance: str, snap: tuple) -> None:
-        before, scheds, aliases = snap
+        before, scheds, aliases, stands = snap
         if before is None:
             self.config.raids.pop(instance, None)
         else:
             self.config.raids[instance] = before
         self.config.schedules = scheds
         self.config.schedule_aliases = aliases
+        for t in self.config.rosters:  # what a schedule write stamped on run dicts (rc.plan_stands_for) goes back too
+            if isinstance(t, dict) and t.get("key") in stands:
+                if stands[t["key"]] is _NO_STAND:
+                    t.pop("stands_for", None)
+                else:
+                    t["stands_for"] = stands[t["key"]]
 
     def _lift_raid(self, instance: str) -> None:
         """An override still holding the old `slots` / `schedules` keys (a file from before schedules moved): move what
@@ -5494,20 +5502,23 @@ class Registry:
             for e in out:  # a schedule made now has its alias at once (lift_schedule_ids would add it at the next start)
                 if e["id"] not in values:
                     self.config.schedule_aliases.setdefault(f"{instance}:{e['id']}", e["id"])
+            # a live run whose night the edit took away stands for the run time put in its place (in its lockout), decided
+            # here, once, with both lists known, BEFORE the rows go in (rc.plan_stands_for reads the run files) — so the
+            # rows and the stamps land back to back, in this same save; a refusal puts both back (the snapshot)
+            plan = {}
+            if not getattr(self, "_shadow", False):
+                from . import raidcycle as rc
+
+                plan = rc.plan_stands_for(self, instance, before, {e["id"]: e for e in out})
             self._set_raid_rows(instance, out)
+            for key, value in plan.items():
+                t = self.config.team(key)
+                if t is not None:
+                    t["stands_for"] = value
             self._check_raid(instance)
         except RegistryError:
             self._restore_raid(instance, snap)
             raise
-        if not getattr(self, "_shadow", False):
-            # a live run whose night the edit took away stands for the run time put in its place (that week's), decided
-            # here, once, with both lists known — written on its run dict in this same save (rc.plan_stands_for)
-            from . import raidcycle as rc
-
-            for key, value in rc.plan_stands_for(self, instance, before).items():
-                t = self.config.team(key)
-                if t is not None:
-                    t["stands_for"] = value
         if save:
             self._prune_raid(instance)
             self.save_config(message)

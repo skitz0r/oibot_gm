@@ -1207,10 +1207,12 @@ the schedule's next runs open on time wherever the moved one now sits. Moved exa
 that hasn't opened yet, it becomes that night's run, and the confirm says so (*"That night's Raid nights run is this
 one."*). When a schedule's run time changes while its run is open or locked — a later hour, past midnight or another
 weekday — the bot decides once, at that save, which new time the run stands for: the run time put in place of the one
-it came from (two changed at once pair up in order), in the same Monday-to-Sunday week (for days of each lockout, the
-same lockout). The run keeps its old time, that week gets no second run, and the next week opens at the new time. A
-run time that was only taken away stands for nothing new, a run already finished or cancelled is never changed, and a
-schedule with two run times keeps both: editing one never stops the other opening. Lockouts, the alt filter and *also on another run* read the new
+it came from (two changed at once pair up by time, whatever order they were typed in), in the same lockout as the run
+(a raid with no first opening: the same Monday-to-Sunday week). The run keeps its old time, that lockout gets no
+second run, and the next one opens at the new time; a new time that falls in the next lockout opens there. A run
+time that was only taken away stands for nothing new, a run already finished or cancelled is never changed, a
+cancelled run gives back the night it stood for (it opens after all), and a schedule with two run times keeps both:
+editing one never stops the other opening. Lockouts, the alt filter and *also on another run* read the new
 start. The verb is the bot's own today (MCP and the site's run card get it with the run pages).
 
 **Changing the raids of an open run (officers).** Until the roster locks, one run's lineup can change: a raid added

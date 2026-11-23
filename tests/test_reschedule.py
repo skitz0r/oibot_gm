@@ -20,6 +20,8 @@ from oibot_gm.registry import RegistryError
 
 RID, HYJAL, ONY = "barrow_deeps", "hyjal_summit_forever", "onyxias_lair"
 OPENED = {"first_open": "2026-01-01T00:00"}
+WEEKLY_LOCKOUT = {"first_open": "2026-01-01T00:00", "lockout_days": 7}  # a Thursday: Thursday-to-Wednesday lockouts
+WED_LOCKOUT = {"first_open": "2026-01-07T15:00", "lockout_days": 7}  # Forever's shape: Wednesday 3 PM to Wednesday 3 PM
 OFFICER_ID = OWNER  # an officer decided live: the owner needs no Discord lookup in the fake
 
 
@@ -148,7 +150,7 @@ def test_the_old_one_off_pair_moves_like_any_run(data_root, old_store_with):
 # ---------------------------------------------------------------- occurrences: never repeated, never blocked
 
 def _tuesdays(reg, sid_fields=None):
-    reg.set_raid_overrides(RID, OPENED, "t")
+    reg.set_raid_overrides(RID, WEEKLY_LOCKOUT, "t")  # Thursday-to-Wednesday lockouts
     sid = weekly(reg, RID, "Tue 19:30")
     reg.set_schedule(sid, {"signup_lead_hours": 48, "nudge_hours_before": 36, "lock_hours_before": 24, "confirm_hours_before": 12}, "t")
     now = reg.now_local()
@@ -414,9 +416,10 @@ def test_the_confirm_says_it_locks_now_and_names_a_clash_of_people(reg, rs):
 
 # ---------------------------------------------------------------- fix round 1
 
-def _schedule(reg, slots):
-    """A weekly schedule whose sheet opens 72 h before and locks 2 h before: a clock jump of a few days never locks."""
-    reg.set_raid_overrides(RID, OPENED, "t")
+def _schedule(reg, slots, anchor=None):
+    """A weekly schedule whose sheet opens 72 h before and locks 2 h before: a clock jump of a few days never locks. The
+    raid's lockouts (the anchor a weekly run time means one run in) run Thursday to Wednesday unless `anchor` says."""
+    reg.set_raid_overrides(RID, anchor or WEEKLY_LOCKOUT, "t")
     sid = weekly(reg, RID, slots)
     reg.set_schedule(sid, {"signup_lead_hours": 72, "nudge_hours_before": 3, "lock_hours_before": 2, "confirm_hours_before": 1}, "t")
     return sid
@@ -504,7 +507,9 @@ def _done(rs, ev):
 
 
 def test_p1_tue_moved_to_fri_still_opens_thursday(reg, rs, monkeypatch):
-    """Tue + Thu, Tue's run open, Tue edited to Fri: the Tue run stands for that week's Fri; Thu opens; next week's Fri opens."""
+    """Anchor: Thursday-to-Wednesday lockouts. Tue + Thu, Tue's run open, Tue edited to Fri: the Tue run stands for the
+    Friday of ITS lockout (four days before it, already past); Thursday opens; the Friday after is in the next lockout
+    and opens."""
     sid = _schedule(reg, ["Tue 19:30", "Thu 19:30"])
     tue = _first_of(reg, "Tue 19:30")
     thu, fri = tue + timedelta(days=2), tue + timedelta(days=3)
@@ -513,21 +518,18 @@ def test_p1_tue_moved_to_fri_still_opens_thursday(reg, rs, monkeypatch):
     _tick(bot, reg, monkeypatch, clock, tue - timedelta(hours=71))
     r1 = rs.events[opened[0]]
     reg.set_schedule(sid, {"slots": ["Fri 19:30", "Thu 19:30"]}, "t")
-    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, fri)
+    own_fri = rc.occurrence_stamp(reg, tue - timedelta(days=4))
+    assert reg.config.roster(r1.team)["stands_for"] == own_fri
     _tick(bot, reg, monkeypatch, clock, thu - timedelta(hours=71))
-    assert _starts(rs, opened) == [tue, thu] and r1.stands_for == rc.occurrence_stamp(reg, fri), "Thursday opens; the run file knows"
+    assert _starts(rs, opened) == [tue, thu] and r1.stands_for == own_fri, "Thursday opens; the run file knows"
     _done(rs, r1)
     _tick(bot, reg, monkeypatch, clock, fri - timedelta(hours=71))
-    assert _starts(rs, opened) == [tue, thu], "that week's Friday is the Tuesday run's"
-    rs.events[opened[1]].state = "cancelled"
-    rs.save(rs.events[opened[1]], "harness")
-    _tick(bot, reg, monkeypatch, clock, fri + timedelta(days=7) - timedelta(hours=71))
-    assert fri + timedelta(days=7) in _starts(rs, opened), "the next Friday opens"
+    assert _starts(rs, opened) == [tue, thu, fri], "the Friday after Tuesday is in the next lockout: it opens"
 
 
 def test_p2_a_finished_run_stands_for_nothing_new(reg, rs, monkeypatch):
-    """Weekly Sat, Sat's run done, then edited to Tue: the done run is never stamped. That week's Tuesday was before the
-    Saturday (in the past, never due); the FOLLOWING Tuesday opens."""
+    """Anchor: Thursday-to-Wednesday lockouts. Weekly Sat, Sat's run done, then edited to Tue: the done run is never
+    stamped; the Tuesday after the Saturday (same lockout, nothing holds it) opens."""
     sid = _schedule(reg, "Sat 19:30")
     sat = _first_of(reg, "Sat 19:30")
     bot, opened = _scheduler(reg, rs)
@@ -543,6 +545,7 @@ def test_p2_a_finished_run_stands_for_nothing_new(reg, rs, monkeypatch):
 
 
 def test_p3_a_cancelled_run_stands_for_nothing(reg, rs, monkeypatch):
+    """Anchor: Thursday-to-Wednesday lockouts. Tue's run cancelled, then edited to Wed: Wednesday opens."""
     sid = _schedule(reg, "Tue 19:30")
     tue = _first_of(reg, "Tue 19:30")
     bot, opened = _scheduler(reg, rs)
@@ -557,6 +560,8 @@ def test_p3_a_cancelled_run_stands_for_nothing(reg, rs, monkeypatch):
 
 
 def test_p4_tue_moved_to_sat_with_its_run_open_opens_no_second_run(reg, rs, monkeypatch):
+    """Anchor: Thursday-to-Wednesday lockouts. Tue edited to Sat with Tue's run open: the run stands for its own
+    lockout's Saturday (three days before it); the Saturday after is in the next lockout and opens."""
     sid = _schedule(reg, "Tue 19:30")
     tue = _first_of(reg, "Tue 19:30")
     sat = tue + timedelta(days=4)
@@ -565,6 +570,25 @@ def test_p4_tue_moved_to_sat_with_its_run_open_opens_no_second_run(reg, rs, monk
     _tick(bot, reg, monkeypatch, clock, tue - timedelta(hours=71))
     r1 = rs.events[opened[0]]
     reg.set_schedule(sid, {"slots": "Sat 19:30"}, "t")
+    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, tue - timedelta(days=3))
+    _done(rs, r1)
+    _tick(bot, reg, monkeypatch, clock, sat - timedelta(hours=71))
+    assert _starts(rs, opened) == [tue, sat], "one run per lockout: Saturday is the next one's"
+
+
+def test_p4_on_a_monday_week_stands_for_that_saturday(reg, rs, monkeypatch):
+    """Anchor: a raid with no first opening reads Monday-to-Sunday weeks. Tue edited to Sat with Tue's run open: that
+    week's Saturday is the Tuesday run's and doesn't open; the next Saturday does."""
+    sid = _schedule(reg, "Tue 19:30", anchor=WEEKLY_LOCKOUT)
+    monkeypatch.setattr(reg, "first_open", lambda instance: None)  # no anchor: Monday weeks (its runs still open from 1 Jan)
+    tue = _first_of(reg, "Tue 19:30")
+    sat = tue + timedelta(days=4)
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _tick(bot, reg, monkeypatch, clock, tue - timedelta(hours=71))
+    r1 = rs.events[opened[0]]
+    reg.set_schedule(sid, {"slots": "Sat 19:30"}, "t")
+    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, sat)
     _done(rs, r1)
     _tick(bot, reg, monkeypatch, clock, sat - timedelta(hours=71))
     assert _starts(rs, opened) == [tue], "that week's Saturday is the Tuesday run's"
@@ -573,7 +597,8 @@ def test_p4_tue_moved_to_sat_with_its_run_open_opens_no_second_run(reg, rs, monk
 
 
 def test_two_run_times_edited_at_once(reg, rs, monkeypatch):
-    """Tue + Thu → Wed + Fri with Tue's run open: Tue stands for Wed (taken away ↔ added, in order); Fri opens."""
+    """Anchor: Thursday-to-Wednesday lockouts. Tue + Thu → Wed + Fri with Tue's run open: by time from the lockout's
+    start, Thu ↔ Fri and Tue ↔ Wed, so Tue stands for the Wednesday after it (same lockout); Fri opens."""
     sid = _schedule(reg, ["Tue 19:30", "Thu 19:30"])
     tue = _first_of(reg, "Tue 19:30")
     bot, opened = _scheduler(reg, rs)
@@ -590,8 +615,10 @@ def test_two_run_times_edited_at_once(reg, rs, monkeypatch):
 
 
 def test_two_edits_in_a_row(reg, rs, monkeypatch):
-    """Tue → Wed → Thu with Tue's run open: each edit re-decides from the night the run stands for now (its stands_for,
-    else its own occurrence), in its own week: Wed, then Thu. Back to Tue clears it."""
+    """Anchor: Thursday-to-Wednesday lockouts. Tue → Wed → Thu with Tue's run open: each edit re-decides from the night
+    the run stands for now (its stands_for, else its own occurrence), always inside the lockout of its ORIGINAL
+    occurrence: Wed (the day after), then that lockout's Thursday (its first day, already past) — so the Thursday after
+    Tuesday, in the next lockout, opens. Back to Tue clears it."""
     sid = _schedule(reg, "Tue 19:30")
     tue = _first_of(reg, "Tue 19:30")
     bot, opened = _scheduler(reg, rs)
@@ -601,9 +628,11 @@ def test_two_edits_in_a_row(reg, rs, monkeypatch):
     reg.set_schedule(sid, {"slots": "Wed 19:30"}, "t")
     assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, tue + timedelta(days=1))
     reg.set_schedule(sid, {"slots": "Thu 19:30"}, "t")
-    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, tue + timedelta(days=2))
+    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, tue - timedelta(days=5))
+    _tick(bot, reg, monkeypatch, clock, tue + timedelta(days=1) - timedelta(hours=71))
+    assert _starts(rs, opened) == [tue], "Wednesday is not a run time any more"
     _tick(bot, reg, monkeypatch, clock, tue + timedelta(days=2) - timedelta(hours=71))
-    assert _starts(rs, opened) == [tue], "neither Wednesday nor Thursday opens that week"
+    assert _starts(rs, opened) == [tue, tue + timedelta(days=2)], "the Thursday after is the next lockout's"
     reg.set_schedule(sid, {"slots": "Tue 19:30"}, "t")
     assert reg.config.roster(r1.team)["stands_for"] is None, "back to its own night"
 
@@ -655,3 +684,136 @@ def test_the_run_thread_line_names_the_run_and_counts_cards(reg, rs):
     run(bot.reschedule_event(reg, rs, ev, timing={"autofill": False}, by="Officer", by_id=OFFICER_ID))
     assert bot.updates[-1] == "🕒 Barrow Deeps: its own sheet timing set by Officer"
     assert rc.reschedule_refusal(reg, rs, ev, ev.start, {"autofill": False}) == rc.TIMING_SAME
+
+
+# ---------------------------------------------------------------- fix round 3
+
+def test_the_order_run_times_are_typed_in_never_pairs_them(reg, rs, monkeypatch):
+    """Anchor: Thursday-to-Wednesday lockouts. Tue + Thu → typed [Fri, Wed]: by time from the lockout's start, Thu ↔ Fri
+    and Tue ↔ Wed, so Tuesday's run stands for the Wednesday after it and Wednesday doesn't open."""
+    sid = _schedule(reg, ["Tue 19:30", "Thu 19:30"])
+    tue = _first_of(reg, "Tue 19:30")
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _tick(bot, reg, monkeypatch, clock, tue - timedelta(hours=71))
+    r1 = rs.events[opened[0]]
+    reg.set_schedule(sid, {"slots": ["Fri 19:30", "Wed 19:30"]}, "t")
+    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, tue + timedelta(days=1))
+    _tick(bot, reg, monkeypatch, clock, tue + timedelta(days=1) - timedelta(hours=71))
+    assert _starts(rs, opened) == [tue], "Wednesday is Tuesday's run"
+
+
+@pytest.mark.parametrize("order", ["edit then cancel", "cancel then edit"])
+def test_a_cancelled_run_never_holds_the_night_it_stood_for(reg, rs, monkeypatch, order):
+    """Anchor: Thursday-to-Wednesday lockouts. Tue → Wed and Tue's run cancelled, in either order: Wednesday opens."""
+    sid = _schedule(reg, "Tue 19:30")
+    tue = _first_of(reg, "Tue 19:30")
+    wed = tue + timedelta(days=1)
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _tick(bot, reg, monkeypatch, clock, tue - timedelta(hours=71))
+    r1 = rs.events[opened[0]]
+
+    def cancel():
+        r1.state, r1.closed_at = "cancelled", rc.now()
+        rs.save(r1, "harness: cancelled")
+
+    if order == "edit then cancel":
+        reg.set_schedule(sid, {"slots": "Wed 19:30"}, "t")
+        assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, wed)
+        cancel()
+    else:
+        cancel()
+        reg.set_schedule(sid, {"slots": "Wed 19:30"}, "t")
+    _tick(bot, reg, monkeypatch, clock, wed - timedelta(hours=70))
+    assert _starts(rs, opened) == [tue, wed], "Wednesday opens"
+
+
+def test_sunday_to_monday_on_a_wednesday_lockout(reg, rs, monkeypatch):
+    """Anchor: Wednesday 3 PM lockouts (Forever's). Sun → Mon with Sunday's run open: the Monday after is in the same
+    lockout, so the Sunday run stands for it and it doesn't open; the next Monday does."""
+    sid = _schedule(reg, "Sun 19:30", anchor=WED_LOCKOUT)
+    sun = _first_of(reg, "Sun 19:30")
+    mon = sun + timedelta(days=1)
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _tick(bot, reg, monkeypatch, clock, sun - timedelta(hours=71))
+    r1 = rs.events[opened[0]]
+    reg.set_schedule(sid, {"slots": "Mon 19:30"}, "t")
+    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, mon)
+    _done(rs, r1)
+    _tick(bot, reg, monkeypatch, clock, mon - timedelta(hours=70))
+    assert _starts(rs, opened) == [sun], "one run in that lockout"
+    _tick(bot, reg, monkeypatch, clock, mon + timedelta(days=7) - timedelta(hours=71))
+    assert _starts(rs, opened) == [sun, mon + timedelta(days=7)]
+
+
+def test_monday_to_sunday_on_a_wednesday_lockout(reg, rs, monkeypatch):
+    """Anchor: Wednesday 3 PM lockouts. Mon → Sun with Monday's run open: the run stands for its own lockout's Sunday
+    (the day before it, past) — never the next lockout's — so the Sunday after opens."""
+    sid = _schedule(reg, "Mon 19:30", anchor=WED_LOCKOUT)
+    mon = _first_of(reg, "Mon 19:30")
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _tick(bot, reg, monkeypatch, clock, mon - timedelta(hours=71))
+    r1 = rs.events[opened[0]]
+    reg.set_schedule(sid, {"slots": "Sun 19:30"}, "t")
+    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, mon - timedelta(days=1))
+    _done(rs, r1)
+    nxt = mon + timedelta(days=6)
+    _tick(bot, reg, monkeypatch, clock, nxt - timedelta(hours=71))
+    assert _starts(rs, opened) == [mon, nxt], "the next lockout's Sunday opens"
+
+
+def test_a_finished_runs_night_outlives_its_run_dict(reg, rs, monkeypatch):
+    """The cleanup path: a stamped run finishes, cleanup_ephemeral drops its dict after the grace hour; the run file
+    still holds the night it stood for, and that night never opens."""
+    sid = _schedule(reg, "Tue 19:30")
+    tue = _first_of(reg, "Tue 19:30")
+    wed = tue + timedelta(days=1)
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _tick(bot, reg, monkeypatch, clock, tue - timedelta(hours=71))
+    r1 = rs.events[opened[0]]
+    reg.set_schedule(sid, {"slots": "Wed 19:30"}, "t")
+    from datetime import datetime, timezone
+    r1.state, r1.closed_at = "done", (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    rs.save(r1, "harness: finished two hours ago")
+    run(bot.cleanup_ephemeral(reg, rs))
+    assert reg.config.roster(r1.team) is None, "the dict is gone"
+    stored = rc.RaidStore(reg.store, reg.key).events[r1.key]
+    assert stored.stands_for == rc.occurrence_stamp(reg, wed), "the file holds the night"
+    _tick(bot, reg, monkeypatch, clock, wed - timedelta(hours=70))
+    assert _starts(rs, opened) == [tue], "Wednesday never opens"
+
+
+def test_a_timing_edit_reads_no_run_file(reg, rs, monkeypatch):
+    sid = _schedule(reg, "Tue 19:30")
+    rc.open_run(reg, rs, RID, _first_of(reg, "Tue 19:30"), schedule=sid)
+
+    def boom(_reg):
+        raise AssertionError("a timing-only edit read the run files")
+
+    monkeypatch.setattr(rc, "_run_files", boom)
+    reg.set_schedule(sid, {"lock_hours_before": 3}, "t")
+
+
+def test_a_refused_raid_write_puts_the_stamps_back(reg, rs, monkeypatch):
+    """set_raid_overrides with schedules and a bad field: nothing it planned stays on a run dict."""
+    sid = _schedule(reg, "Tue 19:30")
+    ev = rc.open_run(reg, rs, RID, _first_of(reg, "Tue 19:30"), schedule=sid)
+    rows = [{**s, "slots": ["Wed 19:30"]} for s in reg.raid_rows(RID)]
+    real, calls, seen = reg._check_raid, [], {}
+
+    def check(instance):  # the schedules write passes (its stamp is on the dict), the raid's final check refuses
+        calls.append(instance)
+        if len(calls) == 2:
+            seen["stand"] = reg.config.roster(ev.team).get("stands_for")
+            raise RegistryError("refused at the end")
+        return real(instance)
+
+    monkeypatch.setattr(reg, "_check_raid", check)
+    with pytest.raises(RegistryError, match="refused at the end"):
+        reg.set_raid_overrides(RID, {"schedules": rows}, "t")
+    assert seen["stand"] == rc.occurrence_stamp(reg, ev.start + timedelta(days=1)), "the premise: it was stamped"
+    assert "stands_for" not in reg.config.roster(ev.team) and reg.schedule_entry(sid)["slots"] == ["Tue 19:30"]
