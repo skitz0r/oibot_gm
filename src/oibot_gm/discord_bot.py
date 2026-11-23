@@ -515,8 +515,9 @@ class ListenMixin:
 
     async def _schedules_migrate(self) -> None:
         """At start, per guild in a thread: Registry.migrate_schedules (an older file's schedules, lifted at load, saved
-        once — a later start writes nothing and says nothing); one ops line when it saved, and one warning naming any
-        stored schedule that can't be read (left in the file, skipped by every read)."""
+        once — a later start writes nothing and says nothing); one ops line when a raid moved, a warning per raid whose
+        old schedules couldn't be moved (they still read from the raid), and one warning naming any stored schedule that
+        can't be read (left in the file, skipped by every read)."""
         for reg in self.registries.ordered():
             try:
                 lines = await asyncio.to_thread(reg.migrate_schedules)
@@ -525,6 +526,9 @@ class ListenMixin:
                 lines = []
             if lines:
                 await self.ops.emit(reg.config, "info", f"Schedules are now stored at guild level: {' · '.join(lines)}.")
+            refused, reg.schedules_refused = list(getattr(reg, "schedules_refused", None) or []), []
+            for line in refused:  # one per raid left under its raid (it still reads as before)
+                await self.ops.emit(reg.config, "warn", line)
             unread, reg.schedules_unread = list(getattr(reg, "schedules_unread", None) or []), []
             if unread:
                 await self.ops.emit(reg.config, "warn", f"Schedules that can't be read are left in guild.yaml and skipped: {' · '.join(unread)}.")

@@ -464,7 +464,7 @@ class GuildConfig(BaseModel):
     # schedules: WHEN raids run, at guild level — [{id, lineup: [{raid, rosters[, starts]}], kind, slots, …}] (to_stored_schedule);
     # a schedule is known by (its first lineup raid, id). A raid's `default` entry holds its own run times. Read through
     # Registry.raid_def / raid_rows, written through _set_raid_rows — never a raid override's `schedules` / `slots` any more
-    schedules: list[dict] = Field(default_factory=list)
+    schedules: list = Field(default_factory=list)  # list, not list[dict]: an entry that isn't a mapping must not stop the load (it is skipped and named)
     # auras: what the guild has learned about Forever's buffs, over profiles/<game>/buffs.yaml
     buffs: dict[str, dict] = Field(default_factory=dict)  # buff id -> {scope, family, strength, status, note}
     families: dict[str, dict] = Field(default_factory=dict)  # family id -> {name, value: {key: points}, status, note}
@@ -1127,12 +1127,12 @@ def _lift_raid_of(cfg: "GuildConfig", instance: str, game_slots: bool = True) ->
     return len(rows)
 
 
-def lift_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
+def lift_schedules(cfg: "GuildConfig", raids: dict | None = None, refused: list | None = None) -> list[str]:
     """An older guild.yaml held schedules under each raid (`raids.<rid>.schedules`, and `slots` as the `default`
     schedule's run times): move them into cfg.schedules, raids in their stored order, and drop an override left empty.
     → one line per raid moved ("Hyjal Summit: 1 schedule"), [] (nothing changed) when there was nothing to move. A raid
-    that can't be converted keeps its keys exactly as they were, still reads as before, and gets a line with the
-    refusal's own sentence. `raids` (the profile's raid table, optional) only names the raids and tells which ones the
+    that can't be converted keeps its keys exactly as they were and still reads as before: it is never one of the
+    lines; its sentence (the raid's name and the refusal's own words) goes into `refused` when given. `raids` (the profile's raid table, optional) only names the raids and tells which ones the
     game gives run times; the conversion reads cfg alone."""
     raids = raids or {}
     lines = []
@@ -1141,7 +1141,9 @@ def lift_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
         try:
             n = _lift_raid_of(cfg, rid, bool((raids.get(rid) or {}).get("slots")) if rid in raids else True)
         except RegistryError as e:
-            lines.append(f"{name}: not moved — {e}")
+            if refused is not None:
+                why = str(e).rstrip(".")
+                refused.append(f"{name}: its schedules were not moved to guild level and still read from the raid ({why}).")
             continue
         if n is None:
             continue
@@ -2220,7 +2222,8 @@ class Registry:
         p = self.store.root / self.key / "guild.yaml"
         cfg = GuildConfig(**yaml.safe_load(p.read_text()))
         raids = self.base_profile.raids
-        self.schedules_lifted: list[str] = lift_schedules(cfg, raids)
+        self.schedules_refused: list[str] = []  # a raid whose old keys couldn't be lifted: told as a warning, never saved as moved
+        self.schedules_lifted: list[str] = lift_schedules(cfg, raids, self.schedules_refused)
         self.schedules_unread: list[str] = []
         for e in cfg.schedules:
             why = unread_schedule(e)

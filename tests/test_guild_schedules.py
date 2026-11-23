@@ -279,8 +279,9 @@ def test_a_raid_that_cannot_be_lifted_stays_as_it_was(data_root, open_registry):
     assert not [e for e in reg.config.schedules if e["lineup"][0]["raid"] == "barrow_deeps"]
     with pytest.raises(RegistryError) as refused:
         R.norm_schedule({"id": "Not A Key!", "kind": "weekly"})
-    line = next(x for x in reg.schedules_lifted if x.startswith("Barrow Deeps"))
-    assert str(refused.value) in line
+    assert not [x for x in reg.schedules_lifted if "Barrow Deeps" in x]  # a refusal is never told as a move
+    assert len(reg.schedules_refused) == 1 and "Barrow Deeps" in reg.schedules_refused[0]
+    assert str(refused.value) in reg.schedules_refused[0]
     assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 04:00"]  # it still reads as before
     assert reg.raid_def("barrow_deeps")["schedules"] == bad["raids"]["barrow_deeps"]["schedules"]
 
@@ -318,3 +319,62 @@ def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
     assert said[0] == ("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule.")
     assert said[1][0] == "warn" and "late" in said[1][1]
     assert len(said) == 2  # the warning is told once a start, not on every call
+
+
+def _start(reg) -> list[tuple[str, str]]:
+    """The start hook once, as tests/test_recipe_identity.py drives _recipes_migrate: the (level, text) lines it sends."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from oibot_gm.discord_bot import OibotGM
+
+    said: list[tuple[str, str]] = []
+
+    async def emit(cfg, level, text):
+        said.append((level, text))
+
+    asyncio.run(OibotGM._schedules_migrate(SimpleNamespace(registries=SimpleNamespace(ordered=lambda: [reg]), ops=SimpleNamespace(emit=emit))))
+    return said
+
+
+BAD_ROW = {"id": "Not A Key!", "kind": "weekly"}
+
+
+def _refusal() -> str:
+    with pytest.raises(RegistryError) as refused:
+        R.norm_schedule(BAD_ROW)
+    return str(refused.value)
+
+
+def test_a_file_whose_only_old_raid_is_refused_says_no_move_and_commits_nothing(data_root, open_registry):
+    _write_old(data_root, {"raids": {"barrow_deeps": {"slots": ["Tue 04:00"], "schedules": [BAD_ROW]}}})
+    store = GitStore(data_root, push=False)
+    reg = open_registry(store)
+    n0 = commit_count(store)
+    said = _start(reg)
+    assert commit_count(store) == n0
+    assert not [t for _, t in said if t.startswith("Schedules are now stored at guild level")]
+    assert len(said) == 1 and said[0][0] == "warn" and "Barrow Deeps" in said[0][1] and _refusal() in said[0][1]
+    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 04:00"]
+
+
+def test_a_moved_raid_and_a_refused_one_are_told_apart(data_root, open_registry):
+    _write_old(data_root, {"raids": {"onyxias_lair": {"slots": ["Wed 20:00"]}, "barrow_deeps": {"slots": ["Tue 04:00"], "schedules": [BAD_ROW]}}})
+    said = _start(open_registry(GitStore(data_root, push=False)))
+    assert ("info", "Schedules are now stored at guild level: Onyxia's Lair: 1 schedule.") in said
+    warns = [t for lv, t in said if lv == "warn"]
+    assert len(warns) == 1 and "Barrow Deeps" in warns[0] and _refusal() in warns[0] and "Onyxia" not in warns[0]
+
+
+def test_a_stored_entry_that_is_not_a_mapping_is_kept_skipped_and_named(data_root, open_registry):
+    good = {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 19:30"]}
+    _write_old(data_root, {"schedules": ["just some words", good]})
+    store = GitStore(data_root, push=False)
+    reg = open_registry(store)
+    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 19:30"]
+    assert len(reg.schedules_unread) == 1
+    reg.set_raid_override("barrow_deeps", "slots", "Thu 20:00", "t")
+    on_disk = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())["schedules"]
+    assert "just some words" in on_disk and reg.raid_def("barrow_deeps")["slots"] == ["Thu 20:00"]
+    warns = [t for lv, t in _start(reg) if lv == "warn"]
+    assert len(warns) == 1 and "can't be read" in warns[0]
