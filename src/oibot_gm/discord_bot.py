@@ -513,6 +513,27 @@ class ListenMixin:
             if res["matched"]:
                 await self.ops.emit(reg.config, "info", professions.migrated_line(res))
 
+    async def _schedules_migrate(self) -> None:
+        """At start, per guild in a thread: Registry.migrate_schedules (an older file's schedules, lifted at load, saved
+        once — a later start writes nothing and says nothing); one ops line when it saved, and one warning naming any
+        stored schedule that can't be read (left in the file, skipped by every read)."""
+        for reg in self.registries.ordered():
+            try:
+                lines = await asyncio.to_thread(reg.migrate_schedules)
+            except Exception as e:  # noqa: BLE001 — a start never fails on it; the next start tries again
+                log.warning("schedules: migration of %s failed (%s)", reg.key, type(e).__name__)
+                lines = []
+            if lines:
+                await self.ops.emit(reg.config, "info", f"Schedules are now stored at guild level: {' · '.join(lines)}.")
+            unread, reg.schedules_unread = list(getattr(reg, "schedules_unread", None) or []), []
+            if unread:
+                await self.ops.emit(reg.config, "warn", f"Schedules that can't be read are left in guild.yaml and skipped: {' · '.join(unread)}.")
+
+    async def _start_migrations(self) -> None:
+        """The start's migrations in order: recipes, then schedules."""
+        await self._recipes_migrate()
+        await self._schedules_migrate()
+
     def _memory_rebuild(self) -> None:
         """At start, in a thread: the index from the rows, then the model once (seconds) when any guild remembers."""
         if mem.MEMORIES is None:
@@ -1400,7 +1421,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             self.loop.create_task(asyncio.to_thread(self._memory_rebuild))
         if not getattr(self, "_recipes_booted", False):  # armory link §4.3: typed recipes matched to the game's list, once a start
             self._recipes_booted = True
-            self.loop.create_task(self._recipes_migrate())
+            self.loop.create_task(self._start_migrations())  # + schedules lifted to the guild level, saved once
         print(f"oibot_GM online as {self.user} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · loot sessions: {len(self.events)}")
         for err in self.registries.load_errors:  # a guild that didn't load has no ops channel to tell
             print(f"guild NOT loaded — {err}")

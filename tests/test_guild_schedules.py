@@ -175,3 +175,146 @@ def test_a_follow_on_given_as_a_map_keeps_its_start_and_text_never_has_one():
     for bad in (0, -5, "soon", True):
         with pytest.raises(RegistryError):
             R.parse_follow({"raid": OTHER, "starts": bad})
+
+
+# ---- Task 3: an older guild.yaml is lifted when it is read, and saved once at start
+import subprocess  # noqa: E402
+
+import yaml  # noqa: E402
+
+from conftest import GUILD, OFFICER_ROLE, OWNER  # noqa: E402
+from oibot_gm.registry import Registry  # noqa: E402
+from oibot_gm.store import GitStore  # noqa: E402
+
+OLD = {
+    "raids": {
+        "hyjal_summit_forever": {"first_open": "2026-12-15T15:00:00-08:00",
+                                 "schedules": [{"id": "tuesday", "kind": "weekly", "slots": ["Tue 18:30"], "follow": {"raid": "barrow_deeps", "rosters": 2}}]},
+        "barrow_deeps": {"confirm_hours_before": 12, "slots": ["Tue 04:00"],
+                         "schedules": [{"id": "default", "rosters": 2}]},
+        "onyxias_lair": {"slots": ["Wed 20:00"]},
+    },
+}
+
+
+def base_config() -> dict:
+    """The minimal GuildConfig kwargs conftest's data_root writes."""
+    return {"key": GUILD, "name": "Demo Guild", "game_profile": "forever", "discord_guild_id": 1, "owner_discord_id": OWNER,
+            "timezone": "America/Los_Angeles", "officer_role_ids": [OFFICER_ROLE]}
+
+
+def _write_old(data_root, cfg: dict) -> None:
+    """conftest's guild.yaml with `cfg` on top, committed: a file as an older bot left it."""
+    (data_root / GUILD / "guild.yaml").write_text(yaml.safe_dump({**base_config(), **copy.deepcopy(cfg)}, sort_keys=False))
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", "old file"], cwd=data_root, check=True)
+
+
+@pytest.fixture
+def old_store(data_root):
+    _write_old(data_root, OLD)
+    return GitStore(data_root, push=False)
+
+
+@pytest.fixture
+def open_registry(profile):
+    return lambda store: Registry(store, GUILD, profile)
+
+
+def commit_count(store) -> int:
+    return int(subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=store.root, check=True, capture_output=True, text=True).stdout)
+
+
+def test_lifting_moves_every_raid_and_is_idempotent():
+    cfg = R.GuildConfig(**{**base_config(), **copy.deepcopy(OLD)})
+    lines = R.lift_schedules(cfg)
+    assert len(lines) == 3
+    assert cfg.schedules == [
+        {"id": "tuesday", "lineup": [{"raid": "hyjal_summit_forever", "rosters": 1}, {"raid": "barrow_deeps", "rosters": 2}], "kind": "weekly", "slots": ["Tue 18:30"]},
+        {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 2}], "slots": ["Tue 04:00"]},
+        {"id": "default", "lineup": [{"raid": "onyxias_lair", "rosters": 1}], "slots": ["Wed 20:00"]},
+    ]
+    assert cfg.raids == {"hyjal_summit_forever": {"first_open": "2026-12-15T15:00:00-08:00"}, "barrow_deeps": {"confirm_hours_before": 12}}
+    assert R.lift_schedules(cfg) == [] and len(cfg.schedules) == 3
+
+
+def test_an_old_file_reads_at_once(old_store, open_registry):
+    reg = open_registry(old_store)
+    assert [s["id"] for s in reg.schedules("hyjal_summit_forever")] == ["tuesday"]
+    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 04:00"]
+    assert reg.schedules_lifted
+    assert "Hyjal Summit: 1 schedule" in reg.schedules_lifted
+
+
+def test_the_lift_is_committed_once(old_store, open_registry):
+    reg = open_registry(old_store)
+    n0 = commit_count(old_store)
+    assert len(reg.migrate_schedules()) == 3 and commit_count(old_store) == n0 + 1
+    assert reg.migrate_schedules() == [] and commit_count(old_store) == n0 + 1
+    assert open_registry(old_store).schedules_lifted == []
+
+
+def test_a_preview_copy_never_commits_the_lift(old_store, open_registry):
+    reg = open_registry(old_store)
+    n0 = commit_count(old_store)
+    reg.shadow().migrate_schedules()
+    assert commit_count(old_store) == n0
+    assert reg.schedules_lifted  # the live registry still owes its save
+
+
+def test_a_raid_rev_is_the_same_before_and_after_the_lift_is_saved(old_store, open_registry):
+    reg = open_registry(old_store)
+    revs = {rid: reg.config_rev(f"raids:{rid}") for rid in OLD["raids"]}
+    reg.migrate_schedules()
+    again = open_registry(old_store)
+    assert {rid: again.config_rev(f"raids:{rid}") for rid in OLD["raids"]} == revs
+
+
+def test_a_raid_that_cannot_be_lifted_stays_as_it_was(data_root, open_registry):
+    bad = copy.deepcopy(OLD)
+    bad["raids"]["barrow_deeps"]["schedules"].append({"id": "Not A Key!", "kind": "weekly"})
+    _write_old(data_root, bad)
+    reg = open_registry(GitStore(data_root, push=False))
+    assert reg.config.raids["barrow_deeps"] == bad["raids"]["barrow_deeps"]
+    assert [s["id"] for s in reg.schedules("hyjal_summit_forever")] == ["tuesday"]  # the other raids moved
+    assert not [e for e in reg.config.schedules if e["lineup"][0]["raid"] == "barrow_deeps"]
+    with pytest.raises(RegistryError) as refused:
+        R.norm_schedule({"id": "Not A Key!", "kind": "weekly"})
+    line = next(x for x in reg.schedules_lifted if x.startswith("Barrow Deeps"))
+    assert str(refused.value) in line
+    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 04:00"]  # it still reads as before
+    assert reg.raid_def("barrow_deeps")["schedules"] == bad["raids"]["barrow_deeps"]["schedules"]
+
+
+def test_a_stored_entry_that_cannot_be_read_is_skipped_and_named(data_root, open_registry):
+    good = {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 19:30"]}
+    broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}], "kind": "weekly", "slots": ["Wed 20:00"]}
+    _write_old(data_root, {"schedules": [good, broken]})
+    reg = open_registry(GitStore(data_root, push=False))
+    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 19:30"]
+    assert [s["id"] for s in reg.schedules("barrow_deeps")] == ["default"]
+    assert len(reg.schedules_unread) == 1 and "late" in reg.schedules_unread[0] and "Barrow Deeps" in reg.schedules_unread[0]
+    reg.set_raid_override("barrow_deeps", "slots", "Thu 20:00", "t")  # a write of that raid leaves it where it was
+    assert broken in reg.config.schedules
+    assert reg.raid_def("barrow_deeps")["slots"] == ["Thu 20:00"]
+
+
+def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
+    import asyncio
+    from types import SimpleNamespace
+
+    from oibot_gm.discord_bot import OibotGM
+
+    broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
+    _write_old(data_root, {**OLD, "schedules": [broken]})
+    reg = open_registry(GitStore(data_root, push=False))
+    said: list[tuple[str, str]] = []
+
+    async def emit(cfg, level, text):
+        said.append((level, text))
+
+    bot = SimpleNamespace(registries=SimpleNamespace(ordered=lambda: [reg]), ops=SimpleNamespace(emit=emit))
+    asyncio.run(OibotGM._schedules_migrate(bot))
+    asyncio.run(OibotGM._schedules_migrate(bot))
+    assert said[0] == ("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule.")
+    assert said[1][0] == "warn" and "late" in said[1][1]
+    assert len(said) == 2  # the warning is told once a start, not on every call

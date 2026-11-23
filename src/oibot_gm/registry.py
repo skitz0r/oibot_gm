@@ -1048,6 +1048,109 @@ def from_stored_schedule(entry: dict) -> tuple[str, dict]:
     return lineup[0]["raid"], row
 
 
+def unread_schedule(entry) -> str | None:
+    """Why a stored guild-level entry can't be read (from_stored_schedule's refusal), or None when it reads. Such an
+    entry stays in the file untouched, and every read skips it."""
+    try:
+        if not isinstance(entry, dict) or not str(entry.get("id") or "").strip():
+            raise RegistryError("A schedule needs an id.")
+        from_stored_schedule(entry)
+    except RegistryError as e:
+        return str(e)
+    return None
+
+
+def _raid_rows_of(cfg: "GuildConfig", instance: str) -> list[dict]:
+    """A raid's guild-level entries in the row shape (Registry.raid_rows), stored order, unreadable entries skipped."""
+    import copy
+
+    return [copy.deepcopy(from_stored_schedule(e)[1]) for e in cfg.schedules if _lead_raid(e) == instance and unread_schedule(e) is None]
+
+
+def _set_raid_rows_of(cfg: "GuildConfig", instance: str, rows: list[dict]) -> None:
+    """Replace a raid's readable entries in the guild-level list with `rows` (Registry._set_raid_rows). Other raids'
+    entries, and an entry that can't be read, stay where they are; the raid's block goes where its first readable
+    entry was, or at the end."""
+    new = [to_stored_schedule(instance, r) for r in rows]
+    cur = cfg.schedules
+    mine = [_lead_raid(e) == instance and unread_schedule(e) is None for e in cur]
+    first = mine.index(True) if True in mine else len(cur)
+    cfg.schedules = [e for e, m in zip(cur[:first], mine) if not m] + new + [e for e, m in zip(cur[first:], mine[first:]) if not m]
+
+
+def _raid_override_of(cfg: "GuildConfig", instance: str) -> dict:
+    """A raid's guild changes in the shape an override had before schedules moved (Registry.raid_override)."""
+    out = dict(cfg.raids.get(instance, {}) or {})
+    scheds = []
+    for r in _raid_rows_of(cfg, instance):
+        if r["id"] == DEFAULT_SCHEDULE:
+            if "slots" in r:
+                out["slots"] = r.pop("slots")
+            if len(r) == 1:
+                continue  # nothing of its own left: the run times are the whole of it
+        scheds.append(r)
+    if scheds:
+        out["schedules"] = scheds
+    return out
+
+
+def _lift_raid_of(cfg: "GuildConfig", instance: str, game_slots: bool = True) -> int | None:
+    """THE conversion of one raid's old override keys (`slots` = the `default` schedule's run times, `schedules`) into
+    guild-level entries: `default` first, then the stored order; both keys dropped. What the guild-level list already
+    holds for the raid wins, as raid_override reads it. An empty `slots` list is kept as `default`'s only where it
+    hides the game's run times (`game_slots`: the profile gives the raid some; unknown = kept). → how many schedules
+    the raid now has, None when there was nothing to move. A refusal (RegistryError) changes nothing. No save."""
+    over = cfg.raids.get(instance)
+    if not isinstance(over, dict) or not ({"slots", "schedules"} & set(over)):
+        return None
+    view = _raid_override_of(cfg, instance)
+    olds = view.get("schedules") or []
+    if not isinstance(olds, list):
+        raise RegistryError("schedules must be a list of schedules")
+    rows = [norm_schedule(r) for r in olds]
+    if "slots" in view:
+        slots = parse_slots(view.get("slots") or [])
+        if slots or game_slots:
+            dflt = next((r for r in rows if r["id"] == DEFAULT_SCHEDULE), None)
+            if dflt is None:
+                rows.insert(0, {"id": DEFAULT_SCHEDULE})
+                dflt = rows[0]
+            dflt["slots"] = slots
+    dflt = next((r for r in rows if r["id"] == DEFAULT_SCHEDULE), None)
+    if dflt is not None:
+        rows = [dflt] + [r for r in rows if r is not dflt]
+    for r in rows:
+        to_stored_schedule(instance, r)  # every row checked before anything changes
+    over.pop("slots", None)
+    over.pop("schedules", None)
+    _set_raid_rows_of(cfg, instance, rows)
+    return len(rows)
+
+
+def lift_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
+    """An older guild.yaml held schedules under each raid (`raids.<rid>.schedules`, and `slots` as the `default`
+    schedule's run times): move them into cfg.schedules, raids in their stored order, and drop an override left empty.
+    → one line per raid moved ("Hyjal Summit: 1 schedule"), [] (nothing changed) when there was nothing to move. A raid
+    that can't be converted keeps its keys exactly as they were, still reads as before, and gets a line with the
+    refusal's own sentence. `raids` (the profile's raid table, optional) only names the raids and tells which ones the
+    game gives run times; the conversion reads cfg alone."""
+    raids = raids or {}
+    lines = []
+    for rid in list(cfg.raids):
+        name = (raids.get(rid) or {}).get("name") or rid
+        try:
+            n = _lift_raid_of(cfg, rid, bool((raids.get(rid) or {}).get("slots")) if rid in raids else True)
+        except RegistryError as e:
+            lines.append(f"{name}: not moved — {e}")
+            continue
+        if n is None:
+            continue
+        if not cfg.raids.get(rid):
+            cfg.raids.pop(rid, None)
+        lines.append(f"{name}: {n} schedule{'' if n == 1 else 's'}")
+    return lines
+
+
 def schedule_value(field: str, value):
     """One schedule setting, validated and in its stored form. None = not set (a cadence field then inherits the raid's)."""
     if field in SCHEDULE_CADENCE and (value is None or str(value).strip().lower() in INHERIT_WORDS):
@@ -2111,8 +2214,33 @@ class Registry:
                 "Say move to also move the open runs with the clock.")
 
     def load_config(self) -> GuildConfig:
+        """guild.yaml as a GuildConfig, an older file's schedules lifted to the guild level in memory (lift_schedules —
+        saved once by migrate_schedules at start). Keeps the lift's lines in `schedules_lifted` and, per stored entry
+        that can't be read, a line in `schedules_unread` (checked here once; every read skips it)."""
         p = self.store.root / self.key / "guild.yaml"
-        return GuildConfig(**yaml.safe_load(p.read_text()))
+        cfg = GuildConfig(**yaml.safe_load(p.read_text()))
+        raids = self.base_profile.raids
+        self.schedules_lifted: list[str] = lift_schedules(cfg, raids)
+        self.schedules_unread: list[str] = []
+        for e in cfg.schedules:
+            why = unread_schedule(e)
+            if why is not None:
+                rid = _lead_raid(e)
+                name = (raids.get(rid) or {}).get("name") or rid or "a schedule with no raid"
+                sid = e.get("id") if isinstance(e, dict) else None
+                self.schedules_unread.append(f"{name} · {sid or 'no id'}: {why}")
+        return cfg
+
+    def migrate_schedules(self, by: str = "migration") -> list[str]:
+        """Save an older file's lifted schedules (load_config) once: one commit when the load lifted anything, then
+        nothing on later calls. → the lift's lines, [] when nothing was saved. A preview copy never writes."""
+        if getattr(self, "_shadow", False) or not self.schedules_lifted:
+            return []
+        with self.config_lock:
+            lines = self.schedules_lifted
+            self.save_config(f"schedules moved to the guild level (by {by})", notify=False)  # a failure keeps the lines: the next start tries again
+            self.schedules_lifted = []
+        return lines
 
     def save_config(self, message: str, notify: bool = True) -> None:
         with self.config_lock:
@@ -4346,37 +4474,20 @@ class Registry:
 
     def raid_rows(self, instance: str) -> list[dict]:
         """The raid's schedules in the row shape (norm_schedule: rosters and follow on the row), from the guild-level
-        list in stored order. The `default` row carries the raid's run times as `slots`."""
-        import copy
-
-        return [copy.deepcopy(from_stored_schedule(e)[1]) for e in self.config.schedules if _lead_raid(e) == instance]
+        list in stored order. The `default` row carries the raid's run times as `slots`. An entry that can't be read
+        (unread_schedule) is skipped."""
+        return _raid_rows_of(self.config, instance)
 
     def _set_raid_rows(self, instance: str, rows: list[dict]) -> None:
         """Replace the raid's entries in the guild-level list with `rows` (the row shape). Other raids' entries keep
         their order; the raid's block stays where its first entry was, or goes at the end. No save."""
-        new = [to_stored_schedule(instance, r) for r in rows]
-        cur = self.config.schedules
-        first = next((i for i, e in enumerate(cur) if _lead_raid(e) == instance), len(cur))
-        before = [e for e in cur[:first] if _lead_raid(e) != instance]
-        after = [e for e in cur[first:] if _lead_raid(e) != instance]
-        self.config.schedules = before + new + after
+        _set_raid_rows_of(self.config, instance, rows)
 
     def raid_override(self, instance: str) -> dict:
         """The guild's changes to a raid as one map, in the shape a raid override had before schedules moved to the
         guild level: config.raids[instance] plus `slots` (the `default` row's run times, when it has them) and
         `schedules` (the other rows, and `default` without its run times when it has settings of its own)."""
-        out = dict(self.config.raids.get(instance, {}) or {})
-        scheds = []
-        for r in self.raid_rows(instance):
-            if r["id"] == DEFAULT_SCHEDULE:
-                if "slots" in r:
-                    out["slots"] = r.pop("slots")
-                if len(r) == 1:
-                    continue  # nothing of its own left: the run times are the whole of it
-            scheds.append(r)
-        if scheds:
-            out["schedules"] = scheds
-        return out
+        return _raid_override_of(self.config, instance)
 
     def _snapshot_raid(self, instance: str) -> tuple:
         """What a raid write may change — its override and the guild-level list — so a refusal can put both back."""
@@ -4394,24 +4505,10 @@ class Registry:
 
     def _lift_raid(self, instance: str) -> None:
         """An override still holding the old `slots` / `schedules` keys (a file from before schedules moved): move what
-        they hold into the guild-level rows — the rows the write then starts from — and drop both keys. What the
-        guild-level list already holds wins, as raid_override reads it. Run by every raid write before it changes
-        anything; the caller's snapshot puts it back on a refusal. No save."""
-        over = self.config.raids.get(instance)
-        if not over or not ({"slots", "schedules"} & set(over)):
-            return
-        view = self.raid_override(instance)
-        rows = [norm_schedule(r) for r in view.get("schedules") or []]
-        slots = parse_slots(view.get("slots") or [])
-        if slots or "slots" in view and (self.profile.raids.get(instance) or {}).get("slots"):
-            dflt = next((r for r in rows if r["id"] == DEFAULT_SCHEDULE), None)
-            if dflt is None:
-                dflt = {"id": DEFAULT_SCHEDULE}
-                rows.insert(0, dflt)
-            dflt["slots"] = slots
-        over.pop("slots", None)
-        over.pop("schedules", None)
-        self._set_raid_rows(instance, rows)
+        they hold into the guild-level rows — the rows the write then starts from — and drop both keys (the one
+        conversion, _lift_raid_of, as lift_schedules uses it). Run by every raid write before it changes anything; the
+        caller's snapshot puts it back on a refusal. No save."""
+        _lift_raid_of(self.config, instance, bool((self.profile.raids.get(instance) or {}).get("slots")))
 
     def _prune_raid(self, instance: str) -> None:
         """An override left empty is removed."""
