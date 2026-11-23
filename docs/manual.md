@@ -754,8 +754,8 @@ tools list the library and withdraw or restore a version; they never upload or g
 ## 4. Raids, runs and the signup cycle
 
 A **raid** is an instance and its rules: size, lockout, expected duration, its **limits** (the fewest and most
-tanks / healers / dps a run takes), and — what drives everything — its **slots** and **a run's week** (when a sheet
-opens, locks and must be confirmed by). At launch: **Barrow Deeps**
+tanks / healers / dps a run takes), and — what drives everything — its **slots**. **A run's week** (when a sheet
+opens, locks and must be confirmed by) belongs to each schedule, below. At launch: **Barrow Deeps**
 (10-player, 3-day lockout guess), **Hyjal Summit** (20-player, weekly), **Onyxia's Lair** (40-player,
 5-day like Classic). Each raid has a **first opens at** (seeded 9 Dec 2026, 3:00 PM PST for all three); no
 sheet opens before it. The owner sets all of this with `/gm config raid`, on the Raids page, or in plain

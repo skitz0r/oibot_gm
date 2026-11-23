@@ -77,6 +77,30 @@ def test_a_default_schedule_on_the_games_run_times_keeps_its_own_timing(reg, mon
     assert reg.schedule_def(RID, "default")["confirm_hours_before"] == 12
 
 
+def test_clearing_the_run_times_keeps_the_timing_set_on_the_default_schedule(reg):
+    """A stored value is never replaced: run times cleared and set again, the officer's confirm-by stays."""
+    reg.set_schedule(RID, "default", {"slots": "Tue 19:30", "confirm_hours_before": 12}, "t")
+    reg.set_raid_override(RID, "slots", "", "t")
+    assert entry(reg, RID, "default")["confirm_hours_before"] == 12
+    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
+    assert entry(reg, RID, "default")["confirm_hours_before"] == 12
+
+
+def test_a_whole_list_write_keeps_a_default_schedule_without_run_times(reg):
+    reg.set_schedule(RID, "default", {"slots": "Tue 19:30", "confirm_hours_before": 12}, "t")
+    reg.set_raid_override(RID, "slots", "", "t")
+    reg.set_schedule(RID, "alt", {"kind": "weekly", "slots": "Sat 20:00"}, "t")  # the raid's whole list is written
+    assert entry(reg, RID, "default")["confirm_hours_before"] == 12
+    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
+    assert reg.schedule_def(RID, "default")["confirm_hours_before"] == 12
+
+
+def test_a_default_schedule_that_says_nothing_is_still_dropped(reg):
+    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
+    reg.set_raid_override(RID, "slots", "", "t")
+    assert R._raid_rows_of(reg.config, RID) == [] and reg.schedules(RID) == []
+
+
 def test_raid_def_is_effective_raid(reg):
     assert reg.raid_def(RID) == R.effective_raid(reg.profile.raids[RID], reg.raid_override(RID))
 

@@ -1390,9 +1390,14 @@ def effective_raid(base: dict, over: dict) -> dict:
     return out
 
 
-def _bare_default(row: dict) -> bool:
-    """A `default` row with nothing of its own but its sheet timing (no run times, no name, no weights …): dropped."""
-    return set(row) <= {"id", *SCHEDULE_TIMING}
+def _bare_default(row: dict, rd: dict) -> bool:
+    """A `default` row that says nothing: no run times, no name, no weights …, and every timing value it holds is what
+    a new row would be seeded with against the effective raid `rd` (write_out_timing). Such a row is dropped; one with
+    timing an officer set is kept, so a stored value is never replaced."""
+    if not set(row) <= {"id", *SCHEDULE_TIMING}:
+        return False
+    seed = write_out_timing({"id": row["id"]}, rd)
+    return all(row[k] == seed[k] for k in SCHEDULE_TIMING if k in row)
 
 
 def write_out_timing(row: dict, rd: dict) -> dict:
@@ -4667,8 +4672,12 @@ class Registry:
         their order; the raid's block stays where its first entry was, or goes at the end. Every row is stored with its
         sheet timing written out (write_out_timing) against the profile's raid and the raid's override — a value a row
         holds stays, a missing one is seeded from what the row read (after the lift: the game's suggestion). No save."""
-        rd = effective_raid(self.profile.raids.get(instance, {}) or {}, self.config.raids.get(instance) or {})
+        rd = self._seed_raid(instance)
         _set_raid_rows_of(self.config, instance, [write_out_timing(r, rd) for r in rows])
+
+    def _seed_raid(self, instance: str) -> dict:
+        """What a row's missing timing is seeded from: the profile's raid and the raid's override (no schedules)."""
+        return effective_raid(self.profile.raids.get(instance, {}) or {}, self.config.raids.get(instance) or {})
 
     def raid_override(self, instance: str) -> dict:
         """The guild's changes to a raid as one map, in the shape a raid override had before schedules moved to the
@@ -5081,7 +5090,7 @@ class Registry:
                 dflt["slots"] = slots
             else:
                 dflt.pop("slots", None)
-            self._set_raid_rows(instance, [r for r in rows if not (r is dflt and _bare_default(r))])
+            self._set_raid_rows(instance, [r for r in rows if not (r is dflt and _bare_default(r, self._seed_raid(instance)))])
             value = ", ".join(self.slot_label(x) for x in slots) or "no run times"  # the reply and change log read 12-hour
         elif field == "schedules":  # the raid's whole list (the wizard's and set_schedule's one write), into the guild-level list
             if not isinstance(value, list):
@@ -5102,8 +5111,8 @@ class Registry:
                 rows.insert(0, {"id": DEFAULT_SCHEDULE, **keep})
             elif dflt is not None and "slots" not in dflt and keep:
                 dflt.update(keep)
-            if dflt is not None and _bare_default(dflt) and not (self.profile.raids.get(instance) or {}).get("slots"):
-                rows = [r for r in rows if r is not dflt]  # nothing of its own but timing, and no run times at all
+            if dflt is not None and _bare_default(dflt, self._seed_raid(instance)):
+                rows = [r for r in rows if r is not dflt]  # it says nothing: no run times, no setting of its own
             self._set_raid_rows(instance, rows)
             named = [e["id"] for e in rows if not (e["id"] == DEFAULT_SCHEDULE and set(e) <= {"id", "slots", *SCHEDULE_TIMING})]
             value = ", ".join(named) or "no schedules of its own"
