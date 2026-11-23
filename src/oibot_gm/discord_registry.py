@@ -1294,7 +1294,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         view = overview_post_view(reg, ico) if officer_view and reg.config.roster_channel_id else None
         await interaction.response.send_message(embed=e, ephemeral=True, **({"view": fade(view, interaction)} if view else {}))
 
-    @roster.command(name="comp", description="Aims: what readiness compares the guild with, per role, class or spec (limits stay the owner's)")
+    @roster.command(name="comp", description="Minimums: the fewest of a role, class or spec a raid's runs need")
     async def roster_comp(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:  # flows_config.CompTargetsWizard: only the targets block of the Group make-up screen → configops (authorize_ops + apply_ops)
@@ -1561,7 +1561,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"ask audience → {audience.value}")
         await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
 
-    @config.command(name="raid", description="Owner: a raid's rules — run times, a run's week, make-up, weights, lockout, notes")
+    @config.command(name="raid", description="Officers: a raid's rules — schedules, make-up, seat weights, lockout, notes")
     async def cfg_raid(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if reg:

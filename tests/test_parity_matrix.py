@@ -54,8 +54,8 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_reopen": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/reopen", "mcp": "reopen_run"},
     # comp targets (phase 3, RD-12): /roster comp, the Readiness page + the Raids page's Desired comp (typed `comp` changes), MCP;
     # comp_groups is plain text only on every surface (D48): /gm change, the officer pages' Tell the bot box, plain_change
-    "comp_target": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_comp_target"},
-    "comp_target_clear": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_comp_target"},
+    "comp_target": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_minimum"},
+    "comp_target_clear": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_minimum"},
     "comp_groups": {"discord": "slash:gm change", "web": "POST /api/ops/change", "mcp": "plain_change"},
     "pin": {"discord": "flow:raid_set", "web": "POST /api/run/{key}/pin", "mcp": "pin"},
     "policy_append": {"discord": "flow:rule", "web": "POST /api/policy/{doc}/append", "mcp": "policy_append"},  # the one append verb (design §5.45)

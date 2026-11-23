@@ -59,7 +59,7 @@ def test_refused_raid_override_is_not_kept(reg):
     with pytest.raises(RegistryError, match="belongs to each schedule"):
         reg.set_raid_override("barrow_deeps", "nudge_hours_before", "30", "t")
     assert "barrow_deeps" not in reg.config.raids
-    with pytest.raises(RegistryError, match="no upper limit"):
+    with pytest.raises(RegistryError, match="Set a role's minimum as a minimum: at least 3 tanks"):
         reg.set_raid_override("barrow_deeps", "tank_max", "3", "t")
     assert "barrow_deeps" not in reg.config.raids and reg.minimums("barrow_deeps")["tank"] == 2
 
@@ -87,12 +87,16 @@ def test_set_raid_override_bools_weights_policy(reg):
 
 
 def test_set_raid_override_comp_and_reset(reg):
-    reg.set_raid_override("barrow_deeps", "healer_min", "3", "t")
+    for field in ("healer_min", "healer_max", "tank_min", "dps_min"):  # a minimum is set as a minimum (D16), never on raid_set
+        with pytest.raises(RegistryError, match="Set a role's minimum as a minimum: at least 3 "):
+            reg.set_raid_override("barrow_deeps", field, "3", "t")
+    assert "barrow_deeps" not in reg.config.raids
+    reg.set_minimums("barrow_deeps", {"healer": {"min": 3}}, "t")
     assert reg.config.raids["barrow_deeps"]["minimums"] == {"healer": {"min": 3}}
     with pytest.raises(RegistryError, match="no upper limit"):
-        reg.set_raid_override("barrow_deeps", "healer_max", "4", "t")
+        reg.set_minimums("barrow_deeps", {"healer": {"min": 3, "max": 4}}, "t")
     with pytest.raises(RegistryError, match="more than the 10"):
-        reg.set_raid_override("barrow_deeps", "tank_min", "11", "t")
+        reg.set_minimums("barrow_deeps", {"tank": {"min": 11}}, "t")
     reg.set_raid_override("barrow_deeps", "slots", "tue 19:30, Thursday 20:00", "t")
     assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 19:30", "Thu 20:00"]
     assert reg.clear_raid_override("barrow_deeps", "t")

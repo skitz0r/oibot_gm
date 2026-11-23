@@ -162,7 +162,7 @@ def test_rosters_2_aims_the_lock_at_two_when_roles_allow(reg, rs):
     opened(reg)
     reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
     reg.set_schedule(RID, "default", {"rosters": 2}, "t")
-    reg.set_raid_overrides(RID, {"tank_min": 1, "healer_min": 1}, "t")
+    reg.set_minimums(RID, {"tank": {"min": 1}, "healer": {"min": 1}}, "t")
     t = rc.slot_starts(reg, RID, reg.now_local(), 24 * 14)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
     roles = by_role(reg)
@@ -248,8 +248,10 @@ def test_config_schedules_add_edit_and_save_in_one_commit(reg, store, owner):
         await submit_multi(h, name="Alt run", nights=["Sat"], hour="20", minute="0")
         assert "Added **Alt run**: Saturdays 8:00 PM" in h.text and "Next runs" in h.text and "20:00" not in h.text
         await h.pick("Change this schedule", "cadence")
+        await h.pick("Pick a run's week", "custom")
+        assert "The game's suggestion (6 hours before)" in [o.label for o in h.modal._items["confirm_hours_before"].options]
         await h.submit(h.modal, signup_lead_hours="inherit", nudge_hours_before="inherit", lock_hours_before="12", confirm_hours_before="inherit", fill_ask_hours="2")
-        assert "locks 12 hours before" in h.text and "confirm by 6 hours before (the raid's)" in h.text
+        assert "locks 12 hours before" in h.text and "confirm-by 6 hours before" in h.text and "the raid's" not in h.text  # its own nine values
         await h.pick("Change this schedule", "rosters")
         await h.pick("Rosters per run", "2")
         assert "2 rosters" in h.text and "the sheet advertises 2 × 10 seats" in h.text  # rc.rosters_copy (phase 3)
@@ -293,7 +295,7 @@ def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, store, ow
         assert "Paused" in h.text
         await h.pick("Change this schedule", "behaviour")
         await h.pick("Change a switch", "nudge=off")
-        assert "the raid's" in h.text or "the raid’s" in h.text
+        assert "Nudge the unanswered → off." in h.text and "the game's suggestion" in h.text  # a switch set back goes to the game's suggestion
         await h.press("Back")
         await h.pick("Change this schedule", "remove")
         await h.press("Remove")
@@ -310,14 +312,14 @@ def test_plain_text_schedule_ops_describe_in_words_and_apply(reg, store):
     op = ConfigOp(op="schedule_set", target=RID, field="alt.slots", value="Sat 20:00")
     assert configops.describe(reg, op).startswith("Barrow Deeps: new schedule alt — Sat 8:00 PM — after it: Barrow Deeps · Weekly: next Sat ")
     assert "20:00" not in configops.describe(reg, op)
-    with pytest.raises(RegistryError, match="needs the owner"):
-        configops.apply(reg, op, "Officer", is_owner=False)
-    assert configops.apply(reg, op, "Owner", is_owner=True) == "Barrow Deeps · Weekly: new schedule, Saturdays 8:00 PM"
+    assert configops.apply(reg, op, "Officer", is_owner=False) == "Barrow Deeps · Weekly: new schedule, Saturdays 8:00 PM"  # officers (D8)
     lock = ConfigOp(op="schedule_set", target=RID, field="alt.lock_hours_before", value="12")
     assert configops.describe(reg, lock) == "Barrow Deeps · Weekly: lock hours before: 24 hours before → lock hours before: 12 hours before"
     configops.apply(reg, lock, "Owner", is_owner=True)
-    back = ConfigOp(op="schedule_set", target=RID, field="alt.lock_hours_before", value="inherit")
-    assert configops.describe(reg, back).endswith("12 hours before → lock hours before: the raid's (24 hours before)")
+    back = ConfigOp(op="schedule_set", target=RID, field="alt.lock_hours_before", value="inherit")  # back to what a new schedule starts with
+    assert configops.describe(reg, back).endswith("12 hours before → lock hours before: the game's suggestion (24 hours before)")
+    split = ConfigOp(op="schedule_set", target=RID, field="alt.split_policy", value="inherit")  # a split goes back to the raid's (C6)
+    assert configops.describe(reg, split).endswith("→ split policy: the raid's (balanced)")
     configops.apply(reg, ConfigOp(op="schedule_set", target=RID, field="alt.name", value="Alt run"), "Owner", is_owner=True)
     lk = ConfigOp(op="schedule_set", target=RID, field="reset.lockout", value="1, 3 at 20:00")
     assert configops.describe(reg, lk).startswith("Barrow Deeps: new schedule reset — days of each lockout, day 1 and 3, 8:00 PM — after it: Barrow Deeps · ")

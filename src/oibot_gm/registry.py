@@ -347,8 +347,8 @@ PLAIN_GROUPS: dict[str, tuple[str, list[str], str]] = {
     "self": ("Own record", ["registered"], "I'll be away Nov 1–3 · make Xanthe my main · I can't make tonight"),
     "members": ("Other people's records", ["officers"], "rank Jonny raider · Mira is away next week · turn Kessa's DMs off"),
     "runs": ("Runs", ["officers"], "lock tonight's Barrow Deeps · Xanthe confirmed for tonight · pin Jonny in tonight · fill the empty seats"),
-    "comp": ("Comp & policy", ["officers"], "we want 3–4 healers in Barrow Deeps · add a loot rule"),
-    "raids": ("Raids & auras", ["owner"], "Barrow Deeps runs Tue and Thu 7:30 pm · fortitude is party-wide"),
+    "comp": ("Raids, schedules and policy", ["officers"], "Barrow Deeps runs Tue 7:30 pm · at least 3 healers in Barrow Deeps · add a loot rule"),
+    "raids": ("Auras", ["owner"], "fortitude is party-wide"),
     "setup": ("Guild setup", ["owner"], "post raid sheets in #signups · add @Raid Lead as an officer role"),
     "test": ("Test bench", ["officers"], "seed 20 puppets · clear the test bench"),
     "loot": ("Loot council", ["officers"], "award the Syphon to Eltam instead — tanks progression · confirm the rest · tier the Robe S for holy priests"),
@@ -1641,6 +1641,19 @@ COMP_ROLE_WORDS = {"tank": ("tank", "tanks"), "healer": ("healer", "healers"), "
 # a raid's make-up is one minimum per role or class (design D16): the refusals every surface shows
 NO_UPPER_LIMIT = "A minimum has no upper limit. Give only the minimum."
 MINIMUM_ON_RAID = "Minimums belong to the raid. Set them on the raid, not on one run."
+
+
+def role_limit_refusal(field: str, value=None) -> str:
+    """raid_set's old role fields (tank_min … dps_max) in one sentence pointing to the minimum (design D16): 'Set a
+    role's minimum as a minimum: at least 3 tanks.' — the number given, else N; damage dealers are melee or ranged."""
+    role = str(field).split("_")[0]
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        n = None
+    words = (f"{n if n is not None else 'N'} melee or ranged" if role == "dps"
+             else _comp_words(role, n) if n is not None else f"N {COMP_ROLE_WORDS.get(role, (role, role))[1]}")
+    return f"Set a role's minimum as a minimum: at least {words}."
 
 
 def _comp_words(role: str, n: int) -> str:
@@ -5069,7 +5082,7 @@ class Registry:
             return slot
         cls, _, spec = slot.partition(":")
         if cls not in self.profile.classes or (spec and spec not in self.profile.classes[cls]):
-            raise RegistryError(f"unknown comp slot '{slot}' (a role, a class or Class:Spec)")
+            raise RegistryError(f"“{slot[:40]}” isn't a role, a class or a spec. Use tank, healer, melee, ranged, a class like Paladin, or Paladin:Holy.")
         return slot
 
     def comp_slot_words(self, slot: str) -> str:
@@ -5102,7 +5115,7 @@ class Registry:
                 continue
             if not isinstance(t, dict):
                 raise RegistryError(f"{words}: a minimum is a number and an optional reason.")
-            if t.get("max") not in (None, ""):
+            if "max" in t:  # one number per slot: any upper limit is refused, even an empty one
                 raise RegistryError(NO_UPPER_LIMIT)
             try:
                 n = int(t.get("min") or 0)
@@ -5174,9 +5187,10 @@ class Registry:
                     raise RegistryError(f"{name}: day {max(s['days'])} is past the end of a {lockout}-day lockout")
 
     def _apply_raid_override(self, instance: str, field: str, value, by: str, commit: bool = True) -> str:
-        """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max
+        """A raid's own setting (officers, design D8): lockout_days | duration_hours | first_open | notes | auto
         | slots | split_policy | loot_auto_distribute | weight_rank/main/sat_out/signup_order | schedules (the whole list).
-        Sheet timing (SCHEDULE_TIMING) is each schedule's own: refused with TIMING_ON_SCHEDULE."""
+        Sheet timing (SCHEDULE_TIMING) is each schedule's own: refused with TIMING_ON_SCHEDULE; the old role limits
+        (tank_min … dps_max) with role_limit_refusal — a minimum is Registry.set_minimums."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
         if field in SCHEDULE_TIMING:  # sheet timing is each schedule's own (C7): refused before anything changes
@@ -5263,23 +5277,7 @@ class Registry:
                 over["first_open"] = t.isoformat()
             value = self.local12(over["first_open"]) if over.get("first_open") else "no first lockout set — weekly runs start at the next run time; a day-of-lockout schedule needs one"  # stored ISO, shown in words
         elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
-            # the old limit fields: a tank or healer minimum is that role's minimum (design D16); no upper limit
-            role, bound = field.split("_")
-            if bound == "max":
-                raise RegistryError(NO_UPPER_LIMIT)
-            if role == "dps":
-                raise RegistryError("Damage dealers have no minimum of their own. Set one for melee or ranged.")
-            try:
-                n = int(value)
-            except (TypeError, ValueError):
-                raise RegistryError(f"{field} must be a whole number")
-            if n < 0:
-                raise RegistryError(f"{field} can't be negative")
-            size = int(self.raid_def(instance).get("size") or DEFAULT_RAID_SIZE)
-            if n > size:
-                raise RegistryError(f"{slot_words(role)}: at least {n} is more than the {size} a run seats.")
-            mins = over.setdefault("minimums", {})
-            mins[role] = {**min_entry(mins.get(role) or {}), "min": n}
+            raise RegistryError(role_limit_refusal(field, value))  # the old limit fields: a minimum is set as a minimum (set_minimums)
         else:
             raise RegistryError(f"unknown raid field {field}")
         if commit:

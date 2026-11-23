@@ -9,21 +9,26 @@ from oibot_gm.registry import RegistryError
 
 
 def test_raid_set_describe_and_apply(reg):
+    from oibot_gm.registry import TIMING_ON_SCHEDULE
+
     op = ConfigOp(op="raid_set", target="barrow_deeps", field="lock_hours_before", value="12")
-    assert configops.describe(reg, op) == "raid barrow_deeps lock_hours_before: 24 → 12"
-    with pytest.raises(RegistryError, match="needs the owner"):
-        configops.apply(reg, op, "officer", is_owner=False)
-    assert configops.apply(reg, op, "owner", is_owner=True) == "barrow_deeps: lock_hours_before = 12"
-    assert reg.raid_def("barrow_deeps")["lock_hours_before"] == 12
+    assert configops.describe(reg, op) == f"raid barrow_deeps lock_hours_before: {TIMING_ON_SCHEDULE}"  # sheet timing is a schedule's (C7)
+    with pytest.raises(RegistryError, match="Change it on the schedule"):
+        configops.apply(reg, op, "officer", is_owner=False)  # officers edit raids (D8): the refusal is the timing's, not the owner's
     assert configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="weight_rank", value="5")) == "raid barrow_deeps weight_rank: 3 → 5"
-    assert configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="healer_max", value="4")) == "raid barrow_deeps healer_max: 3 → 4"
+    assert configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="weight_rank", value="5"), "officer", is_owner=False) == "barrow_deeps: weight_rank = 5"
+    assert configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="healer_max", value="4")) == \
+        "raid barrow_deeps healer_max: Set a role's minimum as a minimum: at least 4 healers."
     slots = configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Tue 19:30"))
     assert slots.startswith("raid barrow_deeps slots: none → Tue 7:30 PM — after it: Barrow Deeps: next Tue ") and "19:30" not in slots
-    assert configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps")) == "raid barrow_deeps: drop the guild's changes — locks 12 hours before → the game's defaults"
-    configops.apply(reg, ConfigOp(op="raid_reset", target="barrow_deeps"), "owner", is_owner=True)
-    assert reg.raid_def("barrow_deeps")["lock_hours_before"] == 24
-    with pytest.raises(RegistryError, match="nudge must fall"):
+    assert configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps")) == "raid barrow_deeps: drop the guild's changes — weights rank 5 → the game's defaults"
+    configops.apply(reg, ConfigOp(op="raid_reset", target="barrow_deeps"), "officer", is_owner=False)
+    assert reg.raid_def("barrow_deeps")["weights"]["rank"] == 3
+    with pytest.raises(RegistryError, match="Change it on the schedule"):
         configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="nudge_hours_before", value="2"), "owner", is_owner=True)
+    configops.apply(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.slots", value="Sat 20:00"), "officer", is_owner=False)
+    with pytest.raises(RegistryError, match="nudge must fall"):  # the same rule, on the schedule
+        configops.apply(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.nudge_hours_before", value="2"), "officer", is_owner=False)
 
 
 def test_set_channel(reg):

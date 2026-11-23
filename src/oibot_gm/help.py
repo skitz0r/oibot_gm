@@ -122,7 +122,7 @@ def gate_of(path: str) -> str:
         return "officer" if path in ("/guide withdraw", "/guide restore") else "member"
     if path in MEMBER_PATHS or path.startswith("/me ") or path == "/gm change":  # /gm change: the plain-text permissions decide per op
         return "member"
-    if path.startswith("/gm config") and path not in ("/gm config show", "/gm config plain"):  # plain: officers read it (D37)
+    if path.startswith("/gm config") and path not in ("/gm config show", "/gm config plain", "/gm config raid"):  # plain: officers read it (D37); raid: officers edit raids (D8)
         return "owner"
     return "officer"
 
@@ -1065,10 +1065,10 @@ def _readiness(ask: Ask) -> list[str]:
         if d["missing_buffs"]:
             out.append(f"  nobody who could play brings: {_names((b['name'] for b in d['missing_buffs']), 12)}")
         if d["short"]:
-            out.append("  aims short: " + " · ".join(f"{c['key']} {c['have']}/{c['want']} ({c['why'][:90]})" for c in d["short"][:8]))
+            out.append("  minimums short: " + " · ".join(f"{c['key']} {c['have']}/{c['want']} ({c['why'][:90]})" for c in d["short"][:8]))
         if d["comp"]:  # the whole desired comp, met targets too, each with its justification ("what is X's desired comp and why")
-            out.append("  aims: " + " · ".join(f"{c['key']} {c['have']} of {c['want']}+ {c['level']}"
-                                                       + (" (officer)" if c["source"] == "officer" else "") + f" ({(c['note'] or c['why'])[:90]})" for c in d["comp"][:14]))
+            out.append("  minimums: " + " · ".join(f"{c['key']} {c['have']} of at least {c['want']} {c['level']}"
+                                                       + (" (the guild's)" if c["source"] == "officer" else "") + f" ({(c['note'] or c['why'])[:90]})" for c in d["comp"][:14]))
     if plan:
         out.append("who could play: mains by role " + " · ".join(f"{r} {n}" for r, n in plan["by_role"].items())
                    + (" · flex " + "; ".join(f"{r}: {_names(v, 6)}" for r, v in plan["flex"].items()) if plan["flex"] else "")
@@ -1324,14 +1324,16 @@ def core_lines(ask: Ask) -> list[str]:
         except Exception:  # noqa: BLE001
             window = ""
         notes = str(rd.get("notes") or "").strip()
-        lines.append(f"raid {rid} ({rd.get('name', rid)}): size {rd.get('size')}, slots {', '.join(reg.slot_label(x) for x in rd.get('slots') or []) or 'none (nothing opens)'}, sheet opens {rd['signup_lead_hours']}h before, "
-                     f"nudge {'at ' + str(rd['nudge_hours_before']) + 'h before' if rd.get('nudge', True) else 'off'}, locks {rd['lock_hours_before']}h before, confirmations expire {rd['confirm_hours_before']}h before, "
-                     f"fill asks time out after {rd['fill_ask_hours']}h, autofill {rd.get('autofill', True)}, open_dm {rd.get('open_dm', False)}, split {rd.get('split_policy')}, weights {rd.get('weights')}, lockout {rd['lockout_days']}d{window}, duration {rd.get('duration_hours')}h, comp {comp}"
-                     + (f", first open {reg.local12(fo)}" if fo else "") + (f", aims {over['minimums']}" if over.get("minimums") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
+        lines.append(f"raid {rid} ({rd.get('name', rid)}): size {rd.get('size')}, slots {', '.join(reg.slot_label(x) for x in rd.get('slots') or []) or 'none (nothing opens)'}, "
+                     f"split {rd.get('split_policy')}, weights {rd.get('weights')}, lockout {rd['lockout_days']}d{window}, duration {rd.get('duration_hours')}h, minimums {comp or 'none'}"
+                     + (f", first open {reg.local12(fo)}" if fo else "") + (f", the guild's minimums {over['minimums']}" if over.get("minimums") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
                      + (f", changed from the game's default: {', '.join(k for k in over if k not in ('minimums', 'comp_groups'))}" if any(k not in ("minimums", "comp_groups") for k in over) else "")
                      + (f", notes “{_safe(notes)[:120]}{'…' if len(notes) > 120 else ''}”" if notes else ""))
-        for s in reg.schedules(rid):  # when it runs: each schedule in words, its own cadence overrides, its next runs
-            own = reg.schedule_def(rid, s["id"])["schedule"]["own"]
+        for s in reg.schedules(rid):  # when it runs: each schedule in words, its own sheet timing (C7), its next runs
+            sd = reg.schedule_def(rid, s["id"])
+            from .registry import SCHEDULE_TIMING, timing_words
+
+            week = timing_words({k: sd[k] for k in SCHEDULE_TIMING})
             from .raidcycle import next_runs_of
 
             nxt = [reg.local12(t) for t in next_runs_of(reg, rid, s)] if s["kind"] != "pickup" else []
@@ -1339,7 +1341,9 @@ def core_lines(ask: Ask) -> list[str]:
 
             cls = schedule_class(s["kind"])
             regs = reg.regulars(series_key(rid, s["id"])) if cls == "recurring" else []
-            lines.append(f"  schedule {s['id']} “{s['name']}” ({s['kind']}, {cls}): {reg.schedule_label(rid, s)}" + (f"; own settings {own}" if own else ("; the raid's week" if cls == "recurring" else "; the ad hoc defaults (no reminder, no confirmations, lock 2h before, first come)"))
+            lines.append(f"  schedule {s['id']} “{s['name']}” ({s['kind']}, {cls}): {reg.schedule_label(rid, s)}; sheet timing: {week}"
+                         + (f"; split {sd['schedule']['own']['split_policy']}" if sd["schedule"]["own"].get("split_policy") else "")
+                         + ("; first come" if cls == "adhoc" else "")
                          + (f"; regulars {len(regs)}" + (f" ({_names((f'{m.display_name} ({c.label})' for m, c in regs), 12)})" if regs and ask.officer else "") if cls == "recurring" else "")
                          + (f"; next runs {', '.join(nxt)}" if nxt else ""))
     if cfg.buffs or cfg.families:

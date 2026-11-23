@@ -34,13 +34,13 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   tank and healer minimums come from the game, scaled to the run's size; a smaller run (a 10-player run of a 20-player
   raid) scales every minimum the same way. A class or spec short is shown on the run (*short 1 Paladin*) and nobody is
   asked to fill it; only a short tank or healer gets fill asks. Set minimums under **Group make-up** on the Raids or
-  Readiness page, with `/roster comp` or in plain text ("at least 3 healers in Barrow Deeps"). They belong to the raid,
+  Readiness page, with `/roster comp`, in `/gm config raid` › *Minimums* or in plain text ("at least 3 healers in Barrow Deeps"). They belong to the raid,
   never to one run.
 - **A run's week** — when a run's sheet **opens** (a few days before the run; it differs per raid), when those who
   haven't answered get a **reminder** (by default halfway between the opening and the lock), when it **locks** (a day
-  before; the roster is decided then) and when the rostered must **confirm by** (6 hours before). The owner sets them per
-  raid or per schedule on the Raids page or with `/gm config raid`; an ad hoc run locks 2 hours before and, by default,
-  asks nobody to confirm.
+  before; the roster is decided then) and when the rostered must **confirm by** (6 hours before). Officers set them per
+  schedule — each schedule holds its own — on the Raids page or with `/gm config raid`; a new schedule starts with the
+  game's suggestion. An ad hoc run locks 2 hours before and, by default, asks nobody to confirm.
 - **When it runs** — the Raids page's first block per raid: the runs themselves — a sheet open for signup or locked
   right now, the next run an active schedule opens, and (before any sheet has opened) when the first one does. A raid
   with none says so and how to change it (add a schedule; open a run from the Rosters page).
@@ -759,8 +759,8 @@ healers, or of a class a run takes — §1a), and — what drives everything —
 opens, locks and must be confirmed by) belongs to each schedule, below. At launch: **Barrow Deeps**
 (10-player, 3-day lockout guess), **Hyjal Summit** (20-player, weekly), **Onyxia's Lair** (40-player,
 5-day like Classic). Each raid has a **first opens at** (seeded 9 Dec 2026, 3:00 PM PST for all three); no
-sheet opens before it. The owner sets all of this with `/gm config raid`, on the Raids page, or in plain
-text (`raid_set`). Every run is built from its own sheet; a recurring schedule also has **regulars** (below) — the
+sheet opens before it. Officers set all of this — a raid's rules and its schedules — with `/gm config raid`, on the
+Raids page, in plain text (`raid_set`, `schedule_set`) or over MCP. Every run is built from its own sheet; a recurring schedule also has **regulars** (below) — the
 people expected each week — but nobody's answer is ever filled in for them.
 
 A **slot** is a recurring run time in the guild's timezone (US Pacific), e.g. Tue 7:30 PM (on the site and in Discord you pick the weekday and time; nothing is typed). A raid can have
@@ -812,9 +812,9 @@ its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same 
   next joiner gets the seat; a comp-policy *never bench* name keeps a seat even if they joined late. Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. A one-off's
   key ends in `-adhoc` (`bd-1212-2100-adhoc`). The Raids page shows each schedule's class, and for a pickup template
   the editor hides the fields that mean nothing there (signup lead, reminder, DM on open); every value it inherits says
-  where from (*raid* or *ad hoc default*). The owner can change any of them per schedule, including **confirmations**
+  where from (*raid* or *ad hoc default*). Officers can change any of them per schedule, including **confirmations**
   (on/off) and the **who gets a seat** weights — on the Raids page, in plain text, over MCP, or in `/gm config raid`
-  (*Behaviour*: the raid's **Ask the rostered to confirm** switch; per schedule, *Change a switch* → default / on / off).
+  (*Schedules* › a schedule › *Switches and split* → *Change a switch*: the game's suggestion, on or off).
 
 **A second raid the same night (a follow-on).** A schedule (Raids page › *then, the same night* and *its rosters* in the
 schedule's editor; plain text `<schedule>.follow = barrow_deeps x2`) or an ad hoc Open (*Then, the same night* and *Its
@@ -1161,9 +1161,8 @@ standing instructions, officer pins, and the schedule's **weights** (the raid's 
 rank (core > raider > trial), main over alt, sat out last window (matched by member, so a Discord rename keeps it),
 earlier signup, and being one of the schedule's **regulars** on their regular character. An ad hoc run is first come
 instead (see *Recurring and ad hoc* above). A comp-policy line such
-as "at least 3 healers" raises that role's minimum and leaves the others (the raid's tank minimum stays). The owner tunes the weights per raid (*Selection weights* in `/gm config
-raid`, the Raids page, or plain text: "weight rank 5 for Barrow Deeps"); officers read them, and the owner can open
-Raids & auras to others (§8c).
+as "at least 3 healers" raises that role's minimum and leaves the others (the raid's tank minimum stays). Officers tune the weights per raid (*Selection weights* in `/gm config
+raid`, the Raids page, or plain text: "weight rank 5 for Barrow Deeps").
 
 If you can't make a run you joined: press *No thanks* on an open sheet, *Can't make it* on a locked one, or
 `/raid out` (a box asks for an optional note; it goes to the run's updates thread for officers, not to the public sheet). After
@@ -1293,7 +1292,7 @@ edits that new family and leaves the one it shared alone.
   class wants from the raid buffs (one provider per group for a party aura, one paladin per blessing). Set them under
   **Group make-up** on the **Readiness** or Raids page, with `/roster comp` (pick the raid, a role, a class or *A
   particular spec…*, then the number and why), in plain text ("at least 3 healers in Barrow Deeps", "clear the paladin
-  minimum") or MCP `set_comp_target`. One write per raid whichever way. A maximum is refused (*"A minimum has no upper
+  minimum"), in `/gm config raid` › *Minimums*, or MCP `set_minimum`. One write per raid whichever way. A maximum is refused (*"A minimum has no upper
   limit. Give only the minimum."*), so is one run's own (*"Minimums belong to the raid. Set them on the raid, not on
   one run."*) and a minimum past the raid's size. The reason is kept with the minimum and shown by the Readiness page,
   `/ask` (readiness) and MCP `raid_readiness`, next to the line it explains. The group layout (`comp_groups`) stays
@@ -1315,6 +1314,9 @@ edits that new family and leaves the one it shared alone.
 
 ## 7. Officers: day-to-day commands
 
+- Raids and schedules: `/gm config raid` — a raid's rules (its schedules with each one's sheet timing, its minimums,
+  seat weights, lockout and length, first lockout, how one night's groups are made, notes, reset), §8 *Raid rules*.
+  Every officer may; so may the plain-text policy's *Raids, schedules and policy* group (§8c).
 - Registry: `/roster list|confirm|rank|set-main|char|professions|armory|add|remove|members|absences|absent|back|comp` (`comp` = the
   raid's minimums, §6). They take at most a member
   (Discord's own picker) and a fixed choice; the character, rank or schedule is picked from a list and confirmed before anything saves.
@@ -1483,7 +1485,7 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   officer can't post one on the site either, and the apply job checks again who approved it before it applies — a
   game-data change an officer approved before this rule is not applied: it reads **Failed** with "only the owner approves
   a game-data change … (approved by <officer>) — the owner approves it again to apply it");
-  officers approve the rest (aims). Approving records who approved it and when; the apply job on the host (every 15 minutes) carries it out.
+  officers approve the rest (minimums, raid and schedule settings). Approving records who approved it and when; the apply job on the host (every 15 minutes) carries it out.
 - **Dismiss** (officers) gets the same screen (D34): nothing changes, and the review is told not to propose it again
   unless newer news says more. For a game-data change that is a rule, not only a request: a new game-data proposal
   that cites nothing but news a dismissed one cited (in your server or another on the same game version) is refused. Once approved, the button reads **Withdraw approval** — it can still be withdrawn until
@@ -1528,9 +1530,9 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
 
 ## 8. Owner: setup
 
-**Who the owner is.** Each guild has one **owner**: the person with owner-only rights there (channels, raid rules and
-schedules, auras, timezone, recruitment, plain-text permissions, the test bench's setup, ownership transfer) and the
-person MCP acts as. When a server is set up (`/gm config owner` in it), the owner defaults to **the Discord server's
+**Who the owner is.** Each guild has one **owner**: the person with owner-only rights there (channels, auras, timezone,
+recruitment, plain-text permissions, the test bench's setup, ownership transfer) and the person MCP acts as. A raid's
+rules and its schedules are every officer's (§7). When a server is set up (`/gm config owner` in it), the owner defaults to **the Discord server's
 owner**; the setup screen can pick someone else, and `/gm config owner user:` transfers it later. (Discord doesn't tell
 a bot who invited it, so "whoever added the bot" can't be read; the server's owner is the reliable stand-in.)
 
@@ -1702,16 +1704,23 @@ card as it will look. Under Channels the **News** card keeps the news **keywords
 shows the terms that are **always matched** (the game version's names and the raids'), the news channel's state (*Last item
 kept … · N recent items kept*, or *Nothing received yet — is the webhook pointed at the news channel?*) and **Re-read the
 channel** — and per raid
-`/gm config raid`: pick the raid, then a section — Schedules, A run's week (Standard /
-Short notice / Same week, or Custom… hour by hour), Group make-up (the limits, and *Aims…* for the officers' aims), Selection weights, Lockout & length, First lockout
-opens, Behaviour (nudge, fill seats automatically, DM on open, split policy, fill-ask expiry), Notes, Reset. Changes
-collect in a draft; Save shows them as sentences with the next three runs (per schedule) and writes them as one change. Nothing
-opens until a raid has run times. The same settings are on the Raids page and in plain text (`raid_set`).
+**Raid rules (officers).** `/gm config raid`: pick the raid, then a section — Schedules (each with its own sheet
+timing), Minimums, Selection weights, Lockout & length, First lockout opens, How one night's groups are made (the
+split), Notes, Reset. Sheet timing is never the raid's: when a sheet opens, the nudge, the lock, the confirm-by time,
+how long a fill ask waits and the four switches belong to each schedule (*"Sheet timing belongs to each schedule now.
+Change it on the schedule."* answers a try on the raid, on every surface). *Minimums* is the same screen as
+`/roster comp`: a number for a role, class or spec and an optional reason, saved on its own with **Save minimums**
+(a role's old *tank min* in plain text is answered *"Set a role's minimum as a minimum: at least 3 tanks."*). The
+other changes collect in a draft; Save shows them as sentences with the next three runs (per schedule) and writes them
+as one change. Nothing opens until a raid has run times. The same settings are on the Raids page and in plain text
+(`raid_set`, `schedule_set`).
 **Schedules** in `/gm config raid`: a raid with only its own run times opens straight on them (✕ a time to drop it,
 *Add a run time* = nights + hour + minutes, *Add another schedule*); with several, pick one from the list. *Add a
 schedule* asks the kind (weekly nights, days of each lockout, pickup template) and then one form (name, nights or
-lockout days, hour, minutes). *Change this schedule* renames it, sets its rosters per run (1–4), its week (each
-step "Same as the raid" or its own hours), its behaviour (each switch "the raid's", on or off), pauses/resumes it or
+lockout days, hour, minutes). The schedule's screen shows its own sheet timing in full. *Change this schedule*
+renames it, sets its rosters per run (1–4), *A run's week* (Standard / Short notice / Same week, or *Each step…*: each
+step its own hours or *The game's suggestion* — what a new schedule starts with; a pickup template's is *The pickup
+default*), *Switches and split* (each switch the game's suggestion, on or off; the split the raid's or its own), pauses/resumes it or
 removes it. A paused schedule says *Paused — would next run Sat 24 Oct 8:00 PM · nothing opens* (never "Next runs"), and
 changing the rosters per run says *From the next run: the sheet advertises 2 × 10 seats. The run already open keeps its 1 ×
 10.* On the site: the Raids page's **Schedules** block under each raid lists them in words with the next three runs (a
@@ -1726,9 +1735,9 @@ removed. Ana, Bo and Cy come off its regulars and see a notice on their Me page.
 open and keeps its time and sheet, but locks with the raid's weights and no regulars."* — the
 same lines on the wizard, the review, plain text and MCP. If someone changed the raid meanwhile, Pause, Remove and the
 editor's Save say so and write nothing; the page reloads. In plain text: `schedule_set` (e.g. "add an alt run on Saturdays at 8 to Barrow Deeps",
-"Barrow Deeps alt run locks 12 hours before", "make the alt run two rosters") and `schedule_remove`. Limits:
-*Group make-up* in `/gm config raid` ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
-plain text (same for healers and dps).
+"Barrow Deeps alt run locks 12 hours before", "short-notice week for the alt run", "make the alt run two
+rosters") and `schedule_remove`. Minimums: *Minimums* in `/gm config raid` ↔ `/roster comp` ↔ the Readiness page ↔
+"at least 3 healers in Barrow Deeps" in plain text ↔ MCP `set_minimum`.
 
 **Recruitment.** `/gm config recruitment` opens one screen with the whole draft: applications **open or closed**, the
 **note** shown on the Apply screen and the registration card (one line, up to 200 characters; empty clears it), the
@@ -1857,11 +1866,12 @@ really called All or Pending is confirmed alone); "Mira is away
   Nov 1–3" (the diff lists the live sheets those days touch — No thanks, or a rostered seat freed — before anything is
   saved); "Marrow is back, clear her absence" (by start
   date when she has several — the bot lists them as days, e.g. "Fri 1 Mar → Sun 3 Mar, Mon 10 Jun"); "turn DMs off for Marrow" (off: her Confirm and fill asks wait on her Me page; she is still asked, in order).
-- *Raids (owner):* "Barrow Deeps runs Tuesdays and Thursdays at 7:30 PM" (the diff shows the next runs it makes),
-  "short-notice week for Barrow Deeps" (Standard, Short notice or Same week — the same presets as `/gm config
-  raid`: when the sheet opens, the nudge, the lock and the confirmation deadline together), "lock Barrow Deeps 12 hours
-  before", schedules (`schedule_set`, above), "put Barrow Deeps back to the defaults" (the diff lists the guild's changes it
-  drops in words: run times, first open, hours). Settings that only make sense together are saved as one change.
+- *Raids and schedules (officers):* "Barrow Deeps runs Tuesdays and Thursdays at 7:30 PM" (the diff shows the next runs it makes),
+  "short-notice week for the Barrow Deeps raid nights" (Standard, Short notice or Same week — the same presets as `/gm config
+  raid`: when the sheet opens, the nudge, the lock and the confirmation deadline together, on one schedule), "the Barrow Deeps
+  raid nights lock 12 hours before", schedules (`schedule_set`, above), "at least 3 healers in Barrow Deeps", "put Barrow Deeps
+  back to the defaults" (the diff lists the guild's changes it drops in words: run times, first open, schedules, minimums).
+  Settings that only make sense together are saved as one change.
 - *Recruitment (owner):* "close applications", "open applications", "set the recruitment note to Looking for
   healers", "add a required question: Why us? — hint: a line or two is plenty", "reword question 2 …", "move the
   logs question up", "remove the question Why us?" (or by number), "@Veterans can register without applying",
@@ -1963,8 +1973,8 @@ record*; someone else's is *Other people's records*):
 | Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles, professions and recipes) and your own answer or confirmation on a run; re-posting a live sheet here (it touches nobody's record, like `/raid sheet`) | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight", "post tonight's sheet here" |
 | Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters, deciding applications | officers | "rank Jonny raider", "Mira is away next week", "accept Nyx" |
 | Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, pins (who the lock rosters), `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight", "pin Jonny in tonight" |
-| Comp & policy — aims and group layout, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "we want 3–4 healers in Barrow Deeps", "add a loot rule" |
-| Raids & auras — raid schedules and settings, buff and family facts | the owner | "Barrow Deeps runs Tue and Thu 7:30 pm" |
+| Raids, schedules and policy — a raid's settings and its schedules (with their sheet timing), minimums and group layout, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "Barrow Deeps runs Tue 7:30 pm", "at least 3 healers in Barrow Deeps", "add a loot rule" |
+| Auras — buff and family facts | the owner | "fortitude is party-wide" |
 | Guild setup — channels, officer roles, timezone, who may ask, the about text, recruitment (applications open/closed, note, questions, invite), starting the local jobs | the owner | "post raid sheets in #signups" |
 | Test bench | officers | "seed 20 puppets", "clear the test bench" |
 | Loot council — open, tick, distribute, award (override, with its reason), confirm, hold or discard, a reason or a correction for an award, end, retire a precedent, item tiers | officers | "give the Syphon to Eltam instead — tanks progression", "confirm the rest", "tier the Robe S for holy priests" |
@@ -2144,13 +2154,13 @@ news post says can make the review read or write another server.
 | `loot_weights` · `set_loot_weights` | the scoring weights with the game's default beside each · change some (`fields` = {path: number or null for the default}; the owner's; `preview=True` first — weights are reviewed) |
 | `distil` | Claude's draft of up to five loot-policy sentences from the active precedents, each with the precedents it rests on — nothing written; add the ones the person wants with `policy_append` |
 | `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`; `follow` ('barrow_deeps x2') = a follow-on the same night from the same signup, §4) |
-| `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days; `follow` = 'barrow_deeps x2' or none, its follow-on) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
+| `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write — its sheet timing (`cadence` = a preset, or each hour and switch; null = the game's suggestion), kind, slots or lockout days, rosters, `follow` = 'barrow_deeps x2' or none · drop a schedule (schedules come back in `list_raids` / `get_raid`, each with its own sheet timing) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
 | `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · the bot builds the groups on the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
 | `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per run) · pause (`paused=true`) or resume the fill engine for one run · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled run) |
 | `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
-| `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, limits, first open…) · back to defaults |
+| `raid_set` · `raid_reset` | a raid's own settings — one, or several as `fields` in one write (slots, weights, lockout and length, split policy, notes, first open; sheet timing is `schedule_set`'s, a minimum `set_minimum`'s) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `set_professions` · `who_can_make` | replace one character's professions — the whole list, each `{id, skill, recipes: [{id} or {name}]}` (a name is looked up in the game's list; a recipe the character already holds that the list doesn't have is kept as it is); `[]` clears; the two-trade rule and the rest are checked as everywhere else; a changed list is refused for a linked character whose professions follow the armory · the game's recipes matching a name (and typed ones somebody makes), each with its crafters, highest skill first, the first 25 and how many more — names only, nobody pinged |
@@ -2165,8 +2175,8 @@ news post says can make the review read or write another server.
 | `policy_get` · `policy_edit` · `policy_append` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full, with what is applied and the waiting draft · replace its text (a draft, the persona too) · add one rule to the loot or comp policy as a draft (refused while another officer's draft waits) · the bot's reading of it (the persona: its text), nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
 | `plain_change` | text → the config ops it means, with current → new, and a `token`; `apply=true` with that token (within ten minutes, once) applies exactly those ops — never a new reading of the text — and refuses a board someone changed since the preview; like Discord's Apply, an op that fails is listed in `refused` with why and the rest still apply (`applied` is what landed, `error` the first failure) (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
 | `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles; the channels the bot listens in and its recent decisions there, `listen` · `listen_recent`) · change it (owner: groups, per-channel modes, DMs, default; listening with `listen`, the whole map {channel: watch or reply}, or `set_listen` for some channels, null = off) |
-| `raid_readiness` | each raid's readiness (§6): who could play against its size, roles with who could cover, buffs nobody brings, the aims with their reasons, short / over cap, mains by role — one raid or all |
-| `set_comp_target` · `list_regulars` · `config_summary` | an officers' aim for a raid (slot = role, class or Class:Spec; `min`, `max`, `note`; `clear=true` drops it; `preview=true` writes nothing — a role aim outside the owner's limits is refused) · a raid's recurring schedules with their regulars, coverage and forecast (`schedule` = one) · the effective configuration in words by section, Host included (what `/gm config show` and the Config page's Overview print) |
+| `raid_readiness` | each raid's readiness (§6): who could play against its size, roles with who could cover, buffs nobody brings, the minimums with their reasons, what is short, mains by role — one raid or all |
+| `set_minimum` · `list_regulars` · `config_summary` | a raid's minimum (slot = role, class or Class:Spec; `min` = at least, no upper limit; `note` = why; `clear=true` drops the guild's so the game's applies; `preview=true` writes nothing) · a raid's recurring schedules with their regulars, coverage and forecast (`schedule` = one) · the effective configuration in words by section, Host included (what `/gm config show` and the Config page's Overview print) |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with the guild's changes marked |
 | `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full (with the consequence of each verdict), approve or dismiss it — a decision a person makes (D8): it needs `OIBOT_MCP_ACTOR` (sent as `X-Oibot-Actor`) naming an officer of the server, and a game-data approval needs that person to be the owner; the token alone is refused. The apply job's steps (applying · applied · failed · reverted, and its "waiting: …" notes) need the job's own `X-Oibot-Job` header, which only the job scripts send — the owner's token alone reports none, and a call with the job header never decides |
 | `job_status` · `get_job_run` · `run_job` | the review and apply jobs: state, last and next run, launchd, recent runs · one run's steps · start a job now (refused when it is running or not installed) |
@@ -2621,9 +2631,9 @@ What `/ask` knows comes from one bounded snapshot the bot builds in code when yo
 dumps; long lists are cut short). Always in it: the guild's channels (a channel the bot can no longer see is marked
 *not found*), officer roles, owner and ask audience; the *about* text, the invite link and the news keywords;
 recruitment (applications open or closed, the note, the guild's questions with their hints); every raid's schedules (in words, with
-their own settings and next runs — *Raid schedule* in the static guide lists each schedule's next three runs too),
-its week (slots, when sheets open, nudge, lock and confirmation times, `fill_ask_hours`, `autofill`, `open_dm`, split
-policy, weights, limits, aims and group layout, which settings the guild changed from the game's default), the raid's
+their own sheet timing — when sheets open, nudge, lock and confirmation times, `fill_ask_hours`, `autofill`, `open_dm` — and
+next runs; *Raid schedule* in the static guide lists each schedule's next three runs too), the raid itself (slots, split
+policy, weights, minimums and group layout, which settings the guild changed from the game's default), the raid's
 notes and the lockout window it is in now; the guild's changes to buffs and stacking families; the test bench; and every live run as the Raids
 page has it — state, nudge / lock / confirmation-expiry times, split strategy, the schedule it came from and how many
 rosters it expects, who joined (character, spec and class) and how many per role, bench, no thanks, who hasn't
@@ -2680,8 +2690,8 @@ Officers get more, only when the question is about it (a few keywords decide; "s
 on" brings the main ones): **status** (data repo and push, LLM spend, the loot feed, uptime, the last ops lines, the
 last ten registry change lines — the analytics change log's from → to — and the last data commits), **applications** (open ones oldest first with the schedules they can make, the last five
 decisions; an applicant's own answers only when you name them), **absences** (the next 30 days, with reasons),
-**readiness** (who could play for each raid against its aims: roles, missing auras, where an aim is short or over cap
-with the reason, and every aim — met ones too — each with its justification), **news** (the last kept
+**readiness** (who could play for each raid against its minimums: roles, missing auras, where a minimum is short
+with the reason, and every minimum — met ones too — each with its reason), **news** (the last kept
 items, every proposal and its state — waiting ones first, then applied, reverted or dismissed with the commit — and the
 review jobs with their last three runs), **loot** (the last precedents with their reasons and the last awards, or a named
 member's; "why did we override …" brings it too — a member asking about loot gets only their own awards), **bank** (the unconfirmed characters first, then every member's characters and rank, who is
@@ -2728,7 +2738,7 @@ Discord screens (the site and MCP; the weights also in plain text); a Claude dra
 the member's "ask the council about an item" thread
 doesn't exist yet; a companion bound to a council with **Bind companion…** is forgotten on a restart (the card offers it
 again). Splits: the **Loot-quality** split philosophy is a greyed placeholder, not built yet (Balanced, Raid one first
-and Rotation work). Buff facts, limits, a run's week and split policy *can* be changed (Auras page, Raids page,
+and Rotation work). Buff facts, minimums, a schedule's week and split policy *can* be changed (Auras page, Raids page,
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
 repository. Regulars are a list of who is expected, never a standing answer: there is no standing availability or
 standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). A follow-on

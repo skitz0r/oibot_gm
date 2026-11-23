@@ -353,10 +353,10 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
 
     @app.post("/api/admin/raid/schedule")
     async def admin_raid_schedule(request: Request):
-        """Change or create one schedule (owner): {instance, id, fields: {setting: value}} — a cadence value of null goes
-        back to the raid's. One registry write (Registry.set_schedule): validated as a whole, one commit."""
+        """Change or create one schedule (officers, D8 — authorize_ops decides it live): {instance, id, fields: {setting:
+        value}} — a sheet-timing value of null goes back to the game's suggestion. One registry write (Registry.set_schedule):
+        validated as a whole, one commit."""
         v, d = await body(request, officer=True)
-        need_owner(v)
         inst, sid = parse(d, InstanceBody).instance, str(d.get("id") or "").strip()
         fields = d.get("fields")
         if not isinstance(fields, dict) or not fields:
@@ -366,26 +366,23 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
 
     @app.post("/api/admin/raid/schedule/remove")
     async def admin_raid_schedule_remove(request: Request):
-        v, d = await body(request, officer=True)
-        need_owner(v)
+        v, d = await body(request, officer=True)  # officers (D8): authorize_ops decides it live
         inst = parse(d, InstanceBody).instance
         res = await translate(v, [{"kind": "schedule_remove", "target": f"{inst}:{str(d.get('id') or '').strip()}"}], d)
         return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"])}
 
     @app.post("/api/admin/raid")
     async def admin_raid(request: Request):
-        """The Raids page's form (owner): only the fields that differ from the raid now, ONE set_raid_overrides write —
-        a refused field leaves the raid exactly as it was."""
+        """The Raids page's form (officers, D8): only the fields that differ from the raid now, ONE set_raid_overrides write —
+        a refused field leaves the raid exactly as it was. Sheet timing is a schedule's (TIMING_ON_SCHEDULE)."""
         v, d = await body(request, officer=True)
-        need_owner(v)
         inst = parse(d, InstanceBody).instance
         res = await translate(v, [{"kind": "raid", "target": inst, "fields": {k: x for k, x in d.items() if k not in ("instance", "revs", "confirmed")}}], d)
         return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"]) or f"{inst}: no changes"}
 
     @app.post("/api/admin/raid/reset")
     async def admin_raid_reset(request: Request):
-        v, d = await body(request, officer=True)
-        need_owner(v)
+        v, d = await body(request, officer=True)  # officers (D8): authorize_ops decides it live
         res = await translate(v, [{"kind": "raid_reset", "target": parse(d, InstanceBody).instance}], d)
         return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"])}
 

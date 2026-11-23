@@ -96,9 +96,9 @@ def test_help_snapshot_hides_not_answered_names_from_members(reg, rs):
     assert "2 not answered" in public and "not answered (regulars): " in officer
 
 
-# ---------------------------------------------------------------- the owner's raid wizard sets confirmations
+# ---------------------------------------------------------------- the raid wizard sets confirmations per schedule (C7)
 
-def test_raid_wizard_toggles_confirmations_for_the_raid_and_a_schedule(reg, monkeypatch):
+def test_raid_wizard_toggles_confirmations_for_each_schedule(reg, monkeypatch):
     import asyncio
 
     from test_flows_config import open_raid
@@ -107,33 +107,38 @@ def test_raid_wizard_toggles_confirmations_for_the_raid_and_a_schedule(reg, monk
     from oibot_gm import discord_registry
     from oibot_gm import flows_config  # noqa: F401 — registers the flows
 
-    monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: True)
+    monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: False)  # an officer (D8)
     monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
     opened(reg)
     reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
-    assert reg.raid_def(RID)["confirm"] is True
+    assert reg.schedule_def(RID, "default")["confirm"] is True and reg.schedule_def(RID, "alt")["confirm"] is True
     h = Harness(reg)
 
     async def go():
         await open_raid(h, reg)
         await h.pick("Pick a section", "behaviour")
-        assert "Ask the rostered to confirm: **on**" in h.text
-        await h.press("Ask the rostered to confirm: on")
-        assert "Ask the rostered to confirm → off" in h.text
+        assert "Ask the rostered to confirm" not in h.text, "the switches are each schedule's own, not the raid's"
         await h.press("Back to the sections")
         await h.pick("Pick a section", "times")
+        await h.pick("Pick a schedule", "default")
+        await h.pick("Change this schedule", "behaviour")
+        assert "Ask the rostered to confirm: **on**" in h.text
+        await h.pick("Change a switch", "confirm=off")
+        assert "Ask the rostered to confirm → off" in h.text and "Ask the rostered to confirm: **off**" in h.text
+        await h.press("Back")
+        await h.press("All schedules")
         await h.pick("Pick a schedule", "alt")
         await h.pick("Change this schedule", "behaviour")
-        await h.pick("Change a switch", "confirm=on")
-        assert "Ask the rostered to confirm: **on**" in h.text
+        await h.pick("Change a switch", "confirm=inherit")
+        assert "Ask the rostered to confirm → the game's suggestion" in h.text
         await h.press("Back")
         await h.press("Back to the sections")
         await h.press("Save")
-        assert "Ask the rostered to confirm" in h.text  # the review names the change
+        assert "ask the rostered to confirm on → **off**" in h.text  # the review names the change
         await h.press("Save")
     asyncio.run(go())
-    assert reg.raid_def(RID)["confirm"] is False
-    assert reg.schedule_def(RID, "alt")["confirm"] is True and reg.schedule_def(RID, "default")["confirm"] is False
+    assert reg.schedule_def(RID, "default")["confirm"] is False
+    assert reg.schedule_def(RID, "alt")["confirm"] is reg.timing_suggestion(RID)["confirm"]
 
 
 # ---------------------------------------------------------------- every open path stamps kind / series / key suffix

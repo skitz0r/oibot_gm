@@ -43,7 +43,7 @@ APP_DIR = HERE / "static" / "app"
 STARTED = time.time()  # fallback when the bot has no start stamp
 from ..constants import LEVEL_WORDS, MARK, MARK_WORDS, ROLES  # noqa: E402 — the order role counts are shown in; the run vocabulary (meta)
 from ..raid_buttons import RUN_WORDS  # noqa: E402 — the run verbs' labels, the Discord buttons' own
-from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE  # noqa: E402
+from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE, SCHEDULE_TIMING  # noqa: E402
 
 ASK_MAX = 1500  # help.answer reads this much of a question
 ASK_DOWN = "The bot can't read sentences right now — use the controls on this page."  # dual interfaces §2.7, LLM down
@@ -1177,7 +1177,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         reg = v.reg
 
         def one(rid: str) -> dict:
-            # the Readiness page's Edit targets (RD-12): the officers' stored targets, the owner's bounds they must sit inside,
+            # the Readiness page's minimums (D16): the guild's stored ones with their reasons, what a run reads (Registry.minimums),
             # and the raid section rev an edit-mode Save sends back (revs["config:raids:<id>"])
             size = int(reg.raid_def(rid).get("size") or DEFAULT_RAID_SIZE)
             r = comp.readiness(reg, rid, rs)
@@ -1193,8 +1193,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             buffs = {b.id: b for b in reg.profile.buffs}  # the page draws missing buffs as icon-only chips (name in the tooltip)
             r["missing_buffs"] = [{**x, "abbr": getattr(buffs.get(x["id"]), "abbr", x["name"][:3]), "colour": getattr(buffs.get(x["id"]), "colour", "#888"),
                                    "art": getattr(buffs.get(x["id"]), "art", None)} for x in r["missing_buffs"]]
-            return {**r, "targets": dict((reg.config.raids.get(rid) or {}).get("minimums") or {}),
-                    "bounds": reg.role_bounds(rid, size), "rev": reg.config_rev(f"raids:{rid}"),
+            return {**r, "minimums": dict((reg.config.raids.get(rid) or {}).get("minimums") or {}),
+                    "minimum": reg.minimums(rid, size), "rev": reg.config_rev(f"raids:{rid}"),
                     "comp_groups": list((reg.config.raids.get(rid) or {}).get("comp_groups") or [])}
         rows = await asyncio.to_thread(lambda: [one(rid) for rid in ids])
         slots = [{"value": r, "label": reg.comp_slot_words(r), "kind": "role"} for r in ROLES]
@@ -2062,10 +2062,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             eff, over, fo = reg.raid_def(rid), reg.raid_override(rid), reg.first_open(rid)
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
-                        "slots": list(eff["slots"]), "slot_labels": [reg.slot_label(x) for x in eff["slots"]], "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
-                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "autofill": bool(eff.get("autofill", True)), "open_dm": bool(eff.get("open_dm", False)), "confirm": bool(eff.get("confirm", True)), "notes": eff.get("notes") or "", "comp": {r: ({"min": n} if (n := reg.minimums(rid).get(r)) else {}) for r in ("tank", "healer", "dps")},
-                        "overridden": sorted(k for k in over if k not in ("minimums", "weights")) + [f"{r}_min" for r in (over.get("minimums") or {}) if r in ("tank", "healer")] + [f"weight_{k}" for k in (over.get("weights") or {})],
-                        "comp_targets": over.get("minimums") or {}, "comp_groups": over.get("comp_groups") or [],
+                        "slots": list(eff["slots"]), "slot_labels": [reg.slot_label(x) for x in eff["slots"]],
+                        # sheet timing is each schedule's own (C7): on `schedules`, never on the raid
+                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "notes": eff.get("notes") or "",
+                        # D16: the guild's own minimums as stored (with their reasons), and what every run reads (Registry.minimums)
+                        "minimums": dict((reg.config.raids.get(rid) or {}).get("minimums") or {}), "minimum": reg.minimums(rid),
+                        "overridden": sorted(k for k in over if k not in ("minimums", "weights", *SCHEDULE_TIMING)) + [f"weight_{k}" for k in (over.get("weights") or {})],
+                        "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "first_open_words": reg.local12(fo) if fo else "", "opened": bool(fo and fo <= now),
                         "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid),
                         "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rs, rid),

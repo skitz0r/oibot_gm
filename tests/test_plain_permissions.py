@@ -57,8 +57,8 @@ SAMPLE = {  # one op per group (the self one has an empty member: the requester)
     "self": lambda g: ConfigOp(op="absence", start="2099-11-01", end="2099-11-03"),
     "members": lambda g: ConfigOp(op="absence", member=g.other.display_name, start="2099-11-01"),
     "runs": lambda g: ConfigOp(op="run_lock", target="barrow_deeps"),
-    "comp": lambda g: ConfigOp(op="comp_target", target="barrow_deeps", field="healer", value="3-4"),
-    "raids": lambda g: ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="x"),
+    "comp": lambda g: ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="x"),  # raids and schedules are officers' (D8)
+    "raids": lambda g: ConfigOp(op="aura_set", target="blood_pact", field="note", value="x"),  # the group id stays: Auras, the owner's
     "setup": lambda g: ConfigOp(op="set", path="timezone", value="Europe/London"),
     "test": lambda g: ConfigOp(op="test", value="seed 3"),
 }
@@ -89,7 +89,7 @@ def test_refusals_say_who_and_where(g):
     member = g.me.discord_id
     assert one(g.reg, SAMPLE["members"](g), member, channel=OPS_CH) == "Only officers can change someone else's absence."
     assert one(g.reg, SAMPLE["runs"](g), member, officer=True, channel=GENERAL_CH) == f"Plain text can't change runs in <#{GENERAL_CH}> — use <#{OPS_CH}> or <#{ANALYTICS_CH}>."
-    assert one(g.reg, SAMPLE["raids"](g), member, officer=True, channel=OPS_CH) == "Only the owner can change raids & auras."
+    assert one(g.reg, SAMPLE["raids"](g), member, officer=True, channel=OPS_CH) == "Only the owner can change auras."
     assert "in DMs" in one(g.reg, SAMPLE["runs"](g), member, officer=True, channel=None)
     assert one(g.reg, SAMPLE["self"](g), 424242, channel=GENERAL_CH) == "Only registered members can change your absences — /register first."
 
@@ -115,7 +115,7 @@ def test_custom_policy_roles_and_channels(g):
     # "everyone" opens a group to unregistered people too; [] = the owner only
     reg.set_plain_policy({"groups": {"test": ["everyone"], "comp": []}, "channels": {}}, "owner")
     assert one(reg, SAMPLE["test"](g), 424242, channel=OPS_CH) is None
-    assert one(reg, SAMPLE["comp"](g), member, officer=True, channel=OPS_CH) == "Only the owner can change comp & policy."
+    assert one(reg, SAMPLE["comp"](g), member, officer=True, channel=OPS_CH) == "Only the owner can change raids, schedules and policy."
 
 
 def test_policy_is_validated_and_stored(g):
@@ -196,7 +196,7 @@ def test_the_rest_of_a_request_still_applies(g, rs):
            ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="x")]
     allowed, refused = check(reg, ops, me.discord_id)
     assert allowed == [ops[0]]
-    assert refused == ["Only officers can change someone else's absence.", "Only the owner can change raids & auras."]
+    assert refused == ["Only officers can change someone else's absence.", "Only officers can change raids, schedules and policy."]
     line = configops.apply(reg, allowed[0], me.display_name, True)
     assert me.display_name in line and reg.members[me.discord_id].absences[-1].start == "2099-11-01"
     assert not any(a.start == "2099-11-01" for a in reg.members[other.discord_id].absences)
@@ -309,10 +309,13 @@ def test_web_plain_change_uses_the_same_check(web_client, g, monkeypatch):
     r = w.c.post("/api/ops/change", json={"text": "x"}, headers=w.as_(w.officer))
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["refused"] == ["Only the owner can change raids & auras."] and [o["op"] for o in d["ops"]] == ["dm"]
+    assert d["refused"] == [] and [o["op"] for o in d["ops"]] == ["raid_set", "dm"]  # officers change raids (D8)
     r = w.c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=w.as_(w.officer))
     assert r.status_code == 200, r.text
-    assert g.reg.members[g.me.discord_id].dm_opt_out and "notes" not in g.reg.config.raids.get("barrow_deeps", {})
+    assert g.reg.members[g.me.discord_id].dm_opt_out and g.reg.config.raids["barrow_deeps"]["notes"] == "bring flasks"
+    req.ops = [ConfigOp(op="aura_set", target="blood_pact", field="note", value="x")]  # auras stay the owner's
+    d = w.c.post("/api/ops/change", json={"text": "x"}, headers=w.as_(w.officer)).json()
+    assert d["refused"] == ["Only the owner can change auras."] and d["ops"] == []
     assert w.c.post("/api/ops/change", json={"text": "x"}, headers=w.as_(w.member)).status_code == 403
     # MCP is the owner: everything
     mcp = {"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"}
@@ -500,7 +503,7 @@ def test_handle_change_and_apply(g):
         log.clear()
         req = ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="x")])
         await handle_change(it, reg, None, None, Feed(), "x", bot=it.client, channel=GENERAL_CH, req=req)
-        assert log == [("followup", "⛔ Only the owner can change raids & auras.\n-# `/gm config plain` shows the whole policy.", {"ephemeral": True})]
+        assert log == [("followup", "⛔ Only officers can change raids, schedules and policy.\n-# `/gm config plain` shows the whole policy.", {"ephemeral": True})]
 
     asyncio.run(go())
 

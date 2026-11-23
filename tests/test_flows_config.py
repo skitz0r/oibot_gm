@@ -67,38 +67,43 @@ def test_raid_config_multi_section_edit_saves_in_one_commit(reg, store, owner):
 
     async def go():
         await open_raid(h, reg)
+        assert "cadence" not in options(h, "Pick a section"), "sheet timing is each schedule's own (C7)"
         await h.pick("Pick a section", "times")
         await h.press("Add a run time")
         assert isinstance(h.modal, fc.MultiForm) and h.modal._items["nights"].max_values == 7
         await submit_multi(h, nights=["Tue", "Thu"], hour="19", minute="30")
         assert "Tue 7:30 PM" in h.text and "Thu 7:30 PM" in h.text and "19:30" not in h.text
-        await h.press("Back to the sections")
-        await h.pick("Pick a section", "cadence")
+        await h.pick("Change this schedule", "cadence")  # the schedule's own week: a preset
         await h.pick("Pick a run's week", "standard")
-        assert "3 unsaved changes" in h.text  # run times + opens + nudge (lock and confirm already match)
+        assert "A run's week → **Standard**" in h.text and "opens 5 days" in h.text
+        await h.pick("Change this schedule", "behaviour")
+        await h.pick("Change a switch", "autofill=off")
+        await h.press("Back")
+        await h.press("Back to the sections")
+        assert "2 unsaved changes" in h.text  # the run times + the schedule (its week and a switch)
         await h.pick("Pick a section", "weights")
         await h.submit(h.modal, rank="5", main="2", sat_out="2", signup_order="1")
         await h.pick("Pick a section", "length")
         await h.submit(h.modal, lockout_days="5", duration_hours="4.5")
         await h.pick("Pick a section", "behaviour")
-        await h.press("Fill seats automatically: on")
-        await h.pick("How to split a full slot", "rotation")
+        assert h.buttons() == ["Back to the sections"], "the raid keeps only its split; the switches are each schedule's"
+        await h.pick("How to split a full night", "rotation")
         await h.press("Back to the sections")
         await h.pick("Pick a section", "notes")
         await h.submit(h.modal, notes="Bring fire resistance.")
         assert commits(store) == n0  # nothing is written before Save
         await h.press("Save")
         assert "Next runs" in h.text and "7:30 PM" in h.text and "19:30" not in h.text and "Rotation" in h.text
-        assert "4½ hours" in h.text and "5 days" in h.text and "5 days before" in h.text
+        assert "4½ hours" in h.text and "5 days" in h.text
         await h.press("Save")
         assert "✅" in h.text and h.screen["view"] is None
     asyncio.run(go())
     assert commits(store) == n0 + 1  # ONE commit for every section
-    rd = reg.raid_def("barrow_deeps")
+    rd, sd = reg.raid_def("barrow_deeps"), reg.schedule_def("barrow_deeps", "default")
     assert rd["slots"] == ["Tue 19:30", "Thu 19:30"]
-    assert (rd["signup_lead_hours"], rd["nudge_hours_before"], rd["lock_hours_before"], rd["confirm_hours_before"]) == (120, 72, 24, 6)
+    assert (sd["signup_lead_hours"], sd["nudge_hours_before"], sd["lock_hours_before"], sd["confirm_hours_before"]) == (120, 72, 24, 6)
     assert rd["weights"]["rank"] == 5 and rd["lockout_days"] == 5 and rd["duration_hours"] == 4.5
-    assert rd["autofill"] is False and rd["split_policy"] == "rotation" and rd["notes"] == "Bring fire resistance."
+    assert sd["autofill"] is False and rd["split_policy"] == "rotation" and rd["notes"] == "Bring fire resistance."
 
 
 def test_a_refused_cadence_is_caught_in_its_section_and_writes_nothing(reg, store, owner):
@@ -107,16 +112,19 @@ def test_a_refused_cadence_is_caught_in_its_section_and_writes_nothing(reg, stor
 
     async def go():
         await open_raid(h, reg)
-        await h.pick("Pick a section", "cadence")
+        await h.pick("Pick a section", "times")
+        await h.pick("Change this schedule", "cadence")
         await h.pick("Pick a run's week", "custom")
-        await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="24", lock_hours_before="48", confirm_hours_before="6")
+        await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="24", lock_hours_before="48", confirm_hours_before="6", fill_ask_hours="inherit")
         assert h.text.startswith("**Raid rules**\n❌") and "nudge" in h.text
         assert h.buttons() == ["Fix this", "Back to the sections", "Cancel"]
-        await h.press("Fix this")  # the same form, with the refused picks restored
-        chosen = {k: [o.value for o in it.options if o.default] for k, it in h.modal._items.items()}
-        assert chosen["lock_hours_before"] == ["48"] and chosen["nudge_hours_before"] == ["24"]
-        await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="48", lock_hours_before="48", confirm_hours_before="6")
-        assert "3 unsaved changes" in h.text  # opens, nudge and lock differ from what is stored; confirm doesn't
+        await h.press("Fix this")  # back to the schedule, the refused week dropped
+        await h.pick("Change this schedule", "cadence")
+        await h.pick("Pick a run's week", "custom")
+        await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="48", lock_hours_before="48", confirm_hours_before="6", fill_ask_hours="inherit")
+        assert "locks 2 days before" in h.text
+        await h.press("Back to the sections")
+        assert "1 unsaved change" in h.text  # the schedule
         await h.press("Cancel")
     asyncio.run(go())
     assert (reg.config.raids, reg.config.schedules) == before and commits(store) == n0
@@ -127,12 +135,14 @@ def test_a_refusal_at_save_keeps_the_draft_and_leaves_config_and_git_untouched(r
 
     async def go():
         await open_raid(h, reg)
-        await h.pick("Pick a section", "cadence")
-        await h.pick("Pick a run's week", "custom")
-        await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="72", lock_hours_before="24", confirm_hours_before="12")
+        await h.pick("Pick a section", "times")
+        await h.press("Add another schedule")
+        await h.pick("What kind of schedule?", "lockout")
+        await submit_multi(h, name="Reset night", days=["3"], hour="21", minute="0")
+        await h.press("Back to the sections")
         await h.press("Save")
         assert "Save these changes" in h.text
-        reg.set_raid_override("barrow_deeps", "lock_hours_before", 8, "someone else")  # the stored rules move under the wizard
+        reg.set_raid_override("barrow_deeps", "lockout_days", 2, "someone else")  # the stored rules move under the wizard
         n, stored = commits(store), (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
         await h.press("Save")
         assert "❌" in h.text and "Nothing was saved" in h.text and h.buttons() == ["Back to the sections", "Cancel"]
@@ -140,7 +150,7 @@ def test_a_refusal_at_save_keeps_the_draft_and_leaves_config_and_git_untouched(r
         await h.press("Back to the sections")
         assert "unsaved change" in h.text  # the draft is kept
     asyncio.run(go())
-    assert reg.raid_def("barrow_deeps")["confirm_hours_before"] == 6
+    assert not any(s["id"] == "reset-night" for s in reg.schedules("barrow_deeps"))
 
 
 def test_cancel_from_the_hub_writes_nothing(reg, store, owner):
@@ -149,8 +159,10 @@ def test_cancel_from_the_hub_writes_nothing(reg, store, owner):
 
     async def go():
         await open_raid(h, reg)
-        await h.pick("Pick a section", "cadence")
+        await h.pick("Pick a section", "times")
+        await h.pick("Change this schedule", "cadence")
         await h.pick("Pick a run's week", "same_week")
+        await h.press("Back to the sections")
         await h.pick("Pick a section", "notes")
         await h.submit(h.modal, notes="x")
         await h.press("Cancel")
@@ -183,20 +195,22 @@ def test_run_times_add_and_remove_round_trip_through_parse_slots(reg, owner):
     assert slots == ["Sat 21:15"] and parse_slots(slots) == slots
 
 
-def test_group_make_up_pages_past_25_and_sets_one_minimum(reg, owner):
+def test_the_minimums_section_sets_one_minimum_with_a_reason(reg, owner):
     h = Harness(reg)
 
     async def go():
-        await open_raid(h, reg, "onyxias_lair")  # 40-player: 0..40 is two pages
+        await open_raid(h, reg, "onyxias_lair")
         await h.pick("Pick a section", "comp")
-        assert options(h, "Pick a role") == ["tank", "healer"]  # one minimum per role, no upper limit
-        await h.pick("Pick a role", "healer")
-        assert "page 1 of 2" in h.text and "8" in options(h, "Fewest healers")  # opens on the page holding the current minimum
-        await h.pick("Fewest healers", "10")
-        await h.press("Save")
-        await h.press("Save")
+        assert "**Minimums**" in h.text and "at most" not in h.text
+        await h.pick("Set a minimum for…", "healer")
+        assert set(h.modal._items) == {"min", "note"}  # one number and a reason: no upper limit
+        assert "10" in [o.value for o in h.modal._items["min"].options]
+        await h.submit(h.modal, min="10", note="two healing groups")
+        assert "Healers: at least 10 — not saved yet." in h.text
+        await h.press("Save minimums")
+        assert "✅" in h.text and h.buttons() == ["Save minimums", "Back"]  # the block stays open; Back is the raid's hub
     asyncio.run(go())
-    assert reg.raid_def("onyxias_lair")["minimums"]["healer"] == {"min": 10} and reg.minimums("onyxias_lair")["healer"] == 10
+    assert reg.raid_def("onyxias_lair")["minimums"]["healer"] == {"min": 10, "note": "two healing groups"} and reg.minimums("onyxias_lair")["healer"] == 10
 
 
 def _next_dst_change(after: date) -> date:
@@ -253,13 +267,13 @@ def test_reset_clears_the_raid_override(reg, store, owner):
     assert "barrow_deeps" not in reg.config.raids
 
 
-def test_raid_config_is_owner_only(reg, store):
-    h = Harness(reg)  # is_owner not patched: the harness user is not the owner
+def test_raid_config_is_officers_only(reg, store):
+    h = Harness(reg)  # is_officer not patched: the harness user is neither the owner nor an officer (D8: officers edit raids)
     n0 = commits(store)
 
     async def go():
         await FLOWS["raid_config"](h.command(), reg)
-        assert h.text == "Owner only." and h.screen["view"] is None
+        assert h.text == fc.OFFICERS_ONLY and h.screen["view"] is None
     asyncio.run(go())
     assert commits(store) == n0
 

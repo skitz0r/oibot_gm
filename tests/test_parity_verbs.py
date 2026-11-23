@@ -318,7 +318,7 @@ def test_presets_are_shared(reg):
     assert flows_config.PRESETS is presets.PRESETS and flows_misc.TEMPOS is presets.TEMPOS
     f = presets.preset_fields("short")
     assert f == {"signup_lead_hours": "48", "nudge_hours_before": "36", "lock_hours_before": "24", "confirm_hours_before": "12"}
-    reg.set_raid_overrides("barrow_deeps", f, "t")  # legal by construction
+    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00", **f}, "t")  # legal by construction (a run's week is a schedule's)
     start_in, cut = presets.tempo_cutoffs("quick", test_by=7)
     assert start_in == 20 and cut["hard"] == 12 / 60 and cut["test_by"] == 7
     with pytest.raises(ValueError):

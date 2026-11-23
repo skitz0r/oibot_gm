@@ -165,7 +165,7 @@ def test_authorize_ops_by_privilege(reg):
     buff = configops.ops_from_fields(reg, "buff", "blood_pact", {"note": "x"})
     for role in ("member", "officer"):
         allowed, refused = configops.authorize_ops(reg, list(buff), m.discord_id, role=role)
-        assert not allowed and refused == ["Only the owner can change raids & auras — on the site's Raids and Auras pages or with /gm config raid | aura."]
+        assert not allowed and refused == ["Only the owner can change auras — on the site's Auras page or with /gm config aura."]
     assert configops.authorize_ops(reg, list(buff), OWNER, role="owner")[0]
     rank = ConfigOp(op="rank", member=other.display_name, rank="core")
     allowed, refused = configops.authorize_ops(reg, [rank], m.discord_id, role="member")
@@ -321,7 +321,7 @@ def test_privilege_on_the_route_per_role(reg, rs, monkeypatch):
     for uid in (m.discord_id, OFFICER):
         h = as_user(w, uid)
         d = w.c.post(CHANGE, json={"changes": buff, "apply": True}, headers=h).json()
-        assert not d["applied"] and d["refused"][0].startswith("Only the owner can change raids & auras"), d
+        assert not d["applied"] and d["refused"][0].startswith("Only the owner can change auras"), d
     h = as_user(w, m.discord_id)
     d = w.c.post(CHANGE, json={"ops": [{"op": "dm", "value": "off"}], "apply": True}, headers=h).json()  # their own record: allowed (D40: no box, the route still answers)
     assert d["applied"] and reg.members[m.discord_id].dm_opt_out
@@ -374,17 +374,19 @@ def test_admin_aura_reset_translator(owner_client, reg):
 
 
 def test_admin_raid_translator(owner_client, reg):
+    from oibot_gm.registry import TIMING_ON_SCHEDULE
+
     cur = reg.raid_def("barrow_deeps")
-    body = {"instance": "barrow_deeps", "lock_hours_before": cur["lock_hours_before"] + 2, "signup_lead_hours": cur["signup_lead_hours"],
-            "weights": {"rank": int(cur["weights"].get("rank", 0)) + 1}, "comp": {"tank": {"min": 1}}, "nudge": not cur.get("nudge", True)}
-    want = {"lock_hours_before": str(body["lock_hours_before"]), "nudge": "true" if body["nudge"] else "false", "weight_rank": str(body["weights"]["rank"])}
-    if str(((cur.get("comp") or {}).get("tank") or {}).get("min", "")) != "1":
-        want["tank_min"] = "1"
+    body = {"instance": "barrow_deeps", "lockout_days": 5, "signup_lead_hours": cur["signup_lead_hours"],  # an unchanged timing value is no change
+            "weights": {"rank": int(cur["weights"].get("rank", 0)) + 1}, "notes": "bring pots"}
+    want = {"lockout_days": "5", "notes": "bring pots", "weight_rank": str(body["weights"]["rank"])}
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid", body, lambda sh: "; ".join(sh.set_raid_overrides("barrow_deeps", want, "x")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
-    assert owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lock_hours_before": body["lock_hours_before"]}, headers=bearer()).json()["message"] == "barrow_deeps: no changes"
-    r = owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lock_hours_before": 1, "confirm_hours_before": 5}, headers=bearer())
-    assert r.status_code == 400 and "lock must come before" in r.json()["error"]
+    assert owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lockout_days": 5}, headers=bearer()).json()["message"] == "barrow_deeps: no changes"
+    r = owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lock_hours_before": cur["lock_hours_before"] + 2}, headers=bearer())
+    assert r.status_code == 400 and r.json()["error"] == TIMING_ON_SCHEDULE  # sheet timing is a schedule's (C7)
+    r = owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "comp": {"tank": {"min": 1}}}, headers=bearer())
+    assert r.status_code == 400 and r.json()["error"] == "Set a role's minimum as a minimum: at least 1 tank."
 
 
 def test_admin_schedule_translators(owner_client, reg):

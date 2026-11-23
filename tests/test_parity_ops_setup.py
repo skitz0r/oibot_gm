@@ -171,39 +171,55 @@ def test_channel_clear(reg, rs):
 # ---------------------------------------------------------------- raids: presets, previews, coalesce
 
 def test_cadence_preset(reg):
-    op = ConfigOp(op="raid_set", target="barrow_deeps", field="cadence", value="short")
+    """A run's week preset is a schedule's (C7): `<id>.cadence` sets its four hours in one write; on the raid it is refused."""
+    from oibot_gm.registry import TIMING_ON_SCHEDULE
+
+    raid = ConfigOp(op="raid_set", target="barrow_deeps", field="cadence", value="short")
+    assert configops.describe(reg, raid) == f"raid barrow_deeps cadence: {TIMING_ON_SCHEDULE}"
+    with pytest.raises(RegistryError, match="Change it on the schedule"):
+        configops.apply(reg, raid, "Owner", True)
+    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")
+    op = ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.cadence", value="short")
     d = configops.describe(reg, op)
-    assert d.startswith("raid barrow_deeps — a run's week: opens 48h") and d.endswith("→ short (opens 48h, nudge 36h, lock 24h, confirm by 12h before)")
+    assert d.startswith("Barrow Deeps · Weekly: ") and d.endswith("→ signup lead hours: 48 hours before, nudge hours before: 36 hours before, "
+                                                                 "lock hours before: 24 hours before, confirm hours before: 12 hours before")
     configops.apply(reg, op, "Owner", True)
-    rd = reg.raid_def("barrow_deeps")
-    assert {f: float(rd[f]) for f in presets.CADENCE_FIELDS} == {f: float(v) for f, v in presets.preset_fields("short").items()}
-    assert "a run's week is one of the presets: " in configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="cadence", value="lazy"))
+    sd = reg.schedule_def("barrow_deeps", "alt")
+    assert {f: float(sd[f]) for f in presets.CADENCE_FIELDS} == {f: float(v) for f, v in presets.preset_fields("short").items()}
+    assert "a run's week is one of the presets: " in configops.describe(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.cadence", value="lazy"))
 
 
 def test_coalesce_saves_settings_that_only_work_together(reg):
-    ops = [ConfigOp(op="raid_set", target="barrow_deeps", field="lock_hours_before", value="60"),
-           ConfigOp(op="raid_set", target="barrow_deeps", field="signup_lead_hours", value="100"),
+    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")
+    ops = [ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.lock_hours_before", value="60"),
+           ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.signup_lead_hours", value="100"),
            ConfigOp(op="dm", value="off"),
-           ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="bring pots")]
+           ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.name", value="Alt run")]
     with pytest.raises(RegistryError, match="signups must open before they lock"):
         configops.apply(reg, ops[0], "Owner", True)  # alone, the first can't apply
     merged = configops.coalesce(ops)
-    assert [type(o).__name__ for o in merged] == ["MergedOp", "ConfigOp", "ConfigOp"], "only consecutive ops on one raid merge"
+    assert [type(o).__name__ for o in merged] == ["MergedOp", "ConfigOp", "ConfigOp"], "only consecutive ops on one schedule merge"
     assert configops.describe(reg, merged[0]).endswith("(saved together)")
     configops.apply(reg, merged[0], "Owner", True)
-    rd = reg.raid_def("barrow_deeps")
-    assert (rd["lock_hours_before"], rd["signup_lead_hours"]) == (60, 100)
-    sched = configops.coalesce([ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.name", value="Alt run"),
-                                ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.slots", value="Sat 20:00")])
+    sd = reg.schedule_def("barrow_deeps", "alt")
+    assert (sd["lock_hours_before"], sd["signup_lead_hours"]) == (60, 100)
+    raid = configops.coalesce([ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="bring pots"),
+                               ConfigOp(op="raid_set", target="barrow_deeps", field="lockout_days", value="5")])
+    assert len(raid) == 1
+    configops.apply(reg, raid[0], "Owner", True)  # consecutive raid settings: one write
+    assert (reg.raid_def("barrow_deeps")["notes"], reg.raid_def("barrow_deeps")["lockout_days"]) == ("bring pots", 5)
+    sched = configops.coalesce([ConfigOp(op="schedule_set", target="barrow_deeps", field="new.name", value="New run"),
+                                ConfigOp(op="schedule_set", target="barrow_deeps", field="new.slots", value="Sun 20:00")])
     assert len(sched) == 1
     configops.apply(reg, sched[0], "Owner", True)  # a new schedule's name before its run times: fine as one write
-    assert next(s for s in reg.schedules("barrow_deeps") if s["id"] == "alt")["name"] == "Alt run"
+    assert next(s for s in reg.schedules("barrow_deeps") if s["id"] == "new")["name"] == "New run"
 
 
 def test_confirm_view_coalesces(reg, rs):
     bot = SetupBot(reg, rs)
-    ops = [ConfigOp(op="raid_set", target="barrow_deeps", field="lock_hours_before", value="60"),
-           ConfigOp(op="raid_set", target="barrow_deeps", field="signup_lead_hours", value="100")]
+    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")
+    ops = [ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.lock_hours_before", value="60"),
+           ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.signup_lead_hours", value="100")]
     log = []
 
     async def edit(content=None, **kw):
@@ -217,7 +233,7 @@ def test_confirm_view_coalesces(reg, rs):
     view = discord_policy.ConfigConfirmView(reg, ConfigRequest(kind="change", reply="", ops=ops), None, bot.ops, OWNER, "Owner", OPS_CH)
     run(view.apply.callback(it))
     assert log[0].startswith("✅") and "⛔" not in log[0], log[0]
-    assert reg.raid_def("barrow_deeps")["lock_hours_before"] == 60
+    assert reg.schedule_def("barrow_deeps", "alt")["lock_hours_before"] == 60
 
 
 def test_run_time_changes_preview_the_next_runs(reg):

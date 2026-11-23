@@ -389,12 +389,14 @@ def test_test_bench(reg, rs):
 
 def test_owner_gating_unchanged(reg, rs):
     """The new ops are officer ops (like /raid, /gm test and the Members page); the owner set is untouched."""
-    assert configops.OWNER_OPS == {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset",
-                                   "schedule_set", "schedule_remove", "recruit", "job", "plain", "loot_weights"}  # schedules are raid rules: owner, like raid_set; recruitment is setup; job and plain are HARD_OWNER_OPS too; loot_weights = the owner's scoring weights (design §5.48)
+    assert configops.OWNER_OPS == {"set", "role_add", "role_remove", "aura_set", "family_set", "aura_reset",
+                                   "recruit", "job", "plain", "loot_weights"}  # raids and schedules are officers' (D8); recruitment is setup; job and plain are HARD_OWNER_OPS too; loot_weights = the owner's scoring weights (design §5.48)
+    assert not {"raid_set", "raid_reset", "schedule_set", "schedule_remove"} & configops.OWNER_OPS
     assert not (configops.RUN_OPS | {"character", "absence_clear", "dm", "test"}) & configops.OWNER_OPS
     bot = FakeBot(rs)
     with pytest.raises(RegistryError, match="needs the owner"):
-        run(configops.apply_async(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="lock_hours_before", value="12"), "Officer", False, bot=bot))
+        run(configops.apply_async(reg, ConfigOp(op="aura_set", target="blood_pact", field="note", value="x"), "Officer", False, bot=bot))
+    assert run(configops.apply_async(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="x"), "Officer", False, bot=bot)) == "barrow_deeps: notes = x"
     m = reg.test_members()[0]
     assert run(configops.apply_async(reg, ConfigOp(op="dm", member=m.display_name, value="off"), "Officer", False, bot=bot)).endswith("DMs off")
 

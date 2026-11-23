@@ -133,7 +133,7 @@ def test_news_consequence_and_decision_refusal(reg):
     ps = news.ProposalStore(reg.store, reg.key)
     p = ps.create(reg, proposal_data())
     assert news.consequence(p, reg, "approved") == ["The apply job makes this change at its next run, within 15 minutes.", "The bot doesn't restart for it."]
-    assert "aim healer: the default aim → " in news.edit_words(reg, p), "the exact edit is the decide screen's context line (flows_news)"
+    assert "minimum healer: the game's minimum → at least 2" in news.edit_words(reg, p), "the exact edit is the decide screen's context line (flows_news)"
     assert news.consequence(p, reg, "dismissed")[0].startswith("Nothing changes")
     assert news.decision_refusal(reg.store, reg, p.id, "approved", 5) is None
     assert "no proposal" in news.decision_refusal(reg.store, reg, "000000-dead", "approved", 5)
@@ -629,6 +629,7 @@ def test_roster_absences_rechecks_officer_standing_on_every_press(reg, monkeypat
 
 
 def test_config_show_is_words_not_yaml(reg):
+    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")  # sheet timing is a schedule's (C7): its line says when it locks
     sections = configops.config_summary(reg)  # phase 3: sections (one embed field each on /gm config show)
     text = configops.summary_text(sections)
     assert sections[0].lines[0].startswith(reg.config.name) and "now " in sections[0].lines[1] and (f"<@{OWNER}>" in text or "Owner: " in text)

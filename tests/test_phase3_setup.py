@@ -65,7 +65,7 @@ def test_set_minimums_is_one_write_and_refuses_a_maximum(reg, store):
         reg.set_minimums("barrow_deeps", {"Mage": {"min": 1}, "tank": {"min": 0, "max": 1}}, "Jon")
     with pytest.raises(RegistryError, match="more than the 10 a run seats"):
         reg.set_minimums("barrow_deeps", {"Mage": {"min": 11}}, "Jon")
-    with pytest.raises(RegistryError, match="unknown comp slot"):
+    with pytest.raises(RegistryError, match="isn't a role, a class or a spec"):
         reg.set_minimums("barrow_deeps", {"Bard": {"min": 1}}, "Jon")
     assert "Mage" not in reg.config.raids["barrow_deeps"]["minimums"] and commits(store) == n0 + 1  # nothing of a refused call stuck
     reg.set_minimums("barrow_deeps", {"healer": None, "Shaman": None}, "Jon")
@@ -94,7 +94,7 @@ def test_comp_target_op_goes_through_the_verb_and_coalesces_into_one_write(reg, 
     assert reg.config.raids["barrow_deeps"]["minimums"] == {"Mage": {"min": 1}, "Warlock": {"min": 1}}
     d = configops.describe_ops(reg, configops.ops_from_fields(reg, "comp", "barrow_deeps", {"Mage": {"min": 2, "note": "Intellect"}}))
     ln = d.lines[0]
-    assert ln.label == "Barrow Deeps · Aims" and ln.parts[0].label == "Mages" and ln.parts[0].before == "at least 1"
+    assert ln.label == "Barrow Deeps · Minimums" and ln.parts[0].label == "Mages" and ln.parts[0].before == "at least 1"
     assert ln.parts[0].after == "at least 2" and "Why: Intellect" in ln.notes and not d.review  # routine: saves directly
 
 
@@ -313,10 +313,10 @@ def test_the_target_form_preselects_a_minimum_equal_to_the_run_size(reg, rs, off
     async def go():
         await FLOWS["roster_comp"](h.command(), reg)
         await h.pick("Pick a raid", "barrow_deeps")
-        await h.pick("Set an aim for…", "Mage")
+        await h.pick("Set a minimum for…", "Mage")
         lo = h.modal._items["min"]
         assert [o.value for o in lo.options if o.default] == ["10"] and len(lo.options) <= 25
-        assert [o.value for o in h.modal._items["max"].options if o.default] == ["none"]
+        assert "max" not in h.modal._items  # one number per slot: no upper limit (D16)
     run(go())
 
 
@@ -381,11 +381,12 @@ def test_config_summary_route_by_audience(owner_client, reg, rs, monkeypatch):
     assert not any("<#" in x or "<@" in x for s in d["sections"] for x in s["lines"])  # names on the site, never a raw mention
 
 
-def test_readiness_route_carries_targets_bounds_and_slots(owner_client, reg):
+def test_readiness_route_carries_minimums_and_slots(owner_client, reg):
     reg.set_minimums("barrow_deeps", {"Mage": {"min": 1, "note": "Intellect"}}, "t")
     d = owner_client.get("/api/readiness", params={"raid": "barrow_deeps"}, headers=bearer()).json()
     r = d["raids"][0]
-    assert r["targets"] == {"Mage": {"min": 1, "note": "Intellect"}} and r["bounds"]["healer"] == {"min": 2} and r["rev"] == reg.config_rev("raids:barrow_deeps")
+    assert r["minimums"] == {"Mage": {"min": 1, "note": "Intellect"}} and r["minimum"]["healer"] == 2 and r["minimum"]["Mage"] == 1
+    assert "targets" not in r and "bounds" not in r and r["rev"] == reg.config_rev("raids:barrow_deeps")
     assert {"value": "Paladin:Holy", "label": "Holy Paladins", "kind": "spec"} in d["slots"] and d["note_max"] == 200
     # the Readiness page's Save: typed comp changes on the structured path, the raid rev as shown
     body = {"changes": [{"kind": "comp", "target": "barrow_deeps", "fields": {"Mage": None, "healer": {"min": 3}}}], "apply": True,
@@ -551,25 +552,26 @@ def officer_only(monkeypatch):
     monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: False)
 
 
-def test_roster_comp_sets_a_target_through_configops(reg, rs, store, officer_only):
+def test_roster_comp_sets_a_minimum_through_configops(reg, rs, store, officer_only):
     h = Harness(reg, rs)
 
     async def go():
         await FLOWS["roster_comp"](h.command(), reg)
         await h.pick("Pick a raid", "barrow_deeps")
-        assert "**Aims**" in h.text and "Limits (the owner's)" in h.text and "Save aims" in h.buttons()
-        await h.pick("Set an aim for…", "healer")
-        await h.submit(h.modal, min="4", max="5")  # a maximum: refused at once (D16), Fix this reopens the form
-        assert "no upper limit" in h.text and "Fix this" in h.buttons()
+        assert "**Minimums**" in h.text and "A run needs at least 2 tanks, 2 healers." in h.text and "Save minimums" in h.buttons()
+        await h.pick("Set a minimum for…", "healer")
+        assert set(h.modal._items) == {"min", "note"}  # one number and a reason: no upper limit (D16)
+        await h.submit(h.modal, min="11")  # past the run's size: refused at once, Fix this reopens the form
+        assert "more than the 10 a run seats" in h.text and "Fix this" in h.buttons()
         await h.press("Fix this")
-        await h.submit(h.modal, min="3", max="none", note="raid heals")
+        await h.submit(h.modal, min="3", note="raid heals")
         assert "not saved yet" in h.text and "1 unsaved change" in h.text
-        await h.pick("Set an aim for…", "__spec")
+        await h.pick("Set a minimum for…", "__spec")
         await h.pick("Pick a class", "Shaman")
         await h.pick("Pick a spec", "Enhancement")
-        await h.submit(h.modal, min="1", max="none")
+        await h.submit(h.modal, min="1")
         n0 = commits(store)
-        await h.press("Save aims")
+        await h.press("Save minimums")
         assert "✅" in h.text and commits(store) == n0 + 1
     run(go())
     assert reg.config.raids["barrow_deeps"]["minimums"] == {"healer": {"min": 3, "note": "raid heals"}, "Shaman:Enhancement": {"min": 1}}
@@ -584,11 +586,7 @@ def test_roster_comp_refuses_a_member(reg, rs, monkeypatch):
     assert "Officers only" in h.text
 
 
-def test_the_raid_wizards_group_make_up_opens_the_targets_block(reg, rs, monkeypatch):
-    from oibot_gm import discord_registry
-
-    monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: True)
-    monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
+def test_the_raid_wizards_minimums_section_is_the_minimums_block(reg, rs, officer_only):
     reg.set_minimums("barrow_deeps", {"Mage": {"min": 1}}, "t")
     h = Harness(reg, rs)
 
@@ -596,22 +594,18 @@ def test_the_raid_wizards_group_make_up_opens_the_targets_block(reg, rs, monkeyp
         await FLOWS["raid_config"](h.command(), reg)
         await h.pick("Pick a raid", "barrow_deeps")
         await h.pick("Pick a section", "comp")
-        assert "**Limits**" in h.text and "**Aims**" in h.text and "Mages at least 1" in h.text
-        await h.press("Aims…")
-        assert "**Aims**" in h.text and "Back" in h.buttons()
-        await h.pick("Remove an aim", "Mage")
-        await h.press("Save aims")
-        assert "✅" in h.text and "Mages: back to the game's minimum" in h.text and "Set an aim for…" in h.selects()
+        assert "**Minimums**" in h.text and "• Mages: at least 1" in h.text and "Back" in h.buttons()
+        assert "Limits" not in h.text and "Aims" not in h.text and "at most" not in h.text
+        await h.pick("Remove a minimum", "Mage")
+        await h.press("Save minimums")
+        assert "✅" in h.text and "Mages: back to the game's minimum" in h.text and "Set a minimum for…" in h.selects()
         await h.press("Back")
-        assert "Pick a role" in h.selects()
+        assert "Pick a section" in h.selects()  # the raid's hub
     run(go())
     assert "minimums" not in reg.config.raids.get("barrow_deeps", {})
 
 
-def test_the_schedule_screen_says_paused_never_next_runs(reg, rs, monkeypatch):
-    from oibot_gm import discord_registry
-
-    monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: True)
+def test_the_schedule_screen_says_paused_never_next_runs(reg, rs, officer_only):
     alt_schedule(reg)
     reg.set_schedule("barrow_deeps", "alt", {"active": False}, "t")
     h = Harness(reg, rs)
@@ -661,12 +655,13 @@ def test_mcp_comp_and_summary_tools(owner_client, reg, monkeypatch):
 
     a = Api(owner_client)
     monkeypatch.setattr(ms, "api", lambda guild=None: a)
-    out = ms.set_comp_target("Barrow Deeps", "Mage", min=1, note="Intellect")
+    out = ms.set_minimum("Barrow Deeps", "Mage", min=1, note="Intellect")
     assert "Mages: at least 1 (Intellect)" in out and reg.config.raids["barrow_deeps"]["minimums"]["Mage"] == {"min": 1, "note": "Intellect"}
-    pv = ms.set_comp_target("barrow_deeps", "Mage", clear=True, preview=True)
-    assert pv["preview"][0]["parts"][0]["after"] == "the default aim" and "Mage" in reg.config.raids["barrow_deeps"]["minimums"]
-    with pytest.raises(Exception, match="no upper limit"):
-        ms.set_comp_target("barrow_deeps", "healer", min=2, max=3)
+    pv = ms.set_minimum("barrow_deeps", "Mage", clear=True, preview=True)
+    assert pv["preview"][0]["parts"][0]["after"] == "the game's minimum" and "Mage" in reg.config.raids["barrow_deeps"]["minimums"]
+    import inspect
+
+    assert "max" not in inspect.signature(ms.set_minimum).parameters  # a minimum has no upper limit (D16)
     alt_schedule(reg)
     m = real(reg, 0)
     reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")

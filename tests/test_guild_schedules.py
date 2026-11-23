@@ -388,11 +388,11 @@ def test_a_stored_entry_that_is_not_a_mapping_is_kept_skipped_and_named(data_roo
 
 def test_a_write_refused_after_the_lift_puts_the_old_keys_back(reg):
     """The lift runs (old keys → rows), the first field is written and the second refused (a role has no upper limit,
-    design D16): the override and the guild-level list are exactly as they were, old keys included."""
+    design D16 — a minimum is set as a minimum): the override and the guild-level list are exactly as they were, old keys included."""
     _old_keys(reg)
     before = (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
-    with pytest.raises(RegistryError, match="no upper limit"):
-        reg.set_raid_overrides(RID, {"tank_min": 5, "tank_max": 1}, "t")
+    with pytest.raises(RegistryError, match="Set a role's minimum as a minimum"):
+        reg.set_raid_overrides(RID, {"notes": "lifted first", "tank_max": 1}, "t")
     assert (reg.config.raids, reg.config.schedules) == before
 
 

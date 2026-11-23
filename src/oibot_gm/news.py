@@ -399,7 +399,7 @@ def restart_pending_text(pending: dict) -> str:
 
 
 def owner_setting(p) -> bool:
-    """A guild-setting proposal whose config op is the owner's (configops.OWNER_OPS: raid_set, aura_reset, …) — an
+    """A guild-setting proposal whose config op is the owner's (configops.OWNER_OPS: aura_set, aura_reset, …) — an
     officer may not approve it, exactly as they may not write it on any other surface; the apply job re-checks the
     approver before it applies (an officer could otherwise write one and approve it themselves)."""
     if getattr(p, "kind", None) != "guild_setting":

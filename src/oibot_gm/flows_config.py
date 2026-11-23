@@ -1,10 +1,11 @@
-"""The owner's `/gm config` wizards: raid rules, aura facts, the guild's timezone and the about blurb.
+"""The `/gm config` wizards: raid rules (officers, design D8), aura facts, the guild's timezone and the about blurb (owner).
 
-`raid_config` is the flagship. It picks a raid, then a HUB of sections (run times, cadence, group make-up, weights,
-lockout and length, first lockout, behaviour, notes, reset). Every section edits a working copy (`self.draft`, in the
-exact field names `Registry._apply_raid_override` accepts) and returns to the hub; nothing is written until Save,
-which shows the diff as sentences plus the next three runs computed from the DRAFT and then makes ONE
-`reg.set_raid_overrides` call — one commit, all or nothing.
+`raid_config` is the flagship. It picks a raid, then a HUB of sections (schedules with each one's sheet timing, the
+minimums, weights, lockout and length, first lockout, how one night's groups are made, notes, reset). Every section
+but the minimums edits a working copy (`self.draft`, in the exact field names `Registry._apply_raid_override` accepts)
+and returns to the hub; nothing is written until Save, which shows the diff as sentences plus the next three runs
+computed from the DRAFT and then makes ONE `reg.set_raid_overrides` call — one commit, all or nothing. The minimums
+(CompTargetsBlock) are saved on their own, through configops' `comp` kind (Registry.set_minimums).
 
 A section refuses a bad combination on the spot rather than at Save: `RaidConfigWizard.preview` applies the draft with
 the registry's own validators (`_apply_raid_override(commit=False)` + `_check_raid`) and restores the config
@@ -27,7 +28,7 @@ import discord
 
 from .constants import hours_words  # noqa: F401 — moved to constants (registry's lift words); re-exported here
 from .presets import PRESETS  # (key, name, opens, nudge, lock, confirm), shared with plain text
-from .registry import (ADHOC_DEFAULTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
+from .registry import (DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
                        RegistryError, parse_slots, schedule_def_of, schedule_value, schedules_of)
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, fmt12, hour_opts, minute_opts, week_opts, when_fields, when_note
 
@@ -51,6 +52,18 @@ class MultiForm(Form):
             if isinstance(item, discord.ui.Select) and item.max_values > 1:
                 out[key] = ",".join(item.values)
         return out
+
+
+OFFICERS_ONLY = "Officers only (Manage Server or a configured officer role)."
+
+
+def _officer_guard(reg: Registry) -> Callable[[discord.Interaction], Awaitable[str | None]]:
+    """Re-checked on every press: officers edit raids and schedules (design D8 / C17)."""
+    async def guard(i: discord.Interaction) -> str | None:
+        from .discord_registry import is_officer
+
+        return None if is_officer(i, reg) else OFFICERS_ONLY
+    return guard
 
 
 def _owner_guard(reg: Registry) -> Callable[[discord.Interaction], Awaitable[str | None]]:
@@ -104,9 +117,6 @@ class OwnerWizard(Wizard):
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before")
-ROLES = ("tank", "healer", "dps")
-MIN_ROLES = ("tank", "healer")  # the roles with a minimum on this screen (design D16: one number, no upper limit)
-ROLE_WORDS = {"tank": "tanks", "healer": "healers", "dps": "dps"}
 WEIGHTS = tuple(RAID_WEIGHT_DEFAULTS)
 WEIGHT_LABEL = {"rank": "Rank", "main": "Main over alt", "sat_out": "Sat out last time", "signup_order": "Signed up early", "regular": "Regular of the schedule"}
 WEIGHT_HINT = {"rank": "core > raider > trial", "main": "a main is picked over an alt", "sat_out": "benched in the last lockout",
@@ -117,14 +127,13 @@ SPLIT_WORDS = {"balanced": ("Balanced", "both runs equal in synergy, tanks, heal
                "rotation": ("Rotation", "whoever sat out or was in the weaker run moves up")}
 BOOL_WORDS = {"nudge": "Nudge the unanswered", "autofill": "Fill seats automatically", "open_dm": "DM everyone on open",
               "confirm": "Ask the rostered to confirm"}  # registry.RAID_BOOL_FIELDS, in words
-SECTIONS = [  # (key, label, fields it edits)
+SECTIONS = [  # (key, label, fields it edits). Sheet timing is each schedule's own (C7): under Schedules, never the raid's.
     ("times", "Schedules", ("slots", "schedules")),
-    ("cadence", "A run's week", CADENCE),
-    ("comp", "Group make-up", tuple(f"{r}_min" for r in MIN_ROLES)),
+    ("comp", "Minimums", ()),  # CompTargetsBlock: saved on its own (Registry.set_minimums), never in the hub's draft
     ("weights", "Selection weights", tuple(f"weight_{k}" for k in WEIGHTS)),
     ("length", "Lockout & length", ("lockout_days", "duration_hours")),
     ("first_open", "First lockout opens", ("first_open",)),
-    ("behaviour", "Behaviour", ("nudge", "autofill", "open_dm", "confirm", "split_policy", "fill_ask_hours")),
+    ("behaviour", "How one night's groups are made", ("split_policy",)),
     ("notes", "Notes", ("notes",)),
     ("reset", "Reset to defaults", ()),
 ]
@@ -134,8 +143,7 @@ FIELD_WORDS = {"slots": "Run times", "schedules": "Schedules", "signup_lead_hour
                "autofill": "Fill seats automatically", "open_dm": "DM everyone on open", "confirm": "Ask the rostered to confirm",
                "split_policy": "Split policy", "lockout_days": "Lockout",
                "duration_hours": "Raid length", "first_open": "First lockout opens", "notes": "Notes",
-               **{f"weight_{k}": f"Weight · {WEIGHT_LABEL[k].lower()}" for k in WEIGHTS},
-               **{f"{r}_{b}": f"{'Fewest' if b == 'min' else 'Most'} {ROLE_WORDS[r]}" for r in ROLES for b in ("min", "max")}}
+               **{f"weight_{k}": f"Weight · {WEIGHT_LABEL[k].lower()}" for k in WEIGHTS}}
 
 
 def slot_key(slot: str) -> tuple[int, str]:
@@ -175,9 +183,7 @@ def field_value(eff: dict, field: str, tz: str):
     if field == "first_open":
         fo = parse_first_open(eff.get("first_open"), tz)
         return fo.isoformat() if fo else ""
-    role, bound = field.split("_")
-    b = (eff.get("minimums") or {}).get(role) or {}  # one minimum per role (design D16): no upper limit, so "max" reads the run size
-    return int(b.get(bound, 0 if bound == "min" else int(eff.get("size") or DEFAULT_RAID_SIZE)))
+    raise KeyError(field)
 
 
 def parse_first_open(raw, tz: str) -> datetime | None:
@@ -216,20 +222,18 @@ def next_runs(reg: Registry, slots: Sequence[str], first_open: datetime | None, 
     return sorted(out)[:n]
 
 
-# ---------------------------------------------------------------- Group make-up: the TARGETS block (design §3.5 RD-03 / RD-12)
-# One screen, two tiers, the same words everywhere: BOUNDS ("at least / at most" the solver seats — the owner's, raid_set,
-# the Group make-up section above) and TARGETS ("we aim for", what readiness measures — officers, comp_target). /gm config
-# raid › Group make-up (owner) opens this block from its comp screen; /roster comp (officers) opens only this block. A Save
-# goes through configops (ops_from_fields "comp" → authorize_ops by privilege → apply_ops = Registry.set_minimums, one
-# write) — never the registry verb directly, so the officer/owner split lives in configops.
+# ---------------------------------------------------------------- Minimums: one number per role, class or spec (design D16)
+# The fewest a run holds — the lock fills minimums first, readiness and the analytics card measure against them; no upper
+# limit. /gm config raid › Minimums and /roster comp open this block (officers). A Save goes through configops
+# (ops_from_fields "comp" → authorize_ops by privilege → apply_ops = Registry.set_minimums, one write).
 
-TARGET_MAX_PICK = 24  # selects hold 25 options: 0…24 (a target past that is a plain-text one)
+TARGET_MAX_PICK = 24  # selects hold 25 options: 0…24 (a minimum past that is a plain-text one)
 
 
 def target_numbers(top: int, keep, room: int = MAX_OPTIONS, drop_low: bool = False) -> list[int]:
-    """The numbers a target select offers: 0…top, plus the stored value `keep` when it lies outside (a max equal to the
-    run size, a target set on the web or in plain text) so the form preselects it and a Submit never drops it; trimmed to
-    `room` options from the high end (`drop_low`: from the low end — a max of 0 or 1 is the rarest pick), never `keep`."""
+    """The numbers a minimum select offers: 0…top, plus the stored value `keep` when it lies outside (one set on the web
+    or in plain text) so the form preselects it and a Submit never drops it; trimmed to `room` options from the high end
+    (`drop_low`: from the low end), never `keep`."""
     vals = list(range(0, max(0, int(top)) + 1))
     k = None if keep in (None, "") else int(keep)
     if k is not None and k not in vals:
@@ -242,9 +246,9 @@ def target_numbers(top: int, keep, room: int = MAX_OPTIONS, drop_low: bool = Fal
 
 
 class CompTargetsBlock:
-    """The targets block, mixed into a Wizard that has `reg` and `raid`. `tdraft` = {slot: entry | None} not yet saved;
-    `trev` = the raid section rev when the block opened (a change meanwhile refuses the Save); `targets_back` = where Back
-    goes (the raid wizard's comp screen), None = the block is the whole wizard (/roster comp)."""
+    """The minimums block, mixed into a Wizard that has `reg` and `raid`. `tdraft` = {slot: {min, note} | None} not yet
+    saved; `trev` = the raid section rev when the block opened (a change meanwhile refuses the Save); `targets_back` =
+    where Back goes (the raid wizard's hub), None = the block is the whole wizard (/roster comp)."""
 
     targets_back = None
 
@@ -267,9 +271,12 @@ class CompTargetsBlock:
     def t_size(self) -> int:
         return int(self.reg.raid_def(self.raid).get("size") or DEFAULT_RAID_SIZE)
 
-    def bounds_line(self) -> str:
-        b = self.reg.role_bounds(self.raid, self.t_size())
-        return "-# Limits (the owner's) — the fewest of each role a run takes: " + " · ".join(f"{ROLE_WORDS[r]} {b[r]['min']}" for r in ROLES if r in b)
+    def reads_line(self) -> str:
+        """What a run reads now (Registry.minimums: the guild's own over the game's), from what is saved."""
+        from .registry import slot_words
+
+        mins = self.reg.minimums(self.raid)
+        return ("-# A run needs at least " + ", ".join(slot_words(k, n) for k, n in mins.items()) + ".") if mins else "-# A run needs no minimum of any role yet."
 
     async def targets(self, i: discord.Interaction, note: str = "") -> None:
         from .configops import _target_words
@@ -278,21 +285,22 @@ class CompTargetsBlock:
         rd = self.reg.raid_def(self.raid)
         cur = self.t_current()
         lines = [note] if note else []
-        lines += [f"**Aims** · {rd.get('name', self.raid)} — what readiness compares the guild with; officers set them.", self.bounds_line()]
+        lines += [f"**Minimums** · {rd.get('name', self.raid)} — the fewest of a role, class or spec a run should hold. The lock fills them first.",
+                  self.reads_line()]
         for slot in sorted(cur, key=lambda s: (s not in ("tank", "healer", "melee", "ranged"), s)):
             t = cur[slot]
-            lines.append(f"• {self.reg.comp_slot_words(slot)}: {_target_words(t)}" + (f" — {t['note']}" if t.get("note") else " — (no reason given)"))
+            lines.append(f"• {self.reg.comp_slot_words(slot)}: {_target_words(t)}" + (f" — {t['note']}" if t.get("note") else ""))
         if not cur:
-            lines.append("No aims set yet — readiness uses the default aims (the limits above and the raid buffs). Pick a role, class or spec below to set one.")
+            lines.append("The guild has set no minimum of its own, so the game's minimums apply. Pick a role, class or spec below to set one.")
         n = len(self.tdraft)
-        lines.append(f"✎ **{n} unsaved change{'' if n == 1 else 's'}** — nothing is saved until Save." if n else "-# Pick a role, class or spec to set its aim. Nothing is saved until Save.")
+        lines.append(f"✎ **{n} unsaved change{'' if n == 1 else 's'}** — nothing is saved until Save." if n else "-# Pick a role, class or spec to set its minimum. Nothing is saved until Save.")
         slots = [Opt(r, self.reg.comp_slot_words(r), "a role") for r in ("tank", "healer", "melee", "ranged")]
         slots += [Opt(c, self.reg.comp_slot_words(c), "a class") for c in self.reg.profile.classes]
         slots.append(Opt("__spec", "A particular spec…", "pick the class, then the spec"))
-        items: list = [self.select("Set an aim for…", slots[:MAX_OPTIONS], self.t_slot_picked)]
+        items: list = [self.select("Set a minimum for…", slots[:MAX_OPTIONS], self.t_slot_picked)]
         if cur:
-            items.append(self.select("Remove an aim", [Opt(s, self.reg.comp_slot_words(s), _target_words(cur[s])) for s in sorted(cur)][:MAX_OPTIONS], self.t_removed))
-        items.append(self.button("Save aims", self.t_save, discord.ButtonStyle.success, disabled=not n))
+            items.append(self.select("Remove a minimum", [Opt(s, self.reg.comp_slot_words(s), _target_words(cur[s])) for s in sorted(cur)][:MAX_OPTIONS], self.t_removed))
+        items.append(self.button("Save minimums", self.t_save, discord.ButtonStyle.success, disabled=not n))
         if n:
             items.append(self.button("Discard changes", self.t_discard))
         items.append(self.button("Back", self.targets_back) if self.targets_back else self.button("Cancel", self.cancel))
@@ -324,13 +332,12 @@ class CompTargetsBlock:
         cur = self.t_current().get(slot) or {}
         top = min(self.t_size(), TARGET_MAX_PICK)
         lo = int(cur.get("min") or 0)
-        hi = cur.get("max")
         words = self.reg.comp_slot_words(slot)
 
         async def submitted(it: discord.Interaction, v: dict[str, str]) -> None:
-            entry = {"min": int(v.get("min") or 0), "max": None if v.get("max") in (None, "", "none") else int(v["max"]), "note": (v.get("note") or "").strip() or None}
+            entry = {"min": int(v.get("min") or 0), "note": (v.get("note") or "").strip() or None}
             raid = self.raid
-            try:  # the registry's own rules on a throw-away copy (bounds, max ≥ min, the run size, the reason's cap)
+            try:  # the registry's own rules on a throw-away copy (the run size, the reason's cap)
                 self.reg.preview(lambda sh: sh.set_minimums(raid, {slot: {k: v for k, v in entry.items() if v is not None}}, "preview"))
             except RegistryError as e:
                 async def again(ix: discord.Interaction) -> None:
@@ -338,14 +345,11 @@ class CompTargetsBlock:
                 await self.refuse(it, str(e), again)
                 return
             self.tdraft[slot] = entry
-            await self.targets(it, f"{words}: {'at least ' + str(entry['min'])}{', at most ' + str(entry['max']) if entry['max'] is not None else ''} — not saved yet.")
-        await self.open_form(i, Form(f"Aim · {words}"[:45], [
-            Field("min", "We aim for at least", [Opt(str(n), str(n), default=n == lo) for n in target_numbers(top, lo)], description="what readiness counts as enough"),
-            Field("max", "And at most", [Opt("none", "No upper limit", default=hi in (None, ""))]
-                  + [Opt(str(n), str(n), default=hi not in (None, "") and n == int(hi)) for n in target_numbers(top, hi, MAX_OPTIONS - 1, drop_low=True)],
-                  description="more than this shows as over"),
+            await self.targets(it, f"{words}: at least {entry['min']} — not saved yet.")
+        await self.open_form(i, Form(f"Minimum · {words}"[:45], [
+            Field("min", "At least", [Opt(str(n), str(n), default=n == lo) for n in target_numbers(top, lo)], description="the fewest a run should hold"),
             Field("note", "Why", required=False, default=cur.get("note") or None, max_length=COMP_NOTE_MAX, placeholder="e.g. Windfury for every melee group",
-                  description="shown on the readiness card (optional)"),
+                  description="shown beside the minimum (optional)"),
         ], submitted))
 
     async def t_removed(self, i: discord.Interaction, values: list[str]) -> None:
@@ -354,10 +358,10 @@ class CompTargetsBlock:
         slot = values[0]
         self._tinit()
         if self.tdraft.get(slot) is not None and slot not in _comp_current(self.reg, self.raid):
-            self.tdraft.pop(slot)  # a target drafted here and never saved: just drop it
+            self.tdraft.pop(slot)  # a minimum drafted here and never saved: just drop it
         else:
             self.tdraft[slot] = None
-        await self.targets(i, f"{self.reg.comp_slot_words(slot)}: back to the default aim — not saved yet.")
+        await self.targets(i, f"{self.reg.comp_slot_words(slot)}: back to the game's minimum — not saved yet.")
 
     async def t_discard(self, i: discord.Interaction) -> None:
         self.tdraft = {}
@@ -374,7 +378,7 @@ class CompTargetsBlock:
         try:
             ops = configops.ops_from_fields(self.reg, "comp", self.raid, dict(self.tdraft))
         except RegistryError as e:
-            await self.refuse(i, str(e), self.t_back, "Back to the aims")
+            await self.refuse(i, str(e), self.t_back, "Back to the minimums")
             return
         allowed, refused = configops.authorize_ops(self.reg, ops, i.user.id, role=role)
         res = await configops.apply_ops(self.reg, allowed, by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None), via="discord",
@@ -382,7 +386,7 @@ class CompTargetsBlock:
         bad = [*refused, *(r["line"] for r in res["results"] if not r["ok"])]
         if not res["applied"]:
             self.trev = self.reg.config_rev(f"raids:{self.raid}")
-            await self.refuse(i, "; ".join(bad) or "Nothing was changed.", self.t_back, "Back to the aims")
+            await self.refuse(i, "; ".join(bad) or "Nothing was changed.", self.t_back, "Back to the minimums")
             return
         self.tdraft = {}
         self.trev = self.reg.config_rev(f"raids:{self.raid}")
@@ -390,18 +394,18 @@ class CompTargetsBlock:
         if self.targets_back:
             await self.targets(i, text)
         else:
-            await self.finish(i, text + "\n-# The Readiness page and the analytics card measure against these now.")
+            await self.finish(i, text + "\n-# The next lock fills these first, and the Readiness page measures against them.")
 
 
 class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
     def __init__(self, reg: Registry, owner_id: int, raid: str | None = None):
-        super().__init__(reg, owner_id, title="Raid rules", guard=_owner_guard(reg))
+        super().__init__(reg, owner_id, title="Raid rules", guard=_officer_guard(reg))
         self.raid = raid
         self.draft: dict = {}
         self.sid = DEFAULT_SCHEDULE  # the schedule the Schedules section is on
         self._attempt: dict = {}  # values a section refused, prefilled when the person presses Fix this
         self._fo_day0: date = reg.now_local().date()
-        self.targets_back = self.comp  # the Group make-up screen's targets block comes back here (CompTargetsBlock)
+        self.targets_back = self.to_hub  # the Minimums section is the block itself (CompTargetsBlock); Back = the hub
 
     # ---- values
     def eff(self) -> dict:
@@ -445,12 +449,6 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             return ", ".join(self.reg.slot_label(s) for s in v) or "no run times (add one under Schedules)"
         if field == "schedules":
             return "; ".join(f"{s['name']}: {self.reg.schedule_label(self.raid, s)}" for s in schedules_of({**self.sview(), "schedules": v}) if s["id"] != DEFAULT_SCHEDULE) or "only the run times"
-        if field in CADENCE:
-            return f"{hours_words(v)} before"
-        if field == "fill_ask_hours":
-            return hours_words(v)
-        if field in BOOL_WORDS:
-            return "on" if v else "off"
         if field == "split_policy":
             return SPLIT_WORDS.get(v, (v,))[0]
         if field.startswith("weight_"):
@@ -475,11 +473,11 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             if len(scheds) > 1 or (scheds and scheds[0]["id"] != DEFAULT_SCHEDULE):
                 return f"{len(scheds)} schedule{'s' if len(scheds) > 1 else ''}: " + ", ".join(s["name"] for s in scheds)
             return self.say("slots", fv("slots")) if fv("slots") else "no run times yet"
-        if key == "cadence":
-            return (f"opens {hours_words(fv('signup_lead_hours'))} · nudge {hours_words(fv('nudge_hours_before'))} · "
-                    f"locks {hours_words(fv('lock_hours_before'))} · confirm {hours_words(fv('confirm_hours_before'))} before")
         if key == "comp":
-            return " · ".join(f"{ROLE_WORDS[r]} at least {fv(f'{r}_min')}" for r in MIN_ROLES)
+            from .registry import slot_words
+
+            mins = self.reg.minimums(self.raid)
+            return ("at least " + ", ".join(slot_words(k, n) for k, n in mins.items())) if mins else "no minimum set"
         if key == "weights":
             return " · ".join(f"{WEIGHT_LABEL[k].lower()} {fv(f'weight_{k}')}" for k in WEIGHTS)
         if key == "length":
@@ -487,8 +485,8 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         if key == "first_open":
             return self.say("first_open", fv("first_open"))
         if key == "behaviour":
-            return (" · ".join(f"{w.lower()} {'on' if fv(f) else 'off'}" for f, w in BOOL_WORDS.items())
-                    + f" · split {SPLIT_WORDS.get(fv('split_policy'), ('?',))[0].lower()}")
+            split = SPLIT_WORDS.get(fv("split_policy"), ("?", ""))
+            return f"{split[0]} — {split[1]}"
         if key == "notes":
             return self.say("notes", fv("notes"))
         return "drop this guild's changes for the raid" if self.reg.raid_override(self.raid) else "already on the game's defaults"
@@ -538,7 +536,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         await self.go(i, values[0])
 
     async def go(self, i: discord.Interaction, key: str) -> None:
-        screens = {"times": self.times, "cadence": self.cadence, "comp": self.comp, "weights": self.weights_form, "length": self.length_form,
+        screens = {"times": self.times, "comp": self.targets, "weights": self.weights_form, "length": self.length_form,
                    "first_open": self.first_open, "behaviour": self.behaviour, "notes": self.notes_form, "reset": self.reset}
         await screens.get(key, self.to_hub)(i)
 
@@ -606,15 +604,26 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         await self.schedule(i, sid, note)
 
     def sched_cadence(self, sid: str) -> str:
+        """The schedule's own sheet timing — all nine values (C7) — in words, and its rosters per run."""
+        from .registry import SCHEDULE_TIMING, timing_words
+
         view = self.sview()
         try:
             sd = schedule_def_of(view, sid)
         except RegistryError:
             return ""
-        own = sd["schedule"]["own"]
-        bits = [f"{w} {hours_words(sd[f])} before" + ("" if f in own else " (the raid's)") for f, w in
-                (("signup_lead_hours", "opens"), ("lock_hours_before", "locks"), ("confirm_hours_before", "confirm by"))]
-        return "-# " + " · ".join(bits) + (f" · **{sd['schedule']['rosters']} rosters** per run" if int(sd["schedule"].get("rosters") or 1) > 1 else "")
+        week = timing_words({k: sd[k] for k in SCHEDULE_TIMING})
+        return ("-# " + week[:1].upper() + week[1:]
+                + (f" · **{sd['schedule']['rosters']} rosters** per run" if int(sd["schedule"].get("rosters") or 1) > 1 else ""))
+
+    def suggestion(self, sid: str) -> tuple[str, dict]:
+        """What a sheet-timing value set back goes to, and its name: the game's suggestion, or a pickup template's
+        defaults — exactly what the save seeds (registry.write_out_timing)."""
+        from .registry import write_out_timing
+
+        kind = self.sched(sid).get("kind") or "weekly"
+        vals = write_out_timing({"id": sid, "kind": kind}, self.reg._seed_raid(self.raid))
+        return ("The pickup default" if kind == "pickup" else "The game's suggestion"), vals
 
     async def times(self, i: discord.Interaction, note: str = "") -> None:
         scheds = self.scheds()
@@ -679,7 +688,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         return [Opt("name", "Rename", f"now “{s['name']}”"),
                 Opt("rosters", "Rosters per run", f"{n} now — the sheet advertises {n} × {self.size()} seats from the next run"),
                 Opt("cadence", "A run's week", "when its sheet opens, nudges, locks and must be confirmed by"),
-                Opt("behaviour", "Behaviour", "nudge, fill, DM on open, split — or the raid's"),
+                Opt("behaviour", "Switches and split", "nudge, fill, DM on open, confirmations, how a night splits"),
                 Opt("active", "Resume" if not s.get("active", True) else "Pause", "nothing opens from it while paused"),
                 Opt("remove", "Remove this schedule", "runs already open keep their times")]
 
@@ -695,7 +704,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
                                "the health check measures against it, and the lock aims for it (as far as tanks and healers allow).",
                             self.select("Rosters per run", opts, self.rosters_picked), self.button("Back", self._to_sched))
         elif what == "cadence":
-            await self.open_form(i, self.sched_cadence_form())
+            await self.sched_week(i)
         elif what == "behaviour":
             await self.sched_behaviour(i)
         elif what == "active":
@@ -732,15 +741,43 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self.sid = DEFAULT_SCHEDULE
         await self.times(i, f"Removed {name}.")
 
+    async def sched_week(self, i: discord.Interaction) -> None:
+        """A schedule's week: a preset (the four hours together), or each step by hand."""
+        sd = schedule_def_of(self.sview(), self.sid)
+        cur = [sd[f] for f in CADENCE]
+        words = lambda lead, nudge, lock, confirm: (f"opens {hours_words(lead)} · nudge {hours_words(nudge)} · "  # noqa: E731
+                                                    f"locks {hours_words(lock)} · confirm by {hours_words(confirm)} before")
+        opts = [Opt("keep", "Keep this week", words(*cur), default=True)]
+        opts += [Opt(key, name, words(*hs)) for key, name, *hs in PRESETS]
+        opts.append(Opt("custom", "Each step…", "pick each step yourself, or the game's suggestion"))
+
+        async def picked(it: discord.Interaction, values: list[str]) -> None:
+            key = values[0]
+            if key == "custom":
+                await self.open_form(it, self.sched_cadence_form())
+                return
+            if key == "keep":
+                await self.schedule(it, self.sid)
+                return
+            _, name, *hs = next(p for p in PRESETS if p[0] == key)
+            snapshot = dict(self.draft)
+            self.entry_put(self.sid, **dict(zip(CADENCE, (float(h) for h in hs))))
+            await self.sched_checked(it, snapshot, self.sid, f"A run's week → **{name}**: {words(*hs)}.")
+        text = (f"**{sd['schedule']['name']}** · a run's week, counted back from each run's start:\n"
+                f"• the sheet opens **{hours_words(cur[0])} before**\n• the unanswered are nudged **{hours_words(cur[1])} before**\n"
+                f"• the roster locks **{hours_words(cur[2])} before**\n• rostered members confirm by **{hours_words(cur[3])} before**")
+        await self.show(i, text, self.select("Pick a run's week", opts, picked), self.button("Back", self._to_sched))
+
     def sched_cadence_form(self) -> Form:
         sd = schedule_def_of(self.sview(), self.sid)
-        own, view = sd["schedule"]["own"], self.sview()
+        own = sd["schedule"]["own"]
+        word, base = self.suggestion(self.sid)
         fields = []
         for f, label, desc in (("signup_lead_hours", "The sheet opens", "before the run starts"), ("nudge_hours_before", "Nudge the unanswered", "between opening and the lock"),
                                ("lock_hours_before", "The roster locks", "before the run starts"), ("confirm_hours_before", "Confirm by", "no later than the lock"),
                                ("fill_ask_hours", "A fill ask expires after", "no answer counts as no")):
             suffix = "" if f == "fill_ask_hours" else " before"
-            inherit = Opt("inherit", f"Same as the raid ({hours_words(view[f])}{suffix})", default=f not in own)
+            inherit = Opt("inherit", f"{word} ({hours_words(base[f])}{suffix})", default=f not in own)
             fields.append(Field(f, label, [inherit] + [Opt(o.value, o.label, default=f in own and o.default) for o in hours_opts(own.get(f), suffix=suffix)][:MAX_OPTIONS - 1], description=desc))
         return Form(f"A run's week · {sd['schedule']['name']}"[:45], fields, self.sched_cadence_submitted)
 
@@ -754,10 +791,9 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         sd = schedule_def_of(self.sview(), self.sid)
         own, view = sd["schedule"]["own"], self.sview()
         lines = [note] if note else []
-        adhoc = sd.get("class") == "adhoc"  # a pickup template inherits the ad hoc defaults, not the raid's cadence
-        lines.append(f"**{sd['schedule']['name']}** · behaviour — pick one to change; " + ("“default” follows the ad hoc defaults (no reminder, no confirmations, first come)." if adhoc else "“the raid's” follows the raid's own setting."))
-        base = {**view, **ADHOC_DEFAULTS} if adhoc else view
-        inherit = "default" if adhoc else "the raid’s"
+        word, base = self.suggestion(self.sid)  # a switch set back goes to the game's suggestion (a pickup: its defaults)
+        lines.append(f"**{sd['schedule']['name']}** · switches and split — pick one to change. “{word.lower()}” is what a new schedule starts with.")
+        inherit = word.lower()
         lines += [f"• {w}: **{('on' if own[f] else 'off') if f in own else inherit + (' (on)' if base[f] else ' (off)')}**" for f, w in BOOL_WORDS.items()]
         # one select for every switch (a select per switch would need more rows than a message has): field=value
         opts = [Opt(f"{f}={v}", f"{w}: " + (f"{inherit} ({'on' if base[f] else 'off'})" if v == "inherit" else v))
@@ -778,7 +814,8 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             v = values[0]
             val = None if v == "inherit" else (v == "on" if field in BOOL_WORDS else v)
             self.entry_put(self.sid, **{field: val})
-            await self.sched_behaviour(i, f"{FIELD_WORDS.get(field, field)} → {'the raid’s' if val is None else ('on' if val is True else 'off' if val is False else SPLIT_WORDS[val][0])}.")
+            back = ("the raid’s" if field == "split_policy" else self.suggestion(self.sid)[0].lower())
+            await self.sched_behaviour(i, f"{FIELD_WORDS.get(field, field)} → {back if val is None else ('on' if val is True else 'off' if val is False else SPLIT_WORDS[val][0])}.")
         return pick
 
     # ---- a new schedule: its kind, then one form
@@ -907,96 +944,6 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self.put_slots(sid, slots)
         await self.sched_checked(i, snapshot, sid, f"Added {', '.join(self.reg.slot_label(s) for s in new)}.")
 
-    # ---- A run's week (the code's "cadence")
-    def cadence_words(self, lead, nudge, lock, confirm) -> str:
-        return f"opens {hours_words(lead)} · nudge {hours_words(nudge)} · locks {hours_words(lock)} · confirm by {hours_words(confirm)} before"
-
-    async def cadence(self, i: discord.Interaction) -> None:
-        cur = [self.cur(f) for f in CADENCE]
-        opts = [Opt("keep", "Keep current", self.cadence_words(*cur), default=True)]
-        opts += [Opt(key, name, self.cadence_words(*hs)) for key, name, *hs in PRESETS]
-        opts.append(Opt("custom", "Custom…", "pick each step yourself"))
-        text = ("**A run's week**, counted back from each run's start:\n"
-                f"• the sheet opens **{hours_words(cur[0])} before**\n• the unanswered are nudged **{hours_words(cur[1])} before**\n"
-                f"• the roster locks **{hours_words(cur[2])} before**\n• rostered members confirm by **{hours_words(cur[3])} before**")
-        await self.show(i, text, self.select("Pick a run's week", opts, self.cadence_picked), self.button("Back to the sections", self.to_hub))
-
-    async def cadence_picked(self, i: discord.Interaction, values: list[str]) -> None:
-        key = values[0]
-        if key == "custom":
-            await self.open_form(i, self.cadence_form())
-            return
-        if key == "keep":
-            await self.hub(i)
-            return
-        _, name, *hs = next(p for p in PRESETS if p[0] == key)
-        snapshot = dict(self.draft)
-        for f, h in zip(CADENCE, hs):
-            self.put(f, float(h))
-        await self.checked(i, snapshot, self.custom_again, f"A run's week → **{name}**: {self.cadence_words(*hs)}.")
-
-    def cadence_form(self) -> Form:
-        a = self._attempt
-        val = {f: float(a[f]) if f in a else self.cur(f) for f in CADENCE}
-        return Form("A run's week", [
-            Field("signup_lead_hours", "The sheet opens", hours_opts(val["signup_lead_hours"]), description="before the run starts"),
-            Field("nudge_hours_before", "Nudge the unanswered", hours_opts(val["nudge_hours_before"]), description="between opening and the lock"),
-            Field("lock_hours_before", "The roster locks", hours_opts(val["lock_hours_before"]), description="before the run starts"),
-            Field("confirm_hours_before", "Confirm by", hours_opts(val["confirm_hours_before"]), description="no later than the lock"),
-        ], self.cadence_submitted)
-
-    async def custom_again(self, i: discord.Interaction) -> None:
-        await self.open_form(i, self.cadence_form())
-
-    async def cadence_submitted(self, i: discord.Interaction, v: dict[str, str]) -> None:
-        snapshot = dict(self.draft)
-        self._attempt = {f: v[f] for f in CADENCE if v.get(f)}
-        for f in CADENCE:
-            if v.get(f):
-                self.put(f, float(v[f]))
-        await self.checked(i, snapshot, self.custom_again, "A run's week → " + self.cadence_words(*(self.cur(f) for f in CADENCE)) + ".")
-
-    # ---- Group make-up (min first, then a max that starts at that min: min above max can't be picked)
-    async def comp(self, i: discord.Interaction) -> None:
-        from .configops import _comp_current, _target_words
-
-        opts = [Opt(r, ROLE_WORDS[r].capitalize(), f"at least {self.cur(f'{r}_min')} now") for r in MIN_ROLES]
-        targets = _comp_current(self.reg, self.raid)
-        lines = [f"**Group make-up** for a {self.size()}-player run.",
-                 "**Limits** (yours): the fewest of each role a run takes — "
-                 + " · ".join(f"{ROLE_WORDS[r]} {self.cur(f'{r}_min')}" for r in MIN_ROLES) + ". Saved with this wizard's Save.",
-                 "**Aims** (officers): what readiness compares the guild with — "
-                 + ("; ".join(f"{self.reg.comp_slot_words(k)} {_target_words(t)}" for k, t in sorted(targets.items()))
-                    or "no aims set yet, so readiness uses the default aims (the limits and the raid buffs); press Aims… to set one")
-                 + ". Saved on their own (officers set them with /roster comp too)."]
-        await self.show(i, "\n".join(lines), self.select("Pick a role", opts, self.comp_role),
-                        self.button("Aims…", self.targets, discord.ButtonStyle.primary),
-                        self.button("Back to the sections", self.to_hub))
-
-    async def comp_role(self, i: discord.Interaction, values: list[str]) -> None:
-        role = values[0]
-
-        async def picked(it: discord.Interaction, lo: int) -> None:
-            snapshot = dict(self.draft)
-            self.put(f"{role}_min", lo)
-            await self.checked(it, snapshot, self.comp, f"{ROLE_WORDS[role].capitalize()} → at least {lo}.")
-        await self.pick_number(i, f"**{ROLE_WORDS[role].capitalize()}** — the fewest a run seats (now {self.cur(f'{role}_min')}).",
-                               f"Fewest {ROLE_WORDS[role]}", 0, self.size(), self.cur(f"{role}_min"), picked, self.comp)
-
-    async def pick_number(self, i: discord.Interaction, text: str, placeholder: str, lo: int, hi: int, current: int,
-                          on_pick: Callable[[discord.Interaction, int], Awaitable[None]], back, page: int | None = None) -> None:
-        nums = list(range(lo, hi + 1))
-        if page is None:
-            page = (nums.index(current) if current in nums else 0) // MAX_OPTIONS
-
-        async def cb(it: discord.Interaction, vals: list[str]) -> None:
-            await on_pick(it, int(vals[0]))
-
-        async def goto(it: discord.Interaction, p: int) -> None:
-            await self.pick_number(it, text, placeholder, lo, hi, current, on_pick, back, p)
-        items, pageline = self.paged(placeholder, [Opt(str(n), str(n), default=n == current) for n in nums], cb, page, goto)
-        await self.show(i, text + (f"\n{pageline}" if pageline else ""), *items, self.button("Back", back))
-
     # ---- Selection weights
     async def weights_form(self, i: discord.Interaction) -> None:
         fields = []
@@ -1071,36 +1018,21 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self._fo_day0 = date.fromisoformat(values[0])
         await self.open_form(i, self.fo_form_obj())
 
-    # ---- Behaviour
+    # ---- How one night's groups are made (the split is the raid's default; a schedule may set its own — C6).
+    # The switches and the fill-ask wait are each schedule's own (C7): Schedules › a schedule › Switches and split.
     async def behaviour(self, i: discord.Interaction, note: str = "") -> None:
-        split, ask = self.cur("split_policy"), self.cur("fill_ask_hours")
+        split = self.cur("split_policy")
         lines = [note] if note else []
-        lines.append("**Behaviour** — press a switch to flip it.")
-        lines += [f"• {w}: **{'on' if self.cur(f) else 'off'}**" for f, w in BOOL_WORDS.items()]
-        lines.append(f"• When more join than one run seats: **{SPLIT_WORDS[split][0]}** — {SPLIT_WORDS[split][1]}")
-        lines.append(f"• A fill ask with no answer counts as no after **{hours_words(ask)}**")
+        lines.append("**How one night's groups are made** — when more join than one run seats, the raid's default split. A schedule may set its own.")
+        lines.append(f"• Now: **{SPLIT_WORDS[split][0]}** — {SPLIT_WORDS[split][1]}")
+        lines.append("-# Each schedule's sheet timing and switches are under Schedules.")
         split_opts = [Opt(p, SPLIT_WORDS[p][0], SPLIT_WORDS[p][1], default=p == split) for p in SPLIT_POLICIES]
-        items: list = [self.select("How to split a full slot", split_opts, self.split_picked),
-                       self.select("A fill ask expires after", hours_opts(ask, upto=48, suffix=""), self.ask_picked)]
-        for f, w in BOOL_WORDS.items():
-            items.append(self.button(f"{w}: {'on' if self.cur(f) else 'off'}", self._toggler(f),
-                                     discord.ButtonStyle.success if self.cur(f) else discord.ButtonStyle.secondary))
-        items.append(self.button("Back to the sections", self.to_hub))
-        await self.show(i, "\n".join(lines), *items)
-
-    def _toggler(self, field: str):
-        async def flip(i: discord.Interaction) -> None:
-            self.put(field, not self.cur(field))
-            await self.behaviour(i, f"{BOOL_WORDS[field]} → {'on' if self.cur(field) else 'off'}.")
-        return flip
+        await self.show(i, "\n".join(lines), self.select("How to split a full night", split_opts, self.split_picked),
+                        self.button("Back to the sections", self.to_hub))
 
     async def split_picked(self, i: discord.Interaction, values: list[str]) -> None:
         self.put("split_policy", values[0])
         await self.behaviour(i, f"Split → {SPLIT_WORDS[values[0]][0]}.")
-
-    async def ask_picked(self, i: discord.Interaction, values: list[str]) -> None:
-        self.put("fill_ask_hours", float(values[0]))
-        await self.behaviour(i, f"A fill ask expires after {hours_words(values[0])}.")
 
     # ---- Notes
     async def notes_form(self, i: discord.Interaction) -> None:
@@ -1117,7 +1049,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
     async def reset(self, i: discord.Interaction) -> None:
         has = bool(self.reg.raid_override(self.raid))
         name = self.reg.raid_def(self.raid).get("name", self.raid)
-        text = (f"Reset **{name}** to the game's defaults? Every guild change for this raid goes — run times and schedules, a run's week, make-up, weights, notes."
+        text = (f"Reset **{name}** to the game's defaults? Every guild change for this raid goes — its schedules with their sheet timing, minimums, weights and notes."
                 + (f"\n-# Your {len(self.draft)} unsaved change(s) are dropped too." if self.draft else "")) if has else f"**{name}** is already on the game's defaults."
         await self.show(i, text, self.button("Reset", self.do_reset, discord.ButtonStyle.danger, disabled=not has),
                         self.button("Back to the sections", self.to_hub))
@@ -1151,7 +1083,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
         def words(f: str, v) -> str:
             if v is None:
-                return "the raid's"
+                return "the raid's" if f in ("split_policy", "weights") else "the game's suggestion"
             if f in BOOL_WORDS:
                 return "on" if v else "off"
             if f == "split_policy":
@@ -1211,14 +1143,10 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
 
 class CompTargetsWizard(CompTargetsBlock, OwnerWizard):
-    """/roster comp (officers): only the targets block of the Group make-up screen, for one raid."""
+    """/roster comp (officers): the raid wizard's Minimums block on its own, for one raid."""
 
     def __init__(self, reg: Registry, owner_id: int, raid: str | None = None):
-        async def guard(i: discord.Interaction) -> str | None:
-            from . import discord_registry
-
-            return None if discord_registry.is_officer(i, reg) else "Officers only."
-        super().__init__(reg, owner_id, title="Aims", guard=guard)
+        super().__init__(reg, owner_id, title="Minimums", guard=_officer_guard(reg))
         self.raid = raid
 
     async def start(self, i: discord.Interaction) -> None:
@@ -1232,26 +1160,29 @@ class CompTargetsWizard(CompTargetsBlock, OwnerWizard):
             async def picked(it: discord.Interaction, values: list[str]) -> None:
                 self.raid = values[0]
                 await self.targets(it)
-            await self.show(i, "Which raid's aims?", self.select("Pick a raid", raids(self.reg), picked), self.button("Cancel", self.cancel))
+            await self.show(i, "Which raid's minimums?", self.select("Pick a raid", raids(self.reg), picked), self.button("Cancel", self.cancel))
             return
         await self.targets(i)
 
 
 @flow("roster_comp")
 async def open_roster_comp(interaction: discord.Interaction, reg: Registry, *, raid: str | None = None, **_seed) -> None:
-    """/roster comp: officers set the aims (what readiness compares the guild with). The limits stay the owner's (/gm config raid)."""
+    """/roster comp: officers set a raid's minimums (the fewest of a role, class or spec a run should hold)."""
     from . import discord_registry
 
     if not discord_registry.is_officer(interaction, reg):
-        await interaction.response.send_message("Officers only (Manage Server or a configured officer role).", ephemeral=True)
+        await interaction.response.send_message(OFFICERS_ONLY, ephemeral=True)
         return
     await CompTargetsWizard(reg, interaction.user.id, raid).start(interaction)
 
 
 @flow("raid_config")
 async def open_raid_config(interaction: discord.Interaction, reg: Registry, *, raid: str | None = None, section: str | None = None) -> None:
-    """`/gm config raid`, or another flow jumping straight to a raid's section (e.g. section="times")."""
-    if not await _owner_or_refuse(interaction, reg):
+    """`/gm config raid` (officers, D8), or another flow jumping straight to a raid's section (e.g. section="times")."""
+    from . import discord_registry
+
+    if not discord_registry.is_officer(interaction, reg):
+        await interaction.response.send_message(OFFICERS_ONLY, ephemeral=True)
         return
     await RaidConfigWizard(reg, interaction.user.id, raid).start(interaction, section)
 

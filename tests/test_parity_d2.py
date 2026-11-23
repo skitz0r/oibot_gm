@@ -115,7 +115,7 @@ def test_discord_cards_say_the_run_in_the_shared_words(reg, rs):
 def test_readiness_gives_the_desired_comp_and_the_minimums_reason(reg, rs):
     reg.config.raids["barrow_deeps"] = {"minimums": {"Hunter": {"min": 1, "note": "Trueshot for the melee"}}}
     s = state(reg, rs, OWNER, True, "what is the desired comp and are we short?")
-    assert any(l.startswith("  aims: ") and "Hunter" in l and "(officer)" in l and "Trueshot for the melee" in l for l in s.splitlines())
+    assert any(l.startswith("  minimums: ") and "Hunter" in l and "(the guild's)" in l and "Trueshot for the melee" in l for l in s.splitlines())
     assert not any(l.startswith("  over cap: ") for l in s.splitlines())  # a minimum has no upper limit (D16)
 
 
@@ -324,9 +324,12 @@ def test_confirm_all_pending_with_the_list_in_the_officer_context(reg):
 # ---------------------------------------------------------------- L8: raid_reset previews in words
 
 def test_raid_reset_preview_is_in_words(reg):
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30, Thu 20:00", "first_open": "2026-12-09T15:00:00-08:00", "lock_hours_before": 12}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30, Thu 20:00", "first_open": "2026-12-09T15:00:00-08:00"}, "t")
+    reg.set_schedule("barrow_deeps", "default", {"lock_hours_before": 12}, "t")  # sheet timing is the schedule's (C7)
+    reg.set_minimums("barrow_deeps", {"healer": {"min": 3}}, "t")
     d = configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps"))
-    assert "Tue 7:30 PM, Thu 8:00 PM" in d and "Wed 9 Dec 2026 3:00 PM" in d and "locks 12 hours before" in d
+    assert "Tue 7:30 PM, Thu 8:00 PM" in d and "Wed 9 Dec 2026 3:00 PM" in d and "minimums: at least 3 healers" in d
+    assert "Raid nights (Tuesdays 7:30 PM, Thursdays 8:00 PM)" in d, "the stored default schedule reads with the raid's run times"
     assert "19:30" not in d and "2026-12-09" not in d and "{" not in d
 
 
@@ -723,14 +726,20 @@ def test_the_config_dump_labels_raid_overrides_and_schedule_settings(reg):
     """Split 3 continued: the raw '## Current config' yaml carried a raid's first_open and slots with no label."""
     reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30", "first_open": "2026-12-09T15:00:00-08:00"}, "t")
     reg.set_schedule("barrow_deeps", "late", {"slots": "Thu 21:00", "lock_hours_before": 30}, "t")
+    reg.set_schedule("barrow_deeps", "default", {"lock_hours_before": 20}, "t")  # stored apart from the raid's run times
     text = configops.current_config_text(reg, officer=True)
     dump = text.split("```yaml\n", 1)[1].split("```", 1)[0]
     assert "first_open" not in dump and "19:30" not in dump, "raid overrides leave the bare dump"
     line = next(l for l in text.splitlines() if l.startswith("- barrow_deeps: ") and "first_open=" in l)
     assert "first_open=2026-12-09T15:00:00-08:00 (= first open Wed 9 Dec 2026 3:00 PM)" in line
     assert "(= run times Tue 7:30 PM)" in line  # (phase 2: a raid holds no lock time; each schedule does)
+    assert "Raid nights (Tuesdays 7:30 PM)" in line and "No run times yet" not in text, "a stored default runs on the raid's run times"
     own = next(l for l in text.splitlines() if "schedule late" in l)
-    assert "own settings {" in own and "lock hours before: 30 hours before" in own
+    assert "sheet timing " in own and "lock_hours_before=30" in own and "locks 30 hours before" in own
+    dflt = next(l for l in text.splitlines() if "schedule default" in l)
+    assert "Tuesdays 7:30 PM" in dflt and "locks 20 hours before" in dflt  # each schedule's own timing, the raid line none
+    raid = next(l for l in text.splitlines() if l.startswith("- barrow_deeps: slots="))
+    assert "lock_hours_before" not in raid and "signup_lead_hours" not in raid
     assert "auto_propose_hour" not in text and "legacy poll" not in text, "dead config is gone from the parser's context"
 
 

@@ -288,9 +288,11 @@ def guild_overview(guild: Guild = None) -> dict:
                   "member_roles": [r["name"] for r in cfg["settings"].get("member_roles", [])], "news_keywords": cfg["settings"].get("news_keywords", [])},
         "channels": {k: {"id": v.get("id"), "name": v.get("name"), "missing": bool(v.get("missing"))} for k, v in cfg.get("channels", {}).items()},
         "policy_docs": {k: {"compiled": v.get("compiled"), "summary": v.get("summary"), "text": excerpt(v.get("text"))} for k, v in cfg.get("docs", {}).items()},
-        "raids": [{"id": r["id"], "name": r["name"], "size": r["size"], "slots": r["slots"], "lockout_days": r["lockout_days"], "signup_lead_hours": r["signup_lead_hours"],
-                   "lock_hours_before": r["lock_hours_before"], "confirm_hours_before": r["confirm_hours_before"], "split_policy": r["split_policy"], "opened": r["opened"], "live": r["live"],
-                   "schedules": [{"id": s["id"], "name": s["name"], "label": s["label"], "class": s.get("class"), "regulars": s.get("regulars", 0), "next": s.get("next", [])} for s in r.get("schedules", [])]} for r in raids.get("raids", [])],
+        "raids": [{"id": r["id"], "name": r["name"], "size": r["size"], "slots": r["slots"], "lockout_days": r["lockout_days"], "minimum": r.get("minimum"),
+                   "split_policy": r["split_policy"], "opened": r["opened"], "live": r["live"],
+                   # sheet timing is each schedule's own (C7): its `week` (when the sheet opens, the nudge, the lock, the confirm deadline)
+                   "schedules": [{"id": s["id"], "name": s["name"], "label": s["label"], "class": s.get("class"), "regulars": s.get("regulars", 0), "next": s.get("next", []),
+                                  "week": s.get("effective")} for s in r.get("schedules", [])]} for r in raids.get("raids", [])],
         "live_runs": live,
         "test_bench": cfg.get("test_bench"),
         "summary": summary.get("sections", []) if isinstance(summary, dict) else [],
@@ -323,10 +325,11 @@ def get_run(run: str, guild: Guild = None) -> dict:
 
 @mcp.tool()
 def list_raids(guild: Guild = None) -> dict:
-    """Every raid of the game profile with the guild's effective cadence: size, slots, lockout, signup lead, nudge/lock/
-    confirm hours, fill-ask hours, weights, split policy, comp bounds, which fields the guild overrides, live-run count,
-    and its schedules (id, name, kind, class recurring|adhoc, series key, regulars count, a plain-words label, own cadence
-    overrides vs the effective values with where each comes from (own | raid | adhoc defaults), seat weights, the next runs)."""
+    """Every raid of the game profile with the guild's settings: size, slots, lockout, length, seat weights, split policy,
+    notes, `minimums` (the guild's own, with reasons) and `minimum` (what every run reads: the guild's over the game's),
+    which fields the guild changed, live-run count, and its schedules (id, name, kind, class recurring|adhoc, series key,
+    regulars count, a plain-words label, the schedule's OWN sheet timing — when the sheet opens, the nudge, the lock, the
+    confirm deadline, fill asks, the switches — seat weights, the next runs). Sheet timing is never on the raid."""
     return api(guild).get("/api/raids")
 
 
@@ -345,8 +348,8 @@ def get_raid(raid: str, guild: Guild = None) -> dict:
 def raid_readiness(raid: str | None = None, guild: Guild = None) -> dict:
     """Pool readiness (what the analytics channel's card shows, with the reasons): per raid the headcount against its
     size, each role's have/need/level with who could cover a shortfall (offspec, flex, alt), buffs nobody provides,
-    the desired comp lines (want/min/max, have, level, why, the officer's note and whether it is derived or officer-set),
-    what is short or over, and the pool plan. `raid` = a raid id for one raid; default every raid. Read-only."""
+    the minimum lines (at least N, have, level, why, the guild's reason and whether it is the game's or the guild's),
+    `minimums` (the guild's own, with reasons) and `minimum` (what a run reads), what is short, and the pool plan. `raid` = a raid id for one raid; default every raid. Read-only."""
     return api(guild).get("/api/readiness", raid=raid)
 
 
@@ -376,20 +379,16 @@ def list_regulars(raid: str, schedule: str | None = None, guild: Guild = None) -
 
 
 @mcp.tool()
-def set_comp_target(raid: str, slot: str, min: int | None = None, max: int | None = None, note: str | None = None, clear: bool = False,
-                    preview: bool = False, guild: Guild = None) -> str | dict:
-    """An officers' comp TARGET for a raid ("we aim for" — what readiness measures; the analytics card and the Readiness
-    page show it): `slot` = a role (tank, healer, melee, ranged), a class (Paladin) or Class:Spec (Paladin:Holy); `min`
-    = at least, `max` = at most (optional), `note` = why (shown on the card). `clear` = drop the target so the derived
-    value applies again. The owner's BOUNDS (raid_set tank_min…) are what the solver seats; a target outside them is
-    refused ('change the bounds first'). `raid` = id or name (or a live run's key for one run). `preview=True`: current →
-    new, nothing saved. Same write as the Readiness page and /roster comp."""
-    key = raid
-    try:
-        key = get_raid(raid, guild)["id"]
-    except ToolError:
-        pass  # a run key: the bot says if it isn't one
-    entry = None if clear else {"min": int(min or 0), "max": max, "note": note}
+def set_minimum(raid: str, slot: str, min: int | None = None, note: str | None = None, clear: bool = False,
+                preview: bool = False, guild: Guild = None) -> str | dict:
+    """A raid's MINIMUM for a role, class or spec (officers): the fewest a run should hold — the lock fills minimums
+    first, readiness and the analytics card measure against them. `slot` = a role (tank, healer, melee, ranged), a class
+    (Paladin) or Class:Spec (Paladin:Holy); `min` = at least this many (there is no upper limit); `note` = why (shown
+    beside it). `clear` = drop the guild's minimum so the game's applies again. A minimum belongs to the raid, never to
+    one run. `raid` = id or name. `preview=True`: current → new, nothing saved. Same write as the Readiness page and
+    /roster comp."""
+    key = get_raid(raid, guild)["id"]
+    entry = None if clear else {"min": int(min or 0), "note": note}
     return ops_change(guild, [{"kind": "comp", "target": key, "fields": {slot: entry}}], preview)
 
 
@@ -533,7 +532,7 @@ def set_strategy(run: str, strategy: str, guild: Guild = None) -> str:
 
 @mcp.tool()
 def autofill(run: str, guild: Guild = None) -> dict:
-    """Let the solver shape the board of an open run (the roster's split strategy, pins, role bounds). Saves the layout;
+    """Let the solver shape the board of an open run (the roster's split strategy, pins, role minimums). Saves the layout;
     the lock will use it. Returns the board and what the roster still needs."""
     data = api(guild).post(f"/api/run/{run}/autofill")
     return {"message": "board auto-filled", "needs": data.get("needs"), "board": data.get("board")}
@@ -639,18 +638,17 @@ def repost_sheet(run: str, channel: str | None = None, guild: Guild = None) -> s
     return msg(api(guild).post(f"/api/run/{run}/sheet", {"channel": channel or ""}))
 
 
-# ---------------------------------------------------------------- writes: raids and auras (owner)
+# ---------------------------------------------------------------- writes: raids and schedules (officers), auras (owner)
 
 @mcp.tool()
 def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
-    """Override raid settings for the guild (owner): one `field` + `value`, or several at once as `fields`
-    {field: value} — ONE validated write, so settings that are only legal together (signup lead and nudge raised
-    together) go through, and a refusal leaves the raid as it was. field = slots (a list ['Tue 19:30', 'Thu 19:30']),
-    cadence (standard|short|same_week), signup_lead_hours, nudge_hours_before, lock_hours_before, confirm_hours_before,
-    fill_ask_hours, lockout_days, duration_hours, notes, split_policy, nudge/autofill/open_dm/confirm (booleans; confirm =
-    the lock asks the rostered to Confirm), first_open ('YYYY-MM-DDTHH:MM' guild time), weight_<key> (see list_raids
-    weight_keys), or tank_min/tank_max/healer_min/healer_max/dps_min/dps_max. Values are typed (numbers, booleans,
-    lists); the bot builds the change. `preview=True`: what would change (current → new, consequences), nothing saved."""
+    """Change a raid's own settings for the guild (officers): one `field` + `value`, or several at once as `fields`
+    {field: value} — ONE validated write, and a refusal leaves the raid as it was. field = slots (a list ['Tue 19:30',
+    'Thu 19:30'] = the default schedule's run times), lockout_days, duration_hours, notes, split_policy (how a night with
+    more joiners than one run seats is split into groups; a schedule may set its own), first_open ('YYYY-MM-DDTHH:MM'
+    guild time), weight_<key> (see list_raids weight_keys). Sheet timing is each schedule's own: use schedule_set. A
+    role's minimum is set_minimum. Values are typed (numbers, lists); the bot builds the change. `preview=True`: what
+    would change (current → new, consequences), nothing saved."""
     rid = get_raid(raid, guild)["id"]
     want = dict(fields or {})
     if field:
@@ -663,16 +661,17 @@ def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dic
 @mcp.tool()
 def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False,
                  guild: Guild = None) -> str | dict:
-    """Change settings of a raid's schedule (owner) — or create the schedule. One `field` + `value`, or several at
+    """Change settings of a raid's schedule (officers) — or create the schedule. One `field` + `value`, or several at
     once as `fields` {field: value} in ONE validated write (a new schedule's kind and run times together). Schedules are
     listed per raid by list_raids / get_raid (`schedules`: id, name, kind, plain-words label, next runs); `default` is
     the raid's own weekly slots. field = kind (weekly|lockout|pickup) | name | active (bool) | rosters (1-4) | slots (a
     list ['Sat 20:00', 'Sun 20:00']) | days (a list [1, 3] = days of each lockout, 1 = reset day) | time ('20:00') |
-    signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge | autofill |
-    open_dm | confirm (bools) | split_policy | weights (the schedule's own seat weights {rank, main, sat_out,
+    cadence (standard|short|same_week: a preset of the four sheet-timing hours) | signup_lead_hours | nudge_hours_before |
+    lock_hours_before | confirm_hours_before | fill_ask_hours | nudge | autofill | open_dm | confirm (bools) — the
+    schedule's own sheet timing | split_policy | weights (the schedule's own seat weights {rank, main, sat_out,
     signup_order, regular}; a key set to null follows the raid) | follow ('<raid id> x<N>' or null: a second raid the
-    same night from the same signup, starting when the first ends). A cadence field set to null goes back to the raid's
-    value. A new schedule starts with its kind, slots, or days/time. `preview=True`: what would change, nothing saved."""
+    same night from the same signup, starting when the first ends). A sheet-timing field set to null goes back to the
+    game's suggestion; split_policy null goes back to the raid's. A new schedule starts with its kind, slots, or days/time. `preview=True`: what would change, nothing saved."""
     rid = get_raid(raid, guild)["id"]
     want = {str(k).strip(): v for k, v in (fields or {}).items()}
     if field:
@@ -684,7 +683,7 @@ def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any 
 
 @mcp.tool()
 def schedule_remove(raid: str, schedule: str, preview: bool = False, guild: Guild = None) -> str | dict:
-    """Remove a raid's schedule (owner). Removing `default` clears the raid's weekly slots; runs already open keep
+    """Remove a raid's schedule (officers). Removing `default` clears the raid's weekly slots; runs already open keep
     their times; its regulars come off it (they see a notice, nobody is DMed). `preview=True` names them first."""
     rid = get_raid(raid, guild)["id"]
     return ops_change(guild, [{"kind": "schedule_remove", "target": f"{rid}:{schedule}"}], preview)
@@ -692,7 +691,8 @@ def schedule_remove(raid: str, schedule: str, preview: bool = False, guild: Guil
 
 @mcp.tool()
 def raid_reset(raid: str, preview: bool = False, guild: Guild = None) -> str | dict:
-    """Drop every guild override on a raid (owner): back to the game profile's cadence. `preview=True` lists what goes."""
+    """Drop every change the guild made to a raid (officers): its schedules, minimums, weights and notes go back to the
+    game profile's. `preview=True` lists what goes."""
     rid = get_raid(raid, guild)["id"]
     return ops_change(guild, [{"kind": "raid_reset", "target": rid}], preview)
 
