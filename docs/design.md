@@ -4478,14 +4478,16 @@ Summit"; the signup-channel lock line adds " · after Hyjal Summit". After the l
 its own board, pins, fill asks (a must-act DM, as on any run), cards, updates thread and loot councils (`<key>-r1`, `-r2`).
 
 **A short role across several rosters (the rule set in review, 2026-11-22).** When a role is short across a run's rosters,
-every joiner who can play it is rostered before a seat of that role is left empty: the run is short by exactly what its
-rosters need less who joined, never more — on a follow-on and on any run with several rosters. `solver._add_role_bounds`
-keeps each roster's floor at `min(min, capable // rosters)` and, when the role is short, adds a total across the rosters
-of at least `min(min × rosters, capable)`, counting nobody forced out (an officer's pin out, always-bench, first come's
-late joiners), so the odd player the floor leaves free can't lose a seat to another role — not even to a lead's rostered
-player carrying `LEAD_SEAT_BONUS`. A role fully supplied, and each roster's maximum, are unchanged. Tests:
-`tests/test_follow_on_solver.py` (three tanks for two 10s, all three rostered) and `tests/test_schedules.py` (the same
-for tanks and healers on an ordinary ×2 run, and a pin out still honoured).
+everyone who joined for it is rostered before a seat of that role is left empty, on a follow-on and on any run with
+several rosters. It is a strong PREFERENCE, never a bound, so it can never stop a lock: `solver._short_role_terms`
+rewards each seat of a short role filled (fewer who can play it than min × rosters; up to min × rosters seats) with more
+than one seat can earn otherwise — twice the largest seat value (which carries `LEAD_SEAT_BONUS` on a follow-on) plus the
+largest roster bonus, half that again for the balance gap, and `SHORT_ROLE_MARGIN` for synergy, all × `SCALE`. The
+per-roster floor `min(min, capable // rosters)` and each roster's maximum are unchanged, a role fully supplied gets no
+reward, a player forced out (pin out, always-bench, first come's late joiners) earns nothing, a hybrid who could fill two
+short roles fills one, and a board that already fills every seat still solves. Tests: `tests/test_follow_on_solver.py`,
+`tests/test_schedules.py` (tanks and healers on an ordinary ×2 run, a pin out) and `tests/test_short_role_solver.py`
+(the hybrid, the full board).
 
 **A Can't on the lead is the whole night**, on every path that frees a lead seat: `rc.free_seat` on a run with
 `followed_by` also frees the same member's seat on the locked follow-on (`notice=False`, idempotent — expired confirmations,
