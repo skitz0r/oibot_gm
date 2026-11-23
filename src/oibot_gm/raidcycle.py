@@ -600,6 +600,8 @@ def _lockout_starts(reg: Registry, rd: dict, sched: dict, now: datetime, horizon
 def schedule_starts(reg: Registry, instance: str, sched: dict, now: datetime, horizon_hours: float, rd: dict | None = None) -> list[datetime]:
     """One schedule's run starts within `horizon_hours` of now. A pickup template never has any: it opens on demand.
     `rd`: an effective raid dict to read first_open / lockout_days from (a wizard's unsaved draft); default the stored raid."""
+    if gone_raids(reg, instance, sched):  # a raid of its lineup left the game's profile: the schedule opens nothing
+        return []
     rd = rd if rd is not None else reg.raid_def(instance)
     if sched.get("kind") == "lockout":
         starts = _lockout_starts(reg, rd, sched, now, horizon_hours)
@@ -615,6 +617,16 @@ def schedule_lineup(instance: str, sched: dict) -> list[dict]:
     from .registry import row_lineup
 
     return row_lineup(instance, sched)
+
+
+def gone_raids(reg: Registry, instance: str, sched: dict) -> list[str]:
+    """The raids of a schedule's lineup that are no longer the game profile's (in lineup order). A schedule with any
+    opens no run at all — never a chain with a raid the profile lacks (the scheduler warns the officers once an hour)."""
+    try:
+        lineup = schedule_lineup(instance, sched)
+    except RegistryError:
+        lineup = [{"raid": instance}]
+    return [e["raid"] for e in lineup if e.get("raid") not in reg.profile.raids]
 
 
 def _after_first_opens(reg: Registry, instance: str, sched: dict, starts: list[datetime]) -> list[datetime]:
@@ -636,7 +648,7 @@ def occurrences(reg: Registry, now: datetime, horizon_hours: float | None = None
     opens now); else `horizon_hours` for all."""
     out = []
     for s in reg.all_schedules():
-        if not s.get("active", True) or s["kind"] == "pickup":
+        if not s.get("active", True) or s["kind"] == "pickup" or gone_raids(reg, s["raid"], s):
             continue
         h = float(reg.schedule_def(s["raid"], s["id"])["signup_lead_hours"]) if lead else float(horizon_hours or 0)
         out += [(s, t) for t in schedule_starts(reg, s["raid"], s, now, h)]
@@ -769,7 +781,8 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         rd = {**rd, "nudge_hours_before": nudge_h}
     t = {"key": key, "name": f"{rd.get('name', instance)} {reg.local12(start)}", "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "schedule": start.strftime("%a %H:%M"), "instance": instance,
          "cutoff_soft_hours": c.get("soft", float(rd["nudge_hours_before"])), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24,
-         "reminders": "dm" if c.get("nudge", rd["nudge"]) else OFF, "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True}
+         "reminders": "dm" if c.get("nudge", rd["nudge"]) else OFF, "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True,
+         "created_at": now()}  # cleanup_ephemeral drops a dict whose open was cut off before its run file (DICT_WITHOUT_RUN_HOURS)
     # every run carries its class and series (roster redesign Phase 1): a one-off (ADHOC_SCHEDULE) and a pickup template
     # are ad hoc; anything else is a run of a recurring series whose regulars it expects
     kind = rd.get("class") or schedule_class(sched.get("kind"))
@@ -3240,6 +3253,9 @@ def end_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> bool:
     return True
 
 
+# a run dict with no run file this long after ensure_run made it is an open cut off before its file was written (a
+# restart, a failed save): cleanup_ephemeral drops it — a new key holds no time, so nothing else ever matches it again
+DICT_WITHOUT_RUN_HOURS = 1.0
 REOPEN_GRACE_HOURS = 1.0  # a run ended / closed by mistake can be reopened this long after (never a cancelled one, D19)
 
 

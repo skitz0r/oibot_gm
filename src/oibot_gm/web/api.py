@@ -1740,8 +1740,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         if "occurrence" in d:
-            got = rc.which_run(reg, rid, start, sid)["occurrence"]
-            if got != ((d.get("occurrence") or "").strip() or None):
+            w = rc.which_run(reg, rid, start, sid)  # the run is (schedule, occurrence): both must be the preview's
+            asked = (str(d.get("schedule") or "").strip().lower() or None, (d.get("occurrence") or "").strip() or None)
+            if w["occurrence"] != asked[1] or (asked[0] is not None and w["schedule"] != asked[0]):
                 return JSONResponse({"error": "That time now opens a different run than the preview showed — check it and open again.",
                                      "preview": rc.open_preview(reg, bot.raids.store(reg), rid, start.isoformat(), sid)}, status_code=409)
         rs = bot.raids.store(reg)

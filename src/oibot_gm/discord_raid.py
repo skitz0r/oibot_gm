@@ -783,7 +783,8 @@ class RaidMixin:
         """Drop run rosters whose sheet is done/cancelled (who held a seat stays in the run file; no member file
         carries a run key any more) — a run ENDED keeps its entry for a grace hour (rc.REOPEN_GRACE_HOURS), so one ended
         by mistake can be reopened with its cutoffs and test flags intact (design B6); a cancelled run is never reopened
-        (D19), so its entry goes at once."""
+        (D19), so its entry goes at once. A first raid's entry with no run file DICT_WITHOUT_RUN_HOURS after it was
+        made (an open cut off before its file) goes too."""
         cfg = reg.config
         gone = []
         for t in list(cfg.rosters):
@@ -800,6 +801,13 @@ class RaidMixin:
                 keys.add(nxt)
                 nxt = (cfg.team(nxt) or {}).get("followed_by")
             evs = [e for e in rs.events.values() if e.team in keys]
+            made = t.get("created_at")
+            if not evs and not t.get("follows") and made and reg.now_local() - datetime.fromisoformat(made) > timedelta(hours=rc.DICT_WITHOUT_RUN_HOURS):
+                # an open cut off before its run file was written: no run will ever take this dict (its later raids'
+                # dicts go with it, as orphans, on the next pass)
+                cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
+                gone.append(t["key"])
+                continue
             if evs and all(e.state == "cancelled" or (e.state == "done" and not rc.closed_recently(e)) for e in evs):
                 cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
                 gone.append(t["key"])

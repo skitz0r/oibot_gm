@@ -380,3 +380,49 @@ def test_the_old_one_off_pair_keeps_working_as_a_two_raid_run(data_root, old_sto
     run(bot.cancel_run(reg, rs, rs.events[fk], "Jon", None))
     assert (rs.events[lk].state, rs.events[fk].state) == ("cancelled", "cancelled")
     assert sorted(rs.events) == sorted([lk, fk]) and rs.events[lk].message_id == 777
+
+
+# ---------------------------------------------------------------- fix round 1
+
+@pytest.mark.parametrize("gone", [RID, HYJAL], ids=["a later raid left the game", "the first raid left the game"])
+def test_a_schedule_with_a_raid_the_game_lacks_opens_nothing_and_warns_hourly(reg, rs, monkeypatch, gone):
+    from oibot_gm.web.app import schedule_sections
+
+    reg.set_raid_overrides(HYJAL, OPENED, "t")
+    reg.set_raid_overrides(RID, OPENED, "t")
+    t = start_in(reg, days=1)
+    sid = weekly(reg, HYJAL, t.strftime("%a %H:%M"), "night")
+    reg.set_schedule(sid, {"follow": f"{RID} x1"}, "t")
+    due(reg, HYJAL, t)  # the premise: the night is due while both raids are the game's
+    monkeypatch.delitem(reg.profile.raids, gone)
+    bot, opened = _scheduler(reg, rs)
+    clock = {"now": reg.now_local()}
+    monkeypatch.setattr(reg, "now_local", lambda: clock["now"])
+    run(bot.scheduler_tick_guild(reg))
+    run(bot.scheduler_tick_guild(reg))
+    assert opened == [] and not rs.events and bot.signup.sent == [], "no run, no public sheet, never a chain without the raid"
+    assert rc.occurrences(reg, reg.now_local(), 24 * 21) == []
+    if gone == RID:
+        assert rc.upcoming_rows(reg, rs, HYJAL) == []
+    assert all(not r["runs"] for sec in schedule_sections(reg) for r in sec["schedules"]), "the public page agrees"
+    warns = [x for lvl, x in bot.ops.lines if lvl == "warn" and "opens no runs" in x]
+    name = "Barrow Deeps" if gone == RID else "Hyjal Summit Forever"  # a raid the profile lacks: its id in words
+    first = "Hyjal Summit" if gone == RID else name
+    assert warns == [f"{first} · Raid nights opens no runs: {name} is no longer a raid "
+                     "of this game. Change its raids on the Raids page, or remove the schedule."]
+    clock["now"] += timedelta(minutes=61)
+    run(bot.scheduler_tick_guild(reg))
+    assert len([x for lvl, x in bot.ops.lines if "opens no runs" in x]) == 2, "again after an hour, never every minute"
+
+
+def test_a_run_dict_whose_open_was_cut_off_is_cleaned_after_an_hour(reg, rs):
+    t = start_in(reg, days=2)
+    cut = rc.ensure_run(reg, RID, t, by="t", rs=rs)  # the open stopped here: no run file
+    fresh = rc.ensure_run(reg, RID, t + timedelta(hours=1), by="t", rs=rs)
+    live = rc.open_run(reg, rs, RID, t + timedelta(hours=2), by="t")
+    old = (datetime.now(TZ) - timedelta(hours=2)).isoformat()
+    cut["created_at"] = reg.config.roster(live.team)["created_at"] = old
+    bot = NightBot(reg, rs)
+    run(bot.cleanup_ephemeral(reg, rs))
+    keys = {x["key"] for x in reg.config.rosters}
+    assert cut["key"] not in keys and fresh["key"] in keys and live.team in keys, "only the old dict with no run goes"

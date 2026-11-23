@@ -277,12 +277,9 @@ def same_run(reg_a: Registry, rs_a: rc.RaidStore, reg_b: Registry, rs_b: rc.Raid
             r.set_schedule(schedule, {"kind": "weekly", "slots": slot, "name": "Fridays"}, "t", raid=instance)
     cut = {"soft": 2, "hard": 1.5, "confirm": 1}
     ev_a = rc.open_run(reg_a, rs_a, instance, start, by="t", cutoffs=cut, schedule=schedule)
-    keyer = rc.new_run_key  # phase 3: a new key is random — the second guild is handed the first's on purpose
-    rc.new_run_key = lambda reg, rs, inst: ev_a.key
-    try:
+    with pytest.MonkeyPatch.context() as mp:  # phase 3: a new key is random — the second guild is handed the first's on purpose
+        mp.setattr(rc, "new_run_key", lambda reg, rs, inst: ev_a.key)
         ev_b = rc.open_run(reg_b, rs_b, instance, start, by="t", cutoffs=cut, schedule=schedule)
-    finally:
-        rc.new_run_key = keyer
     assert ev_a.key == ev_b.key and ev_a.team == ev_b.team, "the fixture's premise: one run key in both guilds"
     return ev_a, ev_b
 

@@ -2121,9 +2121,7 @@ What is safe: who could play on a test run is only the puppets and you (the test
 rostered or asked to fill it, and the test sheet refuses presses from real members. The other way round too: a real
 run (ad hoc, or a schedule with no regulars yet, where every main is expected) never expects, suggests, asks or marks
 away a puppet; setting a real member's answer on a test run is refused on every path too (the site, plain text, MCP),
-and a test run refuses `/raid set`. A rehearsal opened before test runs had their own keys (`-test`) can still sit at a
-real run's key: that real run doesn't open, and the ops feed says so once, naming the run and the fix — clear the test
-bench (`/gm test clear`) and it opens on the next minute. What real members do see: the test sheet in the signup channel (marked as a
+and a test run refuses `/raid set`. What real members do see: the test sheet in the signup channel (marked as a
 test), the ops lines, and the analytics cards pausing until the bench is cleared.
 
 ## 8b. MCP server (owner, from Claude Code)

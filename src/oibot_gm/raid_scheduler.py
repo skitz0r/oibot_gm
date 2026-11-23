@@ -128,6 +128,28 @@ class RaidSchedulerMixin:
         inst = sched["raid"]
         await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: {err}")
 
+    async def _warn_gone_raids(self, reg, now) -> None:
+        """An active schedule whose lineup names a raid the game profile no longer has opens nothing (rc.gone_raids: the
+        whole occurrence, never a chain without that raid). ONE ops warn per (guild, schedule id) per hour, naming the
+        schedule, the raid and the fix."""
+        from .registry import schedule_name
+
+        warned: dict = self.__dict__.setdefault("_gone_raids_warned", {})
+        for s in reg.all_schedules():
+            if not s.get("active", True) or s["kind"] == "pickup":
+                continue
+            gone = rc.gone_raids(reg, s["raid"], s)
+            key = (reg.key, s["id"])
+            if not gone or (key in warned and now - warned[key] < timedelta(hours=1)):
+                continue
+            warned[key] = now
+            names = [(getattr(reg, "base_profile", reg.profile).raids.get(r) or reg.config.raids.get(r) or {}).get("name") or r.replace("_", " ").title() for r in gone]
+            words = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+            first = reg.raid_def(s["raid"]).get("name", s["raid"]) if s["raid"] in reg.profile.raids else names[0]
+            await self.ops.emit(reg.config, "warn", f"{first} · {schedule_name(s)} opens no runs: {words} "
+                                                    f"{'is' if len(names) == 1 else 'are'} no longer a raid of this game. "
+                                                    "Change its raids on the Raids page, or remove the schedule.")
+
     async def _close_run(self, reg, rs, ev, now, exhausted_posted: set) -> None:
         """A locked run past its close: a loot council on it decides (LootMixin.loot_may_close — ended only idle 30 min
         with no pick or drop waiting, after one "closing in 15 min" notice; never with a pick pending), else done."""
@@ -164,6 +186,7 @@ class RaidSchedulerMixin:
         # open sheets on cadence: every active schedule's runs within that schedule's signup lead (needs the signup
         # channel); a pickup template never opens here. A run is found by its schedule and occurrence (live or closed:
         # never a second sheet, a cancelled occurrence never again)
+        await self._warn_gone_raids(reg, now)
         if channel:
             for sched, start in rc.occurrences(reg, now, lead=True):
                 if rc.event_of_occurrence(rs, sched["id"], rc.occurrence_stamp(reg, start), reg=reg) is not None:

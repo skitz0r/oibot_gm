@@ -815,7 +815,7 @@ def test_open_on_a_run_already_open_never_claims_a_follow_on(reg, rs, monkeypatc
     assert rc.follow_of(rs, rs.events[r.json()["key"]]) is None
 
 
-def test_another_guilds_council_on_the_same_run_key_never_moves_this_leads_window(duo):
+def test_another_guilds_council_on_the_same_run_key_never_moves_this_leads_window(duo, monkeypatch):
     """Run keys carry no guild: guild B's live council on a follow-on keyed like A's must not push A's lead past its
     routing window while A has no follow-on council of its own (A's drops would be held and expire unrecorded)."""
     from conftest import lock_with_board
@@ -834,14 +834,12 @@ def test_another_guilds_council_on_the_same_run_key_never_moves_this_leads_windo
         made.append(keyer(reg_, rs_, inst)) if reg_.key == a.key else None
         return made[-1] if reg_.key == a.key else made.pop(0)
 
-    rc.new_run_key = same_keys
+    monkeypatch.setattr(rc, "new_run_key", same_keys)
     for r, rs in ((a, rs_a), (b, rs_b)):
         unlock_hyjal(r)
-        try:
-            lead = rc.open_run(r, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 1})
-        finally:
-            if r.key == b.key:
-                rc.new_run_key = keyer
+        lead = rc.open_run(r, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 1})
+        if r.key == b.key:
+            monkeypatch.setattr(rc, "new_run_key", keyer)
         fev = rc.follow_of(rs, lead)
         ms = r.test_members()
         join(r, rs, lead, ms[:20])
