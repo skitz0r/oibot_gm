@@ -5499,7 +5499,10 @@ function its callers still used, so it can't propose a run). Stop the bot, run `
 each raid's tank and healer minimums go back to `comp: {role: {min}}` (both written, the missing one from the
 profile), every other minimum to `comp_targets: {slot: {min, note?}}`, `minimums` removed, one commit per guild; the
 schedules stay where they are, and the phase-1 code reads each schedule's written-out timing as its own values,
-unchanged. What cannot come back: a raid-level timing value that had no schedule (named in the start's line), a role's
+unchanged. Two things read differently after going back. A lowered class, spec, melee or ranged minimum is only an
+aim in `comp_targets`: the older lock ignores it when it rosters (only the tank and healer minimums in `comp` bind
+there). And each schedule's timing stays frozen as its own written-out values: none of it inherits again, so a later
+change to the raid's or the game's timing no longer reaches that schedule until someone edits it. What cannot come back: a raid-level timing value that had no schedule (named in the start's line), a role's
 old maximum, a tank or healer aim. Going back past phase 1: the script without the flag (minimums first, then
 schedules, as above).
 

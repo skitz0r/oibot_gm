@@ -1052,16 +1052,16 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
     async def reset(self, i: discord.Interaction) -> None:
         from . import configops
+        from .consequences import raid_reset_consequence
 
         has = bool(self.reg.raid_override(self.raid))
         name = self.reg.raid_def(self.raid).get("name", self.raid)
         self._reset_rev = self.reg.config_rev(f"raids:{self.raid}")
         d = configops.describe_ops(self.reg, [self.reset_op()]) if has else None
         goes = d.lines[0].before if d and d.lines else None  # the same words the site's and plain text's preview print
-        text = (f"Reset **{name}** to the game's defaults? Every guild change for this raid goes — its schedules with their sheet timing, minimums, weights and notes."
+        text = (" ".join(raid_reset_consequence(self.reg, self.raid, unsaved=len(self.draft)))
                 + (f"\n-# What goes: {goes}." if goes else "")
-                + "".join(f"\n{c}" for c in (d.consequences if d else []))
-                + (f"\n-# Your {len(self.draft)} unsaved change(s) are dropped too." if self.draft else "")) if has else f"**{name}** is already on the game's defaults."
+                + "".join(f"\n{c}" for c in (d.consequences if d else []))) if has else f"**{name}** is already on the game's defaults."
         await self.show(i, text, self.button("Reset", self.do_reset, discord.ButtonStyle.danger, disabled=not has),
                         self.button("Back to the sections", self.to_hub))
 

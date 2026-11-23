@@ -1398,7 +1398,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     # ---------------- /gm (owner / officers)
     gm = app_commands.Group(name="gm", description="oibot_GM administration")
-    config = app_commands.Group(name="config", description="Owner: bot configuration", parent=gm)
+    config = app_commands.Group(name="config", description="Set up the bot: officers edit raids and their schedules, the owner the rest", parent=gm)
 
     @config.command(name="owner", description="Set up this server for the bot (first claim) or transfer ownership")
     async def cfg_owner(interaction: discord.Interaction, user: discord.User | None = None):

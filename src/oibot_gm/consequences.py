@@ -648,6 +648,27 @@ def market_consequence(reg: Registry, house) -> list[str]:
             "You can pick another auction house or turn prices off at any time."]
 
 
+RESET_WORDS = (("schedules", "schedules"), ("minimums", "minimums"), ("weights", "seat weights"), ("notes", "notes"))
+
+
+def raid_reset_consequence(reg: Registry, raid: str, *, unsaved: int = 0) -> list[str]:
+    """The confirm before a raid goes back to the game's defaults (the raid wizard's Reset): what goes, named from the
+    guild's stored changes, and the wizard's own unsaved edits when there are some."""
+    name = reg.raid_def(raid).get("name", raid)
+    over = reg.raid_override(raid)
+    if not over:
+        return [f"{name} is already on the game's defaults."]
+    parts = [words for key, words in RESET_WORDS if over.get(key)]
+    if any(v not in (None, [], {}, "") for key, v in over.items() if key not in dict(RESET_WORDS)):
+        parts.append("other settings" if parts else "settings")
+    goes = "Its " + ((", ".join(parts[:-1]) + " and " + parts[-1]) if len(parts) > 1 else (parts[0] if parts else "settings"))
+    edits = "so does your unsaved change" if unsaved == 1 else f"so do your {unsaved} unsaved changes"
+    lines = [f"{name} goes back to the game's defaults.", f"{goes} go" + (f", and {edits}." if unsaved else ".")]
+    if over.get("schedules"):
+        lines.append("No sheet opens for this raid until someone adds a schedule again.")
+    return lines
+
+
 def market_clear_consequence(reg: Registry) -> list[str]:
     """The confirm before turning prices off (forgetting the guild's auction house)."""
     if reg.config.market is None:
