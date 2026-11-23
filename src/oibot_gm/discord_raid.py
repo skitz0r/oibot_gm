@@ -833,10 +833,10 @@ class RaidMixin:
         solver's own sentence) when no preview can be made."""
         if ev.state != "open":
             raise RegistryError(f"{run_title(reg, ev)} is already {rc.RUN_STATE_WORDS.get(ev.state, ev.state).split(' — ')[0]}, and the preview is for an open sheet.")
-        strategy = ev.split_strategy or reg.raid_def(ev.instance).get("split_policy") or "balanced"
+        strategy = rc.run_strategy(reg, ev)  # the lock's own strategy and budget: the preview is the roster the lock builds
         async with self.solving(reg, ev.key):
             try:
-                layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy)
+                layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy, None, rc.SOLVE_TIME_LIMIT_S)
             except RuntimeError as e:
                 raise RegistryError(rc.solver_error_text(e)[:1].upper() + rc.solver_error_text(e)[1:]) from e
         ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(reg, ev), "by": by, "by_id": by_id, "at": rc.now(), "kind": "lock preview"}

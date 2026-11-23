@@ -52,9 +52,11 @@ class SolveOptions:
 # on any machine under any load. DTIME_PER_SECOND turns a budget in seconds into deterministic time (measured on the
 # lock's 20- and 10-player models: about 6 units per wall second here). The wall-clock limit stays only as a safety
 # net, WALL_CEILING × the budget: a solve that reaches it is no longer repeatable, but a lock never hangs.
+# interleave_search is marked "Experimental" in OR-tools' sat_parameters: re-check its determinism (tests/
+# test_solver_repeatable.py) and DTIME_PER_SECOND's wall time on every OR-tools upgrade.
 RANDOM_SEED = 0
 DTIME_PER_SECOND = 6.0
-WALL_CEILING = 4.0
+WALL_CEILING = 2.0
 
 DEFAULT_OPTIONS = SolveOptions()  # the shared default for solve()/solve_rosters(); never mutate it
 

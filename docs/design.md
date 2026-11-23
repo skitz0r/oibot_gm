@@ -5502,8 +5502,9 @@ schedules stay where they are, and the phase-1 code reads each schedule's writte
 unchanged. Two things read differently after going back. A lowered class, spec, melee or ranged minimum is only an
 aim in `comp_targets`: the older lock ignores it when it rosters (only the tank and healer minimums in `comp` bind
 there). And each schedule's timing stays frozen as its own written-out values: none of it inherits again, so a later
-change to the raid's or the game's timing no longer reaches that schedule until someone edits it. What cannot come back: a raid-level timing value that had no schedule (named in the start's line), a role's
-old maximum, a tank or healer aim. Going back past phase 1: the script without the flag (minimums first, then
+change to the raid's or the game's timing no longer reaches that schedule until someone edits it. What cannot come
+back: a raid-level timing value that had no schedule (named in the start's line), a role's old maximum, a tank or
+healer aim. Going back past phase 1: the script without the flag (minimums first, then
 schedules, as above).
 
 **Later phases** (spec §9) change what people see: guild-unique schedule ids with regulars keyed by them and no

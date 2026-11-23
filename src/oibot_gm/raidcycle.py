@@ -2592,6 +2592,14 @@ def merged_role_min(rb: dict, policy: dict[str, int] | None) -> dict[str, int]:
     return {**{r: int(rb[r]["min"]) for r in ("tank", "healer") if r in rb}, **{r: int(n) for r, n in (policy or {}).items()}}
 
 
+def run_strategy(reg: Registry, ev: RaidEvent) -> str:
+    """THE split strategy a run's lock uses: the run's own, else its roster's split_policy, else the raid's, else
+    balanced. The lock (_solve_run) and its preview (RaidMixin.lock_preview) both read it, so they solve alike."""
+    raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
+    return (ev.split_strategy or (reg.config.team(ev.team) or {}).get("split_policy") or reg.raid_def(raid_id).get("split_policy")
+            or "balanced")
+
+
 def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None) -> tuple[list[Player], list[RosterResult], int]:
     """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
     the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective."""
@@ -2613,7 +2621,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     placed = {n: gi for gi, g in enumerate(layout) for n in g}
     used = max((gi for gi, g in enumerate(layout) if g), default=-1) + 1  # groups up to the last one holding someone: empty rosters drawn on the board force nothing
     n_rosters = max(how_many_rosters(reg, players, size, rb, want=run_rosters(reg, ev)), -(-used // k) if used else 1)
-    strategy = strategy or ev.split_strategy or (reg.config.team(ev.team) or {}).get("split_policy") or rd.get("split_policy") or "balanced"
+    strategy = strategy or run_strategy(reg, ev)
     bonus = seat_bonus(reg, rs, ev, players)
     lead = lead_of(rs, ev)
     lead_rostered: tuple[str, ...] = ()
@@ -2684,14 +2692,16 @@ def solver_error_text(e: Exception) -> str:
     return f"building the roster failed: {msg}"
 
 
-def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None) -> tuple[list[list[str]], list[RosterResult]]:
+def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None,
+                  time_limit: float = PREVIEW_TIME_LIMIT_S) -> tuple[list[list[str]], list[RosterResult]]:
     """A split under `strategy` for the modal: the layout (flat groups) and the rosters, nothing saved.
-    `avoid` = earlier previews (flat groups) the answer must differ from."""
+    `avoid` = earlier previews (flat groups) the answer must differ from. `time_limit`: the split modal's budget by
+    default; the lock preview passes the lock's (SOLVE_TIME_LIMIT_S) so it shows the roster the lock will build."""
     k = groups_per_roster(reg, run_size(reg, ev))
     prev = [{n: gi // k for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     prev_g = [{n: gi for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     trial = ev.model_copy(deep=True)
-    players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=PREVIEW_TIME_LIMIT_S, whatif=False, avoid_groups=prev_g)
+    players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=time_limit, whatif=False, avoid_groups=prev_g)
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
     return [list(g) for r in rosters for g in r.groups], rosters
