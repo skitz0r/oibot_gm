@@ -50,6 +50,41 @@ def test_a_class_minimum_the_joiners_cannot_meet_never_stops_the_lock():
     assert len(r.selected) == 10
 
 
+def test_a_hybrid_switched_to_tank_does_not_also_count_for_their_healing_spec():
+    """A Restoration druid who can tank fills one minimum, never two: switched to Guardian for the tank minimum, she
+    doesn't count toward a Druid:Restoration minimum, so the other Restoration druid is rostered for it even as a
+    third healer beside the two priests officers placed."""
+    ps = pool([("Warrior", "Protection", "tank", None, 1), ("Druid", "Restoration", "healer", "Guardian", 1), ("Druid", "Restoration", "healer", None, 1),
+               ("Priest", "Holy", "healer", None, 2), ("Mage", "Fire", "ranged", None, 9)])
+    r = solve_rosters(FOREVER, ps, "barrow_deeps", SolveOptions(raid_size=10, minimums={"tank": 2, "healer": 2, "Druid:Restoration": 1}, force_in=("p03", "p04")))[0]
+    seated = {p.signup_name: p for p in r.selected}
+    assert seated["p01"].role == "tank" and "p02" in seated
+
+
+LEAD_BONUS = 1000  # raidcycle.LEAD_SEAT_BONUS
+
+
+def _follow_on(shape, minimums):
+    """Two 10s of a follow-on: the first 20 of `shape` are the lead's rostered (bonus + lead_rostered), then two mages
+    who were not on the lead."""
+    ps = pool([*shape, ("Mage", "Fire", "ranged", None, 2)])
+    lead = tuple(p.signup_name for p in ps[:20])
+    opts = SolveOptions(raid_size=10, minimums=minimums, bonus={n: LEAD_BONUS for n in lead}, lead_rostered=lead)
+    rosters = solve_rosters(FOREVER, ps, "barrow_deeps", opts, rosters=2)
+    return set(lead), {p.signup_name for r in rosters for p in r.selected}
+
+
+@pytest.mark.parametrize("shape, minimums", [
+    ([("Warrior", "Protection", "tank", None, 3), ("Priest", "Holy", "healer", None, 7), ("Mage", "Fire", "ranged", None, 10)], {"tank": 2, "healer": 3}),
+    ([("Warrior", "Protection", "tank", None, 4), ("Priest", "Holy", "healer", None, 6), ("Mage", "Fire", "ranged", None, 10)], {"tank": 1, "healer": 3}),
+    ([("Warrior", "Protection", "tank", None, 3), ("Priest", "Holy", "healer", None, 5), ("Mage", "Fire", "ranged", None, 12)], {"tank": 2, "healer": 3}),
+], ids=["healers past the minimum", "tanks past the minimum", "the live shape"])
+def test_a_follow_on_keeps_every_player_the_lead_rostered(shape, minimums):
+    """A tank or healer the lead rostered is never charged as extra on its follow-on: the two 10s are the lead's 20."""
+    lead, seated = _follow_on(shape, minimums)
+    assert seated == lead
+
+
 def test_officers_placing_an_extra_tank_is_kept():
     ps = pool([("Warrior", "Protection", "tank", None, 3), ("Priest", "Holy", "healer", None, 2), ("Mage", "Fire", "ranged", None, 8)])
     r = solve_rosters(FOREVER, ps, "barrow_deeps", SolveOptions(raid_size=10, minimums={"tank": 2, "healer": 2}, force_in=("p00", "p01", "p02")))[0]

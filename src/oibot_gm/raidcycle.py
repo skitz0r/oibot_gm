@@ -2569,9 +2569,11 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     strategy = strategy or ev.split_strategy or (reg.config.team(ev.team) or {}).get("split_policy") or rd.get("split_policy") or "balanced"
     bonus = seat_bonus(reg, rs, ev, players)
     lead = lead_of(rs, ev)
+    lead_rostered: tuple[str, ...] = ()
     if lead is not None and lead.all_rosters:  # a follow-on: the lead's rostered come first — the splits are the lead's roster split (design §5.62)
         on_lead = {player_uid(lead, p) for p in lead.seated()}
-        bonus = {**bonus, **{p.signup_name: int(bonus.get(p.signup_name, 0)) + LEAD_SEAT_BONUS for p in players if player_uid(ev, p) in on_lead}}
+        lead_rostered = tuple(p.signup_name for p in players if player_uid(ev, p) in on_lead)
+        bonus = {**bonus, **{n: int(bonus.get(n, 0)) + LEAD_SEAT_BONUS for n in lead_rostered}}
     roster_bonus = None
     if strategy == "rotation":
         w = int(rd["weights"].get("sat_out", 2))
@@ -2597,6 +2599,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         pins={n: gi for n, gi in placed.items() if gi < k * n_rosters} or None,
         prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
         minimums=role_min or None,
+        lead_rostered=lead_rostered,
         bonus=bonus,
     )
     # "another one": for a split the rosters must differ, for a single run the groups must
@@ -2611,7 +2614,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
 
 def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> tuple[list[Player], RosterResult]:
     """Roster(s) for a sheet from its signups: one joint solve over as many runs as the Join answers support,
-    weights + officer pins + the officers' board, the raid's role bounds, the comp policy, the run's split strategy."""
+    weights + officer pins + the officers' board, the raid's minimums, the comp policy, the run's split strategy."""
     players, rosters, _ = _solve_run(reg, rs, ev)
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]

@@ -36,6 +36,8 @@ class SolveOptions:
     # slot -> per-roster minimum, laid over the game's scaled tank/healer minimums; a slot is a role (tank, healer,
     # melee, ranged), a class (Paladin) or Class:Spec. A preference filled first, never a constraint (design D16)
     minimums: dict[str, int] | None = None
+    # a follow-on: the players its lead rostered (design §5.62); a tank or healer among them is never charged as extra
+    lead_rostered: tuple[str, ...] = ()
     bonus: dict[str, int] | None = None  # signup_name -> extra selection value (rank, main, sat-out, signup order)
     allow_offspec: bool = True  # let the solver switch players to their offspec to meet role minimums
     offspec_penalty: int = 8  # objective cost per switch
@@ -52,18 +54,6 @@ def scaled_role_minimums(rules: dict, raid_size: int) -> dict[str, int]:
 
     f = raid_size / rules["raid_size"]
     return {role: math.ceil(b["min"] * f) if b.get("min") else 0 for role, b in rules["roles"].items()}
-
-
-def scaled_role_bounds(rules: dict, raid_size: int) -> dict[str, dict[str, int]]:
-    """Role min/max from comp_rules, scaled to a different raid size (ceil for mins). Registry.role_bounds and
-    comp.ideal_comp still read it until minimums are stored (Task 5); the solver reads scaled_role_minimums."""
-    import math
-
-    f = raid_size / rules["raid_size"]
-    return {
-        role: {"min": math.ceil(b["min"] * f) if b["min"] else 0, "max": max(1, round(b["max"] * f))}
-        for role, b in rules["roles"].items()
-    }
 
 
 def solve(profile: GameProfile, players: list[Player], raid_id: str,
@@ -192,18 +182,25 @@ def _build_vars(s: _Model) -> None:
                 m.Add(s.o[p.signup_name] <= s.x[p.signup_name])
 
 
-def _role_expr(s: _Model, role: str, r: int | None = None) -> list:
-    """Players raiding as `role` (offspec switches counted), over the whole pool or one roster."""
+def _switched(s: _Model, n: str, r: int | None, tag: str):
+    """Player n raids as their offspec (in roster r when given)."""
+    return s.o[n] if r is None else m_and(s.m, s.o[n], s.xr[n, r], f"{tag}_{n}_{r}")
+
+
+def _role_expr(s: _Model, role: str, r: int | None = None, only: set[str] | None = None) -> list:
+    """Players raiding as `role` (offspec switches counted), over the whole pool or one roster; `only` limits it to
+    those players."""
     terms = []
     for p in s.players:
         n = p.signup_name
+        if only is not None and n not in only:
+            continue
         seat = s.x[n] if r is None else s.xr[n, r]
         if n in s.o:
             if p.role == role:
-                switched = s.o[n] if r is None else m_and(s.m, s.o[n], s.xr[n, r], f"osw_{n}_{r}_{role}")
-                terms.append(seat - switched)
+                terms.append(seat - _switched(s, n, r, f"osw_{role}"))
             if s.off_specs[n].role == role:
-                terms.append(s.o[n] if r is None else m_and(s.m, s.o[n], s.xr[n, r], f"osw2_{n}_{r}_{role}"))
+                terms.append(_switched(s, n, r, f"osw2_{role}"))
         elif p.role == role:
             terms.append(seat)
     return terms
@@ -226,12 +223,27 @@ def _group_role_expr(s: _Model, role: str, g: int) -> list:
 def _slot_expr(s: _Model, slot: str, r: int | None = None) -> list:
     """Seats that count toward a minimum's slot, over the whole pool or one roster: a role (offspec switches
     counted, as `_role_expr`), a class (every seat of a player of that class) or `Class:Spec` (the seats of players
-    who signed with that spec)."""
+    who play that spec: their signed spec unless switched, their offspec when switched — so a hybrid counts toward
+    one spec's minimum, never two)."""
     if slot in ROLES:
         return _role_expr(s, slot, r)
     cls, _, spec = slot.partition(":")
-    return [s.x[p.signup_name] if r is None else s.xr[p.signup_name, r]
-            for p in s.players if p.cls == cls and (not spec or p.spec == spec)]
+    terms = []
+    for p in s.players:
+        n = p.signup_name
+        if p.cls != cls:
+            continue
+        seat = s.x[n] if r is None else s.xr[n, r]
+        if not spec:
+            terms.append(seat)
+        elif n in s.o:
+            if p.spec == spec:
+                terms.append(seat - _switched(s, n, r, "ssw"))
+            elif p.offspec == spec:
+                terms.append(_switched(s, n, r, "ssw2"))
+        elif p.spec == spec:
+            terms.append(seat)
+    return terms
 
 
 # ---------------------------------------------------------------- constraints
@@ -363,16 +375,26 @@ def _minimum_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) ->
 def _extra_role_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
     """No role has an upper limit, but the seats past the minimums go to damage dealers: each tank or healer above
     their minimum in a roster costs EXTRA_ROLE_COST, more than any seat earns otherwise, so one sits only when nobody
-    else joined (every seat is filled) or officers placed them (forced in, pinned, on the board)."""
+    else joined (every seat is filled) or officers placed them (forced in, pinned, on the board). On a follow-on a
+    player the lead rostered (`opts.lead_rostered`) is never charged: the allowance is the minimum or the lead's own
+    players in the role, whichever is more, so the two 10s stay the lead's 20 split in two (design §5.62)."""
     cost = _extra_role_cost(s, roster_bonus)
+    lead = set(s.opts.lead_rostered) & set(s.x)
     for role in ("tank", "healer"):
         n = int(s.minimums.get(role, 0))
         for r in _per_roster(s):
             have = _role_expr(s, role, r)
             if not have:
                 continue
+            allowed: object = n
+            on_lead = _role_expr(s, role, r, only=lead) if lead else []
+            if on_lead:
+                allowed = s.m.NewIntVar(0, len(s.players), f"allow_{role}_{r}")
+                lead_n = s.m.NewIntVar(0, len(s.players), f"lead_{role}_{r}")
+                s.m.Add(lead_n == sum(on_lead))
+                s.m.AddMaxEquality(allowed, [lead_n, n])
             extra = s.m.NewIntVar(0, len(s.players), f"extra_{role}_{r}")
-            s.m.Add(extra >= sum(have) - n)
+            s.m.Add(extra >= sum(have) - allowed)
             s.terms.append(-cost * extra)
 
 

@@ -4469,7 +4469,9 @@ run of the pair.
 follow-on too". The lead's lock runs as before, then `RaidMixin.lock_follow(reg, rs, lead, by)` locks the open follow-on
 through `lock_run` and the lead's line gains " · <its line>" (a follow-on whose solve fails stays open with `lock_error`; the
 scheduler retries it, its lead being locked). In `_solve_run` every player rostered on the lead gets `+rc.LEAD_SEAT_BONUS`
-(1000, beating every seat weight combined), so the two 10s are the 20 split in two whenever the role minimums allow and bench
+(1000, beating every seat weight combined) and is passed as `SolveOptions.lead_rostered`, so the solver never charges a
+tank or healer the lead rostered as extra (the allowance is the minimum or the lead's own players in the role, whichever is
+more), and the two 10s are the 20 split in two whenever the role minimums allow and bench
 joiners cover the rest (a lead with 2 tanks and two 10s needing 2 each brings 2 bench tanks in); first-come benching applies
 to the lead only (`run_kind == "adhoc" and not is_follow(ev)`). Roster count is the usual `how_many_rosters` cap. The
 follow-on never confirms (`confirm: False` → no `confirm_by`, no DM). The scheduler (`scheduler_tick_guild`) skips a
@@ -4487,7 +4489,7 @@ minimum, `MINIMUM_REWARD`; `solver._extra_role_terms` charges `EXTRA_ROLE_COST` 
 minimum in a roster. `EXTRA_ROLE_COST` is more than one seat can earn otherwise — twice the largest seat value (which
 carries `LEAD_SEAT_BONUS` on a follow-on) plus the largest roster bonus, half that again for the balance gap, and
 `SHORT_ROLE_MARGIN` for synergy, all × `SCALE` — and `MINIMUM_REWARD` is twice it. So the minimums fill first, the seats
-past them go to damage dealers, and an extra tank or healer sits only when nobody else joined or officers placed one. No
+past them go to damage dealers, and an extra tank or healer sits only when nobody else joined, officers placed one or, on a follow-on, the lead rostered one. No
 role has an upper limit; the seat count and the per-group tank / healer caps are the only constraints. A player forced
 out (pin out, always-bench, first come's late joiners) earns nothing, a hybrid who could fill two minimums fills one —
 two Guardian / Restoration druids beside two warriors and two priests on a ×2 run now find rosters, where the old hard
@@ -4496,7 +4498,7 @@ floor counted each druid for both roles and found none — and a board that alre
 more than the roles allow; the empty seats then wait to be filled). Tests: `tests/test_follow_on_solver.py`,
 `tests/test_schedules.py` (tanks and healers on an ordinary ×2 run, a pin out), `tests/test_short_role_solver.py` (the
 hybrid, the full board, a tank forced out) and `tests/test_minimums_solver.py` (one hybrid for two minimums, seats past
-the minimums, an extra healer, class minimums met and unmet, officers' extra tank, two druids on a ×2 run).
+the minimums, an extra healer, class minimums met and unmet, officers' extra tank, two druids on a ×2 run, a switched druid and a Class:Spec minimum, a follow-on keeping the lead's 20).
 
 **A Can't on the lead is the whole night**, on every path that frees a lead seat: `rc.free_seat` on a run with
 `followed_by` also frees the same member's seat on the locked follow-on (`notice=False`, idempotent — expired confirmations,
