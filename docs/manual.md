@@ -1184,6 +1184,27 @@ time in words, lines only officers would read marked *officers*. **History**
 lists the newest eight past runs per raid and *Show older runs* pages the rest; a row opens the run read-only in a
 side panel (a `#run-<key>` link opens it too).
 
+**Moving a run, and its own sheet timing (officers).** One run can move to another start without touching its
+schedule: every raid of it moves together and keeps its gap to the first (counted in real time, also across a clocks
+change night). Answers stand — nobody answers again, and pins, the board and a locked roster stay as they are. Away
+answers are worked out again for the new day: an away row goes when the absence no longer covers the new day, and
+someone away on the new day who hadn't answered is marked away. Everyone who answered gets a notice on the Me page and
+in `/me view` (*"Barrow Deeps now starts Wed 2 Dec 8:00 PM."*); nobody gets a DM. The sheet is edited in place (the same
+message), the officer cards follow, and every card still waiting for an answer — a Confirm / Can't make it card, a fill
+ask — is edited to show the new time with its buttons, so the ask they hold still works. A confirm-by moves with the run;
+one the move would leave in the past is set to within the hour. A fill ask keeps its own deadline. Moving a run whose
+lock time is then past locks it at the scheduler's next minute, and the confirm says so first. Before the lock a run can
+also take its own **sheet timing** — the reminder, the lock, confirm-by, how long a fill ask waits and automatic asks —
+kept on that run alone (its schedule is never changed); once the roster locks only the start can move. The confirm
+reads, for example, *"Barrow Deeps moves to Wed 2 Dec 8:00 PM. Answers stand, and the 7 who answered see a notice. You
+can move it again until it starts."*; it names people also on another run that night when there are any. A run is refused
+in one sentence when it is finished or cancelled, when the start is in the past, when it already starts then, and when
+its raid already has another run at that minute. A moved run still counts as the run of the date its schedule gave it:
+that date never opens a second sheet, and the schedule's next runs open on time wherever the moved one now sits. The
+same holds when a schedule's run time changes while its run is open: that night's run keeps its old time and stands for
+the new one, and the next week opens at the new time. Lockouts, the alt filter and *also on another run* read the new
+start. The verb is the bot's own today (MCP and the site's run card get it with the run pages).
+
 Seat selection at lock is deterministic: the raid's minimums (filled first, never a stop), buff synergy, the comp policy's
 standing instructions, officer pins, and the schedule's **weights** (the raid's unless the schedule sets its own) —
 rank (core > raider > trial), main over alt, sat out last window (matched by member, so a Discord rename keeps it),

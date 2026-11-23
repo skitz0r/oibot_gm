@@ -531,12 +531,61 @@ def event_of_occurrence(rs: "RaidStore", sid: str, occurrence: str, *, reg: Regi
     """THE finder of a schedule's run: the first part (never a test run) stamped with schedule `sid` and `occurrence`,
     in any state (the newest created if several). With `reg`, also a run file from before the stamps (no `event`) whose
     start and schedule (run_schedule_id: its run dict, else its old stamp through the aliases) give the same pair: a
-    finished or cancelled run the start-up stamping never touches, or a live one opened before it."""
+    finished or cancelled run the start-up stamping never touches, or a live one opened before it.
+    With `reg`, a run of the schedule ALSO answers for an occurrence it wasn't opened for in two cases (phase 3, Task 5),
+    so neither ever brings a second sheet: a live run of the schedule MOVED to exactly that start (reschedule), and
+    that night's run when the schedule's run time was edited while it was open (night_run_of: "The open run keeps its
+    old times.")."""
     hits = [e for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid and e.occurrence == occurrence]
     if reg is not None:
         hits += [e for e in rs.events.values() if not e.event and _first_part(e) and not is_test_run(reg, e)
                  and occurrence_stamp(reg, e.start) == occurrence and run_schedule_id(reg, e) == sid]
+        if not hits:
+            hits = [e for e in rs.live() if e.event and _first_part(e) and not e.test and e.schedule == sid
+                    and occurrence_stamp(reg, e.start) == occurrence]
+        if not hits:
+            hit = night_run_of(reg, rs, sid, occurrence)
+            hits = [hit] if hit is not None else []
     return _newest(hits)
+
+
+def night_run_of(reg: Registry, rs: "RaidStore", sid: str, occurrence: str) -> "RaidEvent | None":
+    """The run of schedule `sid` that stands for `occurrence` because the schedule's run time was edited while it was
+    open: a run (any state) stamped with an occurrence on the SAME guild-local day that the schedule no longer gives,
+    paired with the nearest occurrence of that day no run is stamped with. Two run times on one day keep their own
+    runs (each is still the schedule's). None when there is no such run — the usual case, read without touching the
+    schedule."""
+    day = occurrence[:10]
+    cands = [e for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid
+             and e.occurrence and e.occurrence[:10] == day and e.occurrence != occurrence]
+    if not cands:
+        return None
+    try:
+        sched = reg.schedule_entry(sid)
+    except RegistryError:
+        return None
+    from datetime import time as _time
+
+    start_of_day = datetime.combine(datetime.fromisoformat(day).date(), _time(0, 0), tzinfo=reg.tz)
+    current = sorted({occurrence_stamp(reg, t) for t in schedule_starts(reg, sched["raid"], sched, start_of_day, 25)
+                      if occurrence_stamp(reg, t)[:10] == day})
+    if occurrence not in current:
+        return None
+    held = {e.occurrence for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid}
+    free = [o for o in current if o not in held]
+    orphans = sorted((e for e in cands if e.occurrence not in current), key=lambda e: (e.occurrence, e.created_at))
+
+    def minutes(o: str) -> int:
+        return int(o[11:13]) * 60 + int(o[14:16])
+
+    for e in orphans:
+        if not free:
+            break
+        pick = min(free, key=lambda o: (abs(minutes(o) - minutes(e.occurrence)), o))
+        free.remove(pick)
+        if pick == occurrence:
+            return e
+    return None
 
 
 def live_at(rs: "RaidStore", instance: str, start: datetime, *, test: bool = False) -> "RaidEvent | None":
@@ -1074,10 +1123,207 @@ def move_runs_with_clock(reg: Registry, rs: "RaidStore", rows: list[dict], zone:
         ev = rs.events.get(r["ev"].key)
         if ev is None or not r.get("movable") or ev.state != "open":
             continue
-        ev.starts_at = r["moved"].isoformat()
+        place_run(reg, ev, r["moved"])
         ev.log.append(f"moved with the clock to {zone} by {by}: still {reg.local12(r['moved'])}")
         rs.save(ev, f"moved with the clock ({zone})")
         moved.append(ev)
+    return moved
+
+
+def place_run(reg: Registry, ev: "RaidEvent", start: datetime, team: dict | None = None) -> None:
+    """THE start of a run moved (a timezone change's "move with the clock", a reschedule): its instant (`starts_at`) and,
+    when given, its run dict's weekday-and-time line (`schedule`, guild wall time). Its key, identity stamps, sheet,
+    signups, pins and seats are never touched here."""
+    ev.starts_at = start.isoformat()
+    if team is not None:
+        team["schedule"] = start.astimezone(reg.tz).strftime("%a %H:%M")
+
+
+# ---------------------------------------------------------------- reschedule and per-run timing (phase 3, Task 5)
+
+# a run's own sheet timing: the schedule setting (SCHEDULE_TIMING's words, what a schedule and the surfaces name) → the
+# run dict key it lives under. `nudge` stores "dm" / OFF there; the rest are hours, or a switch for autofill
+EVENT_TIMING = {"nudge_hours_before": "cutoff_soft_hours", "lock_hours_before": "cutoff_hard_hours",
+                "confirm_hours_before": "confirm_hours", "fill_ask_hours": "fill_ask_hours", "nudge": "reminders",
+                "autofill": "autofill"}
+MOVE_PAST = "That start is in the past. Pick a time from now on."
+MOVE_CLOSED = "This run is finished or cancelled, so it can't move."
+MOVE_CLASH = "{raid} already has a run at {when}. Pick another time."
+MOVE_SAME = "The run already starts then."
+TIMING_LOCKED = "The sheet timing is fixed once the roster locks. Move the start instead."
+TIMING_ORDER = "The reminder has to come before the lock, and confirm-by after it."
+TIMING_UNKNOWN = "A run's timing is its reminder, lock, confirm-by, fill asks and autofill."
+MOVE_OFFICER_ONLY = "Only an officer moves a run or changes its timing."
+MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
+
+
+class Moved(BaseModel):
+    """What a reschedule did (or, as a preview, would do): the run's raids, the old and new start (ISO), the run's own
+    timing set now (run dict keys), who gets a `moved` notice, the away rows taken off and written, whether the first
+    raid locks at the scheduler's next minute, and the people also Join on another run that night (uid → its key)."""
+
+    parts: list[str]
+    old: str
+    new: str
+    timing: dict = Field(default_factory=dict)
+    told: list[int] = Field(default_factory=list)
+    absence_cleared: list[int] = Field(default_factory=list)
+    absence_written: list[int] = Field(default_factory=list)
+    locks_now: bool = False
+    conflicts: dict[int, str] = Field(default_factory=dict)
+
+
+def _timing_values(timing: dict | None) -> dict:
+    """`timing` {setting: value} (EVENT_TIMING's keys) → {run dict key: value}; RegistryError(TIMING_UNKNOWN) for any other
+    setting or a value that isn't one."""
+    out: dict = {}
+    for k, v in (timing or {}).items():
+        key = EVENT_TIMING.get(k)
+        if key is None:
+            raise RegistryError(TIMING_UNKNOWN)
+        if k == "nudge":
+            out[key] = OFF if v in (False, None, OFF, "off", "false", 0) else "dm"
+        elif k == "autofill":
+            out[key] = v not in (False, None, "off", "false", 0)
+        else:
+            try:
+                h = float(v)
+            except (TypeError, ValueError):
+                raise RegistryError(TIMING_UNKNOWN) from None
+            if h < 0:
+                raise RegistryError(TIMING_UNKNOWN)
+            out[key] = int(h) if h == int(h) else h
+    return out
+
+
+def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: datetime | None, timing: dict | None,
+                       now: datetime | None = None) -> str | None:
+    """Why `ev`'s run can't move to `start` / take `timing`, in one sentence, else None — in this order: finished or
+    cancelled (MOVE_CLOSED), a start more than PAST_GRACE_MINUTES ago (MOVE_PAST), nothing that changes (MOVE_SAME), its
+    first raid already has another live run at that minute (MOVE_CLASH), timing on a locked run (TIMING_LOCKED), a
+    reminder after the lock or a confirm-by before it (TIMING_ORDER). Any raid of a run answers for its first raid."""
+    first = first_part(rs, ev)
+    if first.state in ("done", "cancelled"):
+        return MOVE_CLOSED
+    try:
+        values = _timing_values(timing)
+    except RegistryError as e:
+        return str(e)
+    if start is not None:
+        now = now or reg.now_local()
+        if start < now - timedelta(minutes=PAST_GRACE_MINUTES):
+            return MOVE_PAST
+    if (start is None or start == first.start) and not values:
+        return MOVE_SAME
+    if start is not None and start != first.start:
+        other = live_at(rs, first.instance, start, test=bool(first.test))
+        if other is not None and not same_event(other, first):
+            return MOVE_CLASH.format(raid=reg.raid_def(first.instance).get("name", first.instance), when=reg.local12(start))
+    if values:
+        if first.state != "open":
+            return TIMING_LOCKED
+        team = run_team(reg, first)
+        soft = float(values.get("cutoff_soft_hours", team_setting(team, "cutoff_soft_hours")))
+        hard = float(values.get("cutoff_hard_hours", team_setting(team, "cutoff_hard_hours")))
+        confirm = float(values.get("confirm_hours", team.get("confirm_hours", hard)))
+        if soft < hard or confirm > hard:
+            return TIMING_ORDER
+    return None
+
+
+def recompute_absences(reg: Registry, ev: "RaidEvent") -> tuple[list[int], list[int]]:
+    """A run on a new day (C18): an away row (`source` "absence") comes off when the member's absences no longer cover
+    the new day; everyone the sheet could expect (absence_pool) who is away that day and has no row gets one. Every
+    other row stands — an answer someone gave is theirs, whatever the day. → (uids cleared, uids written)."""
+    day = ev.start.astimezone(reg.tz).date().isoformat()
+    cleared = []
+    for k, sg in list(ev.signups.items()):
+        m = reg.members.get(sg.discord_id)
+        if sg.source == "absence" and not (m is not None and m.absent_on(day)):
+            del ev.signups[k]
+            cleared.append(sg.discord_id)
+    written = []
+    for m, c in absence_pool(reg, ev):
+        if c is not None and str(m.discord_id) not in ev.signups and m.absent_on(day):
+            ev.signups[str(m.discord_id)] = _signup(reg, m, c, "out", "absence")
+            written.append(m.discord_id)
+    return cleared, written
+
+
+def _run_name(reg: Registry, t: dict, old: datetime, new: datetime) -> str:
+    """A run dict's name with its time re-rendered: the old start's words become the new start's (a later raid's name
+    carries the FIRST raid's start, so the first raid's old and new starts are what is replaced on every dict)."""
+    name = str(t.get("name") or "")
+    was, now_ = reg.local12(old), reg.local12(new)
+    return name.replace(was, now_) if was in name else name
+
+
+def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: datetime | None = None, timing: dict | None = None,
+               by: str, save: bool = True) -> Moved:
+    """THE move of a run (any raid of it answers for its first): every raid's `starts_at` moves with the first's — each
+    keeps its offset, in real time (after_minutes) —, each run dict's weekday-and-time line and its name follow; `timing`
+    ({setting: value}, EVENT_TIMING) is the run's own on the first raid's dict, later raids' cut-offs the first's plus
+    their offset. The `occurrence` and `schedule` stamps NEVER change (C11): a moved run still answers for the occurrence
+    it was opened for. A confirm-by moves by the same amount, or to within the hour when that is already past (never
+    past the start); fill asks keep their expiry; away rows are worked out again for the new day (recompute_absences);
+    one log line. Every raid and the dicts are saved in ONE store batch. Never touches config.schedules. The caller
+    checks reschedule_refusal first. `save=False` = the preview: a copy, nothing written."""
+    import copy
+
+    first = first_part(rs, ev)
+    parts = [p for p in event_parts(rs, first) if p.state not in ("done", "cancelled") or p is first]
+    teams = {p.key: reg.config.team(p.team) for p in parts}
+    if not save:
+        parts = [p.model_copy(deep=True) for p in parts]
+        teams = {k: copy.deepcopy(t) for k, t in teams.items()}
+        first = next(p for p in parts if p.key == first.key)
+    old = first.start
+    new = start if start is not None else old
+    delta = new - old
+    now_ = reg.now_local()
+    values = _timing_values(timing)
+    t0 = teams.get(first.key)
+    if t0 is not None and values:
+        t0.update(values)
+    for p in parts:
+        at = new if p is first else after_minutes(new, p.starts)
+        was = p.start
+        t = teams.get(p.key)
+        place_run(reg, p, at, t)
+        if t is not None:
+            t["name"] = _run_name(reg, t, old, new)
+            if p is not first and t0 is not None:
+                hours = p.starts / 60
+                for k in ("cutoff_soft_hours", "cutoff_hard_hours", "confirm_hours"):
+                    if k in t0:
+                        t[k] = t0[k] + hours
+                for k in ("fill_ask_hours", "autofill"):
+                    if k in values:
+                        t[k] = values[k]
+        if p.confirm_by and at != was:
+            cb = datetime.fromisoformat(p.confirm_by) + (at - was)
+            if cb <= now_:
+                cb = min(at, now_ + MOVE_CONFIRM_GRACE)
+            p.confirm_by = cb.isoformat()
+    cleared, written = recompute_absences(reg, first) if delta else ([], [])
+    told = [sg.discord_id for sg in first.signups.values() if sg.source != "absence"] if delta else []
+    team = t0 or run_team(reg, first)
+    hard = first.start - timedelta(hours=float(team_setting(team, "cutoff_hard_hours")))
+    ins = {sg.discord_id for sg in first.signups.values() if sg.status == "in"}
+    clash = {uid: key for uid, key in conflicts(rs, first).items() if uid in ins}
+    moved = Moved(parts=[p.key for p in parts], old=old.isoformat(), new=new.isoformat(), timing=values, told=told,
+                  absence_cleared=cleared, absence_written=written, locks_now=first.state == "open" and hard <= now_, conflicts=clash)
+    if not save:
+        return moved
+    what = [f"moved from {reg.local12(old)} to {reg.local12(new)} by {by}"] if delta else []
+    if values:
+        what.append(f"own timing set by {by}: " + ", ".join(f"{k} {v}" for k, v in values.items()))
+    first.log.extend(what)
+    line = "; ".join(what) or f"saved by {by}"
+    with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
+        reg.save_config(f"run {first.key} {line}", notify=False)
+        for p in sorted(parts, key=lambda e: e is first):  # the first raid last: its save copies its answers onto the later raids
+            rs.save(p, line)
     return moved
 
 

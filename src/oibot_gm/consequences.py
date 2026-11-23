@@ -16,6 +16,8 @@ the Discord character, confirm and I'm back screens alike. A board sentence is a
 TO_TOKEN where those go and the board only puts the names in (it never composes a word of it)."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 from . import raidcycle as rc
 from .registry import RANKS, Registry, RegistryError
 
@@ -156,6 +158,41 @@ def before_first_open_sentence(reg: Registry, lineup: list[dict], start) -> str 
         if fo is not None and fo > rc.after_minutes(start, at):
             return f"{reg.raid_def(e['raid']).get('name', e['raid'])} first opens {reg.local12(fo)}, after this run starts."
     return None
+
+
+def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None) -> list[str]:
+    """The confirm of moving a run (any raid of it stands for its first) to `start` and / or giving it its own `timing`
+    (rc.reschedule's preview — nothing written), at most three sentences: what changes, who is told, then the first of
+    the run locking at once, people also on another run that night, away answers worked out again, or that it can move
+    again. A refusal is rc.reschedule_refusal's own sentence, not this."""
+    first = rc.first_part(rs, ev)
+    mv = rc.reschedule(reg, rs, first, start=start, timing=timing, by="preview", save=False)
+    name = reg.raid_def(first.instance).get("name", first.instance)
+    moves = start is not None and start != first.start
+    if moves:
+        out = [f"{name} moves to {reg.local12(start)}."]
+    else:
+        lock_h = float(mv.timing.get("cutoff_hard_hours", rc.team_setting(rc.run_team(reg, first), "cutoff_hard_hours")))
+        out = [f"The sheet now locks {reg.local12(first.start - timedelta(hours=lock_h))}."]
+    stands = "The roster stands" if first.state == "locked" else "Answers stand"
+    n = len(mv.told)
+    out.append(f"{stands}." if n == 0 else f"{stands}, and the one who answered sees a notice." if n == 1
+               else f"{stands}, and the {n} who answered see a notice.")
+    if mv.locks_now:
+        out.append("It locks within a minute, because its lock time has passed.")
+    elif mv.conflicts:
+        uid, key = next(iter(mv.conflicts.items()))
+        sg = first.signups.get(str(uid))
+        who = sg.display_name if sg else "Someone"
+        other = rs.events.get(key)
+        title = f"{reg.raid_def(other.instance).get('name', other.instance)} {reg.local12(other.start)}" if other else "another run"
+        k = len(mv.conflicts) - 1
+        out.append(f"{who} is also on {title} that night." if k == 0 else f"{who} and {_n(k, 'other')} are also on {title} that night.")
+    elif mv.absence_cleared or mv.absence_written:
+        out.append("Away answers are worked out again for the new day.")
+    else:
+        out.append("You can move it again until it starts.")
+    return out
 
 
 def later_places_sentence(reg: Registry, held: list) -> str:

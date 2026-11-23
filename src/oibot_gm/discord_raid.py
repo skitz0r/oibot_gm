@@ -231,6 +231,23 @@ class RaidMixin:
             log.debug("ask card edit failed (%s/%s): %s", channel_id, message_id, e)
             return False
 
+    async def edit_live_card(self, reg, channel_id: int | None, message_id: int | None, view) -> bool:
+        """Edit an ask's DM card that is still in play to `view` — its buttons kept, so the same card still answers the
+        same ask (a run moved: the card shows the new time). edit_ask_card stays for final states. False when the card is
+        unknown or Discord refused; nothing else changes either way."""
+        if not channel_id or not message_id:
+            return False
+        try:
+            ch = self.get_channel(int(channel_id))
+            if ch is None and hasattr(self, "fetch_channel"):
+                ch = await self.fetch_channel(int(channel_id))
+            msg = await ch.fetch_message(int(message_id))
+            await msg.edit(view=view)
+            return True
+        except Exception as e:  # noqa: BLE001 — the record is written; only the card keeps the old time
+            log.debug("live card edit failed (%s/%s): %s", channel_id, message_id, e)
+            return False
+
     @staticmethod
     def card_ids(msg) -> tuple[int | None, int | None]:
         """(channel id, message id) of a sent DM card, or (None, None)."""
@@ -1484,6 +1501,64 @@ class RaidMixin:
         await self.post_run_update(reg, ev, f"↺ reopened by {by} — {'locked again' if back == 'locked' else 'the sheet is open again'}")
         await ops_mod.audited(self.ops, reg, by, f"reopened {ev.key} ({back})", via=via, by_id=by_id)
         return f"Reopened {run_title(reg, ev)} — {'locked, roster as it was' if back == 'locked' else 'the sheet is open again'}."
+
+    async def reschedule_event(self, reg, rs, ev, *, start: datetime | None = None, timing: dict | None = None, by: str,
+                               by_id: int | None = None, via: str = "discord", preview: bool = False) -> list[str]:
+        """THE move of a run to another start and / or its own sheet timing (phase 3, Task 5) — any raid of it stands for
+        its first. Officers, decided live (PRIV_LIVE; `by_id` None = code acting on the guild's own behalf). Refused →
+        RegistryError with rc.reschedule_refusal's sentence, nothing written. `preview` → the confirm's sentences
+        (consequences.reschedule_consequence), nothing written. Else, under the board lock of every raid of the run:
+        rc.reschedule; then the sheet is edited in place (same message), every raid's officer cards, and every card
+        still in play — an open Confirm / Can't ask and an open fill ask — is edited to the new time with its buttons
+        (edit_live_card: the ask stands, nobody answers again); a moved start gives everyone who answered a `moved`
+        notice (Me page, /me view). One line in the run's thread, one audit line. Nobody is DMed. → the done line."""
+        from .consequences import reschedule_consequence
+
+        if by_id is not None and (await guild_routing.resolve_role(self, reg, int(by_id), max_age=guild_routing.PRIV_LIVE)).role not in ("owner", "officer"):
+            raise RegistryError(rc.MOVE_OFFICER_ONLY)
+        first = rc.first_part(rs, ev)
+        why = rc.reschedule_refusal(reg, rs, first, start, timing)
+        if why:
+            raise RegistryError(why)
+        if preview:
+            return reschedule_consequence(reg, rs, first, start, timing)
+        parts = rc.event_parts(rs, first)
+        async with contextlib.AsyncExitStack() as stack:
+            for key in sorted(p.key for p in parts):  # one order everywhere: no lock cycle with a cancel or a lock
+                await stack.enter_async_context(self.board_lock(reg, key))
+            why = rc.reschedule_refusal(reg, rs, first, start, timing)  # again, now that nothing else writes the run
+            if why:
+                raise RegistryError(why)
+            old = first.start
+            mv = rc.reschedule(reg, rs, first, start=start, timing=timing, by=by)
+        name = reg.raid_def(first.instance).get("name", first.instance)
+        when = reg.local12(first.start)
+        live = [p for p in parts if p.state in ("open", "locked")]
+        await self.refresh_sheet(reg, first)
+        edited = 0
+        for p in live:
+            await self.refresh_cards(reg, p)
+            team = rc.run_team(reg, p)
+            for m, ask in rc.open_placement_rows(reg, p):
+                seat, sg = p.seat_of(m), p.signups.get(str(m.discord_id))
+                if not ask.get("dm") or seat is None or sg is None:
+                    continue
+                gi = next((k for k, g in enumerate(p.all_rosters[seat[0]].groups) if seat[1].signup_name in g), 0)
+                view = confirm_layout(reg, p, team, self.ico, sg, seat[0], gi, m.discord_id, reminder=bool(ask.get("reminded_at")))
+                edited += await self.edit_live_card(reg, ask["dm"][0], ask["dm"][1], view)
+            for a in p.fill_asks:
+                if a.open and a.dm_message_id:
+                    edited += await self.edit_live_card(reg, a.dm_channel_id, a.dm_message_id, fill_layout(reg, p, team, self.ico, a))
+        for uid in mv.told:  # an outcome, never a DM (the DM rule): the Me page and /me view say it — one member save each
+            reg.notify(uid, "moved", f"{name} now starts {when}.", run=first.key)
+        moved = first.start != old
+        line = (f"🕒 moved by {by} to {when}" if moved else f"🕒 sheet timing set by {by}") + (f" · {edited} open card(s) show the new time" if edited else "")
+        await self.post_run_update(reg, first, line)
+        what = f"moved {first.key} from {reg.local12(old)} to {when}" if moved else f"set {first.key}'s own sheet timing"
+        if moved and mv.timing:
+            what += " and set its own sheet timing"
+        await ops_mod.audited(self.ops, reg, by, what, via=via, by_id=by_id)
+        return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own sheet timing is saved."]
 
     async def remind(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
         """Remind the unconfirmed (design B2 levers, D15): re-send the Confirm / Can't DM to everyone rostered whose ask is

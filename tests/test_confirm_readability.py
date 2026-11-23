@@ -757,8 +757,52 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
 
     dump.add("test_clear_consequence", "puppets and a test run", flows_misc.test_clear_consequence(reg, rs))
 
+    # ---- moving a run and its own sheet timing (phase 3, Task 5)
+    reschedule_cases(reg, rs, runs, ms, dump)
+
     dump.write()
     assert not dump.problems, f"{len(dump.problems)} confirm sentences break the Confirm rule:\n" + "\n".join(dump.problems)
+
+
+def reschedule_cases(reg, rs, runs, ms, dump):
+    """consequences.reschedule_consequence across its cases and rc.reschedule_refusal's every sentence."""
+    seen = set()
+
+    def add(case, ev, start, timing=None):
+        lines = cq.reschedule_consequence(reg, rs, ev, start, timing)
+        seen.add(lines[-1].split()[0] if len(lines) > 2 else "")
+        dump.add("reschedule_consequence", case, lines)
+
+    ev = runs["open recurring"]
+    add("open, answers", ev, ev.start + timedelta(hours=1))
+    add("open, nobody answered", runs["open recurring, nobody joined"], runs["open recurring, nobody joined"].start + timedelta(hours=1))
+    add("locked, the roster stands", runs["locked recurring, autofill on"], runs["locked recurring, autofill on"].start + timedelta(hours=2))
+    add("timing only", ev, None, {"lock_hours_before": 6})
+    add("its lock time has passed", runs["open ad hoc"], reg.now_local() + timedelta(hours=1))
+    add("three raids, moved from a later raid", runs["three raids, third"], runs["three raids, first"].start + timedelta(hours=1))
+    # people also on another run that night (a day no other run of the harness is near)
+    other = (ev.start + timedelta(days=16)).replace(minute=0)
+    hy = rc.open_run(reg, rs, "hyjal_summit_forever", other + timedelta(hours=1), by="t", schedule=rc.ADHOC_SCHEDULE)
+    join(reg, rs, hy, ms[:6])
+    add("people also on another run that night", ev, other)
+    join(reg, rs, hy, ms[1:6], "out")
+    add("one person also on another run that night", ev, other)
+    # away answers worked out again: someone away on the new day, with no answer on the sheet
+    reg.add_character(REAL + 61, "Quillamere", "Zephyrine", "Mage", "Fire", None, True)
+    away = ev.start + timedelta(days=18)
+    reg.add_absence(REAL + 61, away.astimezone(reg.tz).date().isoformat(), None, None, "t")
+    add("away answers worked out again", ev, away)
+    assert {"It", "Bramble", "Away", "You"} <= seen, seen
+    # the refusals, one each
+    one = runs["open recurring"]
+    for case, start, timing in (("past", reg.now_local() - timedelta(hours=2), None), ("same", one.start, None),
+                                ("clash", runs["open recurring, nobody joined"].start, None),
+                                ("order", None, {"nudge_hours_before": 1, "lock_hours_before": 6}),
+                                ("unknown timing", None, {"open_dm": True})):
+        dump.add("reschedule_refusal", case, rc.reschedule_refusal(reg, rs, one, start, timing) or "")
+    dump.add("reschedule_refusal", "closed", rc.reschedule_refusal(reg, rs, runs["cancelled"], one.start, None) or "")
+    dump.add("reschedule_refusal", "timing on a locked run", rc.reschedule_refusal(reg, rs, runs["locked recurring, autofill on"], None, {"lock_hours_before": 6}) or "")
+    dump.add("reschedule_event refusal", "a member", rc.MOVE_OFFICER_ONLY)
 
 
 def armory_long_names(reg, rs, dump):
