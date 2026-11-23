@@ -1090,7 +1090,7 @@ def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) 
         return reg.set_plain_policy(reg.merge_plain_policy(_plain_merged(reg, op.parts)), by, rev=rev)
     if op.op in ("comp_target", "comp_target_clear"):
         targets = {reg.comp_slot(p.field or p.path or ""): _comp_entry(reg, p) for p in op.parts}
-        return "; ".join(reg.set_minimums(op.target or "", targets, by, rev=rev)) or "The minimums already read that, so nothing changed."
+        return "; ".join(reg.set_minimums(_minimum_raid(reg, op.target or ""), targets, by, rev=rev)) or "The minimums already read that, so nothing changed."
     if op.op == "recruit":
         kw: dict = {}
         for p in op.parts:
@@ -1344,6 +1344,23 @@ def _comp_current(reg: Registry, key: str) -> dict:
     from .registry import min_entry
 
     return {slot: min_entry(e) for slot, e in ((reg.config.raids.get(key) or {}).get("minimums") or {}).items()}
+
+
+def _minimum_raid(reg: Registry, key: str) -> str:
+    """A minimum's target: a raid id. A run's key (or roster key) is refused with MINIMUM_ON_RAID — a run reads its
+    raid's minimums — whatever surface named it; anything else is left to Registry.set_minimums ("no raid …")."""
+    from .registry import MINIMUM_ON_RAID
+
+    key = (key or "").strip()
+    if key in reg.profile.raids:
+        return key
+    try:
+        _rs, ev = _live_event(reg, key)
+    except RegistryError:
+        ev = None
+    if ev is not None or reg.config.roster(key) is not None:
+        raise RegistryError(MINIMUM_ON_RAID)
+    return key
 
 
 def _comp_entry(reg: Registry, op: ConfigOp) -> dict | None:
@@ -2721,7 +2738,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         reg.save_config(f"{key} group layout → {labels or 'default'} (by {by})")
         return f"{key}: groups = {', '.join(labels) if labels else 'default layout'}"
     if op.op in ("comp_target", "comp_target_clear"):  # THE verb: Registry.set_minimums (one write)
-        key = _key(reg, op)
+        key = _minimum_raid(reg, _key(reg, op))
         slot = reg.comp_slot(op.field or op.path or "")
         lines = reg.set_minimums(key, {slot: _comp_entry(reg, op)}, by, rev=rev)
         return "; ".join(lines) or f"{reg.comp_slot_words(slot)} is already {_target_words(_comp_current(reg, key).get(slot))}, so nothing changed."
@@ -3491,7 +3508,7 @@ def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[S
             return (f"{s['name']}: {reg.schedule_label(rid, s)} — opens {_hours_words(sd['signup_lead_hours'])} before, "
                     f"locks {_hours_words(sd['lock_hours_before'])} before, confirm by {_hours_words(sd['confirm_hours_before'])} before, "
                     f"autofill {'on' if sd.get('autofill', True) else 'off'}")
-        words = "; ".join(week(s) for s in scheds) or "no schedule, so nothing opens on its own. Add one on the Raids page"
+        words = "; ".join(week(s) for s in scheds) or "no schedule, so nothing opens on its own. Add one on the Raids page."
         raid_lines.append(f"{rd.get('name', rid)} ({rd.get('size')}){made} · {words}")
     out.append(SummarySection(key="raids", title="Raids and schedules", lines=raid_lines or ["No raids in the game profile."]))
     rec = cfg.recruitment
@@ -3868,7 +3885,7 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
             raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default, listen, set_listen, remember, set_remember)")
         return ops
     if k == "comp":  # a raid's minimums: target = a raid id; fields = {slot: {min, note} | null} (Registry.set_minimums)
-        key = (target or "").strip()
+        key = _minimum_raid(reg, target or "")
         cur = _comp_current(reg, key)
         for slot, t in fields.items():
             slot = reg.comp_slot(slot)
@@ -3933,34 +3950,35 @@ def _channel_ref(value, channels: list[dict] | None) -> int | None:
 
 def _raid_ops(reg: Registry, inst: str, d: dict) -> list[ConfigOp]:
     """The Raids page's form (or MCP's fields) as raid_set ops — only the fields that differ from the raid as it stands,
-    exactly as POST /api/admin/raid always compared them; consecutive ones coalesce into ONE set_raid_overrides write."""
-    from .registry import RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, parse_slots
+    exactly as POST /api/admin/raid always compared them; consecutive ones coalesce into ONE set_raid_overrides write.
+    Sheet timing (SCHEDULE_TIMING, a `cadence` preset) and the old role limits (`<role>_<min|max>`, a `comp` map) are
+    refused whenever they are PRESENT, never compared: a raid holds neither any more, so the same sentence answers on
+    every surface (TIMING_ON_SCHEDULE / role_limit_refusal)."""
+    from .registry import RAID_WEIGHT_DEFAULTS, SCHEDULE_TIMING, TIMING_ON_SCHEDULE, parse_slots, role_limit_refusal
 
     if inst not in reg.profile.raids:
         raise RegistryError(f"unknown raid {inst or '?'} (one of {', '.join(reg.profile.raids)})")
     cur, want = reg.raid_def(inst), {}
     d = dict(d)
-    for f in list(d):  # flat names (MCP, plain words): weight_<key>, <role>_<min|max>
+    if any(f in d for f in (*SCHEDULE_TIMING, "cadence")):
+        raise RegistryError(TIMING_ON_SCHEDULE)
+    for f in d:
+        if f.split("_")[0] in ("tank", "healer", "dps") and f.split("_")[-1] in ("min", "max") and f.count("_") == 1:
+            raise RegistryError(role_limit_refusal(f, d[f]))
+    if "comp" in d:
+        first = next(((r, b, v) for r, t in (d["comp"] or {}).items() if isinstance(t, dict) for b, v in t.items()), None)
+        raise RegistryError(role_limit_refusal(f"{first[0]}_{first[1]}", first[2]) if first else role_limit_refusal("tank_min"))
+    for f in list(d):  # flat names (MCP, plain words): weight_<key>
         if f.startswith("weight_"):
             d.setdefault("weights", {})[f[7:]] = d.pop(f)
-        elif f.split("_")[0] in ("tank", "healer", "dps") and f.split("_")[-1] in ("min", "max") and f.count("_") == 1:
-            role, bound = f.split("_")
-            d.setdefault("comp", {}).setdefault(role, {})[bound] = d.pop(f)
-    if "cadence" in d:  # a preset: four cadence hours together
-        want["cadence"] = str(d.pop("cadence"))
     if "slots" in d:
         raw = d["slots"] if isinstance(d["slots"], list) else str(d["slots"])
         if parse_slots(raw) != list(cur["slots"]):
             want["slots"] = ", ".join(raw) if isinstance(raw, list) else raw
-    for f in RAID_HOURS_FIELDS + RAID_FORM_FIELDS:
+    for f in RAID_FORM_FIELDS:
         val = d.get(f)
         if val not in (None, "") and str(val) != str(cur.get(f, "")):
             want[f] = str(val)
-    for f in RAID_BOOL_FIELDS:
-        if f in d and d[f] is not None:
-            on = d[f] if isinstance(d[f], bool) else str(d[f]).strip().lower() in ("1", "true", "yes", "on")
-            if on != bool(cur.get(f, f != "open_dm")):
-                want[f] = "true" if on else "false"
     for kk, val in (d.get("weights") or {}).items():
         if kk in RAID_WEIGHT_DEFAULTS and val not in (None, ""):
             try:
@@ -3973,12 +3991,7 @@ def _raid_ops(reg: Registry, inst: str, d: dict) -> list[ConfigOp]:
     cur_fo = reg.first_open(inst)
     if fo and (cur_fo is None or str(fo)[:16] != cur_fo.astimezone(reg.tz).strftime("%Y-%m-%dT%H:%M")):
         want["first_open"] = str(fo)
-    for role in ("tank", "healer", "dps"):
-        for bound in ("min", "max"):
-            val = ((d.get("comp") or {}).get(role) or {}).get(bound)
-            if val not in (None, "") and str(val) != str(((cur.get("minimums") or {}).get(role) or {}).get(bound, "")):
-                want[f"{role}_{bound}"] = str(val)
-    unknown = [f for f in d if f not in ("slots", "weights", "comp", "first_open", "instance") + RAID_HOURS_FIELDS + RAID_FORM_FIELDS + RAID_BOOL_FIELDS]
+    unknown = [f for f in d if f not in ("slots", "weights", "first_open", "instance") + RAID_FORM_FIELDS]
     if unknown:
         raise RegistryError(f"unknown raid field {unknown[0]}")
     return [ConfigOp(op="raid_set", target=inst, field=f, value=v) for f, v in want.items()]

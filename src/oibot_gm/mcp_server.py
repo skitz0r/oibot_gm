@@ -387,7 +387,14 @@ def set_minimum(raid: str, slot: str, min: int | None = None, note: str | None =
     beside it). `clear` = drop the guild's minimum so the game's applies again. A minimum belongs to the raid, never to
     one run. `raid` = id or name. `preview=True`: current → new, nothing saved. Same write as the Readiness page and
     /roster comp."""
-    key = get_raid(raid, guild)["id"]
+    try:
+        key = get_raid(raid, guild)["id"]
+    except ToolError as unknown:
+        try:  # a live run's key goes to the bot, whose answer is the one every surface gives (MINIMUM_ON_RAID)
+            api(guild).get(f"/api/run/{raid}")
+        except Exception:  # noqa: BLE001 — not a run either: get_raid's own error says which raids exist
+            raise unknown from None
+        key = raid.strip()
     entry = None if clear else {"min": int(min or 0), "note": note}
     return ops_change(guild, [{"kind": "comp", "target": key, "fields": {slot: entry}}], preview)
 

@@ -377,14 +377,15 @@ def test_admin_raid_translator(owner_client, reg):
     from oibot_gm.registry import TIMING_ON_SCHEDULE
 
     cur = reg.raid_def("barrow_deeps")
-    body = {"instance": "barrow_deeps", "lockout_days": 5, "signup_lead_hours": cur["signup_lead_hours"],  # an unchanged timing value is no change
+    body = {"instance": "barrow_deeps", "lockout_days": 5,
             "weights": {"rank": int(cur["weights"].get("rank", 0)) + 1}, "notes": "bring pots"}
     want = {"lockout_days": "5", "notes": "bring pots", "weight_rank": str(body["weights"]["rank"])}
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid", body, lambda sh: "; ".join(sh.set_raid_overrides("barrow_deeps", want, "x")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     assert owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lockout_days": 5}, headers=bearer()).json()["message"] == "barrow_deeps: no changes"
-    r = owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lock_hours_before": cur["lock_hours_before"] + 2}, headers=bearer())
-    assert r.status_code == 400 and r.json()["error"] == TIMING_ON_SCHEDULE  # sheet timing is a schedule's (C7)
+    for lock in (cur["lock_hours_before"], cur["lock_hours_before"] + 2):  # present = refused, changed or not (a raid holds no timing)
+        r = owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lock_hours_before": lock}, headers=bearer())
+        assert r.status_code == 400 and r.json()["error"] == TIMING_ON_SCHEDULE  # sheet timing is a schedule's (C7)
     r = owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "comp": {"tank": {"min": 1}}}, headers=bearer())
     assert r.status_code == 400 and r.json()["error"] == "Set a role's minimum as a minimum: at least 1 tank."
 

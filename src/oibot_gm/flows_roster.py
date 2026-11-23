@@ -602,7 +602,7 @@ class RegularsWizard(OfficerWizard):
     async def pick_series(self, interaction: discord.Interaction) -> None:
         opts = self.series_opts()
         if not opts:
-            await self.finish(interaction, "No recurring schedule yet — the owner adds weekly run times on the Raids page (or /gm config raid). "
+            await self.finish(interaction, "No recurring schedule yet. An officer adds weekly run times on the Raids page or with /gm config raid. "
                                            "Ad hoc runs (pickup templates, one-offs) have no regulars: first come, first rostered.")
             return
         if len(opts) == 1:

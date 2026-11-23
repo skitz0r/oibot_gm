@@ -81,14 +81,33 @@ def test_the_admin_raid_routes_take_an_officer(officer_client, reg):
     assert r.status_code == 200 and RID not in reg.config.raids, r.text
 
 
-def test_a_member_is_still_refused(member_client):
+def test_a_member_is_still_refused(member_client, reg):
     r = member_client.post(CHANGE, json={"changes": [{"kind": "raid", "target": RID, "fields": {"notes": "x"}}], "confirmed": True, "apply": True})
-    assert "Only officers" in " ".join(r.json().get("refused") or [r.json().get("error") or ""])
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["refused"] and d["refused"][0].startswith("Only officers") and not d.get("applied")
+    assert "notes" not in (reg.config.raids.get(RID) or {})
 
 
-def test_raid_timing_on_the_raid_form_is_refused_in_the_sentence(officer_client, reg):
-    r = officer_client.post("/api/admin/raid", json={"instance": RID, "lock_hours_before": reg.raid_def(RID)["lock_hours_before"] + 2, "confirmed": True})
-    assert r.status_code == 400 and TIMING_ON_SCHEDULE in r.json()["error"]
+@pytest.mark.parametrize("fields,words", [
+    ({"lock_hours_before": "same"}, TIMING_ON_SCHEDULE),  # the raid's current number: refused all the same, never "no changes"
+    ({"lock_hours_before": "changed"}, TIMING_ON_SCHEDULE),
+    ({"cadence": "short"}, TIMING_ON_SCHEDULE),
+    ({"confirm": True}, TIMING_ON_SCHEDULE),
+    ({"tank_min": 2}, "Set a role's minimum as a minimum: at least 2 tanks."),
+    ({"comp": {"healer": {"min": 3}}}, "Set a role's minimum as a minimum: at least 3 healers."),
+])
+def test_raid_timing_and_role_limits_are_refused_whenever_present(officer_client, reg, fields, words):
+    """configops._raid_ops (the Raids form, ops_from_fields "raid", MCP raid_set): present = refused, without comparing."""
+    lock = reg.raid_def(RID)["lock_hours_before"]
+    fields = {k: (lock if v == "same" else lock + 2 if v == "changed" else v) for k, v in fields.items()}
+    with pytest.raises(RegistryError) as e:
+        configops.ops_from_fields(reg, "raid", RID, dict(fields))
+    assert str(e.value) == words
+    r = officer_client.post("/api/admin/raid", json={"instance": RID, **fields, "confirmed": True})
+    assert r.status_code == 400 and r.json()["error"] == words
+    r = officer_client.post(CHANGE, json={"changes": [{"kind": "raid", "target": RID, "fields": fields}], "confirmed": True, "apply": True})
+    assert words in (r.json().get("error") or ""), r.text
 
 
 def test_the_raids_route_carries_minimums_and_no_raid_timing(officer_client, reg):
@@ -194,3 +213,97 @@ def test_gate_of_names_officers_for_the_raid_wizard():
 def test_set_minimum_is_the_mcp_tool():
     names = mcp_tool_names()
     assert "set_minimum" in names and "set_comp_target" not in names
+
+
+def test_set_minimum_on_a_run_says_minimums_belong_to_the_raid(w, reg, rs, monkeypatch):
+    from conftest import open_test_run
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from oibot_gm.registry import MINIMUM_ON_RAID
+
+    ev = open_test_run(reg, rs)
+
+    class Api:
+        def get(self, path, **params):
+            r = w.c.get(path, params={k: v for k, v in params.items() if v is not None}, headers={"Authorization": f"Bearer {TOKEN}"})
+            if r.status_code >= 400:
+                raise ToolError(r.text)
+            return r.json()
+
+        def post(self, path, body=None, actor=False):
+            r = w.c.post(path, json=body, headers={"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot"})
+            if r.status_code >= 400:
+                raise ToolError(r.json().get("error") or r.text)
+            return r.json()
+    monkeypatch.setattr(ms, "api", lambda guild=None: Api())
+    with pytest.raises(ToolError, match=MINIMUM_ON_RAID):
+        ms.set_minimum(ev.key, "healer", min=3)
+    with pytest.raises(ToolError, match="unknown raid"):
+        ms.set_minimum("molten_core", "healer", min=3)
+
+
+def test_the_raid_wizards_reset_goes_through_the_one_op_with_its_effects(reg, store, monkeypatch):
+    from oibot_gm import discord_registry
+    from oibot_gm.wizard import FLOWS
+
+    monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
+    monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: False)
+    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    from test_member_inbox import real
+
+    m = real(reg, 0)
+    reg.regular_add(m.discord_id, f"{RID}:alt", "t")
+    d = configops.describe_ops(reg, [ConfigOp(op="raid_reset", target=RID)])
+    want = [d.lines[0].before, *d.consequences]  # the site's and plain text's raid_reset preview: what goes, in words
+    assert "Alt run" in want[0]
+    h = Harness(reg)
+    calls = []
+    real = configops.apply_ops
+
+    async def spy(*a, **kw):
+        calls.append([op.op for op in a[1]])
+        return await real(*a, **kw)
+    monkeypatch.setattr(configops, "apply_ops", spy)
+
+    async def go():
+        await FLOWS["raid_config"](h.command(), reg)
+        await h.pick("Pick a raid", RID)
+        await h.pick("Pick a section", "reset")
+        assert all(c in h.text for c in want)
+        await h.press("Reset")
+        assert "✅" in h.text
+    asyncio.run(go())
+    assert calls == [["raid_reset"]] and RID not in reg.config.raids and not any(s["id"] == "alt" for s in reg.schedules(RID))
+
+
+def test_the_raid_wizard_writes_one_audit_line_per_save_and_reset(reg, store, monkeypatch):
+    from oibot_gm import discord_registry
+    from oibot_gm.wizard import FLOWS
+
+    monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
+
+    class Feed:
+        def __init__(self):
+            self.lines = []
+
+        async def emit(self, cfg, level, text, exc=None):
+            self.lines.append(text)
+    client = types.SimpleNamespace(ops=Feed())
+    h = Harness(reg, client=client)
+
+    async def go():
+        await FLOWS["raid_config"](h.command(), reg)
+        await h.pick("Pick a raid", RID)
+        await h.pick("Pick a section", "notes")
+        await h.submit(h.modal, notes="Bring fire resistance.")
+        await h.press("Save")
+        await h.press("Save")
+        assert "✅" in h.text
+        await FLOWS["raid_config"](h.command(), reg)
+        await h.pick("Pick a raid", RID)
+        await h.pick("Pick a section", "reset")
+        await h.press("Reset")
+        assert "✅" in h.text
+    asyncio.run(go())
+    assert len(client.ops.lines) == 2, client.ops.lines
+    assert "Barrow Deeps raid rules: Notes" in client.ops.lines[0] and RID not in reg.config.raids

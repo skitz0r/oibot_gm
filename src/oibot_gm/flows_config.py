@@ -1045,22 +1045,43 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self.put("notes", v.get("notes", ""))
         await self.hub(i, "Notes updated." if v.get("notes") else "Notes cleared.")
 
-    # ---- Reset
+    # ---- Reset: the same raid_reset op as the site and plain text (configops.apply_ops: its consequences shown first,
+    # one audit line, the raid's rev checked at the write)
+    def reset_op(self):
+        from .configops import ConfigOp
+
+        return ConfigOp(op="raid_reset", target=self.raid)
+
     async def reset(self, i: discord.Interaction) -> None:
+        from . import configops
+
         has = bool(self.reg.raid_override(self.raid))
         name = self.reg.raid_def(self.raid).get("name", self.raid)
+        self._reset_rev = self.reg.config_rev(f"raids:{self.raid}")
+        d = configops.describe_ops(self.reg, [self.reset_op()]) if has else None
+        goes = d.lines[0].before if d and d.lines else None  # the same words the site's and plain text's preview print
         text = (f"Reset **{name}** to the game's defaults? Every guild change for this raid goes — its schedules with their sheet timing, minimums, weights and notes."
+                + (f"\n-# What goes: {goes}." if goes else "")
+                + "".join(f"\n{c}" for c in (d.consequences if d else []))
                 + (f"\n-# Your {len(self.draft)} unsaved change(s) are dropped too." if self.draft else "")) if has else f"**{name}** is already on the game's defaults."
         await self.show(i, text, self.button("Reset", self.do_reset, discord.ButtonStyle.danger, disabled=not has),
                         self.button("Back to the sections", self.to_hub))
 
     async def do_reset(self, i: discord.Interaction) -> None:
+        from . import configops
+
         await self.working(i, "Resetting…")
         name = self.reg.raid_def(self.raid).get("name", self.raid)
         if not self.reg.raid_override(self.raid):  # re-read: someone may have reset it meanwhile
             await self.finish(i, f"**{name}** was already on the game's defaults; nothing changed.")
             return
-        self.reg.clear_raid_override(self.raid, i.user.display_name)
+        res = await configops.apply_ops(self.reg, [self.reset_op()], by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None), via="discord",
+                                        revs={f"{configops.CONFIG_REV}raids:{self.raid}": getattr(self, "_reset_rev", None) or self.reg.config_rev(f"raids:{self.raid}")})
+        if not res["applied"]:
+            bad = "; ".join(r["line"] for r in res["results"] if not r["ok"]) or "Nothing was changed."
+            await self.show(i, f"❌ {bad}", self.button("Back to the sections", self.to_hub, discord.ButtonStyle.primary), self.button("Cancel", self.cancel))
+            return
+        self.draft = {}
         await self.finish(i, f"✅ **{name}** is back to the game's defaults.")
 
     # ---- Save: the diff as sentences, the next three runs from the DRAFT, then ONE write
@@ -1138,6 +1159,13 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             await self.show(i, f"❌ {e}\nNothing was saved; your changes are kept.", self.button("Back to the sections", self.to_hub, discord.ButtonStyle.primary),
                             self.button("Cancel", self.cancel))
             return
+        feed = getattr(getattr(i, "client", None), "ops", None)
+        if feed is not None:  # the one audit line of the save (the schedules list is not an op: written by the verb directly)
+            from . import ops as ops_mod
+
+            name = self.reg.raid_def(self.raid).get("name", self.raid)
+            await ops_mod.audited(feed, self.reg, i.user.display_name, f"{name} raid rules: " + "; ".join(d.lstrip("• ").replace("**", "") for d in diff),
+                                  via="discord", by_id=i.user.id)
         self.draft = {}
         await self.finish(i, f"✅ Saved **{self.reg.raid_def(self.raid).get('name', self.raid)}**:\n" + "\n".join(diff))
 
@@ -1849,7 +1877,7 @@ class GuildClaimWizard(Wizard):
         lines = [f"Server: **{discord.utils.escape_markdown(str(i.guild.name))}**",
                  f"Guild key: `{self._key(i)}` — picked from the server name; it never changes (links, the site and MCP use it)",
                  f"Game version: **{label}**",
-                 f"Owner: <@{owner.id}> — the owner sets channels, raids and policy (`/gm config …` or the site's Config page)",
+                 f"Owner: <@{owner.id}> — the owner sets channels, auras and who may do what (`/gm config …` or the site's Config page)",
                  "-# Nothing is written until you press Confirm. The new guild starts empty: its own members, raids and settings."]
         opts = [Opt(n, lab, default=n == self.draft["profile"]) for n, lab in self.profiles]
         await self.show(i, "\n".join(lines), self.select("Game version", opts, self.picked_profile),
