@@ -974,6 +974,62 @@ def parse_follow(value) -> dict | None:
     return {"raid": rid, "rosters": n}
 
 
+LINEUP_MAX = 2  # a schedule's raids in one night: the lead and at most one follow-on
+
+
+def parse_lineup(value) -> list[dict]:
+    """A guild-level schedule's lineup, validated: [{raid, rosters[, starts]}], the lead first and at most LINEUP_MAX
+    raids. `starts` (minutes after the lead's start) is for a later entry only, never the lead. The raid ids are
+    checked against the profile by the caller (this is a free function, like parse_follow)."""
+    if not isinstance(value, list) or not value:
+        raise RegistryError("A schedule needs at least one raid.")
+    if len(value) > LINEUP_MAX:
+        raise RegistryError(f"A schedule runs at most {LINEUP_MAX} raids in one night.")
+    out, seen = [], set()
+    for i, e in enumerate(value):
+        rid = str((e or {}).get("raid") or "").strip().lower() if isinstance(e, dict) else ""
+        if not rid:
+            raise RegistryError("Each raid in a schedule needs a name.")
+        if rid in seen:
+            raise RegistryError("A schedule can't run the same raid twice in one night.")
+        seen.add(rid)
+        n = e.get("rosters", 1)
+        if isinstance(n, bool) or not isinstance(n, (int, str)) or not str(n).strip().isdigit() or not 1 <= int(n) <= MAX_SCHEDULE_ROSTERS:
+            raise RegistryError(f"A raid in a schedule holds 1 to {MAX_SCHEDULE_ROSTERS} rosters.")
+        row = {"raid": rid, "rosters": int(n)}
+        if e.get("starts") is not None:
+            if i == 0:
+                raise RegistryError("The first raid of a schedule starts at the schedule's own time.")
+            st = e["starts"]
+            if isinstance(st, bool) or not isinstance(st, (int, str)) or not str(st).strip().isdigit() or int(st) < 1:
+                raise RegistryError("A later raid starts a whole number of minutes after the first one.")
+            row["starts"] = int(st)
+        out.append(row)
+    return out
+
+
+def to_stored_schedule(raid: str, row: dict) -> dict:
+    """A norm_schedule row of `raid` in the guild-level stored shape: id, then the lineup (the raid with the row's
+    rosters, then its follow-on if any), then the row's other settings. from_stored_schedule is its exact inverse."""
+    lineup = [{"raid": raid, "rosters": row.get("rosters", 1)}]
+    if row.get("follow"):
+        lineup.append(dict(row["follow"]))
+    return {"id": row["id"], "lineup": parse_lineup(lineup), **{k: v for k, v in row.items() if k not in ("id", "rosters", "follow")}}
+
+
+def from_stored_schedule(entry: dict) -> tuple[str, dict]:
+    """A guild-level stored schedule back to (its first raid, the norm_schedule row it came from): `rosters` only when
+    not 1, `follow` only when the lineup has a second raid."""
+    lineup = parse_lineup(entry.get("lineup"))
+    row = {"id": entry["id"]}
+    if lineup[0]["rosters"] != 1:
+        row["rosters"] = lineup[0]["rosters"]
+    if len(lineup) > 1:
+        row["follow"] = lineup[1]
+    row.update({k: v for k, v in entry.items() if k not in ("id", "lineup")})
+    return lineup[0]["raid"], row
+
+
 def schedule_value(field: str, value):
     """One schedule setting, validated and in its stored form. None = not set (a cadence field then inherits the raid's)."""
     if field in SCHEDULE_CADENCE and (value is None or str(value).strip().lower() in INHERIT_WORDS):
