@@ -2672,7 +2672,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         if ev.state in ("done", "cancelled"):
             raise RegistryError(f"{ev.key} is already {ev.state}")
         quiet = not _cancel_notify(op)
-        lines = consequence("cancel", reg, ev)  # who it touches and how they hear, from code (the confirm screen's own sentences)
+        lines = consequence("cancel", reg, ev, rs=rs)  # who it touches and how they hear, from code (the confirm screen's own sentences)
         return (f"cancel {label}" + (f": {op.reason}" if op.reason else "") + ". " + " ".join(lines)
                 + (" No line goes to the signup channel." if quiet else " One fixed line goes to the signup channel, never the reason."))
     if op.op == "run_fill":

@@ -338,9 +338,19 @@ def run_close_at(reg: Registry, ev: "RaidEvent") -> datetime:
     return ev.start + timedelta(hours=float(reg.raid_def(ev.instance).get("duration_hours") or RAID_DEFAULTS["duration_hours"]) + CLOSE_AFTER_HOURS)
 
 
+def after_minutes(start: datetime, minutes: float) -> datetime:
+    """THE start of a later raid: `minutes` of real time after `start`, counted in UTC and given back in `start`'s own
+    zone. Adding a timedelta to a zoneinfo datetime is wall-clock arithmetic (an hour off on a clocks-change night),
+    while a run file's start is an absolute instant — every part start (ensure_run, complete_parts, the previews, the
+    schedule's C8 check, the C9 sentence) goes through here, so they all agree."""
+    from datetime import timezone
+
+    return (start.astimezone(timezone.utc) + timedelta(minutes=minutes)).astimezone(start.tzinfo)
+
+
 def follow_start(reg: Registry, instance: str, start: datetime) -> datetime:
     """When a follow-on starts: the lead's start plus the lead raid's length (design §5.62)."""
-    return start + timedelta(hours=float(reg.raid_def(instance).get("duration_hours") or RAID_DEFAULTS["duration_hours"]))
+    return after_minutes(start, 60 * float(reg.raid_def(instance).get("duration_hours") or RAID_DEFAULTS["duration_hours"]))
 
 
 def is_follow(ev: "RaidEvent") -> bool:
@@ -389,6 +399,14 @@ def later_parts(rs: "RaidStore", ev: "RaidEvent") -> list["RaidEvent"]:
     return [p for p in event_parts(rs, ev) if is_follow(p)]
 
 
+def held_later(rs: "RaidStore", ev: "RaidEvent", who) -> list["RaidEvent"]:
+    """The LOCKED later raids of a first part's run on which `who` (a member or discord id) holds a seat — what their
+    Can't make it on the first raid frees too (free_seat's cascade); [] for a later part."""
+    if is_follow(ev) or who is None:
+        return []
+    return [p for p in later_parts(rs, ev) if p.state == "locked" and p.seat_of(who)]
+
+
 def lead_of(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent | None":
     """The first part of a later part's run (its answers are the first part's), else None."""
     if not is_follow(ev):
@@ -433,7 +451,7 @@ def later_dicts(reg: Registry, ev: "RaidEvent") -> list[dict]:
 def dict_start(reg: Registry, first: "RaidEvent", t: dict) -> datetime:
     """When a later part's dict starts: the first part's start plus its `starts` minutes (an older dict without them:
     the first raid's length after it)."""
-    return first.start + timedelta(minutes=int(t["starts"])) if t.get("starts") else follow_start(reg, first.instance, first.start)
+    return after_minutes(first.start, int(t["starts"])) if t.get("starts") else follow_start(reg, first.instance, first.start)
 
 
 def parts_short(reg: Registry, ev: "RaidEvent") -> list[tuple[str, dict[str, int]]]:
@@ -639,7 +657,7 @@ def _after_first_opens(reg: Registry, instance: str, sched: dict, starts: list[d
     except RegistryError:
         return starts
     opens = [(reg.first_open(e["raid"]), at) for e, at in zip(lineup[1:], offsets[1:])]
-    return [t for t in starts if not any(fo is not None and fo > t + timedelta(minutes=at) for fo, at in opens)]
+    return [t for t in starts if not any(fo is not None and fo > after_minutes(t, at) for fo, at in opens)]
 
 
 def occurrences(reg: Registry, now: datetime, horizon_hours: float | None = None, *, lead: bool = False) -> list[tuple[dict, datetime]]:
@@ -810,7 +828,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
             frd, hours = reg.raid_def(e["raid"]), at / 60
             pt = {**t, "key": pkey, "instance": e["raid"], "size": int(frd.get("size") or DEFAULT_RAID_SIZE),
                   "name": f"{frd.get('name', e['raid'])} · after {rd.get('name', instance)} {reg.local12(start)}",
-                  "schedule": (start + timedelta(minutes=at)).strftime("%a %H:%M"), "schedule_id": FOLLOW_SCHEDULE, "series": None, "confirm": False,
+                  "schedule": after_minutes(start, at).astimezone(reg.tz).strftime("%a %H:%M"), "schedule_id": FOLLOW_SCHEDULE, "series": None, "confirm": False,
                   "rosters": int(e["rosters"]), "follows": key, "reminders": OFF, "open_dm": False,
                   # its lock, nudge and confirm fall at the same instants as part 0's (its start is `at` minutes later)
                   "cutoff_soft_hours": t["cutoff_soft_hours"] + hours, "cutoff_hard_hours": t["cutoff_hard_hours"] + hours, "confirm_hours": t["confirm_hours"] + hours,
@@ -3429,23 +3447,35 @@ def remind_refusal(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> 
     return None
 
 
-def cancel_effects(reg: Registry, ev: RaidEvent) -> dict:
+def cancel_effects(reg: Registry, ev: RaidEvent, rs: "RaidStore | None" = None) -> dict:
     """Who a cancel touches, from the run as it stands (consequences.consequence("cancel"), the plain diff, MCP):
     `rostered` names of the seated (after lock), `open_asks` names with an unanswered Confirm / Can't, `fill_asks` names
     with a fill or pre-lock ask in play, `answered` how many answered the sheet. Nobody is DMed by a cancel (the DM
-    rule): the sheet, the open ask cards, the signup channel line and the run's thread carry it."""
+    rule): the sheet, the open ask cards, the signup channel line and the run's thread carry it. A cancel on any raid of
+    a run cancels every LIVE raid of it (RaidMixin.cancel_run): see _cancel_lineup for `later` / `follow` / `lead` /
+    `first_closed` — `rs` (the run store) tells which raids are still live; without it every raid of the chain counts."""
     locked = ev.state != "open" and bool(ev.all_rosters)
     return {"state": ev.state, "locked": locked,
             "rostered": [p.signup_name for p in ev.seated()] if locked else [],
             "open_asks": [m.display_name for m, _a in open_placement_rows(reg, ev)] if locked else [],
             "fill_asks": [a.display_name for a in ev.fill_asks if a.pending],
             "answered": len([s for s in ev.signups.values() if s.status in STATUSES]),
-            # a cancel on any raid of a run cancels the whole run: `later` = the raids after the first (names, in order),
-            # `follow` = them in words, `lead` = the first raid's name when `ev` is a later raid
-            **_cancel_lineup(reg, ev)}
+            **_cancel_lineup(reg, ev, rs)}
 
 
-def _cancel_lineup(reg: Registry, ev: RaidEvent) -> dict:
+def _cancel_lineup(reg: Registry, ev: RaidEvent, rs: "RaidStore | None" = None) -> dict:
+    """`later` = the names of the later raids the cancel takes (a later `ev` itself included), in order; `follow` = them
+    in words when `ev` is the first raid; `lead` = the first raid's name when `ev` is a later raid and the first is still
+    live (the whole run goes); `first_closed` = `ev` is a later raid whose first raid has already finished or gone."""
+    if rs is not None:
+        parts = event_parts(rs, ev)
+        live = [p for p in parts if p.state not in ("done", "cancelled") or p is ev]
+        first = parts[0] if parts and not is_follow(parts[0]) else None
+        later = [reg.raid_def(p.instance).get("name", p.instance) for p in live if is_follow(p)]
+        first_live = first is not None and first.state not in ("done", "cancelled")
+        lead = reg.raid_def(first.instance).get("name", first.instance) if is_follow(ev) and first_live else None
+        return {"later": later, "follow": join_words(later) if later and not is_follow(ev) else None, "lead": lead,
+                "first_closed": is_follow(ev) and not first_live}
     lt = lead_dict(reg, ev) if is_follow(ev) else reg.config.team(ev.team)
     name = lambda t: reg.raid_def(t.get("instance")).get("name", t.get("instance"))  # noqa: E731
     later: list[str] = []
@@ -3455,7 +3485,7 @@ def _cancel_lineup(reg: Registry, ev: RaidEvent) -> dict:
     if not later and ev.followed_by and (ft := follow_dict(reg, ev)):  # a dict chain gone (cleaned up): the next raid at least
         later = [name(ft)]
     return {"later": later, "follow": join_words(later) if later and not is_follow(ev) else None,
-            "lead": name(lt) if is_follow(ev) and lt is not None else None}
+            "lead": name(lt) if is_follow(ev) and lt is not None else None, "first_closed": False}
 
 
 # ---------------------------------------------------------------- opening: which run a picked time is (design B4)
@@ -3575,7 +3605,7 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     elif asked:
         full = [{"raid": instance, "rosters": 1}, *asked]
         offsets = reg.lineup_offsets(full)
-        later = [(e, start + timedelta(minutes=at)) for e, at in zip(full[1:], offsets[1:])]
+        later = [(e, after_minutes(start, at)) for e, at in zip(full[1:], offsets[1:])]
     ljson = [{"raid": e["raid"], "name": reg.raid_def(e["raid"]).get("name", e["raid"]), "rosters": int(e.get("rosters") or 1), "when": reg.local12(at)}
              for e, at in later]
     if later:

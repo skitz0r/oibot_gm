@@ -312,7 +312,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
                  cant_consequence(reg, runs["follow-on locked"], seated, lead_seated))
     for seated in (True, False):  # a lead's Can't takes the follow-on place too
         dump.add("cant_consequence", f"lead locked, {'rostered' if seated else 'not rostered'} on it, a place on the follow-on",
-                 cant_consequence(reg, runs["lead locked"], seated, follow_seated=True))
+                 cant_consequence(reg, runs["lead locked"], seated, held=[rs.events[runs["lead locked"].followed_by]]))
     dump.add("QUEUE_NOTE", "ad hoc, joined", QUEUE_NOTE)
 
     # ---- raidcycle's refusals and previews
@@ -333,6 +333,15 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     lineup3 = [{"raid": "hyjal_summit_forever", "rosters": 1}, {"raid": RID, "rosters": 2}, {"raid": "onyxias_lair", "rosters": 1}]
     dump.add("before_first_open_sentence", "the third raid opens later", [cq.before_first_open_sentence(reg, lineup3, when) or ""])
     assert cq.before_first_open_sentence(reg, lineup3[:2], when) is None  # every raid open by its start: no line
+    # a cancel on a later raid once the first raid has finished (fix round 1): only the raids still to play, no "whole"
+    later = (reg.now_local() + timedelta(days=6)).replace(hour=18, minute=30, second=0, microsecond=0)
+    first = rc.open_run(reg, rs, "hyjal_summit_forever", later, by="t", schedule=rc.ADHOC_SCHEDULE,
+                        lineup=[{"raid": RID, "rosters": 2}, {"raid": "onyxias_lair", "rosters": 1}])
+    first.state = "done"
+    rs.save(first, "harness: the first raid finished")
+    for k, p in enumerate(rc.event_parts(rs, first)[1:], start=2):
+        dump.add("cancel_effects via consequence(cancel)", f"raid {k} of three, the first finished", cq.consequence("cancel", reg, p, rs=rs))
+    dump.add("cancel_effects via consequence(cancel)", "three raids, third, with the run store", cq.consequence("cancel", reg, runs["three raids, third"], rs=rs))
     reg.set_raid_overrides("onyxias_lair", {"first_open": None}, "t")
     far = reg.now_local() + timedelta(days=40)
     dump.add("open_row_refusal", "too far ahead", rc.open_row_refusal(reg, rs, RID, far, "barrow-deeps", far - timedelta(days=2)) or "")

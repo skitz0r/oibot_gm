@@ -1422,7 +1422,8 @@ class RaidMixin:
         went out meanwhile, and releases the lock — so the cancel waits for one DM at most, never a whole batch.
         Clearing the test bench passes notify=False: its cancels post nothing where real members read.
         A run of several raids (design §5.62) is cancelled whole from ANY of its raids: a later raid's cancel is its first
-        raid's, and the first raid's takes every live later raid with it — one audit line naming them all."""
+        raid's while that one is live, and the pressed raid's cancel takes every other live raid of the run with it (the
+        first raid may have finished while raids 3–4 still play) — one audit line naming them all."""
         if audit and rc.is_follow(ev):
             first = rc.first_part(rs, ev)
             if first is not ev and first.state not in ("done", "cancelled"):
@@ -1460,9 +1461,9 @@ class RaidMixin:
             except Exception as e:  # noqa: BLE001
                 log.warning("cancel line failed (%s): %s", ev.key, e)
         gone = []
-        if not rc.is_follow(ev):  # the first raid's cancel takes every live later raid of the run with it (design §5.62)
-            for fev in rc.later_parts(rs, ev):
-                if fev.state not in ("done", "cancelled"):
+        if audit:  # the cancel takes every other LIVE raid of the run with it (design §5.62) — a later raid's too, once
+            for fev in rc.event_parts(rs, ev):  # the first raid has closed (it ends before raids 3–4 of a long lineup play)
+                if fev is not ev and fev.state not in ("done", "cancelled"):
                     await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False)
                     gone.append(fev.key)
         tail = (f" and its follow-on {gone[0]}" if len(gone) == 1 else f" and its follow-ons {', '.join(gone)}") if gone else ""

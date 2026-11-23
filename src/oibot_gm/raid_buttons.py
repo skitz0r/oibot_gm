@@ -274,7 +274,7 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
     async def back(i: discord.Interaction) -> None:
         await wiz.finish(i, "Nothing was changed.")
 
-    await wiz.show(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("cancel", reg, ev)),
+    await wiz.show(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("cancel", reg, ev, rs=rs)),
                    wiz.button("Cancel the run…", open_box, discord.ButtonStyle.danger), wiz.button("Back", back))
 
 

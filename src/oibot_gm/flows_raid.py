@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 import discord
 
 from . import configops
-from .consequences import before_first_open_sentence
+from .consequences import before_first_open_sentence, later_places_sentence
 from . import raidcycle as rc
 from . import wizard_opts as wo
 from .raid_buttons import RUN_WORDS
@@ -321,7 +321,7 @@ class OpenWizard(Wizard):
                   else [{"raid": self.rid, "rosters": 1}])
         if len(lineup) > 1:  # D2: the wizard shows a schedule's later raids; it sets none
             offsets = self.reg.lineup_offsets(lineup)
-            lines.append("-# Then " + ", then ".join(f"{self.reg.follow_words(e)} at {self.reg.local12(start + timedelta(minutes=at), '%I:%M %p')}"
+            lines.append("-# Then " + ", then ".join(f"{self.reg.follow_words(e)} at {self.reg.local12(rc.after_minutes(start, at), '%I:%M %p')}"
                                                      for e, at in zip(lineup[1:], offsets[1:])) + ", from the same signup.")
         if self.draft["note"]:
             lines.append(when_note(self.draft["note"], start))
@@ -537,10 +537,8 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
                 line = f"❌ {e}"
             await wiz.finish(si, line)
 
-        # a first raid's Can't is the whole night (design §5.62): every later raid's place goes too
-        held = [p for p in rc.later_parts(rs, ev) if p.state == "locked" and p.seat_of(uid)] if not rc.is_follow(ev) else []
-        desc = (f"Submitting marks you out of the night. Your {raid_name(reg, held[0])} place goes too." if len(held) == 1
-                else "Submitting marks you out of the night. Your places on the later raids go too." if held
+        held = rc.held_later(rs, ev, uid)  # a first raid's Can't is the whole night (design §5.62): every later seat goes too
+        desc = (f"Submitting marks you out of the night. {later_places_sentence(reg, held)}" if held
                 else "Submitting marks you out (and frees your seat if you're rostered).")
         form = Form(f"Out · {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", [
             Field("note", "Note for the officers (optional)", required=False, paragraph=True, max_length=300,

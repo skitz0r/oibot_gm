@@ -33,10 +33,10 @@ def _n(n: int, one: str, many: str | None = None) -> str:
 
 
 def consequence(verb: str, reg: Registry, ev: rc.RaidEvent, *, name: str | None = None, other: str | None = None,
-                to: str | None = None) -> list[str]:
+                to: str | None = None, rs=None) -> list[str]:
     """The sentence(s) the confirm screen shows before `verb` on `ev`. `name`: the member a `release` or a board move
     is about; `other`: the member already in the seat (swap / substitute); `to`: the group ("Group 2"). Without them the
-    sentence stays general. Unknown verbs → []."""
+    sentence stays general. `rs`: the run store, so a cancel names only the raids of the run still live. Unknown verbs → []."""
     if verb in BOARD_VERBS:
         return _board(verb, reg, ev, name or "They", other or "the other", to or "the group")
     if verb == "remind":
@@ -46,7 +46,7 @@ def consequence(verb: str, reg: Registry, ev: rc.RaidEvent, *, name: str | None 
     if verb == "lock":
         return _lock(reg, ev)
     if verb == "cancel":
-        return _cancel(reg, ev)
+        return _cancel(reg, ev, rs)
     if verb == "clear":
         return _clear(reg, ev)
     if verb == "release":
@@ -54,12 +54,12 @@ def consequence(verb: str, reg: Registry, ev: rc.RaidEvent, *, name: str | None 
     return []
 
 
-def consequences_json(reg: Registry, ev: rc.RaidEvent) -> dict[str, str]:
+def consequences_json(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict[str, str]:
     """`ev_json.consequences`: every verb in VERBS as one string (the lines joined by a space) — the board verbs with
     NAME_TOKEN / OTHER_TOKEN / TO_TOKEN where the names go — plus `release_named`: the release sentence about one member
     with NAME_TOKEN where the name goes (the board fills it in for the member being dragged out; before lock it is the
     same no-name sentence)."""
-    out = {v: " ".join(consequence(v, reg, ev, name=NAME_TOKEN, other=OTHER_TOKEN, to=TO_TOKEN) if v in BOARD_VERBS else consequence(v, reg, ev)) for v in VERBS}
+    out = {v: " ".join(consequence(v, reg, ev, name=NAME_TOKEN, other=OTHER_TOKEN, to=TO_TOKEN) if v in BOARD_VERBS else consequence(v, reg, ev, rs=rs)) for v in VERBS}
     out["release_named"] = " ".join(consequence("release", reg, ev, name=NAME_TOKEN))
     return out
 
@@ -112,13 +112,17 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     return lines
 
 
-def _cancel(reg: Registry, ev: rc.RaidEvent) -> list[str]:
+def _cancel(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
     """Who the cancel touches, from rc.cancel_effects. Nobody is DMed (the DM rule): the sheet is edited to its final
     state and every open ask card says Cancelled; the screen's own choice says whether a line goes to the signup channel."""
     if (closed := _closed(ev)):
         return closed
-    fx = rc.cancel_effects(reg, ev)
+    fx = rc.cancel_effects(reg, ev, rs)
     fills = len(fx["fill_asks"])
+    if fx.get("first_closed"):  # a later raid once the first raid has finished: the raids still to play go, no sheet changes
+        names = [n for n in fx["later"] if n] or [reg.raid_def(ev.instance).get("name", ev.instance)]
+        return [f"The {rc.join_words(names)} raid{'s are' if len(names) > 1 else ' is'} cancelled.",
+                "Nobody gets a DM, but every ask card says Cancelled.", "A cancelled run can't be reopened."]
     if fx.get("lead"):  # a later raid: a cancel on any raid of a run cancels the whole run (its sheet is the first raid's)
         with_ = [n for n in fx["later"] if n] or [reg.raid_def(ev.instance).get("name", ev.instance)]
         return [f"The whole {fx['lead']} run is cancelled, with {rc.join_words(with_)}.",
@@ -143,17 +147,25 @@ def _cancel(reg: Registry, ev: rc.RaidEvent) -> list[str]:
 def before_first_open_sentence(reg: Registry, lineup: list[dict], start) -> str | None:
     """C9: the open confirm's line when a raid of the run's `lineup` (the whole lineup, the first raid first) would begin
     before that raid first opens — the first such raid, in words; None when every raid is open by its start."""
-    from datetime import timedelta
-
     try:
         offsets = reg.lineup_offsets(lineup)
     except RegistryError:
         return None
     for e, at in zip(lineup, offsets):
         fo = reg.first_open(e["raid"])
-        if fo is not None and fo > start + timedelta(minutes=at):
+        if fo is not None and fo > rc.after_minutes(start, at):
             return f"{reg.raid_def(e['raid']).get('name', e['raid'])} first opens {reg.local12(fo)}, after this run starts."
     return None
+
+
+def later_places_sentence(reg: Registry, held: list) -> str:
+    """A first raid's Can't make it frees the member's seat on every later raid of the run they hold one on
+    (rc.held_later): the one sentence that says so, naming them — the Me page's confirm (web/api_me.cant_consequence)
+    and /raid out's form alike. '' when they hold none."""
+    names = [reg.raid_def(p.instance).get("name", p.instance) for p in held]
+    if not names:
+        return ""
+    return f"Your {rc.join_words(names)} place{'s go' if len(names) > 1 else ' goes'} too."
 
 
 def leave_follow_consequence(reg: Registry, ev: rc.RaidEvent, seated: bool, lead_seated: bool) -> list[str]:

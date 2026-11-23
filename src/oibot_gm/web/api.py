@@ -1006,7 +1006,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "log_rows": rc.log_rows(reg, ev),
                 "health": health_json(reg, ev, t) if ev.state == "open" else None,
                 # the confirm sentences for lock / cancel / clear / release, from code (consequences.py): the browser prints, never composes
-                "consequences": consequences_json(reg, ev),
+                "consequences": consequences_json(reg, ev, rs),
                 # where the run lives in Discord (sheet, updates thread, loot thread) and its loot council in one line (design §2.5)
                 "links": links_json(reg, ev), "loot": loot_json(reg, ev),
                 **night_json(reg, rs, ev, t, plan)}

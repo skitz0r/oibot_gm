@@ -364,3 +364,75 @@ def test_a_structured_four_raid_lineup_creates_the_whole_schedule(reg):
     again = configops.coalesce(configops.ops_from_fields(reg, "schedule", "late", {"lineup": [{"raid": H, "rosters": 1}, *LINEUP]}))[0]
     with pytest.raises(RegistryError, match="Another schedule is already called late"):
         configops.apply(reg, again, "Officer", False)
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def test_a_cancel_after_the_first_raid_finished_takes_every_raid_still_to_play(bot, reg, rs):
+    """The first raid ends (done) while raids 3–4 of a long lineup still play: a cancel on any later raid cancels every
+    LIVE raid, and the confirm names only those, without 'whole'."""
+    from oibot_gm import consequences as cq
+
+    first = open_four(reg, rs)
+    first.state = "done"
+    rs.save(first, "harness: the first raid finished")
+    parts = rc.event_parts(rs, first)
+    said = cq.consequence("cancel", reg, parts[2], rs=rs)
+    assert said == ["The Barrow Deeps, Extra A and Extra B raids are cancelled.",
+                    "Nobody gets a DM, but every ask card says Cancelled.", "A cancelled run can't be reopened."]
+    run(bot.cancel_run(reg, rs, parts[2], "Jon", None))
+    assert [p.state for p in rc.event_parts(rs, first)] == ["done", "cancelled", "cancelled", "cancelled"]
+    audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
+    assert len(audits) == 1 and all(p.key in audits[0] for p in parts[1:]) and first.key not in audits[0]
+
+
+def test_the_confirm_names_only_the_raids_still_live(reg, rs):
+    from oibot_gm import consequences as cq
+
+    first = open_four(reg, rs)
+    parts = rc.event_parts(rs, first)
+    parts[3].state = "cancelled"  # an older run's raid cancelled on its own
+    rs.save(parts[3], "harness")
+    assert cq.consequence("cancel", reg, parts[1], rs=rs)[0] == "The whole Hyjal Summit run is cancelled, with Barrow Deeps and Extra A."
+    assert cq.consequence("cancel", reg, first, rs=rs)[1] == "The Barrow Deeps and Extra A follow-ons are cancelled with it, and nobody gets a DM."
+
+
+@pytest.mark.parametrize("keep, words", [((1, 3), "Your Barrow Deeps and Extra B places go too."), ((2,), "Your Extra A place goes too.")],
+                         ids=["seated on raids 2 and 4", "seated only on raid 3"])
+def test_the_me_pages_cant_names_every_later_place_it_frees(bot, reg, rs, monkeypatch, keep, words):
+    from oibot_gm.web.api_me import sheet_row_extras
+
+    first = open_four(reg, rs)
+    join(reg, rs, first, reg.test_members())
+    monkeypatch.setattr(rc, "propose", seat_first())
+    run(bot.lock_run(reg, rs, first, by="Jon"))
+    m = next(m for m in reg.test_members() if all(p.seat_of(m) for p in rc.event_parts(rs, first)))
+    for k, p in enumerate(rc.event_parts(rs, first)):
+        if k and k not in keep:
+            rc.free_seat(reg, rs, p, m.discord_id, "test", notice=False)
+    assert [k for k, p in enumerate(rc.event_parts(rs, first)) if k and p.seat_of(m)] == list(keep)
+    said = sheet_row_extras(reg, rs.events[first.key], m, rs)["cant_consequence"]
+    assert words in said and said.count("goes too") + said.count("go too") == 1
+
+
+def test_a_lineup_across_a_clocks_change_night_starts_each_raid_in_real_time(reg, rs):
+    """Spring forward (Sun 14 Mar 2027, 2:00 AM): a 12:30 AM Hyjal of 3 hours is followed at 4:30 AM, never 3:30 AM —
+    the preview, the part's stored start and its dict's run time agree."""
+    p = rc.open_preview(reg, rs, H, "2027-03-14 00:30", rc.ADHOC_SCHEDULE, lineup=LINEUP)
+    start = datetime.fromisoformat(p["start"])
+    first = rc.open_run(reg, rs, H, start, by="t", schedule=rc.ADHOC_SCHEDULE, lineup=LINEUP)
+    parts = rc.event_parts(rs, first)
+    assert [x["when"] for x in p["later"]] == [reg.local12(x.start) for x in parts[1:]]
+    assert [round((x.start - first.start).total_seconds() / 60) for x in parts] == [0, 180, 330, 450]
+    assert parts[1].start.astimezone(reg.tz).strftime("%H:%M") == "04:30"
+    assert reg.config.roster(parts[1].team)["schedule"] == "Sun 04:30"
+    assert p["follow_line"].startswith("Then Barrow Deeps ×2 at 4:30 AM")
+    lineup = [{"raid": H, "rosters": 1}, *LINEUP]
+    reg.set_raid_overrides(BD, {"first_open": "2027-03-14T04:00"}, "t")  # opens between 3:30 (wall) and 4:30 (real)
+    assert cq_before(reg, lineup, reg.tz) is None
+
+
+def cq_before(reg, lineup, tz):
+    from oibot_gm import consequences as cq
+
+    return cq.before_first_open_sentence(reg, lineup, datetime(2027, 3, 14, 0, 30, tzinfo=tz))
