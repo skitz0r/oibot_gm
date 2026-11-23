@@ -162,3 +162,38 @@ def test_an_older_file_is_lifted_at_load_and_saved_once(data_root, profile):
     said = list(reg.timing_saved)
     assert len(said) == 1 and said[0].startswith("Make-up is one minimum per role or class now: ")
     assert reg.migrate_schedules() == [] and list(reg.timing_saved) == said
+
+
+def test_scaling_rounds_half_up_and_never_loses_a_minimum(reg):
+    reg.set_minimums("hyjal_summit_forever", {"healer": {"min": 5}, "Paladin": {"min": 1}, "Druid": {"min": 3}}, "t")
+    m = reg.minimums("hyjal_summit_forever", 10)  # half of a 20-player raid
+    assert m["healer"] == 3 and m["Druid"] == 2  # 2.5 → 3 and 1.5 → 2: half up, never to the even number
+    assert m["Paladin"] == 1  # half of one Paladin is still one Paladin
+    assert reg.minimums("hyjal_summit_forever", 5)["Paladin"] == 1
+
+
+def test_lifting_an_aim_with_only_a_maximum_keeps_no_minimum():
+    cfg = R.GuildConfig(**{**base_config(), "raids": {RID: {"comp_targets": {"Paladin": {"max": 2}, "Mage": {"min": 0}, "Hunter": {"min": 1}}}}})
+    lines = R.lift_minimums(cfg)
+    assert cfg.raids[RID] == {"minimums": {"Hunter": {"min": 1}}}
+    assert "at least 0" not in lines[0] and "at most 2 Paladins" in lines[0] and "Mages with no minimum" in lines[0]
+
+
+def test_the_analytics_card_hint_is_a_minimum(reg):
+    from test_analytics_cards import text_of
+
+    from oibot_gm import discord_pool
+
+    view, _ = discord_pool.pool_layout(reg, reg.raid_shell(RID), lambda kind, x: "")
+    text = text_of(view)
+    assert "at least 2 Paladins in Barrow Deeps" in text
+    assert not any(w in text for w in ("cap ", "at most", "ideals", "over cap", "Over cap"))
+
+
+def test_the_auras_section_prints_each_minimum_alone(reg, rs):
+    from test_parity_d2 import state
+
+    s = state(reg, rs, OWNER, True, "does windfury totem stack with anything?")
+    line = next(x for x in s.splitlines() if x.startswith("comp rules: "))
+    assert "at least 2 tanks" in line and "at least 5 healers" in line and "None" not in line
+    assert "–" not in line.split(", per group")[0]

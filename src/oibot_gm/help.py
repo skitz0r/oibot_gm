@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from . import prices, professions
 from .constants import ROLES
-from .registry import CLOCK12, Registry
+from .registry import CLOCK12, Registry, slot_words
 
 ROOT = Path(__file__).resolve().parents[2]
 MANUAL = ROOT / "docs" / "manual.md"
@@ -1031,7 +1031,7 @@ def _auras(ask: Ask) -> list[str]:
     roles = r.get("roles", {})
     grp = r.get("grouping", {})
     out = ["### Auras (the game's defaults + the guild's changes; * = a field the guild changed)",
-           f"comp rules: raid size {r.get('raid_size')}, groups of {r.get('group_size')}, " + ", ".join(f"{k} {v.get('min')}–{v.get('max')}" for k, v in roles.items()) + (f", per group at most {grp.get('healer_max_per_group')} healers / {grp.get('tank_max_per_group')} tanks" if grp else "")]
+           f"comp rules: raid size {r.get('raid_size')}, groups of {r.get('group_size')}, " + ", ".join(f"at least {slot_words(k, int(v.get('min') or 0))}" for k, v in roles.items()) + (f", per group at most {grp.get('healer_max_per_group')} healers / {grp.get('tank_max_per_group')} tanks" if grp else "")]
     # what the question names first, so a cut never loses it
     out += [l for hit, l in b_lines + f_lines if hit] + [l for hit, l in b_lines if not hit] + [l for hit, l in f_lines if not hit]
     return out

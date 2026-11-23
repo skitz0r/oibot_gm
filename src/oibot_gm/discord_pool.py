@@ -70,7 +70,7 @@ def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.L
         lines += views.forecast_lines(ico, cv)
     parts = [top, ui.Separator(), ui.TextDisplay("\n".join(x for x in lines if x.strip()) or "every slot filled")]
     links = [ui.Button(label=label, style=discord.ButtonStyle.link, url=url) for label, url in (("Members", _site(reg, "/app/members")), ("Raid rules", _site(reg, "/app/raids"))) if url]
-    parts += [ui.Separator(), ui.TextDisplay(f"-# Change the ideals in plain text here: @mention me, e.g. “{roster.get('instance') or key}: we want 3 tanks”, “cap hunters at 3”.")]
+    parts += [ui.Separator(), ui.TextDisplay(f"-# Change a raid's minimums in plain text here: @mention me, e.g. “at least 2 Paladins in {name}”.")]
     if links:
         parts.append(ui.ActionRow(*links))
     view = ui.LayoutView(timeout=None)

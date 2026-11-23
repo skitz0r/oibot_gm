@@ -1686,7 +1686,7 @@ def lift_minimums(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
     """An older guild.yaml held a raid's make-up twice: `comp` (the owner's {min, max} per tank / healer / dps) and
     `comp_targets` (the officers' {min, max, note} per role, class or spec). Phase 2 keeps one map, `minimums` (D16):
     comp's tank and healer minimums, and every class, spec, melee or ranged entry of comp_targets with its reason. A
-    tank or healer entry of comp_targets (comp's wins), every maximum and comp's dps are dropped, and so is a run
+    tank or healer entry of comp_targets (comp's wins), an entry with no minimum, every maximum and comp's dps are dropped, and so is a run
     dict's own comp_targets. → one line per raid or run that changed ("Barrow Deeps: kept at least 3 healers; dropped
     at most 4 healers"); [] when nothing was left to lift. Idempotent; pure on cfg (`raids` = the profile's, for names)."""
     raids = raids or {}
@@ -1715,6 +1715,9 @@ def lift_minimums(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
             t = t if isinstance(t, dict) else {"min": t}
             if slot in ("tank", "healer"):
                 dropped.append(f"the officers' {_comp_words(slot, int(t.get('min') or 0))}")
+            elif min_entry(t)["min"] <= 0:  # only a maximum (or nothing): no minimum to keep, named with the maximums
+                if t.get("max") in (None, ""):
+                    dropped.append(f"{slot_words(slot)} with no minimum")
             else:
                 e = min_entry(t)
                 mins[slot] = e
@@ -4883,7 +4886,10 @@ class Registry:
     def minimums(self, instance: str | None, size: int | None = None) -> dict[str, int]:
         """The raid's minimums, one number per slot (a role, a class or Class:Spec; design D16): the guild's entries over
         the profile's over the game's tank / healer minimums (comp_rules, scaled to the size). A raid's own entries are
-        for its full size: scaled by round(n × size / raid size) when `size` differs. Zero entries are left out."""
+        for its full size: scaled by n × size / raid size, rounded half up, when `size` differs — a minimum of 1 or more
+        never scales below 1. Zero entries are left out."""
+        import math
+
         from .roster.solver import scaled_role_minimums
 
         rd = self.raid_def(instance)
@@ -4892,7 +4898,7 @@ class Registry:
         out = {r: n for r, n in scaled_role_minimums(self.profile.comp_rules, size).items() if r in ("tank", "healer")}
         for slot, e in (rd.get("minimums") or {}).items():
             n = min_entry(e)["min"]
-            out[slot] = n if size == full else max(0, round(n * size / full))
+            out[slot] = n if size == full or n <= 0 else max(1, math.floor(n * size / full + 0.5))
         return {slot: n for slot, n in out.items() if n}
 
     def role_bounds(self, instance: str | None, size: int) -> dict[str, dict[str, int]]:
