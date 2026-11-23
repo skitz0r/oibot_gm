@@ -202,6 +202,7 @@ class RaidSchedulerMixin:
         for ev in rs.live():  # an open cut off between its raids (a restart) gets its missing later raids, once
             if not rc.is_follow(ev):
                 try:
+                    rc.sync_stands_for(reg, rs, ev)  # a schedule edit's decision onto the run file (once)
                     rc.complete_parts(reg, rs, ev)
                 except Exception:  # noqa: BLE001 — never stops the guild's minute; tried again at the next
                     log.exception("later raids of %s not opened", ev.key)

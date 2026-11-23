@@ -783,6 +783,13 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     add("timing only, the lock", ev, None, {"lock_hours_before": 6})
     add("timing only, automatic asks", ev, None, {"autofill": False})
     add("timing only, no reminder", ev, None, {"nudge": False})
+    add("timing only, reminder off with a new reminder time", ev, None, {"nudge_hours_before": 12, "nudge": False})
+    team = rc.run_team(reg, ev)
+    was = team.get("reminders")
+    team["reminders"] = rc.OFF
+    add("timing only, reminder on", ev, None, {"nudge": True})
+    add("timing only, reminder on with a new reminder time", ev, None, {"nudge": True, "nudge_hours_before": 12})
+    team["reminders"] = was
     add("timing only, the fill ask wait", ev, None, {"fill_ask_hours": 2})
     add("timing only, confirm-by", ev, None, {"confirm_hours_before": 2})
     add("timing only, two times", ev, None, {"lock_hours_before": 6, "nudge_hours_before": 12})

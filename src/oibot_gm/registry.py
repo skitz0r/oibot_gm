@@ -5479,6 +5479,7 @@ class Registry:
         snap = self._snapshot_raid(instance)
         try:
             self._lift_raid(instance)
+            before = {s["id"]: s for s in self.schedules(instance)}  # the run times before: what a live run stood for
             others = {str(e.get("id")) for e in self.config.schedules if isinstance(e, dict) and _lead_raid(e) != instance}
             out = []
             for row in rows:
@@ -5498,6 +5499,15 @@ class Registry:
         except RegistryError:
             self._restore_raid(instance, snap)
             raise
+        if not getattr(self, "_shadow", False):
+            # a live run whose night the edit took away stands for the run time put in its place (that week's), decided
+            # here, once, with both lists known — written on its run dict in this same save (rc.plan_stands_for)
+            from . import raidcycle as rc
+
+            for key, value in rc.plan_stands_for(self, instance, before).items():
+                t = self.config.team(key)
+                if t is not None:
+                    t["stands_for"] = value
         if save:
             self._prune_raid(instance)
             self.save_config(message)

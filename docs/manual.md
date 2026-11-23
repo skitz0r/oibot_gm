@@ -1205,9 +1205,11 @@ either), when the start is in the past, when nothing would change, and when its 
 minute. A moved run still counts as the run of the date its schedule gave it: that date never opens a second sheet, and
 the schedule's next runs open on time wherever the moved one now sits. Moved exactly onto another night of its schedule
 that hasn't opened yet, it becomes that night's run, and the confirm says so (*"That night's Raid nights run is this
-one."*). The same holds when a schedule's run time changes while its run is open — a later hour, past midnight or
-another weekday: the open run keeps its old time and stands for the nearest new time within half a week (half the
-lockout for days of each lockout), so the week gets no second run, and the next week opens at the new time. A
+one."*). When a schedule's run time changes while its run is open or locked — a later hour, past midnight or another
+weekday — the bot decides once, at that save, which new time the run stands for: the run time put in place of the one
+it came from (two changed at once pair up in order), in the same Monday-to-Sunday week (for days of each lockout, the
+same lockout). The run keeps its old time, that week gets no second run, and the next week opens at the new time. A
+run time that was only taken away stands for nothing new, a run already finished or cancelled is never changed, and a
 schedule with two run times keeps both: editing one never stops the other opening. Lockouts, the alt filter and *also on another run* read the new
 start. The verb is the bot's own today (MCP and the site's run card get it with the run pages).
 

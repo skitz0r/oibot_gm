@@ -826,6 +826,9 @@ class RaidMixin:
                 gone.append(t["key"])
                 continue
             if evs and all(e.state == "cancelled" or (e.state == "done" and not rc.closed_recently(e)) for e in evs):
+                for e in evs:  # what the run stood for outlives its dict: a replaced night never opens after it closed
+                    if not rc.is_follow(e):
+                        rc.sync_stands_for(reg, rs, e)
                 cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
                 gone.append(t["key"])
         if gone:

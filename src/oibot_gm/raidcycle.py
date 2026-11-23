@@ -169,6 +169,10 @@ class RaidEvent(BaseModel):
     # schedule gave it in GUILD WALL TIME 'YYYY-MM-DDTHH:MM' (a timezone change never makes a second run of one occurrence),
     # the first part's key, which part of the event this run is, and its start in minutes after the first part's
     occurrence: Optional[str] = None
+    # the occurrence of its schedule this run ALSO stands for, decided once when the schedule's run time was edited while
+    # the run was live (plan_stands_for): Tue's run with the night moved to Wed stands for that week's Wed. None = only
+    # its own occurrence. Older code ignores the key (extra="ignore")
+    stands_for: Optional[str] = None
     event: Optional[str] = None
     part: int = 0
     starts: int = 0
@@ -535,64 +539,162 @@ def _newest(evs: list) -> "RaidEvent | None":
 
 
 def event_of_occurrence(rs: "RaidStore", sid: str, occurrence: str, *, reg: Registry | None = None) -> "RaidEvent | None":
-    """THE finder of a schedule's run: the first part (never a test run) stamped with schedule `sid` and `occurrence`,
-    in any state (the newest created if several). With `reg`, also a run file from before the stamps (no `event`) whose
-    start and schedule (run_schedule_id: its run dict, else its old stamp through the aliases) give the same pair: a
-    finished or cancelled run the start-up stamping never touches, or a live one opened before it.
-    With `reg`, a run of the schedule ALSO answers for an occurrence it wasn't opened for in two cases (phase 3, Task 5),
-    so neither ever brings a second sheet: a live run of the schedule MOVED to exactly that start (reschedule), and
-    that night's run when the schedule's run time was edited while it was open (night_run_of: "The open run keeps its
-    old times.")."""
-    hits = [e for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid and e.occurrence == occurrence]
+    """THE finder of a schedule's run: the first part (never a test run) of schedule `sid` stamped with `occurrence`, or
+    that stands for it (stands_for_of: decided when the schedule's run time was edited while the run was live —
+    plan_stands_for), in any state (the newest created if several). With `reg`, also a run file from before the stamps
+    (no `event`) whose start and schedule (run_schedule_id: its run dict, else its old stamp through the aliases) give
+    the same pair: a finished or cancelled run the start-up stamping never touches, or a live one opened before it; and
+    a LIVE run of the schedule moved to exactly that start (reschedule), so nothing else opens there. Nothing is
+    guessed: a run stands for what its stamps say."""
+    hits = [e for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid
+            and (e.occurrence == occurrence or stands_for_of(reg, e) == occurrence)]
     if reg is not None:
         hits += [e for e in rs.events.values() if not e.event and _first_part(e) and not is_test_run(reg, e)
                  and occurrence_stamp(reg, e.start) == occurrence and run_schedule_id(reg, e) == sid]
         if not hits:
             hits = [e for e in rs.live() if e.event and _first_part(e) and not e.test and e.schedule == sid
                     and occurrence_stamp(reg, e.start) == occurrence]
-        if not hits:
-            hit = night_run_of(reg, rs, sid, occurrence)
-            hits = [hit] if hit is not None else []
     return _newest(hits)
 
 
-def night_run_of(reg: Registry, rs: "RaidStore", sid: str, occurrence: str) -> "RaidEvent | None":
-    """The run of schedule `sid` that stands for `occurrence` because the schedule's run time was edited while it was
-    open (Tue 7:30 PM → 8:00 PM, Tue → Wed, Tue 11:30 PM → Wed 12:30 AM): a run (any state) stamped with an occurrence
-    the schedule no longer gives, paired with the nearest occurrence it does give, no run is stamped with, within half
-    the schedule's period of it (half a week for weekly run times, half the lockout for days of each lockout). Each such
-    run stands for one occurrence at most, and an occurrence a run is stamped with keeps that run — so two run times in
-    a week (Tue + Thu) keep their own runs when one of them is edited. None when there is no such run — the usual case,
-    read without touching the schedule. (Nearest wins: a run time moved past another unchanged one of the same schedule
-    pairs with the nearer.)"""
-    q = datetime.fromisoformat(occurrence)
-    try:
-        sched = reg.schedule_entry(sid)
-    except RegistryError:
-        return None
-    period_days = int(reg.raid_def(sched["raid"]).get("lockout_days") or 7) if sched.get("kind") == "lockout" else 7
-    half = timedelta(days=period_days / 2)
-    mine = [e for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid and e.occurrence]
-    cands = [e for e in mine if e.occurrence != occurrence and abs(datetime.fromisoformat(e.occurrence) - q) < half]
-    if not cands:
-        return None
-    lo = (q - 2 * half).replace(tzinfo=reg.tz)
-    current = {occurrence_stamp(reg, t) for t in schedule_starts(reg, sched["raid"], sched, lo, 4 * half.total_seconds() / 3600)}
-    if occurrence not in current:
-        return None
-    held = {e.occurrence for e in mine}
-    free = sorted(o for o in current if o not in held)
-    orphans = sorted((e for e in cands if e.occurrence not in current), key=lambda e: (e.occurrence, e.created_at))
-    for e in orphans:
-        at = datetime.fromisoformat(e.occurrence)
-        near = [o for o in free if abs(datetime.fromisoformat(o) - at) < half]
-        if not near:
+def stands_for_of(reg: Registry | None, ev: "RaidEvent") -> str | None:
+    """The occurrence `ev` also stands for: its run dict's `stands_for` while the dict exists (the schedule write sets it
+    there, in the same commit), else the run file's (copied over by sync_stands_for before the dict goes)."""
+    t = reg.config.team(ev.team) if reg is not None else None
+    if t is not None and "stands_for" in t:
+        return t["stands_for"]
+    return ev.stands_for
+
+
+def sync_stands_for(reg: Registry, rs: "RaidStore", ev: "RaidEvent") -> bool:
+    """Copy the run dict's `stands_for` onto the run file (cleanup_ephemeral, before a closed run's dict goes; the
+    scheduler's minute for a live run). → whether it changed."""
+    t = reg.config.team(ev.team)
+    if t is None or "stands_for" not in t or t["stands_for"] == ev.stands_for:
+        return False
+    ev.stands_for = t["stands_for"]
+    rs.save(ev, f"stands for {ev.stands_for}" if ev.stands_for else "stands for its own night only")
+    return True
+
+
+def _run_files(reg: Registry) -> list[dict]:
+    """Every run file of the guild as stored (the few keys plan_stands_for reads): read from disk, so it needs no run store."""
+    out = []
+    for f in sorted((reg.store.root / reg.key / "raids").glob("*.json")):
+        try:
+            raw = json.loads(f.read_text())
+        except (OSError, ValueError):
             continue
-        pick = min(near, key=lambda o: (abs(datetime.fromisoformat(o) - at), o))
-        free.remove(pick)
-        if pick == occurrence:
-            return e
-    return None
+        out.append({k: raw.get(k) for k in ("key", "team", "state", "schedule", "occurrence", "stands_for", "event", "part",
+                                            "follows", "test", "created_at")})
+    return out
+
+
+def _week_monday(at: datetime):
+    return at.date() - timedelta(days=at.weekday())
+
+
+def _slot_pairs(old: dict, new: dict) -> dict | None:
+    """The run times an edit took away, each paired with one it added, in order: {old slot: new slot | None}. None when
+    the run times didn't change. Weekly slots are 'Tue 19:30'; days of a lockout are (day, 'HH:MM')."""
+    kind = old.get("kind") or "weekly"
+    if kind != (new.get("kind") or "weekly"):
+        return {}
+    if kind == "lockout":
+        a = [(int(d), old.get("time")) for d in old.get("days") or []]
+        b = [(int(d), new.get("time")) for d in new.get("days") or []]
+    elif kind == "weekly":
+        a, b = list(old.get("slots") or []), list(new.get("slots") or [])
+    else:
+        return None
+    if a == b:
+        return None
+    gone, added = [x for x in a if x not in b], [x for x in b if x not in a]
+    return {x: (added[i] if i < len(added) else None) for i, x in enumerate(gone)}
+
+
+def _lockout_day(reg: Registry, instance: str, at: datetime) -> tuple[int, object]:
+    """(day N of its lockout window, the window's first calendar day) for a guild wall time, as _lockout_starts counts."""
+    fo = reg.first_open(instance)
+    days = int(reg.raid_def(instance).get("lockout_days") or 7)
+    d0 = fo.astimezone(reg.tz).date() if fo else at.date()
+    k = (at.date() - d0).days // days
+    w0 = d0 + timedelta(days=k * days)
+    return (at.date() - w0).days + 1, w0
+
+
+def _given(reg: Registry, instance: str, sched: dict, stamp: str) -> bool:
+    """Does `sched` give the occurrence `stamp` (its day's starts)?"""
+    from datetime import time as _time
+
+    day = datetime.combine(datetime.fromisoformat(stamp).date(), _time(0, 0), tzinfo=reg.tz)
+    return stamp in {occurrence_stamp(reg, t) for t in schedule_starts(reg, instance, sched, day, 25)}
+
+
+def _replacement(reg: Registry, instance: str, sched: dict, slot, original: str) -> str | None:
+    """The occurrence `slot` of the edited schedule gives in the run's own week (weekly: the Monday-to-Sunday guild week
+    of its ORIGINAL occurrence) or lockout window (days of each lockout); None when the schedule doesn't give it."""
+    from .wizard import resolve_local
+
+    at = datetime.fromisoformat(original)
+    if isinstance(slot, tuple):
+        n, hhmm = slot
+        _day, w0 = _lockout_day(reg, instance, at)
+        date = w0 + timedelta(days=int(n) - 1)
+    else:
+        wd, h, m = parse_schedule(slot)
+        date, hhmm = _week_monday(at) + timedelta(days=wd), f"{h:02d}:{m:02d}"
+    h, m = (int(x) for x in str(hhmm).split(":"))
+    t, _note = resolve_local(datetime(date.year, date.month, date.day, h, m), reg.tz)
+    stamp = occurrence_stamp(reg, t)
+    return stamp if _given(reg, instance, sched, stamp) else None
+
+
+def plan_stands_for(reg: Registry, instance: str, before: dict[str, dict]) -> dict[str, str | None]:
+    """THE decision of what a live run stands for after its schedule's run times were edited — made once, at the
+    schedule write, when the old (`before`: sid → effective row) and the new run times are both known; never guessed at
+    read time. For each LIVE (open or locked; never cancelled, done or a test run) first raid of an edited schedule
+    whose current night — its `stands_for` when it has one, else its own `occurrence` — the new run times no longer
+    give: the run time that night came from is paired with the one the edit added in its place (_slot_pairs: taken away
+    ↔ added, in order), and the run stands for that run time's occurrence in its ORIGINAL occurrence's week (weekly) or
+    lockout window (days of each lockout) — when the schedule gives it and no other run holds it (by occurrence or
+    stands_for). No added run time, or a held one: it stands for nothing more. An edit back to its own night clears it.
+    → {run dict key: stands_for | None} for the dicts that change; the caller writes them (Registry._write_schedules)."""
+    files = _run_files(reg)
+    after = {s["id"]: s for s in reg.schedules(instance)}
+    out: dict[str, str | None] = {}
+    for sid, old in before.items():
+        new = after.get(sid)
+        pairs = _slot_pairs(old, new) if new is not None else None
+        if not pairs and pairs != {}:
+            continue
+        mine = [f for f in files if f.get("schedule") == sid and not f.get("follows") and not f.get("part") and not f.get("test")]
+        dicts = [t for t in reg.config.rosters if isinstance(t, dict) and t.get("occurrence") and not t.get("part") and not t.get("follows")
+                 and not t.get("test") and t.get("schedule_id") == sid]
+        held = {x for f in mine for x in (f.get("occurrence"), f.get("stands_for")) if x}
+        held |= {t["stands_for"] for t in dicts if t.get("stands_for")}
+        for t in dicts:
+            files_of = [f for f in mine if f.get("team") == t["key"] or f.get("key") == t["key"]]
+            f = max(files_of, key=lambda x: x.get("created_at") or "") if files_of else None
+            if f is None or f.get("state") not in ("open", "locked"):
+                continue
+            own, was = t["occurrence"], t.get("stands_for")
+            cur = was or own
+            if _given(reg, instance, new, cur):
+                continue
+            at = datetime.fromisoformat(cur)
+            slot = ((_lockout_day(reg, instance, at)[0], at.strftime("%H:%M")) if (old.get("kind") == "lockout")
+                    else at.strftime("%a %H:%M"))
+            to = pairs.get(slot)
+            rep = _replacement(reg, instance, new, to, own) if to is not None else None
+            if rep == own or (rep is not None and rep in held - {own, was}):
+                rep = None
+            if rep != was:
+                out[t["key"]] = rep
+                held.discard(was)
+                if rep:
+                    held.add(rep)
+    return out
 
 
 def live_at(rs: "RaidStore", instance: str, start: datetime, *, test: bool = False) -> "RaidEvent | None":
@@ -1242,7 +1344,7 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
     if start is not None and start < now - timedelta(minutes=PAST_GRACE_MINUTES):
         return MOVE_PAST
     if (start is None or start == first.start) and not values:
-        return TIMING_SAME if start is None and timing else MOVE_SAME
+        return TIMING_SAME if timing else MOVE_SAME
     if start is not None and start != first.start:
         other = live_at(rs, first.instance, start, test=bool(first.test))
         if other is not None and not same_event(other, first):

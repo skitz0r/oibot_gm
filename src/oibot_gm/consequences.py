@@ -172,8 +172,9 @@ def _words(text: str) -> int:
     return len(text.split())
 
 
-def _timing_phrases(reg: Registry, start, changed: dict) -> list[str]:
-    """One phrase per run setting that changes, in the manual's words, with the new time where it is a time."""
+def _timing_phrases(reg: Registry, start, changed: dict, team: dict) -> list[str]:
+    """One phrase per run setting that changes, in the manual's words, with the new time where it is a time. The
+    reminder is one thing: turned off, its time isn't named; turned on, it says when it goes out."""
     out = []
     for k in TIMING_ORDER_OF:
         if k not in changed:
@@ -182,11 +183,17 @@ def _timing_phrases(reg: Registry, start, changed: dict) -> list[str]:
         if k == "cutoff_hard_hours":
             out.append(f"the sheet locks {reg.local12(start - timedelta(hours=float(v)))}")
         elif k == "cutoff_soft_hours":
+            if changed.get("reminders") == rc.OFF:
+                continue  # no reminder: its time says nothing
             out.append(f"the reminder goes out {reg.local12(start - timedelta(hours=float(v)))}")
         elif k == "confirm_hours":
             out.append(f"confirm-by is {reg.local12(start - timedelta(hours=float(v)))}")
         elif k == "reminders":
-            out.append("the reminder is on" if v != rc.OFF else "there is no reminder")
+            if v == rc.OFF:
+                out.append("there is no reminder")
+            elif "cutoff_soft_hours" not in changed:  # turned on: when it goes out (a new time was said above)
+                soft = float(rc.team_setting(team, "cutoff_soft_hours"))
+                out.append(f"the reminder goes out {reg.local12(start - timedelta(hours=soft))}")
         elif k == "autofill":
             out.append("automatic asks are on" if v else "automatic asks are off")
         else:
@@ -208,7 +215,7 @@ def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: b
             return head + "."
         full = f"{head} with its own {_and(names)}."
         return full if _words(full) <= 20 else f"{head} with its own sheet timing."
-    detail = "For this run, " + _and(_timing_phrases(reg, first.start, changed)) + "."
+    detail = "For this run, " + _and(_timing_phrases(reg, first.start, changed, rc.run_team(reg, first))) + "."
     if _words(detail) <= 20:
         return detail
     listed = f"This run takes its own {_and(names)}."
