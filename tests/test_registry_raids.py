@@ -27,45 +27,49 @@ def test_role_bounds_scale_with_size(reg):
     assert b20["tank"] == {"min": 4, "max": 4} and b20["healer"]["min"] == 4
 
 
-def test_set_raid_override_hours_and_nudge_window(reg):
-    assert reg.set_raid_override("barrow_deeps", "lock_hours_before", "12", "t") == "barrow_deeps: lock_hours_before = 12"
-    assert reg.raid_def("barrow_deeps")["lock_hours_before"] == 12
-    assert reg.config.raids["barrow_deeps"]["lock_hours_before"] == 12
-    # the derived nudge follows: halfway between open (48) and lock (12)
-    assert reg.raid_def("barrow_deeps")["nudge_hours_before"] == 30
-    reg.set_raid_override("barrow_deeps", "nudge_hours_before", "20", "t")
-    assert reg.raid_def("barrow_deeps")["nudge_hours_before"] == 20
+def _sched(reg, sid="tue"):
+    return reg.schedule_def("barrow_deeps", sid)
+
+
+def test_schedule_hours_and_nudge_window(reg):
+    """Sheet timing is each schedule's own (phase 2): the same rules as the raid's were, on the schedule."""
+    reg.set_schedule("barrow_deeps", "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule("barrow_deeps", "tue", {"lock_hours_before": "12"}, "t")
+    assert _sched(reg)["lock_hours_before"] == 12
+    # the stored reminder (36, the profile's halfway) still falls between open (48) and lock (12): it stays
+    assert _sched(reg)["nudge_hours_before"] == 36
+    reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": "20"}, "t")
+    assert _sched(reg)["nudge_hours_before"] == 20
     with pytest.raises(RegistryError, match="between signup opening and lock"):
-        reg.set_raid_override("barrow_deeps", "nudge_hours_before", "6", "t")  # before the lock
+        reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": "6"}, "t")  # before the lock
     with pytest.raises(RegistryError, match="between signup opening and lock"):
-        reg.set_raid_override("barrow_deeps", "nudge_hours_before", "60", "t")  # before signups open
+        reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": "60"}, "t")  # before signups open
     with pytest.raises(RegistryError, match="confirmation deadline"):
-        reg.set_raid_override("barrow_deeps", "confirm_hours_before", "30", "t")
+        reg.set_schedule("barrow_deeps", "tue", {"confirm_hours_before": "30"}, "t")
     with pytest.raises(RegistryError, match="number of hours"):
-        reg.set_raid_override("barrow_deeps", "fill_ask_hours", "soon", "t")
+        reg.set_schedule("barrow_deeps", "tue", {"fill_ask_hours": "soon"}, "t")
     with pytest.raises(RegistryError, match="negative"):
-        reg.set_raid_override("barrow_deeps", "fill_ask_hours", "-1", "t")
-    with pytest.raises(RegistryError, match="open before they lock"):  # last: the refused value lingers (see test_refused_raid_override_is_not_kept)
-        reg.set_raid_override("barrow_deeps", "lock_hours_before", "48", "t")
+        reg.set_schedule("barrow_deeps", "tue", {"fill_ask_hours": "-1"}, "t")
+    with pytest.raises(RegistryError, match="open before they lock"):
+        reg.set_schedule("barrow_deeps", "tue", {"lock_hours_before": "48"}, "t")
+    assert _sched(reg)["lock_hours_before"] == 12 and _sched(reg)["nudge_hours_before"] == 20, "a refused change leaves the last good values"
 
 
 def test_refused_raid_override_is_not_kept(reg):
-    reg.set_raid_override("barrow_deeps", "nudge_hours_before", "30", "t")
-    with pytest.raises(RegistryError):
-        reg.set_raid_override("barrow_deeps", "nudge_hours_before", "6", "t")
-    assert reg.raid_def("barrow_deeps")["nudge_hours_before"] == 30, "a refused change leaves the last good value"
+    with pytest.raises(RegistryError, match="belongs to each schedule"):
+        reg.set_raid_override("barrow_deeps", "nudge_hours_before", "30", "t")
+    assert "barrow_deeps" not in reg.config.raids
     with pytest.raises(RegistryError):
         reg.set_raid_override("barrow_deeps", "tank_min", "3", "t")
     assert reg.raid_def("barrow_deeps")["comp"]["tank"] == {"min": 2, "max": 2}
 
 
 def test_set_raid_override_bools_weights_policy(reg):
-    reg.set_raid_override("barrow_deeps", "nudge", "off", "t")
-    assert reg.raid_def("barrow_deeps")["nudge"] is False
-    reg.set_raid_override("barrow_deeps", "open_dm", "yes", "t")
-    assert reg.raid_def("barrow_deeps")["open_dm"] is True
-    reg.set_raid_override("barrow_deeps", "autofill", "false", "t")
-    assert reg.raid_def("barrow_deeps")["autofill"] is False
+    reg.set_schedule("barrow_deeps", "tue", {"kind": "weekly", "slots": "Tue 19:30", "nudge": "off", "open_dm": "yes", "autofill": "false"}, "t")
+    assert (_sched(reg)["nudge"], _sched(reg)["open_dm"], _sched(reg)["autofill"]) == (False, True, False)
+    for field in ("nudge", "open_dm", "autofill", "confirm"):
+        with pytest.raises(RegistryError, match="belongs to each schedule"):
+            reg.set_raid_override("barrow_deeps", field, "off", "t")
     reg.set_raid_override("barrow_deeps", "weight_rank", "5", "t")
     assert reg.raid_def("barrow_deeps")["weights"] == {**RAID_WEIGHT_DEFAULTS, "rank": 5}
     with pytest.raises(RegistryError, match="whole number"):

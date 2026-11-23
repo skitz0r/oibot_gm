@@ -46,7 +46,7 @@ def test_class_is_derived_from_the_kind():
 
 def test_adhoc_takes_the_raids_identity_but_not_its_recurring_timing(reg):
     opened(reg)
-    reg.set_raid_overrides(RID, {"lock_hours_before": 24, "confirm_hours_before": 12, "nudge_hours_before": 36}, "t")
+    reg.set_schedule(RID, "default", {"lock_hours_before": 24, "confirm_hours_before": 12, "nudge_hours_before": 36}, "t")
     reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup"}, "t")
     rd, pug, dflt = reg.raid_def(RID), reg.schedule_def(RID, "pug"), reg.schedule_def(RID, "default")
     assert pug["class"] == "adhoc" and dflt["class"] == "recurring"
@@ -56,7 +56,8 @@ def test_adhoc_takes_the_raids_identity_but_not_its_recurring_timing(reg):
     assert pug["weights"] == {**RAID_WEIGHT_DEFAULTS, **ADHOC_WEIGHTS}
     assert (dflt["lock_hours_before"], dflt["confirm"], dflt["nudge"]) == (24, True, True)
     # where each value comes from, for the editors
-    assert pug["schedule"]["source"]["lock_hours_before"] == "adhoc" and dflt["schedule"]["source"]["lock_hours_before"] == "raid"
+    # (phase 2: every stored schedule holds its timing written out, so each reads as its own)
+    assert pug["schedule"]["source"]["lock_hours_before"] == "own" and dflt["schedule"]["source"]["lock_hours_before"] == "own"
     reg.set_schedule(RID, "pug", {"lock_hours_before": 4}, "t")
     pug = reg.schedule_def(RID, "pug")
     assert pug["schedule"]["source"]["lock_hours_before"] == "own" and pug["lock_hours_before"] == 4
@@ -92,8 +93,8 @@ def test_confirm_is_a_raid_and_schedule_setting(reg):
     opened(reg)
     reg.set_schedule(RID, "default", {"confirm": "false"}, "t")
     assert reg.schedule_def(RID, "default")["confirm"] is False
-    reg.set_raid_override(RID, "confirm", "false", "t")
-    assert reg.raid_def(RID)["confirm"] is False
+    with pytest.raises(RegistryError, match="belongs to each schedule"):  # phase 2: no longer the raid's
+        reg.set_raid_override(RID, "confirm", "false", "t")
 
 
 # ---------------------------------------------------------------- every open path stamps the class

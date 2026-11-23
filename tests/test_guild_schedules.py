@@ -51,7 +51,8 @@ def stored(reg, raid):
 
 def test_a_schedule_is_stored_at_guild_level(reg):
     reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30", "rosters": 2, "follow": f"{OTHER} x2"}, "t")
-    assert stored(reg, RID) == [{"id": "tue", "lineup": [{"raid": RID, "rosters": 2}, {"raid": OTHER, "rosters": 2}], "kind": "weekly", "slots": ["Tue 19:30"]}]
+    T = reg.timing_suggestion(RID)  # every stored schedule carries its sheet timing (phase 2)
+    assert stored(reg, RID) == [{"id": "tue", "lineup": [{"raid": RID, "rosters": 2}, {"raid": OTHER, "rosters": 2}], "kind": "weekly", "slots": ["Tue 19:30"], **T}]
     assert not {"schedules", "slots"} & set(reg.config.raids.get(RID) or {})
     row = next(s for s in reg.schedules(RID) if s["id"] == "tue")
     assert row["rosters"] == 2 and row["follow"] == {"raid": OTHER, "rosters": 2}
@@ -59,15 +60,15 @@ def test_a_schedule_is_stored_at_guild_level(reg):
 
 def test_run_times_are_the_default_schedule(reg):
     reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    assert stored(reg, RID) == [{"id": "default", "lineup": [{"raid": RID, "rosters": 1}], "slots": ["Tue 19:30"]}]
-    assert reg.raid_def(RID)["slots"] == ["Tue 19:30"] and reg.raid_def(RID).get("schedules") in (None, [])
+    assert stored(reg, RID) == [{"id": "default", "lineup": [{"raid": RID, "rosters": 1}], "slots": ["Tue 19:30"], **reg.timing_suggestion(RID)}]
+    assert reg.raid_def(RID)["slots"] == ["Tue 19:30"] and [s["id"] for s in reg.raid_def(RID)["schedules"]] == ["default"]  # its timing
     assert [s["id"] for s in reg.schedules(RID)] == ["default"]
 
 
 def test_default_keeps_its_own_settings_without_run_times(reg):
     reg.set_schedule(RID, "default", {"slots": "Tue 19:30", "rosters": 2}, "t")
     reg.set_raid_override(RID, "slots", "", "t")
-    assert stored(reg, RID) == [{"id": "default", "lineup": [{"raid": RID, "rosters": 2}]}]
+    assert stored(reg, RID) == [{"id": "default", "lineup": [{"raid": RID, "rosters": 2}], **reg.timing_suggestion(RID)}]
     assert reg.raid_def(RID)["slots"] == []
 
 
@@ -157,7 +158,7 @@ def test_a_schedule_write_lifts_the_old_keys_and_a_removed_one_stays_gone(reg):
     assert reg.raid_def(RID)["slots"] == ["Tue 19:30"] and [s["id"] for s in reg.schedules(RID)] == ["default", "alt", "keep"]
     reg.remove_schedule(RID, "alt", "t")
     reg.remove_schedule(RID, "keep", "t")
-    assert [s["id"] for s in reg.schedules(RID)] == ["default"] and "schedules" not in reg.raid_def(RID)
+    assert [s["id"] for s in reg.schedules(RID)] == ["default"] and [s["id"] for s in reg.raid_def(RID)["schedules"]] == ["default"]
     assert reg.config.raids[RID] == {"notes": "old"}
 
 
@@ -386,8 +387,8 @@ def test_a_write_refused_after_the_lift_puts_the_old_keys_back(reg):
     the guild-level list are exactly as they were, old keys included."""
     _old_keys(reg)
     before = (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
-    with pytest.raises(RegistryError, match="confirmation deadline"):
-        reg.set_raid_overrides(RID, {"lock_hours_before": 1, "confirm_hours_before": 5}, "t")
+    with pytest.raises(RegistryError, match="min 5 above max 1"):
+        reg.set_raid_overrides(RID, {"tank_min": 5, "tank_max": 1}, "t")
     assert (reg.config.raids, reg.config.schedules) == before
 
 

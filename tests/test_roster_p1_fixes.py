@@ -269,9 +269,10 @@ def test_dead_config_is_gone_and_old_files_still_load(reg):
     assert not hasattr(rc, "TEAM_DEFAULTS")
 
 
-def test_a_run_without_its_run_dict_reads_the_raids_settings(reg, rs):
+def test_a_run_without_its_run_dict_reads_the_raids_settings(reg, rs, monkeypatch):
+    # phase 2: a guild can't give the raid timing any more; the raid's own settings are the game's (the profile's)
+    monkeypatch.setitem(reg.profile.raids, RID, {**reg.profile.raids[RID], "lock_hours_before": 12, "nudge": False, "autofill": False})
     opened(reg)
-    reg.set_raid_overrides(RID, {"lock_hours_before": 12, "nudge": False, "autofill": False}, "t")
     ev = rc.open_run(reg, rs, RID, soon(reg, 6), by="t")
     reg.config.rosters = [t for t in reg.config.rosters if t["key"] != ev.team]  # the run dict is gone (cleanup, an old file)
     team = rc.run_team(reg, ev)

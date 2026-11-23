@@ -824,7 +824,8 @@ def test_a_real_run_whose_key_a_rehearsal_holds_warns_once_never_an_error_every_
 
     bot = NightBot(reg, rs)
     reg.config.signup_channel_id = bot.signup.id
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00", "signup_lead_hours": 24 * 14}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_schedule("barrow_deeps", "default", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
     (sched, start), *rest = rc.upcoming(reg, "barrow_deeps", reg.now_local(), lead=True)
     key = rc.run_key("barrow_deeps", start, sched["id"])
     reg.config.rosters.append({"key": key, "name": "old rehearsal", "test": True, "test_by": OWNER, "instance": "barrow_deeps", "size": 20, "ephemeral": True})

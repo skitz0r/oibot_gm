@@ -766,10 +766,14 @@ A **slot** is a recurring run time in the guild's timezone (US Pacific), e.g. Tu
 several. One **run** = one slot occurrence = one sheet. A run is **open**, then **locked**, then **done**
 (or **cancelled**). Members never keep standing availability; they answer each sheet.
 
-**Schedules** say *when* a raid runs; the raid itself keeps what it is (size, limits, lockout, weights) and its
-week as the defaults. A raid's own run times are its first schedule (*Raid nights*); it can have more, each
-with a name, and each can set its own week (when its sheet opens, nudges, locks, confirms, how long fill asks
-wait, autofill, DM on open, split policy) — anything it doesn't set follows the raid's. Three kinds:
+**Schedules** say *when* a raid runs; the raid itself keeps what it is (size, limits, lockout, weights, split
+policy). A raid's own run times are its first schedule (*Raid nights*); it can have more, each with a name. Each
+schedule holds its own **sheet timing** in full: when its sheet opens, nudges, locks and asks to confirm, how long
+fill asks wait, autofill and the DM on open. A new schedule starts from the game's suggestion for its raid (a pickup
+template from the ad hoc values below); setting one of them back to the default gives it the suggestion again. The
+raid's own settings no longer hold timing: change it on the schedule. Moving a schedule's opening or lock past its
+reminder moves the reminder back to halfway between them. Weights and split policy stay the raid's unless the
+schedule sets its own. Three kinds:
 - **Weekly nights** — run times like the raid's own ("Saturdays 8:00 PM"). A Tuesday main night and a Saturday alt
   run of the same raid, each with its own lock time.
 - **Days of each lockout** — "Day 1 of each 3-day lockout, 8:00 PM": day 1 is the day the lockout resets, counted

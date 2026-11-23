@@ -22,6 +22,7 @@ from web_helpers import post_confirmed
 from oibot_gm import configops
 from oibot_gm import flows_config  # noqa: F401 — registers the flows
 from oibot_gm import raidcycle as rc
+from oibot_gm import registry as R
 from oibot_gm.configops import ConfigOp
 from oibot_gm.registry import RegistryError, schedules_of
 from oibot_gm.web import app as web
@@ -65,10 +66,11 @@ def test_a_raid_with_only_slots_is_the_default_schedule_and_nothing_changes(reg,
     ev = rc.open_run(reg, rs, RID, t, by="t")
     team = reg.config.roster(ev.team)
     assert ev.key == rc.event_key(RID, t) and ev.schedule is None
-    # Phase 1: every run dict names its schedule, class and series; nothing else about a plain run changed
-    assert (team["schedule_id"], team["kind"], team["series"]) == ("default", "recurring", f"{RID}:default") and "rosters" not in team
+    # Phase 1: every run dict names its schedule, class and series. Phase 2: the default schedule holds its own sheet
+    # timing, so its run carries the schedule's settings like any other schedule's run
+    assert (team["schedule_id"], team["kind"], team["series"]) == ("default", "recurring", f"{RID}:default") and team["rosters"] == 1
     assert (ev.kind, ev.series) == ("recurring", f"{RID}:default")
-    assert rc.run_rosters(reg, ev) == 1 and reg.raid_rows(RID) == [{"id": "default", "slots": ["Tue 19:30", "Thu 20:00"]}]  # run times alone
+    assert rc.run_rosters(reg, ev) == 1 and reg.raid_rows(RID) == [{"id": "default", "slots": ["Tue 19:30", "Thu 20:00"], **reg.timing_suggestion(RID)}]  # run times + timing
     # the scheduler's own view (each schedule within its signup lead) is the old slot_starts at the raid's lead
     lead = float(reg.raid_def(RID)["signup_lead_hours"])
     assert [t for _s, t in rc.upcoming(reg, RID, now, lead=True)] == [t for _s, t in rc.slot_starts(reg, RID, now, lead)]
@@ -207,7 +209,8 @@ def test_set_and_remove_are_one_commit_each_and_inherit_goes_back_to_the_raid(re
     assert commits(store) == n0 + 1 and lines == ["Barrow Deeps · Alt run: new schedule, Saturdays 8:00 PM"]
     reg.set_schedule(RID, "alt", {"lock_hours_before": "inherit", "rosters": 2}, "t")
     s = next(x for x in reg.schedules(RID) if x["id"] == "alt")
-    assert "lock_hours_before" not in s and reg.schedule_def(RID, "alt")["lock_hours_before"] == reg.raid_def(RID)["lock_hours_before"]
+    # inherit = the game's suggestion, written out again
+    assert s["lock_hours_before"] == reg.timing_suggestion(RID)["lock_hours_before"] == reg.schedule_def(RID, "alt")["lock_hours_before"]
     assert reg.schedule_label(RID, s) == "Saturdays 8:00 PM · 2 rosters"
     assert reg.remove_schedule(RID, "alt", "t") == "Barrow Deeps: schedule Alt run removed"
     assert commits(store) == n0 + 3 and reg.schedules(RID) == [] and reg.raid_rows(RID) == [] and "schedules" not in reg.config.raids.get(RID, {})
@@ -311,7 +314,7 @@ def test_plain_text_schedule_ops_describe_in_words_and_apply(reg, store):
         configops.apply(reg, op, "Officer", is_owner=False)
     assert configops.apply(reg, op, "Owner", is_owner=True) == "Barrow Deeps · Weekly: new schedule, Saturdays 8:00 PM"
     lock = ConfigOp(op="schedule_set", target=RID, field="alt.lock_hours_before", value="12")
-    assert configops.describe(reg, lock) == "Barrow Deeps · Weekly: lock hours before: the raid's (24 hours before) → lock hours before: 12 hours before"
+    assert configops.describe(reg, lock) == "Barrow Deeps · Weekly: lock hours before: 24 hours before → lock hours before: 12 hours before"
     configops.apply(reg, lock, "Owner", is_owner=True)
     back = ConfigOp(op="schedule_set", target=RID, field="alt.lock_hours_before", value="inherit")
     assert configops.describe(reg, back).endswith("12 hours before → lock hours before: the raid's (24 hours before)")
@@ -370,7 +373,7 @@ def test_web_routes_list_set_remove_and_open_by_schedule(api, reg, rs):
     alt = next(s for s in raid["schedules"] if s["id"] == "alt")
     assert alt["label"] == "Saturdays 8:00 PM · 2 rosters" and alt["seats"] == 20 and alt["slot_labels"] == ["Sat 8:00 PM"]
     assert len(alt["next"]) == 3 and all("PM" in x and "20:00" not in x for x in alt["next"])
-    assert alt["effective"]["lock_hours_before"] == 24 and alt["own"] == {}
+    assert alt["effective"]["lock_hours_before"] == 24 and set(alt["own"]) == set(R.SCHEDULE_TIMING)  # its timing, written out
     c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "pug", "fields": {"kind": "pickup", "name": "Pickup"}}, headers=bearer())
     rosters = next(x for x in c.get("/api/rosters", headers=bearer()).json()["raids"] if x["id"] == RID)
     assert {s["id"] for s in rosters["schedules"]} == {"alt", "pug"} and all(u["schedule"] == "alt" for u in rosters["upcoming"])

@@ -865,6 +865,12 @@ SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_befor
                     "nudge", "autofill", "open_dm", "confirm", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
 # `weights`: a partial seat-order map {rank, main, sat_out, signup_order, regular} merged per key over the raid's (ad hoc: ADHOC_WEIGHTS)
 SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow") + SCHEDULE_CADENCE
+# the nine values a schedule OWNS (C7): every stored schedule carries them written out in full (write_out_timing), seeded
+# from the game's suggestion for its raid (Registry.timing_suggestion; a pickup row from ADHOC_DEFAULTS). A raid refuses
+# them (TIMING_ON_SCHEDULE). split_policy and weights are not timing: the raid keeps a default a schedule may override (C6).
+SCHEDULE_TIMING = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before",
+                   "fill_ask_hours", "nudge", "autofill", "open_dm", "confirm")
+TIMING_ON_SCHEDULE = "Sheet timing belongs to each schedule now. Change it on the schedule."
 MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
 # A follow-on run (design §5.62) — a second raid the same night from the same signup — keys its run with this reserved
 # schedule id ('bd-1209-2130-after'), so it never collides with a run of that raid's own schedules at the same minute.
@@ -1355,6 +1361,54 @@ def schedule_def_of(rd: dict, sid: str | None) -> dict:
     source["weights"] = {k: ("own" if k in own_w else inherited) for k in RAID_WEIGHT_DEFAULTS}
     eff["schedule"] = {**s, "own": own, "own_weights": own_w, "class": cls, "source": source}
     return eff
+
+
+def effective_raid(base: dict, over: dict) -> dict:
+    """The effective raid definition: the profile's raid (`base`) with the guild's override (`over`) on top, then
+    RAID_DEFAULTS — comp merged per role, weights per key, the reminder derived halfway when nothing sets it, the
+    true/false settings parsed. Pure: Registry.raid_def is effective_raid(profile raid, raid_override)."""
+    base = dict(base or {})
+    out = {**base}
+    for k, v in (over or {}).items():
+        if k == "comp":
+            comp = {r: dict(b) for r, b in (base.get("comp") or {}).items()}
+            for r, b in (v or {}).items():
+                comp[r] = {**comp.get(r, {}), **b}
+            out["comp"] = comp
+        elif k == "weights":
+            out["weights"] = {**(base.get("weights") or {}), **(v or {})}
+        else:
+            out[k] = v
+    out.setdefault("slots", [])
+    for k, v in RAID_DEFAULTS.items():  # nudge: DM the mains who haven't answered, once, at nudge_hours_before;
+        out.setdefault(k, v)  # fill_ask_hours: a fill DM with no answer counts as no after this long (never later than the run start)
+    out.setdefault("nudge_hours_before", default_nudge_hours(out["signup_lead_hours"], out["lock_hours_before"]))
+    out["loot_auto_distribute"] = parse_bool(out.get("loot_auto_distribute", True))
+    for k in RAID_BOOL_FIELDS:
+        out[k] = parse_bool(out[k])
+    out["weights"] = {**RAID_WEIGHT_DEFAULTS, **(out.get("weights") or {})}
+    return out
+
+
+def _bare_default(row: dict) -> bool:
+    """A `default` row with nothing of its own but its sheet timing (no run times, no name, no weights …): dropped."""
+    return set(row) <= {"id", *SCHEDULE_TIMING}
+
+
+def write_out_timing(row: dict, rd: dict) -> dict:
+    """A copy of a schedule row (the norm_schedule shape) with every SCHEDULE_TIMING value written out: what the row
+    resolves to today against the effective raid `rd` (schedule_def_of — own, then the raid's and RAID_DEFAULTS for a
+    recurring row, own then ADHOC_DEFAULTS for a pickup row, the reminder halfway where the row moves the opening or the
+    lock without its own). A value the row holds is never replaced. Pure."""
+    eff = schedule_def_of({**rd, "schedules": [row]}, row["id"])
+    out = {**row}
+    for k in SCHEDULE_TIMING:
+        v = eff[k]
+        if k in RAID_HOURS_FIELDS:  # a derived halfway reminder is a float: stored as a whole number where it is one
+            v = float(v)
+            v = int(v) if v == int(v) else v
+        out[k] = v
+    return out
 
 
 def join_words(words: list[str]) -> str:
@@ -4486,29 +4540,13 @@ class Registry:
     RAID_FIELDS = ("lockout_days", "duration_hours", "notes")
 
     def raid_def(self, instance: str | None) -> dict:
-        """Effective raid definition: profile raids.yaml merged with guild overrides (comp merged per role)."""
-        base = dict(self.profile.raids.get(instance or "", {}) or {})
-        over = self.raid_override(instance) if instance else {}
-        out = {**base}
-        for k, v in over.items():
-            if k == "comp":
-                comp = {r: dict(b) for r, b in (base.get("comp") or {}).items()}
-                for r, b in (v or {}).items():
-                    comp[r] = {**comp.get(r, {}), **b}
-                out["comp"] = comp
-            elif k == "weights":
-                out["weights"] = {**(base.get("weights") or {}), **(v or {})}
-            else:
-                out[k] = v
-        out.setdefault("slots", [])
-        for k, v in RAID_DEFAULTS.items():  # nudge: DM the mains who haven't answered, once, at nudge_hours_before;
-            out.setdefault(k, v)  # fill_ask_hours: a fill DM with no answer counts as no after this long (never later than the run start)
-        out.setdefault("nudge_hours_before", default_nudge_hours(out["signup_lead_hours"], out["lock_hours_before"]))
-        out["loot_auto_distribute"] = parse_bool(out.get("loot_auto_distribute", True))
-        for k in RAID_BOOL_FIELDS:
-            out[k] = parse_bool(out[k])
-        out["weights"] = {**RAID_WEIGHT_DEFAULTS, **(out.get("weights") or {})}
-        return out
+        """Effective raid definition: profile raids.yaml merged with guild overrides (see effective_raid)."""
+        return effective_raid(self.profile.raids.get(instance or "", {}) or {}, self.raid_override(instance) if instance else {})
+
+    def timing_suggestion(self, raid: str) -> dict:
+        """The nine timing values the game suggests for a new schedule of `raid` (the profile's raid and RAID_DEFAULTS)."""
+        eff = effective_raid(self.profile.raids.get(raid, {}) or {}, {})
+        return {k: eff[k] for k in SCHEDULE_TIMING}
 
     def raid_rows(self, instance: str) -> list[dict]:
         """The raid's schedules in the row shape (norm_schedule: rosters and follow on the row), from the guild-level
@@ -4518,8 +4556,11 @@ class Registry:
 
     def _set_raid_rows(self, instance: str, rows: list[dict]) -> None:
         """Replace the raid's entries in the guild-level list with `rows` (the row shape). Other raids' entries keep
-        their order; the raid's block stays where its first entry was, or goes at the end. No save."""
-        _set_raid_rows_of(self.config, instance, rows)
+        their order; the raid's block stays where its first entry was, or goes at the end. Every row is stored with its
+        sheet timing written out (write_out_timing) against the profile's raid and the raid's override — a value a row
+        holds stays, a missing one is seeded from what the row read (after the lift: the game's suggestion). No save."""
+        rd = effective_raid(self.profile.raids.get(instance, {}) or {}, self.config.raids.get(instance) or {})
+        _set_raid_rows_of(self.config, instance, [write_out_timing(r, rd) for r in rows])
 
     def raid_override(self, instance: str) -> dict:
         """The guild's changes to a raid as one map, in the shape a raid override had before schedules moved to the
@@ -4617,9 +4658,10 @@ class Registry:
 
     @_config_verb(_raid_section)
     def set_schedule(self, instance: str, sid: str, fields: dict, by: str) -> list[str]:
-        """Change (or create) one schedule of a raid: `fields` = {setting: value} from SCHEDULE_FIELDS, a cadence value
-        of None / 'inherit' going back to the raid's. A new id needs what it is first — a kind, run times, or lockout
-        days and a time. One set_raid_overrides call: validated as a whole, one commit, a refusal leaves config as it was."""
+        """Change (or create) one schedule of a raid: `fields` = {setting: value} from SCHEDULE_FIELDS; a timing value of
+        None / 'inherit' goes back to the game's suggestion (the row loses it and _set_raid_rows seeds it again), split
+        policy to the raid's. Moving the opening or the lock past the stored reminder derives the reminder again. A new
+        id needs what it is first — a kind, run times, or lockout days and a time. One set_raid_overrides call: validated as a whole, one commit, a refusal leaves config as it was."""
         import copy
 
         if instance not in self.profile.raids:
@@ -4662,6 +4704,13 @@ class Registry:
                 entry.pop(f, None)
             else:
                 entry[f] = nv
+        if entry is not None and {"signup_lead_hours", "lock_hours_before"} & set(fields) and "nudge_hours_before" not in fields \
+                and entry.get("nudge_hours_before") is not None:
+            # outside the new window: the reminder is derived again (halfway — default_nudge_hours; a pickup row's an
+            # hour before its lock), not a refusal
+            full = write_out_timing({k: v for k, v in entry.items() if k != "nudge_hours_before"}, rd)
+            if not float(full["lock_hours_before"]) <= float(entry["nudge_hours_before"]) <= float(full["signup_lead_hours"]):
+                entry["nudge_hours_before"] = full["nudge_hours_before"]
         want["schedules"] = stored
         self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} {', '.join(fields)} (by {by})")
         after = next((s for s in self.schedules(instance) if s["id"] == sid), None) or {"id": sid}
@@ -4860,14 +4909,8 @@ class Registry:
 
     def _check_raid(self, instance: str) -> None:
         """The cross-field rules, on the merged result (profile → guild override → defaults), never on one field at a
-        time: that way a change that is only valid as a whole (lead and nudge raised together) is accepted."""
+        time: the comp's min ≤ max, and every schedule's (its timing ordering among them — _check_schedules)."""
         eff = self.raid_def(instance)
-        if eff["lock_hours_before"] < eff["confirm_hours_before"]:
-            raise RegistryError("lock must come before the confirmation deadline (lock_hours_before ≥ confirm_hours_before)")
-        if eff["signup_lead_hours"] <= eff["lock_hours_before"]:
-            raise RegistryError("signups must open before they lock (signup_lead_hours > lock_hours_before)")
-        if not (eff["lock_hours_before"] <= float(eff["nudge_hours_before"]) <= eff["signup_lead_hours"]):
-            raise RegistryError("the nudge must fall between signup opening and lock (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)")
         for role, b in (eff.get("comp") or {}).items():
             if b.get("min", 0) > b.get("max", 999):
                 raise RegistryError(f"{role}: min {b['min']} above max {b['max']}")
@@ -4911,10 +4954,12 @@ class Registry:
 
     def _apply_raid_override(self, instance: str, field: str, value, by: str, commit: bool = True) -> str:
         """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max
-        | slots | signup_lead_hours | lock_hours_before | confirm_hours_before | nudge_hours_before | fill_ask_hours | split_policy
-        | nudge / autofill / open_dm (true|false) | weight_rank/main/sat_out/signup_order | schedules (the whole list)."""
+        | slots | split_policy | loot_auto_distribute | weight_rank/main/sat_out/signup_order | schedules (the whole list).
+        Sheet timing (SCHEDULE_TIMING) is each schedule's own: refused with TIMING_ON_SCHEDULE."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
+        if field in SCHEDULE_TIMING:  # sheet timing is each schedule's own (C7): refused before anything changes
+            raise RegistryError(TIMING_ON_SCHEDULE)
         self._lift_raid(instance)  # an older file's run times and schedules become rows first, so nothing they held is lost
         over = self.config.raids.setdefault(instance, {})
         if field == "slots":  # the raid's run times = the `default` schedule's, in the guild-level list
@@ -4928,7 +4973,7 @@ class Registry:
                 dflt["slots"] = slots
             else:
                 dflt.pop("slots", None)
-            self._set_raid_rows(instance, [r for r in rows if not (r is dflt and len(r) == 1)])
+            self._set_raid_rows(instance, [r for r in rows if not (r is dflt and _bare_default(r))])
             value = ", ".join(self.slot_label(x) for x in slots) or "no run times"  # the reply and change log read 12-hour
         elif field == "schedules":  # the raid's whole list (the wizard's and set_schedule's one write), into the guild-level list
             if not isinstance(value, list):
@@ -4949,20 +4994,12 @@ class Registry:
                 rows.insert(0, {"id": DEFAULT_SCHEDULE, **keep})
             elif dflt is not None and "slots" not in dflt and keep:
                 dflt.update(keep)
-            if dflt is not None and len(dflt) == 1:
-                rows = [r for r in rows if r is not dflt]  # nothing of its own and no run times
+            if dflt is not None and _bare_default(dflt) and not (self.profile.raids.get(instance) or {}).get("slots"):
+                rows = [r for r in rows if r is not dflt]  # nothing of its own but timing, and no run times at all
             self._set_raid_rows(instance, rows)
-            named = [e["id"] for e in rows if not (e["id"] == DEFAULT_SCHEDULE and set(e) <= {"id", "slots"})]
+            named = [e["id"] for e in rows if not (e["id"] == DEFAULT_SCHEDULE and set(e) <= {"id", "slots", *SCHEDULE_TIMING})]
             value = ", ".join(named) or "no schedules of its own"
-        elif field in RAID_HOURS_FIELDS:
-            try:
-                num = float(value)
-            except (TypeError, ValueError):
-                raise RegistryError(f"{field} must be a number of hours")
-            if num < 0:
-                raise RegistryError(f"{field} can't be negative")
-            over[field] = int(num) if num == int(num) else num
-        elif field in RAID_BOOL_FIELDS or field in RAID_LOOT_FIELDS:
+        elif field in RAID_LOOT_FIELDS:
             over[field] = parse_bool(value)
         elif field == "split_policy":
             if value not in SPLIT_POLICIES:

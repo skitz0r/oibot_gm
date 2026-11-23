@@ -19,26 +19,28 @@ def commits(store) -> int:
 
 def test_raid_fields_saved_together_are_one_commit(reg, store):
     n = commits(store)
-    reg.set_raid_overrides("barrow_deeps", {"signup_lead_hours": 96, "lock_hours_before": 12, "confirm_hours_before": 4}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"lockout_days": 5, "duration_hours": 3, "notes": "x"}, "t")
     rd = reg.raid_def("barrow_deeps")
-    assert (rd["signup_lead_hours"], rd["lock_hours_before"], rd["confirm_hours_before"]) == (96, 12, 4)
+    assert (rd["lockout_days"], rd["duration_hours"], rd["notes"]) == (5, 3, "x")
     assert commits(store) == n + 1
 
 
 def test_a_refused_field_leaves_the_raid_and_git_untouched(reg, store):
     before, n = dict(reg.config.raids.get("barrow_deeps") or {}), commits(store)
-    with pytest.raises(RegistryError, match="lock must come before"):
-        # lock 2 h but confirm 6 h: the third field is refused, and the first two must not have committed on their own
-        reg.set_raid_overrides("barrow_deeps", {"signup_lead_hours": 50, "lock_hours_before": 2, "confirm_hours_before": 6}, "t")
+    with pytest.raises(RegistryError, match="must be positive"):
+        # the third field is refused, and the first two must not have committed on their own
+        reg.set_raid_overrides("barrow_deeps", {"lockout_days": 5, "notes": "x", "duration_hours": 0}, "t")
     assert dict(reg.config.raids.get("barrow_deeps") or {}) == before
     assert commits(store) == n
 
 
 def test_a_change_only_valid_as_a_whole_is_accepted(reg):
-    """Raising the nudge past the CURRENT lead is refused field by field, but it is fine with the new lead beside it."""
-    lead = reg.raid_def("barrow_deeps")["signup_lead_hours"]
-    reg.set_raid_overrides("barrow_deeps", {"nudge_hours_before": lead + 40, "signup_lead_hours": lead + 60}, "t")
-    assert reg.raid_def("barrow_deeps")["nudge_hours_before"] == lead + 40
+    """Raising the nudge past the CURRENT lead is refused field by field, but it is fine with the new lead beside it
+    (sheet timing is each schedule's own: phase 2)."""
+    reg.set_schedule("barrow_deeps", "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    lead = reg.schedule_def("barrow_deeps", "tue")["signup_lead_hours"]
+    reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": lead + 40, "signup_lead_hours": lead + 60}, "t")
+    assert reg.schedule_def("barrow_deeps", "tue")["nudge_hours_before"] == lead + 40
     reg.set_raid_overrides("barrow_deeps", {"tank_max": 5, "tank_min": 4}, "t")  # min above the OLD max, fine with the new one
     assert reg.raid_def("barrow_deeps")["comp"]["tank"] == {"min": 4, "max": 5} or reg.raid_def("barrow_deeps")["comp"]["tank"]["min"] == 4
 

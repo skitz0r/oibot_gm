@@ -722,16 +722,16 @@ def test_help_in_a_dm_shows_an_officer_the_officer_tiers(reg, monkeypatch):
 
 def test_the_config_dump_labels_raid_overrides_and_schedule_settings(reg):
     """Split 3 continued: the raw '## Current config' yaml carried a raid's first_open and slots with no label."""
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30", "first_open": "2026-12-09T15:00:00-08:00", "lock_hours_before": 12}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30", "first_open": "2026-12-09T15:00:00-08:00"}, "t")
     reg.set_schedule("barrow_deeps", "late", {"slots": "Thu 21:00", "lock_hours_before": 30}, "t")
     text = configops.current_config_text(reg, officer=True)
     dump = text.split("```yaml\n", 1)[1].split("```", 1)[0]
     assert "first_open" not in dump and "19:30" not in dump, "raid overrides leave the bare dump"
     line = next(l for l in text.splitlines() if l.startswith("- barrow_deeps: ") and "first_open=" in l)
     assert "first_open=2026-12-09T15:00:00-08:00 (= first open Wed 9 Dec 2026 3:00 PM)" in line
-    assert "(= run times Tue 7:30 PM)" in line and "(= locks 12 hours before)" in line
+    assert "(= run times Tue 7:30 PM)" in line  # (phase 2: a raid holds no lock time; each schedule does)
     own = next(l for l in text.splitlines() if "schedule late" in l)
-    assert "own settings {" in own and "(= lock hours before: 30 hours before)" in own
+    assert "own settings {" in own and "lock hours before: 30 hours before" in own
     assert "auto_propose_hour" not in text and "legacy poll" not in text, "dead config is gone from the parser's context"
 
 
