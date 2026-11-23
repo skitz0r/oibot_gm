@@ -82,6 +82,7 @@ def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opt
     _add_forces_pairs_and_pins(s)
     _add_avoid(s, avoid, avoid_groups, min_changes)
     _selection_terms(s, roster_bonus)
+    _short_role_terms(s, roster_bonus)
     _preference_terms(s)
     _synergy_terms(s)
     _raid_cover_terms(s)
@@ -238,11 +239,7 @@ def _add_seat_and_group_constraints(s: _Model) -> None:
 
 def _add_role_bounds(s: _Model) -> None:
     """Each role stays within its min/max per roster (over the whole pool for a single roster). The minimum is
-    capped at what the pool can supply per roster (`capable // rosters`) so a thin sheet still solves. With several
-    rosters a short role is also held across them (the rule set in review, 2026-11-22): together they seat at least
-    min(min × rosters, capable) — everyone who can play it is rostered before a seat of it is left empty, so the odd
-    one the per-roster floor leaves unconstrained never loses a seat to another role. A player forced out (an
-    officer's pin out, always-bench, first come's late joiners) is not counted as capable for that total."""
+    capped at what the pool can supply per roster (`capable // rosters`) so a thin sheet still solves."""
     for role, bounds in s.role_bounds.items():
         capable = sum(1 for p in s.players
                       if p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role))
@@ -251,13 +248,6 @@ def _add_role_bounds(s: _Model) -> None:
             if have:
                 s.m.Add(sum(have) >= min(bounds["min"], capable // s.rosters if s.rosters > 1 else capable))
                 s.m.Add(sum(have) <= bounds["max"])
-        if s.rosters > 1 and bounds["min"] and capable < bounds["min"] * s.rosters:
-            out = set(s.opts.force_out)
-            free = sum(1 for p in s.players if p.signup_name not in out
-                       and (p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role)))
-            total = _role_expr(s, role)
-            if total and free:
-                s.m.Add(sum(total) >= min(bounds["min"] * s.rosters, free))
 
 
 def _add_forces_pairs_and_pins(s: _Model) -> None:
@@ -300,18 +290,23 @@ def _add_avoid(s: _Model, avoid: list[dict[str, int]] | None, avoid_groups: list
 # ---------------------------------------------------------------- objective
 
 
+def _seat_value(s: _Model, p: Player) -> int:
+    """One player's seat value before SCALE: signed / bench, attendance, an unknown character, the per-player bonus."""
+    sel = s.rules["selection"]
+    v = sel["signed_bonus"] if p.status == "signed" else -sel["bench_penalty"]
+    v += int(round(sel["attendance_weight"] * (p.attendance if p.attendance_total else 1.0)))  # unknown: neutral, never a penalty
+    if p.unmapped:
+        v -= sel["unknown_character_penalty"]
+    return v + int((s.opts.bonus or {}).get(p.signup_name, 0))
+
+
 def _selection_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
     """Seat quality: signed beats bench, attendance (unknown — no counted run — weighs as full, the loot factor's
     neutral 1.0: never a penalty; design §3.1 decision 10), an unknown-character penalty, the per-player `bonus`. With
     several rosters the value is earned per roster — doubled for roster 1 under `first`, plus `roster_bonus[r]` —
     and its positive part feeds the per-roster quality totals the balance step compares."""
-    sel, opts = s.rules["selection"], s.opts
     for p in s.players:
-        v = sel["signed_bonus"] if p.status == "signed" else -sel["bench_penalty"]
-        v += int(round(sel["attendance_weight"] * (p.attendance if p.attendance_total else 1.0)))  # unknown: neutral, never a penalty
-        if p.unmapped:
-            v -= sel["unknown_character_penalty"]
-        v += int((opts.bonus or {}).get(p.signup_name, 0))
+        v = _seat_value(s, p)
         if s.rosters == 1:
             s.terms.append(v * SCALE * s.x[p.signup_name])
         else:
@@ -320,6 +315,34 @@ def _selection_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) 
                 extra = int((roster_bonus or {}).get(r, {}).get(p.signup_name, 0))
                 s.terms.append((v * w + extra) * SCALE * s.xr[p.signup_name, r])
                 s.quality[r].append(max(0, v) * s.xr[p.signup_name, r])
+
+
+SHORT_ROLE_MARGIN = 10_000  # buff points: more than the synergy, raid cover and group preference one seat can add
+
+
+def _short_role_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
+    """A role short across several rosters (fewer who can play it than min × rosters): every seat of it filled, up to
+    min × rosters, earns a reward larger than anything one seat earns otherwise — twice the largest seat value (the
+    `first` strategy's double) plus the largest roster bonus, its half-weight balance gap on top, and SHORT_ROLE_MARGIN
+    for synergy — so everyone who joined for the role is rostered before a seat of it is left empty (the rule set in
+    review, 2026-11-22), the odd player beating even a lead's rostered player (LEAD_SEAT_BONUS rides in `bonus`). A
+    preference, never a bound: a hybrid who could fill two short roles fills one, a player forced out earns nothing,
+    and a board that fills every seat still solves."""
+    if s.rosters < 2:
+        return
+    top = 2 * max((abs(_seat_value(s, p)) for p in s.players), default=0)
+    top += max((abs(int(v)) for b in (roster_bonus or {}).values() for v in b.values()), default=0)
+    reward = (top + top // 2 + SHORT_ROLE_MARGIN) * SCALE
+    for role, bounds in s.role_bounds.items():
+        want = int(bounds["min"] or 0) * s.rosters
+        capable = sum(1 for p in s.players
+                      if p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role))
+        have = _role_expr(s, role)
+        if not want or capable >= want or not have:
+            continue
+        filled = s.m.NewIntVar(0, want, f"short_{role}")
+        s.m.Add(filled <= sum(have))
+        s.terms.append(reward * filled)
 
 
 def _preference_terms(s: _Model) -> None:
