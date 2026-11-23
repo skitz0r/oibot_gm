@@ -136,6 +136,39 @@ def test_a_follow_on_start_survives_an_unrelated_edit(reg):
     assert stored(reg, RID)[0]["name"] == "Tuesday"
 
 
+def _old_keys(reg):
+    """A raid override as an older guild.yaml holds it: run times and a schedule under the raid."""
+    reg.config.raids[RID] = {"notes": "old", "slots": ["Tue 19:30"], "schedules": [{"id": "alt", "kind": "weekly", "slots": ["Sat 20:00"]}, {"id": "keep", "kind": "pickup"}]}
+
+
+def test_a_run_times_write_lifts_the_old_keys_and_keeps_what_they_held(reg):
+    _old_keys(reg)
+    reg.set_raid_override(RID, "slots", "Wed 20:00", "t")
+    assert reg.config.raids[RID] == {"notes": "old"}
+    assert reg.raid_def(RID)["slots"] == ["Wed 20:00"] and [s["id"] for s in reg.schedules(RID)] == ["default", "alt", "keep"]
+    reg.set_raid_override(RID, "slots", "", "t")  # the profile has no run times: none left, and the old ones don't come back
+    assert reg.raid_def(RID)["slots"] == [] and [s["id"] for s in reg.schedules(RID)] == ["alt", "keep"]
+
+
+def test_a_schedule_write_lifts_the_old_keys_and_a_removed_one_stays_gone(reg):
+    _old_keys(reg)
+    reg.set_schedule(RID, "keep", {"name": "Pickups"}, "t")
+    assert not {"schedules", "slots"} & set(reg.config.raids[RID])
+    assert reg.raid_def(RID)["slots"] == ["Tue 19:30"] and [s["id"] for s in reg.schedules(RID)] == ["default", "alt", "keep"]
+    reg.remove_schedule(RID, "alt", "t")
+    reg.remove_schedule(RID, "keep", "t")
+    assert [s["id"] for s in reg.schedules(RID)] == ["default"] and "schedules" not in reg.raid_def(RID)
+    assert reg.config.raids[RID] == {"notes": "old"}
+
+
+def test_a_refused_write_leaves_the_old_keys_where_they_were(reg):
+    _old_keys(reg)
+    before = (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
+    with pytest.raises(RegistryError):
+        reg.set_schedule(RID, "alt", {"rosters": 9}, "t")
+    assert (reg.config.raids, reg.config.schedules) == before
+
+
 def test_a_follow_on_given_as_a_map_keeps_its_start_and_text_never_has_one():
     assert R.parse_follow({"raid": OTHER, "rosters": 2, "starts": 90}) == {"raid": OTHER, "rosters": 2, "starts": 90}
     assert R.parse_follow(f"{OTHER} x2") == {"raid": OTHER, "rosters": 2}

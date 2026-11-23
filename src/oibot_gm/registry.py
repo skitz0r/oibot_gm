@@ -4392,6 +4392,27 @@ class Registry:
             self.config.raids[instance] = before
         self.config.schedules = scheds
 
+    def _lift_raid(self, instance: str) -> None:
+        """An override still holding the old `slots` / `schedules` keys (a file from before schedules moved): move what
+        they hold into the guild-level rows — the rows the write then starts from — and drop both keys. What the
+        guild-level list already holds wins, as raid_override reads it. Run by every raid write before it changes
+        anything; the caller's snapshot puts it back on a refusal. No save."""
+        over = self.config.raids.get(instance)
+        if not over or not ({"slots", "schedules"} & set(over)):
+            return
+        view = self.raid_override(instance)
+        rows = [norm_schedule(r) for r in view.get("schedules") or []]
+        slots = parse_slots(view.get("slots") or [])
+        if slots or "slots" in view and (self.profile.raids.get(instance) or {}).get("slots"):
+            dflt = next((r for r in rows if r["id"] == DEFAULT_SCHEDULE), None)
+            if dflt is None:
+                dflt = {"id": DEFAULT_SCHEDULE}
+                rows.insert(0, dflt)
+            dflt["slots"] = slots
+        over.pop("slots", None)
+        over.pop("schedules", None)
+        self._set_raid_rows(instance, rows)
+
     def _prune_raid(self, instance: str) -> None:
         """An override left empty is removed."""
         if instance in self.config.raids and not self.config.raids[instance]:
@@ -4759,6 +4780,7 @@ class Registry:
         | nudge / autofill / open_dm (true|false) | weight_rank/main/sat_out/signup_order | schedules (the whole list)."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
+        self._lift_raid(instance)  # an older file's run times and schedules become rows first, so nothing they held is lost
         over = self.config.raids.setdefault(instance, {})
         if field == "slots":  # the raid's run times = the `default` schedule's, in the guild-level list
             slots = parse_slots(value)
