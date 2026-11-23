@@ -7,7 +7,9 @@ Three ways back, in this order of how far back they go:
    goes back to the id its alias came from (registry.lower_schedule_ids: a raid's own run times to `default`), every
    member's regular spots, every applicant's schedules and every run dict's series back to "<raid>:<schedule>", and
    `schedule_aliases` is emptied. Refused when a schedule runs more raids than the older code reads, two schedules of
-   one raid would both go back to one id, or a live run's key is one the older code can't find.
+   one raid would both go back to one id, or ANY live run's key differs from the key the older code builds from its
+   raid, start and lowered schedule id (a run opened from `barrow-deeps` has a '-barrow-deeps' key the older code's
+   `default` never builds): the older code would open a second sheet for it, so end or cancel that run first.
 
 2. To the phase-1 code (schedules at guild level, timing on each schedule, but a raid's make-up still as the owner's
    limits and the officers' aims): `--minimums-only`. The ids are lowered as above, then each raid's `minimums` go back
@@ -44,7 +46,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from oibot_gm.profiles import GameProfile  # noqa: E402
-from oibot_gm.registry import Applicant, GuildConfig, Member, RegistryError, lower_minimums, lower_schedule_ids, lower_schedules  # noqa: E402
+from oibot_gm.registry import (Applicant, GuildConfig, Member, RegistryError, lower_minimums, lower_schedule_ids,  # noqa: E402
+                               lower_schedules, lowered_id)
 from oibot_gm.store import GitStore, is_fixture_root, resolve_data_root  # noqa: E402
 
 HEADER = "# oibot_GM guild config — edit via /gm config or by PR.\n"  # as Registry.save_config writes it
@@ -55,24 +58,42 @@ def _records(gdir: Path, sub: str, model) -> list:
     return [model.model_validate_json(f.read_text()) for f in sorted(d.glob("*.json"))] if d.exists() else []
 
 
-def _run_refusal(gdir: Path) -> str | None:
-    """A live run file whose key the older code can't find: Task 3 stamps `occurrence` on a run whose key is no longer
-    the one the old event_key builds from its raid, start and schedule."""
+def old_event_key(instance: str, start: datetime, sid: str | None, test: bool = False) -> str:
+    """The key phase 2's code builds for a run (its raidcycle.event_key): no schedule suffix for `default` or none."""
     from oibot_gm import raidcycle as rc
 
+    base = f"{rc.abbr(instance)}-{start.strftime('%m%d-%H%M')}"
+    key = base if sid in (None, "", "default") else f"{base}-{sid}"
+    if test and sid != "test":
+        key += "-test"
+    return f"{key}-{start.date().isoformat()}"
+
+
+def _run_refusal(gdir: Path, cfg: GuildConfig) -> str | None:
+    """One sentence when a LIVE run file has a key the older code won't build for it: each run's key is compared with
+    old_event_key from its raid, its start and the id its schedule lowers to (a run opened from `barrow-deeps` keyed
+    '…-barrow-deeps' where the older code builds no suffix for `default`; `tuesday-2` where it builds `tuesday`; a key
+    of Task 3's that holds no time at all). The older code would then open a second sheet for that run."""
+    back = {new: old for old, new in cfg.schedule_aliases.items()}
+    entries = {e["id"]: e for e in cfg.schedules if isinstance(e, dict) and e.get("id")}
+    names = {t.get("key"): t.get("name") for t in cfg.rosters if isinstance(t, dict)}
     bad = []
     for f in sorted((gdir / "raids").glob("*.json")) if (gdir / "raids").exists() else []:
         raw = json.loads(f.read_text())
-        if raw.get("state") in ("done", "cancelled") or not raw.get("occurrence"):
+        if raw.get("state") in ("done", "cancelled"):
             continue
+        sid = raw.get("schedule")
+        old = lowered_id(entries[sid], back) if sid in entries else sid
         try:
-            start = datetime.fromisoformat(raw["starts_at"])
-            want = rc.event_key(raw["instance"], start, raw.get("schedule"), test=bool(raw.get("test")))
+            want = old_event_key(raw["instance"], datetime.fromisoformat(raw["starts_at"]), old, bool(raw.get("test")))
         except (KeyError, TypeError, ValueError):
             want = None
         if raw.get("key") != want:
-            bad.append(str(raw.get("key")))
-    return f"the older code can't find the runs {', '.join(bad)}" if bad else None
+            bad.append(str(names.get(raw.get("team")) or raw.get("key")))
+    if not bad:
+        return None
+    return (f"The older code can't find the run {bad[0]}, so end or cancel it first." if len(bad) == 1
+            else f"The older code can't find the runs {', '.join(bad)}, so end or cancel them first.")
 
 
 def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, ids_only: bool = False) -> list[str]:
@@ -94,7 +115,7 @@ def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, i
         before_a = [a.model_dump_json() for a in applicants]
         had_ids = bool(doc.get("schedule_aliases"))
         try:
-            why = _run_refusal(gdir) if had_ids else None
+            why = _run_refusal(gdir, cfg)
             if why:
                 raise RegistryError(why)
             ids = lower_schedule_ids(cfg, members, applicants)

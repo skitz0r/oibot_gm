@@ -258,12 +258,14 @@ def ended_line(reg: Registry, ev: rc.RaidEvent) -> str:
 
 
 def series_words(reg: Registry, key: str) -> str:
-    """A schedule id as a sentence names it: '<raid> <schedule name>' ('Barrow Deeps Raid nights')."""
+    """A schedule id as a sentence names it: '<raid> <schedule name>' ('Barrow Deeps Raid nights'); one no schedule
+    answers to: 'a removed Barrow Deeps schedule' (Registry.series_label's words, never the key)."""
     sid = reg.config.schedule_aliases.get(str(key), str(key))
     try:
         s = reg.schedule_entry(sid)
     except RegistryError:
-        return sid
+        label = reg.series_label(key)
+        return label[:1].lower() + label[1:]
     return f"{reg.raid_def(s['raid']).get('name', s['raid'])} {s.get('name') or sid}"
 
 
@@ -274,7 +276,7 @@ def regular_remove(reg: Registry, m, key: str) -> list[str]:
     chars = [c.label for c in m.characters if key in c.rosters] or [m.display_name]
     who = " and ".join(chars)
     if key not in dict(reg.series("recurring")):
-        return [f"{who} stops being a regular of a removed schedule.", "Nothing else changes, and nobody is told."]
+        return [f"{who} stops being a regular of {series_words(reg, key)}.", "Nothing else changes, and nobody is told."]
     return [f"{who} stops being a regular of {series_words(reg, key)}.",
             "Its sheets no longer wait for their answer, and the lock no longer weights them as a regular.",
             "They can still join any sheet, and nobody is told."]

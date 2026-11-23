@@ -1214,6 +1214,16 @@ def _old_override_of(cfg: "GuildConfig", instance: str) -> dict:
     return out
 
 
+def unread_entry_name(e, raids: dict | None = None) -> str:
+    """A stored entry that can't be read, as a person reads it: its raid and its name ("Barrow Deeps · Alt run"), its
+    raid alone when it has no name of its own, never an id or the old word `default`."""
+    raids = raids or {}
+    rid = _lead_raid(e)
+    raid = (raids.get(rid) or {}).get("name") or rid or "A schedule with no raid"
+    name = str(e.get("name") or "").strip() if isinstance(e, dict) else ""
+    return f"{raid} · {name}" if name else raid
+
+
 def lower_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
     """The way back to code from before schedules moved (scripts/lower_schedules.py, run with the bot stopped): every
     raid's guild-level entries folded back into `cfg.raids[<raid>]` in the old shape (_old_override_of: `slots` = the
@@ -1225,10 +1235,7 @@ def lower_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
     for e in cfg.schedules:
         why = unread_schedule(e)
         if why is not None:
-            rid = _lead_raid(e)
-            name = (raids.get(rid) or {}).get("name") or rid or "a schedule with no raid"
-            sid = e.get("id") if isinstance(e, dict) else None
-            raise RegistryError(f"{name} · {sid or 'no id'} can't be read: {why}")
+            raise RegistryError(f"{unread_entry_name(e, raids)} can't be read: {why}")
     order = list(dict.fromkeys(_lead_raid(e) for e in cfg.schedules))
     counts = {rid: sum(1 for e in cfg.schedules if _lead_raid(e) == rid) for rid in order}
     lowered = {rid: _old_override_of(cfg, rid) for rid in order}
@@ -1896,6 +1903,14 @@ def schedule_ids_line(lines: list[str]) -> str:
     return "Schedules now have ids of their own: " + " · ".join(lines) + "."
 
 
+def lowered_id(entry: dict, back: dict) -> str:
+    """The id the older code knows a schedule by: its alias's old id when the alias names the schedule's own first raid
+    (`back` = the reversed config.schedule_aliases), else its id as it is (a schedule made since, or an id another raid
+    once had)."""
+    old = back.get(entry["id"])
+    return old.partition(":")[2] if old and old.partition(":")[0] == _lead_raid(entry) else entry["id"]
+
+
 def lower_schedule_ids(cfg: "GuildConfig", members: list, applicants: list = ()) -> list[str]:
     """The way back to phase 2's code (scripts/lower_schedules.py, with the bot stopped): each schedule goes back to the
     id its alias came from — a raid's own run times to `default` —, every regular key of `members` (their characters'
@@ -1915,8 +1930,7 @@ def lower_schedule_ids(cfg: "GuildConfig", members: list, applicants: list = ())
             continue
         rid = _lead_raid(e)
         first[e["id"]] = rid
-        old = back.get(e["id"])
-        want.append(old.partition(":")[2] if old and old.partition(":")[0] == rid else e["id"])
+        want.append(lowered_id(e, back))
     if too_long:
         raise RegistryError(f"{join_words(too_long)} run more than 2 raids, which the older code can't read.")
     pairs = [(_lead_raid(e), w) for e, w in zip(cfg.schedules, want) if w is not None]
@@ -1924,11 +1938,13 @@ def lower_schedule_ids(cfg: "GuildConfig", members: list, applicants: list = ())
     if clash:
         raise RegistryError(f"two schedules would both go back to {join_words(clash)}.")
 
+    lowered = {e["id"]: w for e, w in zip(cfg.schedules, want) if w is not None}  # an alias counts only for its own raid
+
     def key_back(k):
         k = str(k)
-        if ":" in k:
+        if ":" in k or k not in first:
             return k
-        return back.get(k) or (f"{first[k]}:{k}" if k in first else k)
+        return f"{first[k]}:{lowered[k]}"
 
     lines = []
     for i, (e, w) in enumerate(zip(cfg.schedules, want)):
@@ -1949,8 +1965,7 @@ def lower_schedule_ids(cfg: "GuildConfig", members: list, applicants: list = ())
 
     def map_sid(t):
         sid = t.get("schedule_id")
-        old = back.get(sid) if sid not in (None, "") else None
-        return old.partition(":")[2] if old else None
+        return lowered.get(sid) if sid in lowered and first.get(sid) == t.get("instance") else None
 
     for t in cfg.rosters:
         if isinstance(t, dict) and not t.get("test"):
@@ -2715,8 +2730,10 @@ class Registry:
         saved once by migrate_schedules at start). Keeps the lift's lines in `schedules_lifted` and, per stored entry
         that can't be read, a line in `schedules_unread` (checked here once; every read skips it)."""
         p = self.store.root / self.key / "guild.yaml"
-        cfg = GuildConfig(**yaml.safe_load(p.read_text()))
+        raw = yaml.safe_load(p.read_text())
+        cfg = GuildConfig(**raw)
         raids = self.base_profile.raids
+        self._ids_first = "schedule_aliases" not in (raw or {})  # phase 3's first start: the file never held the aliases
         self.schedules_refused: list[str] = []  # a raid whose old keys couldn't be lifted: told as a warning, never saved as moved
         emptied: list[str] = []  # raids whose old keys held nothing: dropped, no line, but the file still owes the save
         self.schedules_lifted: list[str] = lift_schedules(cfg, raids, self.schedules_refused, emptied)
@@ -2748,20 +2765,26 @@ class Registry:
             trial = cfg.model_copy(deep=True)
             self.ids_lifted, ids_owed = lift_schedule_ids(trial, raids)
             cfg = trial
+            ids_ok = True
         except (RegistryError, ValueError, TypeError) as e:
             log.warning("schedules: the ids of %s were not lifted (%s)", self.key, e)
-            self.ids_lifted, ids_owed = [], False
+            self.ids_lifted, ids_owed, ids_ok = [], False, False
         failed = lift_failed_line(timing_failed, minimums_failed)
         self.lift_failed: list[str] = [failed] if failed else []
         self._schedules_owed = self._lift_owed or timing_owed or minimums_owed or ids_owed
         self.schedules_unread: list[str] = []
+        unread_raids: set = set()
         for e in cfg.schedules:
             why = unread_schedule(e)
             if why is not None:
                 rid = _lead_raid(e)
-                name = (raids.get(rid) or {}).get("name") or rid or "a schedule with no raid"
-                sid = e.get("id") if isinstance(e, dict) else None
-                self.schedules_unread.append(f"{name} · {sid or 'no id'}: {why}")
+                unread_raids.add(rid)
+                self.schedules_unread.append(f"{unread_entry_name(e, raids)}: {why}")
+        # the raids whose old "<raid>:<id>" keys the aliases fully answer for: every entry read and lifted, none left under
+        # the raid (remap_regulars drops an old key without an alias only for these; any other is kept untouched)
+        left = {rid for rid, o in cfg.raids.items() if isinstance(o, dict) and {"slots", "schedules"} & set(o)}
+        self._aliased_raids = (set() if not ids_ok or None in unread_raids
+                               else set(raids) - left - unread_raids)
         return cfg
 
     def migrate_schedules(self, by: str = "migration") -> list[str]:
@@ -2814,6 +2837,9 @@ class Registry:
         records changed) for migrate_schedules, which saves them in the lift's one commit. → the dropped lines
         ("Nyx: dropped a regular spot on a removed Barrow Deeps schedule")."""
         aliases = self.config.schedule_aliases
+        trusted = getattr(self, "_aliased_raids", set())
+        first = getattr(self, "_ids_first", False)
+        ids = {s["id"] for s in self.all_schedules()}
         dropped: list[str] = []
         changed, apps = set(), set()
 
@@ -2826,10 +2852,13 @@ class Registry:
                 keep = []
                 for k in c.rosters:
                     if ":" not in k:
-                        keep.append(k)
+                        if k in ids or not first:  # a key that never named a schedule ("main", a run key): gone at the first lift
+                            keep.append(k)
                     elif k in aliases:
                         if aliases[k] not in keep:
                             keep.append(aliases[k])
+                    elif k.partition(":")[0] not in trusted:
+                        keep.append(k)  # its raid wasn't lifted in full (refused, unreadable, a failed lift): kept as it is
                     else:
                         dropped.append(f"{m.display_name}: dropped a regular spot on a removed {raid_name(k)} schedule")
                 if keep != c.rosters:
@@ -2843,6 +2872,8 @@ class Registry:
                 elif k in aliases:
                     if aliases[k] not in keep:
                         keep.append(aliases[k])
+                elif k.partition(":")[0] not in trusted:
+                    keep.append(k)
                 else:
                     dropped.append(f"{a.display_name}'s application: dropped a removed {raid_name(k)} schedule")
             if keep != a.schedules:
@@ -2860,6 +2891,7 @@ class Registry:
             p = Path(self.key) / "guild.yaml"
             self.store.write_text(p, "# oibot_GM guild config — edit via /gm config or by PR.\n" + yaml.safe_dump(self.config.model_dump(), sort_keys=False))
             self.store.commit(f"{self.key}: {message}")
+            self._ids_first = False  # the file holds the aliases now: a bare key no schedule answers to is a removed schedule's
         if notify:
             self._notify("config", [message])
 
@@ -6492,11 +6524,16 @@ class Registry:
 
     def series_label(self, key: str) -> str:
         """A schedule id as a person reads it ('Barrow Deeps · Raid nights'); an older "<raid>:<schedule>" key reads
-        through config.schedule_aliases; one no schedule answers to reads "<key> (removed schedule)"."""
+        through config.schedule_aliases; one no schedule answers to reads "A removed Barrow Deeps schedule" (its raid
+        when the key names one, else "A removed schedule") — never the key."""
         key = str(key or "")
         key = self.config.schedule_aliases.get(key, key)
         hit = next((label for k, label in self.series(None) if k == key), None)
-        return hit or f"{key} (removed schedule)"
+        if hit:
+            return hit
+        rid = key.partition(":")[0] if ":" in key else None  # an old key read for its words only
+        name = (self.profile.raids.get(rid) or {}).get("name") if rid else None
+        return f"A removed {name} schedule" if name else "A removed schedule"
 
     def _recurring_series(self, key: str) -> str:
         key = str(key or "").strip()

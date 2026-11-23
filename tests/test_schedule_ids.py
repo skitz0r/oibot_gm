@@ -21,6 +21,11 @@ def open_registry(profile):
     return lambda store: Registry(store, GUILD, profile)
 
 
+@pytest.fixture
+def rs_for():
+    return lambda store: rc.RaidStore(store, GUILD)
+
+
 RID = "barrow_deeps"
 NYX, ANA = 300_000_000_000_000_001, 300_000_000_000_000_002
 
@@ -249,7 +254,7 @@ def test_a_regular_is_keyed_by_the_schedule_id(reg):
     _m, _c, warn = reg.regular_add(m.discord_id, "thu", "t")
     assert len(warn) == 1 and "same raid's lockout" in warn[0]
     assert reg.series_label(sid) == "Barrow Deeps · Raid nights"
-    assert reg.series_label("barrow_deeps:gone") == "barrow_deeps:gone (removed schedule)"
+    assert reg.series_label("barrow_deeps:gone") == "A removed Barrow Deeps schedule" and reg.series_label("gone") == "A removed schedule"
 
 
 def test_lowering_ids_round_trips(old_store_with, open_registry):
@@ -289,3 +294,116 @@ def test_a_new_run_of_a_schedule_carries_its_id_as_its_series(reg, rs):
     t = rc.ensure_run(reg, RID, start, schedule=sid)
     assert (t["series"], t["schedule_id"], t["kind"]) == (sid, sid, "recurring")
     assert t["key"].endswith(f"-{sid}")
+
+
+# ---- fix round 1
+BAD_ROW = {"id": "Not A Key!", "kind": "weekly"}
+
+
+def _keys_on_disk(store, uid) -> list[str]:
+    return _member_file(store, uid)["characters"][0]["rosters"]
+
+
+def test_a_refused_raids_regular_spots_are_kept_untouched(old_store_with, open_registry):
+    """A raid phase 1's lift refused keeps its old keys: no alias answers for them, so they are not dropped."""
+    store = old_store_with({"raids": {RID: {"slots": ["Tue 04:00"], "schedules": [BAD_ROW]}}},
+                           members={NYX: ("Nyx", ["barrow_deeps:default", "barrow_deeps:alt"])})
+    reg = open_registry(store)
+    assert reg.members[NYX].main.rosters == ["barrow_deeps:default", "barrow_deeps:alt"] and not reg.regulars_dropped
+    n0 = commit_count(store)
+    reg.migrate_schedules()
+    assert _keys_on_disk(store, NYX) == ["barrow_deeps:default", "barrow_deeps:alt"] and commit_count(store) == n0
+
+
+def test_an_unreadable_entrys_raid_keeps_its_unaliased_keys(old_store_with, open_registry):
+    broken = {"id": "late", "lineup": [{"raid": RID, "rosters": 9}], "kind": "weekly", "slots": ["Wed 20:00"]}
+    store = old_store_with({"schedules": [*OI["schedules"], broken]}, members={NYX: ("Nyx", ["barrow_deeps:default", "barrow_deeps:late"])})
+    reg = open_registry(store)
+    assert reg.members[NYX].main.rosters == ["barrow-deeps", "barrow_deeps:late"]  # the aliased one moves, the other waits
+    reg.migrate_schedules()
+    assert _keys_on_disk(store, NYX) == ["barrow-deeps", "barrow_deeps:late"] and not any("dropped" in x for x in reg.ids_saved)
+
+
+def test_a_failed_ids_lift_drops_no_regular_spot(old_store_with, open_registry, monkeypatch):
+    def boom(cfg, raids):
+        raise RegistryError("a value that can't be read")
+
+    monkeypatch.setattr(R, "lift_schedule_ids", boom)
+    store = old_store_with(OI, members={NYX: ("Nyx", ["barrow_deeps:default"])})
+    reg = open_registry(store)
+    assert reg.members[NYX].main.rosters == ["barrow_deeps:default"]
+    reg.migrate_schedules()
+    assert _keys_on_disk(store, NYX) == ["barrow_deeps:default"]
+
+
+def test_a_stray_key_that_never_named_a_schedule_goes_at_the_first_lift(old_store_with, open_registry):
+    store = old_store_with(OI, members={NYX: ("Nyx", ["main", "bd-0917-1937", "barrow_deeps:default"])})
+    reg = open_registry(store)
+    assert reg.members[NYX].main.rosters == ["barrow-deeps"] and reg.orphan_regulars() == []
+    reg.migrate_schedules()
+    again = open_registry(store)
+    assert again.members[NYX].main.rosters == ["barrow-deeps"]
+
+
+def test_a_removed_schedules_orphan_stays_after_the_first_lift(reg):
+    """After phase 3 a bare key no schedule answers to is a removed schedule's (a raid reset): listed, never dropped."""
+    sid = weekly(reg)
+    m = reg.test_members()[0]
+    m.test = False
+    reg.save(m, "real")
+    reg.regular_add(m.discord_id, sid, "t")
+    reg.clear_raid_override(RID, "t")  # its schedules go; the regulars stay as orphans
+    reg.reload()
+    assert reg.members[m.discord_id].main.rosters == [sid]
+    assert [(k, label) for k, label in [(k, reg.series_label(k)) for k, _m, _c in reg.orphan_regulars()]] == [(sid, "A removed schedule")]
+
+
+def test_an_unread_schedule_is_named_by_its_name_or_its_raid(old_store_with, open_registry):
+    store = old_store_with({"schedules": [
+        {"id": "default", "lineup": [{"raid": RID, "rosters": 9}], "slots": ["Tue 04:00"]},
+        {"id": "late", "name": "Late night", "lineup": [{"raid": RID, "rosters": 9}], "kind": "weekly", "slots": ["Wed 20:00"]}]})
+    reg = open_registry(store)
+    assert [x.split(": ")[0] for x in reg.schedules_unread] == ["Barrow Deeps", "Barrow Deeps · Late night"]
+    assert not any("default" in x or "late:" in x for x in reg.schedules_unread)
+
+
+def test_lowering_reads_an_alias_only_for_its_own_raid(profile):
+    """Hyjal's old `tuesday` was removed and the id later went to a Barrow Deeps schedule: it lowers as Barrow Deeps's."""
+    cfg = R.GuildConfig(**{**base_config(), "schedule_aliases": {"hyjal_summit_forever:tuesday": "tuesday"},
+                           "schedules": [{"id": "tuesday", "lineup": [{"raid": RID, "rosters": 1}], "kind": "weekly", "slots": ["Tue 21:30"]}],
+                           "rosters": [{"key": "bd-1215-2130-tuesday", "instance": RID, "schedule_id": "tuesday", "series": "tuesday", "kind": "recurring"}]})
+    nyx = R.Member(discord_id=NYX, display_name="Nyx", characters=[R.RegisteredCharacter(name="Nyx", cls="Priest", spec="Holy", is_main=True, rosters=["tuesday"])])
+    assert R.lower_schedule_ids(cfg, [nyx]) == []
+    assert cfg.schedules[0]["id"] == "tuesday" and nyx.main.rosters == ["barrow_deeps:tuesday"]
+    assert (cfg.rosters[0]["series"], cfg.rosters[0]["schedule_id"]) == ("barrow_deeps:tuesday", "tuesday")
+
+
+def test_an_old_run_without_a_schedule_reads_its_schedule_through_the_aliases(old_store_with, open_registry, rs_for):
+    store = old_store_with(OI)
+    reg = open_registry(store)
+    rs = rs_for(store)
+    start = rc.next_runs_of(reg, RID, reg.schedule_entry("barrow-deeps"), n=1, now=reg.now_local())[0]
+    ev = rc.open_run(reg, rs, RID, start, by="t", schedule="barrow-deeps")
+    ev.schedule = None  # as the old `default` opened it
+    reg.config.roster(ev.team).pop("schedule_id")
+    assert rc.run_schedule_id(reg, ev) == "barrow-deeps"
+
+
+def test_the_script_refuses_a_live_run_the_older_code_cannot_find(old_store_with, open_registry, rs_for, data_root):
+    from test_guild_schedules import _lower_script
+
+    store = old_store_with(OI)
+    reg = open_registry(store)
+    reg.migrate_schedules()
+    rs = rs_for(store)
+    start = rc.next_runs_of(reg, RID, reg.schedule_entry("barrow-deeps"), n=1, now=reg.now_local())[0]
+    ev = rc.open_run(reg, rs, RID, start, by="t", schedule="barrow-deeps")  # keyed '…-barrow-deeps': the older code builds none
+    store.flush()
+    n0, text = commit_count(store), (data_root / GUILD / "guild.yaml").read_text()
+    said = _lower_script().lower(data_root, ids_only=True)
+    name = reg.config.roster(ev.team)["name"]
+    assert said == [f"{GUILD}: refused, nothing changed. The older code can't find the run {name}, so end or cancel it first."]
+    assert commit_count(store) == n0 and (data_root / GUILD / "guild.yaml").read_text() == text
+    ev.state = "cancelled"
+    rs.save(ev, "cancelled")
+    assert _lower_script().lower(data_root, ids_only=True)[0].startswith(f"{GUILD}: moved the schedule ids back")

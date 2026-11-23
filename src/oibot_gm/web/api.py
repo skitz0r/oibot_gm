@@ -1740,7 +1740,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": str(e)}, status_code=400)
         expect = (d.get("key") or "").strip()
         if expect:
-            got = rc.which_run(reg, rid, start, sid if sid is not None else "default")["key"]
+            got = rc.which_run(reg, rid, start, sid)["key"]
             if got != expect:
                 return JSONResponse({"error": "That time now opens a different run than the preview showed — check it and open again.",
                                      "preview": rc.open_preview(reg, bot.raids.store(reg), rid, start.isoformat(), sid)}, status_code=409)
@@ -2044,7 +2044,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         "ad hoc" for a one-off or a pickup."""
         out = []
         for ev in sorted((e for e in rs.live() if e.instance == rid and not e.test), key=lambda e: e.starts_at):
-            sched = next((s for s in reg.schedules(rid) if s["id"] == ev.schedule), None)
+            sched = next((s for s in reg.schedules(rid) if s["id"] == rc.run_schedule_id(reg, ev)), None)
             name = "ad hoc" if rc.run_kind(reg, ev) == "adhoc" else (sched.get("name") or sched["id"]) if sched else "its schedule"
             out.append({"key": ev.key, "when": t12(reg, ev.starts_at), "state": ev.state, "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state), "schedule": name})
         return out

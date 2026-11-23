@@ -1098,6 +1098,14 @@ def sync_follow(rs: "RaidStore", lead: RaidEvent) -> bool:
 
 # ---------------------------------------------------------------- who a run is for (roster redesign Phase 1)
 
+def run_schedule_id(reg: Registry, ev: RaidEvent) -> str | None:
+    """The id of the schedule a run came from today: its run dict's (the lift translated those), else its own stamp read
+    through config.schedule_aliases — a run file the old `default` opened has none, a renamed duplicate the old id."""
+    team = reg.config.team(ev.team) or {}
+    sid = team.get("schedule_id") or ev.schedule
+    return reg.config.schedule_aliases.get(f"{ev.instance}:{sid or 'default'}", sid)
+
+
 def run_kind(reg: Registry, ev: RaidEvent) -> str:
     """'recurring' | 'adhoc'. Stamped at open; a file from before classes reads as its schedule says (a pickup or a
     one-off → ad hoc; the raid's own run times or another weekly / lockout schedule → recurring)."""

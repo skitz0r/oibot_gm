@@ -283,11 +283,11 @@ def test_a_raid_that_cannot_be_lifted_stays_as_it_was(data_root, open_registry):
 
 def test_a_stored_entry_that_cannot_be_read_is_skipped_and_named(data_root, open_registry):
     good = {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 19:30"]}
-    broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}], "kind": "weekly", "slots": ["Wed 20:00"]}
+    broken = {"id": "late", "name": "Late night", "lineup": [{"raid": "barrow_deeps", "rosters": 9}], "kind": "weekly", "slots": ["Wed 20:00"]}
     _write_old(data_root, {"schedules": [good, broken]})
     reg = open_registry(GitStore(data_root, push=False))
     assert [s["id"] for s in reg.schedules("barrow_deeps")] == ["barrow-deeps"]
-    assert len(reg.schedules_unread) == 1 and "late" in reg.schedules_unread[0] and "Barrow Deeps" in reg.schedules_unread[0]
+    assert len(reg.schedules_unread) == 1 and "Late night" in reg.schedules_unread[0] and "Barrow Deeps" in reg.schedules_unread[0]
     reg.set_schedule("barrow-deeps", {"slots": "Thu 20:00"}, "t")  # a write of that raid leaves it where it was
     assert broken in reg.config.schedules
     assert reg.schedule_entry("barrow-deeps")["slots"] == ["Thu 20:00"]
@@ -299,7 +299,7 @@ def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
 
     from oibot_gm.discord_bot import OibotGM
 
-    broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
+    broken = {"id": "late", "name": "Late night", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
     _write_old(data_root, {**OLD, "schedules": [broken]})
     reg = open_registry(GitStore(data_root, push=False))
     said: list[tuple[str, str]] = []
@@ -313,7 +313,7 @@ def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
     assert said[0] == ("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule.")
     assert said[1] == ("info", TIMING_MOVED)  # phase 2: the raid-level timing went onto its schedule in the same save
     assert said[2] == ("info", IDS_LINE)  # phase 3: each raid's own run times have an id of their own
-    assert said[3][0] == "warn" and "late" in said[3][1]
+    assert said[3][0] == "warn" and "Late night" in said[3][1]
     assert len(said) == 4  # the warning is told once a start, not on every call
 
 
@@ -406,11 +406,11 @@ def test_a_unicode_digit_as_a_follow_on_start_is_refused_in_words():
 
 def test_a_stored_entry_with_a_unicode_digit_is_skipped_at_load(data_root, open_registry):
     good = {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 19:30"]}
-    odd = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": "²"}], "kind": "weekly", "slots": ["Wed 20:00"]}
+    odd = {"id": "late", "name": "Late night", "lineup": [{"raid": "barrow_deeps", "rosters": "²"}], "kind": "weekly", "slots": ["Wed 20:00"]}
     _write_old(data_root, {"schedules": [good, odd]})
     reg = open_registry(GitStore(data_root, push=False))
     assert [s["id"] for s in reg.schedules("barrow_deeps")] == ["barrow-deeps"]
-    assert len(reg.schedules_unread) == 1 and "late" in reg.schedules_unread[0]
+    assert len(reg.schedules_unread) == 1 and "Late night" in reg.schedules_unread[0]
 
 
 def test_editing_a_raid_keeps_its_block_before_a_later_raid(reg):
@@ -501,10 +501,10 @@ def test_lift_then_lower_gives_back_the_old_shape(old):
 
 def test_lowering_an_unreadable_entry_refuses_and_changes_nothing():
     good = {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 19:30"]}
-    broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
+    broken = {"id": "late", "name": "Late night", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
     cfg = R.GuildConfig(**{**base_config(), "raids": {"barrow_deeps": {"notes": "x"}}, "schedules": [good, broken]})
     before = (copy.deepcopy(cfg.raids), copy.deepcopy(cfg.schedules))
-    with pytest.raises(RegistryError, match="late"):
+    with pytest.raises(RegistryError, match="Late night"):
         R.lower_schedules(cfg)
     assert (cfg.raids, cfg.schedules) == before
 
@@ -557,13 +557,13 @@ def test_the_script_lowers_each_guild_once_and_this_code_lifts_it_again(old_stor
 
 
 def test_the_script_refuses_a_guild_with_an_unreadable_entry(data_root):
-    broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
+    broken = {"id": "late", "name": "Late night", "lineup": [{"raid": "barrow_deeps", "rosters": 9}]}
     _write_old(data_root, {"schedules": [broken]})
     text = (data_root / GUILD / "guild.yaml").read_text()
     store = GitStore(data_root, push=False)
     n0 = commit_count(store)
     said = _lower_script().lower(data_root)
-    assert len(said) == 1 and "late" in said[0] and "nothing" in said[0].lower()
+    assert len(said) == 1 and "Late night" in said[0] and "nothing" in said[0].lower()
     assert (data_root / GUILD / "guild.yaml").read_text() == text and commit_count(store) == n0
 
 

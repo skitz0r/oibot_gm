@@ -372,4 +372,4 @@ def test_me_view_and_names_never_show_series_keys(reg):
     m = real(reg, 0)
     reg.regular_add(m.discord_id, KEY, "t")
     assert reg.series_label(KEY) == "Barrow Deeps · Raid nights"
-    assert reg.series_label("gone") == "gone (removed schedule)"
+    assert reg.series_label("gone") == "A removed schedule"
