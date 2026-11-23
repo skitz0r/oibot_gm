@@ -318,12 +318,15 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     dump.add("end_refusal", "locked, after the start", rc.end_refusal(ev, ev.start + timedelta(minutes=5)) or "")
     d = runs["done"]
     dump.add("reopen_refusal", "done, over an hour ago", rc.reopen_refusal(reg, d, d.start + timedelta(days=30)) or "")
-    dump.add("closed_run_refusal", "done", rc.closed_run_refusal(rs, d.key) or "")
-    dump.add("closed_run_refusal", "cancelled", rc.closed_run_refusal(rs, runs["cancelled"].key) or "")
+    dump.add("closed_run_refusal", "done", rc.closed_run_refusal(rs, d) or "")
+    dump.add("closed_run_refusal", "cancelled", rc.closed_run_refusal(rs, runs["cancelled"]) or "")
     far = reg.now_local() + timedelta(days=40)
-    dump.add("open_row_refusal", "too far ahead", rc.open_row_refusal(reg, rs, RID, far, rc.event_key(RID, far, "barrow-deeps"), far - timedelta(days=2)) or "")
-    dump.add("open_row_refusal", "too far ahead, the sheet opens before Open works", rc.open_row_refusal(reg, rs, RID, far, rc.event_key(RID, far, "barrow-deeps"), far - timedelta(days=30)) or "")
-    dump.add("open_row_refusal", "closed", rc.open_row_refusal(reg, rs, RID, d.start, d.key, d.start) or "")
+    dump.add("open_row_refusal", "too far ahead", rc.open_row_refusal(reg, rs, RID, far, "barrow-deeps", far - timedelta(days=2)) or "")
+    dump.add("open_row_refusal", "too far ahead, the sheet opens before Open works", rc.open_row_refusal(reg, rs, RID, far, "barrow-deeps", far - timedelta(days=30)) or "")
+    ended = recurring_run(reg, rs, 7)  # a schedule's occurrence whose run is finished: found by its stamps
+    ended.state = "done"
+    rs.save(ended, "harness")
+    dump.add("open_row_refusal", "closed", rc.open_row_refusal(reg, rs, RID, ended.start, ended.schedule, ended.start) or "")
     p = rc.open_preview(reg, rs, RID, None, None)
     dump.add("open_preview", "the next scheduled run", [p["rules"], p["refusal"] or "", p["when_note"]])
     when = (reg.now_local() + timedelta(days=3)).strftime("%Y-%m-%d 21:15")

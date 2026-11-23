@@ -58,7 +58,7 @@ def start_in(reg, minutes=180):
     return (reg.now_local() + timedelta(minutes=minutes)).replace(second=0, microsecond=0)
 
 
-# ---------------------------------------------------------------- the '-test' key space
+# ---------------------------------------------------------------- a rehearsal never meets a real run
 
 def test_a_test_run_and_a_real_run_at_the_same_minute_get_separate_keys(reg, rs):
     """The bug: open_test_run opened with schedule=None, so its key equalled a real default-schedule run's at that minute
@@ -67,8 +67,7 @@ def test_a_test_run_and_a_real_run_at_the_same_minute_get_separate_keys(reg, rs)
     sid = night_at(reg, at)
     real = rc.open_run(reg, rs, "barrow_deeps", at, by="scheduler", schedule=sid)
     test = rc.open_run(reg, rs, "barrow_deeps", at, by="t", cutoffs={"soft": 0.5, "hard": 0.4, "confirm": 0.2, "test_by": TESTER})
-    assert real.team == rc.run_key("barrow_deeps", at, sid) and test.team == rc.run_key("barrow_deeps", at, rc.TEST_SCHEDULE)
-    assert test.team == rc.run_key("barrow_deeps", at) + "-test" and test.key != real.key
+    assert test is not real and test.team != real.team and real.schedule == sid and test.test
     assert rc.is_test_run(reg, test) and not rc.is_test_run(reg, real)
     join(reg, rs, test, reg.test_members()[:5])
     assert not real.signups, "puppets never land on the real sheet"
@@ -82,35 +81,14 @@ def night_at(reg, at) -> str:
     return weekly(reg, "barrow_deeps", at.astimezone(reg.tz).strftime("%a %H:%M"), "night")
 
 
-def test_a_test_run_of_a_named_schedule_keeps_the_schedule_in_its_key(reg):
+def test_a_rehearsal_of_a_named_schedule_never_meets_that_schedules_run(reg, rs):
+    """Phase 3: a rehearsal is found only among rehearsals (rc.live_at with test=True), whatever schedule it names."""
     at = start_in(reg)
-    assert rc.run_key("barrow_deeps", at, "fri", test=True) == rc.run_key("barrow_deeps", at, "fri") + "-test"
-    assert rc.run_key("barrow_deeps", at, test=True) == rc.run_key("barrow_deeps", at, rc.TEST_SCHEDULE) == rc.run_key("barrow_deeps", at) + "-test"
-
-
-def test_ensure_run_refuses_a_roster_whose_test_flag_differs(reg, rs):
-    at = start_in(reg, 240)
     sid = night_at(reg, at)
-    key = rc.run_key("barrow_deeps", at, sid)
-    # a rehearsal's roster from before the key space sits at a real key: the scheduler's real run refuses to take it over
-    reg.config.rosters.append({"key": key, "name": "old rehearsal", "test": True, "instance": "barrow_deeps", "size": 20, "ephemeral": True})
-    with pytest.raises(RegistryError, match="a test run: a real run can't share it"):
-        rc.ensure_run(reg, "barrow_deeps", at, schedule=sid)
-    # …and a real roster that somehow sits in the test key space is never taken by a rehearsal
-    tkey = rc.run_key("barrow_deeps", at, rc.TEST_SCHEDULE)
-    reg.config.rosters.append({"key": tkey, "name": "odd real", "instance": "barrow_deeps", "size": 20, "ephemeral": True})
-    with pytest.raises(RegistryError, match="a real run: a test run can't share it"):
-        rc.ensure_run(reg, "barrow_deeps", at, cutoffs={"soft": 0.5, "hard": 0.4, "confirm": 0.2})
-
-
-def test_open_event_never_hands_a_rehearsals_sheet_to_a_real_run(reg, rs):
-    at = start_in(reg, 300)
-    ev = open_test_run(reg, rs)
-    team = {"key": ev.team.removesuffix("-test"), "instance": "barrow_deeps"}  # a real roster whose event key collides (old files)
-    rs.events[f"{team['key']}-{ev.start.date().isoformat()}"] = ev
-    with pytest.raises(RegistryError, match="test run's sheet"):
-        rc.open_event(reg, rs, team, ev.start)
-    assert at  # (the run itself is untouched)
+    real = rc.open_run(reg, rs, "barrow_deeps", at, by="scheduler", schedule=sid)
+    test = rc.open_run(reg, rs, "barrow_deeps", at, by="t", schedule=sid, cutoffs={"soft": 0.5, "hard": 0.4, "confirm": 0.2, "test_by": TESTER})
+    assert test is not real and test.test and rc.live_at(rs, "barrow_deeps", at, test=True) is test
+    assert rc.event_of_occurrence(rs, sid, real.occurrence) is real, "a rehearsal never answers for a schedule's occurrence"
 
 
 def test_the_schedule_id_test_is_kept_for_test_runs(reg):
@@ -124,7 +102,7 @@ def test_the_guards_hold_in_the_new_key_space(reg, rs, monkeypatch):
     monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
     bot = TBot(reg, rs)
     ev = open_test_run(reg, rs, test_by=TESTER)
-    assert ev.team.endswith("-test")
+    assert ev.test
     real = reg.add_character(4242, "Realperson", "Realperson", "Warrior", next(iter(reg.profile.classes["Warrior"])), None, True)[0]
     tester = reg.add_character(TESTER, "Tester", "Testerchar", "Mage", next(iter(reg.profile.classes["Mage"])), None, True)[0]
     pool = {m.discord_id for m, _c in rc._test_pool(reg, ev)}
@@ -148,7 +126,8 @@ def test_the_guards_hold_in_the_new_key_space(reg, rs, monkeypatch):
         run(inbox.do_member_action(bot, reg, rs, ev, reg.members[4242], "join", by="Officer", by_id=OWNER))
     assert "4242" not in ev.signups, "nothing written on the rehearsal's sheet"
     sid = night_at(reg, ev.start)
-    assert rc.open_run(reg, rs, "barrow_deeps", ev.start, by="scheduler", schedule=sid).team == rc.run_key("barrow_deeps", ev.start, sid), "the real run at that minute is its own"
+    real_run = rc.open_run(reg, rs, "barrow_deeps", ev.start, by="scheduler", schedule=sid)
+    assert real_run is not ev and not real_run.test, "the real run at that minute is its own"
 
 
 # ---------------------------------------------------------------- the puppet DM digest
@@ -441,7 +420,7 @@ def test_run_route_takes_tempo_names_and_refuses_without_a_signup_channel(reg, r
     assert r.status_code == 200, r.text
     ev = rs.events[r.json()["key"]]
     t = reg.config.roster(ev.team)
-    assert ev.team.endswith("-test") and t["open_dm"] is True and t["test_by"] == OWNER
+    assert ev.test and t["open_dm"] is True and t["test_by"] == OWNER
     assert (round(t["cutoff_soft_hours"] * 60), round(t["cutoff_hard_hours"] * 60), round(t["confirm_hours"] * 60)) == TEMPOS["quick"][2:]
     assert 19 <= (ev.start - before).total_seconds() / 60 <= 20
     assert "not posted" not in r.json()["message"]  # posted or refused: no dead 'sheet not posted' tail
@@ -500,7 +479,7 @@ def test_compose_and_comp_routes(reg, rs, site):
     r = client.post("/api/test/comp", json={"raid": "barrow_deeps"}, headers=bearer())
     assert r.status_code == 200, r.text
     ev = rs.events[r.json()["key"]]
-    assert ev.team.endswith("-test") and ev.message_id is None and len(ev.by_status("in")) == len(reg.test_members())
+    assert ev.test and ev.message_id is None and len(ev.by_status("in")) == len(reg.test_members())
 
 
 def test_feed_route_lists_events_after_a_seq(reg, rs, site):
@@ -824,10 +803,9 @@ def test_shutdown_sends_the_waiting_puppet_digests_before_disconnecting(monkeypa
     assert order == ["flush", "disconnect"]
 
 
-def test_a_real_run_whose_key_a_rehearsal_holds_warns_once_never_an_error_every_minute(reg, rs):
-    """Migration: a rehearsal opened before the '-test' key space at a real slot's very minute holds the real run's
-    key. The scheduler opens the other runs, says ONCE which one waits and how to free it, and never raises (an error
-    alert to the owner every minute)."""
+def test_a_rehearsal_at_a_real_slots_minute_never_holds_the_real_run_up(reg, rs):
+    """Phase 3: a rehearsal at a schedule's very minute is never the schedule's run (it is found by its stamps, and a
+    rehearsal carries none the scheduler reads): the scheduler opens every due run, with no warning and no error."""
     from test_raid_night import NightBot
 
     bot = NightBot(reg, rs)
@@ -835,15 +813,11 @@ def test_a_real_run_whose_key_a_rehearsal_holds_warns_once_never_an_error_every_
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
     weekly(reg, "barrow_deeps", "Wed 20:00")
     reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
-    (sched, start), *rest = rc.upcoming(reg, "barrow_deeps", reg.now_local(), lead=True)
-    key = rc.run_key("barrow_deeps", start, sched["id"])
-    reg.config.rosters.append({"key": key, "name": "old rehearsal", "test": True, "test_by": OWNER, "instance": "barrow_deeps", "size": 20, "ephemeral": True})
+    due = rc.upcoming(reg, "barrow_deeps", reg.now_local(), lead=True)
+    (sched, start) = due[0]
+    test = rc.open_run(reg, rs, "barrow_deeps", start, by="t", cutoffs={"soft": 2, "hard": 1, "confirm": 0.5, "test_by": OWNER})
     run(bot.scheduler_tick_guild(reg))
     run(bot.scheduler_tick_guild(reg))
-    warns = [t for lvl, t in bot.ops.lines if "a test run holds its key" in t]
-    assert len(warns) == 1 and key in warns[0] and "/gm test clear" in warns[0] and ("AM" in warns[0] or "PM" in warns[0])
-    assert not any(lvl == "error" for lvl, _t in bot.ops.lines)
-    assert rc.event_key("barrow_deeps", start, sched["id"]) not in rs.events
-    assert all(rc.event_key("barrow_deeps", s, sc["id"]) in rs.events for sc, s in rest), "the other runs open as ever"
-    with pytest.raises(rc.RunKeyClash):  # what the scheduler catches when a clash reaches the opener another way
-        rc.ensure_run(reg, "barrow_deeps", start)
+    assert not any(lvl in ("warn", "error") for lvl, _t in bot.ops.lines)
+    opened = [rc.event_of_occurrence(rs, sc["id"], rc.occurrence_stamp(reg, s)) for sc, s in due]
+    assert all(e is not None and not e.test for e in opened) and test not in opened, "every due run opens, the rehearsal stays its own"

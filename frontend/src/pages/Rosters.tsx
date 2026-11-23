@@ -120,9 +120,9 @@ function StartAdhoc({ r, others, busy, onAct }: { r: RaidRuns; others: { id: str
   async function start() {
     if (!p || waits) return;
     close();
-    await onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { start: p.start, key: p.key, follow: followBody,
+    await onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { start: p.start, occurrence: p.occurrence, follow: followBody,
       // a time that IS a scheduled run opens as that schedule's run (the preview names its id);
-      // sending "adhoc" there would resolve to a one-off key and the server would refuse the stale preview (409)
+      // sending "adhoc" there would resolve to a one-off and the server would refuse the stale preview (409)
       schedule: p.kind === "scheduled" ? p.schedule : (p.schedule || (tpl === "adhoc" ? "adhoc" : tpl)) });
   }
   return (
@@ -177,17 +177,17 @@ function UpcomingRows({ r, busy, onAct }: { r: RaidRuns; busy: string | null; on
     if (p.refusal) { fail(new Error(p.refusal)); return; }
     const message = [`${p.label} guild time · ${yourClock(p.start)} your time`, p.rules, p.posts].join("\n");  // the server's words; the browser adds only the reader's own clock
     if (!(await ask({ title: `Open ${r.name} · ${u.start} now?`, message, confirmLabel: "Open now" }))) return;
-    await onAct(`up${u.key}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: u.schedule, key: p.key });
+    await onAct(`up${u.schedule}${u.occurrence}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: u.schedule, occurrence: p.occurrence });
   }
   const css = raidCardCss;
   return (
     <>
       {rows.map((u, i) => (
-        <li key={u.key} className={css.run}>
+        <li key={`${u.schedule}${u.occurrence}`} className={css.run}>
           <span className={[css.runDot, css.runNext].join(" ")} />
           <span className={css.runWhen}>{u.start}</span>
           <span className={css.runWhat}>{i === 0 ? "next run · " : ""}{u.schedule_name} — its sheet opens {u.opens}</span>
-          {u.can_open && <Button size="compact-xs" variant="light" loading={busy === `up${u.key}`} onClick={() => open(u)}>Open now</Button>}
+          {u.can_open && <Button size="compact-xs" variant="light" loading={busy === `up${u.schedule}${u.occurrence}`} onClick={() => open(u)}>Open now</Button>}
           {u.needs_channel && <Text size="xs" c="red">needs a signup channel</Text>}
           {!u.can_open && u.why && <Text size="xs" c="dimmed" style={{ flexBasis: "100%", paddingLeft: 20 }}>{u.why}</Text>}
         </li>

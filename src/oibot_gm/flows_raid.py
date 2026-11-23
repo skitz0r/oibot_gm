@@ -297,8 +297,9 @@ class OpenWizard(Wizard):
 
     # ---- confirm and save
     def existing(self, start: datetime) -> rc.RaidEvent | None:
-        """The run open_run would hand back for this start (same roster key and day), if it is still live."""
-        ev = self.rs.events.get(rc.event_key(self.rid, start, self.draft.get("schedule")))
+        """The run open_run would hand back for this start (rc.find_run: a schedule's occurrence, else a live one-off
+        at that minute), if it is still live."""
+        ev = rc.find_run(self.reg, self.rs, self.rid, start, self.draft.get("schedule"))
         return ev if ev and ev.state not in ("done", "cancelled") else None
 
     async def confirm(self, interaction: discord.Interaction) -> None:
@@ -323,7 +324,7 @@ class OpenWizard(Wizard):
         ev = self.existing(start)
         if ev:
             lines.append(f"-# A run for that time already exists and is {sheet_state(ev)}. Open points you at it instead of making a second.")
-        closed = rc.closed_run_refusal(self.rs, rc.event_key(self.rid, start, self.draft.get("schedule")))
+        closed = rc.closed_run_refusal(self.rs, rc.find_run(self.reg, self.rs, self.rid, start, self.draft.get("schedule")))
         if closed:  # open_run refuses it: the screen says so instead of offering an Open that would fail
             lines.append(f"-# {closed}")
             await self.show(interaction, "\n".join(lines), self.button("Change", self.shortlist), self.button("Cancel", self.cancel))
@@ -345,7 +346,7 @@ class OpenWizard(Wizard):
             return
         await self.working(interaction, "Opening…")
         bot, rs = interaction.client, self.rs
-        ev = await bot.open_run_and_post(self.reg, rs, self.rid, start, by=interaction.user.display_name, **rc.schedule_kw(self.draft.get("schedule")))
+        ev = await bot.open_run_and_post(self.reg, rs, self.rid, start, by=interaction.user.display_name, schedule=self.draft.get("schedule") or None)
         extra = ""
         if not ev.message_id:  # no signup channel configured: the sheet goes where the officer asked
             if interaction.channel is not None:

@@ -77,12 +77,15 @@ def _run_refusal(gdir: Path, cfg: GuildConfig) -> str | None:
     back = {new: old for old, new in cfg.schedule_aliases.items()}
     entries = {e["id"]: e for e in cfg.schedules if isinstance(e, dict) and e.get("id")}
     names = {t.get("key"): t.get("name") for t in cfg.rosters if isinstance(t, dict)}
+    dict_sid = {t.get("key"): t.get("schedule_id") for t in cfg.rosters if isinstance(t, dict)}
     bad = []
     for f in sorted((gdir / "raids").glob("*.json")) if (gdir / "raids").exists() else []:
         raw = json.loads(f.read_text())
         if raw.get("state") in ("done", "cancelled"):
             continue
-        sid = raw.get("schedule")
+        # the run dict's schedule_id keeps the old suffix ('adhoc', 'after', 'test'); the file's stamp (phase 3) holds
+        # a real schedule id only, so a stamped one-off reads its dict
+        sid = dict_sid.get(raw.get("team")) or raw.get("schedule")
         old = lowered_id(entries[sid], back) if sid in entries else sid
         try:
             want = old_event_key(raw["instance"], datetime.fromisoformat(raw["starts_at"]), old, bool(raw.get("test")))

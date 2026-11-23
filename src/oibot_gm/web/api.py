@@ -1193,10 +1193,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 sid = str(sr.get("id") or sr.get("key") or "")
                 for f in sr.get("forecast") or []:
                     try:
-                        k = rc.event_key(rid, datetime.fromisoformat(f["start"]).astimezone(reg.tz), sid or None)
+                        hit = rc.event_of_occurrence(rs, sid, rc.occurrence_stamp(reg, datetime.fromisoformat(f["start"])), reg=reg) if sid else None
                     except (KeyError, ValueError):
-                        k = None
-                    f["open_key"] = k if k in live and live[k].state in ("open", "locked") else None
+                        hit = None
+                    f["open_key"] = hit.key if hit is not None and hit.key in live else None
             buffs = {b.id: b for b in reg.profile.buffs}  # the page draws missing buffs as icon-only chips (name in the tooltip)
             r["missing_buffs"] = [{**x, "abbr": getattr(buffs.get(x["id"]), "abbr", x["name"][:3]), "colour": getattr(buffs.get(x["id"]), "colour", "#888"),
                                    "art": getattr(buffs.get(x["id"]), "art", None)} for x in r["missing_buffs"]]
@@ -1701,7 +1701,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     @app.post("/api/raid/{rid}/open/preview")
     async def raid_open_preview(request: Request, rid: str):
         """What Open would do, nothing written (design B4; rc.open_preview — the /raid open wizard says the same):
-        {kind: scheduled | adhoc, schedule, schedule_name, key, start (ISO: carry it back to Open), label (12-hour guild
+        {kind: scheduled | adhoc, schedule, schedule_name, occurrence, start (ISO: carry it back to Open), label (12-hour guild
         time), when_note (the DST line), exists, channel, rules, past, follow, follow_line}. Body as Open's: {when? | start?,
         schedule?, follow?}."""
         v, d = await body(request, officer=True)
@@ -1725,8 +1725,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """Open a sheet now: the raid's next run (of `schedule` when given, else of any schedule), or a picked time —
         `start` (the preview's exact instant) or `when` ('YYYY-MM-DD HH:MM' guild time from the picker; DST-safe through
         rc.open_when / wizard.resolve_local, never replace(tzinfo=)). With `schedule`: that schedule's settings (a pickup
-        template); without: the upcoming run at exactly that time if there is one, else a one-off (ad hoc). `key` (from
-        the preview): the run Open is expected to make — refused (409) when the time now resolves to another run."""
+        template); without: the upcoming run at exactly that time if there is one, else a one-off (ad hoc). `occurrence`
+        (from the preview; None for a one-off): the schedule's run Open is expected to make — refused (409) with a fresh
+        preview when the time now resolves to another."""
         v, d = await body(request, officer=True)
         reg = v.reg
         if rid not in reg.profile.raids:
@@ -1738,15 +1739,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             rc.refuse_past_start(reg, start, reg.now_local())  # a mistyped year would open a run the scheduler may close at once
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        expect = (d.get("key") or "").strip()
-        if expect:
-            got = rc.which_run(reg, rid, start, sid)["key"]
-            if got != expect:
+        if "occurrence" in d:
+            got = rc.which_run(reg, rid, start, sid)["occurrence"]
+            if got != ((d.get("occurrence") or "").strip() or None):
                 return JSONResponse({"error": "That time now opens a different run than the preview showed — check it and open again.",
                                      "preview": rc.open_preview(reg, bot.raids.store(reg), rid, start.isoformat(), sid)}, status_code=409)
         rs = bot.raids.store(reg)
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
-            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, follow=fw, **rc.schedule_kw(sid)))
+            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, follow=fw, schedule=sid))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")
@@ -2053,7 +2053,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """The raid's next scheduled run across its ACTIVE recurring schedules (a pickup template opens nothing on its
         own) that has no sheet yet — a run already open or locked is listed above it, a closed one is past: {when,
         schedule, opens} (`opens` = when its sheet opens on its own); None when no active schedule has a run coming."""
-        rows = [u for u in rc.upcoming_rows(reg, rs, rid) if u["key"] not in rs.events]
+        rows = [u for u in rc.upcoming_rows(reg, rs, rid) if not u["closed"]]
         return {"when": rows[0]["start"], "schedule": rows[0]["schedule_name"], "opens": rows[0]["opens"]} if rows else None
 
     # ---- raids: rules per raid (officers read, owner edits)

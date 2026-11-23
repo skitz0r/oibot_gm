@@ -69,7 +69,7 @@ def test_the_one_off_schedule_is_virtual(reg):
     with pytest.raises(RegistryError, match="kept for one-off runs"):
         reg.set_schedule(ADHOC_SCHEDULE, {"kind": "pickup"}, "t", raid=RID)
     t = soon(reg)
-    assert rc.run_key(RID, t, ADHOC_SCHEDULE).endswith("-adhoc") and rc.run_key(RID, t, ADHOC_SCHEDULE) != rc.run_key(RID, t)
+    assert rc.schedule_stamp(ADHOC_SCHEDULE) is None, "a one-off carries no schedule: it is never a schedule's run"
 
 
 def test_schedule_weights_merge_per_key_and_refuse_junk(reg):
@@ -100,10 +100,10 @@ def test_run_dict_and_event_carry_kind_series_and_test(reg, rs):
     opened(reg)
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
-    assert (ev.kind, ev.series, ev.test) == ("recurring", "barrow-deeps", False) and ev.key == rc.event_key(RID, t, "barrow-deeps")
+    assert (ev.kind, ev.series, ev.test) == ("recurring", "barrow-deeps", False) and rc.event_of_occurrence(rs, "barrow-deeps", rc.occurrence_stamp(reg, t)) is ev
     one = rc.open_run(reg, rs, RID, soon(reg, 4), by="t", schedule=ADHOC_SCHEDULE)
     team = reg.config.roster(one.team)
-    assert (one.kind, one.series, one.schedule) == ("adhoc", None, ADHOC_SCHEDULE) and one.team.endswith("-adhoc")
+    assert (one.kind, one.series, one.schedule) == ("adhoc", None, None) and team["schedule_id"] == ADHOC_SCHEDULE
     assert (team["reminders"], team["open_dm"], team["confirm"], team["cutoff_hard_hours"], team["fill_ask_hours"]) == ("none", False, False, 2, 1)
     test = open_test_run(reg, rs)
     assert test.test and test.kind == "recurring" and rc.is_test_run(reg, test)
@@ -123,7 +123,7 @@ def test_scheduler_opens_recurring_runs(reg, rs):
     bot.channels[77] = Chan(77)
     run(bot.scheduler_tick())
     ev = next(e for e in rs.live() if e.instance == RID)
-    assert (ev.kind, ev.series) == ("recurring", "barrow-deeps") and ev.key.startswith(rc.run_key(RID, ev.start, "barrow-deeps"))
+    assert (ev.kind, ev.series, ev.schedule) == ("recurring", "barrow-deeps", "barrow-deeps") and ev.occurrence == rc.occurrence_stamp(reg, ev.start)
 
 
 def test_web_open_stamps_the_class(reg, rs, monkeypatch):
@@ -142,7 +142,7 @@ def test_web_open_stamps_the_class(reg, rs, monkeypatch):
     assert rs.events[nxt.json()["message"].split()[1]].kind == "recurring"
     when = soon(reg, 5, 22)
     one = c.post(f"/api/raid/{RID}/open", json={"when": when.strftime("%Y-%m-%d %H:%M")}, headers=bearer())
-    assert bot.opened[-1][2] == ADHOC_SCHEDULE and "-adhoc-" in one.json()["message"]
+    assert bot.opened[-1][2] == ADHOC_SCHEDULE and rs.events[one.json()["key"]].kind == "adhoc"
     listed = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[1][1]
     c.post(f"/api/raid/{RID}/open", json={"when": listed.strftime("%Y-%m-%d %H:%M")}, headers=bearer())
     assert bot.opened[-1][2] == "barrow-deeps", "a picked time that IS an upcoming run opens that run, not a one-off"
@@ -154,7 +154,7 @@ def test_plain_text_and_mcp_open_paths(reg, rs):
     assert configops._open_time(reg, RID, listed.strftime("%Y-%m-%d %H:%M"))[1] == "barrow-deeps"  # its schedule's run: recurring
     start, sid = configops._open_time(reg, RID, soon(reg, 9).strftime("%Y-%m-%d %H:%M"))
     assert sid == ADHOC_SCHEDULE
-    assert "-adhoc-" in configops.describe(reg, ConfigOp(op="run_open", target=RID, value=start.strftime("%Y-%m-%d %H:%M")))
+    assert configops.describe(reg, ConfigOp(op="run_open", target=RID, value=start.strftime("%Y-%m-%d %H:%M"))).startswith("open Barrow Deeps")
 
     import httpx
 

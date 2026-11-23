@@ -60,6 +60,14 @@ def _store() -> GitStore:
     assert STORE is not None, "store not initialised"
     return STORE
 
+
+def _start_store(bot, reg):
+    """The run store the start's save stamps (the bot's own; a bare start hook without one reads the guild's files)."""
+    from . import raidcycle as rc
+
+    raids = getattr(bot, "raids", None)
+    return raids.store(reg) if raids is not None else rc.RaidStore(reg.store, reg.key)
+
 CLASS_COLOURS = {"Warrior": 0xC79C6E, "Paladin": 0xF58CBA, "Hunter": 0xABD473, "Rogue": 0xFFF569, "Priest": 0xFFFFFF, "Shaman": 0x0070DE, "Mage": 0x69CCF0, "Warlock": 0x9482C9, "Druid": 0xFF7D0A}
 MEMBER_BLIP_RETRY_S = 15  # cached_member: a transient fetch failure is retried after this, never cached as a miss
 MEMBERS_LIST_AGE_S = 300  # refresh_members: one list request per server per this many seconds feeds every member lookup (§5.58)
@@ -515,13 +523,16 @@ class ListenMixin:
 
     async def _schedules_save(self) -> None:
         """The FIRST thing setup_hook does, per guild in a thread: Registry.migrate_schedules (an older file's schedules,
-        lifted at load, saved once under its own message) before the web app, the scheduler or on_ready's officer-role
-        pass can save the lifted shape under theirs. The lines wait for _schedules_migrate to tell them once Discord is
-        ready; a failure leaves the save to _schedules_migrate."""
+        lifted at load) and raidcycle.stamp_runs (the live runs' schedule and occurrence stamps) saved in ONE commit
+        (raidcycle.migrate_at_start) before the web app, the scheduler or on_ready's officer-role pass can save the
+        lifted shape under theirs. The lines wait for _schedules_migrate to tell them once Discord is ready; a failure
+        leaves the save to _schedules_migrate."""
+        from . import raidcycle as rc
+
         saved = self.__dict__.setdefault("_schedules_saved", {})
         for reg in self.registries.ordered():
             try:
-                saved[reg.key] = saved.get(reg.key, []) + await asyncio.to_thread(reg.migrate_schedules)
+                saved[reg.key] = saved.get(reg.key, []) + await asyncio.to_thread(rc.migrate_at_start, reg, _start_store(self, reg))
             except Exception as e:  # noqa: BLE001 — a start never fails on it; _schedules_migrate tries again
                 log.warning("schedules: early save of %s failed (%s)", reg.key, type(e).__name__)
 
@@ -531,13 +542,14 @@ class ListenMixin:
         per raid whose old schedules couldn't be moved (they still read from the raid; the warning says how to get out),
         one when the timing or make-up lift failed (registry.lift_failed_line), one for the schedule ids (registry.schedule_ids_line:
         each schedule renamed, by its name, and each regular spot dropped), and one warning naming any stored schedule that can't be read (left in the file, skipped by every read)."""
+        from . import raidcycle as rc
         from .registry import schedule_ids_line
 
         saved = self.__dict__.get("_schedules_saved") or {}
         for reg in self.registries.ordered():
             lines = saved.pop(reg.key, [])
             try:
-                lines = lines + await asyncio.to_thread(reg.migrate_schedules)
+                lines = lines + await asyncio.to_thread(rc.migrate_at_start, reg, _start_store(self, reg))
             except Exception as e:  # noqa: BLE001 — a start never fails on it; the next start tries again
                 log.warning("schedules: migration of %s failed (%s)", reg.key, type(e).__name__)
             if lines:

@@ -805,8 +805,9 @@ stop the lock: the rosters are built and the empty seats wait to be filled. That
 can switch between tanking and healing are needed as both at once too: they take one role each and the rest waits.
 With one roster's worth of joiners or fewer it builds a second
 roster only when the tanks and healers allow two. A
-schedule can be **paused** (nothing opens from it). A run from a schedule carries the schedule's id in its key
-(`bd-1212-2000-alt`), so two schedules starting at the same minute are two runs.
+schedule can be **paused** (nothing opens from it). The bot finds a schedule's run by the schedule and the start it
+was opened for, never by its key, so two schedules starting at the same minute are two runs, and a start whose run is
+already open, finished or cancelled never gets a second sheet — also after the guild's timezone changes.
 
 **Recurring and ad hoc.** Every run is one or the other, and nobody sets it by hand — it follows the schedule's kind:
 - **Recurring** — weekly nights and days of each lockout. Opens by itself on its
@@ -820,8 +821,8 @@ schedule can be **paused** (nothing opens from it). A run from a schedule carrie
   your place; Bench or No thanks and then Join again puts you at the back — except that a seat still needed for a tank or healer minimum is kept for the first later joiner who plays
   that role, and a tank or healer who joins once that role's minimum is met waits until everyone else who joined has
   a seat, then takes what is left in the order they joined). An officer's *Bench* pin (or a comp-policy *always bench*) takes that joiner out of the line, so the
-  next joiner gets the seat; a comp-policy *never bench* name keeps a seat even if they joined late. Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. A one-off's
-  key ends in `-adhoc` (`bd-1212-2100-adhoc`). The Raids page shows each schedule's class, and for a pickup template
+  next joiner gets the seat; a comp-policy *never bench* name keeps a seat even if they joined late. Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. Opening a
+  one-off at the minute of one already open points at that run instead of making a second. The Raids page shows each schedule's class, and for a pickup template
   the editor hides the fields that mean nothing there (signup lead, reminder, DM on open); every timing field shows the
   schedule's own value, and a field left empty takes *the pickup default* when saved. Officers can change any of them per schedule, including **confirmations**
   (on/off) and the **who gets a seat** weights — on the Raids page, in plain text, over MCP, or in `/gm config raid`
@@ -1833,7 +1834,7 @@ confirmation DMs and cards as `/raid lock`, a cancel withdraws the same confirma
 re-opens the same sheets. The exceptions are handing the guild to a new owner (`/gm config owner` only, above) and
 the loot session (`/raid loot`). Who may do what, and in which channel, is the owner's plain-text policy (§8c): by
 default officer actions (raids and schedules included) need an officer, and auras and guild setup need the owner. A run is
-named by its key (`bd-1209-1930`), or by raid and day ("tonight's Barrow Deeps", "the Hyjal run") when only one of
+named by its key (`bd-k7m2qx`), or by raid and day ("tonight's Barrow Deeps", "the Hyjal run") when only one of
 that raid's runs is live — with two live, the bot asks which. A member is named by display name, @mention or one
 of their characters. The bot reads each live run's board as it stands and each raid's next unopened runs, so
 "groups for tonight" and "open Saturday's alt run" start from the real thing.
@@ -1841,7 +1842,7 @@ of their characters. The bot reads each live run's board as it stands and each r
 - *Runs:* "open Barrow Deeps for Thursday 7:30 PM" (one of the raid's upcoming runs opens as that schedule's run;
   "open the 8 PM Barrow Deeps" picks the next one at that time; any other time is a one-off; "open the next Barrow
   Deeps") posts the sheet now; "lock tonight's Barrow Deeps" builds the roster and DMs everyone rostered; "cancel
-  bd-1209-1930, server down"; "put Xanthe on the bench for bd-1209-1930" / "set Marrow to join as Marrowlite" /
+  bd-k7m2qx, server down"; "put Xanthe on the bench for bd-k7m2qx" / "set Marrow to join as Marrowlite" /
   "Kestrel can't make it" (after lock: join seats and asks to confirm, no thanks frees the seat and the fill engine
   looks for cover; with a reason — "Kestrel can't make it, work" — it is a callout like `/raid out`, the reason
   kept for the officers; your own "I can't make it" is always a callout, reason or not); "Xanthe confirmed for tonight" / "Kestrel said she can't make it after all" (on a locked
@@ -1853,7 +1854,7 @@ of their characters. The bot reads each live run's board as it stands and each r
   shows exactly who will be asked; if the suggestions changed before you press Apply, nothing is sent); "split tonight's run
   first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock); "remind the
   unconfirmed for tonight" (once an hour); "pause automatic asks on tonight's run" / "resume automatic asks"; "withdraw the ask
-  to Kestrel"; "reopen bd-1209-1930" (an end by mistake, within the hour — never a cancelled run).
+  to Kestrel"; "reopen bd-k7m2qx" (an end by mistake, within the hour — never a cancelled run).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
   one person, like a drag (after lock: in from *Not rostered* = asked to confirm, out to it = seat freed); "groups for
   bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the whole board — the layout the lock will use, or after lock the roster
@@ -2065,8 +2066,8 @@ on the site — the bot refuses before anything is written and says so: set the 
 can't reach (deleted, or hidden from the bot) is refused the same way, and the message says that is the problem. The
 site's card says all of this before you press.
 A test run never has a follow-on (a second raid the same night, §4): rehearse the lead and the follow-on one at a time.
-A test run never shares a real run's sheet, even when it starts the same minute as one: its key ends in `-test`
-(`bd-1209-1930-test`), and the schedule id `test` is kept for it. A test run belongs to the officer who opened it:
+A test run never shares a real run's sheet, even when it starts the same minute as one: the bot finds a test run only
+among test runs, and the schedule id `test` is kept for it. A test run belongs to the officer who opened it:
 a second officer opening one in the same minute is refused — "Tess opened a test run at Tue 9 Dec 7:30 PM — join
 theirs or clear it" — and nothing is opened for them.
 

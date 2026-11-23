@@ -60,18 +60,16 @@ def test_run_times_are_an_ordinary_schedule_with_an_id_of_its_own(reg, rs):
     ups = rc.upcoming(reg, RID, now, 24 * 21)
     assert ups and all(s["id"] == sid for s, _t in ups)
     t = ups[0][1]
-    assert rc.run_key(RID, t, sid) == f"bd-{t.strftime('%m%d-%H%M')}-{sid}"  # a schedule id is always a suffix
-    assert rc.schedule_kw(sid) == {"schedule": sid} and rc.schedule_kw(None) == {}
     ev = rc.open_run(reg, rs, RID, t, by="t")  # none named: the schedule that runs at that start
     team = reg.config.roster(ev.team)
-    assert ev.key == rc.event_key(RID, t, sid) and ev.schedule == sid
+    assert (ev.schedule, ev.occurrence) == (sid, rc.occurrence_stamp(reg, t)) and rc.event_of_occurrence(rs, sid, ev.occurrence) is ev
     assert (team["schedule_id"], team["kind"], team["series"]) == (sid, "recurring", sid) and team["rosters"] == 1
     assert (ev.kind, ev.series) == ("recurring", sid)
     assert rc.run_rosters(reg, ev) == 1 and reg.raid_rows(RID) == [{"id": sid, "kind": "weekly", "slots": ["Tue 19:30", "Thu 20:00"], "name": "Raid nights", **reg.timing_suggestion(RID)}]
     lead = float(reg.schedule_def(RID, sid)["signup_lead_hours"])
     assert [t for _s, t in rc.upcoming(reg, RID, now, lead=True)] == [t for _s, t in rc.upcoming(reg, RID, now, lead)]
     one_off = rc.open_run(reg, rs, RID, t + timedelta(hours=1), by="t")  # a time no schedule runs at: a one-off
-    assert one_off.schedule == R.ADHOC_SCHEDULE and rc.run_kind(reg, one_off) == "adhoc"
+    assert one_off.schedule is None and rc.run_kind(reg, one_off) == "adhoc"
 
 
 def test_two_weekly_schedules_coexist_with_different_lock_hours(reg, rs):
@@ -87,7 +85,7 @@ def test_two_weekly_schedules_coexist_with_different_lock_hours(reg, rs):
     assert (tue, "alt") in {(t, s["id"]) for s, t in ups}  # both schedules start that same minute …
     a = rc.open_run(reg, rs, RID, tue, by="t", schedule="barrow-deeps")
     b = rc.open_run(reg, rs, RID, tue, by="t", schedule="alt")
-    assert a.key != b.key and b.key == rc.event_key(RID, tue, "alt") and b.key.startswith(rc.run_key(RID, tue) + "-alt-")  # … as two runs
+    assert a.key != b.key and (a.schedule, b.schedule) == ("barrow-deeps", "alt") and a.occurrence == b.occurrence  # … as two runs
     ta, tb = reg.config.roster(a.team), reg.config.roster(b.team)
     assert (ta["cutoff_hard_hours"], tb["cutoff_hard_hours"]) == (24, 12)
     assert b.schedule == "alt" and tb["schedule_id"] == "alt" and "Alt run" in tb["name"]
@@ -126,7 +124,7 @@ def test_a_pickup_template_never_opens_by_itself(reg, rs):
     start = (reg.now_local() + timedelta(hours=30)).replace(second=0, microsecond=0)
     ev = rc.open_run(reg, rs, RID, start, by="officer", schedule="pug")  # on demand: its own settings
     team = reg.config.roster(ev.team)
-    assert ev.schedule == "pug" and team["rosters"] == 2 and team["cutoff_hard_hours"] == 2 and ev.key.endswith(f"-pug-{start.date().isoformat()}")
+    assert ev.schedule == "pug" and team["rosters"] == 2 and team["cutoff_hard_hours"] == 2 and ev.occurrence == rc.occurrence_stamp(reg, start)
 
 
 def test_rosters_2_doubles_the_advertised_seats_and_the_health_target(reg, rs):
@@ -138,7 +136,7 @@ def test_rosters_2_doubles_the_advertised_seats_and_the_health_target(reg, rs):
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
     team = rc.run_team(reg, ev)
-    assert rc.run_rosters(reg, ev) == 2 and ev.key == rc.event_key(RID, t, "barrow-deeps")
+    assert rc.run_rosters(reg, ev) == 2 and ev.schedule == "barrow-deeps"
     roles = by_role(reg)
     join(reg, rs, ev, roles["tank"][:1] + roles["healer"][:2] + roles["melee"][:3])
     h = rc.health_data(reg, ev, team)
@@ -341,9 +339,9 @@ def test_run_open_takes_a_schedule(reg, rs):
     reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid=RID)
     reg.set_schedule("pug", {"kind": "pickup"}, "t", raid=RID)
     line = configops.describe(reg, ConfigOp(op="run_open", target=RID, field="alt"))
-    assert line.startswith("open Barrow Deeps · Weekly ") and "-alt-" in line
+    assert line.startswith("open Barrow Deeps · Weekly Sat ")
     assert "pickup template" in configops.describe(reg, ConfigOp(op="run_open", target=RID, field="pug"))
-    assert "-pug-" in configops.describe(reg, ConfigOp(op="run_open", target=RID, field="pug", value="2030-01-08 19:30"))
+    assert configops.describe(reg, ConfigOp(op="run_open", target=RID, field="pug", value="2030-01-08 19:30")).startswith("open Barrow Deeps · Pickup Tue 8 Jan")
 
 
 # ---------------------------------------------------------------- web API + MCP
@@ -384,7 +382,7 @@ def test_web_routes_list_set_remove_and_open_by_schedule(api, reg, rs):
     need_time = c.post(f"/api/raid/{RID}/open", json={"schedule": "pug"}, headers=bearer())
     assert need_time.status_code == 400 and "pick the date and time" in need_time.json()["error"]
     ok = c.post(f"/api/raid/{RID}/open", json={"schedule": "alt"}, headers=bearer())
-    assert ok.status_code == 200 and bot.opened[-1][2] == "alt" and "-alt-" in ok.json()["message"]
+    assert ok.status_code == 200 and bot.opened[-1][2] == "alt" and rs.events[ok.json()["key"]].schedule == "alt"
     when = (reg.now_local() + timedelta(days=1)).strftime("%Y-%m-%d 21:00")
     c.post(f"/api/raid/{RID}/open", json={"schedule": "pug", "when": when}, headers=bearer())
     assert bot.opened[-1][2] == "pug"
@@ -505,7 +503,7 @@ def test_the_raids_route_says_when_a_raid_runs_from_the_runs_themselves(api, reg
     assert ok.status_code == 200
     raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
     live = raid["live_runs"]
-    assert len(live) == 1 and live[0]["state"] == "open" and live[0]["schedule"] == "Alt run" and "-alt-" in live[0]["key"] and bot.opened[-1][2] == "alt"
+    assert len(live) == 1 and live[0]["state"] == "open" and live[0]["schedule"] == "Alt run" and rs.events[live[0]["key"]].schedule == "alt" and bot.opened[-1][2] == "alt"
     assert not re.search(r"\b0\d [A-Z][a-z]{2}\b", live[0]["when"] + raid["next_run"]["when"]), "no leading zero on a day a person reads"
     assert raid["next_run"]["schedule"] == "Alt run"
     c.post("/api/admin/raid/schedule", json={"id": "wed", "fields": {"raid": RID, "slots": ["Wed 20:00"], "name": "Wednesday"}}, headers=bearer())

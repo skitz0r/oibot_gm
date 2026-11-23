@@ -381,7 +381,8 @@ export interface LiveRun { key: string; when: string; state: string; state_word?
 /** The next run an active schedule opens that has no sheet yet; `opens` = when its sheet opens on its own. */
 export interface NextRun { when: string; schedule: string; opens?: string }
 /** One upcoming run of an active schedule (web/api.py rosters_data → rc.upcoming_rows): `can_open` false comes with `why`, the server's sentence. */
-export interface UpcomingRun { schedule: string; schedule_name: string; start: string; start_iso: string; key: string; opens: string; opens_iso: string; needs_channel: boolean; can_open: boolean; why: string | null; follow?: string }
+/** `occurrence`: the stamp a schedule's run is found by (Open carries it back); a run has no key until it opens. */
+export interface UpcomingRun { schedule: string; schedule_name: string; start: string; start_iso: string; occurrence: string; open_key: string | null; closed: boolean; opens: string; opens_iso: string; needs_channel: boolean; can_open: boolean; why: string | null; follow?: string }
 export interface RaidRuns {
   id: string; name: string; size: number; slots: string[]; slot_labels?: string[]; lockout_days: number; opened: boolean; first_open: string | null; first_open_words?: string;
   live_runs?: LiveRun[]; next_run?: NextRun | null;

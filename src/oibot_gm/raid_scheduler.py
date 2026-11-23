@@ -103,35 +103,29 @@ class RaidSchedulerMixin:
     async def _warn_unopened(self, reg, now) -> None:
         """No signup channel: the scheduler opens nothing (design B4 "scheduler visibility"). Each run that is due to open
         gets ONE ops warn ("Barrow Deeps Tue 7:30 PM did not open: no signup channel") — never repeated every minute, and
-        no DM beyond the ops feed's own error path; the Rosters page's Upcoming row says "needs a signup channel"."""
+        no DM beyond the ops feed's own error path; the Rosters page's Upcoming row says "needs a signup channel". Keyed
+        by (guild, schedule id, occurrence): a run is found by its stamps, never by a key."""
         warned: set = self.__dict__.setdefault("_unopened_warned", set())
-        for inst in reg.profile.raids:
-            for sched, start in rc.upcoming(reg, inst, now, lead=True):
-                key = (reg.key, rc.event_key(inst, start, sched["id"]))
-                if key in warned or key[1] in self.raids.store(reg).events:
-                    continue
-                warned.add(key)
-                await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: no signup channel is set (/gm config signup-channel)")
+        rs = self.raids.store(reg)
+        for sched, start in rc.occurrences(reg, now, lead=True):
+            occ = rc.occurrence_stamp(reg, start)
+            key = (reg.key, sched["id"], occ)
+            if key in warned or rc.event_of_occurrence(rs, sched["id"], occ, reg=reg) is not None:
+                continue
+            warned.add(key)
+            inst = sched["raid"]
+            await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: no signup channel is set (/gm config signup-channel)")
 
-    async def _warn_key_clash(self, reg, inst: str, start, key: str) -> None:
-        """A real run's key is held by a test run (a rehearsal opened before the '-test' key space, at that very minute):
-        the real run can't open until the test bench is cleared. ONE ops warn per (guild, key) naming the fix — never
-        the minute-by-minute RegistryError (and its owner error alert) the tick would otherwise raise."""
-        warned: set = self.__dict__.setdefault("_key_clash_warned", set())
-        if (reg.key, key) in warned:
-            return
-        warned.add((reg.key, key))
-        await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: a test run holds its key {key} "
-                                                "— clear the test bench (/gm test clear) and it opens on the next minute")
-
-    async def _warn_open_refused(self, reg, inst: str, start, key: str, err: Exception) -> None:
-        """A scheduled open the registry refused (design §5.62: the follow-on's time was closed or cancelled, that night
-        already has a follow-on, the schedule's follow-on raid left the profile): ONE ops warn per (guild, key) with the
-        refusal, and the minute goes on — the other runs' health, locks, expiry, fill and close never wait on it."""
+    async def _warn_open_refused(self, reg, sched: dict, start, err: Exception) -> None:
+        """A scheduled open the registry refused (a follow-on raid gone from the profile, a schedule that can't be read):
+        ONE ops warn per (guild, schedule id, occurrence) with the refusal, and the minute goes on — the other runs'
+        health, locks, expiry, fill and close never wait on it."""
         warned: set = self.__dict__.setdefault("_open_refused_warned", set())
-        if (reg.key, key) in warned:
+        key = (reg.key, sched["id"], rc.occurrence_stamp(reg, start))
+        if key in warned:
             return
-        warned.add((reg.key, key))
+        warned.add(key)
+        inst = sched["raid"]
         await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: {err}")
 
     async def _close_run(self, reg, rs, ev, now, exhausted_posted: set) -> None:
@@ -168,22 +162,16 @@ class RaidSchedulerMixin:
         await self.cleanup_ephemeral(reg, rs)
         now = reg.now_local()
         # open sheets on cadence: every active schedule's runs within that schedule's signup lead (needs the signup
-        # channel); a pickup template never opens here
+        # channel); a pickup template never opens here. A run is found by its schedule and occurrence (live or closed:
+        # never a second sheet, a cancelled occurrence never again)
         if channel:
-            for inst in reg.profile.raids:
-                for sched, start in rc.upcoming(reg, inst, now, lead=True):
-                    held = reg.config.roster(rc.run_key(inst, start, sched["id"])) or {}
-                    if held.get("test"):  # a rehearsal from before the '-test' key space holds this real run's key
-                        await self._warn_key_clash(reg, inst, start, rc.run_key(inst, start, sched["id"]))
-                        continue
-                    if rc.event_key(inst, start, sched["id"]) in rs.events:
-                        continue
-                    try:
-                        await self.open_run_and_post(reg, rs, inst, start, by="scheduler", **rc.schedule_kw(sched["id"]))
-                    except rc.RunKeyClash:
-                        await self._warn_key_clash(reg, inst, start, rc.run_key(inst, start, sched["id"]))
-                    except RegistryError as e:  # a refused open (its follow-on's time closed, a follow-on raid gone — design §5.62)
-                        await self._warn_open_refused(reg, inst, start, rc.run_key(inst, start, sched["id"]), e)
+            for sched, start in rc.occurrences(reg, now, lead=True):
+                if rc.event_of_occurrence(rs, sched["id"], rc.occurrence_stamp(reg, start), reg=reg) is not None:
+                    continue
+                try:
+                    await self.open_run_and_post(reg, rs, sched["raid"], start, by="scheduler", schedule=sched["id"])
+                except RegistryError as e:  # a refused open (a follow-on raid gone — design §5.62)
+                    await self._warn_open_refused(reg, sched, start, e)
         else:
             await self._warn_unopened(reg, now)
         # every live run is processed even when its sheet channel can't be resolved: the steps that post to a

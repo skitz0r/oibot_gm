@@ -996,7 +996,7 @@ def test_healthz_reports_each_guild(duo):
 
 def test_two_guild_fixture_holds_a_colliding_schedule_key(duo):
     ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b, schedule="fri")
-    assert "-fri-" in ev_a.key and duo.rs_a.events[ev_a.key] is not duo.rs_b.events[ev_b.key]
+    assert ev_a.schedule == ev_b.schedule == "fri" and duo.rs_a.events[ev_a.key] is not duo.rs_b.events[ev_b.key]
     shared = {m.display_name for m in duo.a.test_members()} & {m.display_name for m in duo.b.test_members()}
     assert len(shared) == len(duo.b.test_members()), "the same puppet names in both guilds"
     assert duo.a.config.owner_discord_id == OWNER and duo.b.config.owner_discord_id == OWNER2

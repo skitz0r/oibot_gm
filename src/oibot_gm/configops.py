@@ -294,7 +294,8 @@ def live_runs_text(reg: Registry, raids=None) -> str:
     now = reg.now_local()
     for rid in reg.profile.raids:
         try:
-            nxt = [(s, t) for s, t in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if rc.event_key(rid, t, s["id"]) not in rs.events][:6]
+            nxt = [(s, t) for s, t in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS)
+                   if rc.event_of_occurrence(rs, s["id"], rc.occurrence_stamp(reg, t), reg=reg) is None][:6]
         except Exception:  # noqa: BLE001 — a raid with a broken schedule must not break the parser's context
             continue
         if nxt:
@@ -2491,8 +2492,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         rid = op.target or ""
         start, sid = _open_time(reg, rid, op.value, op.field)
         rs = rc.RaidStore(reg.store, reg.key)
-        key = rc.event_key(rid, start, sid)
-        have = rs.events.get(key)
+        have = rc.find_run(reg, rs, rid, start, sid)
         where = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "nowhere (no signup channel set — /raid sheet can place it)"
         sname = next((f" · {s['name']}" for s in reg.schedules(rid) if s["id"] == sid and len(reg.schedules(rid)) > 1), "")
         fw = follow_of_op(reg, rid, op.text)
@@ -2506,7 +2506,9 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
                 return (f"{head}: already {have.state} as {have.key}. A follow-on can't be added to a run that is already open."
                         " Cancel it and open the night again.")
             return f"{head}: already {have.state} as {have.key} — nothing new is posted"
-        return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then} now ({key}): sheet posted in {where}, absences pre-filled"
+        if have is not None:  # that time's run is closed: open_run refuses it
+            raise RegistryError(rc.closed_run_refusal(rs, have) or "That time's run can't be opened again. Pick another time.")
+        return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then} now: sheet posted in {where}, absences pre-filled"
     if op.op == "test":
         kind, arg = _test_op(op.value)
         n = len(reg.test_members())
@@ -3316,7 +3318,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_open":
         rid = op.target or ""
         start, sid = _open_time(reg, rid, op.value, op.field)
-        ev = await bot.open_run_and_post(reg, rs, rid, start, by, follow=follow_of_op(reg, rid, op.text), **rc.schedule_kw(sid))
+        ev = await bot.open_run_and_post(reg, rs, rid, start, by, follow=follow_of_op(reg, rid, op.text), schedule=sid)
         return f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted; /raid sheet places it)")
     if op.op == "absence_clear":  # THE "I'm back" verb (discord_people.im_back): the absence goes, its sheets re-open
         from . import discord_people

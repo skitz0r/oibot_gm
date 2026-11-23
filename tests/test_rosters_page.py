@@ -69,8 +69,8 @@ def test_live_runs_soonest_first_never_a_test_run_and_next_run_skips_them(reg, r
     r = raid(c)
     assert [x["key"] for x in r["live_runs"]] == [b.key, a.key]
     assert all(x["state"] == "open" and "PM" in x["when"] for x in r["live_runs"])
-    keys = {u["key"] for u in r["upcoming"]}
-    assert a.key not in keys and b.key not in keys  # a live run has its own card, not an upcoming row
+    occs = {u["occurrence"] for u in r["upcoming"]}
+    assert a.occurrence not in occs and b.occurrence not in occs  # a live run has its own card, not an upcoming row
     assert r["next_run"]["when"] == reg.local12(starts[2])
 
 
@@ -80,7 +80,7 @@ def test_a_closed_run_at_an_upcoming_time_says_why_it_cant_open(reg, rs, c):
     ev = rc.open_run(reg, rs, RID, first, by="t")
     rc.end_run(reg, rs, ev, "t")
     r = raid(c)
-    row = next(u for u in r["upcoming"] if u["key"] == ev.key)
+    row = next(u for u in r["upcoming"] if u["occurrence"] == ev.occurrence)
     assert row["can_open"] is False and "already ended" in row["why"]
     assert r["next_run"]["when"] != row["start"]  # the next run is one that can still have a sheet
 

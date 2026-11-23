@@ -599,9 +599,9 @@ def test_open_preview_resolves_dst_nights_and_matches_a_scheduled_run(reg, rs):
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
     weekly(reg, "barrow_deeps", "Wed 20:00")
     hit = rc.open_preview(reg, rs, "barrow_deeps", f"{wed.isoformat()} 20:00", None)
-    assert hit["kind"] == "scheduled" and hit["key"] == rc.event_key("barrow_deeps", datetime.fromisoformat(hit["start"]), "barrow-deeps")
+    assert hit["kind"] == "scheduled" and hit["occurrence"] == rc.occurrence_stamp(reg, datetime.fromisoformat(hit["start"])) and "key" not in hit
     again = rc.open_preview(reg, rs, "barrow_deeps", hit["start"], None)  # the exact instant carried back by Open
-    assert again["key"] == hit["key"] and again["start"] == hit["start"]
+    assert again["occurrence"] == hit["occurrence"] and again["start"] == hit["start"]
     with pytest.raises(RegistryError, match="pick one"):
         rc.open_when(reg, "barrow_deeps", None, "adhoc")
 
@@ -740,10 +740,10 @@ def test_open_preview_and_open_routes_carry_the_exact_instant(reg, rs, web_bot):
     weekly(reg, "barrow_deeps", "Wed 20:00")
     p = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00"}, headers=H()).json()
     assert p["kind"] == "scheduled"
-    bad = c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "key": "bd-0000-0000-2000-01-01"}, headers=H())
-    assert bad.status_code == 409 and bad.json()["preview"]["key"] == p["key"] and not rs.events
-    ok = c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "key": p["key"]}, headers=H())
-    assert ok.status_code == 200 and ok.json()["key"] == p["key"] and p["key"] in rs.events, ok.text
+    bad = c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "occurrence": "2000-01-01T00:00"}, headers=H())
+    assert bad.status_code == 409 and bad.json()["preview"]["occurrence"] == p["occurrence"] and not rs.events
+    ok = c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "occurrence": p["occurrence"]}, headers=H())
+    assert ok.status_code == 200 and rs.events[ok.json()["key"]].occurrence == p["occurrence"], ok.text
 
 
 def test_runs_history_pages_beyond_the_first_eight(reg, rs, web_bot):
@@ -763,7 +763,7 @@ def test_upcoming_rows_carry_the_instant_and_say_when_no_channel_can_take_the_sh
     weekly(reg, "barrow_deeps", "Wed 20:00")
     reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
     bd = next(x for x in web_bot.c.get("/api/rosters", headers=H()).json()["raids"] if x["id"] == "barrow_deeps")
-    assert bd["upcoming"] and all(u["start_iso"] and u["key"] for u in bd["upcoming"])
+    assert bd["upcoming"] and all(u["start_iso"] and u["occurrence"] for u in bd["upcoming"])
     assert bd["upcoming"][0]["needs_channel"] is True and bd["signup_channel"] is False
 
 
@@ -1095,15 +1095,16 @@ def test_opening_at_a_cancelled_runs_time_is_refused_and_the_preview_says_so(reg
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
     weekly(reg, "barrow_deeps", "Wed 20:00")
     p = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00"}, headers=H()).json()
-    assert c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "key": p["key"]}, headers=H()).status_code == 200
-    ev = rs.events[p["key"]]
+    r0 = c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "occurrence": p["occurrence"]}, headers=H())
+    assert r0.status_code == 200
+    ev = rs.events[r0.json()["key"]]
     run(bot.cancel_run(reg, rs, ev, "Jon", None, notify=False))
     run(bot.cleanup_ephemeral(reg, rs))
     assert not reg.config.team(ev.team)
     opened_lines = sum("opened" in t for _, t in bot.ops.lines)
     p2 = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00"}, headers=H()).json()
     assert p2["closed"] == "cancelled" and "was cancelled" in p2["refusal"] and p2["exists"] is None
-    r = c.post("/api/raid/barrow_deeps/open", json={"start": p2["start"], "key": p2["key"]}, headers=H())
+    r = c.post("/api/raid/barrow_deeps/open", json={"start": p2["start"], "occurrence": p2["occurrence"]}, headers=H())
     assert r.status_code == 400 and "was cancelled" in r.json()["error"], r.text
     assert ev.state == "cancelled" and not reg.config.team(ev.team), "a refused open re-creates no roster entry"
     assert sum("opened" in t for _, t in bot.ops.lines) == opened_lines, "no 'opened' audit line for a refused open"
@@ -1118,12 +1119,12 @@ def test_a_test_run_opened_after_clearing_one_the_same_minute_is_a_live_run(reg,
     run(bot.cancel_run(reg, rs, ev, "Jon", None, notify=False))  # what clearing the bench does to its runs
     ev2, _ = run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=10, nudge_in=8, lock_in=6, confirm_in=3, dm=False, by="Jon", by_id=1, channel=bot.signup))
     assert ev2.key != ev.key and ev2.state == "open" and ev.state == "cancelled", "a fresh rehearsal, never the cleared one handed back"
-    assert ev2.key.endswith(f"-test-{ev2.start.date().isoformat()}"), "still in the '-test' key space"
+    assert ev2.test and rc.live_at(rs, "barrow_deeps", ev2.start, test=True) is ev2 and rc.live_at(rs, "barrow_deeps", ev2.start) is None
 
 
 def test_rosters_page_open_of_the_raids_own_scheduled_run_from_the_adhoc_picker(reg, rs, web_bot):
     """Rosters.tsx StartAdhoc: a one-off time that IS the raid's own (default) run previews as 'scheduled' with schedule
-    null; the page then sends schedule 'default' (it used to send 'adhoc' → 409, the key never matched)."""
+    null; the page then sends schedule 'default' (it used to send 'adhoc' → 409, the run never matched)."""
     c = web_bot.c
     wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
@@ -1131,10 +1132,10 @@ def test_rosters_page_open_of_the_raids_own_scheduled_run_from_the_adhoc_picker(
     p = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00", "schedule": ""}, headers=H()).json()
     assert p["kind"] == "scheduled" and p["schedule"] == "barrow-deeps"  # phase 3: always the schedule's id
     tpl = "adhoc"  # the page's template select: One-off
-    sent = {"start": p["start"], "key": p["key"],
+    sent = {"start": p["start"], "occurrence": p["occurrence"],
             "schedule": p["schedule"] if p["kind"] == "scheduled" else (p["schedule"] or ("adhoc" if tpl == "adhoc" else tpl))}
     r = c.post("/api/raid/barrow_deeps/open", json=sent, headers=H())
-    assert r.status_code == 200 and r.json()["key"] == p["key"], r.text
+    assert r.status_code == 200 and rs.events[r.json()["key"]].occurrence == p["occurrence"], r.text
     from pathlib import Path
     page = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Rosters.tsx").read_text()
     assert 'p.kind === "scheduled" ? p.schedule :' in page, "the page sends what this test sends"

@@ -175,9 +175,8 @@ def test_raid_open_next_run_is_recurring_on_the_default_series(reg, rs, raid_off
         await h.press(f"Next run — {reg.local12(t0)}")
         await h.press("Open")
     asyncio.run(go())
-    ev = rs.events[rc.event_key(RID, t0, "barrow-deeps")]
-    assert (ev.kind, ev.series) == ("recurring", "barrow-deeps")
-    assert ev.key == rc.event_key(RID, t0, "barrow-deeps") and "-adhoc-" not in ev.key
+    ev = rc.event_of_occurrence(rs, "barrow-deeps", rc.occurrence_stamp(reg, t0))
+    assert (ev.kind, ev.series, ev.schedule) == ("recurring", "barrow-deeps", "barrow-deeps")
 
 
 def test_raid_open_another_upcoming_run_keeps_its_schedules_series(reg, rs, raid_officer):
@@ -197,8 +196,8 @@ def test_raid_open_another_upcoming_run_keeps_its_schedules_series(reg, rs, raid
         await h.pick("Pick the run", f"{alt_t.isoformat()}|alt")
         await h.press("Open")
     asyncio.run(go())
-    ev = rs.events[rc.event_key(RID, alt_t, "alt")]
-    assert (ev.kind, ev.series) == ("recurring", "alt") and ev.key.split("-")[3] == "alt"
+    ev = rc.event_of_occurrence(rs, "alt", rc.occurrence_stamp(reg, alt_t))
+    assert (ev.kind, ev.series, ev.schedule) == ("recurring", "alt", "alt")
 
 
 def test_raid_open_ad_hoc_pickup_template_is_adhoc_without_a_series(reg, rs, raid_officer):
@@ -219,7 +218,7 @@ def test_raid_open_ad_hoc_pickup_template_is_adhoc_without_a_series(reg, rs, rai
         await h.submit(h.modal, day=day, hour="21", minute="0")
         await h.press("Open")
     asyncio.run(go())
-    ev = next(e for e in rs.events.values() if e.key.split("-")[3] == "pug")
+    ev = next(e for e in rs.events.values() if e.schedule == "pug")
     assert (ev.kind, ev.series) == ("adhoc", None) and ev.start.hour == 21
     assert not rc.run_confirms(reg, ev) and rc.expected_from(reg, ev) == "none"
 
@@ -239,15 +238,15 @@ def test_plain_text_run_open_applies_with_the_right_class(reg, rs):
     apply = lambda op: asyncio.run(configops.apply_async(reg, op, "Owner", True, bot=bot))  # noqa: E731
     t0 = rc.upcoming(reg, RID, reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)[0][1]
     line = apply(ConfigOp(op="run_open", target=RID))
-    ev = rs.events[rc.event_key(RID, t0, "barrow-deeps")]
+    ev = rc.event_of_occurrence(rs, "barrow-deeps", rc.occurrence_stamp(reg, t0))
     assert line.startswith(f"opened {ev.key}") and (ev.kind, ev.series) == ("recurring", "barrow-deeps")
     when = soon(reg, 9, 22)
     apply(ConfigOp(op="run_open", target=RID, value=when.strftime("%Y-%m-%d %H:%M")))
-    one = rs.events[rc.event_key(RID, when, ADHOC_SCHEDULE)]
-    assert (one.kind, one.series) == ("adhoc", None) and "-adhoc-" in one.key
+    one = rc.live_at(rs, RID, when)
+    assert (one.kind, one.series, one.schedule) == ("adhoc", None, None)
     pug_t = soon(reg, 10, 20)
     apply(ConfigOp(op="run_open", target=RID, field="pug", value=pug_t.strftime("%Y-%m-%d %H:%M")))
-    pug = rs.events[rc.event_key(RID, pug_t, "pug")]
+    pug = rc.event_of_occurrence(rs, "pug", rc.occurrence_stamp(reg, pug_t))
     assert (pug.kind, pug.series) == ("adhoc", None)
 
 

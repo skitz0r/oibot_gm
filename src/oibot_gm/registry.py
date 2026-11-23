@@ -885,8 +885,8 @@ SCHEDULE_TIMING = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before
                    "fill_ask_hours", "nudge", "autofill", "open_dm", "confirm")
 TIMING_ON_SCHEDULE = "Sheet timing belongs to each schedule now. Change it on the schedule."
 MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
-# A follow-on run (design §5.62) — a second raid the same night from the same signup — keys its run with this reserved
-# schedule id ('bd-1209-2130-after'), so it never collides with a run of that raid's own schedules at the same minute.
+# A follow-on run (design §5.62) — a second raid the same night from the same signup — carries this reserved schedule id
+# in its run dict's `schedule_id` (never in its key: a run key holds no time or schedule since phase 3).
 FOLLOW_SCHEDULE = "after"
 FOLLOW_WORDS = {"none", "clear", "off", "no", ""}
 SCHEDULE_NAMES = {"weekly": "Weekly", "lockout": "Lockout days", "pickup": "Pickup"}
@@ -899,7 +899,7 @@ CLASSES = ("recurring", "adhoc")
 CLASS_WORDS = {"recurring": "Recurring", "adhoc": "Ad hoc"}
 # A one-off run ("Another day and time…", a picked time that is none of the upcoming runs) comes from this VIRTUAL schedule:
 # schedule_def_of knows it (ad hoc defaults), schedules_of never lists it (listings, wizards, the config dump don't change),
-# and run_key gives it the '-adhoc' suffix, so a one-off is never mistaken for a run of the raid's own run times.
+# and its run carries no schedule stamp (RaidEvent.schedule None), so a one-off is never mistaken for a schedule's run.
 ADHOC_SCHEDULE = "adhoc"
 ADHOC_SCHEDULE_NAME = "Ad hoc"
 
@@ -1117,7 +1117,7 @@ def _unique_id(base: str, taken) -> str:
 
 
 # ids no schedule may take: an older file's `default`, and the key spaces old run dicts carry (ADHOC_SCHEDULE,
-# raidcycle.TEST_SCHEDULE, FOLLOW_SCHEDULE)
+# a rehearsal's `test`, FOLLOW_SCHEDULE)
 RESERVED_SCHEDULE_IDS = (_OLD_DEFAULT, "adhoc", "test", "after")
 
 
@@ -1354,7 +1354,7 @@ def norm_schedule(row: dict) -> dict:
             out[k] = nv
     if sid == ADHOC_SCHEDULE:
         raise RegistryError(f"schedule id {ADHOC_SCHEDULE!r} is kept for one-off runs; pick another id")
-    if sid == "test":  # raidcycle.TEST_SCHEDULE: the test runs' key space ('bd-1209-1930-test'), never a real schedule's
+    if sid == "test":  # a rehearsal's run dict carries it (raidcycle._REHEARSAL), never a real schedule
         raise RegistryError("schedule id 'test' is kept for test runs; pick another id")
     if sid == FOLLOW_SCHEDULE:
         raise RegistryError(f"schedule id {FOLLOW_SCHEDULE!r} is kept for follow-on runs; pick another id")

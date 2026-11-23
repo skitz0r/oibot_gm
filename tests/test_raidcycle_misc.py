@@ -12,7 +12,7 @@ def test_solver_error_text():
     assert rc.solver_error_text(ValueError("boom")) == "building the roster failed: boom"
 
 
-def test_parse_schedule_and_run_key():
+def test_parse_schedule_and_the_raid_abbreviation():
     assert rc.parse_schedule("Tue 19:30") == (1, 19, 30)
     assert rc.parse_schedule("thursday 20:00") == (3, 20, 0)
     with pytest.raises(ValueError):
@@ -21,7 +21,6 @@ def test_parse_schedule_and_run_key():
     from zoneinfo import ZoneInfo
 
     t = datetime(2026, 12, 9, 19, 30, tzinfo=ZoneInfo("America/Los_Angeles"))
-    assert rc.run_key("barrow_deeps", t) == "bd-1209-1930"
     assert rc.abbr("hyjal_summit_forever") == "hsf"
     assert t.weekday() == 2  # 2026-12-09 is a Wednesday
     assert rc.next_raid_time("Wed 19:30", "America/Los_Angeles", after=t) == t + timedelta(days=7), "the same minute is not 'next'"

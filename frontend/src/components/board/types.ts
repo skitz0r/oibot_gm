@@ -43,7 +43,7 @@ export interface LockPreview { board: Board; consequence: string; leftovers: str
 
 /** POST /api/raid/{rid}/open/preview — what Open would do (rc.open_preview); `start` is carried back to Open. */
 export interface OpenPreview {
-  kind: "scheduled" | "adhoc"; schedule: string | null; schedule_name: string; key: string; start: string; label: string; when_note: string;
+  kind: "scheduled" | "adhoc"; schedule: string | null; schedule_name: string; occurrence: string | null; start: string; label: string; when_note: string;
   exists: string | null; channel: number | null; channel_name?: string | null; rules: string; past: boolean;
   /** where the sheet goes, one sentence from the server */
   posts?: string;

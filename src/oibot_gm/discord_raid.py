@@ -1332,7 +1332,8 @@ class RaidMixin:
 
     # ---- opening and cancelling runs (commands, the web and plain-text ops share these)
     async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None, follow: dict | None = None) -> rc.RaidEvent:
-        """Open (or find) the run for `instance` at `start` (from `schedule`, None = the raid's own cadence), post its
+        """Open (or find) the run for `instance` at `start` (from `schedule`, None = the schedule with a run at exactly
+        that start, else a one-off — rc.open_run), post its
         sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
         place it), and say so on the ops feed. A start more than a few minutes in the past is refused
         (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts."""
@@ -1356,8 +1357,8 @@ class RaidMixin:
         tester (`by_id`), `dm` = DM every puppet when it opens (the puppets' DMs reach the tester as one digest). The
         sheet goes to the signup channel, else to `channel` (where it was asked for); with neither (the site, MCP, a DM
         without a signup channel) it is refused before anything is written, naming the setting (NO_TEST_CHANNEL). Its
-        officer cards post in `channel` when it is a server channel (D20; officer_channel), and its key is in the
-        '-test' key space (rc.TEST_SCHEDULE), so it never shares a real run's roster. The audit line (ops.audited, `via` = the surface) is the verb's own. Returns (the run, the channel it was posted in or None). rc.open_run runs on the event loop, as in
+        officer cards post in `channel` when it is a server channel (D20; officer_channel), and a rehearsal is found only
+        by a rehearsal (rc.live_at with test=True), so it never shares a real run's roster. The audit line (ops.audited, `via` = the surface) is the verb's own. Returns (the run, the channel it was posted in or None). rc.open_run runs on the event loop, as in
         open_run_and_post: it adds to the live events the loop's handlers iterate, so never from a worker thread (L3);
         its one git commit is the same short block every on-demand open has."""
         start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
@@ -1366,10 +1367,6 @@ class RaidMixin:
         target = (self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None) or (channel if in_guild else None)
         if target is None:  # nowhere to post the sheet: refused before anything is written (the site, MCP, a DM), naming why
             raise RegistryError(bench_channel_refusal(reg, self.get_channel) or NO_TEST_CHANNEL)
-        for _ in range(60):  # a rehearsal cleared (cancelled) this minute keeps its key: start a minute later instead
-            if not rc.closed_run_refusal(rs, rc.event_key(raid, start, test=True)):
-                break
-            start += timedelta(minutes=1)
         cut = {"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(dm), "test_by": by_id}
         if in_guild:
             cut["test_channel"] = channel.id  # its health / lock cards post where it was asked for (D20)

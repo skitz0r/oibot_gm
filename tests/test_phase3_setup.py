@@ -430,7 +430,7 @@ def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypat
     res = c.post("/api/raid/barrow_deeps/open", json={"start": f["start"], "schedule": "alt"}, headers=bearer())
     assert res.status_code == 200, res.text
     key = res.json()["key"]
-    assert rows()[1]["open_key"] == key and rows()[0]["open_key"] is None and key.endswith("-alt-" + f["start"][:10])
+    assert rows()[1]["open_key"] == key and rows()[0]["open_key"] is None and rs.events[key].schedule == "alt"
     src = (FRONT / "pages" / "Readiness.tsx").read_text()
     assert "Open this run early" in src and "/api/raid/${r.raid}/open" in src and "start: f.start, schedule: s.id" in src and "useConfirm" in src
 

@@ -4,6 +4,7 @@ verbs (here: a fake bot that records the calls). No LLM anywhere."""
 from __future__ import annotations
 
 import asyncio
+import re
 import types
 
 import pytest
@@ -161,7 +162,7 @@ def test_describe_run_ops(reg, rs):
     assert "not joined on this sheet: Nobody" in d(op="run_board", target=ev.key, value="Nobody")
     assert "no live run bd-0101-0000" in d(op="run_lock", target="bd-0101-0000")
     o = d(op="run_open", target="barrow_deeps", value="2030-01-08 19:30")
-    assert o.startswith("open Barrow Deeps") and "bd-0108-1930-adhoc-2030-01-08" in o and "no signup channel" in o
+    assert o.startswith("open Barrow Deeps Tue 8 Jan 7:30 PM now:") and "no signup channel" in o
     assert "unknown raid" in d(op="run_open", target="nowhere")
     bad = d(op="run_open", target="barrow_deeps", value="tonight")
     assert "couldn't tell which time" in bad and "7:30 PM" in bad and "19:30" not in bad and "2026-" not in bad
@@ -234,9 +235,9 @@ def test_run_open(reg, rs):
         configops.apply(reg, ConfigOp(op="run_open", target="barrow_deeps", value="2030-01-08 19:30"), "officer", is_owner=False)
     out = run(configops.apply_async(reg, ConfigOp(op="run_open", target="barrow_deeps", value="2030-01-08 19:30"), "Officer", False, bot=bot))
     # a time that is none of the raid's upcoming runs is a one-off: ad hoc (roster redesign Phase 1)
-    assert out.startswith("opened bd-0108-1930-adhoc-2030-01-08") and "no signup channel" in out
+    assert re.match(r"opened bd-[a-z0-9]{6} ", out) and "no signup channel" in out
     assert bot.calls[0][:2] == ("open_run_and_post", "barrow_deeps") and bot.calls[0][2].startswith("2030-01-08T19:30") and bot.calls[0][4] == "adhoc"
-    ev = rs.for_team("bd-0108-1930-adhoc")
+    ev = rs.for_team(out.split()[1])
     assert ev.state == "open" and ev.kind == "adhoc" and ev.series is None
     with pytest.raises(RegistryError, match="no recurring slots yet"):
         run(configops.apply_async(reg, ConfigOp(op="run_open", target="barrow_deeps"), "Officer", False, bot=bot))
@@ -377,7 +378,7 @@ def test_test_bench(reg, rs):
     assert out.startswith("test run bd-") and "lock 25 min before" in out and "sheet in <#777>" in out
     ev = rs.live()[0]
     t = reg.config.roster(ev.team)
-    assert ev.team.endswith("-test") and t["test_channel"] == 777, "the -test key space; its cards post where it was asked for (D20)"
+    assert ev.test and t["test_channel"] == 777, "a rehearsal; its cards post where it was asked for (D20)"
     assert t["test"] is True and t["test_by"] == 42 and t["cutoff_hard_hours"] == 25 / 60 and t["confirm_hours"] == 15 / 60
     assert bot.calls == [("post_sheet", ev.key, 777)]
     bot.calls.clear()

@@ -66,7 +66,8 @@ def open_pair(reg, rs, days: float = 3):
 def test_open_pair_opens_two_runs_with_one_signup(reg, rs):
     lead, fev = open_pair(reg, rs)
     assert fev is not None and fev.follows == lead.key and lead.followed_by == fev.key
-    assert fev.instance == FOLLOW and "-after-" in fev.key  # 'bd-MMDD-HHMM-after-YYYY-MM-DD'
+    assert fev.instance == FOLLOW and fev.key.startswith("bd-") and fev.team == fev.key  # a key of its own, no time in it
+    assert (fev.event, fev.part, fev.starts) == (lead.key, 1, 180)
     assert fev.start == lead.start + timedelta(hours=3)  # Hyjal lasts 3 h
     t, ft = reg.config.roster(lead.team), reg.config.roster(fev.team)
     assert t["follow"] == {"raid": FOLLOW, "rosters": 2} and t["followed_by"] == ft["key"] and ft["follows"] == t["key"]
@@ -145,23 +146,23 @@ def test_the_pair_finds_each_others_dicts(reg, rs):
     assert rc.lead_dict(reg, lead) is None and rc.follow_dict(reg, fev) is None
 
 
-def test_a_second_lead_on_the_same_follow_on_is_refused(reg, rs):
+def test_a_second_lead_at_the_same_minute_keeps_its_own_follow_on(reg, rs):
+    """Phase 3: a follow-on's key holds no time, so a schedule's run at the one-off's minute is a pair of its own —
+    neither lead ever takes the other's follow-on."""
     lead, fev = open_pair(reg, rs)
-    n_dicts, n_events = len(reg.config.rosters), len(rs.events)
-    with pytest.raises(RegistryError, match=r"^That night already has a Barrow Deeps follow-on after .+\. Pick another time\.$"):
-        rc.open_run(reg, rs, LEAD, lead.start, by="t", schedule=night(reg, lead), follow={"raid": FOLLOW, "rosters": 1})  # a schedule's run, same minute
-    assert len(reg.config.rosters) == n_dicts and len(rs.events) == n_events
-    assert reg.config.roster(fev.team)["follows"] == lead.team
+    other = rc.open_run(reg, rs, LEAD, lead.start, by="t", schedule=night(reg, lead), follow={"raid": FOLLOW, "rosters": 1})
+    ofev = rc.follow_of(rs, other)
+    assert other is not lead and ofev is not None and ofev.key != fev.key and ofev.follows == other.key
+    assert reg.config.roster(fev.team)["follows"] == lead.team and rc.follow_of(rs, lead) is fev
 
 
-def test_a_cancelled_follow_on_refuses_the_night_and_opens_no_lead(reg, rs):
+def test_a_cancelled_follow_on_never_brings_a_second_lead(reg, rs):
     lead, fev = open_pair(reg, rs)
     fev.state = "cancelled"
     rs.save(fev, "cancelled")
     n_dicts, n_events = len(reg.config.rosters), len(rs.events)
-    with pytest.raises(RegistryError, match="cancelled"):
-        rc.open_run(reg, rs, LEAD, lead.start, by="t", schedule=night(reg, lead), follow={"raid": FOLLOW, "rosters": 1})
-    assert len(reg.config.rosters) == n_dicts and len(rs.events) == n_events
+    assert rc.open_run(reg, rs, LEAD, lead.start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 1}) is lead
+    assert len(reg.config.rosters) == n_dicts and len(rs.events) == n_events and rc.follow_of(rs, lead).state == "cancelled"
 
 
 def night(reg, lead) -> str:
@@ -251,8 +252,8 @@ def test_the_scheduler_skips_a_follow_on_while_its_lead_is_open(reg, rs, monkeyp
 
 
 def test_a_refused_scheduled_open_never_stops_the_guilds_minute(reg, rs, monkeypatch):
-    """A weekly Hyjal with a Barrow Deeps follow-on whose follow-on time was cancelled (an officer's ad hoc pair at the
-    same minute, then cancelled): the scheduled open is refused. One ops warn, and the same tick still locks another run."""
+    """A weekly Hyjal with a Barrow Deeps follow-on whose scheduled open the registry refuses: one ops warn, and the
+    same tick still locks another run."""
     unlock_hyjal(reg)
     reg.config.signup_channel_id = 1111
     reg.set_schedule("tue", {"slots": "Mon 18:30, Tue 18:30, Wed 18:30, Thu 18:30, Fri 18:30, Sat 18:30, Sun 18:30",
@@ -263,9 +264,15 @@ def test_a_refused_scheduled_open_never_stops_the_guilds_minute(reg, rs, monkeyp
     monkeypatch.setattr(reg, "now_local", lambda: now)
     _s, t = rc.upcoming(reg, LEAD, now, lead=True)[0]
     bot = NightBot(reg, rs)
-    adhoc = rc.open_run(reg, rs, LEAD, t, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 2})
-    run(bot.cancel_run(reg, rs, adhoc, "t", None))
     other = rc.open_run(reg, rs, FOLLOW, now + timedelta(minutes=30), by="t", schedule=rc.ADHOC_SCHEDULE)
+    real_ensure = rc.ensure_run
+
+    def refused(reg_, instance, start, *a, **k):
+        if instance == LEAD and start == t:  # that one night only
+            raise RegistryError("That time's run was cancelled, and a cancelled run isn't opened again. Pick another time.")
+        return real_ensure(reg_, instance, start, *a, **k)
+
+    monkeypatch.setattr(rc, "ensure_run", refused)
     locked = []
 
     async def lock_run(reg, rs, ev, by="scheduler"):
@@ -679,7 +686,7 @@ def test_open_route_takes_a_follow_on(reg, rs, monkeypatch):
     assert p["follow"]["name"] == "Barrow Deeps" and p["follow_line"].startswith("Then Barrow Deeps ×2")
     plain = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": ""}, headers=bearer()).json()
     assert plain["follow"] is None
-    r = fc.post(f"/api/raid/{LEAD}/open", json={"start": p["start"], "key": p["key"], "schedule": "adhoc", "follow": "barrow_deeps x2"}, headers=bearer())
+    r = fc.post(f"/api/raid/{LEAD}/open", json={"start": p["start"], "occurrence": p["occurrence"], "schedule": "adhoc", "follow": "barrow_deeps x2"}, headers=bearer())
     assert r.status_code == 200, r.text
     assert r.json()["message"].endswith(", then Barrow Deeps ×2")
     lead = rs.events[r.json()["key"]]
@@ -815,10 +822,21 @@ def test_another_guilds_council_on_the_same_run_key_never_moves_this_leads_windo
     a.seed_test_members(24, "t")
     b.seed_test_members(24, "t")
     start = (a.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
-    pairs = {}
+    pairs, made = {}, []
+    keyer = rc.new_run_key  # phase 3: keys are random — guild B is handed guild A's keys on purpose (the premise)
+
+    def same_keys(reg_, rs_, inst):
+        made.append(keyer(reg_, rs_, inst)) if reg_.key == a.key else None
+        return made[-1] if reg_.key == a.key else made.pop(0)
+
+    rc.new_run_key = same_keys
     for r, rs in ((a, rs_a), (b, rs_b)):
         unlock_hyjal(r)
-        lead = rc.open_run(r, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 1})
+        try:
+            lead = rc.open_run(r, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": FOLLOW, "rosters": 1})
+        finally:
+            if r.key == b.key:
+                rc.new_run_key = keyer
         fev = rc.follow_of(rs, lead)
         ms = r.test_members()
         join(r, rs, lead, ms[:20])

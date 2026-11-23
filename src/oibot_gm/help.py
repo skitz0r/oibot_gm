@@ -801,7 +801,7 @@ def next_sheet_lines(reg: Registry, rs) -> list[str]:
         except Exception:  # noqa: BLE001 — a half-configured raid must not break the snapshot
             continue
         for s, start in ups:
-            if rc.event_key(rid, start, s["id"]) in rs.events:
+            if rc.event_of_occurrence(rs, s["id"], rc.occurrence_stamp(reg, start), reg=reg) is not None:
                 continue
             lead = float(reg.schedule_def(rid, s["id"])["signup_lead_hours"])
             opens = start - timedelta(hours=lead)

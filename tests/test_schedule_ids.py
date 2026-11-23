@@ -296,7 +296,7 @@ def test_a_new_run_of_a_schedule_carries_its_id_as_its_series(reg, rs):
     start = rc.next_runs_of(reg, RID, reg.schedule_entry(sid), n=1)[0]
     t = rc.ensure_run(reg, RID, start, schedule=sid)
     assert (t["series"], t["schedule_id"], t["kind"]) == (sid, sid, "recurring")
-    assert t["key"].endswith(f"-{sid}")
+    assert t["occurrence"] == rc.occurrence_stamp(reg, start) and t["event"] == t["key"]
 
 
 # ---- fix round 1
@@ -387,7 +387,7 @@ def test_an_old_run_without_a_schedule_reads_its_schedule_through_the_aliases(ol
     rs = rs_for(store)
     start = rc.next_runs_of(reg, RID, reg.schedule_entry("barrow-deeps"), n=1, now=reg.now_local())[0]
     ev = rc.open_run(reg, rs, RID, start, by="t", schedule="barrow-deeps")
-    ev.schedule = None  # as the old `default` opened it
+    ev.schedule, ev.event = None, None  # as the old `default` opened it: no stamps
     reg.config.roster(ev.team).pop("schedule_id")
     assert rc.run_schedule_id(reg, ev) == "barrow-deeps"
 
