@@ -34,7 +34,10 @@ def test_the_splits_are_the_leads_roster(reg, rs):
     assert all((("dps" if role[n] in ("melee", "ranged") else role[n]) in short) for n in extra)
 
 
-def test_follow_on_caps_rosters_by_roles(reg, rs):
+def test_follow_on_builds_its_declared_second_roster_short_a_tank(reg, rs):
+    """The owner, 2026-11-22: a declared second roster is built as soon as the joiners no longer fit in one, even with
+    tanks for only one, and the short seats stay open to fill. Three tanks for two 10s (four needed): two full rosters,
+    and the missing tank is told where the code reports a shortfall — the run's needs and the lead's follow-on line."""
     reg.seed_test_members(24, "t")
     lead, fev = open_pair(reg, rs)
     ms = reg.test_members()
@@ -45,7 +48,9 @@ def test_follow_on_caps_rosters_by_roles(reg, rs):
     rs.save(lead, "locked (test)")
     fev = rs.events[fev.key]
     rc.propose(reg, rs, fev)
-    assert len(fev.all_rosters) == 1
+    assert [len(r.selected) for r in fev.all_rosters] == [10, 10], "the joiners don't fit in one 10: the declared second roster is built"
+    assert rc.needs(reg, fev)["roles"] == {"tank": 1}, "the follow-on's needs name the tank the two rosters are short"
+    assert rc.follow_short(reg, lead) == {"tank": 1}, "the lead's health card says the follow-on is a tank short"
 
 
 def test_the_leads_board_beats_first_come_on_the_follow_on(reg, rs):
