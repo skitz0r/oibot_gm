@@ -10,7 +10,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from conftest import OWNER, join, lock_with_board, open_test_run
+from conftest import OWNER, join, lock_with_board, open_test_run, weekly
 from test_mcp import FakeBot
 
 from oibot_gm import presets
@@ -93,7 +93,7 @@ def test_set_answer_refuses_a_real_member_on_a_test_run(reg, rs):
 
 def test_a_real_run_still_takes_real_members(reg, rs):
     bot = Bot(reg, rs)
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30"}, "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30")
     start = (reg.now_local() + timedelta(days=3)).replace(second=0, microsecond=0)
     ev = rc.open_run(reg, rs, "barrow_deeps", start, by="t")
     m = real_member(reg)
@@ -283,18 +283,20 @@ def test_registry_changes_are_kept_in_a_ring(reg):
 
 def test_shadow_previews_never_touch_the_live_config(reg):
     head = reg.store.head()
-    before = reg.raid_def("barrow_deeps")["slots"]
-    rows = rc.next_runs_preview(reg, "barrow_deeps", fields={"slots": "Sat 20:00", "first_open": "2020-01-01T00:00"})
+    before = reg.raid_def("barrow_deeps")
+    sat = {"schedule": "sat", "schedule_fields": {"kind": "weekly", "slots": "Sat 20:00"}}  # phase 3: run times are a schedule's
+    rows = rc.next_runs_preview(reg, "barrow_deeps", fields={"first_open": "2020-01-01T00:00"}, **sat)
     assert rows and all("Sat" in label and "8:00 PM" in label for label in rows[0]["labels"])
-    assert reg.raid_def("barrow_deeps")["slots"] == before and reg.store.head() == head
+    assert reg.raid_def("barrow_deeps") == before and reg.all_schedules() == [] and reg.store.head() == head
     with pytest.raises(RegistryError):  # the save's own validation: signups must open before they lock
         rc.next_runs_preview(reg, "barrow_deeps", fields={"signup_lead_hours": "1", "lock_hours_before": "5"})
-    lines = rc.next_runs_lines(reg, "barrow_deeps", fields={"slots": "Sat 20:00", "first_open": "2020-01-01T00:00"})
+    lines = rc.next_runs_lines(reg, "barrow_deeps", fields={"first_open": "2020-01-01T00:00"}, **sat)
     assert lines[0].startswith(reg.raid_def("barrow_deeps")["name"]) and "20:00" not in lines[0]
 
 
 def test_timezone_preview(reg):
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30", "first_open": "2020-01-01T00:00"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2020-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30")
     lines = rc.timezone_preview(reg, "America/New_York")
     line = next(x for x in lines if x.startswith(reg.raid_def("barrow_deeps")["name"]))
     assert "7:30 PM America/New_York" in line and "4:30 PM" in line and reg.config.timezone == "America/Los_Angeles"
@@ -318,7 +320,7 @@ def test_presets_are_shared(reg):
     assert flows_config.PRESETS is presets.PRESETS and flows_misc.TEMPOS is presets.TEMPOS
     f = presets.preset_fields("short")
     assert f == {"signup_lead_hours": "48", "nudge_hours_before": "36", "lock_hours_before": "24", "confirm_hours_before": "12"}
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00", **f}, "t")  # legal by construction (a run's week is a schedule's)
+    reg.set_schedule("alt", {"slots": "Sat 20:00", **f}, "t", raid="barrow_deeps")  # legal by construction (a run's week is a schedule's)
     start_in, cut = presets.tempo_cutoffs("quick", test_by=7)
     assert start_in == 20 and cut["hard"] == 12 / 60 and cut["test_by"] == 7
     with pytest.raises(ValueError):

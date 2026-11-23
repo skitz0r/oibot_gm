@@ -50,7 +50,7 @@ def stored(reg, raid):
 
 
 def test_a_schedule_is_stored_at_guild_level(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30", "rosters": 2, "follow": f"{OTHER} x2"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "rosters": 2, "follow": f"{OTHER} x2"}, "t", raid=RID)
     T = reg.timing_suggestion(RID)  # every stored schedule carries its sheet timing (phase 2)
     assert stored(reg, RID) == [{"id": "tue", "lineup": [{"raid": RID, "rosters": 2}, {"raid": OTHER, "rosters": 2}], "kind": "weekly", "slots": ["Tue 19:30"], **T}]
     assert not {"schedules", "slots"} & set(reg.config.raids.get(RID) or {})
@@ -58,36 +58,29 @@ def test_a_schedule_is_stored_at_guild_level(reg):
     assert row["rosters"] == 2 and row["follow"] == {"raid": OTHER, "rosters": 2}
 
 
-def test_run_times_are_the_default_schedule(reg):
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    assert stored(reg, RID) == [{"id": "default", "lineup": [{"raid": RID, "rosters": 1}], "slots": ["Tue 19:30"], **reg.timing_suggestion(RID)}]
-    assert reg.raid_def(RID)["slots"] == ["Tue 19:30"] and [s["id"] for s in reg.raid_def(RID)["schedules"]] == ["default"]  # its timing
-    assert [s["id"] for s in reg.schedules(RID)] == ["default"]
+def test_run_times_are_an_ordinary_schedule(reg):
+    """Phase 3: a raid has no run times of its own — weekly() makes a schedule with an id of its own."""
+    sid = weekly(reg, RID, "Tue 19:30")
+    assert stored(reg, RID) == [{"id": sid, "lineup": [{"raid": RID, "rosters": 1}], "kind": "weekly", "slots": ["Tue 19:30"], "name": "Raid nights", **reg.timing_suggestion(RID)}]
+    assert reg.raid_def(RID)["slots"] == [] and [s["id"] for s in reg.schedules(RID)] == [sid] == ["barrow-deeps"]
 
 
-def test_default_keeps_its_own_settings_without_run_times(reg):
-    reg.set_schedule(RID, "default", {"slots": "Tue 19:30", "rosters": 2}, "t")
-    reg.set_raid_override(RID, "slots", "", "t")
-    assert stored(reg, RID) == [{"id": "default", "lineup": [{"raid": RID, "rosters": 2}], **reg.timing_suggestion(RID)}]
-    assert reg.raid_def(RID)["slots"] == []
+def test_removing_a_schedule_removes_its_run_times(reg):
+    sid = weekly(reg, RID, "Tue 19:30")
+    reg.remove_schedule(sid, "t")
+    assert stored(reg, RID) == [] and reg.schedules(RID) == []
 
 
-def test_removing_default_clears_its_run_times(reg):
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.remove_schedule(RID, "default", "t")
-    assert stored(reg, RID) == [] and reg.raid_def(RID)["slots"] == []
-
-
-def test_two_raids_may_share_a_schedule_id(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
-    reg.set_schedule(OTHER, "tue", {"kind": "weekly", "slots": "Tue 21:00"}, "t")
-    assert reg.schedules(RID)[0]["slots"] == ["Tue 19:30"] and reg.schedules(OTHER)[0]["slots"] == ["Tue 21:00"]
-    reg.remove_schedule(RID, "tue", "t")
-    assert stored(reg, RID) == [] and len(stored(reg, OTHER)) == 1
+def test_two_raids_may_not_share_a_schedule_id(reg):
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
+    with pytest.raises(RegistryError, match="already called tue"):
+        reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 21:00"}, "t", raid=OTHER)
+    reg.remove_schedule("tue", "t")
+    assert stored(reg, RID) == [] and stored(reg, OTHER) == []
 
 
 def test_a_refused_write_restores_both_stores(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     before = (list(reg.config.schedules), dict(reg.config.raids.get(RID) or {}))
     with pytest.raises(RegistryError):
         reg.set_raid_overrides(RID, {"notes": "kept?", "schedules": [{"id": "tue", "kind": "weekly", "slots": ["Tue 19:30"], "rosters": 9}]}, "t")
@@ -95,44 +88,45 @@ def test_a_refused_write_restores_both_stores(reg):
 
 
 def test_a_refused_check_after_an_accepted_field_restores_both_stores(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     before = (copy.deepcopy(reg.config.schedules), copy.deepcopy(reg.config.raids))
     with pytest.raises(RegistryError, match="used twice"):  # both fields apply; the whole-raid check refuses
-        reg.set_raid_overrides(RID, {"slots": "Wed 20:00", "schedules": [{"id": "a", "slots": ["Sat 20:00"]}, {"id": "a", "kind": "pickup"}]}, "t")
+        reg.set_raid_overrides(RID, {"notes": "x", "schedules": [{"id": "a", "slots": ["Sat 20:00"]}, {"id": "a", "kind": "pickup"}]}, "t")
     assert (reg.config.schedules, reg.config.raids) == before
 
 
-def test_the_raid_rev_follows_its_own_schedules_only(reg):
-    r0, o0, s0 = reg.config_rev(f"raids:{RID}"), reg.config_rev(f"raids:{OTHER}"), reg.config_rev("settings")
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
-    assert reg.config_rev(f"raids:{RID}") != r0
-    assert reg.config_rev(f"raids:{OTHER}") == o0 and reg.config_rev("settings") == s0
+def test_a_schedule_has_a_rev_of_its_own(reg):
+    """Phase 3: `schedule:<id>` covers one schedule; a raid's rev no longer moves with its schedules."""
+    r0, o0, s0, t0 = reg.config_rev(f"raids:{RID}"), reg.config_rev(f"raids:{OTHER}"), reg.config_rev("settings"), reg.config_rev("schedule:tue")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
+    assert reg.config_rev("schedule:tue") != t0
+    assert (reg.config_rev(f"raids:{RID}"), reg.config_rev(f"raids:{OTHER}"), reg.config_rev("settings")) == (r0, o0, s0)
 
 
-def test_a_stale_raid_rev_still_refuses_a_schedule_edit(reg):
-    rev = reg.config_rev(f"raids:{RID}")
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+def test_a_stale_schedule_rev_refuses_a_schedule_edit(reg):
+    rev = reg.config_rev("schedule:tue")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     with pytest.raises(R.ConfigChanged):
-        reg.set_schedule(RID, "tue", {"slots": "Wed 19:30"}, "t", rev=rev)
+        reg.set_schedule("tue", {"slots": "Wed 19:30"}, "t", rev=rev, raid=RID)
 
 
 def test_clearing_a_raid_clears_its_schedules(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     reg.clear_raid_override(RID, "t")
     assert stored(reg, RID) == [] and reg.schedules(RID) == []
 
 
 def test_the_file_holds_schedules_at_the_top(reg):
     import yaml
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     doc = yaml.safe_load((reg.store.root / reg.key / "guild.yaml").read_text())
     assert doc["schedules"][0]["id"] == "tue" and "schedules" not in (doc.get("raids") or {}).get(RID, {})
 
 
 def test_a_follow_on_start_survives_an_unrelated_edit(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30", "follow": f"{OTHER} x2"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "follow": f"{OTHER} x2"}, "t", raid=RID)
     stored(reg, RID)[0]["lineup"][1]["starts"] = 180  # nothing writes `starts` in this phase; a stored one must not be lost
-    reg.set_schedule(RID, "tue", {"name": "Tuesday"}, "t")
+    reg.set_schedule("tue", {"name": "Tuesday"}, "t", raid=RID)
     assert stored(reg, RID)[0]["lineup"] == [{"raid": RID, "rosters": 1}, {"raid": OTHER, "rosters": 2, "starts": 180}]
     assert stored(reg, RID)[0]["name"] == "Tuesday"
 
@@ -142,23 +136,23 @@ def _old_keys(reg):
     reg.config.raids[RID] = {"notes": "old", "slots": ["Tue 19:30"], "schedules": [{"id": "alt", "kind": "weekly", "slots": ["Sat 20:00"]}, {"id": "keep", "kind": "pickup"}]}
 
 
-def test_a_run_times_write_lifts_the_old_keys_and_keeps_what_they_held(reg):
+def test_a_schedule_write_lifts_the_old_keys_and_keeps_what_they_held(reg):
+    """The old run times become the raid's own schedule with its own id (and its alias), before the write."""
     _old_keys(reg)
-    reg.set_raid_override(RID, "slots", "Wed 20:00", "t")
+    reg.set_schedule("wed", {"kind": "weekly", "slots": "Wed 20:00"}, "t", raid=RID)
     assert reg.config.raids[RID] == {"notes": "old"}
-    assert reg.raid_def(RID)["slots"] == ["Wed 20:00"] and [s["id"] for s in reg.schedules(RID)] == ["default", "alt", "keep"]
-    reg.set_raid_override(RID, "slots", "", "t")  # the profile has no run times: none left, and the old ones don't come back
-    assert reg.raid_def(RID)["slots"] == [] and [s["id"] for s in reg.schedules(RID)] == ["alt", "keep"]
+    assert [s["id"] for s in reg.schedules(RID)] == ["barrow-deeps", "alt", "keep", "wed"]
+    assert reg.schedule_entry("barrow-deeps")["slots"] == ["Tue 19:30"] and reg.config.schedule_aliases[f"{RID}:default"] == "barrow-deeps"
 
 
 def test_a_schedule_write_lifts_the_old_keys_and_a_removed_one_stays_gone(reg):
     _old_keys(reg)
-    reg.set_schedule(RID, "keep", {"name": "Pickups"}, "t")
+    reg.set_schedule("keep", {"name": "Pickups"}, "t", raid=RID)
     assert not {"schedules", "slots"} & set(reg.config.raids[RID])
-    assert reg.raid_def(RID)["slots"] == ["Tue 19:30"] and [s["id"] for s in reg.schedules(RID)] == ["default", "alt", "keep"]
-    reg.remove_schedule(RID, "alt", "t")
-    reg.remove_schedule(RID, "keep", "t")
-    assert [s["id"] for s in reg.schedules(RID)] == ["default"] and [s["id"] for s in reg.raid_def(RID)["schedules"]] == ["default"]
+    assert [s["id"] for s in reg.schedules(RID)] == ["barrow-deeps", "alt", "keep"]
+    reg.remove_schedule("alt", "t")
+    reg.remove_schedule("keep", "t")
+    assert [s["id"] for s in reg.schedules(RID)] == ["barrow-deeps"]
     assert reg.config.raids[RID] == {"notes": "old"}
 
 
@@ -167,7 +161,7 @@ def test_a_schedule_refused_before_the_lift_leaves_the_old_keys_where_they_were(
     _old_keys(reg)
     before = (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
     with pytest.raises(RegistryError):
-        reg.set_schedule(RID, "alt", {"rosters": 9}, "t")
+        reg.set_schedule("alt", {"rosters": 9}, "t", raid=RID)
     assert (reg.config.raids, reg.config.schedules) == before
 
 
@@ -184,7 +178,7 @@ import subprocess  # noqa: E402
 
 import yaml  # noqa: E402
 
-from conftest import GUILD, OFFICER_ROLE, OWNER  # noqa: E402
+from conftest import GUILD, OFFICER_ROLE, OWNER, weekly  # noqa: E402
 from oibot_gm.registry import Registry  # noqa: E402
 from oibot_gm.store import GitStore  # noqa: E402
 
@@ -242,7 +236,7 @@ def test_lifting_moves_every_raid_and_is_idempotent():
 def test_an_old_file_reads_at_once(old_store, open_registry):
     reg = open_registry(old_store)
     assert [s["id"] for s in reg.schedules("hyjal_summit_forever")] == ["tuesday"]
-    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 04:00"]
+    assert reg.schedule_entry("barrow-deeps")["slots"] == ["Tue 04:00"]  # phase 3: the old run times are a schedule of their own
     assert reg.schedules_lifted
     assert "Hyjal Summit: 1 schedule" in reg.schedules_lifted
 
@@ -284,8 +278,7 @@ def test_a_raid_that_cannot_be_lifted_stays_as_it_was(data_root, open_registry):
     assert not [x for x in reg.schedules_lifted if "Barrow Deeps" in x]  # a refusal is never told as a move
     assert len(reg.schedules_refused) == 1 and "Barrow Deeps" in reg.schedules_refused[0]
     assert str(refused.value) in reg.schedules_refused[0]
-    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 04:00"]  # it still reads as before
-    assert reg.raid_def("barrow_deeps")["schedules"] == bad["raids"]["barrow_deeps"]["schedules"]
+    assert reg.schedules("barrow_deeps") == []  # phase 3: kept in the file, and no run opens from them
 
 
 def test_a_stored_entry_that_cannot_be_read_is_skipped_and_named(data_root, open_registry):
@@ -293,12 +286,11 @@ def test_a_stored_entry_that_cannot_be_read_is_skipped_and_named(data_root, open
     broken = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": 9}], "kind": "weekly", "slots": ["Wed 20:00"]}
     _write_old(data_root, {"schedules": [good, broken]})
     reg = open_registry(GitStore(data_root, push=False))
-    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 19:30"]
-    assert [s["id"] for s in reg.schedules("barrow_deeps")] == ["default"]
+    assert [s["id"] for s in reg.schedules("barrow_deeps")] == ["barrow-deeps"]
     assert len(reg.schedules_unread) == 1 and "late" in reg.schedules_unread[0] and "Barrow Deeps" in reg.schedules_unread[0]
-    reg.set_raid_override("barrow_deeps", "slots", "Thu 20:00", "t")  # a write of that raid leaves it where it was
+    reg.set_schedule("barrow-deeps", {"slots": "Thu 20:00"}, "t")  # a write of that raid leaves it where it was
     assert broken in reg.config.schedules
-    assert reg.raid_def("barrow_deeps")["slots"] == ["Thu 20:00"]
+    assert reg.schedule_entry("barrow-deeps")["slots"] == ["Thu 20:00"]
 
 
 def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
@@ -320,11 +312,13 @@ def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
     asyncio.run(OibotGM._schedules_migrate(bot))
     assert said[0] == ("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule.")
     assert said[1] == ("info", TIMING_MOVED)  # phase 2: the raid-level timing went onto its schedule in the same save
-    assert said[2][0] == "warn" and "late" in said[2][1]
-    assert len(said) == 3  # the warning is told once a start, not on every call
+    assert said[2] == ("info", IDS_LINE)  # phase 3: each raid's own run times have an id of their own
+    assert said[3][0] == "warn" and "late" in said[3][1]
+    assert len(said) == 4  # the warning is told once a start, not on every call
 
 
-TIMING_MOVED = "Sheet timing now belongs to each schedule. Moved: Barrow Deeps · default: confirm-by 12 hours before."
+TIMING_MOVED = "Sheet timing now belongs to each schedule. Moved: Barrow Deeps · Raid nights: confirm-by 12 hours before."
+IDS_LINE = "Schedules now have ids of their own: Barrow Deeps · Raid nights is now barrow-deeps · Onyxia's Lair · Raid nights is now onyxias-lair."
 
 
 def _start(reg) -> list[tuple[str, str]]:
@@ -361,7 +355,7 @@ def test_a_file_whose_only_old_raid_is_refused_says_no_move_and_commits_nothing(
     assert commit_count(store) == n0
     assert not [t for _, t in said if t.startswith("Schedules are now stored at guild level")]
     assert len(said) == 1 and said[0][0] == "warn" and "Barrow Deeps" in said[0][1] and _refusal() in said[0][1]
-    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 04:00"]
+    assert reg.config.raids["barrow_deeps"]["slots"] == ["Tue 04:00"]  # left in the file as it was
 
 
 def test_a_moved_raid_and_a_refused_one_are_told_apart(data_root, open_registry):
@@ -377,11 +371,11 @@ def test_a_stored_entry_that_is_not_a_mapping_is_kept_skipped_and_named(data_roo
     _write_old(data_root, {"schedules": ["just some words", good]})
     store = GitStore(data_root, push=False)
     reg = open_registry(store)
-    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 19:30"]
+    assert reg.schedule_entry("barrow-deeps")["slots"] == ["Tue 19:30"]
     assert len(reg.schedules_unread) == 1
-    reg.set_raid_override("barrow_deeps", "slots", "Thu 20:00", "t")
+    reg.set_schedule("barrow-deeps", {"slots": "Thu 20:00"}, "t")
     on_disk = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())["schedules"]
-    assert "just some words" in on_disk and reg.raid_def("barrow_deeps")["slots"] == ["Thu 20:00"]
+    assert "just some words" in on_disk and reg.schedule_entry("barrow-deeps")["slots"] == ["Thu 20:00"]
     warns = [t for lv, t in _start(reg) if lv == "warn"]
     assert len(warns) == 1 and "can't be read" in warns[0]
 
@@ -415,15 +409,15 @@ def test_a_stored_entry_with_a_unicode_digit_is_skipped_at_load(data_root, open_
     odd = {"id": "late", "lineup": [{"raid": "barrow_deeps", "rosters": "²"}], "kind": "weekly", "slots": ["Wed 20:00"]}
     _write_old(data_root, {"schedules": [good, odd]})
     reg = open_registry(GitStore(data_root, push=False))
-    assert [s["id"] for s in reg.schedules("barrow_deeps")] == ["default"]
+    assert [s["id"] for s in reg.schedules("barrow_deeps")] == ["barrow-deeps"]
     assert len(reg.schedules_unread) == 1 and "late" in reg.schedules_unread[0]
 
 
 def test_editing_a_raid_keeps_its_block_before_a_later_raid(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
-    reg.set_schedule(OTHER, "wed", {"kind": "weekly", "slots": "Wed 20:00"}, "t")
-    reg.set_schedule(RID, "tue", {"name": "Tuesday"}, "t")
-    reg.set_schedule(RID, "sat", {"kind": "weekly", "slots": "Sat 20:00"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
+    reg.set_schedule("wed", {"kind": "weekly", "slots": "Wed 20:00"}, "t", raid=OTHER)
+    reg.set_schedule("tue", {"name": "Tuesday"}, "t", raid=RID)
+    reg.set_schedule("sat", {"kind": "weekly", "slots": "Sat 20:00"}, "t", raid=RID)
     assert [(e["lineup"][0]["raid"], e["id"]) for e in reg.config.schedules] == [(RID, "tue"), (RID, "sat"), (OTHER, "wed")]
 
 
@@ -486,7 +480,7 @@ def test_the_lift_is_saved_before_anything_else_at_start(old_store, open_registr
     reg.save_config("something else")  # ready's officer roles, say: nothing of the lift is left for it to carry
     asyncio.run(OibotGM._schedules_migrate(bot))
     assert said == [("info", "Schedules are now stored at guild level: Hyjal Summit: 1 schedule · Barrow Deeps: 1 schedule · Onyxia's Lair: 1 schedule."),
-                    ("info", TIMING_MOVED)]
+                    ("info", TIMING_MOVED), ("info", IDS_LINE)]
 
 
 # ---- going back to older code: scripts/lower_schedules.py
@@ -590,3 +584,31 @@ def test_the_script_lowers_minimums_only_when_asked(data_root):
     script.lower(data_root)  # all the way back: the schedules too
     doc = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())
     assert "schedules" not in doc and doc["raids"]["barrow_deeps"]["slots"] == ["Tue 19:30"] and commit_count(store) == n0 + 2
+
+
+def test_the_script_lowers_ids_only_when_asked(old_store, open_registry, data_root):
+    """Phase 3's way back to phase 2's code: ids and regulars only; the schedules, their timing and the minimums stay."""
+    import json
+
+    reg = open_registry(old_store)
+    reg.seed_test_members(2, "t")
+    m = reg.test_members()[0]
+    reg.migrate_schedules()
+    m.main.rosters = ["barrow-deeps", "tuesday"]
+    reg.save(m, "regular spots")
+    assert {e["id"] for e in reg.config.schedules} == {"tuesday", "barrow-deeps", "onyxias-lair"}
+    n0 = commit_count(old_store)
+    script = _lower_script()
+    assert script.lower(data_root, dry_run=True, ids_only=True)[0].startswith(f"{GUILD}: would move the schedule ids back")
+    assert commit_count(old_store) == n0
+    said = script.lower(data_root, ids_only=True)
+    assert len(said) == 1 and GUILD in said[0] and commit_count(old_store) == n0 + 1
+    doc = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())
+    assert [e["id"] for e in doc["schedules"]] == ["tuesday", "default", "default"] and "schedule_aliases" not in doc
+    assert all(set(R.SCHEDULE_TIMING) <= set(e) for e in doc["schedules"])  # phase 2's timing stays on each schedule
+    raw = json.loads((data_root / GUILD / "members" / f"{m.discord_id}.json").read_text())
+    assert raw["characters"][0]["rosters"] == ["barrow_deeps:default", "hyjal_summit_forever:tuesday"]
+    assert script.lower(data_root, ids_only=True) == [f"{GUILD}: no schedule ids of their own, nothing to lower"]
+    again = open_registry(GitStore(data_root, push=False))  # this code lifts it again to the same ids and keys
+    assert {e["id"] for e in again.config.schedules} == {"tuesday", "barrow-deeps", "onyxias-lair"}
+    assert again.members[m.discord_id].main.rosters == ["barrow-deeps", "tuesday"]

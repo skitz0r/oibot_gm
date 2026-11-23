@@ -18,7 +18,7 @@ import asyncio
 from datetime import datetime, timedelta
 
 import pytest
-from conftest import join, lock_with_board
+from conftest import join, lock_with_board, weekly
 from test_analytics_cards import text_of
 from test_flows_raid import FakeBot as FlowBot
 from test_flows_raid import channel, officer  # noqa: F401 — the flows' fixtures
@@ -126,7 +126,8 @@ def test_scheduler_in_suggested_state_writes_nothing_while_nothing_changes(reg, 
 # ---------------------------------------------------------------- test puppets never reach a real run
 
 def _adhoc_short_healer(reg, rs):
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, ["Tue 19:30"])
     rows = [("Tanka", "Warrior", "Protection"), ("Tankb", "Paladin", "Protection"), ("Heala", "Priest", "Holy")] + DPS8[:5]
     ms = [add(reg, 820 + i, *row) for i, row in enumerate(rows)]
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
@@ -152,7 +153,8 @@ def test_puppets_are_never_suggested_or_asked_on_a_real_ad_hoc_run(reg, rs):
 
 
 def test_a_series_with_no_regulars_expects_real_mains_only(reg, rs):
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, ["Tue 19:30"])
     real = add(reg, 880, "Realone", "Priest", "Holy")
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")

@@ -393,14 +393,14 @@ def test_admin_raid_translator(owner_client, reg):
 def test_admin_schedule_translators(owner_client, reg):
     fields = {"kind": "weekly", "slots": ["Sat 20:00"], "name": "Alt run", "rosters": 2}
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": fields},
-                          lambda sh: "; ".join(sh.set_schedule("barrow_deeps", "alt", fields, "x")))
+                          lambda sh: "; ".join(sh.set_schedule("alt", fields, "x", raid="barrow_deeps")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     fields = {"active": False, "lock_hours_before": None, "weights": {"regular": 6, "rank": None}}
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": fields},
-                          lambda sh: "; ".join(sh.set_schedule("barrow_deeps", "alt", fields, "x")))
+                          lambda sh: "; ".join(sh.set_schedule("alt", fields, "x", raid="barrow_deeps")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule/remove", {"instance": "barrow_deeps", "id": "alt"},
-                          lambda sh: sh.remove_schedule("barrow_deeps", "alt", "x"))
+                          lambda sh: sh.remove_schedule("alt", "x"))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/reset", {"instance": "barrow_deeps"}, lambda sh: sh.clear_raid_override("barrow_deeps", "x"))
     assert "barrow_deeps" not in reg.config.raids and reg.raid_rows("barrow_deeps") == []
@@ -442,7 +442,7 @@ def test_admin_translators_review_a_warn_class_batch_before_writing(owner_client
     preview returned) answers `review_required` with the Described preview and writes NOTHING; confirmed + matching revs
     applies; a routine one still saves at once."""
     c = owner_client
-    reg.set_schedule("barrow_deeps", "alt", {"kind": "weekly", "slots": ["Sat 20:00"], "name": "Alt run"}, "Jon")
+    reg.set_schedule("alt", {"kind": "weekly", "slots": ["Sat 20:00"], "name": "Alt run"}, "Jon", raid="barrow_deeps")
     cases = [
         ("/api/admin/config", {"field": "timezone", "value": "America/New_York"}),
         ("/api/admin/config", {"field": "channel:signup", "value": "12345"}),

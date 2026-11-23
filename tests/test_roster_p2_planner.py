@@ -11,14 +11,14 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from conftest import first_slot, join
+from conftest import first_slot, join, weekly
 
 from oibot_gm import raidcycle as rc
 from oibot_gm.models import Player, RosterResult
 from oibot_gm.registry import Absence
 
 RID = "barrow_deeps"
-KEY = f"{RID}:default"
+KEY = "barrow-deeps"
 BASE = 600_000_000_000_000_000
 
 # name, class, spec, offspec, declared flex, alt (name, class, spec)
@@ -51,7 +51,8 @@ def add(reg, i: int, name: str, cls: str, spec: str, offspec=None, flex=(), alt=
 
 def worked_example(reg, rs, absent=("Thorn", "Ona")):
     """The §4 fixture: returns (run, {name: member}). The run is the next Tuesday; `absent` recorded away that day."""
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, ["Tue 19:30"])
     people = {}
     for i, (name, cls, spec, off, flex, alt) in enumerate(REGULARS):
         people[name] = add(reg, i, name, cls, spec, off, flex, alt)
@@ -142,7 +143,8 @@ def test_lock_seats_two_tanks_and_two_healers(reg, rs):
 
 def _joined_series(reg, rs, specs):
     """A recurring run whose regulars are exactly `specs` and have all joined (nobody projected)."""
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, ["Tue 19:30"])
     ms = []
     for i, row in enumerate(specs):
         name, cls, spec = row[:3]
@@ -250,7 +252,8 @@ def test_pick_asks_refuses_one_person_for_two_seats():
 
 
 def test_no_projection_without_regulars_and_no_suggestions_when_covered(reg, rs):
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, ["Tue 19:30"])
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
     plan = rc.role_plan(reg, rs, ev)

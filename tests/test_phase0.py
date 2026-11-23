@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from oibot_gm.registry import RegistryError
+from conftest import weekly
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "oibot_gm"
 
@@ -37,9 +38,9 @@ def test_a_refused_field_leaves_the_raid_and_git_untouched(reg, store):
 def test_a_change_only_valid_as_a_whole_is_accepted(reg):
     """Raising the nudge past the CURRENT lead is refused field by field, but it is fine with the new lead beside it
     (sheet timing is each schedule's own: phase 2)."""
-    reg.set_schedule("barrow_deeps", "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid="barrow_deeps")
     lead = reg.schedule_def("barrow_deeps", "tue")["signup_lead_hours"]
-    reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": lead + 40, "signup_lead_hours": lead + 60}, "t")
+    reg.set_schedule("tue", {"nudge_hours_before": lead + 40, "signup_lead_hours": lead + 60}, "t", raid="barrow_deeps")
     assert reg.schedule_def("barrow_deeps", "tue")["nudge_hours_before"] == lead + 40
     reg.set_minimums("barrow_deeps", {"tank": {"min": 4}, "healer": {"min": 3}}, "t")  # one minimum per role, no upper limit (D16)
     assert reg.minimums("barrow_deeps") == {"tank": 4, "healer": 3}
@@ -57,7 +58,7 @@ def test_roster_remove_refuses_unknown_roster_and_non_members(reg):
     with pytest.raises(RegistryError, match="isn't a regular"):
         reg.roster_remove(m.discord_id, "no-such-roster", "t")
     with pytest.raises(RegistryError, match="isn't a regular"):
-        reg.roster_remove(m.discord_id, "barrow_deeps:default", "t")
+        reg.roster_remove(m.discord_id, "barrow-deeps", "t")
 
 
 # ---- an absence is the same day however it is written
@@ -82,7 +83,7 @@ def test_slot_and_day_labels():
 def test_no_raw_slot_reaches_a_person(reg):
     from oibot_gm import discord_help
 
-    reg.set_raid_override("barrow_deeps", "slots", "Tue 19:30", "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30")
     for key in ("about", "schedule"):
         text = discord_help.guide_text(reg, key)
         assert "19:30" not in text, (key, text)

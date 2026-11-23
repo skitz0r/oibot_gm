@@ -1,6 +1,6 @@
 """Schedules (design.md §5.27): WHEN a raid runs as entries under the raid — weekly, day N of each lockout, pickup
-templates — each with its own cadence and the rosters a run expects. Back-compat first: a raid with only `slots` is the
-implicit `default` schedule and behaves exactly as before. Then the registry's refusals, the cycle (keys, cutoffs,
+templates — each with its own cadence and the rosters a run expects. A raid has no run times of its own (phase 3): every
+schedule has an id of its own across the guild. Then the registry's refusals, the cycle (keys, cutoffs,
 health against N rosters), the /gm config Schedules section, plain-text ops, the web API and the MCP tools."""
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import by_role, join
+from conftest import by_role, join, weekly
 from fastapi.testclient import TestClient
 from test_flows_config import open_raid, submit_multi
 from test_mcp import TOKEN, FakeBot, bearer
@@ -50,44 +50,42 @@ def owner(monkeypatch):
 
 # ---------------------------------------------------------------- back-compat
 
-def test_a_raid_with_only_slots_is_the_default_schedule_and_nothing_changes(reg, rs):
+def test_run_times_are_an_ordinary_schedule_with_an_id_of_its_own(reg, rs):
+    """Phase 3: a raid has no run times of its own; its weekly schedule is addressed by its id like any other."""
     opened(reg)
-    reg.set_raid_override(RID, "slots", "Tue 19:30, Thu 20:00", "t")
+    sid = weekly(reg, RID, "Tue 19:30, Thu 20:00")
     scheds = reg.schedules(RID)
-    assert [(s["id"], s["kind"], s["slots"]) for s in scheds] == [("default", "weekly", ["Tue 19:30", "Thu 20:00"])]
+    assert [(s["id"], s["kind"], s["slots"]) for s in scheds] == [(sid, "weekly", ["Tue 19:30", "Thu 20:00"])] and sid == "barrow-deeps"
     now = reg.now_local()
-    old = rc.slot_starts(reg, RID, now, 24 * 21)
-    new = rc.upcoming(reg, RID, now, 24 * 21)
-    assert [t for _s, t in old] == [t for _s, t in new] and all(s["id"] == "default" for s, _t in new)
-    t = old[0][1]
-    assert rc.run_key(RID, t) == rc.run_key(RID, t, "default") == f"bd-{t.strftime('%m%d-%H%M')}"
-    assert rc.event_key(RID, t, "default") == f"bd-{t.strftime('%m%d-%H%M')}-{t.date().isoformat()}"
-    assert rc.schedule_kw("default") == {} and rc.schedule_kw(None) == {}
-    ev = rc.open_run(reg, rs, RID, t, by="t")
+    ups = rc.upcoming(reg, RID, now, 24 * 21)
+    assert ups and all(s["id"] == sid for s, _t in ups)
+    t = ups[0][1]
+    assert rc.run_key(RID, t, sid) == f"bd-{t.strftime('%m%d-%H%M')}-{sid}"  # a schedule id is always a suffix
+    assert rc.schedule_kw(sid) == {"schedule": sid} and rc.schedule_kw(None) == {}
+    ev = rc.open_run(reg, rs, RID, t, by="t")  # none named: the schedule that runs at that start
     team = reg.config.roster(ev.team)
-    assert ev.key == rc.event_key(RID, t) and ev.schedule is None
-    # Phase 1: every run dict names its schedule, class and series. Phase 2: the default schedule holds its own sheet
-    # timing, so its run carries the schedule's settings like any other schedule's run
-    assert (team["schedule_id"], team["kind"], team["series"]) == ("default", "recurring", f"{RID}:default") and team["rosters"] == 1
-    assert (ev.kind, ev.series) == ("recurring", f"{RID}:default")
-    assert rc.run_rosters(reg, ev) == 1 and reg.raid_rows(RID) == [{"id": "default", "slots": ["Tue 19:30", "Thu 20:00"], **reg.timing_suggestion(RID)}]  # run times + timing
-    # the scheduler's own view (each schedule within its signup lead) is the old slot_starts at the raid's lead
-    lead = float(reg.raid_def(RID)["signup_lead_hours"])
-    assert [t for _s, t in rc.upcoming(reg, RID, now, lead=True)] == [t for _s, t in rc.slot_starts(reg, RID, now, lead)]
+    assert ev.key == rc.event_key(RID, t, sid) and ev.schedule == sid
+    assert (team["schedule_id"], team["kind"], team["series"]) == (sid, "recurring", sid) and team["rosters"] == 1
+    assert (ev.kind, ev.series) == ("recurring", sid)
+    assert rc.run_rosters(reg, ev) == 1 and reg.raid_rows(RID) == [{"id": sid, "kind": "weekly", "slots": ["Tue 19:30", "Thu 20:00"], "name": "Raid nights", **reg.timing_suggestion(RID)}]
+    lead = float(reg.schedule_def(RID, sid)["signup_lead_hours"])
+    assert [t for _s, t in rc.upcoming(reg, RID, now, lead=True)] == [t for _s, t in rc.upcoming(reg, RID, now, lead)]
+    one_off = rc.open_run(reg, rs, RID, t + timedelta(hours=1), by="t")  # a time no schedule runs at: a one-off
+    assert one_off.schedule == R.ADHOC_SCHEDULE and rc.run_kind(reg, one_off) == "adhoc"
 
 
 def test_two_weekly_schedules_coexist_with_different_lock_hours(reg, rs):
     opened(reg)
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00, Tue 19:30", "name": "Alt run", "lock_hours_before": 12}, "t")
+    weekly(reg, RID, "Tue 19:30")
+    reg.set_schedule("alt", {"slots": "Sat 20:00, Tue 19:30", "name": "Alt run", "lock_hours_before": 12}, "t", raid=RID)
     main, alt = reg.schedules(RID)
-    assert (main["id"], alt["id"], alt["name"]) == ("default", "alt", "Alt run")
-    assert reg.schedule_def(RID, "default")["lock_hours_before"] == 24 and reg.schedule_def(RID, "alt")["lock_hours_before"] == 12
+    assert (main["id"], alt["id"], alt["name"]) == ("barrow-deeps", "alt", "Alt run")
+    assert reg.schedule_def(RID, "barrow-deeps")["lock_hours_before"] == 24 and reg.schedule_def(RID, "alt")["lock_hours_before"] == 12
     ups = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)
-    assert {s["id"] for s, _t in ups} == {"default", "alt"}
-    tue = max(t for s, t in ups if s["id"] == "default")  # the latest in the window: a run days away keeps its cadence (a near one is squeezed by fit_cutoffs)
+    assert {s["id"] for s, _t in ups} == {"barrow-deeps", "alt"}
+    tue = max(t for s, t in ups if s["id"] == "barrow-deeps")  # the latest in the window: a run days away keeps its cadence (a near one is squeezed by fit_cutoffs)
     assert (tue, "alt") in {(t, s["id"]) for s, t in ups}  # both schedules start that same minute …
-    a = rc.open_run(reg, rs, RID, tue, by="t")
+    a = rc.open_run(reg, rs, RID, tue, by="t", schedule="barrow-deeps")
     b = rc.open_run(reg, rs, RID, tue, by="t", schedule="alt")
     assert a.key != b.key and b.key == rc.event_key(RID, tue, "alt") and b.key.startswith(rc.run_key(RID, tue) + "-alt-")  # … as two runs
     ta, tb = reg.config.roster(a.team), reg.config.roster(b.team)
@@ -98,7 +96,7 @@ def test_two_weekly_schedules_coexist_with_different_lock_hours(reg, rs):
 def test_a_lockout_schedule_follows_a_3_day_reset_across_dst(reg):
     """Day 1 of each 3-day lockout at 8:00 PM: every third day from the first opening, always 8:00 PM on the wall clock,
     through the March 2027 spring-forward; a time the clocks skip moves past the gap."""
-    reg.set_schedule(RID, "reset", {"kind": "lockout", "days": "1", "time": "20:00", "name": "Reset night"}, "t")
+    reg.set_schedule("reset", {"kind": "lockout", "days": "1", "time": "20:00", "name": "Reset night"}, "t", raid=RID)
     s = next(x for x in reg.schedules(RID) if x["id"] == "reset")
     assert reg.schedule_label(RID, s) == "Day 1 of each 3-day lockout, 8:00 PM"
     now = datetime(2027, 3, 1, 12, 0, tzinfo=LA)
@@ -109,7 +107,7 @@ def test_a_lockout_schedule_follows_a_3_day_reset_across_dst(reg):
     offsets = {t.utcoffset() for t in starts}
     assert offsets == {timedelta(hours=-8), timedelta(hours=-7)}  # both sides of 2027-03-14
     # days 1 and 3 (a 3-day lockout): day 3 of the window starting Fri 12 Mar is Sun 14 Mar, the spring-forward day
-    reg.set_schedule(RID, "reset", {"days": "1, 3", "time": "02:30"}, "t")
+    reg.set_schedule("reset", {"days": "1, 3", "time": "02:30"}, "t", raid=RID)
     s = next(x for x in reg.schedules(RID) if x["id"] == "reset")
     got = rc.schedule_starts(reg, RID, s, datetime(2027, 3, 12, 0, 0, tzinfo=LA), 72)
     gap = next(t for t in got if t.astimezone(LA).date() == date(2027, 3, 14))
@@ -121,8 +119,8 @@ def test_a_lockout_schedule_follows_a_3_day_reset_across_dst(reg):
 
 def test_a_pickup_template_never_opens_by_itself(reg, rs):
     opened(reg)
-    reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup", "rosters": 2, "lock_hours_before": 2, "confirm_hours_before": 1,
-                                  "nudge_hours_before": 3, "signup_lead_hours": 6}, "t")
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup", "rosters": 2, "lock_hours_before": 2, "confirm_hours_before": 1,
+                                  "nudge_hours_before": 3, "signup_lead_hours": 6}, "t", raid=RID)
     assert not [s for s, _t in rc.upcoming(reg, RID, reg.now_local(), 24 * 30) if s["id"] == "pug"]
     assert not [s for s, _t in rc.upcoming(reg, RID, reg.now_local(), lead=True) if s["id"] == "pug"]
     start = (reg.now_local() + timedelta(hours=30)).replace(second=0, microsecond=0)
@@ -135,12 +133,12 @@ def test_rosters_2_doubles_the_advertised_seats_and_the_health_target(reg, rs):
     from oibot_gm.raid_views import sheet_message
 
     opened(reg)
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.set_schedule(RID, "default", {"rosters": 2}, "t")
-    t = rc.slot_starts(reg, RID, reg.now_local(), 24 * 14)[0][1]
+    weekly(reg, RID, "Tue 19:30")
+    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t", raid=RID)
+    t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
     team = rc.run_team(reg, ev)
-    assert rc.run_rosters(reg, ev) == 2 and ev.key == rc.event_key(RID, t)  # the default schedule keeps its key
+    assert rc.run_rosters(reg, ev) == 2 and ev.key == rc.event_key(RID, t, "barrow-deeps")
     roles = by_role(reg)
     join(reg, rs, ev, roles["tank"][:1] + roles["healer"][:2] + roles["melee"][:3])
     h = rc.health_data(reg, ev, team)
@@ -160,10 +158,10 @@ def test_rosters_2_doubles_the_advertised_seats_and_the_health_target(reg, rs):
 
 def test_rosters_2_aims_the_lock_at_two_when_roles_allow(reg, rs):
     opened(reg)
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.set_schedule(RID, "default", {"rosters": 2}, "t")
+    weekly(reg, RID, "Tue 19:30")
+    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t", raid=RID)
     reg.set_minimums(RID, {"tank": {"min": 1}, "healer": {"min": 1}}, "t")
-    t = rc.slot_starts(reg, RID, reg.now_local(), 24 * 14)[0][1]
+    t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
     roles = by_role(reg)
     join(reg, rs, ev, roles["tank"][:2] + roles["healer"][:2] + roles["melee"][:4])  # 8 bodies: one run by headcount
@@ -185,47 +183,46 @@ def test_rosters_2_aims_the_lock_at_two_when_roles_allow(reg, rs):
     ("Bad Id!", {"slots": "Sat 20:00"}, "short key"),
     ("alt", {"slots": "Saturday at 8"}, "should look like"),
     ("alt", {"slots": "Sat 20:00", "colour": "red"}, "unknown schedule setting"),
-    ("default", {"kind": "pickup"}, "the raid's own weekly run times"),
+    ("default", {"kind": "weekly", "slots": "Tue 19:30"}, "kept for older files"),
 ])
 def test_refusals_leave_config_and_git_untouched(reg, store, sid, fields, why):
-    reg.set_schedule(RID, "keep", {"slots": "Mon 20:00"}, "t")
+    reg.set_schedule("keep", {"slots": "Mon 20:00"}, "t", raid=RID)
     before, n0 = copy.deepcopy((reg.config.raids, reg.config.schedules)), commits(store)
     with pytest.raises(RegistryError, match=why.replace("(", r"\(").replace(")", r"\)")):
-        reg.set_schedule(RID, sid, fields, "t")
+        reg.set_schedule(sid, fields, "t", raid=RID)
     assert (reg.config.raids, reg.config.schedules) == before and commits(store) == n0
 
 
 def test_duplicate_ids_and_a_lockout_without_first_open_are_refused(reg, store):
     with pytest.raises(RegistryError, match="used twice"):
         reg.set_raid_overrides(RID, {"schedules": [{"id": "a", "slots": ["Sat 20:00"]}, {"id": "a", "kind": "pickup"}]}, "t")
-    reg.set_schedule(RID, "reset", {"kind": "lockout", "days": "1", "time": "20:00"}, "t")
+    reg.set_schedule("reset", {"kind": "lockout", "days": "1", "time": "20:00"}, "t", raid=RID)
     with pytest.raises(RegistryError, match="first opening"):  # a raid with no anchor can't count lockout days
         reg._check_schedules({**reg.raid_def(RID), "first_open": None})
 
 
 def test_set_and_remove_are_one_commit_each_and_inherit_goes_back_to_the_raid(reg, store):
     n0 = commits(store)
-    lines = reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run", "lock_hours_before": 12}, "t")
+    lines = reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run", "lock_hours_before": 12}, "t", raid=RID)
     assert commits(store) == n0 + 1 and lines == ["Barrow Deeps · Alt run: new schedule, Saturdays 8:00 PM"]
-    reg.set_schedule(RID, "alt", {"lock_hours_before": "inherit", "rosters": 2}, "t")
+    reg.set_schedule("alt", {"lock_hours_before": "inherit", "rosters": 2}, "t", raid=RID)
     s = next(x for x in reg.schedules(RID) if x["id"] == "alt")
     # inherit = the game's suggestion, written out again
     assert s["lock_hours_before"] == reg.timing_suggestion(RID)["lock_hours_before"] == reg.schedule_def(RID, "alt")["lock_hours_before"]
     assert reg.schedule_label(RID, s) == "Saturdays 8:00 PM · 2 rosters"
-    assert reg.remove_schedule(RID, "alt", "t") == "Barrow Deeps: schedule Alt run removed"
+    assert reg.remove_schedule("alt", "t") == "Barrow Deeps: schedule Alt run removed"
     assert commits(store) == n0 + 3 and reg.schedules(RID) == [] and reg.raid_rows(RID) == [] and "schedules" not in reg.config.raids.get(RID, {})
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.remove_schedule(RID, "default", "t")  # the default schedule is the raid's slots
+    reg.remove_schedule(weekly(reg, RID, "Tue 19:30"), "t")  # a raid's run times are a schedule like any other
     assert reg.raid_def(RID)["slots"] == [] and reg.schedules(RID) == []
-    with pytest.raises(RegistryError, match="has no schedule"):
-        reg.remove_schedule(RID, "nope", "t")
+    with pytest.raises(RegistryError, match="no schedule called nope"):
+        reg.remove_schedule("nope", "t")
 
 
 def test_schedule_labels_are_words_never_24_hour(reg):
-    reg.set_raid_override(RID, "slots", "Tue 19:30, Thu 19:30, Sat 21:00", "t")
+    weekly(reg, RID, "Tue 19:30, Thu 19:30, Sat 21:00")
     s = reg.schedules(RID)[0]
     assert reg.schedule_label(RID, s) == "Tuesdays and Thursdays 7:30 PM, Saturdays 9:00 PM"
-    reg.set_schedule(RID, "pug", {"kind": "pickup"}, "t")
+    reg.set_schedule("pug", {"kind": "pickup"}, "t", raid=RID)
     assert reg.schedule_label(RID, reg.schedules(RID)[1]) == "Pickup template: opened by an officer"
     assert reg.time_label("00:05") == "12:05 AM"
 
@@ -240,9 +237,11 @@ def test_config_schedules_add_edit_and_save_in_one_commit(reg, store, owner):
     async def go():
         await open_raid(h, reg)
         await h.pick("Pick a section", "times")
+        assert h.buttons() == ["Add a schedule", "Back to the sections"] and "has none yet" in h.text  # no run times of its own
+        await h.press("Add a schedule")
+        await h.pick("What kind of schedule?", "weekly")
+        await submit_multi(h, name="Raid nights", nights=["Tue"], hour="19", minute="30")
         assert "Add a run time" in h.buttons() and "Add another schedule" in h.buttons()
-        await h.press("Add a run time")
-        await submit_multi(h, nights=["Tue"], hour="19", minute="30")
         await h.press("Add another schedule")
         await h.pick("What kind of schedule?", "weekly")
         await submit_multi(h, name="Alt run", nights=["Sat"], hour="20", minute="0")
@@ -264,6 +263,7 @@ def test_config_schedules_add_edit_and_save_in_one_commit(reg, store, owner):
         await h.press("Back to the sections")
         assert commits(store) == n0  # nothing before Save
         await h.press("Save")
+        assert "New schedule **Raid nights**: Tuesdays 7:30 PM" in h.text
         assert "New schedule **Alt run**: Saturdays 8:00 PM · 2 rosters" in h.text and "New schedule **Reset night**" in h.text
         assert "Next runs with these rules:" in h.text and "Alt run: " in h.text and "19:30" not in h.text
         await h.press("Save")
@@ -271,15 +271,15 @@ def test_config_schedules_add_edit_and_save_in_one_commit(reg, store, owner):
     asyncio.run(go())
     assert commits(store) == n0 + 1
     by_id = {s["id"]: s for s in reg.schedules(RID)}
-    assert set(by_id) == {"default", "alt-run", "reset-night"} and by_id["default"]["slots"] == ["Tue 19:30"]
+    assert set(by_id) == {"raid-nights", "alt-run", "reset-night"} and by_id["raid-nights"]["slots"] == ["Tue 19:30"]
     assert by_id["alt-run"]["rosters"] == 2 and reg.schedule_def(RID, "alt-run")["lock_hours_before"] == 12
     assert reg.schedule_def(RID, "alt-run")["fill_ask_hours"] == 2 and by_id["reset-night"]["days"] == [1] and by_id["reset-night"]["time"] == "21:00"
 
 
 def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, store, owner):
     opened(reg)
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
+    weekly(reg, RID, "Tue 19:30")
     h = Harness(reg)
     before = copy.deepcopy((reg.config.raids, reg.config.schedules))
 
@@ -336,8 +336,8 @@ def test_plain_text_schedule_ops_describe_in_words_and_apply(reg, store):
 
 def test_run_open_takes_a_schedule(reg, rs):
     opened(reg)
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00"}, "t")
-    reg.set_schedule(RID, "pug", {"kind": "pickup"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid=RID)
+    reg.set_schedule("pug", {"kind": "pickup"}, "t", raid=RID)
     line = configops.describe(reg, ConfigOp(op="run_open", target=RID, field="alt"))
     assert line.startswith("open Barrow Deeps · Weekly ") and "-alt-" in line
     assert "pickup template" in configops.describe(reg, ConfigOp(op="run_open", target=RID, field="pug"))
@@ -424,8 +424,8 @@ def test_help_schedule_lists_the_real_upcoming_runs_per_schedule(reg):
     from oibot_gm import discord_help
 
     opened(reg)
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("raid-nights", {"kind": "weekly", "slots": "Tue 19:30", "name": "Raid nights"}, "t", raid=RID)
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     text = discord_help.guide_text(reg, "schedule")
     assert "Raid nights (recurring): Tuesdays 7:30 PM" in text and "Alt run (recurring): Saturdays 8:00 PM" in text
     for s in reg.schedules(RID):
@@ -448,9 +448,9 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
             return rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
 
     opened(reg)
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
-    reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup"}, "t")
+    weekly(reg, RID, "Tue 19:30")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)
     bot = Bot(rs)
     h = Harness(reg, rs, client=bot)
     ups = rc.upcoming(reg, RID, reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)
@@ -518,9 +518,9 @@ def _two_roster_run(reg, rs):
     """A Barrow Deeps run whose schedule expects two rosters, opened the way the declared-roster test opens its run."""
     reg.seed_test_members(30, "t")  # 4 tanks, 7 healers, 19 dps
     opened(reg)
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.set_schedule(RID, "default", {"rosters": 2}, "t")
-    t = rc.slot_starts(reg, RID, reg.now_local(), 24 * 14)[0][1]
+    weekly(reg, RID, "Tue 19:30")
+    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t", raid=RID)
+    t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     return rc.open_run(reg, rs, RID, t, by="t")
 
 
@@ -558,9 +558,9 @@ def test_a_declared_second_roster_is_placeable_and_built_once_the_joiners_need_i
     the board draws every roster the run expects; the lock builds the declared roster as soon as the joiners no longer
     fit in fewer, even with tanks for one — and empty rosters drawn on the board never force one."""
     opened(reg)
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.set_schedule(RID, "default", {"rosters": 2}, "t")
-    t = rc.slot_starts(reg, RID, reg.now_local(), 24 * 14)[0][1]
+    weekly(reg, RID, "Tue 19:30")
+    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t", raid=RID)
+    t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
     k, bounds = rc.groups_per_roster(reg, 10), reg.role_bounds(RID, 10)
     assert len(rc.board_layout(reg, ev)) == 2 * k, "20 places before anyone is placed"

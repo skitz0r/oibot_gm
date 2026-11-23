@@ -421,7 +421,7 @@ def test_config_verbs_and_save_config_hold_the_registry_lock(reg, monkeypatch):
 
     monkeypatch.setattr(reg, "save_config", spy)
     reg.set_raid_override("barrow_deeps", "lockout_days", 5, "t")
-    reg.set_schedule("barrow_deeps", "fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays"}, "t")
+    reg.set_schedule("fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays"}, "t", raid="barrow_deeps")
     reg.set_buff_override(reg.profile.buffs[0].id, "note", "x", "t")
     reg.set_recruitment("t", note="hi")
     reg.set_plain_policy({"dm": "answer"}, "t")
@@ -527,7 +527,7 @@ def test_config_verbs_refuse_a_stale_rev_and_write_nothing(reg, store):
     assert isinstance(e.value, RegistryError) and e.value.section == "raids:barrow_deeps" and "changed since you looked" in str(e.value)
     assert reg.raid_def("barrow_deeps")["lockout_days"] == 5 and store.head() == head
     with pytest.raises(ConfigChanged):
-        reg.set_schedule("barrow_deeps", "fri", {"kind": "weekly", "slots": "Fri 20:00"}, "t", rev=rev)
+        reg.set_schedule("fri", {"kind": "weekly", "slots": "Fri 20:00"}, "t", rev=rev, raid="barrow_deeps")
     with pytest.raises(ConfigChanged):
         reg.set_buff_override(reg.profile.buffs[0].id, "note", "x", "t", rev="000000000000")
     with pytest.raises(ConfigChanged):

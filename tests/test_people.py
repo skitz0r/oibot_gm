@@ -8,7 +8,7 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from conftest import OWNER, join, lock_with_board
+from conftest import OWNER, at_schedule, join, lock_with_board, weekly
 from test_parity_verbs import Bot
 
 from oibot_gm import configops, discord_people
@@ -34,7 +34,7 @@ def real(reg, n: int, cls="Priest", spec="Holy", name=None, surname=None):
 
 def real_run(reg, rs, *, days=3, schedule=None):
     start = (reg.now_local() + timedelta(days=days, hours=3)).replace(second=0, microsecond=0)
-    ev = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=schedule)
+    ev = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=schedule or at_schedule(reg, start))  # recurring
     assert not rc.is_test_run(reg, ev)
     return ev
 
@@ -149,17 +149,18 @@ def test_deleting_a_seated_character_frees_the_seat_and_asks_the_bench(reg, rs, 
 
 
 def test_retire_clears_an_open_join_and_drops_the_regular(reg, rs, bot):
-    reg.set_raid_overrides("barrow_deeps", {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", ["Tue 19:30"])
     m = real(reg, 0, "Priest", "Holy")
     reg.add_character(m.discord_id, m.display_name, "Altoni", "Mage", "Fire", None, False)
-    reg.regular_add(m.discord_id, "barrow_deeps:default", "t", "Altoni")
+    reg.regular_add(m.discord_id, "barrow-deeps", "t", "Altoni")
     ev = real_run(reg, rs)
     rc.set_signup(reg, rs, ev, m, "Altoni", "in", source="member")
     preview = discord_people.character_preview(bot, reg, m.discord_id, [{"label": "Altoni", "retire": True}])
     assert any("stops being a regular of" in p for p in preview) and any("answer for" in p and "is cleared" in p for p in preview), preview
     run(bot.save_characters(reg, m.discord_id, [{"label": "Altoni", "retire": True}], m.display_name, by_id=m.discord_id))
     assert str(m.discord_id) not in ev.signups
-    assert not reg.regulars("barrow_deeps:default")
+    assert not reg.regulars("barrow-deeps")
 
 
 def test_preview_writes_nothing_and_refuses_like_the_save(reg, rs, bot):
@@ -355,16 +356,16 @@ def test_transfer_owner_verb_audits_and_dms_nobody(reg, rs, bot, monkeypatch):
 
 
 def test_removing_a_schedule_drops_its_regulars_without_a_dm(reg, bot):
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid="barrow_deeps")
     a, b = real(reg, 0), real(reg, 1)
-    reg.regular_add(a.discord_id, "barrow_deeps:alt", "t")
-    reg.regular_add(b.discord_id, "barrow_deeps:alt", "t")
+    reg.regular_add(a.discord_id, "alt", "t")
+    reg.regular_add(b.discord_id, "alt", "t")
     op = ConfigOp(op="schedule_remove", target="barrow_deeps", field="alt")
     assert "2 regulars come off it" in configops.describe(reg, op) and "nobody is DMed" in configops.describe(reg, op)  # the diff line
     assert any("come off its regulars and see a notice on their Me page" in c for c in configops.op_consequences(reg, op))
-    line = reg.remove_schedule("barrow_deeps", "alt", "Owner")
+    line = reg.remove_schedule("alt", "Owner")
     assert "2 regulars off it" in line and a.display_name in line
-    assert not any("barrow_deeps:alt" in c.rosters for m in reg.members.values() for c in m.characters)
+    assert not any("alt" in c.rosters for m in reg.members.values() for c in m.characters)
     assert not reg.orphan_regulars() and not bot.sent_dms and not bot.dms
 
 
@@ -651,7 +652,8 @@ def test_save_characters_reads_the_changes_under_the_same_lock_as_the_save(reg, 
 def test_member_writes_hold_the_config_lock(reg, monkeypatch, verb):
     """Registration, plans and the other member writes take config_lock like the character table (they run on the loop
     while a web save may hold it in a worker thread)."""
-    reg.set_raid_overrides("barrow_deeps", {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", ["Tue 19:30"])
     m = real(reg, 0)
     reg.add_character(m.discord_id, m.display_name, "Lockalt", "Mage", "Fire", None, False)
     reg.set_plan(REAL + 7, "Planner", "Priest", "Holy", None, "main")
@@ -667,7 +669,7 @@ def test_member_writes_hold_the_config_lock(reg, monkeypatch, verb):
      "name_character": lambda: reg.name_character(REAL + 7, "Namedone"),
      "set_flex": lambda: reg.set_flex(m.discord_id, "Lockalt", ["tank"]),
      "set_main": lambda: reg.set_main(m.discord_id, "Lockalt"),
-     "regular_add": lambda: reg.regular_add(m.discord_id, "barrow_deeps:default", "t")}[verb]()
+     "regular_add": lambda: reg.regular_add(m.discord_id, "barrow-deeps", "t")}[verb]()
     assert held and all(held)
 
 

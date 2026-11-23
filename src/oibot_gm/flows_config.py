@@ -28,7 +28,7 @@ import discord
 
 from .constants import hours_words  # noqa: F401 — moved to constants (registry's lift words); re-exported here
 from .presets import PRESETS  # (key, name, opens, nudge, lock, confirm), shared with plain text
-from .registry import (DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
+from .registry import (DEFAULT_RAID_SIZE, MAX_SCHEDULE_ROSTERS, SCHEDULE_NAMES, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
                        RegistryError, parse_slots, schedule_def_of, schedule_value, schedules_of)
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, fmt12, hour_opts, minute_opts, week_opts, when_fields, when_note
 
@@ -128,7 +128,7 @@ SPLIT_WORDS = {"balanced": ("Balanced", "both runs equal in synergy, tanks, heal
 BOOL_WORDS = {"nudge": "Nudge the unanswered", "autofill": "Fill seats automatically", "open_dm": "DM everyone on open",
               "confirm": "Ask the rostered to confirm"}  # registry.RAID_BOOL_FIELDS, in words
 SECTIONS = [  # (key, label, fields it edits). Sheet timing is each schedule's own (C7): under Schedules, never the raid's.
-    ("times", "Schedules", ("slots", "schedules")),
+    ("times", "Schedules", ("schedules",)),
     ("comp", "Minimums", ()),  # CompTargetsBlock: saved on its own (Registry.set_minimums), never in the hub's draft
     ("weights", "Selection weights", tuple(f"weight_{k}" for k in WEIGHTS)),
     ("length", "Lockout & length", ("lockout_days", "duration_hours")),
@@ -402,7 +402,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         super().__init__(reg, owner_id, title="Raid rules", guard=_officer_guard(reg))
         self.raid = raid
         self.draft: dict = {}
-        self.sid = DEFAULT_SCHEDULE  # the schedule the Schedules section is on
+        self.sid: str | None = None  # the schedule the Schedules section is on
         self._attempt: dict = {}  # values a section refused, prefilled when the person presses Fix this
         self._fo_day0: date = reg.now_local().date()
         self.targets_back = self.to_hub  # the Minimums section is the block itself (CompTargetsBlock); Back = the hub
@@ -448,7 +448,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         if field == "slots":
             return ", ".join(self.reg.slot_label(s) for s in v) or "no run times (add one under Schedules)"
         if field == "schedules":
-            return "; ".join(f"{s['name']}: {self.reg.schedule_label(self.raid, s)}" for s in schedules_of({**self.sview(), "schedules": v}) if s["id"] != DEFAULT_SCHEDULE) or "only the run times"
+            return "; ".join(f"{s['name']}: {self.reg.schedule_label(self.raid, s)}" for s in schedules_of({**self.sview(), "schedules": v})) or "no schedules (add one under Schedules)"
         if field == "split_policy":
             return SPLIT_WORDS.get(v, (v,))[0]
         if field.startswith("weight_"):
@@ -470,9 +470,9 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             return field_value(eff, f, tz)
         if key == "times":
             scheds = schedules_of(eff)
-            if len(scheds) > 1 or (scheds and scheds[0]["id"] != DEFAULT_SCHEDULE):
+            if scheds:
                 return f"{len(scheds)} schedule{'s' if len(scheds) > 1 else ''}: " + ", ".join(s["name"] for s in scheds)
-            return self.say("slots", fv("slots")) if fv("slots") else "no run times yet"
+            return "no schedules yet: add one to set when this raid runs"
         if key == "comp":
             from .registry import slot_words
 
@@ -555,21 +555,20 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self._attempt = {}
         await self.hub(i, note)
 
-    # ---- Schedules (the "times" section): WHEN the raid runs. `default` is the raid's own weekly slots (draft field
-    # "slots"); every other schedule — and default's own settings — live in the draft field "schedules" (the stored list,
-    # in the exact form Registry._apply_raid_override takes). A raid with just its run times opens straight on them.
+    # ---- Schedules (the "times" section): WHEN the raid runs. Every schedule lives in the draft field "schedules" (the
+    # raid's stored list, in the exact form Registry.set_raid_overrides takes); a raid has no run times of its own.
     def sview(self) -> dict:
         """The raid as the draft would make it — schedules included even while another section's change is refused."""
         eff, _ = self.preview()
         base = eff or self.reg.raid_def(self.raid)
-        return {**base, "slots": list(self.cur("slots")), "schedules": copy.deepcopy(self.cur("schedules"))}
+        return {**base, "schedules": copy.deepcopy(self.cur("schedules"))}
 
     def scheds(self) -> list[dict]:
         return schedules_of(self.sview())
 
     def sched(self, sid: str) -> dict:
         return next((s for s in self.scheds() if s["id"] == sid), None) or {
-            "id": DEFAULT_SCHEDULE, "name": DEFAULT_SCHEDULE_NAME, "kind": "weekly", "active": True, "rosters": 1, "slots": [], "days": [], "time": None}
+            "id": sid, "name": SCHEDULE_NAMES["weekly"], "kind": "weekly", "active": True, "rosters": 1, "slots": [], "days": [], "time": None}
 
     def sched_runs(self, s: dict) -> list[datetime]:
         from .raidcycle import next_runs_of
@@ -588,7 +587,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
                 e.pop(k, None)
             else:
                 e[k] = v
-        self.put("schedules", [r for r in rows if not (r["id"] == DEFAULT_SCHEDULE and len(r) == 1)])
+        self.put("schedules", rows)
 
     async def sched_checked(self, i: discord.Interaction, snapshot: dict, sid: str, note: str) -> None:
         """After a schedule change: back to that schedule — or, if the registry would refuse the draft, undo and say why."""
@@ -627,10 +626,12 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
     async def times(self, i: discord.Interaction, note: str = "") -> None:
         scheds = self.scheds()
-        if not scheds or (len(scheds) == 1 and scheds[0]["id"] == DEFAULT_SCHEDULE):
-            await self.schedule(i, DEFAULT_SCHEDULE, note)
-            return
         lines = [note] if note else []
+        if not scheds:
+            lines.append("**Schedules** — this raid has none yet, so no run opens on its own. Add one to set when it runs.")
+            await self.show(i, "\n".join(lines), self.button("Add a schedule", self.add_schedule, discord.ButtonStyle.primary),
+                            self.button("Back to the sections", self.to_hub))
+            return
         lines.append("**Schedules** — when this raid runs (guild time):")
         for s in scheds:
             runs = self.sched_runs(s) if s["kind"] != "pickup" else []
@@ -714,8 +715,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             await self.sched_checked(i, snapshot, sid, f"{self.sched(sid)['name']} {'resumed' if on else 'paused'}.")
         else:
             s = self.sched(sid)
-            extra = " Its run times are the raid's own, so the raid is left with none." if sid == DEFAULT_SCHEDULE else ""
-            await self.show(i, f"Remove **{s['name']}** ({self.reg.schedule_label(self.raid, s)})?{extra}\n-# Runs already open keep their times. Nothing is saved until Save.",
+            await self.show(i, f"Remove **{s['name']}** ({self.reg.schedule_label(self.raid, s)})?\n-# Runs already open keep their times. Nothing is saved until Save.",
                             self.button("Remove", self.remove_sched, discord.ButtonStyle.danger), self.button("Back", self._to_sched))
 
     async def _to_sched(self, i: discord.Interaction) -> None:
@@ -735,10 +735,8 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
     async def remove_sched(self, i: discord.Interaction) -> None:
         sid, name = self.sid, self.sched(self.sid)["name"]
-        if sid == DEFAULT_SCHEDULE:
-            self.put("slots", [])
         self.put("schedules", [r for r in copy.deepcopy(self.cur("schedules")) if r.get("id") != sid])
-        self.sid = DEFAULT_SCHEDULE
+        self.sid = None
         await self.times(i, f"Removed {name}.")
 
     async def sched_week(self, i: discord.Interaction) -> None:
@@ -851,9 +849,12 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
     def new_id(self, name: str, kind: str) -> str:
         base = re.sub(r"[^a-z0-9]+", "-", (name or kind).lower()).strip("-")[:12] or kind
-        taken = {s["id"] for s in self.scheds()} | {r.get("id") for r in self.cur("schedules")}
+        from .registry import RESERVED_SCHEDULE_IDS
+
+        # guild-unique (phase 3): another raid's schedules count too
+        taken = {s["id"] for s in self.scheds()} | {r.get("id") for r in self.cur("schedules")} | {s["id"] for s in self.reg.all_schedules()}
         sid, n = base, 2
-        while sid in taken or sid == DEFAULT_SCHEDULE:
+        while sid in taken or sid in RESERVED_SCHEDULE_IDS:
             sid, n = f"{base[:12]}-{n}", n + 1
         return sid
 
@@ -895,15 +896,12 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
                        time=f"{int(v.get('hour') or 0):02d}:{int(v.get('minute') or 0):02d}")
         await self.sched_checked(i, snapshot, self.sid, f"{self.sched(self.sid)['name']}: {self.reg.schedule_label(self.raid, self.sched(self.sid))}.")
 
-    # ---- a weekly schedule's run times (the default schedule's are the raid's own `slots`)
+    # ---- a weekly schedule's run times
     def sched_slots(self, sid: str) -> list[str]:
-        return list(self.cur("slots")) if sid == DEFAULT_SCHEDULE else list(self.sched(sid).get("slots") or [])
+        return list(self.sched(sid).get("slots") or [])
 
     def put_slots(self, sid: str, slots: list[str]) -> None:
-        if sid == DEFAULT_SCHEDULE:
-            self.put("slots", slots)
-        else:
-            self.entry_put(sid, slots=slots)
+        self.entry_put(sid, slots=slots)
 
     def _dropper(self, slot: str):
         async def drop(i: discord.Interaction) -> None:
@@ -1117,8 +1115,8 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
                 out.append(f"• New schedule **{s['name']}**: {label(s)}")
                 continue
             changes = []
-            if label({**b, "slots": s["slots"]}) != label(s):  # the default's run times have their own line above
-                changes.append(f"{label({**b, 'slots': s['slots']})} → **{label(s)}**")
+            if label(b) != label(s):
+                changes.append(f"{label(b)} → **{label(s)}**")
             if b["name"] != s["name"]:
                 changes.append(f"renamed **{s['name']}**")
             ob, oa = schedule_def_of(stored_rd, sid)["schedule"]["own"], schedule_def_of(view, sid)["schedule"]["own"]

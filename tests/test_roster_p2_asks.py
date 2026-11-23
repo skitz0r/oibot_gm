@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from conftest import first_slot, join, lock_with_board
+from conftest import first_slot, join, lock_with_board, weekly
 from test_analytics_cards import text_of
 from test_parity_verbs import Bot, Chan
 from test_roster_p2_planner import DPS8, KEY, RID, _joined_series, add, worked_example
@@ -126,7 +126,8 @@ def _locked_short_healer(reg, rs, adhoc: bool = False):
     rows = [("Tanka", "Warrior", "Protection"), ("Tankb", "Paladin", "Protection"), ("Heala", "Priest", "Holy"), ("Healb", "Shaman", "Restoration"),
             ("Offy", "Shaman", "Enhancement", "Restoration")] + DPS8[:5]
     if adhoc:
-        reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+        reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+        weekly(reg, RID, ["Tue 19:30"])
         ms = [add(reg, 300 + i, *row) for i, row in enumerate(rows)]
         assert reg.test_members(), "the fixture has test puppets: an ad hoc run's pool (every main) must leave them out"
         t = first_slot(reg, RID)

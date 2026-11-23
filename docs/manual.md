@@ -75,9 +75,14 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   lock (who could cover a tank or healer minimum — a yes changes their signup, nobody is seated until the lock) and
   **Fill seats…** after it (who to ask for an open place). Both show exactly the DMs **Send** will send. **Pause
   automatic asks** stops the bot asking anyone on its own for that run; an officer's own Fill seats… still sends.
-- **Regulars** — the people expected every week on a recurring schedule, each on one character. Officers keep the list
-  (the Rosters page's *Regulars* tab or `/roster add`); nothing is answered for them, they press Join like everyone else,
-  and being one counts at lock.
+- **Schedule** — when a raid runs: weekly nights, days of each lockout or a pickup template, with its own sheet
+  timing. Each schedule has an **id** of its own across the guild (*barrow-deeps*, *tuesday*), so one id always names one
+  schedule. A raid has no run times of its own: its run times are an ordinary schedule (the one a guild had before is
+  called *Raid nights*).
+- **Regulars** — the people expected every week on a recurring schedule, each on one character. Regulars belong to the
+  schedule, not to the raid: removing the schedule takes them off it. Officers keep the list (the Rosters page's
+  *Regulars* tab or `/roster add`); nothing is answered for them, they press Join like everyone else, and being one
+  counts at lock.
 - **Listening** (owner) — a channel the bot reads without being tagged: it answers what is clearly for it there.
   *Watches* means it only notes what it would have answered; *Replies* means it answers. The owner chooses the channels
   (§8c *Listening*).
@@ -756,8 +761,8 @@ tools list the library and withdraw or restore a version; they never upload or g
 ## 4. Raids, runs and the signup cycle
 
 A **raid** is an instance and its rules: size, lockout, expected duration, its **minimums** (the fewest tanks,
-healers, or of a class a run takes — §1a), and — what drives everything — its **slots**. **A run's week** (when a sheet
-opens, locks and must be confirmed by) belongs to each schedule, below. At launch: **Barrow Deeps**
+healers, or of a class a run takes — §1a). When it runs — its **slots** — and **a run's week** (when a sheet opens,
+locks and must be confirmed by) belong to each of its schedules, below. At launch: **Barrow Deeps**
 (10-player, 3-day lockout guess), **Hyjal Summit** (20-player, weekly), **Onyxia's Lair** (40-player,
 5-day like Classic). Each raid has a **first opens at** (seeded 9 Dec 2026, 3:00 PM PST for all three); no
 sheet opens before it. Officers set all of this — a raid's rules and its schedules — with `/gm config raid`, on the
@@ -769,7 +774,10 @@ several. One **run** = one slot occurrence = one sheet. A run is **open**, then 
 (or **cancelled**). Members never keep standing availability; they answer each sheet.
 
 **Schedules** say *when* a raid runs; the raid itself keeps what it is (size, minimums, lockout, weights, split
-policy). A raid's own run times are its first schedule (*Raid nights*); it can have more, each with a name. Each
+policy) and has no run times of its own. Each schedule has a name and an **id** that no other schedule of the guild has
+— two raids can't both have a *tuesday*. A guild whose raid had run times of its own before keeps them as an ordinary
+schedule named *Raid nights* (its id from the raid's name, e.g. *barrow-deeps*), and its regulars stay on it; the ops
+channel gets one line at the next start naming each schedule given a new id. A raid can have several schedules. Each
 schedule holds its own **sheet timing** in full: when its sheet opens, nudges, locks and asks to confirm, how long
 fill asks wait, autofill and the DM on open. A new schedule starts from the game's suggestion for its raid (a pickup
 template from the ad hoc values below); setting one of them back to the default gives it the suggestion again. The
@@ -797,11 +805,11 @@ stop the lock: the rosters are built and the empty seats wait to be filled. That
 can switch between tanking and healing are needed as both at once too: they take one role each and the rest waits.
 With one roster's worth of joiners or fewer it builds a second
 roster only when the tanks and healers allow two. A
-schedule can be **paused** (nothing opens from it). Runs from a schedule other than the raid's own run times carry
-its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same minute are two runs.
+schedule can be **paused** (nothing opens from it). A run from a schedule carries the schedule's id in its key
+(`bd-1212-2000-alt`), so two schedules starting at the same minute are two runs.
 
 **Recurring and ad hoc.** Every run is one or the other, and nobody sets it by hand — it follows the schedule's kind:
-- **Recurring** — weekly nights and days of each lockout (the raid's own run times included). Opens by itself on its
+- **Recurring** — weekly nights and days of each lockout. Opens by itself on its
   week, has **regulars**, and its lock weighs being a regular (below). Confirmations on by default.
 - **Ad hoc** — a pickup template, or a **one-off** run at a time an officer picks (*Ad hoc run…* in `/raid open`,
   *Start an ad hoc run…* on the Rosters page, or plain text / MCP with a time that is none of the raid's upcoming runs).

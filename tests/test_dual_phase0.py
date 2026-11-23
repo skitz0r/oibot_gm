@@ -629,7 +629,7 @@ def test_roster_absences_rechecks_officer_standing_on_every_press(reg, monkeypat
 
 
 def test_config_show_is_words_not_yaml(reg):
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")  # sheet timing is a schedule's (C7): its line says when it locks
+    reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid="barrow_deeps")  # sheet timing is a schedule's (C7): its line says when it locks
     sections = configops.config_summary(reg)  # phase 3: sections (one embed field each on /gm config show)
     text = configops.summary_text(sections)
     assert sections[0].lines[0].startswith(reg.config.name) and "now " in sections[0].lines[1] and (f"<@{OWNER}>" in text or "Owner: " in text)

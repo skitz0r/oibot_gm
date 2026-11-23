@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from conftest import join, lock_with_board
+from conftest import join, lock_with_board, weekly
 
 from oibot_gm import raidcycle as rc
 from oibot_gm.loot import scoring
@@ -23,7 +23,9 @@ def done_run(reg: Registry, rs: rc.RaidStore, joined, seated, days_ago: float, *
     """A run `days_ago` days back, joined by `joined`, locked around `seated`, then ended (state done). `confirm`:
     {member: answer} placement asks on the run's roster key (recurring); `regulars`: who the series expected at open."""
     start = (reg.now_local() + timedelta(days=20 + n, hours=3)).replace(second=0, microsecond=0)
-    ev = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=ADHOC_SCHEDULE if adhoc else None)
+    if not adhoc and not reg.schedules("barrow_deeps"):
+        weekly(reg)  # phase 3: a recurring run comes from a schedule (the raid has no run times of its own)
+    ev = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=ADHOC_SCHEDULE if adhoc else "barrow-deeps")
     join(reg, rs, ev, joined)
     lock_with_board(reg, rs, ev, [m.display_name for m in seated])
     ev.regulars = [m.discord_id for m in regulars]

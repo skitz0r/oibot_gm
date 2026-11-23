@@ -12,7 +12,7 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from conftest import OWNER, by_role, join, open_test_run
+from conftest import OWNER, by_role, join, open_test_run, weekly
 from fastapi.testclient import TestClient
 from test_analytics_cards import text_of
 from test_mcp import TOKEN, FakeBot, bearer
@@ -26,7 +26,7 @@ from oibot_gm.registry import ADHOC_DEFAULTS, RAID_WEIGHT_DEFAULTS, RegistryErro
 from oibot_gm.web import app as web
 
 RID = "barrow_deeps"
-KEY = f"{RID}:default"
+KEY = "barrow-deeps"
 REAL = 400_000_000_000_000_000
 ico = lambda kind, key: f"<{kind}:{key}>"  # noqa: E731
 
@@ -36,8 +36,9 @@ def run(coro):
 
 
 def opened(reg):
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
-    reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, ["Tue 19:30"])
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)
 
 
 SPECS = [("Warrior", "Protection"), ("Priest", "Holy"), ("Shaman", "Restoration"), ("Rogue", "Combat"), ("Mage", "Fire"), ("Hunter", "Marksmanship")]
@@ -74,9 +75,9 @@ def test_regular_add_remove_and_their_refusals(reg):
     with pytest.raises(RegistryError, match="already a regular"):
         reg.regular_add(a.discord_id, KEY, "t")
     with pytest.raises(RegistryError, match="ad hoc"):
-        reg.regular_add(a.discord_id, f"{RID}:pug", "t")
+        reg.regular_add(a.discord_id, "pug", "t")
     with pytest.raises(RegistryError, match="no recurring schedule"):
-        reg.regular_add(a.discord_id, f"{RID}:nope", "t")
+        reg.regular_add(a.discord_id, "nope", "t")
     with pytest.raises(RegistryError, match="test puppet"):
         reg.regular_add(reg.test_members()[0].discord_id, KEY, "t")
     # one character per member per series: another character replaces the first
@@ -91,22 +92,22 @@ def test_regular_add_remove_and_their_refusals(reg):
 
 def test_same_character_on_two_series_of_one_raid_warns(reg):
     opened(reg)
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     m = real(reg, 0)
     reg.regular_add(m.discord_id, KEY, "t")
-    _m, _c, warn = reg.regular_add(m.discord_id, f"{RID}:alt", "t")
+    _m, _c, warn = reg.regular_add(m.discord_id, "alt", "t")
     assert warn and "lockout" in warn[0]
 
 
 def test_removed_schedule_takes_its_regulars_with_it(reg):
     """Owner decision D30 (phase 2 C): removing a schedule removes its regulars — named in the line, no DM, no orphans."""
     opened(reg)
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     m = real(reg, 0)
-    reg.regular_add(m.discord_id, f"{RID}:alt", "t")
-    line = reg.remove_schedule(RID, "alt", "t")
+    reg.regular_add(m.discord_id, "alt", "t")
+    line = reg.remove_schedule("alt", "t")
     assert "1 regular off it" in line and m.display_name in line
-    assert not reg.orphan_regulars() and not any(f"{RID}:alt" in c.rosters for c in reg.members[m.discord_id].characters)
+    assert not reg.orphan_regulars() and not any("alt" in c.rosters for c in reg.members[m.discord_id].characters)
 
 
 # ---------------------------------------------------------------- D1: nothing pre-filled; absences mark people away
@@ -309,7 +310,7 @@ def test_web_route_adds_and_removes_regulars_and_members_step_down(reg, rs, monk
     assert series[0]["key"] == KEY and [x["uid"] for x in series[0]["regulars"]] == [str(m.discord_id)]
     assert any(p["uid"] == str(m.discord_id) for p in rows["people"]) and not any(p["uid"] == str(reg.test_members()[0].discord_id) for p in rows["people"])
     raid = next(r for r in c.get("/api/raids", headers=bearer()).json()["raids"] if r["id"] == RID)
-    dflt = next(s for s in raid["schedules"] if s["id"] == "default")
+    dflt = next(s for s in raid["schedules"] if s["id"] == "barrow-deeps")
     pug = next(s for s in raid["schedules"] if s["id"] == "pug")
     # phase 2: every stored schedule holds its timing written out, so the pickup's lock is its own value — the ad hoc
     # default's (the site's empty-field hint for a pickup says "ad hoc default" from ADHOC_DEFAULTS either way)
@@ -362,7 +363,7 @@ def test_mcp_set_regular_calls_the_route():
         assert ms.set_regular(RID, "Ana", on=False, schedule="alt") == "ok"
     finally:
         ms.use(None)
-    assert seen == [("/api/admin/raid/regulars", {"raid": "Barrow Deeps", "schedule": "default", "member": "Ana", "character": "Anabelle", "on": True}),
+    assert seen == [("/api/admin/raid/regulars", {"raid": "Barrow Deeps", "schedule": "", "member": "Ana", "character": "Anabelle", "on": True}),
                     ("/api/admin/raid/regulars", {"raid": RID, "schedule": "alt", "member": "Ana", "character": "", "on": False})]
 
 
@@ -371,4 +372,4 @@ def test_me_view_and_names_never_show_series_keys(reg):
     m = real(reg, 0)
     reg.regular_add(m.discord_id, KEY, "t")
     assert reg.series_label(KEY) == "Barrow Deeps · Raid nights"
-    assert reg.series_label(f"{RID}:gone") == "Barrow Deeps · gone (removed schedule)"
+    assert reg.series_label("gone") == "gone (removed schedule)"

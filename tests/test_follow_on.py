@@ -6,7 +6,7 @@ import types
 from datetime import timedelta
 
 import pytest
-from conftest import join
+from conftest import join, weekly
 
 from oibot_gm import raidcycle as rc
 from oibot_gm import registry as rg
@@ -37,21 +37,21 @@ def test_parse_follow_grammar():
 
 def test_schedule_follow_is_validated_and_read_back(reg):
     unlock_hyjal(reg)
-    reg.set_schedule(LEAD, "tue", {"slots": "Tue 18:30", "name": "Tuesday", "follow": "barrow_deeps x2"}, "t")
+    reg.set_schedule("tue", {"slots": "Tue 18:30", "name": "Tuesday", "follow": "barrow_deeps x2"}, "t", raid=LEAD)
     s = next(x for x in reg.schedules(LEAD) if x["id"] == "tue")
     assert s["follow"] == {"raid": "barrow_deeps", "rosters": 2}
     assert reg.schedule_label(LEAD, s).endswith("· then Barrow Deeps ×2")
     assert reg.follow_words(s["follow"]) == "Barrow Deeps ×2" and reg.follow_words(None) == ""
-    reg.set_schedule(FOLLOW, "wed", {"slots": "Wed 18:30"}, "t")  # Barrow Deeps has no run times of its own in the profile
+    reg.set_schedule("wed", {"slots": "Wed 18:30"}, "t", raid=FOLLOW)  # Barrow Deeps has no run times of its own in the profile
     assert next(x for x in reg.schedules(FOLLOW) if x["id"] == "wed")["follow"] is None  # every schedule carries the key
     with pytest.raises(RegistryError, match="unknown raid"):
-        reg.set_schedule(LEAD, "tue", {"follow": "nope x2"}, "t")
+        reg.set_schedule("tue", {"follow": "nope x2"}, "t", raid=LEAD)
     with pytest.raises(RegistryError, match="itself"):
-        reg.set_schedule(LEAD, "tue", {"follow": "hyjal_summit_forever x2"}, "t")
-    reg.set_schedule(LEAD, "tue", {"follow": "none"}, "t")
+        reg.set_schedule("tue", {"follow": "hyjal_summit_forever x2"}, "t", raid=LEAD)
+    reg.set_schedule("tue", {"follow": "none"}, "t", raid=LEAD)
     assert next(x for x in reg.schedules(LEAD) if x["id"] == "tue")["follow"] is None
     with pytest.raises(RegistryError, match="kept for follow-on"):
-        reg.set_schedule(LEAD, "after", {"slots": "Tue 18:30"}, "t")
+        reg.set_schedule("after", {"slots": "Tue 18:30"}, "t", raid=LEAD)
 
 
 # ---------------------------------------------------------------- Task 2: the pair of runs
@@ -85,7 +85,7 @@ def test_open_pair_is_idempotent(reg, rs):
 
 def test_a_schedule_with_a_follow_on_opens_the_pair_on_its_own(reg, rs):
     unlock_hyjal(reg)
-    reg.set_schedule(LEAD, "tue", {"slots": "Tue 18:30", "follow": "barrow_deeps x2"}, "t")
+    reg.set_schedule("tue", {"slots": "Tue 18:30", "follow": "barrow_deeps x2"}, "t", raid=LEAD)
     now = reg.now_local()
     t = next(t for s, t in rc.upcoming(reg, LEAD, now, 24 * 21) if s["id"] == "tue" and t - now >= timedelta(hours=30))
     lead = rc.open_run(reg, rs, LEAD, t, by="scheduler", schedule="tue")  # no explicit follow: the schedule's
@@ -149,7 +149,7 @@ def test_a_second_lead_on_the_same_follow_on_is_refused(reg, rs):
     lead, fev = open_pair(reg, rs)
     n_dicts, n_events = len(reg.config.rosters), len(rs.events)
     with pytest.raises(RegistryError, match=r"^That night already has a Barrow Deeps follow-on after .+\. Pick another time\.$"):
-        rc.open_run(reg, rs, LEAD, lead.start, by="t", follow={"raid": FOLLOW, "rosters": 1})  # the raid's own times, same minute
+        rc.open_run(reg, rs, LEAD, lead.start, by="t", schedule=night(reg, lead), follow={"raid": FOLLOW, "rosters": 1})  # a schedule's run, same minute
     assert len(reg.config.rosters) == n_dicts and len(rs.events) == n_events
     assert reg.config.roster(fev.team)["follows"] == lead.team
 
@@ -160,8 +160,13 @@ def test_a_cancelled_follow_on_refuses_the_night_and_opens_no_lead(reg, rs):
     rs.save(fev, "cancelled")
     n_dicts, n_events = len(reg.config.rosters), len(rs.events)
     with pytest.raises(RegistryError, match="cancelled"):
-        rc.open_run(reg, rs, LEAD, lead.start, by="t", follow={"raid": FOLLOW, "rosters": 1})
+        rc.open_run(reg, rs, LEAD, lead.start, by="t", schedule=night(reg, lead), follow={"raid": FOLLOW, "rosters": 1})
     assert len(reg.config.rosters) == n_dicts and len(rs.events) == n_events
+
+
+def night(reg, lead) -> str:
+    """A weekly schedule of the lead's raid at the lead's minute (phase 3: a raid has no run times of its own)."""
+    return weekly(reg, LEAD, lead.start.astimezone(reg.tz).strftime("%a %H:%M"), "night")
 
 
 # ---------------------------------------------------------------- Task 3: the lock builds both
@@ -250,8 +255,8 @@ def test_a_refused_scheduled_open_never_stops_the_guilds_minute(reg, rs, monkeyp
     same minute, then cancelled): the scheduled open is refused. One ops warn, and the same tick still locks another run."""
     unlock_hyjal(reg)
     reg.config.signup_channel_id = 1111
-    reg.set_schedule(LEAD, "tue", {"slots": "Mon 18:30, Tue 18:30, Wed 18:30, Thu 18:30, Fri 18:30, Sat 18:30, Sun 18:30",
-                                   "follow": "barrow_deeps x2"}, "t")
+    reg.set_schedule("tue", {"slots": "Mon 18:30, Tue 18:30, Wed 18:30, Thu 18:30, Fri 18:30, Sat 18:30, Sun 18:30",
+                                   "follow": "barrow_deeps x2"}, "t", raid=LEAD)
     # tomorrow noon, not the wall clock: within half an hour before the 6:30 PM slot the next slot would start before
     # `later` and the scheduled open was never tried (the test failed every evening from 6:01 to 6:30 PM)
     now = (reg.now_local() + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
@@ -518,7 +523,7 @@ def test_sheet_and_cards_say_then_and_after(reg, rs):
 
 def test_previews_and_json_carry_the_follow_on(reg, rs, c):
     unlock_hyjal(reg)
-    reg.set_schedule(LEAD, "tue", {"slots": "Tue 18:30", "follow": "barrow_deeps x2"}, "t")
+    reg.set_schedule("tue", {"slots": "Tue 18:30", "follow": "barrow_deeps x2"}, "t", raid=LEAD)
     p = rc.open_preview(reg, rs, LEAD, None, "tue")
     assert p["follow"]["name"] == "Barrow Deeps" and p["follow"]["rosters"] == 2 and p["follow_line"].startswith("Then Barrow Deeps ×2 at ") and p["follow_line"].endswith("PM, from the same signup.")
     p2 = rc.open_preview(reg, rs, LEAD, (reg.now_local() + timedelta(days=4)).strftime("%Y-%m-%d 18:30"), None, follow={"raid": FOLLOW, "rosters": 1})

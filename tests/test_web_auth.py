@@ -2,6 +2,7 @@
 import time
 
 from oibot_gm.web import app as web
+from conftest import weekly
 
 
 def test_safe_next_only_inside_the_app():
@@ -79,11 +80,10 @@ def test_opening_a_run_refuses_the_past_and_explains_a_missing_slot(reg, rs, mon
     assert "PM" in past.json()["error"] and ":30" in past.json()["error"]  # 12-hour, never "19:30"
     junk = c.post(f"/api/raid/{rid}/open", json={"when": "next tuesday"}, headers=h)
     assert junk.status_code == 400 and "picker" in junk.json()["error"]
-    reg.set_raid_override(rid, "slots", "", "t")
     none = c.post(f"/api/raid/{rid}/open", json={"when": ""}, headers=h)
     assert none.status_code == 400 and "no recurring slots yet" in none.json()["error"] and "Pick a date and time" in none.json()["error"]
     # slots exist but every occurrence is before the raid opens: say THAT, not "no slots"
-    reg.set_raid_override(rid, "slots", "Tue 19:30", "t")
+    weekly(reg, rid, "Tue 19:30")
     reg.set_raid_override(rid, "first_open", "2030-01-01T15:00", "t")
     early = c.post(f"/api/raid/{rid}/open", json={"when": ""}, headers=h)
     assert early.status_code == 400 and "before it opens" in early.json()["error"] and "PM" in early.json()["error"]

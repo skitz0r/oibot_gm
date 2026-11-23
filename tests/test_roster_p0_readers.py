@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import GUILD, join, lock_with_board, open_test_run
+from conftest import GUILD, join, lock_with_board, open_test_run, weekly
 from fastapi.testclient import TestClient
 from test_mcp import TOKEN, bearer
 from test_parity_verbs import Bot
@@ -158,7 +158,10 @@ def test_legacy_teams_migration_copies_series_keys_only(reg, store, profile):
     raw = json.loads(p.read_text())
     raw["teams"] = ["main", "barrow_deeps:default"]
     p.write_text(json.dumps(raw))
+    weekly(reg)  # phase 3: the old key reads through the lift's alias
+    reg.config.schedule_aliases["barrow_deeps:default"] = "barrow-deeps"
+    reg.save_config("alias")
     again = Registry(store, GUILD, profile)
-    assert again.members[m.discord_id].main.rosters == ["barrow_deeps:default"]
+    assert again.members[m.discord_id].main.rosters == ["barrow-deeps"]
     assert "teams" not in json.loads(p.read_text())
     assert again.migrate_rosters_to_series(dry_run=True) == []  # nothing phantom left behind

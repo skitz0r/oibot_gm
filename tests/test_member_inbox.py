@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import by_role, join, lock_with_board, open_test_run
+from conftest import by_role, join, lock_with_board, open_test_run, weekly
 from test_raid_night import NightBot
 
 from oibot_gm import configops, inbox
@@ -240,11 +240,12 @@ def test_officer_on_behalf_writes_tell_the_member_and_their_own_do_not(reg, rs):
 
 
 def test_schedule_removed_tells_its_regulars_by_notice(reg):
-    reg.set_raid_overrides("barrow_deeps", {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", ["Tue 19:30"])
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid="barrow_deeps")
     m = real(reg, 0)
-    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
-    reg.remove_schedule("barrow_deeps", "alt", "Jon")
+    reg.regular_add(m.discord_id, "alt", "t")
+    reg.remove_schedule("alt", "Jon")
     (t,) = texts(reg, m)
     assert "removed by Jon" in t
 

@@ -5,7 +5,7 @@ from conftest import join, open_test_run
 
 from oibot_gm import configops, raidcycle as rc
 from oibot_gm.configops import ConfigOp
-from oibot_gm.registry import RegistryError
+from oibot_gm.registry import RUN_TIMES_ON_SCHEDULE, RegistryError
 
 
 def test_raid_set_describe_and_apply(reg):
@@ -20,7 +20,9 @@ def test_raid_set_describe_and_apply(reg):
     assert configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="healer_max", value="4")) == \
         "raid barrow_deeps healer_max: Set a role's minimum as a minimum: at least 4 healers."
     slots = configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Tue 19:30"))
-    assert slots.startswith("raid barrow_deeps slots: none → Tue 7:30 PM — after it: Barrow Deeps: next Tue ") and "19:30" not in slots
+    assert slots == f"raid barrow_deeps slots: {RUN_TIMES_ON_SCHEDULE}"  # phase 3: run times are a schedule's
+    with pytest.raises(RegistryError, match="belong to a schedule"):
+        configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Tue 19:30"), "officer", is_owner=False)
     assert configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps")) == "raid barrow_deeps: drop the guild's changes — weights rank 5 → the game's defaults"
     configops.apply(reg, ConfigOp(op="raid_reset", target="barrow_deeps"), "officer", is_owner=False)
     assert reg.raid_def("barrow_deeps")["weights"]["rank"] == 3

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import wizard_harness
-from conftest import join, lock_with_board, open_test_run
+from conftest import join, lock_with_board, open_test_run, weekly
 from oibot_gm import discord_registry
 from oibot_gm import flows_raid  # noqa: F401 — registers the flows
 from oibot_gm import raidcycle as rc
@@ -146,15 +146,14 @@ def as_member(h, m):
 
 
 def with_slots(reg, rid="barrow_deeps", slots=("Tue 19:30", "Thu 19:30"), first_open=PAST):
-    reg.set_raid_overrides(rid, {"slots": list(slots), "first_open": first_open}, "t")
-
-
+    reg.set_raid_overrides(rid, {"first_open": first_open}, "t")
+    weekly(reg, rid, list(slots))
 # ---------------------------------------------------------------- /raid open
 
 def test_open_next_slot_is_one_press_after_the_raid(reg, rs, officer, channel):
     with_slots(reg)
     h, bot = harness(reg, rs)
-    want = rc.slot_starts(reg, "barrow_deeps", reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)[0][1]
+    want = rc.upcoming(reg, "barrow_deeps", reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)[0][1]
 
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
@@ -177,16 +176,16 @@ def test_open_next_slot_is_one_press_after_the_raid(reg, rs, officer, channel):
 def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):
     with_slots(reg)
     h, bot = harness(reg, rs)
-    starts = [t for _s, t in rc.slot_starts(reg, "barrow_deeps", reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)]
+    starts = [t for _s, t in rc.upcoming(reg, "barrow_deeps", reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)]
 
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         await h.press("Another upcoming run…")
         sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run")
-        assert [o.value for o in sel.options] == [t.isoformat() for t in starts[1:23]]
+        assert [o.value for o in sel.options] == [f"{t.isoformat()}|barrow-deeps" for t in starts[1:23]]  # each names its schedule
         assert all(":" in o.label and ("AM" in o.label or "PM" in o.label) for o in sel.options)
-        await h.pick("Pick the run", starts[2].isoformat())
+        await h.pick("Pick the run", f"{starts[2].isoformat()}|barrow-deeps")
         await h.press("Open")
     asyncio.run(go())
     assert bot.calls[0][2] == starts[2]
@@ -195,7 +194,7 @@ def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):
 def test_open_existing_run_is_named_on_confirm(reg, rs, officer, channel):
     with_slots(reg)
     h, bot = harness(reg, rs)
-    first = rc.slot_starts(reg, "barrow_deeps", reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)[0][1]
+    first = rc.upcoming(reg, "barrow_deeps", reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)[0][1]
     rc.open_run(reg, rs, "barrow_deeps", first, by="t")
 
     async def go():

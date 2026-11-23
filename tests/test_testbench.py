@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import discord
 import pytest
-from conftest import OWNER, join, lock_with_board, open_test_run
+from conftest import OWNER, join, lock_with_board, open_test_run, weekly
 from fastapi.testclient import TestClient
 from test_mcp import TOKEN, bearer
 from test_parity_verbs import Bot, Chan
@@ -64,16 +64,22 @@ def test_a_test_run_and_a_real_run_at_the_same_minute_get_separate_keys(reg, rs)
     """The bug: open_test_run opened with schedule=None, so its key equalled a real default-schedule run's at that minute
     and ensure_run / open_event handed back the REAL roster — the puppets' answers landed on the real sheet."""
     at = start_in(reg)
-    real = rc.open_run(reg, rs, "barrow_deeps", at, by="scheduler")
+    sid = night_at(reg, at)
+    real = rc.open_run(reg, rs, "barrow_deeps", at, by="scheduler", schedule=sid)
     test = rc.open_run(reg, rs, "barrow_deeps", at, by="t", cutoffs={"soft": 0.5, "hard": 0.4, "confirm": 0.2, "test_by": TESTER})
-    assert real.team == rc.run_key("barrow_deeps", at) and test.team == rc.run_key("barrow_deeps", at, rc.TEST_SCHEDULE)
-    assert test.team == real.team + "-test" and test.key != real.key
+    assert real.team == rc.run_key("barrow_deeps", at, sid) and test.team == rc.run_key("barrow_deeps", at, rc.TEST_SCHEDULE)
+    assert test.team == rc.run_key("barrow_deeps", at) + "-test" and test.key != real.key
     assert rc.is_test_run(reg, test) and not rc.is_test_run(reg, real)
     join(reg, rs, test, reg.test_members()[:5])
     assert not real.signups, "puppets never land on the real sheet"
     assert reg.config.roster(real.team).get("test") is None and reg.config.roster(test.team)["test"] is True
     # the real run's own settings: a test roster is never read for it, nor the schedule 'test' for either
-    assert rc.open_run(reg, rs, "barrow_deeps", at, by="scheduler") is real
+    assert rc.open_run(reg, rs, "barrow_deeps", at, by="scheduler", schedule=sid) is real
+
+
+def night_at(reg, at) -> str:
+    """A weekly schedule of Barrow Deeps at `at`'s minute (phase 3: a raid has no run times of its own) → its id."""
+    return weekly(reg, "barrow_deeps", at.astimezone(reg.tz).strftime("%a %H:%M"), "night")
 
 
 def test_a_test_run_of_a_named_schedule_keeps_the_schedule_in_its_key(reg):
@@ -84,11 +90,12 @@ def test_a_test_run_of_a_named_schedule_keeps_the_schedule_in_its_key(reg):
 
 def test_ensure_run_refuses_a_roster_whose_test_flag_differs(reg, rs):
     at = start_in(reg, 240)
-    key = rc.run_key("barrow_deeps", at)
+    sid = night_at(reg, at)
+    key = rc.run_key("barrow_deeps", at, sid)
     # a rehearsal's roster from before the key space sits at a real key: the scheduler's real run refuses to take it over
     reg.config.rosters.append({"key": key, "name": "old rehearsal", "test": True, "instance": "barrow_deeps", "size": 20, "ephemeral": True})
     with pytest.raises(RegistryError, match="a test run: a real run can't share it"):
-        rc.ensure_run(reg, "barrow_deeps", at)
+        rc.ensure_run(reg, "barrow_deeps", at, schedule=sid)
     # …and a real roster that somehow sits in the test key space is never taken by a rehearsal
     tkey = rc.run_key("barrow_deeps", at, rc.TEST_SCHEDULE)
     reg.config.rosters.append({"key": tkey, "name": "odd real", "instance": "barrow_deeps", "size": 20, "ephemeral": True})
@@ -108,7 +115,7 @@ def test_open_event_never_hands_a_rehearsals_sheet_to_a_real_run(reg, rs):
 
 def test_the_schedule_id_test_is_kept_for_test_runs(reg):
     with pytest.raises(RegistryError, match="kept for test runs"):
-        reg.set_schedule("barrow_deeps", "test", {"kind": "weekly", "slots": "Sat 20:00"}, "t")
+        reg.set_schedule("test", {"kind": "weekly", "slots": "Sat 20:00"}, "t", raid="barrow_deeps")
 
 
 def test_the_guards_hold_in_the_new_key_space(reg, rs, monkeypatch):
@@ -140,7 +147,8 @@ def test_the_guards_hold_in_the_new_key_space(reg, rs, monkeypatch):
     with pytest.raises(RegistryError, match="test bench"):
         run(inbox.do_member_action(bot, reg, rs, ev, reg.members[4242], "join", by="Officer", by_id=OWNER))
     assert "4242" not in ev.signups, "nothing written on the rehearsal's sheet"
-    assert rc.open_run(reg, rs, "barrow_deeps", ev.start, by="scheduler").team == ev.team.removesuffix("-test"), "the real run at that minute is its own"
+    sid = night_at(reg, ev.start)
+    assert rc.open_run(reg, rs, "barrow_deeps", ev.start, by="scheduler", schedule=sid).team == rc.run_key("barrow_deeps", ev.start, sid), "the real run at that minute is its own"
 
 
 # ---------------------------------------------------------------- the puppet DM digest
@@ -824,8 +832,9 @@ def test_a_real_run_whose_key_a_rehearsal_holds_warns_once_never_an_error_every_
 
     bot = NightBot(reg, rs)
     reg.config.signup_channel_id = bot.signup.id
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
-    reg.set_schedule("barrow_deeps", "default", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", "Wed 20:00")
+    reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t", raid="barrow_deeps")  # sheet timing is the schedule's
     (sched, start), *rest = rc.upcoming(reg, "barrow_deeps", reg.now_local(), lead=True)
     key = rc.run_key("barrow_deeps", start, sched["id"])
     reg.config.rosters.append({"key": key, "name": "old rehearsal", "test": True, "test_by": OWNER, "instance": "barrow_deeps", "size": 20, "ephemeral": True})

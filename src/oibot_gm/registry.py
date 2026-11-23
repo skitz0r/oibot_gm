@@ -145,7 +145,7 @@ class RegisteredCharacter(BaseModel):
     is_main: bool = False
     rank: str = "trial"
     status: str = "active"  # planned | active | retired
-    rosters: list[str] = Field(default_factory=list)  # regular-series keys "<raid>:<schedule>" (seats on runs live in the run files)
+    rosters: list[str] = Field(default_factory=list)  # regular spots: schedule ids (seats on runs live in the run files); an older "<raid>:<schedule>" is translated at load
     flex: list[str] = Field(default_factory=list)  # extra roles this character can play besides its spec/offspec
     professions: list[Profession] = Field(default_factory=list)  # design §5.60; saved through the table verb like flex
     confirmed_by: Optional[str] = None
@@ -320,7 +320,7 @@ class Applicant(BaseModel):
     availability: Optional[str] = None
     about: Optional[str] = None
     surname: Optional[str] = None  # Forever names are two words; carried onto the character on accept
-    schedules: list[str] = Field(default_factory=list)  # "<raid id>:<schedule id>" the applicant can make
+    schedules: list[str] = Field(default_factory=list)  # the schedule ids the applicant can make (an older "<raid>:<schedule>" is translated at load)
     answers: list[dict] = Field(default_factory=list)  # [{label, answer}] — the guild's questions as asked (a snapshot: later edits don't reword it)
     source: str = "discord"  # discord (the /apply wizard / the card's Apply button)
     status: str = "open"  # open | accepted | declined | withdrawn
@@ -462,9 +462,12 @@ class GuildConfig(BaseModel):
     # raids: guild overrides per instance id over profiles/<game>/raids.yaml: {lockout_days, duration_hours, minimums: {slot: {min, note?}}, notes}
     raids: dict[str, dict] = Field(default_factory=dict)
     # schedules: WHEN raids run, at guild level — [{id, lineup: [{raid, rosters[, starts]}], kind, slots, …}] (to_stored_schedule);
-    # a schedule is known by (its first lineup raid, id). A raid's `default` entry holds its own run times. Read through
-    # Registry.raid_def / raid_rows, written through _set_raid_rows — never a raid override's `schedules` / `slots` any more
+    # a schedule is known by its guild-unique id (phase 3; no `default`). Read through Registry.raid_def / raid_rows /
+    # schedule_entry, written through _set_raid_rows — never a raid override's `schedules` / `slots` any more
     schedules: list = Field(default_factory=list)  # list, not list[dict]: an entry that isn't a mapping must not stop the load (it is skipped and named)
+    # phase 3 (lift_schedule_ids): "<raid>:<old id>" → the schedule's guild-unique id, for every schedule the lift saw — the
+    # ONE way an older key (a regular spot, an application, a run's series) is read; never split, never overwritten
+    schedule_aliases: dict[str, str] = Field(default_factory=dict)
     # auras: what the guild has learned about Forever's buffs, over profiles/<game>/buffs.yaml
     buffs: dict[str, dict] = Field(default_factory=dict)  # buff id -> {scope, family, strength, status, note}
     families: dict[str, dict] = Field(default_factory=dict)  # family id -> {name, value: {key: points}, status, note}
@@ -628,6 +631,10 @@ def _raid_section(self, instance, *a, **k) -> str:
     return f"raids:{instance}"
 
 
+def _schedule_section(self, sid, *a, **k) -> str:
+    return f"schedule:{str(sid or '').strip().lower()}"
+
+
 # ---- guild.yaml `loot:` (the scoring weights' overrides): nested maps addressed by dotted paths ('wishlist.rank_bonus.1')
 def _loot_key(d: dict, seg: str):
     """The key of `d` whose text is `seg` (rank_bonus keys are ints in the profile, text in a path), else `seg` itself."""
@@ -777,7 +784,7 @@ RAID_DEFAULTS = {"lockout_days": 7, "duration_hours": 3, "signup_lead_hours": 12
 ADHOC_DEFAULTS = {"signup_lead_hours": 168, "nudge_hours_before": 3, "lock_hours_before": 2, "confirm_hours_before": 1, "fill_ask_hours": 1,
                   "nudge": False, "open_dm": False, "confirm": False, "autofill": True, "split_policy": "balanced"}
 ADHOC_WEIGHTS = {"rank": 0, "main": 1, "sat_out": 0, "signup_order": 6, "regular": 0}
-RAID_IDENTITY = ("name", "size", "minimums", "lockout_days", "duration_hours", "first_open", "notes", "comp_groups", "slots", "schedules")
+RAID_IDENTITY = ("name", "size", "minimums", "lockout_days", "duration_hours", "first_open", "notes", "comp_groups", "schedules")
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
 CLOCK12 = "%a %d %b %I:%M %p"  # the one human-facing clock format; %H:%M is for machines
 UNTIERED_WEIGHT = 0.5  # loot: the upgrade value of an item with no tier data (Registry.loot_cfg `untiered_weight`)
@@ -853,13 +860,15 @@ def parse_slots(text) -> list[str]:
     return out
 
 
-# ---- schedules: WHEN a raid runs, as entries under the raid (design.md §5.27). A raid keeps its identity (size, comp,
-# lockout, weights) and its cadence fields as the DEFAULTS; each schedule says when runs happen and may override any
-# cadence field. The raid's own `slots` are the implicit weekly schedule `default`, so a raid that only has slots behaves
-# exactly as before (same starts, same run keys). Stored in guild.yaml's own `schedules:` list (GuildConfig.schedules,
-# each entry with a lineup — the raid's `default` entry holds its run times); Registry.raid_def hands them back as the
-# raid's `slots` and `schedules`, the shape schedules_of reads.
-DEFAULT_SCHEDULE = "default"
+# ---- schedules: WHEN raids run (design.md §5.27, §5.67). A raid keeps its identity (size, minimums, lockout, weights);
+# each schedule says when runs happen and owns its sheet timing. Stored in guild.yaml's own `schedules:` list
+# (GuildConfig.schedules, each entry with a lineup), addressed by a GUILD-UNIQUE id (phase 3): there is no `default`
+# schedule any more — a raid's own run times are an ordinary schedule (lift_schedule_ids moved an older file's).
+# Registry.raid_def hands a raid's schedules back as its `schedules`, the shape schedules_of reads.
+_OLD_DEFAULT = "default"  # an older file's `default` schedule (the raid's own run times): read only by the lifts and the way back
+RUN_TIMES_ON_SCHEDULE = "Run times belong to a schedule now. Add or change a schedule for this raid."
+NO_SCHEDULE = "There is no schedule called {sid}."
+ID_TAKEN = "Another schedule is already called {sid}. Pick another id."
 SCHEDULE_KINDS = ("weekly", "lockout", "pickup")  # weekly slots · day N of each lockout · a template opened on demand
 SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours",
                     "nudge", "autofill", "open_dm", "confirm", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
@@ -877,7 +886,7 @@ MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
 FOLLOW_SCHEDULE = "after"
 FOLLOW_WORDS = {"none", "clear", "off", "no", ""}
 SCHEDULE_NAMES = {"weekly": "Weekly", "lockout": "Lockout days", "pickup": "Pickup"}
-DEFAULT_SCHEDULE_NAME = "Raid nights"  # D10: members see "regulars", so the raid's own run times are no longer "Regular nights"
+DEFAULT_SCHEDULE_NAME = "Raid nights"  # the name an older file's `default` schedule (the raid's own run times) takes when lifted (D10)
 # ---- classes (roster redesign §2): derived from the kind, never set by hand. Recurring = weekly or lockout (opens on its
 # own, has REGULARS, counts toward fairness); ad hoc = a pickup template or a one-off run (opened by an officer at a
 # picked time, no regulars, first come, ADHOC_DEFAULTS).
@@ -914,18 +923,6 @@ def can_cover(people: list[set[str]], need: list[str]) -> bool:
     return all(place(s, set()) for s in range(len(need)))
 
 
-def series_key(instance: str, sid: str | None) -> str:
-    """A recurring series' key: '<raid id>:<schedule id>' — what RegisteredCharacter.rosters (regulars), Applicant.schedules
-    and wizard_opts.schedules store. Run keys never contain ':', so the two key spaces can't collide."""
-    return f"{instance}:{sid or DEFAULT_SCHEDULE}"
-
-
-def parse_series(key: str) -> tuple[str, str]:
-    """'<raid id>:<schedule id>' → (raid id, schedule id)."""
-    rid, sep, sid = str(key or "").partition(":")
-    if not sep or not rid or not sid:
-        raise RegistryError(f"{key or '?'} isn't a schedule (raid:schedule)")
-    return rid, sid
 INHERIT_WORDS = ("", "inherit", "raid", "default", "same", "clear", "none")  # a cadence override set to one of these goes back to the raid's
 _SCHED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\s*(am|pm)?$", re.I)  # a picker may add :ss
@@ -1085,46 +1082,78 @@ def _set_raid_rows_of(cfg: "GuildConfig", instance: str, rows: list[dict]) -> No
 
 
 def _raid_override_of(cfg: "GuildConfig", instance: str) -> dict:
-    """A raid's guild changes in the shape an override had before schedules moved (Registry.raid_override)."""
-    out = dict(cfg.raids.get(instance, {}) or {})
-    scheds = []
-    for r in _raid_rows_of(cfg, instance):
-        if r["id"] == DEFAULT_SCHEDULE:
-            if "slots" in r:
-                out["slots"] = r.pop("slots")
-            if len(r) == 1:
-                continue  # nothing of its own left: the run times are the whole of it
-        scheds.append(r)
+    """A raid's guild changes as one map (Registry.raid_override): config.raids[instance] plus `schedules` = the raid's
+    rows (the schedules whose lineup starts with it). A raid has no run times of its own (phase 3): an older override's
+    `slots` / `schedules` are read only once lifted (_lift_raid_of)."""
+    out = {k: v for k, v in (cfg.raids.get(instance, {}) or {}).items() if k not in ("slots", "schedules")}
+    scheds = _raid_rows_of(cfg, instance)
     if scheds:
         out["schedules"] = scheds
     return out
 
 
-def _lift_raid_of(cfg: "GuildConfig", instance: str, game_slots: bool = True) -> int | None:
-    """THE conversion of one raid's old override keys (`slots` = the `default` schedule's run times, `schedules`) into
-    guild-level entries: `default` first, then the stored order; both keys dropped. What the guild-level list already
-    holds for the raid wins, as raid_override reads it. An empty `slots` list is kept as `default`'s only where it
-    hides the game's run times (`game_slots`: the profile gives the raid some; unknown = kept). → how many schedules
-    the raid now has, None when there was nothing to move. A refusal (RegistryError) changes nothing. No save."""
+def _unique_id(base: str, taken) -> str:
+    """`base`, else `base-2`, `base-3` … (trimmed so the whole id stays within 16 characters): the first not in `taken`."""
+    if base not in taken:
+        return base
+    n = 2
+    while True:
+        tail = f"-{n}"
+        sid = base[:16 - len(tail)].rstrip("-") + tail
+        if sid not in taken:
+            return sid
+        n += 1
+
+
+# ids no schedule may take: an older file's `default`, and the key spaces old run dicts carry (ADHOC_SCHEDULE,
+# raidcycle.TEST_SCHEDULE, FOLLOW_SCHEDULE)
+RESERVED_SCHEDULE_IDS = (_OLD_DEFAULT, "adhoc", "test", "after")
+
+
+def lifted_schedule_id(raid: str, taken) -> str:
+    """The id an older file's `default` schedule of `raid` (its own run times) takes: the raid id with '-' for '_', at
+    most 16 characters ('hyjal_summit_forever' → 'hyjal-summit-for'), then '-2', '-3' … while `taken` holds it."""
+    return _unique_id(raid.replace("_", "-")[:16].rstrip("-"), set(taken) | set(RESERVED_SCHEDULE_IDS))
+
+
+def _is_old_default(row) -> bool:
+    return isinstance(row, dict) and str(row.get("id") or "").strip().lower() == _OLD_DEFAULT
+
+
+def _lift_raid_of(cfg: "GuildConfig", instance: str) -> int | None:
+    """THE conversion of one raid's old override keys (`slots` = the old `default` schedule's run times, `schedules`)
+    into guild-level entries, the old `default` row first and still called `default` (lift_schedule_ids gives it its
+    own id right after); both keys dropped. What the guild-level list already holds for the raid wins. An empty `slots`
+    makes no row. → how many schedules the raid now has, None when there was nothing to move. A refusal
+    (RegistryError) changes nothing. No save."""
     over = cfg.raids.get(instance)
     if not isinstance(over, dict) or not ({"slots", "schedules"} & set(over)):
         return None
-    view = _raid_override_of(cfg, instance)
-    olds = view.get("schedules") or []
+    have = _raid_rows_of(cfg, instance)
+    olds = have or over.get("schedules") or []
     if not isinstance(olds, list):
         raise RegistryError("schedules must be a list of schedules")
-    rows = [norm_schedule(r) for r in olds]
-    if "slots" in view:
-        slots = parse_slots(view.get("slots") or [])
-        if slots or game_slots:
-            dflt = next((r for r in rows if r["id"] == DEFAULT_SCHEDULE), None)
-            if dflt is None:
-                rows.insert(0, {"id": DEFAULT_SCHEDULE})
-                dflt = rows[0]
-            dflt["slots"] = slots
-    dflt = next((r for r in rows if r["id"] == DEFAULT_SCHEDULE), None)
+    rows = []
+    for r in olds:
+        if _is_old_default(r):
+            if str(r.get("kind") or "weekly") != "weekly":
+                raise RegistryError("the default schedule is the raid's own weekly run times; add another schedule for other kinds")
+            row = norm_schedule({**{k: v for k, v in r.items() if k != "kind"}, "id": "x"})
+            row.pop("kind", None)  # an old `default` row is weekly by what it is; lift_schedule_ids writes the kind
+            rows.append({"id": _OLD_DEFAULT, **{k: v for k, v in row.items() if k != "id"}})
+        else:
+            rows.append(norm_schedule(r))
+    dflt = next((r for r in rows if r["id"] == _OLD_DEFAULT), None)
+    slots = parse_slots(over.get("slots") or []) if "slots" in over and not (dflt or {}).get("slots") else []
+    if slots:
+        if dflt is None:
+            dflt = {"id": _OLD_DEFAULT}
+            rows.insert(0, dflt)
+        dflt["slots"] = slots
     if dflt is not None:
         rows = [dflt] + [r for r in rows if r is not dflt]
+        if not dflt.get("slots") and set(dflt) <= {"id", *SCHEDULE_TIMING}:
+            rows = rows[1:]  # the raid's own run times held nothing: no schedule
     for r in rows:
         to_stored_schedule(instance, r)  # every row checked before anything changes
     over.pop("slots", None)
@@ -1141,18 +1170,18 @@ def lift_schedules(cfg: "GuildConfig", raids: dict | None = None, refused: list 
     no line: its id goes into `emptied` when given, so the caller still owes a save. A raid that can't be converted
     keeps its keys exactly as they were and still reads as before: it is never one of the lines; its warning (the
     raid's name, the refusal's own words, and how to get out) goes into `refused` when given. `raids` (the profile's
-    raid table, optional) only names the raids and tells which ones the game gives run times; the conversion reads
-    cfg alone. lower_schedules is the way back."""
+    raid table, optional) only names the raids; the conversion reads cfg alone. An old `default` row keeps that id here:
+    lift_schedule_ids gives it one of its own. lower_schedules is the way back."""
     raids = raids or {}
     lines = []
     for rid in list(cfg.raids):
         name = (raids.get(rid) or {}).get("name") or rid
         try:
-            n = _lift_raid_of(cfg, rid, bool((raids.get(rid) or {}).get("slots")) if rid in raids else True)
+            n = _lift_raid_of(cfg, rid)
         except RegistryError as e:
             if refused is not None:
                 why = str(e).rstrip(".")
-                refused.append(f"{name}: its schedules were not moved to guild level, so they still read from the raid: {why}. "
+                refused.append(f"{name}: its schedules were not moved to guild level, so no run opens from them: {why}. "
                                f"No setting of {name} can be saved until its schedules are corrected by hand in guild.yaml or the raid is reset.")
             continue
         if n is None:
@@ -1167,10 +1196,28 @@ def lift_schedules(cfg: "GuildConfig", raids: dict | None = None, refused: list 
     return lines
 
 
+def _old_override_of(cfg: "GuildConfig", instance: str) -> dict:
+    """A raid's override in the shape it had before schedules moved (lower_schedules, after lower_schedule_ids): `slots`
+    = its `default` entry's run times, `schedules` = the rest (and `default` without its run times when it has settings
+    of its own)."""
+    out = {k: v for k, v in (cfg.raids.get(instance, {}) or {}).items() if k not in ("slots", "schedules")}
+    scheds = []
+    for r in _raid_rows_of(cfg, instance):
+        if r["id"] == _OLD_DEFAULT:
+            if "slots" in r:
+                out["slots"] = r.pop("slots")
+            if len(r) == 1:
+                continue  # nothing of its own left: the run times are the whole of it
+        scheds.append(r)
+    if scheds:
+        out["schedules"] = scheds
+    return out
+
+
 def lower_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
     """The way back to code from before schedules moved (scripts/lower_schedules.py, run with the bot stopped): every
-    raid's guild-level entries folded back into `cfg.raids[<raid>]` in the old shape (exactly what _raid_override_of
-    reads: `slots` = the `default` entry's run times, `schedules` = the rest), and cfg.schedules emptied. → one line per
+    raid's guild-level entries folded back into `cfg.raids[<raid>]` in the old shape (_old_override_of: `slots` = the
+    `default` entry's run times, `schedules` = the rest), and cfg.schedules emptied. Run after lower_schedule_ids. → one line per
     raid ("Hyjal Summit: 1 schedule"), raids in the list's order. A stored entry that can't be read refuses the whole
     guild (RegistryError naming the raid and the entry) before anything changes. `raids` (the profile's raid table,
     optional) only names the raids. A file lowered and then read by this code is lifted again to the same list."""
@@ -1184,7 +1231,7 @@ def lower_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
             raise RegistryError(f"{name} · {sid or 'no id'} can't be read: {why}")
     order = list(dict.fromkeys(_lead_raid(e) for e in cfg.schedules))
     counts = {rid: sum(1 for e in cfg.schedules if _lead_raid(e) == rid) for rid in order}
-    lowered = {rid: _raid_override_of(cfg, rid) for rid in order}
+    lowered = {rid: _old_override_of(cfg, rid) for rid in order}
     cfg.raids = {**cfg.raids, **lowered}
     cfg.schedules = []
     return [f"{(raids.get(rid) or {}).get('name') or rid}: {n} schedule{'' if n == 1 else 's'}" for rid, n in counts.items()]
@@ -1293,27 +1340,20 @@ def norm_schedule(row: dict) -> dict:
         raise RegistryError("schedule id 'test' is kept for test runs; pick another id")
     if sid == FOLLOW_SCHEDULE:
         raise RegistryError(f"schedule id {FOLLOW_SCHEDULE!r} is kept for follow-on runs; pick another id")
-    if sid == DEFAULT_SCHEDULE:
-        if out.pop("kind", "weekly") != "weekly":
-            raise RegistryError("the default schedule is the raid's own weekly run times; add another schedule for other kinds")
-    else:
-        out.setdefault("kind", "weekly")
+    if sid == _OLD_DEFAULT:  # an older file's name for a raid's own run times (the way back renames to it)
+        raise RegistryError(f"schedule id {_OLD_DEFAULT!r} is kept for older files; pick another id")
+    out.setdefault("kind", "weekly")
     return out
 
 
 def schedules_of(rd: dict) -> list[dict]:
-    """The effective schedules of an effective raid definition (Registry.raid_def), every key present: `default` first
-    (from the raid's slots, listed when it has slots or settings of its own), then the stored ones in order."""
+    """The effective schedules of an effective raid definition (Registry.raid_def), every key present, in stored order."""
     stored = [s for s in (rd.get("schedules") or []) if isinstance(s, dict) and s.get("id")]
-    dflt = next((s for s in stored if s["id"] == DEFAULT_SCHEDULE), None)
     base = {"active": True, "rosters": 1, "slots": [], "days": [], "time": None, "follow": None}
     out = []
-    if rd.get("slots") or dflt:
-        out.append({**base, "name": DEFAULT_SCHEDULE_NAME, **(dflt or {}), "id": DEFAULT_SCHEDULE, "kind": "weekly", "slots": list(rd.get("slots") or [])})
     for s in stored:
-        if s["id"] != DEFAULT_SCHEDULE:
-            kind = s.get("kind") or "weekly"
-            out.append({**base, "name": SCHEDULE_NAMES.get(kind, kind), **s, "kind": kind})
+        kind = s.get("kind") or "weekly"
+        out.append({**base, "name": SCHEDULE_NAMES.get(kind, kind), **s, "kind": kind})
     for s in out:
         s["active"] = parse_bool(s.get("active", True))
     return out
@@ -1323,20 +1363,18 @@ def schedule_def_of(rd: dict, sid: str | None) -> dict:
     """The raid definition as one schedule sees it: the raid's fields with the schedule's cadence overrides on top, and
     the schedule itself under "schedule" (its overrides under ["schedule"]["own"], where each cadence value comes from
     under ["schedule"]["source"]: own | raid | adhoc). A schedule that moves the opening or the lock without its own
-    nudge gets the nudge halfway again. None / "" / "default" = the raid's own cadence.
+    nudge gets the nudge halfway again. None / "" / ADHOC_SCHEDULE = a one-off of the raid; any other id must be one of
+    the raid's schedules (else NO_SCHEDULE).
     The CLASS follows the kind (eff["class"]): a recurring schedule resolves own → the raid's (profile + guild override →
     RAID_DEFAULTS) as before; an ad hoc one (a pickup template, or ADHOC_SCHEDULE = a one-off) resolves own →
     ADHOC_DEFAULTS, and takes only the raid's identity (size, comp, lockout, duration, first opening) — never its
     recurring timing. Weights merge per key the same way (raid weights, or ADHOC_WEIGHTS, then the schedule's own)."""
-    sid = sid or DEFAULT_SCHEDULE
+    sid = sid or ADHOC_SCHEDULE
     s = next((x for x in schedules_of(rd) if x["id"] == sid), None)
     if s is None:
-        if sid == ADHOC_SCHEDULE:
-            s = {"id": ADHOC_SCHEDULE, "name": ADHOC_SCHEDULE_NAME, "kind": "pickup", "active": True, "rosters": 1, "slots": [], "days": [], "time": None, "virtual": True}
-        elif sid != DEFAULT_SCHEDULE:
-            raise RegistryError(f"no schedule {sid} on {rd.get('name', 'this raid')}")
-        else:
-            s = {"id": DEFAULT_SCHEDULE, "name": DEFAULT_SCHEDULE_NAME, "kind": "weekly", "active": True, "rosters": 1, "slots": list(rd.get("slots") or []), "days": [], "time": None}
+        if sid != ADHOC_SCHEDULE:
+            raise RegistryError(NO_SCHEDULE.format(sid=sid))
+        s = {"id": ADHOC_SCHEDULE, "name": ADHOC_SCHEDULE_NAME, "kind": "pickup", "active": True, "rosters": 1, "slots": [], "days": [], "time": None, "virtual": True}
     cls = schedule_class(s.get("kind"))
     own = {k: s[k] for k in SCHEDULE_CADENCE if s.get(k) is not None}
     own_w = dict(s.get("weights") or {})
@@ -1387,16 +1425,6 @@ def effective_raid(base: dict, over: dict) -> dict:
         out[k] = parse_bool(out[k])
     out["weights"] = {**RAID_WEIGHT_DEFAULTS, **(out.get("weights") or {})}
     return out
-
-
-def _bare_default(row: dict, rd: dict) -> bool:
-    """A `default` row that says nothing: no run times, no name, no weights …, and every timing value it holds is what
-    a new row would be seeded with against the effective raid `rd` (write_out_timing). Such a row is dropped; one with
-    timing an officer set is kept, so a stored value is never replaced."""
-    if not set(row) <= {"id", *SCHEDULE_TIMING}:
-        return False
-    seed = write_out_timing({"id": row["id"]}, rd)
-    return all(row[k] == seed[k] for k in SCHEDULE_TIMING if k in row)
 
 
 def write_out_timing(row: dict, rd: dict) -> dict:
@@ -1452,13 +1480,24 @@ def lift_failed_line(timing: bool = False, minimums: bool = False) -> str | None
             "Find it in the bot's log, correct it by hand and restart the bot to move it.")
 
 
+def schedule_name(row: dict) -> str:
+    """A schedule's name as a person reads it: its own name, else an older `default` row's DEFAULT_SCHEDULE_NAME, else
+    its kind's name ('Weekly') — never its id."""
+    if row.get("name"):
+        return row["name"]
+    if row.get("id") == _OLD_DEFAULT:
+        return DEFAULT_SCHEDULE_NAME
+    kind = row.get("kind") or "weekly"
+    return SCHEDULE_NAMES.get(kind, kind)
+
+
 def lift_timing(cfg: "GuildConfig", raids: dict, skip=frozenset()) -> tuple[list[str], list[str], bool]:
     """An older guild.yaml held sheet timing (SCHEDULE_TIMING) on each raid; phase 2 keeps it on each schedule (C7).
     Every readable stored entry gets its nine values written out (write_out_timing) against what its raid read then
     (the profile's raid + the old override), every timing key leaves every raid override (an override left empty is
     dropped), and every live run dict without `fill_ask_hours` (and not a test run) is stamped with the value the old
-    merge gave its raid, so ask_deadline reads the same. A raid with game run times and timing but no stored entry
-    gets a `default` entry holding that timing. Raids in `skip` (lift_schedules refused them) are left exactly as they
+    merge gave its raid, so ask_deadline reads the same. A schedule is named by its name (an old `default` one by
+    DEFAULT_SCHEDULE_NAME), never by its id. Raids in `skip` (lift_schedules refused them) are left exactly as they
     are. → (moved: "Hyjal Summit · tuesday: reminder 3 days before" per schedule that took a value from its raid,
     dropped: "Barrow Deeps: reminder 36 hours before" per raid whose timing no schedule takes, owed: anything changed).
     Idempotent; pure on cfg."""
@@ -1493,15 +1532,11 @@ def lift_timing(cfg: "GuildConfig", raids: dict, skip=frozenset()) -> tuple[list
         derived = bool({"signup_lead_hours", "lock_hours_before"} & set(row))  # its own reminder was derived, not the raid's
         took = {k: out[k] for k in held.get(rid, {}) if k not in row and not (k == "nudge_hours_before" and derived)}
         if took:
-            moved.append(f"{name(rid)} · {row.get('name') or row['id']}: {timing_words(took)}")
+            moved.append(f"{name(rid)} · {schedule_name(row)}: {timing_words(took)}")
     for rid, h in held.items():
         if rid in led:
             continue
-        if (raids.get(rid) or {}).get("slots"):  # the game's run times are its `default` schedule: that one takes the timing
-            entries.append(to_stored_schedule(rid, write_out_timing({"id": DEFAULT_SCHEDULE}, rd_of(rid))))
-            moved.append(f"{name(rid)} · {DEFAULT_SCHEDULE}: {timing_words(h)}")
-        else:
-            dropped.append(f"{name(rid)}: {timing_words(h)}")
+        dropped.append(f"{name(rid)}: {timing_words(h)}")
     for t in cfg.rosters:  # a live run read its raid's fill-ask wait when its dict had none (rc.ask_deadline): keep it
         if not isinstance(t, dict):
             continue
@@ -1784,6 +1819,144 @@ def lower_minimums(cfg: "GuildConfig", raids: dict) -> list[str]:
         name = (raids.get(rid) or {}).get("name") or rid
         out.append(f"{name}: " + (", ".join(f"at least {slot_words(s, e['min'])}" for s, e in {**roles, **mins}.items()) or "no minimums"))
     return out
+
+
+def _run_dict_ids(t: dict, map_series, map_sid) -> bool:
+    """One run dict's `series` and `schedule_id` through the two maps (None = leave it). → changed?"""
+    changed = False
+    new = map_series(t.get("series")) if t.get("series") else None
+    if new is not None and new != t.get("series"):
+        t["series"] = new
+        changed = True
+    new = map_sid(t)
+    if new is not None and new != t.get("schedule_id"):
+        t["schedule_id"] = new
+        changed = True
+    return changed
+
+
+def lift_schedule_ids(cfg: "GuildConfig", raids: dict) -> tuple[list[str], bool]:
+    """Phase 3: every schedule gets an id of its own across the guild, and there is no `default` schedule. Readable
+    entries in stored order: an old `default` entry (a raid's own run times) becomes lifted_schedule_id(its raid),
+    named DEFAULT_SCHEDULE_NAME unless it has a name, `kind: weekly`; an id an earlier entry already holds becomes
+    `<id>-2` …; each entry's old key "<raid>:<old id>" → its id goes into cfg.schedule_aliases (never overwritten; on
+    the first pass every entry, later only a renamed one). Every run dict (cfg.rosters) but a test run's has its
+    `series` and `schedule_id` translated through the aliases (a `default` or missing schedule id → the raid's lifted
+    id). → (one line per renamed schedule, "Barrow Deeps · Raid nights is now barrow-deeps"; owed: anything changed).
+    Idempotent: no `default`, no duplicate, aliases in place → ([], False). Pure on cfg (`raids` = the profile's, for
+    names); Registry.remap_regulars translates the member files with the same aliases."""
+    raids = raids or {}
+    aliases = cfg.schedule_aliases
+    first = not aliases
+    readable = [isinstance(e, dict) and unread_schedule(e) is None for e in cfg.schedules]
+    others = {str(e.get("id")).strip().lower() for e, ok in zip(cfg.schedules, readable) if isinstance(e, dict) and e.get("id")
+              and str(e.get("id")).strip().lower() != _OLD_DEFAULT}
+    lines, owed, seen, out = [], False, set(), []
+    for e, ok in zip(cfg.schedules, readable):
+        if not ok:
+            out.append(e)
+            continue
+        rid = _lead_raid(e)
+        old = str(e["id"]).strip().lower()
+        if old == _OLD_DEFAULT:
+            new = aliases.get(f"{rid}:{_OLD_DEFAULT}")
+            if new is None or new in seen or (new in others and new != old):
+                new = lifted_schedule_id(rid, seen | others)
+            e = {**e, "id": new, "name": e.get("name") or DEFAULT_SCHEDULE_NAME, "kind": "weekly"}
+            e = {"id": e["id"], "lineup": e["lineup"], **{k: v for k, v in e.items() if k not in ("id", "lineup")}}
+        elif old in seen:
+            e = {**e, "id": _unique_id(old, seen | others | set(RESERVED_SCHEDULE_IDS))}
+        new = e["id"]
+        seen.add(new)
+        if new != old:
+            owed = True
+            name = (raids.get(rid) or {}).get("name") or rid
+            _r, row = from_stored_schedule({**e, "id": old})
+            lines.append(f"{name} · {schedule_name(row)} is now {new}")
+        if (first or new != old) and f"{rid}:{old}" not in aliases:
+            aliases[f"{rid}:{old}"] = new
+            owed = True
+        out.append(e)
+    cfg.schedules = out
+
+    def map_sid(t):
+        sid = t.get("schedule_id")
+        if sid in (None, "", _OLD_DEFAULT):
+            return aliases.get(f"{t.get('instance')}:{_OLD_DEFAULT}") if sid or t.get("kind") != "adhoc" else None
+        return aliases.get(f"{t.get('instance')}:{sid}") if sid not in RESERVED_SCHEDULE_IDS else None
+
+    for t in cfg.rosters:
+        if isinstance(t, dict) and not t.get("test"):
+            owed = _run_dict_ids(t, lambda k: aliases.get(k) if ":" in str(k) else None, map_sid) or owed
+    return lines, owed
+
+
+def schedule_ids_line(lines: list[str]) -> str:
+    """The start's one ops line for lift_schedule_ids' and Registry.remap_regulars' lines (migrate_schedules → ids_saved)."""
+    return "Schedules now have ids of their own: " + " · ".join(lines) + "."
+
+
+def lower_schedule_ids(cfg: "GuildConfig", members: list, applicants: list = ()) -> list[str]:
+    """The way back to phase 2's code (scripts/lower_schedules.py, with the bot stopped): each schedule goes back to the
+    id its alias came from — a raid's own run times to `default` —, every regular key of `members` (their characters'
+    rosters), every schedule an applicant of `applicants` picked and every run dict's `series` / `schedule_id` back to
+    "<raid>:<old id>" through the reversed aliases (a schedule made since gets "<its first raid>:<id>"), and
+    cfg.schedule_aliases is emptied. Refused (RegistryError naming them), before anything changes, when two schedules of
+    one raid would both lower to the same id, or a schedule holds more raids than the older code reads. → one line per
+    schedule whose id changed. Pure on cfg and the records passed in; the caller saves."""
+    back = {new: old for old, new in cfg.schedule_aliases.items()}
+    first: dict[str, str] = {}  # schedule id → its first raid
+    want, too_long = [], []
+    for e in cfg.schedules:
+        if isinstance(e, dict) and isinstance(e.get("lineup"), list) and len(e["lineup"]) > 2:
+            too_long.append(str(e.get("id") or "a schedule with no id"))  # phase 3 reads up to four; the older code two
+        if not (isinstance(e, dict) and unread_schedule(e) is None):
+            want.append(None)
+            continue
+        rid = _lead_raid(e)
+        first[e["id"]] = rid
+        old = back.get(e["id"])
+        want.append(old.partition(":")[2] if old and old.partition(":")[0] == rid else e["id"])
+    if too_long:
+        raise RegistryError(f"{join_words(too_long)} run more than 2 raids, which the older code can't read.")
+    pairs = [(_lead_raid(e), w) for e, w in zip(cfg.schedules, want) if w is not None]
+    clash = sorted({f"{rid}:{w}" for rid, w in pairs if pairs.count((rid, w)) > 1})
+    if clash:
+        raise RegistryError(f"two schedules would both go back to {join_words(clash)}.")
+
+    def key_back(k):
+        k = str(k)
+        if ":" in k:
+            return k
+        return back.get(k) or (f"{first[k]}:{k}" if k in first else k)
+
+    lines = []
+    for i, (e, w) in enumerate(zip(cfg.schedules, want)):
+        if w is None or w == e["id"]:
+            continue
+        lines.append(f"{e['id']} is {w} again")
+        back_row = {**e, "id": w}
+        if w == _OLD_DEFAULT:  # what the lift wrote on a raid's own run times: the older code's `default` has neither
+            back_row.pop("kind", None)
+            if back_row.get("name") == DEFAULT_SCHEDULE_NAME:
+                back_row.pop("name")
+        cfg.schedules[i] = back_row
+    for m in members:
+        for c in m.characters:
+            c.rosters = [key_back(k) for k in c.rosters]
+    for a in applicants:
+        a.schedules = [key_back(k) for k in a.schedules]
+
+    def map_sid(t):
+        sid = t.get("schedule_id")
+        old = back.get(sid) if sid not in (None, "") else None
+        return old.partition(":")[2] if old else None
+
+    for t in cfg.rosters:
+        if isinstance(t, dict) and not t.get("test"):
+            _run_dict_ids(t, lambda k: key_back(k) if ":" not in str(k) else None, map_sid)
+    cfg.schedule_aliases = {}
+    return lines
 
 
 class Effects(BaseModel):
@@ -2570,9 +2743,17 @@ class Registry:
             log.warning("schedules: the make-up of %s was not lifted (%s)", self.key, e)
             self.minimums_lifted, minimums_owed = [], False
             minimums_failed = True
+        # phase 3: guild-unique schedule ids, no `default`; on a copy as above (a failure leaves the ids as they were)
+        try:
+            trial = cfg.model_copy(deep=True)
+            self.ids_lifted, ids_owed = lift_schedule_ids(trial, raids)
+            cfg = trial
+        except (RegistryError, ValueError, TypeError) as e:
+            log.warning("schedules: the ids of %s were not lifted (%s)", self.key, e)
+            self.ids_lifted, ids_owed = [], False
         failed = lift_failed_line(timing_failed, minimums_failed)
         self.lift_failed: list[str] = [failed] if failed else []
-        self._schedules_owed = self._lift_owed or timing_owed or minimums_owed
+        self._schedules_owed = self._lift_owed or timing_owed or minimums_owed or ids_owed
         self.schedules_unread: list[str] = []
         for e in cfg.schedules:
             why = unread_schedule(e)
@@ -2584,27 +2765,92 @@ class Registry:
         return cfg
 
     def migrate_schedules(self, by: str = "migration") -> list[str]:
-        """Save an older file's lifted schedules (load_config) once: one commit when the load lifted anything, then
-        nothing on later calls. → the lift's lines, [] when nothing was saved or no raid had a schedule to move (a raid
-        whose old keys held nothing is saved without a line). The same commit carries the timing lift (lift_timing)
-        and the make-up lift (lift_minimums): one ops line each goes into `timing_saved` for the start hook. A preview
-        copy never writes."""
-        if getattr(self, "_shadow", False) or not (self.schedules_lifted or getattr(self, "_schedules_owed", False)):
+        """Save an older file's lifted schedules (load_config) and the regulars translated to schedule ids
+        (remap_regulars) once: ONE commit (a store.batch) holding guild.yaml and every member or applicant file that
+        changed, then nothing on later calls. → the schedules lift's lines, [] when nothing was saved or no raid had a
+        schedule to move (a raid whose old keys held nothing is saved without a line). The same commit carries the timing
+        lift (lift_timing) and the make-up lift (lift_minimums): one ops line each goes into `timing_saved` for the start
+        hook; the ids lift (lift_schedule_ids) and the dropped regulars go into `ids_saved`. A preview copy never writes."""
+        regs_owed = getattr(self, "_regulars_owed", False)
+        if getattr(self, "_shadow", False) or not (self.schedules_lifted or getattr(self, "_schedules_owed", False) or regs_owed):
             return []
         with self.config_lock:
             lines = self.schedules_lifted
             moved, dropped = list(getattr(self, "timing_moved", [])), list(getattr(self, "timing_dropped", []))
             mins = list(getattr(self, "minimums_lifted", []))
+            ids = list(getattr(self, "ids_lifted", [])) + list(getattr(self, "regulars_dropped", []))
             what = ("schedules moved to the guild level" if getattr(self, "_lift_owed", True)
-                    else "sheet timing moved onto each schedule" if moved or dropped or not mins else "make-up is one minimum per role or class")
-            self.save_config(f"{what} (by {by})", notify=False)  # a failure keeps the lines: the next start tries again
+                    else "sheet timing moved onto each schedule" if moved or dropped
+                    else "make-up is one minimum per role or class" if mins else "schedules have ids of their own")
+            with self.store.batch(f"{self.key}: {what} (by {by})"):  # a failure keeps the lines: the next start tries again
+                if getattr(self, "_schedules_owed", False) or self.schedules_lifted:
+                    self.save_config(f"{what} (by {by})", notify=False)
+                for uid in sorted(getattr(self, "_regulars_changed", ())):
+                    m = self.members.get(uid)
+                    if m is not None:
+                        self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
+                        self._snap[m.discord_id] = m.model_dump()
+                for uid in sorted(getattr(self, "_applicants_changed", ())):
+                    a = self.applicants.get(uid)
+                    if a is not None:
+                        self.store.write_text(Path(self.key) / "applicants" / f"{a.discord_id}.json", a.model_dump_json(indent=1))
+                self.store.commit(f"{self.key}: {what} (by {by})")
             if moved or dropped:
                 self.timing_saved = [*getattr(self, "timing_saved", []), timing_line(moved, dropped)]
             if mins:
                 self.timing_saved = [*getattr(self, "timing_saved", []), minimums_line(mins)]
+            if ids:
+                self.ids_saved = [*getattr(self, "ids_saved", []), *ids]
             self.schedules_lifted, self.timing_moved, self.timing_dropped, self.minimums_lifted = [], [], [], []
-            self._schedules_owed = self._lift_owed = False
+            self.ids_lifted, self.regulars_dropped = [], []
+            self._schedules_owed = self._lift_owed = self._regulars_owed = False
+            self._regulars_changed, self._applicants_changed = set(), set()
         return lines
+
+    def remap_regulars(self) -> list[str]:
+        """At load, in memory: every member character's regular spots (`rosters`) and every applicant's `schedules`
+        through config.schedule_aliases — an older "<raid>:<schedule>" key becomes the schedule's id. A key with ':' that
+        no alias knows (a schedule removed before the lift) is dropped and named. Sets `_regulars_owed` (and which
+        records changed) for migrate_schedules, which saves them in the lift's one commit. → the dropped lines
+        ("Nyx: dropped a regular spot on a removed Barrow Deeps schedule")."""
+        aliases = self.config.schedule_aliases
+        dropped: list[str] = []
+        changed, apps = set(), set()
+
+        def raid_name(key: str) -> str:  # an old key read for its words only (this migration is the one place)
+            rid = key.partition(":")[0]
+            return (self.base_profile.raids.get(rid) or {}).get("name") or rid
+
+        for m in self.members.values():
+            for c in m.characters:
+                keep = []
+                for k in c.rosters:
+                    if ":" not in k:
+                        keep.append(k)
+                    elif k in aliases:
+                        if aliases[k] not in keep:
+                            keep.append(aliases[k])
+                    else:
+                        dropped.append(f"{m.display_name}: dropped a regular spot on a removed {raid_name(k)} schedule")
+                if keep != c.rosters:
+                    c.rosters = keep
+                    changed.add(m.discord_id)
+        for a in self.applicants.values():
+            keep = []
+            for k in a.schedules:
+                if ":" not in k:
+                    keep.append(k)
+                elif k in aliases:
+                    if aliases[k] not in keep:
+                        keep.append(aliases[k])
+                else:
+                    dropped.append(f"{a.display_name}'s application: dropped a removed {raid_name(k)} schedule")
+            if keep != a.schedules:
+                a.schedules = keep
+                apps.add(a.discord_id)
+        self._regulars_changed, self._applicants_changed, self.regulars_dropped = changed, apps, dropped  # reload re-reads every record
+        self._regulars_owed = bool(self._regulars_changed or self._applicants_changed)
+        return dropped
 
     def save_config(self, message: str, notify: bool = True) -> None:
         with self.config_lock:
@@ -2618,21 +2864,19 @@ class Registry:
             self._notify("config", [message])
 
     # ---- section revs (design §2.4): computed on demand from the stored shape, never a stored field bumped by hand
-    REV_SECTIONS = ("settings", "buffs", "recruitment", "plain", "loot")  # plus raids:<instance id>; loot = the scoring weights (guild.yaml loot:)
+    REV_SECTIONS = ("settings", "buffs", "recruitment", "plain", "loot")  # plus raids:<instance id> and schedule:<id>; loot = the scoring weights (guild.yaml loot:)
     # what no rev covers: the scheduler's own bookkeeping (run rosters, card and sheet message ids) — an owner's edit during a
     # raid week must never be refused because a card was re-posted
     REV_SKIP = ("rosters", "feed_tokens")  # feed_tokens: a companion's last_seen must never 409 an owner's settings edit
 
     def _section_blob(self, section: str):
         cfg = self.config.model_dump()
-        own = {"raids", "schedules", "buffs", "families", "recruitment", "invite_url", "member_role_ids", "plain", "loot"}
+        own = {"raids", "schedules", "schedule_aliases", "buffs", "families", "recruitment", "invite_url", "member_role_ids", "plain", "loot"}
         if section.startswith("raids:"):
-            rid = section[6:]
-            blob = dict(cfg.get("raids", {}).get(rid) or {})
-            mine = [e for e in cfg.get("schedules") or [] if _lead_raid(e) == rid]  # the raid's own schedules count as its section
-            if mine:
-                blob["schedules"] = mine
-            return blob
+            return dict(cfg.get("raids", {}).get(section[6:]) or {})
+        if section.startswith("schedule:"):  # one schedule, by its id (phase 3): absent = the id is free
+            sid = section[9:]
+            return next((e for e in cfg.get("schedules") or [] if isinstance(e, dict) and e.get("id") == sid), None)
         if section == "buffs":
             return {"buffs": cfg.get("buffs") or {}, "families": cfg.get("families") or {}}
         if section == "recruitment":
@@ -2643,7 +2887,7 @@ class Registry:
             return cfg.get("loot") or {}
         if section == "settings":
             return {k: v for k, v in cfg.items() if k not in own and k not in self.REV_SKIP and "_message_id" not in k}
-        raise RegistryError(f"unknown config section {section} (one of {', '.join(self.REV_SECTIONS)}, raids:<id>)")
+        raise RegistryError(f"unknown config section {section} (one of {', '.join(self.REV_SECTIONS)}, raids:<id>, schedule:<id>)")
 
     def config_rev(self, section: str) -> str:
         """A fingerprint of one config section as stored: `settings` (channels, timezone, roles, owner, about…),
@@ -2718,6 +2962,7 @@ class Registry:
             for f in ad.glob("*.json"):
                 a = Applicant.model_validate_json(f.read_text())
                 self.applicants[a.discord_id] = a
+        self.remap_regulars()  # older "<raid>:<schedule>" keys → schedule ids, in memory (migrate_schedules saves them)
 
     def save_applicant(self, a: Applicant, message: str) -> None:
         self.store.write_text(Path(self.key) / "applicants" / f"{a.discord_id}.json", a.model_dump_json(indent=1))
@@ -2741,7 +2986,7 @@ class Registry:
         if self.find(full, former=False):
             raise RegistryError(f"{full} is already registered to a member.")
         answers = self.check_answers(answers or [])
-        known = {f"{rid}:{sc['id']}" for rid in self.profile.raids for sc in self.schedules(rid)}
+        known = {sc["id"] for rid in self.profile.raids for sc in self.schedules(rid)}
         schedules = [x for x in (schedules or []) if x in known]
         clash = next((x for x in self.applicants.values() if x.status == "open" and x.name.lower() == name.lower() and x.discord_id != discord_id), None)
         if clash:
@@ -4818,8 +5063,7 @@ class Registry:
 
     def raid_rows(self, instance: str) -> list[dict]:
         """The raid's schedules in the row shape (norm_schedule: rosters and follow on the row), from the guild-level
-        list in stored order. The `default` row carries the raid's run times as `slots`. An entry that can't be read
-        (unread_schedule) is skipped."""
+        list in stored order. An entry that can't be read (unread_schedule) is skipped."""
         return _raid_rows_of(self.config, instance)
 
     def _set_raid_rows(self, instance: str, rows: list[dict]) -> None:
@@ -4835,9 +5079,8 @@ class Registry:
         return effective_raid(self.profile.raids.get(instance, {}) or {}, self.config.raids.get(instance) or {})
 
     def raid_override(self, instance: str) -> dict:
-        """The guild's changes to a raid as one map, in the shape a raid override had before schedules moved to the
-        guild level: config.raids[instance] plus `slots` (the `default` row's run times, when it has them) and
-        `schedules` (the other rows, and `default` without its run times when it has settings of its own)."""
+        """The guild's changes to a raid as one map: config.raids[instance] plus `schedules` = the raid's rows (the
+        schedules whose lineup starts with it)."""
         return _raid_override_of(self.config, instance)
 
     def _snapshot_raid(self, instance: str) -> tuple:
@@ -4859,7 +5102,8 @@ class Registry:
         they hold into the guild-level rows — the rows the write then starts from — and drop both keys (the one
         conversion, _lift_raid_of, as lift_schedules uses it). Run by every raid write before it changes anything; the
         caller's snapshot puts it back on a refusal. No save."""
-        _lift_raid_of(self.config, instance, bool((self.profile.raids.get(instance) or {}).get("slots")))
+        if _lift_raid_of(self.config, instance) is not None:
+            lift_schedule_ids(self.config, self.profile.raids)  # an old `default` row gets its own id at once
 
     def _prune_raid(self, instance: str) -> None:
         """An override left empty is removed."""
@@ -4926,47 +5170,90 @@ class Registry:
         return {"tank": {"min": mins.get("tank", 0)}, "healer": {"min": mins.get("healer", 0)}, "dps": {"min": 0}}
 
     def schedules(self, instance: str | None) -> list[dict]:
-        """The raid's effective schedules (see schedules_of)."""
+        """The raid's effective schedules: the ones whose lineup starts with it (see schedules_of)."""
         return schedules_of(self.raid_def(instance))
 
+    def all_schedules(self) -> list[dict]:
+        """Every readable schedule of the guild, effective rows (schedules_of) in guild order, each with its `raid` (the
+        first of its lineup) and `lineup`."""
+        out = []
+        for e in self.config.schedules:
+            if not isinstance(e, dict) or unread_schedule(e) is not None:
+                continue
+            rid = _lead_raid(e)
+            row = next((s for s in self.schedules(rid) if s["id"] == e["id"]), None)
+            if row is not None:
+                out.append({**row, "raid": rid, "lineup": parse_lineup(e["lineup"])})
+        return out
+
+    def schedule_entry(self, sid: str) -> dict:
+        """One schedule by its guild-unique id (an all_schedules row); RegistryError(NO_SCHEDULE) when there is none."""
+        sid = str(sid or "").strip().lower()
+        hit = next((s for s in self.all_schedules() if s["id"] == sid), None)
+        if hit is None:
+            raise RegistryError(NO_SCHEDULE.format(sid=sid or "?"))
+        return hit
+
     def schedule_def(self, instance: str | None, sid: str | None = None) -> dict:
-        """The raid definition as schedule `sid` sees it (see schedule_def_of)."""
+        """The raid definition as schedule `sid` sees it (see schedule_def_of): `sid` None or ADHOC_SCHEDULE = a one-off of
+        `instance`; any other id is the guild's, and `instance` must be its first raid (else NO_SCHEDULE)."""
         return schedule_def_of(self.raid_def(instance), sid)
 
-    @_config_verb(_raid_section)
-    def set_schedule(self, instance: str, sid: str, fields: dict, by: str) -> list[str]:
-        """Change (or create) one schedule of a raid: `fields` = {setting: value} from SCHEDULE_FIELDS; a timing value of
-        None / 'inherit' goes back to the game's suggestion (the row loses it and _set_raid_rows seeds it again), split
-        policy to the raid's. Moving the opening or the lock past the stored reminder derives the reminder again. A new
-        id needs what it is first — a kind, run times, or lockout days and a time. One set_raid_overrides call: validated as a whole, one commit, a refusal leaves config as it was."""
-        import copy
+    def _schedule_raid(self, sid: str, raid: str | None) -> tuple[str, bool]:
+        """(the first raid of schedule `sid`, is it new?) — an existing id names its own raid (`raid`, when given, must be
+        it: else ID_TAKEN); a new one needs `raid` (else NO_SCHEDULE)."""
+        have = next((e for e in self.config.schedules if isinstance(e, dict) and str(e.get("id") or "").strip().lower() == sid), None)
+        if have is not None:
+            rid = _lead_raid(have)
+            if raid and raid != rid:
+                raise RegistryError(ID_TAKEN.format(sid=sid))
+            if unread_schedule(have) is not None:
+                raise RegistryError(f"The schedule called {sid} can't be read. Correct it by hand in guild.yaml first.")
+            return rid, False
+        if not raid:
+            raise RegistryError(NO_SCHEDULE.format(sid=sid or "?"))
+        if raid not in self.profile.raids:
+            raise RegistryError(f"unknown raid {raid}; known: {', '.join(self.profile.raids)}")
+        return raid, True
 
-        if instance not in self.profile.raids:
-            raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
+    @_config_verb(_schedule_section)
+    def set_schedule(self, sid: str, fields: dict, by: str, *, raid: str | None = None) -> list[str]:
+        """Change (or create) one schedule, by its guild-unique id: `fields` = {setting: value} from SCHEDULE_FIELDS; a
+        timing value of None / 'inherit' goes back to the game's suggestion (the row loses it and _set_raid_rows seeds it
+        again), split policy to the raid's. Moving the opening or the lock past the stored reminder derives the reminder
+        again. `raid` names the first raid of a NEW schedule only (given for an existing id of another raid → ID_TAKEN); a
+        new id needs what it is first — a kind, run times, or lockout days and a time. One write of the raid's rows:
+        validated as a whole, one commit, a refusal leaves config as it was."""
         sid = str(sid or "").strip().lower()
+        raid = str(raid or "").strip().lower() or None
         if not fields:
             return []
         bad = [f for f in fields if f not in SCHEDULE_FIELDS]
         if bad:
             raise RegistryError(f"unknown schedule setting {bad[0]} (one of {', '.join(SCHEDULE_FIELDS)})")
+        instance, new = self._schedule_raid(sid, raid)
+        snap = self._snapshot_raid(instance)
+        try:
+            return self._set_schedule(instance, new, sid, fields, by)
+        except RegistryError:
+            self._restore_raid(instance, snap)  # the lift of an older raid's keys included
+            raise
+
+    def _set_schedule(self, instance: str, new: bool, sid: str, fields: dict, by: str) -> list[str]:
+        import copy
+
+        self._lift_raid(instance)  # an older file's run times and schedules become rows first, so nothing they held is lost
         rd = self.raid_def(instance)
-        stored = copy.deepcopy([s for s in (rd.get("schedules") or []) if isinstance(s, dict)])
+        stored = copy.deepcopy(self.raid_rows(instance))
         entry = next((s for s in stored if s.get("id") == sid), None)
-        before = next((s for s in schedules_of(rd) if s["id"] == sid), None)
-        if before is None and entry is None:
+        before = None if new else next((s for s in schedules_of(rd) if s["id"] == sid), None)
+        if entry is None:
             kind = fields.get("kind") or ("weekly" if "slots" in fields else "lockout" if ("days" in fields or "time" in fields) else None)
             if not kind:
                 raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'}; start it with its kind (weekly, lockout or pickup) or its run times")
-            entry = {"id": sid, "kind": kind} if sid != DEFAULT_SCHEDULE else {"id": sid}
+            entry = {"id": sid, "kind": kind}
             stored.append(entry)
-        want: dict = {}
         for f, v in fields.items():
-            if f == "slots" and sid == DEFAULT_SCHEDULE:
-                want["slots"] = v  # the default schedule's run times ARE the raid's slots
-                continue
-            if entry is None:
-                entry = {"id": sid}
-                stored.append(entry)
             if f == "weights" and isinstance(v, dict):  # per key: a key set to inherit / None drops back to the default
                 cur = dict(entry.get("weights") or {})
                 for k, val in v.items():
@@ -4981,45 +5268,38 @@ class Registry:
                 entry.pop(f, None)
             else:
                 entry[f] = nv
-        if entry is not None and {"signup_lead_hours", "lock_hours_before"} & set(fields) and "nudge_hours_before" not in fields \
+        if {"signup_lead_hours", "lock_hours_before"} & set(fields) and "nudge_hours_before" not in fields \
                 and entry.get("nudge_hours_before") is not None:
             # outside the new window: the reminder is derived again (halfway — default_nudge_hours; a pickup row's an
             # hour before its lock), not a refusal
             full = write_out_timing({k: v for k, v in entry.items() if k != "nudge_hours_before"}, rd)
             if not float(full["lock_hours_before"]) <= float(entry["nudge_hours_before"]) <= float(full["signup_lead_hours"]):
                 entry["nudge_hours_before"] = full["nudge_hours_before"]
-        want["schedules"] = stored
-        self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} {', '.join(fields)} (by {by})")
+        self._write_schedules(instance, stored, message=f"schedule {sid} ({instance}): {', '.join(fields)} (by {by})")
         after = next((s for s in self.schedules(instance) if s["id"] == sid), None) or {"id": sid}
         return [f"{rd.get('name', instance)} · {after.get('name') or sid}: " + ("new schedule, " if before is None else "") + self.schedule_label(instance, after)]
 
-    def schedule_regulars(self, instance: str, sid: str) -> list[tuple[Member, RegisteredCharacter]]:
-        """Everyone holding the series "<raid>:<schedule>" on any character (retired ones too) — what removing the
+    def schedule_regulars(self, sid: str) -> list[tuple[Member, RegisteredCharacter]]:
+        """Everyone holding a regular spot on schedule `sid` on any character (retired ones too) — what removing the
         schedule takes off (D30), by display name."""
-        key = series_key(instance, str(sid or "").strip().lower())
-        out = [(m, c) for m in self.members.values() for c in m.characters if key in c.rosters]
+        sid = str(sid or "").strip().lower()
+        out = [(m, c) for m in self.members.values() for c in m.characters if sid in c.rosters]
         return sorted(out, key=lambda mc: mc[0].display_name.lower())
 
-    def schedule_runs_open(self, instance: str, sid: str, rs=None) -> list[dict]:
-        """The run dicts (config.rosters) of the live runs a schedule opened — test runs left out. `rs` = the run store
+    def schedule_runs_open(self, sid: str, rs=None) -> list[dict]:
+        """The run dicts (config.rosters) of the live runs schedule `sid` opened — test runs left out. `rs` = the run store
         that says which runs are still live (read from the store when not given)."""
-        sid = str(sid or "").strip().lower() or DEFAULT_SCHEDULE
-        live = {ev.team for ev in self._live_runs(rs)}
-        return [t for t in self.config.rosters if t.get("instance") == instance and str(t.get("schedule_id") or DEFAULT_SCHEDULE) == sid
-                and not t.get("test") and t.get("key") in live]
-
-    def schedule_removal_effects(self, instance: str, sid: str, rs=None) -> Effects:
-        """Effects(regulars, open_runs) of removing a raid's schedule — what remove_schedule will do, computed before it
-        does it, in code (see Effects). Unknown raid or schedule → RegistryError (the verb's own words)."""
-        if instance not in self.profile.raids:
-            raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
         sid = str(sid or "").strip().lower()
-        s = next((x for x in self.schedules(instance) if x["id"] == sid), None)
-        if s is None:
-            rd = self.raid_def(instance)
-            raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'} (it has {', '.join(x['id'] for x in schedules_of(rd)) or 'none'})")
-        regs = sorted({m.display_name for m, _c in self.schedule_regulars(instance, sid)}, key=str.lower)
-        runs = [str(t.get("name") or t.get("key")) for t in self.schedule_runs_open(instance, sid, rs)]
+        live = {ev.team for ev in self._live_runs(rs)}
+        return [t for t in self.config.rosters if str(t.get("schedule_id") or "") == sid and not t.get("test") and t.get("key") in live]
+
+    def schedule_removal_effects(self, sid: str, rs=None) -> Effects:
+        """Effects(regulars, open_runs) of removing schedule `sid` — what remove_schedule will do, computed before it
+        does it, in code (see Effects). Unknown schedule → RegistryError(NO_SCHEDULE)."""
+        s = self.schedule_entry(sid)
+        sid = s["id"]
+        regs = sorted({m.display_name for m, _c in self.schedule_regulars(sid)}, key=str.lower)
+        runs = [str(t.get("name") or t.get("key")) for t in self.schedule_runs_open(sid, rs)]
         # what the open runs' lock reads once the schedule is gone (rc.run_weights: the class's fallback; the series'
         # regulars come off with it) — named so nobody expects the schedule's own weights or its regulars on them
         loses: list[str] = []
@@ -5031,42 +5311,66 @@ class Registry:
                 loses.append("the ad hoc weights")
             if regs and not adhoc:
                 loses.append("no regulars")
-        return Effects(name=s.get("name") or sid, label=self.schedule_label(instance, s), regulars=regs, open_runs=runs, loses=loses)
+        return Effects(name=s.get("name") or sid, label=self.schedule_label(s["raid"], s), regulars=regs, open_runs=runs, loses=loses)
 
-    @_config_verb(_raid_section)
-    def remove_schedule(self, instance: str, sid: str, by: str) -> str:
-        """Drop one schedule. `default` is the raid's own run times: removing it clears the raid's slots. Runs already
-        opened from it keep their times. Its REGULARS come off with it (owner decision D30 — no orphans, and no DM to
-        them: the DM rule); the line names them. One commit for the schedule and the members."""
-        import copy
-
-        if instance not in self.profile.raids:
-            raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
-        sid = str(sid or "").strip().lower()
+    @_config_verb(_schedule_section)
+    def remove_schedule(self, sid: str, by: str) -> str:
+        """Drop one schedule, by its id. Runs already opened from it keep their times. Its REGULARS come off with it
+        (owner decision D30 — no orphans, and no DM to them: the DM rule); the line names them. One commit for the
+        schedule and the members."""
+        have = self.schedule_entry(sid)
+        sid, instance = have["id"], have["raid"]
         rd = self.raid_def(instance)
-        have = next((s for s in schedules_of(rd) if s["id"] == sid), None)
-        if have is None:
-            raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'} (it has {', '.join(s['id'] for s in schedules_of(rd)) or 'none'})")
-        stored = [copy.deepcopy(s) for s in (rd.get("schedules") or []) if isinstance(s, dict) and s.get("id") != sid]
-        want: dict = {"schedules": stored}
-        if sid == DEFAULT_SCHEDULE:
-            want["slots"] = []
-        key = series_key(instance, sid)
-        held = self.schedule_regulars(instance, sid) if not getattr(self, "_shadow", False) else []
-        label = self.schedule_label(instance, have)  # read before the override is written
-        with self.store.batch(f"{self.key}: raid {instance}: schedule {sid} removed (by {by})"):
-            self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} removed (by {by})")
+        snap = self._snapshot_raid(instance)
+        try:
+            self._lift_raid(instance)  # an older raid's keys become rows first, so the write keeps them
+        except RegistryError:
+            self._restore_raid(instance, snap)
+            raise
+        stored = [r for r in self.raid_rows(instance) if r["id"] != sid]
+        held = self.schedule_regulars(sid) if not getattr(self, "_shadow", False) else []
+        label = self.schedule_label(instance, have)  # read before the rows are written
+        with self.store.batch(f"{self.key}: schedule {sid} ({instance}) removed (by {by})"):
+            self._write_schedules(instance, stored, message=f"schedule {sid} ({instance}) removed (by {by})")
             gone: list[str] = []
             for m in {mm.discord_id: mm for mm, _c in held}.values():
                 for c in m.characters:
-                    if key in c.rosters:
-                        c.rosters.remove(key)
+                    if sid in c.rosters:
+                        c.rosters.remove(sid)
                 # a notice, never a DM (D47 = no): the Me page and /me view say it — in the same member save
                 self.notify(m.discord_id, "schedule_removed", f"{label} was removed by {by}: no more sheets come from it, so nobody expects you on them.", save=False)
-                self.save(m, f"{by}: {m.display_name} off the regulars of {key} (schedule removed)")
+                self.save(m, f"{by}: {m.display_name} off the regulars of {sid} (schedule removed)")
                 gone.append(m.display_name)
         return (f"{rd.get('name', instance)}: schedule {have.get('name') or sid} removed"
                 + (f" — {len(gone)} regular{'s' if len(gone) != 1 else ''} off it ({join_words(gone)})" if gone else ""))
+
+    def _write_schedules(self, instance: str, rows: list, message: str, save: bool = True) -> None:
+        """THE write of a raid's whole list of schedules (set_schedule, remove_schedule, set_raid_overrides' `schedules`):
+        each row validated (norm_schedule), an id another raid's schedule holds refused (ID_TAKEN), the rows stored in the
+        guild-level list, every schedule rule checked on the result, one save. A refusal puts config back as it was."""
+        if not isinstance(rows, list):
+            raise RegistryError("schedules must be a list of schedules")
+        snap = self._snapshot_raid(instance)
+        try:
+            self._lift_raid(instance)
+            others = {str(e.get("id")) for e in self.config.schedules if isinstance(e, dict) and _lead_raid(e) != instance}
+            out = []
+            for row in rows:
+                e = norm_schedule(row)
+                f = e.get("follow")
+                if f and f["raid"] == instance:  # _check_schedules' words, before the stored lineup refuses it in its own
+                    raise RegistryError(f"{schedule_name(e)}: a follow-on is another raid, not the raid itself")
+                if e["id"] in others:
+                    raise RegistryError(ID_TAKEN.format(sid=e["id"]))
+                out.append(e)
+            self._set_raid_rows(instance, out)
+            self._check_raid(instance)
+        except RegistryError:
+            self._restore_raid(instance, snap)
+            raise
+        if save:
+            self._prune_raid(instance)
+            self.save_config(message)
 
     @_config_verb(_raid_section)
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
@@ -5085,12 +5389,20 @@ class Registry:
         result, and it is saved in a single commit. A refused value leaves the stored config exactly as it was — no
         field commits on its own. This is what every multi-field editor must call (the Discord wizard, the web Raids
         page); calling set_raid_override in a loop commits the first fields and then fails on a later one against the
-        STORED values, leaving a half-applied raid in git."""
+        STORED values, leaving a half-applied raid in git. `schedules` (the Discord wizard's whole list) = the raid's
+        schedules, written as _write_schedules writes them (an id another raid's schedule holds → ID_TAKEN); a raid's
+        own run times (`slots`) are refused (RUN_TIMES_ON_SCHEDULE)."""
         if not fields:
             return []
         snap = self._snapshot_raid(instance)
         try:
-            lines = [self._apply_raid_override(instance, f, v, by, commit=False) for f, v in fields.items()]
+            lines = [self._apply_raid_override(instance, f, v, by, commit=False) for f, v in fields.items() if f != "schedules"]
+            if "schedules" in fields:
+                if instance not in self.profile.raids:
+                    raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
+                self._write_schedules(instance, fields["schedules"], message="", save=False)
+                named = [r["id"] for r in self.raid_rows(instance)]
+                lines.append(f"{instance}: schedules = {', '.join(named) or 'no schedules of its own'}")
             self._check_raid(instance)
         except RegistryError:
             self._restore_raid(instance, snap)
@@ -5201,7 +5513,7 @@ class Registry:
                     raise RegistryError(f"{name}: unknown raid {f['raid']} for the follow-on (one of {', '.join(self.profile.raids)})")
                 if f["raid"] == eff.get("id"):
                     raise RegistryError(f"{name}: a follow-on is another raid, not the raid itself")
-            if s["kind"] == "weekly" and s["id"] != DEFAULT_SCHEDULE and not s.get("slots"):
+            if s["kind"] == "weekly" and not s.get("slots"):
                 raise RegistryError(f"{name}: a weekly schedule needs at least one run time")
             if s["kind"] == "lockout":
                 if not eff.get("first_open"):
@@ -5213,53 +5525,19 @@ class Registry:
 
     def _apply_raid_override(self, instance: str, field: str, value, by: str, commit: bool = True) -> str:
         """A raid's own setting (officers, design D8): lockout_days | duration_hours | first_open | notes | auto
-        | slots | split_policy | loot_auto_distribute | weight_rank/main/sat_out/signup_order | schedules (the whole list).
+        | split_policy | loot_auto_distribute | weight_rank/main/sat_out/signup_order. Run times (`slots`, `schedules`)
+        belong to a schedule: refused with RUN_TIMES_ON_SCHEDULE (set_schedule; set_raid_overrides writes a raid's whole list).
         Sheet timing (SCHEDULE_TIMING) is each schedule's own: refused with TIMING_ON_SCHEDULE; the old role limits
         (tank_min … dps_max) with role_limit_refusal — a minimum is Registry.set_minimums."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
         if field in SCHEDULE_TIMING:  # sheet timing is each schedule's own (C7): refused before anything changes
             raise RegistryError(TIMING_ON_SCHEDULE)
+        if field in ("slots", "schedules"):  # a raid has no run times of its own: they belong to a schedule (phase 3)
+            raise RegistryError(RUN_TIMES_ON_SCHEDULE)
         self._lift_raid(instance)  # an older file's run times and schedules become rows first, so nothing they held is lost
         over = self.config.raids.setdefault(instance, {})
-        if field == "slots":  # the raid's run times = the `default` schedule's, in the guild-level list
-            slots = parse_slots(value)
-            rows = self.raid_rows(instance)
-            dflt = next((r for r in rows if r["id"] == DEFAULT_SCHEDULE), None)
-            if dflt is None:
-                dflt = {"id": DEFAULT_SCHEDULE}
-                rows.insert(0, dflt)
-            if slots or (self.profile.raids.get(instance) or {}).get("slots"):  # [] is kept only where it hides the game's run times
-                dflt["slots"] = slots
-            else:
-                dflt.pop("slots", None)
-            self._set_raid_rows(instance, [r for r in rows if not (r is dflt and _bare_default(r, self._seed_raid(instance)))])
-            value = ", ".join(self.slot_label(x) for x in slots) or "no run times"  # the reply and change log read 12-hour
-        elif field == "schedules":  # the raid's whole list (the wizard's and set_schedule's one write), into the guild-level list
-            if not isinstance(value, list):
-                raise RegistryError("schedules must be a list of schedules")
-            cur = next((r for r in self.raid_rows(instance) if r["id"] == DEFAULT_SCHEDULE), None)
-            keep = {"slots": cur["slots"]} if cur is not None and "slots" in cur else {}  # `default`'s run times stay unless it names its own
-            rows, dflt = [], None
-            for row in value:
-                e = norm_schedule(row)
-                f = e.get("follow")
-                if f and f["raid"] == instance:  # _check_schedules' words, before the stored lineup refuses it in its own
-                    name = e.get("name") or (DEFAULT_SCHEDULE_NAME if e["id"] == DEFAULT_SCHEDULE else SCHEDULE_NAMES.get(e["kind"], e["kind"]))
-                    raise RegistryError(f"{name}: a follow-on is another raid, not the raid itself")
-                if e["id"] == DEFAULT_SCHEDULE and dflt is None:
-                    dflt = e
-                rows.append(e)
-            if dflt is None and keep:
-                rows.insert(0, {"id": DEFAULT_SCHEDULE, **keep})
-            elif dflt is not None and "slots" not in dflt and keep:
-                dflt.update(keep)
-            if dflt is not None and _bare_default(dflt, self._seed_raid(instance)):
-                rows = [r for r in rows if r is not dflt]  # it says nothing: no run times, no setting of its own
-            self._set_raid_rows(instance, rows)
-            named = [e["id"] for e in rows if not (e["id"] == DEFAULT_SCHEDULE and set(e) <= {"id", "slots", *SCHEDULE_TIMING})]
-            value = ", ".join(named) or "no schedules of its own"
-        elif field in RAID_LOOT_FIELDS:
+        if field in RAID_LOOT_FIELDS:
             over[field] = parse_bool(value)
         elif field == "split_policy":
             if value not in SPLIT_POLICIES:
@@ -6197,28 +6475,28 @@ class Registry:
             self.save(m, f"{m.display_name} DMs {'on' if on else 'off'}" + (f" (by {by})" if by != m.display_name else ""))
             return f"{m.display_name}: DMs {'on' if on else 'off'}"
 
-    # ---- regulars (roster redesign Phase 1): officer-curated, per recurring SERIES "<raid>:<schedule>", one character per
+    # ---- regulars (roster redesign Phase 1): officer-curated, per recurring SERIES (the schedule's id), one character per
     # member per series, stored on the character (RegisteredCharacter.rosters). Regulars are expected on every sheet of the
     # series (officers see who hasn't answered; the nudge goes to them), weigh more at lock, and are asked first by the
     # fill engine. Nothing is pre-filled (owner decision D1): a regular starts unanswered like everyone else.
     def series(self, cls: str | None = "recurring") -> list[tuple[str, str]]:
-        """(series key, label) for every schedule of every raid of class `cls` (None = all), in profile order:
-        ('barrow_deeps:default', 'Barrow Deeps · Raid nights'). Paused schedules are included (they keep their regulars)."""
+        """(schedule id, label) for every schedule of class `cls` (None = all), raids in profile order: ('barrow-deeps',
+        'Barrow Deeps · Raid nights'). Paused schedules are included (they keep their regulars)."""
         out = []
         for rid in self.profile.raids:
             name = self.raid_def(rid).get("name", rid)
             for s in self.schedules(rid):
                 if cls is None or schedule_class(s["kind"]) == cls:
-                    out.append((series_key(rid, s["id"]), f"{name} · {s.get('name') or s['id']}"))
+                    out.append((s["id"], f"{name} · {s.get('name') or s['id']}"))
         return out
 
     def series_label(self, key: str) -> str:
-        """A series key as a person reads it ('Barrow Deeps · Raid nights'); a removed schedule reads as its raid + id."""
+        """A schedule id as a person reads it ('Barrow Deeps · Raid nights'); an older "<raid>:<schedule>" key reads
+        through config.schedule_aliases; one no schedule answers to reads "<key> (removed schedule)"."""
+        key = str(key or "")
+        key = self.config.schedule_aliases.get(key, key)
         hit = next((label for k, label in self.series(None) if k == key), None)
-        if hit:
-            return hit
-        rid, _, sid = str(key).partition(":")
-        return f"{self.raid_def(rid).get('name', rid) if rid in self.profile.raids else rid} · {sid} (removed schedule)"
+        return hit or f"{key} (removed schedule)"
 
     def _recurring_series(self, key: str) -> str:
         key = str(key or "").strip()
@@ -6236,8 +6514,15 @@ class Registry:
         return sorted(out, key=lambda mc: mc[0].display_name.lower())
 
     def regular_series_of(self, m: Member) -> list[tuple[str, RegisteredCharacter]]:
-        """(series key, character) for every series `m` is a regular on (orphans of a removed schedule included)."""
-        return [(k, c) for c in m.active() for k in c.rosters if ":" in k]
+        """(schedule id, character) for every schedule `m` is a regular on (orphans of a removed schedule included)."""
+        return [(k, c) for c in m.active() for k in c.rosters]
+
+    def first_raid(self, sid: str) -> str | None:
+        """The first raid of schedule `sid`, None when there is no such schedule."""
+        try:
+            return self.schedule_entry(sid)["raid"]
+        except RegistryError:
+            return None
 
     @_member_write
     def regular_add(self, discord_id: int, key: str, by: str, character: str | None = None) -> tuple[Member, RegisteredCharacter, list[str]]:
@@ -6260,9 +6545,9 @@ class Registry:
             if key in other.rosters:
                 other.rosters.remove(key)
         c.rosters.append(key)
-        rid = key.partition(":")[0]
+        rid = self.schedule_entry(key)["raid"]
         warn = [f"{c.label} is also a regular on {self.series_label(k)} — the same raid's lockout: one save covers both nights"
-                for k in c.rosters if k != key and k.partition(":")[0] == rid]
+                for k in c.rosters if k != key and self.first_raid(k) == rid]
         self.save(m, f"{by}: {m.display_name} ({c.label}) regular on {key}" + (f" (was {before.label})" if before else ""))
         return m, c, warn
 
@@ -6274,7 +6559,7 @@ class Registry:
         key = str(key or "").strip()
         hit = [c for c in (m.characters if m else []) if key in c.rosters]
         if not hit:
-            raise RegistryError(f"{m.display_name if m else 'they'} isn't a regular on {self.series_label(key) if ':' in key else key or '?'}")
+            raise RegistryError(f"{m.display_name if m else 'they'} isn't a regular on {self.series_label(key) if key else '?'}")
         for c in hit:
             c.rosters.remove(key)
         self.save(m, f"{by}: {m.display_name} off the regulars of {key}")
@@ -6303,7 +6588,7 @@ class Registry:
             for s in self.schedules(r):
                 if schedule_class(s["kind"]) != "recurring":
                     continue
-                key = series_key(r, s["id"])
+                key = s["id"]
                 size = int(self.schedule_def(r, s["id"]).get("size") or DEFAULT_RAID_SIZE)
                 n = int(s.get("rosters") or 1)
                 bounds = self.role_bounds(r, size)
@@ -6363,25 +6648,30 @@ class Registry:
         """(key, member, character) for every regular of a series whose schedule no longer exists (or is ad hoc now):
         never stripped silently — the Rosters page lists them with a remove button."""
         known = dict(self.series("recurring"))
-        return [(k, m, c) for m in self.members.values() for c in m.active() for k in c.rosters if ":" in k and k not in known]
+        return [(k, m, c) for m in self.members.values() for c in m.active() for k in c.rosters if k not in known]
 
     def migrate_rosters_to_series(self, by: str = "migrate", dry_run: bool = False) -> list[str]:
-        """Roster redesign D11 (Phase 0): RegisteredCharacter.rosters keeps regular-series keys only
-        ("<raid>:<schedule>", which always hold a ':'); every other entry is dropped — the phantom "main" left by the
+        """Roster redesign D11 (Phase 0): RegisteredCharacter.rosters keeps regular-series keys only (a schedule id of
+        the guild, or an older "<raid>:<schedule>" key, which the load translates); every other entry is dropped — the phantom "main" left by the
         old teams migration and any run key ("bd-0917-1937") the lock used to write before seats moved to the run files.
         Retired characters too. Idempotent (a second run finds nothing and commits nothing); one commit for the lot
         ("migrate: rosters = regular series only"). `dry_run` changes nothing. Returns one line per member touched.
         Run it with scripts/migrate_rosters.py while the bot is stopped (the bot keeps members in memory)."""
         lines: list[str] = []
+        ids = {s["id"] for s in self.all_schedules()}
+
+        def kept(k: str) -> bool:
+            return ":" in k or k in ids
+
         with self.store.batch(f"{self.key}: migrate: rosters = regular series only ({by})"):
             for m in sorted(self.members.values(), key=lambda x: x.display_name.lower()):
                 dropped = []
                 for c in m.characters:
-                    gone = [k for k in c.rosters if ":" not in k]
+                    gone = [k for k in c.rosters if not kept(k)]
                     if gone:
                         dropped.append(f"{c.label} ({c.status}): {', '.join(gone)}")
                         if not dry_run:
-                            c.rosters = [k for k in c.rosters if ":" in k]
+                            c.rosters = [k for k in c.rosters if kept(k)]
                 if dropped:
                     lines.append(f"{m.display_name}: dropped " + "; ".join(dropped))
                     if not dry_run:

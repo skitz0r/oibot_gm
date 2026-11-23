@@ -650,10 +650,9 @@ def repost_sheet(run: str, channel: str | None = None, guild: Guild = None) -> s
 @mcp.tool()
 def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """Change a raid's own settings for the guild (officers): one `field` + `value`, or several at once as `fields`
-    {field: value} — ONE validated write, and a refusal leaves the raid as it was. field = slots (a list ['Tue 19:30',
-    'Thu 19:30'] = the default schedule's run times), lockout_days, duration_hours, notes, split_policy (how a night with
+    {field: value} — ONE validated write, and a refusal leaves the raid as it was. field = lockout_days, duration_hours, notes, split_policy (how a night with
     more joiners than one run seats is split into groups; a schedule may set its own), first_open ('YYYY-MM-DDTHH:MM'
-    guild time), weight_<key> (see list_raids weight_keys). Sheet timing is each schedule's own: use schedule_set. A
+    guild time), weight_<key> (see list_raids weight_keys). Run times and sheet timing are each schedule's own: use schedule_set. A
     role's minimum is set_minimum. Values are typed (numbers, lists); the bot builds the change. `preview=True`: what
     would change (current → new, consequences), nothing saved."""
     rid = get_raid(raid, guild)["id"]
@@ -670,8 +669,8 @@ def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any 
                  guild: Guild = None) -> str | dict:
     """Change settings of a raid's schedule (officers) — or create the schedule. One `field` + `value`, or several at
     once as `fields` {field: value} in ONE validated write (a new schedule's kind and run times together). Schedules are
-    listed per raid by list_raids / get_raid (`schedules`: id, name, kind, plain-words label, next runs); `default` is
-    the raid's own weekly slots. field = kind (weekly|lockout|pickup) | name | active (bool) | rosters (1-4) | slots (a
+    listed per raid by list_raids / get_raid (`schedules`: id, name, kind, plain-words label, next runs); a schedule's id
+    is unique across the guild. field = kind (weekly|lockout|pickup) | name | active (bool) | rosters (1-4) | slots (a
     list ['Sat 20:00', 'Sun 20:00']) | days (a list [1, 3] = days of each lockout, 1 = reset day) | time ('20:00') |
     cadence (standard|short|same_week: a preset of the four sheet-timing hours) | signup_lead_hours | nudge_hours_before |
     lock_hours_before | confirm_hours_before | fill_ask_hours | nudge | autofill | open_dm | confirm (bools) — the
@@ -690,7 +689,7 @@ def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any 
 
 @mcp.tool()
 def schedule_remove(raid: str, schedule: str, preview: bool = False, guild: Guild = None) -> str | dict:
-    """Remove a raid's schedule (officers). Removing `default` clears the raid's weekly slots; runs already open keep
+    """Remove a raid's schedule by its id (officers). Runs already open keep
     their times; its regulars come off it (they see a notice, nobody is DMed). `preview=True` names them first."""
     rid = get_raid(raid, guild)["id"]
     return ops_change(guild, [{"kind": "schedule_remove", "target": f"{rid}:{schedule}"}], preview)
@@ -843,12 +842,12 @@ def set_dm(member: str, on: bool, guild: Guild = None) -> str:
 @mcp.tool()
 def set_regular(raid: str, member: str, on: bool = True, schedule: str | None = None, character: str | None = None, guild: Guild = None) -> str:
     """Add (`on` true) or remove a REGULAR of a recurring schedule: `raid` id or name, `schedule` id from get_raid's
-    schedules (default "default" = the raid's own run times; weekly or lockout only — pickup templates and one-offs are
+    schedules (none = the raid's only recurring schedule; weekly or lockout only — pickup templates and one-offs are
     ad hoc and have no regulars), `member` (name, character or id), `character` = which of theirs raids there (default
     their main; one per member per schedule). Regulars are expected on every sheet of the schedule (get_run's
     not_answered lists the ones who haven't answered; the reminder goes to them) and weigh more at lock; nothing is
     answered for them. Same route as the Rosters page."""
-    return msg(api(guild).post("/api/admin/raid/regulars", {"raid": raid, "schedule": schedule or "default", "member": member, "character": character or "", "on": bool(on)}))
+    return msg(api(guild).post("/api/admin/raid/regulars", {"raid": raid, "schedule": schedule or "", "member": member, "character": character or "", "on": bool(on)}))
 
 
 # ---------------------------------------------------------------- writes: config (owner) and the test bench

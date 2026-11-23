@@ -16,7 +16,7 @@ from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from conftest import OWNER, join, lock_with_board
+from conftest import OWNER, join, lock_with_board, weekly as _weekly
 
 from oibot_gm import consequences as cq
 from oibot_gm import discord_people, inbox
@@ -92,7 +92,8 @@ def names_of(reg) -> set[str]:
 
 
 def weekly(reg):
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30", "Thu 19:30", "Sat 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    _weekly(reg, RID, ["Tue 19:30", "Thu 19:30", "Sat 19:30"])
 
 
 def recurring_run(reg, rs, n: int = 0):
@@ -239,9 +240,9 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
 
     # ---- regular_remove
     m = ms[0]
-    reg.regular_add(m.discord_id, f"{RID}:default", "t")
-    dump.add("regular_remove", "a running schedule", cq.regular_remove(reg, reg.members[m.discord_id], f"{RID}:default"))
-    dump.add("regular_remove", "a removed schedule", cq.regular_remove(reg, reg.members[m.discord_id], f"{RID}:gone"))
+    reg.regular_add(m.discord_id, "barrow-deeps", "t")
+    dump.add("regular_remove", "a running schedule", cq.regular_remove(reg, reg.members[m.discord_id], "barrow-deeps"))
+    dump.add("regular_remove", "a removed schedule", cq.regular_remove(reg, reg.members[m.discord_id], "gone"))
 
     # ---- inbox.action_consequence: every key member_actions offers, every run, by an officer and on their own record
     for case, ev in runs.items():
@@ -320,8 +321,8 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     dump.add("closed_run_refusal", "done", rc.closed_run_refusal(rs, d.key) or "")
     dump.add("closed_run_refusal", "cancelled", rc.closed_run_refusal(rs, runs["cancelled"].key) or "")
     far = reg.now_local() + timedelta(days=40)
-    dump.add("open_row_refusal", "too far ahead", rc.open_row_refusal(reg, rs, RID, far, rc.event_key(RID, far, "default"), far - timedelta(days=2)) or "")
-    dump.add("open_row_refusal", "too far ahead, the sheet opens before Open works", rc.open_row_refusal(reg, rs, RID, far, rc.event_key(RID, far, "default"), far - timedelta(days=30)) or "")
+    dump.add("open_row_refusal", "too far ahead", rc.open_row_refusal(reg, rs, RID, far, rc.event_key(RID, far, "barrow-deeps"), far - timedelta(days=2)) or "")
+    dump.add("open_row_refusal", "too far ahead, the sheet opens before Open works", rc.open_row_refusal(reg, rs, RID, far, rc.event_key(RID, far, "barrow-deeps"), far - timedelta(days=30)) or "")
     dump.add("open_row_refusal", "closed", rc.open_row_refusal(reg, rs, RID, d.start, d.key, d.start) or "")
     p = rc.open_preview(reg, rs, RID, None, None)
     dump.add("open_preview", "the next scheduled run", [p["rules"], p["refusal"] or "", p["when_note"]])
@@ -365,7 +366,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
             dump.add("character_effects(spec)", "role flip on an ad hoc run", e["text"])
     opener = ms[11]
     reg.add_character(opener.discord_id, opener.display_name, "Spareling", "Mage", "Frost", None, False)
-    reg.regular_add(opener.discord_id, f"{RID}:default", "t", "Spareling")
+    reg.regular_add(opener.discord_id, "barrow-deeps", "t", "Spareling")
     o = runs["open recurring"]
     rc.set_signup(reg, rs, o, opener, "Spareling", "in", source="member")
     for change in ({"kind": "retire", "label": "Spareling"}, {"kind": "spec", "label": "Spareling", "spec": "Arcane", "role": "ranged", "old_spec": "Frost", "old_role": "ranged"},
@@ -421,13 +422,13 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
             dump.add("timezone_change_effects", "mode move, one open run whose lock would pass", reg.timezone_change_effects("America/New_York", rs, "move"))
     monkeypatch.setattr(reg, "timezone_runs", real_runs)
     dump.add("timezone_refusal", "a locked run, no mode", reg.timezone_refusal("America/New_York", rs, "") or "")
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt nights"}, "t")
-    reg.regular_add(ms[5].discord_id, f"{RID}:alt", "t")
-    reg.regular_add(ms[6].discord_id, f"{RID}:alt", "t")
-    fx = reg.schedule_removal_effects(RID, "alt", rs)
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt nights"}, "t", raid=RID)
+    reg.regular_add(ms[5].discord_id, "alt", "t")
+    reg.regular_add(ms[6].discord_id, "alt", "t")
+    fx = reg.schedule_removal_effects("alt", rs)
     dump.add("schedule_removal_effects.lines", "two regulars, nothing open", fx.lines())
     dump.add("schedule_removal_effects.sentence", "two regulars, nothing open", fx.sentence())
-    fx = reg.schedule_removal_effects(RID, "default", rs)
+    fx = reg.schedule_removal_effects("barrow-deeps", rs)
     dump.add("schedule_removal_effects.lines", "the raid's own run times, runs open", fx.lines())
     dump.add("schedule_removal_effects.sentence", "the raid's own run times, runs open", fx.sentence())
     dump.add("aura_reset_sentence", "nothing changed", reg.aura_reset_sentence())
@@ -455,7 +456,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
 
     # ---- configops
     dump.add("schedule_pause_sentence", "pause, nothing open", configops.schedule_pause_sentence(reg, RID, "alt", True, rs))
-    dump.add("schedule_pause_sentence", "pause, runs open", configops.schedule_pause_sentence(reg, RID, "default", True, rs))
+    dump.add("schedule_pause_sentence", "pause, runs open", configops.schedule_pause_sentence(reg, RID, "barrow-deeps", True, rs))
     dump.add("schedule_pause_sentence", "resume", configops.schedule_pause_sentence(reg, RID, "alt", False, rs))
     Op = configops.ConfigOp
     reg.config.officer_role_ids = [5]
@@ -599,7 +600,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
         main = next((x for x in chars if x.is_main), None)
         return SimpleNamespace(display_name=name, characters=chars, main=main, active=lambda: list(chars))
 
-    spot, spot2 = f"{RID}:default", f"{RID}:alt"
+    spot, spot2 = "barrow-deeps", "alt"
     bram = mv_char("Bram Kettle", main=True, rosters=[spot])
     wren = mv_char("Wren Hollow")
     giver = mv_member("Bramble", [bram, wren])
@@ -756,7 +757,7 @@ def armory_long_names(reg, rs, dump):
     # the move, every case, the real records and the long ones built to reach each branch
     dump.add("move_consequence", "long names, the main to a member with a main", cq.move_consequence(reg, am, ac, bm), names)
     dump.add("move_consequence", "long names, an alt", cq.move_consequence(reg, am, reg.own_character(am.characters, "Wrenna Hollowmere"), bm), names)
-    spot = f"{RID}:default"
+    spot = "barrow-deeps"
 
     def mv_char(label, *, main=False, rosters=()):
         return SimpleNamespace(label=label, name=label.split()[0], is_main=main, status="active", rosters=list(rosters))

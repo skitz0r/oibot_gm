@@ -283,7 +283,7 @@ def schedule_sections(reg) -> list[dict]:
         rd = reg.raid_def(rid)
         rows = []
         for sc in reg.schedules(rid):
-            title = sc.get("name") if sc.get("id") != rc.DEFAULT_SCHEDULE and sc.get("name") else None
+            title = sc.get("name") if len(reg.schedules(rid)) > 1 and sc.get("name") else None
             if sc.get("kind") == "pickup":
                 rows.append({"title": title, "label": "Ad hoc: an officer opens these runs when there's interest — first come, first served", "runs": []})
                 continue

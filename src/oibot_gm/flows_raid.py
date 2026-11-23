@@ -124,7 +124,7 @@ class OpenWizard(Wizard):
     def sched_name(self, sid: str | None) -> str:
         if sid == ADHOC_SCHEDULE:
             return ADHOC_SCHEDULE_NAME
-        s = next((x for x in self.reg.schedules(self.rid) if x["id"] == (sid or "default")), None)
+        s = next((x for x in self.reg.schedules(self.rid) if x["id"] == sid), None)
         return (s or {}).get("name") or ""
 
     def template_buttons(self) -> list[discord.ui.Item]:
@@ -140,7 +140,7 @@ class OpenWizard(Wizard):
     def is_adhoc(self, sid: str | None) -> bool:
         if sid == ADHOC_SCHEDULE:
             return True
-        s = next((x for x in self.reg.schedules(self.rid) if x["id"] == (sid or "default")), None)
+        s = next((x for x in self.reg.schedules(self.rid) if x["id"] == sid), None)
         return bool(s) and schedule_class(s["kind"]) == "adhoc"
 
     def _template(self, sid: str):
@@ -182,7 +182,7 @@ class OpenWizard(Wizard):
         await self.show(interaction, f"**{self.name()}** — which run?\n-# Ad hoc = a pickup or a one-off at a time you pick: {rc.FIRST_COME}, no regulars, no reminder.", *items)
 
     async def another(self, interaction: discord.Interaction) -> None:
-        """The other upcoming runs of every recurring schedule (the value names the schedule unless it is the raid's own).
+        """The other upcoming runs of every recurring schedule (the value names the schedule).
         More than OTHER_STARTS of them page BY WEEK (design B4): one week per screen with ← Earlier week / Later week →,
         so a busy raid's runs past the first 22 are reachable without typing a date."""
         ups = self.upcoming()
@@ -205,7 +205,7 @@ class OpenWizard(Wizard):
                          self.button("Later week →", self._week_page(page + 1), disabled=page >= len(weeks) - 1)]
         else:
             others = others[:OTHER_STARTS]
-        opts = [Opt(t.isoformat() + ("" if s["id"] == "default" else f"|{s['id']}"), self.reg.local12(t), (f"{s['name']} · " if many else "") + when_relative(self.reg, t)) for s, t in others]
+        opts = [Opt(f"{t.isoformat()}|{s['id']}", self.reg.local12(t), (f"{s['name']} · " if many else "") + when_relative(self.reg, t)) for s, t in others]
         await self.show(interaction, head, self.select("Pick the run", opts, self.start_picked), *page_btns,
                         self.button("Back", self.shortlist), self.button("Cancel", self.cancel))
 
@@ -288,7 +288,7 @@ class OpenWizard(Wizard):
             # the same): opened as scheduled, with its regulars and confirmations, never a second "ad hoc" run beside it
             w = rc.which_run(self.reg, self.rid, start, None)
             if w["kind"] == "scheduled":
-                self.draft["schedule"], self.draft["matched"] = w["schedule"] or "default", w["schedule_name"]
+                self.draft["schedule"], self.draft["matched"] = w["schedule"], w["schedule_name"]
         await self.confirm(interaction)
 
     async def week_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
@@ -304,7 +304,7 @@ class OpenWizard(Wizard):
     async def confirm(self, interaction: discord.Interaction) -> None:
         start = self.draft["start"]
         sid = self.draft.get("schedule")
-        label = f"**{self.name()}**" + (f" · {self.sched_name(sid)}" if sid and (sid != "default" or self.many()) else "")
+        label = f"**{self.name()}**" + (f" · {self.sched_name(sid)}" if sid and (sid == ADHOC_SCHEDULE or self.many()) else "")
         lines = [f"Open {label} at {both_clocks(self.reg, start)}?"]
         if self.draft.get("matched"):
             lines.append(f"-# That time is the {self.draft['matched']} run. " + " ".join(rc.open_rules(self.reg, self.rid, sid, "scheduled")))

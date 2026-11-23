@@ -10,7 +10,7 @@ import re
 import types
 
 import pytest
-from conftest import OWNER, join, lock_with_board, open_test_run
+from conftest import OWNER, join, lock_with_board, open_test_run, weekly
 
 from oibot_gm import configops, help as help_mod, raidcycle as rc
 from oibot_gm.configops import ConfigOp
@@ -286,7 +286,7 @@ def test_a_name_cannot_close_the_data_fence(reg, rs):
 
 def test_the_parser_context_labels_machine_times_in_12_hour_words(reg, rs):
     reg.set_raid_override("barrow_deeps", "first_open", "2026-01-01T00:00", "t")
-    reg.set_raid_override("barrow_deeps", "slots", "Tue 19:30", "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30")
     ev = open_test_run(reg, rs)
     m = reg.test_members()[0]
     reg.add_absence(m.discord_id, "2030-03-01", "2030-03-03", None, "t")
@@ -297,7 +297,7 @@ def test_the_parser_context_labels_machine_times_in_12_hour_words(reg, rs):
     now_line = next(l for l in text.splitlines() if l.startswith("## Now: "))
     assert " = " in now_line and ("AM" in now_line or "PM" in now_line)
     up = next(l for l in text.split("## Upcoming runs not opened yet", 1)[1].splitlines() if l.startswith("- barrow_deeps: "))
-    assert re.search(r"\d{4}-\d\d-\d\d \d\d:\d\d default \(= \w{3} \d{1,2} \w{3} \d{1,2}:\d\d [AP]M\)", up)
+    assert re.search(r"\d{4}-\d\d-\d\d \d\d:\d\d barrow-deeps \(= \w{3} \d{1,2} \w{3} \d{1,2}:\d\d [AP]M\)", up)
 
 
 # ---------------------------------------------------------------- confirm "all pending"
@@ -324,12 +324,13 @@ def test_confirm_all_pending_with_the_list_in_the_officer_context(reg):
 # ---------------------------------------------------------------- L8: raid_reset previews in words
 
 def test_raid_reset_preview_is_in_words(reg):
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30, Thu 20:00", "first_open": "2026-12-09T15:00:00-08:00"}, "t")
-    reg.set_schedule("barrow_deeps", "default", {"lock_hours_before": 12}, "t")  # sheet timing is the schedule's (C7)
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-12-09T15:00:00-08:00"}, "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30, Thu 20:00")
+    reg.set_schedule("barrow-deeps", {"lock_hours_before": 12}, "t", raid="barrow_deeps")  # sheet timing is the schedule's (C7)
     reg.set_minimums("barrow_deeps", {"healer": {"min": 3}}, "t")
     d = configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps"))
-    assert "Tue 7:30 PM, Thu 8:00 PM" in d and "Wed 9 Dec 2026 3:00 PM" in d and "minimums: at least 3 healers" in d
-    assert "Raid nights (Tuesdays 7:30 PM, Thursdays 8:00 PM)" in d, "the stored default schedule reads with the raid's run times"
+    assert "Wed 9 Dec 2026 3:00 PM" in d and "minimums: at least 3 healers" in d
+    assert "Raid nights (Tuesdays 7:30 PM, Thursdays 8:00 PM)" in d, "the raid's schedules, in words"
     assert "19:30" not in d and "2026-12-09" not in d and "{" not in d
 
 
@@ -495,7 +496,7 @@ def test_timezone_wizard_confirm_carries_discord_stamps(reg, monkeypatch):
     monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: True)
     monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
     reg.set_raid_override("barrow_deeps", "first_open", "2026-01-01T00:00", "t")
-    reg.set_raid_override("barrow_deeps", "slots", "Tue 19:30", "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30")
     h = Harness(reg)
 
     async def go():
@@ -724,21 +725,21 @@ def test_help_in_a_dm_shows_an_officer_the_officer_tiers(reg, monkeypatch):
 
 def test_the_config_dump_labels_raid_overrides_and_schedule_settings(reg):
     """Split 3 continued: the raw '## Current config' yaml carried a raid's first_open and slots with no label."""
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30", "first_open": "2026-12-09T15:00:00-08:00"}, "t")
-    reg.set_schedule("barrow_deeps", "late", {"slots": "Thu 21:00", "lock_hours_before": 30}, "t")
-    reg.set_schedule("barrow_deeps", "default", {"lock_hours_before": 20}, "t")  # stored apart from the raid's run times
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-12-09T15:00:00-08:00"}, "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30")
+    reg.set_schedule("late", {"slots": "Thu 21:00", "lock_hours_before": 30}, "t", raid="barrow_deeps")
+    reg.set_schedule("barrow-deeps", {"lock_hours_before": 20}, "t", raid="barrow_deeps")  # stored apart from the raid's run times
     text = configops.current_config_text(reg, officer=True)
     dump = text.split("```yaml\n", 1)[1].split("```", 1)[0]
     assert "first_open" not in dump and "19:30" not in dump, "raid overrides leave the bare dump"
     line = next(l for l in text.splitlines() if l.startswith("- barrow_deeps: ") and "first_open=" in l)
     assert "first_open=2026-12-09T15:00:00-08:00 (= first open Wed 9 Dec 2026 3:00 PM)" in line
-    assert "(= run times Tue 7:30 PM)" in line  # (phase 2: a raid holds no lock time; each schedule does)
-    assert "Raid nights (Tuesdays 7:30 PM)" in line and "No run times yet" not in text, "a stored default runs on the raid's run times"
+    assert "Raid nights (Tuesdays 7:30 PM)" in line and "No run times yet" not in text, "each schedule with its run times (phase 3: a raid has none)"
     own = next(l for l in text.splitlines() if "schedule late" in l)
     assert "sheet timing " in own and "lock_hours_before=30" in own and "locks 30 hours before" in own
-    dflt = next(l for l in text.splitlines() if "schedule default" in l)
-    assert "Tuesdays 7:30 PM" in dflt and "locks 20 hours before" in dflt  # each schedule's own timing, the raid line none
-    raid = next(l for l in text.splitlines() if l.startswith("- barrow_deeps: slots="))
+    dflt = next(l for l in text.splitlines() if "schedule barrow-deeps" in l)
+    assert "Tuesdays 7:30 PM" in dflt and "(= Tue 7:30 PM)" in dflt and "locks 20 hours before" in dflt  # each schedule's own timing, the raid line none
+    raid = next(l for l in text.splitlines() if l.startswith("- barrow_deeps: ") and "split_policy=" in l and "first_open=" not in l)
     assert "lock_hours_before" not in raid and "signup_lead_hours" not in raid
     assert "auto_propose_hour" not in text and "legacy poll" not in text, "dead config is gone from the parser's context"
 

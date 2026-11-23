@@ -10,7 +10,7 @@ import types
 
 import httpx
 import pytest
-from conftest import OWNER, open_test_run
+from conftest import OWNER, open_test_run, weekly
 from fastapi.testclient import TestClient
 from test_mcp import TOKEN, bearer
 from test_parity_verbs import Bot
@@ -178,7 +178,7 @@ def test_cadence_preset(reg):
     assert configops.describe(reg, raid) == f"raid barrow_deeps cadence: {TIMING_ON_SCHEDULE}"
     with pytest.raises(RegistryError, match="Change it on the schedule"):
         configops.apply(reg, raid, "Owner", True)
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid="barrow_deeps")
     op = ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.cadence", value="short")
     d = configops.describe(reg, op)
     assert d.startswith("Barrow Deeps · Weekly: ") and d.endswith("→ signup lead hours: 48 hours before, nudge hours before: 36 hours before, "
@@ -190,7 +190,7 @@ def test_cadence_preset(reg):
 
 
 def test_coalesce_saves_settings_that_only_work_together(reg):
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid="barrow_deeps")
     ops = [ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.lock_hours_before", value="60"),
            ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.signup_lead_hours", value="100"),
            ConfigOp(op="dm", value="off"),
@@ -217,7 +217,7 @@ def test_coalesce_saves_settings_that_only_work_together(reg):
 
 def test_confirm_view_coalesces(reg, rs):
     bot = SetupBot(reg, rs)
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid="barrow_deeps")
     ops = [ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.lock_hours_before", value="60"),
            ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.signup_lead_hours", value="100")]
     log = []
@@ -238,11 +238,13 @@ def test_confirm_view_coalesces(reg, rs):
 
 def test_run_time_changes_preview_the_next_runs(reg):
     reg.set_raid_override("barrow_deeps", "first_open", "2026-01-01T00:00", "t")
-    d = configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Thu 20:00"))
-    assert "→ Thu 8:00 PM — after it: Barrow Deeps: next Thu " in d and "20:00" not in d
+    d = configops.describe(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="thu.slots", value="Thu 20:00"))
+    assert "Thu 8:00 PM — after it: Barrow Deeps · Weekly: next Thu " in d and "20:00" not in d
+    refused = configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Thu 20:00"))
+    assert "Run times belong to a schedule now" in refused  # phase 3: a raid has no run times of its own
     bad = configops.describe(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="x.lockout", value="9 at 20:00"))
     assert "refused" in bad or "day" in bad
-    reg.set_raid_override("barrow_deeps", "slots", "Tue 19:30", "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30")
     tz = configops.describe(reg, ConfigOp(op="set", path="timezone", value="America/New_York"))
     assert tz.startswith("timezone: America/Los_Angeles → America/New_York") and "on today's clock" in tz
     assert "refused" in configops.describe(reg, ConfigOp(op="set", path="timezone", value="Mars/Olympus"))

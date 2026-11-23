@@ -7,7 +7,7 @@ import importlib.util
 import subprocess
 from pathlib import Path
 
-from conftest import GUILD
+from conftest import GUILD, weekly
 
 from oibot_gm.registry import Registry
 
@@ -29,7 +29,8 @@ def _phantoms(reg):
     old = next(ch for ch in b.characters if ch.label == "Boomalt")
     old.rosters, old.status = ["main"], "retired"
     reg.save(b, "seed retired phantom")
-    c.main.rosters = ["bd-0917-1937", "barrow_deeps:default"]
+    weekly(reg)  # phase 3: a regular spot is a schedule id the guild has
+    c.main.rosters = ["bd-0917-1937", "barrow-deeps"]
     reg.save(c, "seed run key + series")
     return a, b, c
 
@@ -48,7 +49,7 @@ def test_migration_drops_phantoms_keeps_series_and_is_idempotent(reg, store):
     fresh = Registry(store, GUILD, reg.profile)  # what is on disk
     assert fresh.members[a.discord_id].main.rosters == []
     assert all(ch.rosters == [] for ch in fresh.members[b.discord_id].characters), "retired characters too"
-    assert fresh.members[c.discord_id].main.rosters == ["barrow_deeps:default"]
+    assert fresh.members[c.discord_id].main.rosters == ["barrow-deeps"]
     assert fresh.migrate_rosters_to_series(by="t") == [] and commits(store) == n + 1, "idempotent: nothing left, no commit"
 
 

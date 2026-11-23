@@ -19,7 +19,7 @@ import json
 from datetime import timedelta
 
 import pytest
-from conftest import by_role, join, lock_with_board, open_test_run
+from conftest import by_role, join, lock_with_board, open_test_run, at_schedule
 from test_analytics_cards import text_of
 from test_parity_verbs import Bot
 
@@ -36,7 +36,7 @@ def run(coro):
 def open_plain_run(reg, rs, days: float = 3, instance: str = "barrow_deeps") -> rc.RaidEvent:
     """A real (not test) run: its pool is every main, as on the live guild."""
     start = (reg.now_local() + timedelta(days=days, hours=3)).replace(second=0, microsecond=0)
-    return rc.open_run(reg, rs, instance, start, by="t")
+    return rc.open_run(reg, rs, instance, start, by="t", schedule=at_schedule(reg, start, instance))  # a recurring run
 
 
 def _locked_with_confirmations(reg, rs, ev, seated):

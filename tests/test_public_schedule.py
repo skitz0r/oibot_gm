@@ -23,7 +23,7 @@ H24 = re.compile(r"\b([01]\d|2[0-3]):[0-5]\d\b(?! (AM|PM))")
 
 @pytest.fixture
 def one(reg, rs, env):  # noqa: F811
-    reg.set_schedule("barrow_deeps", "fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays"}, "t")
+    reg.set_schedule("fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays"}, "t", raid="barrow_deeps")
     bot = FakeBot(reg, rs)
     return bot, TestClient(web.create_app(bot), follow_redirects=False)
 
@@ -61,7 +61,7 @@ def test_the_schedule_page_is_words_only_for_anyone_without_a_login(one, reg):
 
 def test_paused_and_ad_hoc_schedules_read_in_words(one, reg):
     bot, c = one
-    reg.set_schedule("barrow_deeps", "pug", {"kind": "pickup", "name": "Pickups"}, "t")
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickups"}, "t", raid="barrow_deeps")
     body = c.get("/schedule").text
     assert "Pickups" in body and "first come" in body
 
@@ -69,7 +69,7 @@ def test_paused_and_ad_hoc_schedules_read_in_words(one, reg):
 def test_a_paused_schedule_says_paused_once(one, reg):
     """Regression: schedule_label's ' · paused' plus the page's 'paused for now' read 'paused' twice."""
     bot, c = one
-    reg.set_schedule("barrow_deeps", "fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays", "active": False}, "t")
+    reg.set_schedule("fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays", "active": False}, "t", raid="barrow_deeps")
     body = c.get("/schedule").text
     row = body.split("Fridays", 1)[1].split("</li>", 1)[0]
     assert row.count("paused") == 1 and "paused for now" in row and "next:" not in row

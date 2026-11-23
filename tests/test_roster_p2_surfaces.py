@@ -27,6 +27,7 @@ from oibot_gm.configops import ConfigOp
 from oibot_gm.registry import Absence, RegistryError
 from oibot_gm.web import app as web
 from oibot_gm.wizard import FLOWS
+from conftest import weekly
 
 
 def run(coro):
@@ -149,7 +150,8 @@ def test_a_stale_suggestions_screen_is_redrawn_not_sent(reg, rs, officer, channe
 # ---------------------------------------------------------------- regulars coverage and the forecast
 
 def _series(reg, rows):
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, ["Tue 19:30"])
     ms_ = [add(reg, 700 + i, *row) for i, row in enumerate(rows)]
     for m in ms_:
         reg.regular_add(m.discord_id, KEY, "officer")
@@ -190,7 +192,7 @@ def test_forecast_counts_regulars_minus_absences(reg):
     assert rows[1]["short"] == {"tank": 1} and rows[1]["away"] == [ms_[0].display_name] and rows[0]["short"] == {}
     assert all("AM" in r["when"] or "PM" in r["when"] for r in rows), "12-hour words for people"
     reg.regular_remove(ms_[0].discord_id, KEY, "t")
-    reg.set_schedule(RID, "default", {"active": False}, "t")
+    reg.set_schedule("barrow-deeps", {"active": False}, "t", raid=RID)
     assert rc.series_forecast(reg, KEY) == [], "a paused series has no forecast"
 
 

@@ -2,6 +2,7 @@
 import pytest
 
 from oibot_gm.registry import RAID_WEIGHT_DEFAULTS, RegistryError, default_nudge_hours, parse_slots
+from conftest import weekly
 
 
 def test_raid_def_defaults_from_profile(reg):
@@ -33,25 +34,25 @@ def _sched(reg, sid="tue"):
 
 def test_schedule_hours_and_nudge_window(reg):
     """Sheet timing is each schedule's own (phase 2): the same rules as the raid's were, on the schedule."""
-    reg.set_schedule("barrow_deeps", "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
-    reg.set_schedule("barrow_deeps", "tue", {"lock_hours_before": "12"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid="barrow_deeps")
+    reg.set_schedule("tue", {"lock_hours_before": "12"}, "t", raid="barrow_deeps")
     assert _sched(reg)["lock_hours_before"] == 12
     # the stored reminder (36, the profile's halfway) still falls between open (48) and lock (12): it stays
     assert _sched(reg)["nudge_hours_before"] == 36
-    reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": "20"}, "t")
+    reg.set_schedule("tue", {"nudge_hours_before": "20"}, "t", raid="barrow_deeps")
     assert _sched(reg)["nudge_hours_before"] == 20
     with pytest.raises(RegistryError, match="between signup opening and lock"):
-        reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": "6"}, "t")  # before the lock
+        reg.set_schedule("tue", {"nudge_hours_before": "6"}, "t", raid="barrow_deeps")  # before the lock
     with pytest.raises(RegistryError, match="between signup opening and lock"):
-        reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": "60"}, "t")  # before signups open
+        reg.set_schedule("tue", {"nudge_hours_before": "60"}, "t", raid="barrow_deeps")  # before signups open
     with pytest.raises(RegistryError, match="confirmation deadline"):
-        reg.set_schedule("barrow_deeps", "tue", {"confirm_hours_before": "30"}, "t")
+        reg.set_schedule("tue", {"confirm_hours_before": "30"}, "t", raid="barrow_deeps")
     with pytest.raises(RegistryError, match="number of hours"):
-        reg.set_schedule("barrow_deeps", "tue", {"fill_ask_hours": "soon"}, "t")
+        reg.set_schedule("tue", {"fill_ask_hours": "soon"}, "t", raid="barrow_deeps")
     with pytest.raises(RegistryError, match="negative"):
-        reg.set_schedule("barrow_deeps", "tue", {"fill_ask_hours": "-1"}, "t")
+        reg.set_schedule("tue", {"fill_ask_hours": "-1"}, "t", raid="barrow_deeps")
     with pytest.raises(RegistryError, match="open before they lock"):
-        reg.set_schedule("barrow_deeps", "tue", {"lock_hours_before": "48"}, "t")
+        reg.set_schedule("tue", {"lock_hours_before": "48"}, "t", raid="barrow_deeps")
     assert _sched(reg)["lock_hours_before"] == 12 and _sched(reg)["nudge_hours_before"] == 20, "a refused change leaves the last good values"
 
 
@@ -65,7 +66,7 @@ def test_refused_raid_override_is_not_kept(reg):
 
 
 def test_set_raid_override_bools_weights_policy(reg):
-    reg.set_schedule("barrow_deeps", "tue", {"kind": "weekly", "slots": "Tue 19:30", "nudge": "off", "open_dm": "yes", "autofill": "false"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "nudge": "off", "open_dm": "yes", "autofill": "false"}, "t", raid="barrow_deeps")
     assert (_sched(reg)["nudge"], _sched(reg)["open_dm"], _sched(reg)["autofill"]) == (False, True, False)
     for field in ("nudge", "open_dm", "autofill", "confirm"):
         with pytest.raises(RegistryError, match="belongs to each schedule"):
@@ -97,11 +98,11 @@ def test_set_raid_override_comp_and_reset(reg):
         reg.set_minimums("barrow_deeps", {"healer": {"min": 3, "max": 4}}, "t")
     with pytest.raises(RegistryError, match="more than the 10"):
         reg.set_minimums("barrow_deeps", {"tank": {"min": 11}}, "t")
-    reg.set_raid_override("barrow_deeps", "slots", "tue 19:30, Thursday 20:00", "t")
-    assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 19:30", "Thu 20:00"]
+    sid = weekly(reg, "barrow_deeps", "tue 19:30, Thursday 20:00")
+    assert reg.schedule_entry(sid)["slots"] == ["Tue 19:30", "Thu 20:00"] and reg.raid_def("barrow_deeps")["slots"] == []
     assert reg.clear_raid_override("barrow_deeps", "t")
     assert "barrow_deeps" not in reg.config.raids
-    assert reg.minimums("barrow_deeps")["healer"] == 2 and reg.raid_def("barrow_deeps")["slots"] == []
+    assert reg.minimums("barrow_deeps")["healer"] == 2 and reg.schedules("barrow_deeps") == []
 
 
 def test_parse_slots():

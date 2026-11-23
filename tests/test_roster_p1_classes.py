@@ -8,7 +8,7 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from conftest import by_role, join, open_test_run
+from conftest import by_role, join, open_test_run, weekly
 from test_analytics_cards import text_of
 from test_parity_verbs import Bot, Chan
 
@@ -17,8 +17,7 @@ from oibot_gm import raid_views as views
 from oibot_gm import raidcycle as rc
 from oibot_gm.configops import ConfigOp
 from oibot_gm.raid_scheduler import RaidSchedulerMixin
-from oibot_gm.registry import (ADHOC_DEFAULTS, ADHOC_SCHEDULE, ADHOC_WEIGHTS, RAID_WEIGHT_DEFAULTS, RegistryError, schedule_class,
-                               series_key)
+from oibot_gm.registry import ADHOC_DEFAULTS, ADHOC_SCHEDULE, ADHOC_WEIGHTS, RAID_WEIGHT_DEFAULTS, RegistryError, schedule_class
 
 RID = "barrow_deeps"
 ico = lambda kind, key: f"<{kind}:{key}>"  # noqa: E731
@@ -29,9 +28,8 @@ def run(coro):
 
 
 def opened(reg, slots=("Tue 19:30",)):
-    reg.set_raid_overrides(RID, {"slots": list(slots), "first_open": "2026-01-01T00:00"}, "t")
-
-
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, list(slots))
 def soon(reg, days: float = 3, hour: int = 21):
     return (reg.now_local() + timedelta(days=days)).replace(hour=hour, minute=0, second=0, microsecond=0)
 
@@ -40,15 +38,14 @@ def soon(reg, days: float = 3, hour: int = 21):
 
 def test_class_is_derived_from_the_kind():
     assert [schedule_class(k) for k in ("weekly", "lockout", "pickup", None)] == ["recurring", "recurring", "adhoc", "recurring"]
-    assert series_key(RID, None) == f"{RID}:default" and series_key(RID, "alt") == f"{RID}:alt"
     assert RAID_WEIGHT_DEFAULTS["regular"] > RAID_WEIGHT_DEFAULTS["rank"], "D9: being a regular is worth more than one rank step"
 
 
 def test_adhoc_takes_the_raids_identity_but_not_its_recurring_timing(reg):
     opened(reg)
-    reg.set_schedule(RID, "default", {"lock_hours_before": 24, "confirm_hours_before": 12, "nudge_hours_before": 36}, "t")
-    reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup"}, "t")
-    rd, pug, dflt = reg.raid_def(RID), reg.schedule_def(RID, "pug"), reg.schedule_def(RID, "default")
+    reg.set_schedule("barrow-deeps", {"lock_hours_before": 24, "confirm_hours_before": 12, "nudge_hours_before": 36}, "t", raid=RID)
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)
+    rd, pug, dflt = reg.raid_def(RID), reg.schedule_def(RID, "pug"), reg.schedule_def(RID, "barrow-deeps")
     assert pug["class"] == "adhoc" and dflt["class"] == "recurring"
     for k, v in ADHOC_DEFAULTS.items():
         assert pug[k] == v, k
@@ -58,7 +55,7 @@ def test_adhoc_takes_the_raids_identity_but_not_its_recurring_timing(reg):
     # where each value comes from, for the editors
     # (phase 2: every stored schedule holds its timing written out, so each reads as its own)
     assert pug["schedule"]["source"]["lock_hours_before"] == "own" and dflt["schedule"]["source"]["lock_hours_before"] == "own"
-    reg.set_schedule(RID, "pug", {"lock_hours_before": 4}, "t")
+    reg.set_schedule("pug", {"lock_hours_before": 4}, "t", raid=RID)
     pug = reg.schedule_def(RID, "pug")
     assert pug["schedule"]["source"]["lock_hours_before"] == "own" and pug["lock_hours_before"] == 4
     assert pug["nudge_hours_before"] == 5, "the ad hoc officer card stays an hour before its own lock"
@@ -70,29 +67,29 @@ def test_the_one_off_schedule_is_virtual(reg):
     assert sd["class"] == "adhoc" and sd["lock_hours_before"] == 2 and sd["confirm"] is False
     assert ADHOC_SCHEDULE not in [s["id"] for s in reg.schedules(RID)], "never listed: listings, wizards and the config dump don't change"
     with pytest.raises(RegistryError, match="kept for one-off runs"):
-        reg.set_schedule(RID, ADHOC_SCHEDULE, {"kind": "pickup"}, "t")
+        reg.set_schedule(ADHOC_SCHEDULE, {"kind": "pickup"}, "t", raid=RID)
     t = soon(reg)
     assert rc.run_key(RID, t, ADHOC_SCHEDULE).endswith("-adhoc") and rc.run_key(RID, t, ADHOC_SCHEDULE) != rc.run_key(RID, t)
 
 
 def test_schedule_weights_merge_per_key_and_refuse_junk(reg):
     opened(reg)
-    reg.set_schedule(RID, "default", {"weights": {"regular": 6, "rank": 0}}, "t")
-    w = reg.schedule_def(RID, "default")["weights"]
+    reg.set_schedule("barrow-deeps", {"weights": {"regular": 6, "rank": 0}}, "t", raid=RID)
+    w = reg.schedule_def(RID, "barrow-deeps")["weights"]
     assert (w["regular"], w["rank"], w["main"]) == (6, 0, RAID_WEIGHT_DEFAULTS["main"])
-    reg.set_schedule(RID, "default", {"weights": {"rank": "inherit"}}, "t")
-    w = reg.schedule_def(RID, "default")["weights"]
+    reg.set_schedule("barrow-deeps", {"weights": {"rank": "inherit"}}, "t", raid=RID)
+    w = reg.schedule_def(RID, "barrow-deeps")["weights"]
     assert (w["regular"], w["rank"]) == (6, RAID_WEIGHT_DEFAULTS["rank"])
-    assert reg.schedule_def(RID, "default")["schedule"]["source"]["weights"]["regular"] == "own"
+    assert reg.schedule_def(RID, "barrow-deeps")["schedule"]["source"]["weights"]["regular"] == "own"
     for bad in ({"luck": 3}, {"rank": -1}, {"rank": "lots"}):
         with pytest.raises(RegistryError):
-            reg.set_schedule(RID, "default", {"weights": bad}, "t")
+            reg.set_schedule("barrow-deeps", {"weights": bad}, "t", raid=RID)
 
 
 def test_confirm_is_a_raid_and_schedule_setting(reg):
     opened(reg)
-    reg.set_schedule(RID, "default", {"confirm": "false"}, "t")
-    assert reg.schedule_def(RID, "default")["confirm"] is False
+    reg.set_schedule("barrow-deeps", {"confirm": "false"}, "t", raid=RID)
+    assert reg.schedule_def(RID, "barrow-deeps")["confirm"] is False
     with pytest.raises(RegistryError, match="belongs to each schedule"):  # phase 2: no longer the raid's
         reg.set_raid_override(RID, "confirm", "false", "t")
 
@@ -103,7 +100,7 @@ def test_run_dict_and_event_carry_kind_series_and_test(reg, rs):
     opened(reg)
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
-    assert (ev.kind, ev.series, ev.test) == ("recurring", f"{RID}:default", False) and ev.key == rc.event_key(RID, t)
+    assert (ev.kind, ev.series, ev.test) == ("recurring", "barrow-deeps", False) and ev.key == rc.event_key(RID, t, "barrow-deeps")
     one = rc.open_run(reg, rs, RID, soon(reg, 4), by="t", schedule=ADHOC_SCHEDULE)
     team = reg.config.roster(one.team)
     assert (one.kind, one.series, one.schedule) == ("adhoc", None, ADHOC_SCHEDULE) and one.team.endswith("-adhoc")
@@ -126,7 +123,7 @@ def test_scheduler_opens_recurring_runs(reg, rs):
     bot.channels[77] = Chan(77)
     run(bot.scheduler_tick())
     ev = next(e for e in rs.live() if e.instance == RID)
-    assert (ev.kind, ev.series) == ("recurring", f"{RID}:default") and not ev.key.split("-")[3].isalpha()
+    assert (ev.kind, ev.series) == ("recurring", "barrow-deeps") and ev.key.startswith(rc.run_key(RID, ev.start, "barrow-deeps"))
 
 
 def test_web_open_stamps_the_class(reg, rs, monkeypatch):
@@ -148,13 +145,13 @@ def test_web_open_stamps_the_class(reg, rs, monkeypatch):
     assert bot.opened[-1][2] == ADHOC_SCHEDULE and "-adhoc-" in one.json()["message"]
     listed = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[1][1]
     c.post(f"/api/raid/{RID}/open", json={"when": listed.strftime("%Y-%m-%d %H:%M")}, headers=bearer())
-    assert bot.opened[-1][2] is None, "a picked time that IS an upcoming run opens that run, not a one-off"
+    assert bot.opened[-1][2] == "barrow-deeps", "a picked time that IS an upcoming run opens that run, not a one-off"
 
 
 def test_plain_text_and_mcp_open_paths(reg, rs):
     opened(reg)
     listed = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
-    assert configops._open_time(reg, RID, listed.strftime("%Y-%m-%d %H:%M"))[1] is None  # the raid's own run: recurring
+    assert configops._open_time(reg, RID, listed.strftime("%Y-%m-%d %H:%M"))[1] == "barrow-deeps"  # its schedule's run: recurring
     start, sid = configops._open_time(reg, RID, soon(reg, 9).strftime("%Y-%m-%d %H:%M"))
     assert sid == ADHOC_SCHEDULE
     assert "-adhoc-" in configops.describe(reg, ConfigOp(op="run_open", target=RID, value=start.strftime("%Y-%m-%d %H:%M")))

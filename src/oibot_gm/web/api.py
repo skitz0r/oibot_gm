@@ -31,7 +31,7 @@ from .. import guild_routing
 from ..consequences import consequence as consequence_lines, consequences_json, regular_remove as regular_remove_lines
 from ..presets import DURATIONS, PRESETS
 from ..registry import ABSENCE_REASON_MAX, DECISION_NOTE_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged, is_superuser
-from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
+from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 from .api_me import sheet_row_extras
 from .api_memory import own_rows
@@ -126,15 +126,16 @@ def public_card(bot, reg) -> dict:
 
 
 def schedule_choice_label(reg, key: str) -> str:
-    """An applicant's '<raid id>:<schedule id>' as words: 'Barrow Deeps · Tuesdays and Thursdays 7:30 PM'."""
-    rid, _, sid = str(key).partition(":")
+    """An applicant's schedule id as words: 'Barrow Deeps · Tuesdays and Thursdays 7:30 PM'."""
+    sid = reg.config.schedule_aliases.get(str(key), str(key))
+    rid = reg.first_raid(sid)
     if rid not in reg.profile.raids:
         return key
     name = reg.raid_def(rid).get("name", rid)
     sc = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
     if sc is None:
         return name
-    title = sc.get("name") if sid != "default" and sc.get("name") else None
+    title = sc.get("name") or None  # phase 3: every schedule has a name of its own
     return f"{name} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
 
 
@@ -622,7 +623,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         off = reg.profile.spec(c.cls, c.offspec).role if c.offspec else None
         return {"label": c.label, "name": c.name, "surname": c.surname, "cls": c.cls, "spec": c.spec, "offspec": c.offspec, "is_main": c.is_main,
                 "status": c.status, "rank": c.rank, "rosters": list((runs or {}).get(c.label, [])), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off,
-                "flex": list(c.flex), "regular_on": [reg.series_label(k) for k in c.rosters if ":" in k],
+                "flex": list(c.flex), "regular_on": [reg.series_label(k) for k in c.rosters],
                 "professions": [{**e, "specialization": professions_mod.specialization_of(reg, p)} for e, p in zip(reg.professions_entries(c), c.professions)],
                 **armory_extras(reg, c)}  # armory link §5.4: `armory`, `profession_sync`, `flags`
 
@@ -783,7 +784,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/admin/raid/regulars")
     async def admin_regulars(request: Request):
-        """Officers add or remove a regular of a recurring schedule: {raid, schedule (default "default"), member | uid,
+        """Officers add or remove a regular of a recurring schedule: {raid, schedule (none = the raid's only recurring one), member | uid,
         character (default their main), on (true = add, false = remove), rev?}. The one path for the Rosters page, Discord's
         /roster add|remove wizards (same verbs), plain text's op=regular and MCP set_regular. `rev` = the member record's
         characters_rev the page drew (the regulars' rows carry it): when their record changed since, nothing is written
@@ -797,8 +798,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 if len(hits) != 1:
                     raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
                 rid = hits[0]
-            sid = str(d.get("schedule") or "default").strip().lower()
-            key = series_key(rid, sid)
+            sid = str(d.get("schedule") or "").strip().lower()
+            sid = reg.config.schedule_aliases.get(sid, sid)  # an older "<raid>:<schedule>" from a page not reloaded
+            if not sid:  # none named: the raid's only recurring schedule
+                mine = [s["id"] for s in reg.schedules(rid) if schedule_class(s["kind"]) == "recurring"]
+                if len(mine) != 1:
+                    raise RegistryError(f"name the schedule: {', '.join(mine)}" if mine else f"{reg.raid_def(rid).get('name', rid)} has no recurring schedule")
+                sid = mine[0]
+            key = sid
             m = resolve_member(reg, member_ref(d))
             if d.get("rev") and str(d["rev"]) != reg.characters_rev(m):
                 raise CharactersChanged(m)
@@ -848,14 +855,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         sd = reg.schedule_def(rid, s["id"])
         size = int(sd.get("size") or 20)
         cls = schedule_class(s["kind"])
-        key = series_key(rid, s["id"])
+        key = s["id"]
         return {"id": s["id"], "name": s.get("name") or s["id"], "kind": s["kind"], "class": cls, "class_label": CLASS_WORDS[cls],
                 "series": key if cls == "recurring" else None, "regulars": len(reg.regulars(key)) if cls == "recurring" else 0,
                 "source": dict(sd["schedule"]["source"]), "own_weights": dict(sd["schedule"].get("own_weights") or {}), "weights": dict(sd["weights"]),
                 "active": bool(s.get("active", True)), "rosters": int(s.get("rosters") or 1),
                 "seats": size * int(s.get("rosters") or 1), "slots": list(s.get("slots") or []), "slot_labels": [reg.slot_label(x) for x in s.get("slots") or []],
                 "days": list(s.get("days") or []), "time": s.get("time") or "", "time_label": reg.time_label(s.get("time")) if s.get("time") else "",
-                "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]), "is_default": s["id"] == "default",
+                "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]), "is_default": False,
                 "effective": {k: sd[k] for k in SCHEDULE_CADENCE}, "follow": s.get("follow"), "follow_words": reg.follow_words(s.get("follow")),
                 **schedule_words(reg, rid, s)}
 
@@ -870,7 +877,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         runs = [t12(reg, t) for t in rc.next_runs_of(reg, rid, s)] if s.get("kind") != "pickup" else []
         active = bool(s.get("active", True))
         try:
-            removal = reg.schedule_removal_effects(rid, s["id"], rs).sentence()
+            removal = reg.schedule_removal_effects(s["id"], rs).sentence()
         except RegistryError as e:
             removal = str(e)
         return {"next": runs if active else [], "next_if_active": runs,
@@ -1127,7 +1134,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         # a removed schedule's regulars: the clear's sentence from code and the member record's rev (a stale clear is a 409)
                         "orphan_regulars": [{"key": k, "label": reg.series_label(k), "uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec,
                                              "clear": " ".join(regular_remove_lines(reg, m, k)), "rev": reg.characters_rev(m)}
-                                            for k, m, c in reg.orphan_regulars() if k.partition(":")[0] == rid],
+                                            for k, m, c in reg.orphan_regulars() if (reg.first_raid(k) or next(iter(reg.profile.raids))) == rid],  # a removed schedule's: under the first raid
                         "opened": bool(fo and fo <= now), "first_open": reg.local12(fo) if fo else None, "first_open_words": reg.local12(fo) if fo else "",
                         # the Raids card's "When it runs" block, from the same fields (design §5.54 / §5.56)
                         "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rs, rid),
@@ -1183,10 +1190,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             r = comp.readiness(reg, rid, rs)
             live = {e.key: e for e in rs.live()}
             for sr in r.get("series") or []:  # a forecast row's run already open: the page links it instead of "Open this run early"
-                sid = str(sr.get("id") or sr.get("key", "").partition(":")[2] or "default")
+                sid = str(sr.get("id") or sr.get("key") or "")
                 for f in sr.get("forecast") or []:
                     try:
-                        k = rc.event_key(rid, datetime.fromisoformat(f["start"]).astimezone(reg.tz), None if sid == "default" else sid)
+                        k = rc.event_key(rid, datetime.fromisoformat(f["start"]).astimezone(reg.tz), sid or None)
                     except (KeyError, ValueError):
                         k = None
                     f["open_key"] = k if k in live and live[k].state in ("open", "locked") else None
@@ -2037,7 +2044,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         "ad hoc" for a one-off or a pickup."""
         out = []
         for ev in sorted((e for e in rs.live() if e.instance == rid and not e.test), key=lambda e: e.starts_at):
-            sched = next((s for s in reg.schedules(rid) if s["id"] == (ev.schedule or "default")), None)
+            sched = next((s for s in reg.schedules(rid) if s["id"] == ev.schedule), None)
             name = "ad hoc" if rc.run_kind(reg, ev) == "adhoc" else (sched.get("name") or sched["id"]) if sched else "its schedule"
             out.append({"key": ev.key, "when": t12(reg, ev.starts_at), "state": ev.state, "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state), "schedule": name})
         return out

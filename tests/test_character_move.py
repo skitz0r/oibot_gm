@@ -15,7 +15,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
-from conftest import OWNER, join, lock_with_board
+from conftest import OWNER, join, lock_with_board, weekly
 from test_loot_web import env  # noqa: F401 — a fixture
 
 from oibot_gm import appeals, discord_armory, loot_ops
@@ -30,7 +30,7 @@ TESSA = 700_000_000_000_000_011
 ORLA = 700_000_000_000_000_012
 PELL = 700_000_000_000_000_013
 RID = "barrow_deeps"
-SERIES = f"{RID}:default"
+SERIES = "barrow-deeps"
 
 
 def run(coro):
@@ -53,7 +53,8 @@ def ledger_file(reg) -> Path:
 def people(reg):
     """Tessa: Bram Kettle (her main, a regular, linked, a wishlist, once called Bram Ashgrove) and Wren Hollow (an alt).
     Orla: Ivo Marsh (her main). Pell: a member with no character yet."""
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30", "Thu 19:30", "Sat 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, ["Tue 19:30", "Thu 19:30", "Sat 19:30"])
     reg.add_character(TESSA, "Tessa", "Bram", "Warrior", "Arms", None, True, surname="Kettle")
     reg.add_character(TESSA, "Tessa", "Wren", "Mage", "Fire", None, False, surname="Hollow")
     reg.add_character(ORLA, "Orla", "Ivo", "Priest", "Holy", None, True, surname="Marsh")
@@ -87,7 +88,7 @@ def done_run(reg, rs, joined, days_ago: float, *, label_of=None, n: int = 0):
     """A finished run `days_ago` back: `joined` signed up (each with `label_of[m]`, else their main), all seated, each
     confirmed yes."""
     start = (reg.now_local() + timedelta(days=20 + n, hours=3)).replace(second=0, microsecond=0)
-    ev = rc.open_run(reg, rs, RID, start, by="t")
+    ev = rc.open_run(reg, rs, RID, start, by="t", schedule=SERIES)  # a run of the regulars' schedule
     for m in joined:
         rc.set_signup(reg, rs, ev, m, (label_of or {}).get(m.discord_id), "in", source="test")
     lock_with_board(reg, rs, ev, [m.display_name for m in joined])

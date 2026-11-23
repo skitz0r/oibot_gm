@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .registry import RANKS, Member, Registry
+from .registry import RANKS, Member, Registry, RegistryError
 from .wizard import MAX_OPTIONS, Opt
 
 Ico = Callable[[str, str], str]
@@ -70,7 +70,7 @@ def series(reg: Registry, *, current: str | None = None) -> list[Opt]:
 
 def schedules(reg: Registry, *, current: list[str] | None = None) -> list[Opt]:
     """The guild's active, non-pickup schedules across raids ('Barrow Deeps · Tuesdays and Thursdays 7:30 PM'), for an
-    applicant to say which they can make. Value = '<raid id>:<schedule id>' (what Applicant.schedules stores)."""
+    applicant to say which they can make. Value = the schedule id (what Applicant.schedules stores)."""
     picked = set(current or [])
     out = []
     for rid in reg.profile.raids:
@@ -78,17 +78,20 @@ def schedules(reg: Registry, *, current: list[str] | None = None) -> list[Opt]:
         for s in reg.schedules(rid):
             if s["kind"] == "pickup" or not s.get("active", True):
                 continue
-            key = f"{rid}:{s['id']}"
+            key = s["id"]
             out.append(Opt(key, f"{name} · {reg.schedule_label(rid, s)}", s.get("name") or None, default=key in picked))
     return out[:MAX_OPTIONS]
 
 
 def schedule_names(reg: Registry, keys: list[str]) -> list[str]:
-    """Stored '<raid id>:<schedule id>' keys as a person reads them; a schedule removed since shows as its raid and id."""
+    """Stored schedule ids as a person reads them; a schedule removed since shows as its id."""
     out = []
     for key in keys:
-        rid, _, sid = str(key).partition(":")
-        s = next((x for x in reg.schedules(rid) if x["id"] == sid), None) if rid in reg.profile.raids else None
-        name = reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else rid
-        out.append(f"{name} · {reg.schedule_label(rid, s)}" if s else f"{name} · {sid} (no longer scheduled)")
+        sid = reg.config.schedule_aliases.get(str(key), str(key))
+        try:
+            s = reg.schedule_entry(sid)
+        except RegistryError:
+            out.append(f"{sid} (no longer scheduled)")
+            continue
+        out.append(f"{reg.raid_def(s['raid']).get('name', s['raid'])} · {reg.schedule_label(s['raid'], s)}")
     return out

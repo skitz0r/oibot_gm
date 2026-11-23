@@ -460,15 +460,16 @@ def _duration(seconds: int) -> str:
 
 
 def schedule_choice_label(reg: Registry, key: str) -> str:
-    """An applicant's '<raid id>:<schedule id>' in words (the web's helper of the same name, without importing the web)."""
-    rid, _, sid = str(key).partition(":")
+    """An applicant's schedule id in words (the web's helper of the same name, without importing the web)."""
+    sid = reg.config.schedule_aliases.get(str(key), str(key))
+    rid = reg.first_raid(sid)
     if rid not in reg.profile.raids:
         return key
     name = reg.raid_def(rid).get("name", rid)
     sc = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
     if sc is None:
         return name
-    title = sc.get("name") if sid != "default" and sc.get("name") else None
+    title = sc.get("name") or None  # phase 3: every schedule has a name of its own
     return f"{name} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
 
 
@@ -662,7 +663,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     runs_now = rc.how_many_rosters(reg, players, size, rb, want=n_rosters) if live else len(ev.all_rosters)
     kind = rc.run_kind(reg, ev)
     series = rc.run_series(reg, ev)
-    head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · {kind}" + (f" ({reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
+    head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'none'} · {kind}" + (f" ({reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
              + ("" if rc.run_confirms(reg, ev) else " · nobody is asked to confirm")
              + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else "")
              + (f" · then {then}" if (then := rc.follow_words_of(reg, ev)) else "")
@@ -806,7 +807,7 @@ def next_sheet_lines(reg: Registry, rs) -> list[str]:
                 continue
             lead = float(reg.schedule_def(rid, s["id"])["signup_lead_hours"])
             opens = start - timedelta(hours=lead)
-            label = reg.raid_def(rid).get("name", rid) + (f" · {s.get('name')}" if s["id"] != "default" and s.get("name") else "")
+            label = reg.raid_def(rid).get("name", rid) + (f" · {s.get('name')}" if len(reg.schedules(rid)) > 1 and s.get("name") else "")
             out.append(f"next sheet: {label} run {reg.local12(start)} — its sheet opens {reg.local12(max(opens, now))}" + (" (any minute now)" if opens <= now else ""))
             break
     return out
@@ -1337,10 +1338,10 @@ def core_lines(ask: Ask) -> list[str]:
             from .raidcycle import next_runs_of
 
             nxt = [reg.local12(t) for t in next_runs_of(reg, rid, s)] if s["kind"] != "pickup" else []
-            from .registry import schedule_class, series_key
+            from .registry import schedule_class
 
             cls = schedule_class(s["kind"])
-            regs = reg.regulars(series_key(rid, s["id"])) if cls == "recurring" else []
+            regs = reg.regulars(s["id"]) if cls == "recurring" else []
             lines.append(f"  schedule {s['id']} “{s['name']}” ({s['kind']}, {cls}): {reg.schedule_label(rid, s)}; sheet timing: {week}"
                          + (f"; split {sd['schedule']['own']['split_policy']}" if sd["schedule"]["own"].get("split_policy") else "")
                          + ("; first come" if cls == "adhoc" else "")

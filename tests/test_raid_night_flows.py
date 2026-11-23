@@ -138,7 +138,7 @@ def test_card_lock_preview_refusal_offers_back(reg, rs):
 
 def test_more_than_three_templates_become_one_select(reg, rs, officer, channel):  # noqa: F811
     for i in range(4):
-        reg.set_schedule("barrow_deeps", f"pug{i}", {"kind": "pickup", "name": f"Pug {i}"}, "t")
+        reg.set_schedule(f"pug{i}", {"kind": "pickup", "name": f"Pug {i}"}, "t", raid="barrow_deeps")
     h, bot = night(reg, rs)
 
     async def go():
@@ -187,7 +187,7 @@ def test_a_one_off_at_a_scheduled_minute_opens_as_that_run(reg, rs, officer, cha
         assert "It's a scheduled run" in h.text and "ad hoc run" not in h.text
         await h.press("Open")
     run(go())
-    assert bot.calls[0][:3] == ("open_run_and_post", "barrow_deeps", nxt) and len(bot.calls[0]) == 4, "the raid's own run, not a one-off"
+    assert bot.calls[0][:3] == ("open_run_and_post", "barrow_deeps", nxt) and bot.calls[0][4:] == ("barrow-deeps",), "the schedule's run, not a one-off"
 
 
 # ---------------------------------------------------------------- the suggestions screen: Withdraw

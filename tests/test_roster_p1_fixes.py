@@ -7,7 +7,7 @@ import time
 from datetime import timedelta
 
 import pytest
-from conftest import by_role
+from conftest import by_role, weekly
 
 from oibot_gm import raidcycle as rc
 from oibot_gm.registry import ADHOC_SCHEDULE
@@ -16,9 +16,8 @@ RID = "barrow_deeps"
 
 
 def opened(reg, slots=("Tue 19:30",)):
-    reg.set_raid_overrides(RID, {"slots": list(slots), "first_open": "2026-01-01T00:00"}, "t")
-
-
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, RID, list(slots))
 def soon(reg, days: float = 3, hour: int = 21):
     return (reg.now_local() + timedelta(days=days)).replace(hour=hour, minute=0, second=0, microsecond=0)
 
@@ -85,7 +84,7 @@ def test_help_snapshot_hides_not_answered_names_from_members(reg, rs):
 
     ms = [real(reg, i) for i in range(3)]
     for m in ms:
-        reg.regular_add(m.discord_id, f"{RID}:default", "officer")
+        reg.regular_add(m.discord_id, "barrow-deeps", "officer")
     ev = rc.open_run(reg, rs, RID, rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1], by="t")
     rc.set_signup(reg, rs, ev, ms[0], None, "in")
     public = "\n".join(help_mod.run_lines(reg, rs, ev, is_officer=False))
@@ -110,8 +109,8 @@ def test_raid_wizard_toggles_confirmations_for_each_schedule(reg, monkeypatch):
     monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: False)  # an officer (D8)
     monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
     opened(reg)
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
-    assert reg.schedule_def(RID, "default")["confirm"] is True and reg.schedule_def(RID, "alt")["confirm"] is True
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
+    assert reg.schedule_def(RID, "barrow-deeps")["confirm"] is True and reg.schedule_def(RID, "alt")["confirm"] is True
     h = Harness(reg)
 
     async def go():
@@ -120,7 +119,7 @@ def test_raid_wizard_toggles_confirmations_for_each_schedule(reg, monkeypatch):
         assert "Ask the rostered to confirm" not in h.text, "the switches are each schedule's own, not the raid's"
         await h.press("Back to the sections")
         await h.pick("Pick a section", "times")
-        await h.pick("Pick a schedule", "default")
+        await h.pick("Pick a schedule", "barrow-deeps")
         await h.pick("Change this schedule", "behaviour")
         assert "Ask the rostered to confirm: **on**" in h.text
         await h.pick("Change a switch", "confirm=off")
@@ -137,7 +136,7 @@ def test_raid_wizard_toggles_confirmations_for_each_schedule(reg, monkeypatch):
         assert "ask the rostered to confirm on → **off**" in h.text  # the review names the change
         await h.press("Save")
     asyncio.run(go())
-    assert reg.schedule_def(RID, "default")["confirm"] is False
+    assert reg.schedule_def(RID, "barrow-deeps")["confirm"] is False
     assert reg.schedule_def(RID, "alt")["confirm"] is reg.timing_suggestion(RID)["confirm"]
 
 
@@ -176,9 +175,9 @@ def test_raid_open_next_run_is_recurring_on_the_default_series(reg, rs, raid_off
         await h.press(f"Next run — {reg.local12(t0)}")
         await h.press("Open")
     asyncio.run(go())
-    ev = rs.events[rc.event_key(RID, t0)]
-    assert (ev.kind, ev.series) == ("recurring", f"{RID}:default")
-    assert ev.key == rc.event_key(RID, t0) and "-adhoc-" not in ev.key
+    ev = rs.events[rc.event_key(RID, t0, "barrow-deeps")]
+    assert (ev.kind, ev.series) == ("recurring", "barrow-deeps")
+    assert ev.key == rc.event_key(RID, t0, "barrow-deeps") and "-adhoc-" not in ev.key
 
 
 def test_raid_open_another_upcoming_run_keeps_its_schedules_series(reg, rs, raid_officer):
@@ -187,7 +186,7 @@ def test_raid_open_another_upcoming_run_keeps_its_schedules_series(reg, rs, raid
     from oibot_gm.wizard import FLOWS
 
     opened(reg)
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     h, bot = _wizard(reg, rs)
     alt_t = next(t for s, t in rc.upcoming(reg, RID, reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS) if s["id"] == "alt")
 
@@ -199,7 +198,7 @@ def test_raid_open_another_upcoming_run_keeps_its_schedules_series(reg, rs, raid
         await h.press("Open")
     asyncio.run(go())
     ev = rs.events[rc.event_key(RID, alt_t, "alt")]
-    assert (ev.kind, ev.series) == ("recurring", f"{RID}:alt") and ev.key.split("-")[3] == "alt"
+    assert (ev.kind, ev.series) == ("recurring", "alt") and ev.key.split("-")[3] == "alt"
 
 
 def test_raid_open_ad_hoc_pickup_template_is_adhoc_without_a_series(reg, rs, raid_officer):
@@ -208,7 +207,7 @@ def test_raid_open_ad_hoc_pickup_template_is_adhoc_without_a_series(reg, rs, rai
     from oibot_gm.wizard import FLOWS
 
     opened(reg)
-    reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup"}, "t")
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)
     h, bot = _wizard(reg, rs)
     day = (reg.now_local() + timedelta(days=2)).date().isoformat()
 
@@ -235,13 +234,13 @@ def test_plain_text_run_open_applies_with_the_right_class(reg, rs):
     from oibot_gm.configops import ConfigOp
 
     opened(reg)
-    reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup"}, "t")
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)
     bot = tfr.FakeBot(rs)
     apply = lambda op: asyncio.run(configops.apply_async(reg, op, "Owner", True, bot=bot))  # noqa: E731
     t0 = rc.upcoming(reg, RID, reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)[0][1]
     line = apply(ConfigOp(op="run_open", target=RID))
-    ev = rs.events[rc.event_key(RID, t0)]
-    assert line.startswith(f"opened {ev.key}") and (ev.kind, ev.series) == ("recurring", f"{RID}:default")
+    ev = rs.events[rc.event_key(RID, t0, "barrow-deeps")]
+    assert line.startswith(f"opened {ev.key}") and (ev.kind, ev.series) == ("recurring", "barrow-deeps")
     when = soon(reg, 9, 22)
     apply(ConfigOp(op="run_open", target=RID, value=when.strftime("%Y-%m-%d %H:%M")))
     one = rs.events[rc.event_key(RID, when, ADHOC_SCHEDULE)]
@@ -294,15 +293,15 @@ def _regulars(reg, n=4):
     opened(reg)
     ms = [real(reg, i) for i in range(n)]  # Warrior Prot, Priest Holy, Shaman Resto, Rogue Combat
     for m in ms:
-        reg.regular_add(m.discord_id, f"{RID}:default", "officer")
+        reg.regular_add(m.discord_id, "barrow-deeps", "officer")
     return ms
 
 
 def test_series_coverage_counts_regulars_against_the_minimums(reg):
-    reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup"}, "t")
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)
     _regulars(reg)
     cov = reg.series_coverage(RID)
-    assert [c["key"] for c in cov] == [f"{RID}:default"], "ad hoc templates have no regulars"
+    assert [c["key"] for c in cov] == ["barrow-deeps"], "ad hoc templates have no regulars"
     c = cov[0]
     need = {r: int(reg.role_bounds(RID, c["size"])[r]["min"]) for r in ("tank", "healer")}
     assert c["counts"]["tank"] == 1 and c["counts"]["healer"] == 2 and c["counts"]["melee"] == 1

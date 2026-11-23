@@ -699,8 +699,8 @@ class RegularAddWizard(RegularsWizard):
         other = next((x for x in m.active() if x is not c and key in x.rosters), None)
         if other:
             lines.append(f"-# One character per member per schedule: this replaces **{other.label}** there.")
-        rid = key.partition(":")[0]
-        twin = [k for k in c.rosters if k != key and k.partition(":")[0] == rid]
+        rid = self.reg.first_raid(key)
+        twin = [k for k in c.rosters if k != key and self.reg.first_raid(k) == rid]
         if twin:
             lines.append(f"-# ⚠️ {c.label} is also a regular of {', '.join(self.reg.series_label(k) for k in twin)} — the same raid, so the same lockout.")
         await self.show(interaction, "\n".join(lines), self.button("Confirm", self.save, discord.ButtonStyle.success),
@@ -832,7 +832,7 @@ class RegularListWizard(RegularsWizard):
         key = self.draft["series"]
         ico = _ico(interaction)
         regs = self.reg.regulars(key)
-        rid, sid = key.split(":", 1)
+        rid = self.reg.first_raid(key)
         rd = self.reg.raid_def(rid)
         if not regs:
             text = (f"**{self.label()}** has no regulars yet — until it does, every registered main counts as expected on its sheets."

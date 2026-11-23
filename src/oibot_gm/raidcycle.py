@@ -14,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, FOLLOW_SCHEDULE, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
-                       RegisteredCharacter, RegistryError, can_cover, now, schedule_class, series_key, slot_words)
+from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, FOLLOW_SCHEDULE, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
+                       RegisteredCharacter, RegistryError, can_cover, now, schedule_class, schedule_def_of, slot_words)
 from .roster import explain, solver
 from .store import GitStore
 
@@ -400,11 +400,12 @@ class RunKeyClash(RegistryError):
 
 
 def run_key(instance: str, start: datetime, schedule: str | None = None, *, test: bool = False) -> str:
-    """The run's roster key: 'bd-1209-1930'. A run from a schedule other than the raid's own run times carries the
-    schedule id ('bd-1209-1930-alt'), so two schedules starting the same minute never share a run; a test run ends in
-    TEST_SCHEDULE ('bd-1209-1930-test', 'bd-1209-1930-alt-test'): `test=True`, or `schedule=TEST_SCHEDULE`."""
+    """The run's roster key: 'bd-1209-1930-alt' — a run from a schedule carries the schedule id, so two schedules
+    starting the same minute never share a run (a key from before phase 3 may have none: an older file's raid run
+    times); a test run ends in TEST_SCHEDULE ('bd-1209-1930-test', 'bd-1209-1930-alt-test'): `test=True`, or
+    `schedule=TEST_SCHEDULE`."""
     base = f"{abbr(instance)}-{start.strftime('%m%d-%H%M')}"
-    key = base if schedule in (None, "", DEFAULT_SCHEDULE) else f"{base}-{schedule}"
+    key = base if schedule in (None, "") else f"{base}-{schedule}"
     return f"{key}-{TEST_SCHEDULE}" if test and schedule != TEST_SCHEDULE else key
 
 
@@ -414,15 +415,8 @@ def event_key(instance: str, start: datetime, schedule: str | None = None, *, te
 
 
 def schedule_kw(schedule: str | None) -> dict:
-    """`schedule=` for open_run_and_post, only when the run comes from a schedule other than the raid's own run times."""
-    return {"schedule": schedule} if schedule not in (None, "", DEFAULT_SCHEDULE) else {}
-
-
-def slot_starts(reg: Registry, instance: str, now: datetime, horizon_hours: float) -> list[tuple[str, datetime]]:
-    """(slot, start) for every occurrence of the raid's own slots (the `default` schedule) within `horizon_hours` of
-    now (and never before first_open)."""
-    rd = reg.raid_def(instance)
-    return _weekly_starts(reg, rd, rd.get("slots") or [], now, horizon_hours)
+    """`schedule=` for open_run_and_post, when the run comes from a schedule."""
+    return {"schedule": schedule} if schedule not in (None, "") else {}
 
 
 def first_open_of(reg: Registry, rd: dict) -> datetime | None:
@@ -502,7 +496,7 @@ def upcoming(reg: Registry, instance: str, now: datetime, horizon_hours: float |
             continue
         h = float(reg.schedule_def(instance, s["id"])["signup_lead_hours"]) if lead else float(horizon_hours or 0)
         out += [(s, t) for t in schedule_starts(reg, instance, s, now, h)]
-    return sorted(out, key=lambda x: (x[1], x[0]["id"] != DEFAULT_SCHEDULE))
+    return sorted(out, key=lambda x: (x[1], x[0]["id"]))
 
 
 def next_runs_of(reg: Registry, instance: str, sched: dict, n: int = 3, now: datetime | None = None, rd: dict | None = None,
@@ -528,8 +522,12 @@ def series_forecast(reg: Registry, key: str, now: datetime | None = None) -> lis
     healer minimums. [{start (ISO), day ('Tue 15 Dec'), when (12-hour), expected, seats, short {role: n}, away
     [names]}]. Empty while the series has no regulars or is paused. Computed in code; officers see a hole a week
     ahead instead of at reminder time."""
-    rid, _, sid = key.partition(":")
     regs = reg.regulars(key)
+    try:
+        entry = reg.schedule_entry(key)
+    except RegistryError:
+        return []
+    rid, sid = entry["raid"], entry["id"]
     if not regs or rid not in reg.profile.raids:
         return []
     sched = next((x for x in reg.schedules(rid) if x["id"] == sid), None)
@@ -580,7 +578,8 @@ def fit_cutoffs(available_h: float, nudge_h: float, lock_h: float, confirm_h: fl
 def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None,
                follow: dict | None = None) -> dict:
     """The ephemeral roster that carries one run's settings (size, cutoffs from its schedule's cadence, how many rosters
-    it expects); created once. `schedule` = the schedule id it comes from (None: the raid's own cadence).
+    it expects); created once. `schedule` = the schedule id it comes from (None: the schedule with a run at exactly
+    `start`, else a one-off — open_schedule; a test run: a rehearsal on the game's suggested timing).
     `cutoffs` = {soft, hard, confirm} in hours to override the cadence (test runs compress it to minutes) — and makes
     it a TEST run: its key is in the '-test' key space (TEST_SCHEDULE), and an existing roster whose test flag differs
     from what is asked is refused (a rehearsal never takes over a real run's roster, nor a real run a rehearsal's).
@@ -588,6 +587,8 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     `follow` ({raid, rosters}; None = the schedule's own) also creates the follow-on's dict (design §5.62): the lead's dict
     gains `follow` and `followed_by`, the follow-on's carries `follows`; both are saved in the one config write."""
     test = bool(cutoffs)
+    if not schedule and not test:  # none named: the schedule that runs at that start, else a one-off (open_schedule)
+        schedule = open_schedule(reg, instance, start, None)
     key = run_key(instance, start, schedule, test=test)
     t = reg.config.roster(key)
     if t:
@@ -601,7 +602,10 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
             raise RunKeyClash(f"{who.display_name if who else 'Another officer'} opened a test run at {reg.local12(start)} — "
                                 "join theirs or clear it (nothing was opened)")
         return t
-    rd = reg.schedule_def(instance, schedule)
+    if test and not schedule:  # a rehearsal of the raid: a recurring run on the game's suggested timing, its own cutoffs
+        rd = schedule_def_of({**reg.raid_def(instance), "schedules": [{"id": TEST_SCHEDULE, "kind": "weekly"}]}, TEST_SCHEDULE)
+    else:
+        rd = reg.schedule_def(instance, schedule)
     sched = rd["schedule"]
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
     c = cutoffs or {}
@@ -615,13 +619,12 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     # every run carries its class and series (roster redesign Phase 1): a one-off (ADHOC_SCHEDULE) and a pickup template
     # are ad hoc; anything else is a run of a recurring series whose regulars it expects
     kind = rd.get("class") or schedule_class(sched.get("kind"))
-    t.update({"schedule_id": sched["id"], "kind": kind, "series": series_key(instance, sched["id"]) if kind == "recurring" else None,
+    t.update({"schedule_id": sched["id"], "kind": kind, "series": sched["id"] if kind == "recurring" and not test else None,
               "confirm": True if cutoffs else bool(rd.get("confirm", True))})  # a test run rehearses the confirmations
-    if sched["id"] != DEFAULT_SCHEDULE or sched.get("own") or int(sched.get("rosters") or 1) > 1:
-        # the run carries its schedule's settings (the raid's are read live, as before, for a plain run)
-        t.update({"schedule_id": sched["id"], "rosters": int(sched.get("rosters") or 1), "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced"})
-        if sched["id"] != DEFAULT_SCHEDULE:
-            t["name"] = f"{rd.get('name', instance)} · {sched.get('name') or sched['id']} {reg.local12(start)}"
+    # the run carries its schedule's settings
+    t.update({"rosters": int(sched.get("rosters") or 1), "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced"})
+    if not test and (sched.get("virtual") or len(reg.schedules(instance)) > 1):  # the raid's only schedule needs no name on the run
+        t["name"] = f"{rd.get('name', instance)} · {sched.get('name') or sched['id']} {reg.local12(start)}"
     if cutoffs:
         t["test"] = True
         t["test_by"] = c.get("test_by")
@@ -676,6 +679,8 @@ def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by:
     """Open (or find the live) run for `instance` at `start`. RegistryError when that time's run is closed
     (closed_run_refusal) — checked before ensure_run, so a refused open re-creates no roster entry. `follow`
     ({raid, rosters}, or the schedule's own) opens the follow-on run with it (design §5.62): no sheet, its answers the lead's."""
+    if not schedule and not cutoffs:  # none named: the schedule that runs at that start, else a one-off (open_schedule)
+        schedule = open_schedule(reg, instance, start, None)
     lead_key = event_key(instance, start, schedule, test=bool(cutoffs))
     why = closed_run_refusal(rs, lead_key)
     if not why and not cutoffs and lead_key not in rs.events:  # a new night: its follow-on's time must be free too, so a
@@ -795,7 +800,7 @@ def next_runs_preview(reg: Registry, instance: str, *, fields: dict | None = Non
     if fields:
         sh.set_raid_overrides(instance, dict(fields), "preview")
     if schedule and schedule_fields:
-        sh.set_schedule(instance, schedule, dict(schedule_fields), "preview")
+        sh.set_schedule(schedule, dict(schedule_fields), "preview", raid=instance)
     ref = (now_ or sh.now_local()).astimezone(sh.tz)
     out = []
     for s in sh.schedules(instance):
@@ -810,7 +815,7 @@ def next_runs_lines(reg: Registry, instance: str, **kw) -> list[str]:
     """next_runs_preview as one line per schedule: 'Barrow Deeps · Default: next Tue 6 Oct 7:30 PM, Thu 8 Oct 7:30 PM'."""
     name = reg.raid_def(instance).get("name", instance)
     rows = next_runs_preview(reg, instance, **kw)
-    return [f"{name}" + (f" · {r['name']}" if len(rows) > 1 or r["id"] != DEFAULT_SCHEDULE else "") + ": next " + (", ".join(r["labels"]) or "none (no run times yet)")
+    return [f"{name}" + (f" · {r['name']}" if len(rows) > 1 else "") + ": next " + (", ".join(r["labels"]) or "none (no run times yet)")
             for r in rows]
 
 
@@ -870,7 +875,7 @@ def rosters_copy(reg: Registry, instance: str, sid: str, n: int, rs=None) -> str
     n = max(1, int(n or 1))
     text = f"From the next run: the sheet advertises {n} × {size} seats."
     try:
-        live = reg.schedule_runs_open(instance, sid, rs)
+        live = reg.schedule_runs_open(sid, rs)
     except Exception:  # noqa: BLE001 — the first sentence is still true without the run store
         live = []
     have = sorted({int(t.get("rosters") or 1) for t in live})
@@ -1044,7 +1049,7 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
             follows = f"{team['follows']}-{lstart.date().isoformat()}"
         else:
             follows = lead.key
-    ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=None if sid in (None, DEFAULT_SCHEDULE) else sid,
+    ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=sid or None,
                    series=team.get("series"), kind=team.get("kind"), test=bool(team.get("test")), starts_at=starts_at.isoformat(),
                    follows=follows)
     if not ev.follows:  # a follow-on's answers come from its lead (sync_follow), absences included
@@ -1101,21 +1106,24 @@ def run_kind(reg: Registry, ev: RaidEvent) -> str:
     team = reg.config.team(ev.team) or {}
     if team.get("kind"):
         return team["kind"]
-    sid = team.get("schedule_id") or ev.schedule
+    sid = team.get("schedule_id") or ev.schedule or reg.config.schedule_aliases.get(f"{ev.instance}:default")
     if sid == ADHOC_SCHEDULE:
         return "adhoc"
-    s = next((x for x in reg.schedules(ev.instance) if x["id"] == (sid or DEFAULT_SCHEDULE)), None) if ev.instance in reg.profile.raids else None
+    try:
+        s = reg.schedule_entry(sid) if sid else None
+    except RegistryError:
+        s = None
     return schedule_class(s["kind"]) if s else "recurring"
 
 
 def run_series(reg: Registry, ev: RaidEvent) -> str | None:
-    """The recurring series a run belongs to ('<raid>:<schedule>'), None for an ad hoc run."""
-    if run_kind(reg, ev) != "recurring" or not ev.instance:
+    """The recurring series a run belongs to (its schedule's id), None for an ad hoc run or a rehearsal. An older
+    "<raid>:<schedule>" stamp is read through config.schedule_aliases; else the run dict's series, else its schedule id."""
+    if run_kind(reg, ev) != "recurring" or not ev.instance or is_test_run(reg, ev):
         return None
-    if ev.series:
-        return ev.series
     team = reg.config.team(ev.team) or {}
-    return team.get("series") or series_key(ev.instance, team.get("schedule_id") or ev.schedule or DEFAULT_SCHEDULE)
+    key = ev.series or team.get("series") or team.get("schedule_id") or ev.schedule
+    return reg.config.schedule_aliases.get(key, key) if key else None
 
 
 def is_test_run(reg: Registry, ev: RaidEvent) -> bool:
@@ -1214,11 +1222,9 @@ def open_schedule(reg: Registry, instance: str, start: datetime, sid: str | None
     raid's upcoming runs at exactly that start (its schedule id, None for the raid's own run times); else a one-off →
     ADHOC_SCHEDULE. The /raid open wizard asks instead (Next run · Another upcoming run · Ad hoc run…)."""
     if sid:
-        return None if sid == DEFAULT_SCHEDULE else sid
+        return sid
     hit = next((s["id"] for s, t in upcoming(reg, instance, reg.now_local(), 24 * OPEN_HORIZON_DAYS) if t == start), None)
-    if hit is not None:
-        return None if hit == DEFAULT_SCHEDULE else hit
-    return ADHOC_SCHEDULE
+    return hit if hit is not None else ADHOC_SCHEDULE
 
 
 def _signup(reg: Registry, m: Member, c: RegisteredCharacter, status: str, source: str, note: str | None = None) -> Signup:
@@ -3165,15 +3171,15 @@ def which_run(reg: Registry, instance: str, start: datetime, sid: str | None = N
     upcoming runs at exactly `start` (scheduled), else a one-off (ad hoc)."""
     if instance not in reg.profile.raids:
         raise RegistryError(f"unknown raid {instance or '?'} (one of {', '.join(reg.profile.raids)})")
-    if sid and sid not in (DEFAULT_SCHEDULE, ADHOC_SCHEDULE) and not any(s["id"] == sid for s in reg.schedules(instance)):
+    if sid and sid != ADHOC_SCHEDULE and not any(s["id"] == sid for s in reg.schedules(instance)):
         raise RegistryError(f"{reg.raid_def(instance).get('name', instance)} has no schedule {sid}")
     resolved = open_schedule(reg, instance, start, sid)
     if resolved == ADHOC_SCHEDULE:
         kind, name = "adhoc", "One-off"
     else:
-        s = next((x for x in reg.schedules(instance) if x["id"] == (resolved or DEFAULT_SCHEDULE)), None) or {}
+        s = next((x for x in reg.schedules(instance) if x["id"] == resolved), None) or {}
         kind = "adhoc" if schedule_class(s.get("kind") or "weekly") == "adhoc" else "scheduled"
-        name = s.get("name") or (resolved or DEFAULT_SCHEDULE)
+        name = s.get("name") or resolved
     return {"kind": kind, "schedule": resolved, "schedule_name": name, "key": event_key(instance, start, resolved)}
 
 
@@ -3247,12 +3253,12 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     open at that time: ITS follow-on, or None) and follow_line (the sentence the confirm prints: "Then Barrow Deeps ×2
     at 9:30 PM, from the same signup.", OPEN_FOLLOW_REFUSAL when a follow-on was asked of a run already open, or "")}."""
     start, sid, note = open_when(reg, instance, value, schedule)
-    w = which_run(reg, instance, start, sid if sid is not None else DEFAULT_SCHEDULE)
+    w = which_run(reg, instance, start, sid)
     ev = rs.events.get(w["key"])
     live = ev if ev is not None and ev.state not in ("done", "cancelled") else None
     refusal = closed_run_refusal(rs, w["key"])
     rules = " ".join(open_rules(reg, instance, w["schedule"], w["kind"]))
-    fw = follow if follow is not None else (reg.schedule_def(instance, w["schedule"] or DEFAULT_SCHEDULE)["schedule"].get("follow") if w["schedule"] != ADHOC_SCHEDULE else None)
+    fw = follow if follow is not None else (reg.schedule_def(instance, w["schedule"])["schedule"].get("follow") if w["schedule"] != ADHOC_SCHEDULE else None)
     fstart = follow_start(reg, instance, start) if fw else None
     follow_line = ""
     if live is not None:  # Open points at the run already there: its own follow-on, never the one asked for (design §5.62)
@@ -3314,7 +3320,7 @@ def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime |
             if len(rows) >= n:
                 break
         out += rows
-    return sorted(out, key=lambda r: (r["start_iso"], r["schedule"] != DEFAULT_SCHEDULE))
+    return sorted(out, key=lambda r: (r["start_iso"], r["schedule"]))
 
 
 def short_why(reg: Registry, ev: RaidEvent) -> str | None:
@@ -3525,7 +3531,7 @@ def character_effects(reg: Registry, rs: RaidStore, m: Member, change: dict) -> 
             out.append({"ev": None, "kind": "rank", "action": "none", "text": f"Rank {m.main.rank} moves to {label} with the main, and {m.main.label} becomes an alt."})
         return out
     if kind in ("retire", "delete") and char is not None:
-        for k in [k for k in char.rosters if ":" in k]:
+        for k in list(char.rosters):
             from .consequences import series_words
 
             out.append({"ev": None, "kind": "regular", "action": "none",

@@ -529,7 +529,10 @@ class ListenMixin:
         """On ready, per guild: the lines of the save _schedules_save made, else Registry.migrate_schedules now (in a
         thread; saved once — a later start writes nothing and says nothing); one ops line when a raid moved, a warning
         per raid whose old schedules couldn't be moved (they still read from the raid; the warning says how to get out),
-        one when the timing or make-up lift failed (registry.lift_failed_line), and one warning naming any stored schedule that can't be read (left in the file, skipped by every read)."""
+        one when the timing or make-up lift failed (registry.lift_failed_line), one for the schedule ids (registry.schedule_ids_line:
+        each schedule renamed, by its name, and each regular spot dropped), and one warning naming any stored schedule that can't be read (left in the file, skipped by every read)."""
+        from .registry import schedule_ids_line
+
         saved = self.__dict__.get("_schedules_saved") or {}
         for reg in self.registries.ordered():
             lines = saved.pop(reg.key, [])
@@ -542,6 +545,9 @@ class ListenMixin:
             timing, reg.timing_saved = list(getattr(reg, "timing_saved", None) or []), []
             for line in timing:  # the raid-level sheet timing moved onto each schedule (registry.lift_timing): once
                 await self.ops.emit(reg.config, "info", line)
+            ids, reg.ids_saved = list(getattr(reg, "ids_saved", None) or []), []
+            if ids:  # phase 3: schedule ids made unique, `default` named, regulars keyed by id (registry.lift_schedule_ids)
+                await self.ops.emit(reg.config, "info", schedule_ids_line(ids))
             refused, reg.schedules_refused = list(getattr(reg, "schedules_refused", None) or []), []
             for line in refused:  # one per raid left under its raid (it still reads as before)
                 await self.ops.emit(reg.config, "warn", line)

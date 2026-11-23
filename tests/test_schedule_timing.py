@@ -9,6 +9,7 @@ from oibot_gm import registry as R
 from oibot_gm.registry import RegistryError
 
 from test_guild_schedules import OTHER, RID
+from conftest import weekly
 
 TIMING = R.SCHEDULE_TIMING
 
@@ -18,27 +19,27 @@ def entry(reg, raid, sid):
 
 
 def test_a_new_schedule_is_seeded_from_the_profile(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     e = entry(reg, RID, "tue")
     assert {k: e[k] for k in TIMING} == reg.timing_suggestion(RID)
     assert e["signup_lead_hours"] == 48 and e["lock_hours_before"] == 24  # profiles/forever/raids.yaml barrow_deeps
 
 
 def test_a_pickup_schedule_is_seeded_from_the_first_come_values(reg):
-    reg.set_schedule(RID, "pug", {"kind": "pickup"}, "t")
+    reg.set_schedule("pug", {"kind": "pickup"}, "t", raid=RID)
     e = entry(reg, RID, "pug")
     assert {k: e[k] for k in TIMING} == {k: R.ADHOC_DEFAULTS[k] for k in TIMING}
 
 
-def test_run_times_alone_seed_the_default_schedule(reg):
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    assert set(TIMING) <= set(entry(reg, RID, "default"))
+def test_run_times_alone_seed_their_schedule(reg):
+    sid = weekly(reg, RID, "Tue 19:30")
+    assert set(TIMING) <= set(entry(reg, RID, sid))
 
 
 def test_a_stored_value_is_kept_and_inherit_means_the_suggestion(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30", "confirm_hours_before": 12}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "confirm_hours_before": 12}, "t", raid=RID)
     assert entry(reg, RID, "tue")["confirm_hours_before"] == 12
-    reg.set_schedule(RID, "tue", {"confirm_hours_before": "inherit"}, "t")
+    reg.set_schedule("tue", {"confirm_hours_before": "inherit"}, "t", raid=RID)
     assert entry(reg, RID, "tue")["confirm_hours_before"] == reg.timing_suggestion(RID)["confirm_hours_before"]
 
 
@@ -51,54 +52,22 @@ def test_the_raid_refuses_timing(reg, field):
 
 
 def test_moving_the_lock_past_the_reminder_moves_the_reminder(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30", "signup_lead_hours": 48, "lock_hours_before": 24, "nudge_hours_before": 30}, "t")
-    reg.set_schedule(RID, "tue", {"lock_hours_before": 36}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "signup_lead_hours": 48, "lock_hours_before": 24, "nudge_hours_before": 30}, "t", raid=RID)
+    reg.set_schedule("tue", {"lock_hours_before": 36}, "t", raid=RID)
     e = entry(reg, RID, "tue")
     assert e["lock_hours_before"] == 36 and e["nudge_hours_before"] == R.default_nudge_hours(48, 36)
 
 
 def test_a_reminder_inside_the_new_window_stays(reg):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30", "signup_lead_hours": 48, "lock_hours_before": 12, "nudge_hours_before": 30}, "t")
-    reg.set_schedule(RID, "tue", {"lock_hours_before": 24}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "signup_lead_hours": 48, "lock_hours_before": 12, "nudge_hours_before": 30}, "t", raid=RID)
+    reg.set_schedule("tue", {"lock_hours_before": 24}, "t", raid=RID)
     assert entry(reg, RID, "tue")["nudge_hours_before"] == 30
 
 
 def test_the_follow_on_editor_still_writes_lineup_entry_two(reg):
-    reg.set_schedule(OTHER, "tuesday", {"kind": "weekly", "slots": "Tue 18:30", "follow": f"{RID} x2"}, "t")
+    reg.set_schedule("tuesday", {"kind": "weekly", "slots": "Tue 18:30", "follow": f"{RID} x2"}, "t", raid=OTHER)
     e = entry(reg, OTHER, "tuesday")
     assert e["lineup"][1] == {"raid": RID, "rosters": 2} and set(TIMING) <= set(e)
-
-
-def test_a_default_schedule_on_the_games_run_times_keeps_its_own_timing(reg, monkeypatch):
-    """A raid whose run times come from the profile: a `default` row holding only timing is still its schedule."""
-    monkeypatch.setitem(reg.profile.raids, RID, {**reg.profile.raids[RID], "slots": ["Tue 19:30"]})
-    reg.set_schedule(RID, "default", {"confirm_hours_before": 12}, "t")
-    assert entry(reg, RID, "default")["confirm_hours_before"] == 12
-    assert reg.schedule_def(RID, "default")["confirm_hours_before"] == 12
-
-
-def test_clearing_the_run_times_keeps_the_timing_set_on_the_default_schedule(reg):
-    """A stored value is never replaced: run times cleared and set again, the officer's confirm-by stays."""
-    reg.set_schedule(RID, "default", {"slots": "Tue 19:30", "confirm_hours_before": 12}, "t")
-    reg.set_raid_override(RID, "slots", "", "t")
-    assert entry(reg, RID, "default")["confirm_hours_before"] == 12
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    assert entry(reg, RID, "default")["confirm_hours_before"] == 12
-
-
-def test_a_whole_list_write_keeps_a_default_schedule_without_run_times(reg):
-    reg.set_schedule(RID, "default", {"slots": "Tue 19:30", "confirm_hours_before": 12}, "t")
-    reg.set_raid_override(RID, "slots", "", "t")
-    reg.set_schedule(RID, "alt", {"kind": "weekly", "slots": "Sat 20:00"}, "t")  # the raid's whole list is written
-    assert entry(reg, RID, "default")["confirm_hours_before"] == 12
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    assert reg.schedule_def(RID, "default")["confirm_hours_before"] == 12
-
-
-def test_a_default_schedule_that_says_nothing_is_still_dropped(reg):
-    reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
-    reg.set_raid_override(RID, "slots", "", "t")
-    assert R._raid_rows_of(reg.config, RID) == [] and reg.schedules(RID) == []
 
 
 def test_raid_def_is_effective_raid(reg):
@@ -111,11 +80,11 @@ def test_a_one_off_still_uses_the_first_come_values(reg):
 
 
 def test_a_schedule_edit_never_reaches_an_open_run(reg, rs):
-    reg.set_schedule(RID, "tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t")
+    reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     start = (reg.now_local() + timedelta(days=5)).replace(hour=19, minute=30, second=0, microsecond=0)
     t = rc.ensure_run(reg, RID, start, schedule="tue")
     keep = {k: t[k] for k in ("cutoff_hard_hours", "confirm_hours", "fill_ask_hours")}
-    reg.set_schedule(RID, "tue", {"lock_hours_before": 36, "confirm_hours_before": 12}, "t")
+    reg.set_schedule("tue", {"lock_hours_before": 36, "confirm_hours_before": 12}, "t", raid=RID)
     after = reg.config.roster(t["key"])
     assert {k: after[k] for k in keep} == keep
 
@@ -151,7 +120,7 @@ def test_lifting_timing_writes_it_out_and_drops_what_has_no_schedule(profile):
     e = cfg.schedules[0]
     assert e["nudge_hours_before"] == 72 and e["signup_lead_hours"] == 120 and e["confirm"] is True
     assert cfg.raids == {"barrow_deeps": {"lockout_days": 7}}
-    assert owed and moved == ["Hyjal Summit · tuesday: reminder 3 days before"]
+    assert owed and moved == ["Hyjal Summit · Weekly: reminder 3 days before"]  # by its name, never its id
     assert dropped == ["Barrow Deeps: reminder 36 hours before"]
     assert R.lift_timing(cfg, profile.raids) == ([], [], False)
 
@@ -176,7 +145,7 @@ def test_the_start_says_where_the_timing_went_once(old_store_with, open_registry
     store = old_store_with(OLD_TIMING)
     reg = open_registry(store)
     said = _start(reg) + _start(reg)
-    assert said == [("info", "Sheet timing now belongs to each schedule. Moved: Hyjal Summit · tuesday: reminder 3 days before. "
+    assert said == [("info", "Sheet timing now belongs to each schedule. Moved: Hyjal Summit · Weekly: reminder 3 days before. "
                              "Dropped, with no schedule to take it: Barrow Deeps: reminder 36 hours before.")]
     assert "sheet timing moved onto each schedule (by " in _last_subject(store.root)
 
@@ -206,16 +175,16 @@ def test_every_schedule_reads_the_same_before_and_after(old_store_with, open_reg
         before[(rid, row["id"])] = {k: sd[k] for k in TIMING}
     reg = open_registry(old_store_with(RICH))
     for (rid, sid), want in before.items():
-        sd = reg.schedule_def(rid, sid)
+        sd = reg.schedule_def(rid, reg.config.schedule_aliases[f"{rid}:{sid}"])  # phase 3: `default` has an id of its own
         assert {k: sd[k] for k in TIMING} == want, (rid, sid)
     assert before[("hyjal_summit_forever", "tuesday")]["nudge_hours_before"] == 72
     assert before[("barrow_deeps", "default")]["lock_hours_before"] == 12
     assert not any(k in o for o in reg.config.raids.values() for k in TIMING)
     assert reg.config.raids["barrow_deeps"] == {"notes": "kept"}
     assert reg.timing_moved == [
-        "Hyjal Summit · tuesday: reminder 3 days before, a fill ask waits 2 hours, confirmations off",
-        "Hyjal Summit · early: a fill ask waits 2 hours, confirmations off",  # its reminder is halfway to its own opening
-        "Barrow Deeps · default: locks 12 hours before, automatic fill off, opening DM on",
+        "Hyjal Summit · Weekly: reminder 3 days before, a fill ask waits 2 hours, confirmations off",
+        "Hyjal Summit · Weekly: a fill ask waits 2 hours, confirmations off",  # `early`: its reminder is halfway to its own opening
+        "Barrow Deeps · Raid nights: locks 12 hours before, automatic fill off, opening DM on",
     ]  # the pickup read the first-come values, never its raid's
     assert reg.timing_dropped == []
 
@@ -264,11 +233,11 @@ def test_a_one_off_and_its_follow_on_are_untouched(old_store_with, open_registry
 
 def test_a_refused_raid_keeps_its_timing(old_store_with, open_registry):
     """A raid whose old `schedules` key can't be lifted (phase 1's refused case) and that holds lock_hours_before 12:
-    the key stays in its override, the schedule still reads 12, and the raid is in neither moved nor dropped."""
+    the key stays in its override, and the raid is in neither moved nor dropped. Phase 3: no run opens from it."""
     reg = open_registry(old_store_with({"raids": {"barrow_deeps": {"lock_hours_before": 12, "slots": ["Tue 04:00"], "schedules": [BAD_ROW]}}}))
     assert reg.schedules_refused
     assert reg.config.raids["barrow_deeps"]["lock_hours_before"] == 12
-    assert reg.schedule_def("barrow_deeps", "default")["lock_hours_before"] == 12
+    assert reg.schedules("barrow_deeps") == []
     assert not [x for x in reg.timing_moved + reg.timing_dropped if "Barrow Deeps" in x]
 
 

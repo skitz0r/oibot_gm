@@ -8,6 +8,7 @@ import pytest
 from oibot_gm import discord_registry, flows_roster  # noqa: F401 — importing registers the flows
 from oibot_gm.wizard import FLOWS
 from wizard_harness import Harness
+from conftest import weekly
 
 
 class Ops:
@@ -56,8 +57,9 @@ def real_member(reg, n: int, cls: str = "Priest", spec: str = "Holy", name: str 
 @pytest.fixture
 def rosters(reg):
     """Two recurring schedules on Barrow Deeps: its own run times (Raid nights) and an Alt run."""
-    reg.set_raid_overrides("barrow_deeps", {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", ["Tue 19:30"])
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid="barrow_deeps")
     return reg
 
 
@@ -260,14 +262,14 @@ def test_add_then_remove_round_trip(reg, rs, officer, rosters):
     async def go():
         await FLOWS["roster_add"](h.command(), reg, member=user(m))
         assert [o.label for o in h._items()[0].options] == ["Barrow Deeps · Raid nights", "Barrow Deeps · Alt run"]
-        await h.pick("Pick the schedule", "barrow_deeps:alt")
+        await h.pick("Pick the schedule", "alt")
         assert any(b.startswith("Their main") for b in h.buttons())
         await h.press(next(b for b in h.buttons() if b.startswith("Their main")))
         assert "a regular of **Barrow Deeps · Alt run**" in h.text and "Nothing is answered for them" in h.text
         await h.press("Confirm")
         assert "is a regular of **Barrow Deeps · Alt run**" in h.text
     run(go())
-    assert "barrow_deeps:alt" in reg.members[m.discord_id].main.rosters
+    assert "alt" in reg.members[m.discord_id].main.rosters
 
     h2 = harness(reg, rs)
 
@@ -277,7 +279,7 @@ def test_add_then_remove_round_trip(reg, rs, officer, rosters):
         await h2.press("Confirm")
         assert "no longer a regular of **Barrow Deeps · Alt run**" in h2.text
     run(back())
-    assert not any("barrow_deeps:alt" in c.rosters for c in reg.members[m.discord_id].characters)
+    assert not any("alt" in c.rosters for c in reg.members[m.discord_id].characters)
 
 
 def test_add_without_a_member_picks_one_in_the_wizard(reg, rs, officer, rosters):
@@ -286,13 +288,13 @@ def test_add_without_a_member_picks_one_in_the_wizard(reg, rs, officer, rosters)
 
     async def go():
         await FLOWS["roster_add"](h.command(), reg)  # no member widget: schedule → member → character
-        await h.pick("Pick the schedule", "barrow_deeps:default")
+        await h.pick("Pick the schedule", "barrow-deeps")
         sel = next(s for s in h._items() if getattr(s, "placeholder", "") == "Pick the member")
         assert [o.value for o in sel.options] == [str(m.discord_id)], "puppets are never offered as regulars"
         await h.pick("Pick the member", str(m.discord_id))  # one character: straight to confirm
         await h.press("Confirm")
     run(go())
-    assert reg.regulars("barrow_deeps:default") == [(reg.members[m.discord_id], reg.members[m.discord_id].main)]
+    assert reg.regulars("barrow-deeps") == [(reg.members[m.discord_id], reg.members[m.discord_id].main)]
 
 
 def test_remove_when_on_no_roster_says_so(reg, rs, officer, rosters):
@@ -304,18 +306,18 @@ def test_remove_when_on_no_roster_says_so(reg, rs, officer, rosters):
 
 def test_remove_from_a_roster_they_left_meanwhile_refuses(reg, rs, officer, rosters):
     m = real_member(reg, 3)
-    reg.regular_add(m.discord_id, "barrow_deeps:default", "t")
-    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+    reg.regular_add(m.discord_id, "barrow-deeps", "t")
+    reg.regular_add(m.discord_id, "alt", "t")
     h = harness(reg, rs)
 
     async def go():
         await FLOWS["roster_remove"](h.command(), reg, member=user(m))
-        await h.pick("Pick the schedule", "barrow_deeps:default")
-        reg.regular_remove(m.discord_id, "barrow_deeps:default", "Other Officer")  # meanwhile
+        await h.pick("Pick the schedule", "barrow-deeps")
+        reg.regular_remove(m.discord_id, "barrow-deeps", "Other Officer")  # meanwhile
         await h.press("Confirm")
         assert "❌" in h.text and "isn't a regular" in h.text
     run(go())
-    assert "barrow_deeps:alt" in reg.members[m.discord_id].main.rosters
+    assert "alt" in reg.members[m.discord_id].main.rosters
 
 
 def test_add_cancel_writes_nothing(reg, rs, officer, rosters):
@@ -324,7 +326,7 @@ def test_add_cancel_writes_nothing(reg, rs, officer, rosters):
 
     async def go():
         await FLOWS["roster_add"](h.command(), reg, member=user(m))
-        await h.pick("Pick the schedule", "barrow_deeps:default")  # one character: straight to confirm
+        await h.pick("Pick the schedule", "barrow-deeps")  # one character: straight to confirm
         await h.press("Cancel")
     run(go())
     assert not any(c.rosters for c in reg.members[m.discord_id].characters)
@@ -339,13 +341,13 @@ def test_add_with_no_recurring_schedule_says_so(reg, rs, officer):
 
 def test_members_lists_the_regulars_by_role_one_per_line(reg, rs, officer, rosters):
     a, b = real_member(reg, 0), real_member(reg, 1, "Warrior", "Protection")
-    reg.regular_add(a.discord_id, "barrow_deeps:default", "t")
-    reg.regular_add(b.discord_id, "barrow_deeps:default", "t")
+    reg.regular_add(a.discord_id, "barrow-deeps", "t")
+    reg.regular_add(b.discord_id, "barrow-deeps", "t")
     h = harness(reg, rs)
 
     async def go():
         await FLOWS["roster_members"](h.command(), reg)
-        await h.pick("Pick the schedule", "barrow_deeps:default")
+        await h.pick("Pick the schedule", "barrow-deeps")
         lines = h.text.splitlines()
         assert any(ln.endswith(f"{b.main.label} · {b.display_name}") for ln in lines)
         assert any(ln.endswith(f"{a.main.label} · {a.display_name}") for ln in lines)
@@ -355,7 +357,7 @@ def test_members_lists_the_regulars_by_role_one_per_line(reg, rs, officer, roste
 
 def test_step_down_is_self_service(reg, rs, officer, rosters):
     m = real_member(reg, 2)
-    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+    reg.regular_add(m.discord_id, "alt", "t")
     officer["officer"] = False  # a member, not an officer
     h = harness(reg, rs)
     h.user.id, h.user.display_name = m.discord_id, m.display_name

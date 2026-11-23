@@ -44,7 +44,7 @@ def run(coro):
 
 
 def alt_schedule(reg, rid="barrow_deeps"):
-    reg.set_schedule(rid, "alt", {"kind": "weekly", "slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("alt", {"kind": "weekly", "slots": "Sat 20:00", "name": "Alt run"}, "t", raid=rid)
 
 
 def open_real(reg, rs, rid="barrow_deeps", schedule="alt", days=3):
@@ -110,18 +110,18 @@ def test_comp_targets_are_officers_by_privilege(reg):
 def test_schedule_removal_effects_names_regulars_and_open_runs(reg, rs):
     alt_schedule(reg)
     m = real(reg, 0)
-    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+    reg.regular_add(m.discord_id, "alt", "t")
     ev = open_real(reg, rs)
-    eff = reg.schedule_removal_effects("barrow_deeps", "alt", rs)
+    eff = reg.schedule_removal_effects("alt", rs)
     assert eff.regulars == [m.display_name] and eff.open_runs == [reg.config.roster(ev.team)["name"]]
     s = eff.sentence()
     assert s.startswith("The Alt run schedule is removed.") and f"{m.display_name} comes off its regulars and sees a notice" in s and "keeps its time and sheet" in s
     cons = configops.op_consequences(reg, ConfigOp(op="schedule_remove", target="barrow_deeps", field="alt"))
     assert cons == eff.lines()
-    with pytest.raises(RegistryError, match="has no schedule"):
-        reg.schedule_removal_effects("barrow_deeps", "nope", rs)
-    reg.set_schedule("barrow_deeps", "sun", {"kind": "weekly", "slots": "Sun 20:00", "name": "Sundays"}, "t")
-    assert reg.schedule_removal_effects("barrow_deeps", "sun", rs).lines() == [], "nothing beyond the schedule itself: no line"
+    with pytest.raises(RegistryError, match="no schedule called"):
+        reg.schedule_removal_effects("nope", rs)
+    reg.set_schedule("sun", {"kind": "weekly", "slots": "Sun 20:00", "name": "Sundays"}, "t", raid="barrow_deeps")
+    assert reg.schedule_removal_effects("sun", rs).lines() == [], "nothing beyond the schedule itself: no line"
 
 
 def test_rosters_copy_reaches_the_next_run_only(reg, rs):
@@ -270,15 +270,15 @@ def test_timezone_wizard_with_only_a_locked_run_offers_keep_only(reg, rs, monkey
 def test_schedule_removal_names_the_open_runs_lock_fate(reg, rs):
     """RD-11: a run already open from a removed schedule keeps its time and sheet, but its lock reads the raid's weights
     (rc.run_weights' fallback) and no regulars (they came off with it) — the sentence says so, and it is true."""
-    reg.set_schedule("barrow_deeps", "alt", {"kind": "weekly", "slots": "Sat 20:00", "name": "Alt run", "weights": {"regular": 9}}, "t")
+    reg.set_schedule("alt", {"kind": "weekly", "slots": "Sat 20:00", "name": "Alt run", "weights": {"regular": 9}}, "t", raid="barrow_deeps")
     m = real(reg, 0)
-    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+    reg.regular_add(m.discord_id, "alt", "t")
     ev = open_real(reg, rs)
     assert rc.run_weights(reg, ev)["regular"] == 9 and rc.run_regulars(reg, ev)
-    eff = reg.schedule_removal_effects("barrow_deeps", "alt", rs)
+    eff = reg.schedule_removal_effects("alt", rs)
     assert eff.loses == ["the raid's weights", "no regulars"]
     assert eff.lines()[-1] == reg.config.roster(ev.team)["name"] + " is already open and keeps its time and sheet, but locks with the raid's weights and no regulars."
-    reg.remove_schedule("barrow_deeps", "alt", "t")
+    reg.remove_schedule("alt", "t")
     assert rc.run_weights(reg, ev)["regular"] != 9  # the raid's weights now
     assert rc.run_regulars(reg, ev) == []
 
@@ -400,7 +400,7 @@ def test_readiness_route_carries_minimums_and_slots(owner_client, reg):
 
 def test_raids_route_schedule_words_paused_and_sentences(owner_client, reg, rs):
     alt_schedule(reg)
-    reg.set_schedule("barrow_deeps", "alt", {"active": False}, "t")
+    reg.set_schedule("alt", {"active": False}, "t", raid="barrow_deeps")
     raids = owner_client.get("/api/raids", headers=bearer()).json()["raids"]
     s = next(x for r in raids if r["id"] == "barrow_deeps" for x in r["schedules"] if x["id"] == "alt")
     assert s["next"] == [] and len(s["next_if_active"]) == 3 and not any(MILITARY.search(x) for x in s["next_if_active"])
@@ -420,11 +420,11 @@ def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypat
     c = TestClient(web.create_app(Bot(reg, rs)))
     alt_schedule(reg)
     m = real(reg, 0)  # one Holy Priest regular: the series is short of tanks every week
-    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+    reg.regular_add(m.discord_id, "alt", "t")
 
     def rows():
         r = c.get("/api/readiness", params={"raid": "barrow_deeps"}, headers=bearer()).json()["raids"][0]
-        return next(x for x in r["series"] if x["key"] == "barrow_deeps:alt")["forecast"]
+        return next(x for x in r["series"] if x["key"] == "alt")["forecast"]
     f = rows()[1]
     assert f["short"] and f["open_key"] is None
     res = c.post("/api/raid/barrow_deeps/open", json={"start": f["start"], "schedule": "alt"}, headers=bearer())
@@ -438,12 +438,12 @@ def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypat
 def test_schedule_writes_from_the_raids_page_carry_the_raid_rev(owner_client, reg, rs):
     """Regression: Pause / Resume / Remove posted with no config:raids rev, so a stale page overwrote a change."""
     alt_schedule(reg)
-    rev = reg.config_rev("raids:barrow_deeps")
-    reg.set_schedule("barrow_deeps", "alt", {"name": "Alt night"}, "someone else")
+    rev = reg.config_rev("schedule:alt")  # phase 3: a schedule has a rev of its own
+    reg.set_schedule("alt", {"name": "Alt night"}, "someone else", raid="barrow_deeps")
     for path, body in (("/api/admin/raid/schedule/remove", {"instance": "barrow_deeps", "id": "alt"}),
                        ("/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": {"active": False}})):
-        r = owner_client.post(path, json={**body, "revs": {"config:raids:barrow_deeps": rev}}, headers=bearer())
-        assert r.status_code == 409 and r.json()["changed"] == ["raids:barrow_deeps"], r.text
+        r = owner_client.post(path, json={**body, "revs": {"config:schedule:alt": rev}}, headers=bearer())
+        assert r.status_code == 409 and r.json()["changed"] == ["schedule:alt"], r.text
     assert any(x["id"] == "alt" and x["active"] for x in reg.schedules("barrow_deeps"))
     src = (FRONT / "components" / "ScheduleCard.tsx").read_text()
     saves = [ln for ln in src.splitlines() if re.search(r'saveOps\(\[\{ kind: "schedule(?:_remove)?"', ln)]  # useOpsSave (D51)
@@ -607,7 +607,7 @@ def test_the_raid_wizards_minimums_section_is_the_minimums_block(reg, rs, office
 
 def test_the_schedule_screen_says_paused_never_next_runs(reg, rs, officer_only):
     alt_schedule(reg)
-    reg.set_schedule("barrow_deeps", "alt", {"active": False}, "t")
+    reg.set_schedule("alt", {"active": False}, "t", raid="barrow_deeps")
     h = Harness(reg, rs)
 
     async def go():
@@ -664,7 +664,7 @@ def test_mcp_comp_and_summary_tools(owner_client, reg, monkeypatch):
     assert "max" not in inspect.signature(ms.set_minimum).parameters  # a minimum has no upper limit (D16)
     alt_schedule(reg)
     m = real(reg, 0)
-    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+    reg.regular_add(m.discord_id, "alt", "t")
     regs = ms.list_regulars("barrow_deeps", "alt")
     assert regs["series"][0]["regulars"][0]["display_name"] == m.display_name
     summ = ms.config_summary()

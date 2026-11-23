@@ -153,6 +153,57 @@ def first_slot(reg: Registry, instance: str, horizon_days: float = 21, min_lead_
     return next(t for _, t in rc.upcoming(reg, instance, now, 24 * horizon_days) if t - now >= timedelta(hours=min_lead_hours))
 
 
+def weekly(reg: Registry, raid: str = "barrow_deeps", slots="Tue 19:30", sid: str | None = None) -> str:
+    """A weekly schedule of `raid` at `slots` (phase 3: a raid has no run times of its own) → its id: `sid`, else the
+    raid's id the way an older file's own run times are lifted ('barrow-deeps'), made unique across the guild; named
+    as the lift names a raid's own run times (DEFAULT_SCHEDULE_NAME, "Raid nights")."""
+    from oibot_gm.registry import DEFAULT_SCHEDULE_NAME, lifted_schedule_id
+
+    sid = sid or lifted_schedule_id(raid, {s["id"] for s in reg.all_schedules()})
+    reg.set_schedule(sid, {"kind": "weekly", "slots": slots, "name": DEFAULT_SCHEDULE_NAME}, "t", raid=raid)
+    return sid
+
+
+def at_schedule(reg: Registry, start, raid: str = "barrow_deeps") -> str:
+    """The id of a weekly schedule of `raid` with a run at `start`'s minute, made when there is none (phase 3: a
+    recurring run comes from a schedule — a raid has no run times of its own). Pass it as `schedule=`."""
+    slot = start.astimezone(reg.tz).strftime("%a %H:%M")
+    hit = next((s["id"] for s in reg.schedules(raid) if s["kind"] == "weekly" and slot in s["slots"]), None)
+    if hit:
+        return hit
+    from oibot_gm.registry import lifted_schedule_id
+
+    sid = lifted_schedule_id(raid, {s["id"] for s in reg.all_schedules()})
+    reg.set_schedule(sid, {"kind": "weekly", "slots": slot}, "t", raid=raid)
+    return sid
+
+
+@pytest.fixture
+def old_store_with(data_root: Path):
+    """A data repo as an older bot left it: `old_store_with(cfg, members={uid: rosters}, applicants={uid: schedules})`
+    writes conftest's guild.yaml with `cfg` on top, one member file per uid (a main whose regular spots are `rosters`)
+    and one applicant file per uid, commits it and returns its GitStore."""
+    import json
+
+    def make(cfg: dict, members: dict | None = None, applicants: dict | None = None) -> GitStore:
+        doc = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())
+        (data_root / GUILD / "guild.yaml").write_text(yaml.safe_dump({**doc, **cfg}, sort_keys=False))
+        for uid, (name, rosters) in (members or {}).items():
+            (data_root / GUILD / "members").mkdir(exist_ok=True)
+            m = {"discord_id": uid, "display_name": name, "characters": [{"name": name, "cls": "Priest", "spec": "Holy", "is_main": True,
+                                                                         "rosters": list(rosters)}]}
+            (data_root / GUILD / "members" / f"{uid}.json").write_text(json.dumps(m))
+        for uid, (name, schedules) in (applicants or {}).items():
+            (data_root / GUILD / "applicants").mkdir(exist_ok=True)
+            a = {"discord_id": uid, "display_name": name, "name": name, "cls": "Priest", "spec": "Holy", "schedules": list(schedules)}
+            (data_root / GUILD / "applicants" / f"{uid}.json").write_text(json.dumps(a))
+        subprocess.run(["git", "add", "-A"], cwd=data_root, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "old file"], cwd=data_root, check=True)
+        return GitStore(data_root, push=False)
+
+    return make
+
+
 def join(reg: Registry, rs: rc.RaidStore, ev: rc.RaidEvent, members, status: str = "in") -> None:
     for m in members:
         rc.set_signup(reg, rs, ev, m, None, status, source="test")
@@ -223,7 +274,7 @@ def same_run(reg_a: Registry, rs_a: rc.RaidStore, reg_b: Registry, rs_b: rc.Raid
     if schedule:
         slot = start.strftime("%a %H:%M")
         for r in (reg_a, reg_b):
-            r.set_schedule(instance, schedule, {"kind": "weekly", "slots": slot, "name": "Fridays"}, "t")
+            r.set_schedule(schedule, {"kind": "weekly", "slots": slot, "name": "Fridays"}, "t", raid=instance)
     cut = {"soft": 2, "hard": 1.5, "confirm": 1}
     ev_a = rc.open_run(reg_a, rs_a, instance, start, by="t", cutoffs=cut, schedule=schedule)
     ev_b = rc.open_run(reg_b, rs_b, instance, start, by="t", cutoffs=cut, schedule=schedule)

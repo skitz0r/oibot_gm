@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from conftest import join, open_test_run
+from conftest import join, open_test_run, weekly as _weekly
 from fastapi.testclient import TestClient
 from test_mcp import TOKEN, FakeBot, bearer
 from test_raid_night import locked_ten
@@ -31,15 +31,16 @@ def raid(c) -> dict:
 
 
 def weekly(reg, first_open: str = "2026-01-01T00:00") -> None:
-    reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": first_open}, "t")
+    reg.set_raid_overrides(RID, {"first_open": first_open}, "t")
+    _weekly(reg, RID, ["Tue 19:30"])
 
 
 def test_upcoming_lists_three_runs_per_active_schedule_whatever_the_horizon(reg, c):
     weekly(reg)
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
-    reg.set_schedule(RID, "pug", {"kind": "pickup", "name": "Pickup"}, "t")  # a template opens nothing on its own
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)  # a template opens nothing on its own
     rows = raid(c)["upcoming"]
-    assert sorted(u["schedule"] for u in rows) == ["alt"] * 3 + ["default"] * 3
+    assert sorted(u["schedule"] for u in rows) == ["alt"] * 3 + ["barrow-deeps"] * 3
     assert [u["start_iso"] for u in rows] == sorted(u["start_iso"] for u in rows)  # soonest first across schedules
     assert all("PM" in u["start"] and "19:30" not in u["start"] and u["opens"] for u in rows)  # words, 12-hour
     assert all(u["can_open"] and u["why"] is None for u in rows)  # all within three weeks
@@ -110,7 +111,7 @@ def test_the_short_line_names_the_regulars_who_havent_answered(reg, rs, c):
         uid = REAL + n
         names.append(f"Regular{'ab'[n]}")
         reg.add_character(uid, f"P{n}", names[-1], cls, spec, None, True)
-        reg.regular_add(uid, f"{RID}:default", "t")
+        reg.regular_add(uid, "barrow-deeps", "t")
     first = [t for _s, t in rc.upcoming(reg, RID, reg.now_local(), 24 * 21)][0]
     ev = rc.open_run(reg, rs, RID, first, by="t")
     assert rc.short_why(reg, ev) == f"2 regulars haven't answered: {names[0]}, {names[1]}"
@@ -306,22 +307,22 @@ def test_ev_json_carries_every_board_sentence_with_tokens_for_the_names(reg, rs,
 def test_a_regulars_remove_and_an_orphan_clear_carry_the_servers_sentence_and_a_rev(reg, rs, c):
     weekly(reg)
     reg.add_character(REAL, "P0", "Bramble", "Priest", "Holy", None, True)
-    reg.regular_add(REAL, f"{RID}:default", "t")
+    reg.regular_add(REAL, "barrow-deeps", "t")
     m = reg.members[REAL]
     row = next(x for s in raid(c)["series"] for x in s["regulars"] if x["uid"] == str(REAL))
-    assert row["remove"] == " ".join(cq.regular_remove(reg, m, f"{RID}:default"))
+    assert row["remove"] == " ".join(cq.regular_remove(reg, m, "barrow-deeps"))
     assert row["remove"].startswith("Bramble stops being a regular of ") and "nobody is told" in row["remove"] and "weights them as a regular" in row["remove"]
     post = lambda body: c.post("/api/admin/raid/regulars", json=body, headers={**bearer(), "X-Requested-With": "oibot"})  # noqa: E731
-    stale = post({"raid": RID, "schedule": "default", "uid": str(REAL), "on": False, "rev": "0" * 12})
+    stale = post({"raid": RID, "schedule": "barrow-deeps", "uid": str(REAL), "on": False, "rev": "0" * 12})
     assert stale.status_code == 409 and "changed since you loaded them" in stale.json()["error"]
-    assert f"{RID}:default" in m.main.rosters, "a stale remove writes nothing"
+    assert "barrow-deeps" in m.main.rosters, "a stale remove writes nothing"
     # a removed schedule's leftover: listed with its own sentence and rev
-    m.main.rosters.append(f"{RID}:gone")
+    m.main.rosters.append("gone")
     reg.save(m, "t")
-    o = next(x for x in raid(c)["orphan_regulars"] if x["key"] == f"{RID}:gone")
-    assert "a removed Barrow Deeps schedule" in o["clear"] and o["rev"] == reg.characters_rev(m)
+    o = next(x for x in raid(c)["orphan_regulars"] if x["key"] == "gone")
+    assert "a removed schedule" in o["clear"] and o["rev"] == reg.characters_rev(m)
     ok = post({"raid": RID, "schedule": "gone", "uid": str(REAL), "on": False, "rev": o["rev"]})
-    assert ok.status_code == 200 and f"{RID}:gone" not in m.main.rosters
+    assert ok.status_code == 200 and "gone" not in m.main.rosters
 
 
 def test_place_the_rest_refuses_a_board_that_changed_since_it_was_drawn(reg, rs, c):

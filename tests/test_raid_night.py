@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from conftest import by_role, join, lock_with_board, open_test_run
+from conftest import by_role, join, lock_with_board, open_test_run, weekly
 from test_parity_verbs import Bot, Chan
 
 from oibot_gm import raidcycle as rc
@@ -596,9 +596,10 @@ def test_open_preview_resolves_dst_nights_and_matches_a_scheduled_run(reg, rs):
     wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)  # a Wednesday 1–2 weeks out
     plain = rc.open_preview(reg, rs, "barrow_deeps", f"{wed.isoformat()} 20:00", "adhoc")
     assert plain["when_note"] == "" and "8:00 PM" in plain["label"] and "ad hoc run" in plain["rules"]
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", "Wed 20:00")
     hit = rc.open_preview(reg, rs, "barrow_deeps", f"{wed.isoformat()} 20:00", None)
-    assert hit["kind"] == "scheduled" and hit["key"] == rc.event_key("barrow_deeps", datetime.fromisoformat(hit["start"]), None)
+    assert hit["kind"] == "scheduled" and hit["key"] == rc.event_key("barrow_deeps", datetime.fromisoformat(hit["start"]), "barrow-deeps")
     again = rc.open_preview(reg, rs, "barrow_deeps", hit["start"], None)  # the exact instant carried back by Open
     assert again["key"] == hit["key"] and again["start"] == hit["start"]
     with pytest.raises(RegistryError, match="pick one"):
@@ -613,8 +614,9 @@ def test_local12_is_the_one_formatter(reg):
 
 def test_no_signup_channel_warns_once_per_run(reg, rs):
     bot = NightBot(reg, rs)
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
-    reg.set_schedule("barrow_deeps", "default", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", "Wed 20:00")
+    reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t", raid="barrow_deeps")  # sheet timing is the schedule's
     run(bot.scheduler_tick_guild(reg))
     first = [t for lvl, t in bot.ops.lines if "did not open: no signup channel" in t]
     assert first and all("PM" in t or "AM" in t for t in first)
@@ -734,7 +736,8 @@ def test_open_preview_and_open_routes_carry_the_exact_instant(reg, rs, web_bot):
     j = p.json()
     assert j["kind"] == "adhoc" and "clocks go forward" in j["when_note"] and j["channel"] is None
     wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", "Wed 20:00")
     p = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00"}, headers=H()).json()
     assert p["kind"] == "scheduled"
     bad = c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "key": "bd-0000-0000-2000-01-01"}, headers=H())
@@ -756,8 +759,9 @@ def test_runs_history_pages_beyond_the_first_eight(reg, rs, web_bot):
 
 
 def test_upcoming_rows_carry_the_instant_and_say_when_no_channel_can_take_the_sheet(reg, rs, web_bot):
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
-    reg.set_schedule("barrow_deeps", "default", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", "Wed 20:00")
+    reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t", raid="barrow_deeps")  # sheet timing is the schedule's
     bd = next(x for x in web_bot.c.get("/api/rosters", headers=H()).json()["raids"] if x["id"] == "barrow_deeps")
     assert bd["upcoming"] and all(u["start_iso"] and u["key"] for u in bd["upcoming"])
     assert bd["upcoming"][0]["needs_channel"] is True and bd["signup_channel"] is False
@@ -1088,7 +1092,8 @@ def test_opening_at_a_cancelled_runs_time_is_refused_and_the_preview_says_so(reg
     """open_event used to hand the cancelled run back ('opened <key>') — nothing opened, the run stayed cancelled."""
     bot, c = web_bot.bot, web_bot.c
     wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", "Wed 20:00")
     p = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00"}, headers=H()).json()
     assert c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "key": p["key"]}, headers=H()).status_code == 200
     ev = rs.events[p["key"]]
@@ -1121,9 +1126,10 @@ def test_rosters_page_open_of_the_raids_own_scheduled_run_from_the_adhoc_picker(
     null; the page then sends schedule 'default' (it used to send 'adhoc' → 409, the key never matched)."""
     c = web_bot.c
     wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)
-    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", "Wed 20:00")
     p = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00", "schedule": ""}, headers=H()).json()
-    assert p["kind"] == "scheduled" and p["schedule"] is None
+    assert p["kind"] == "scheduled" and p["schedule"] == "barrow-deeps"  # phase 3: always the schedule's id
     tpl = "adhoc"  # the page's template select: One-off
     sent = {"start": p["start"], "key": p["key"],
             "schedule": (p["schedule"] or "default") if p["kind"] == "scheduled" else (p["schedule"] or ("adhoc" if tpl == "adhoc" else tpl))}

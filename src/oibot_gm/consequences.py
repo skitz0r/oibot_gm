@@ -258,11 +258,13 @@ def ended_line(reg: Registry, ev: rc.RaidEvent) -> str:
 
 
 def series_words(reg: Registry, key: str) -> str:
-    """A series key as a sentence names it: '<raid> <schedule name>' ('Barrow Deeps Raid nights')."""
-    rid, _, sid = str(key).partition(":")
-    raid = reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else rid
-    s = next((x for x in reg.schedules(rid) if x["id"] == sid), None) if rid in reg.profile.raids else None
-    return f"{raid} {s.get('name') or sid}" if s else f"{raid} {sid}"
+    """A schedule id as a sentence names it: '<raid> <schedule name>' ('Barrow Deeps Raid nights')."""
+    sid = reg.config.schedule_aliases.get(str(key), str(key))
+    try:
+        s = reg.schedule_entry(sid)
+    except RegistryError:
+        return sid
+    return f"{reg.raid_def(s['raid']).get('name', s['raid'])} {s.get('name') or sid}"
 
 
 def regular_remove(reg: Registry, m, key: str) -> list[str]:
@@ -272,9 +274,7 @@ def regular_remove(reg: Registry, m, key: str) -> list[str]:
     chars = [c.label for c in m.characters if key in c.rosters] or [m.display_name]
     who = " and ".join(chars)
     if key not in dict(reg.series("recurring")):
-        rid = str(key).partition(":")[0]
-        raid = reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else rid
-        return [f"{who} stops being a regular of a removed {raid} schedule.", "Nothing else changes, and nobody is told."]
+        return [f"{who} stops being a regular of a removed schedule.", "Nothing else changes, and nobody is told."]
     return [f"{who} stops being a regular of {series_words(reg, key)}.",
             "Its sheets no longer wait for their answer, and the lock no longer weights them as a regular.",
             "They can still join any sheet, and nobody is told."]

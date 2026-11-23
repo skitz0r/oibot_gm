@@ -68,10 +68,10 @@ def schedule_keys(reg) -> list[str]:
 # ---------------------------------------------------------------- the wizard end to end
 
 def test_apply_end_to_end_with_schedules_and_two_pages_of_questions(reg):
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     reg.set_recruitment("t", questions=SIX, note="Looking for healers")
     keys = schedule_keys(reg)
-    assert f"{RID}:alt" in keys
+    assert "alt" in keys
     h = person(reg)
     cls, specs = a_class(reg)
 
@@ -86,7 +86,7 @@ def test_apply_end_to_end_with_schedules_and_two_pages_of_questions(reg):
         sel = next(s for s in h._items() if isinstance(s, discord.ui.Select))
         assert sel.placeholder == "Raid schedules you can make" and sel.max_values == len(keys) and sel.min_values == 0
         assert any(o.label.startswith(reg.raid_def(RID)["name"] + " · ") for o in sel.options)
-        await h.pick("Raid schedules you can make", f"{RID}:alt")
+        await h.pick("Raid schedules you can make", "alt")
         await h.press("Continue")
         page1 = h.modal
         assert page1.title == "Questions (1 of 2)" and len(page1._items) == 5
@@ -111,7 +111,7 @@ def test_apply_end_to_end_with_schedules_and_two_pages_of_questions(reg):
     run(go())
     a = reg.applicants[NEW_ID]
     assert (a.name, a.surname, a.cls, a.spec, a.source, a.status) == ("Kessa", "Dawnfire", cls, specs[0], "discord", "open")
-    assert a.schedules == [f"{RID}:alt"] and a.logs_url == "https://logs.example/k"
+    assert a.schedules == ["alt"] and a.logs_url == "https://logs.example/k"
     assert [x["label"] for x in a.answers] == ["Question 1", "Question 2", "Question 3", "Question 5", "Question 6"]  # the empty optional one dropped
     assert a.answers[2]["answer"] == "x" * 900  # stored whole
     assert h.posted == [a]
@@ -187,9 +187,9 @@ def test_a_required_question_left_empty_is_refused_and_fix_this_keeps_the_answer
 # ---------------------------------------------------------------- the review card
 
 def big_applicant(reg, n=15) -> Applicant:
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     return Applicant(discord_id=NEW_ID, display_name="Newbie", name="Kessa", surname="Dawnfire", cls="Mage", spec="Frost", offspec="Fire",
-                     logs_url="https://logs.example/" + "k" * 150, schedules=[f"{RID}:alt", "gone:raid"],
+                     logs_url="https://logs.example/" + "k" * 150, schedules=["alt", "gone:raid"],
                      answers=[{"label": f"Question number {i}", "answer": f"{i} " + "word " * 199} for i in range(n)])
 
 

@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from conftest import join, lock_with_board
+from conftest import join, lock_with_board, weekly
 from test_analytics_cards import text_of
 from test_parity_verbs import Bot, Chan
 from test_roster_p2_asks import _locked_short_healer
@@ -203,7 +203,8 @@ def test_plain_text_send_after_the_run_locked_is_refused_and_sends_nothing(reg, 
 # ---------------------------------------------------------------- ad hoc first come: when they joined
 
 def _adhoc(reg, rs, rows):
-    reg.set_raid_overrides("barrow_deeps", {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+    weekly(reg, "barrow_deeps", ["Tue 19:30"])
     ms_ = [add(reg, 700 + i, *row) for i, row in enumerate(rows)]
     t = rc.upcoming(reg, "barrow_deeps", reg.now_local(), 24 * 21)[0][1]
     ev = rc.open_run(reg, rs, "barrow_deeps", t, by="t", schedule=ADHOC_SCHEDULE)
@@ -369,9 +370,9 @@ def test_mcp_raid_set_takes_confirm():
 
     ms.use(ms.Api(url="http://bot", token="t" * 64, transport=httpx.MockTransport(handler)))
     try:
-        ms.schedule_set("barrow", "default", "confirm", "off")  # sent as given: the bot reads 'off', no client-side grammar (a schedule's switch, C7)
-        assert seen[-1] == ("/api/ops/change", {"changes": [{"kind": "schedule", "target": "barrow_deeps:default", "fields": {"confirm": "off"}}], "apply": True, "confirmed": True})
-        ms.schedule_set("barrow", "default", fields={"confirm": True})
+        ms.schedule_set("barrow", "barrow-deeps", "confirm", "off")  # sent as given: the bot reads 'off', no client-side grammar (a schedule's switch, C7)
+        assert seen[-1] == ("/api/ops/change", {"changes": [{"kind": "schedule", "target": "barrow_deeps:barrow-deeps", "fields": {"confirm": "off"}}], "apply": True, "confirmed": True})
+        ms.schedule_set("barrow", "barrow-deeps", fields={"confirm": True})
         assert seen[-1][1]["changes"][0]["fields"]["confirm"] is True
     finally:
         ms.use(None)
@@ -401,7 +402,7 @@ def test_ask_kind_is_not_regular_on_an_ad_hoc_run(reg, rs):
 def test_ask_kind_is_regular_where_the_series_has_regulars(reg, rs):
     ev, people = _locked_short_healer(reg, rs)
     extra = add(reg, 871, "Cleric", "Priest", "Holy")
-    reg.regular_add(extra.discord_id, "barrow_deeps:default", "officer")
+    reg.regular_add(extra.discord_id, "barrow-deeps", "officer")
     kinds = {a.kind for st in rc.role_plan(reg, rs, ev).seats for opt in st.options for a in opt}
     assert "regular" in kinds and "unanswered" not in kinds
 

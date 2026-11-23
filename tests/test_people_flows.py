@@ -8,7 +8,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from conftest import OWNER, join, lock_with_board
+from conftest import OWNER, join, lock_with_board, weekly
 from test_people import real, real_run
 from wizard_harness import Harness
 
@@ -333,11 +333,13 @@ def test_roster_overview_is_ephemeral_and_officers_can_post_it(reg, officer):
     from discord import app_commands
     from test_parity_verbs import Chan
 
-    reg.set_raid_overrides("barrow_deeps", {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
+
+    weekly(reg, "barrow_deeps", ["Tue 19:30"])
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid="barrow_deeps")
     for i in range(3):
         m = real(reg, i)
-        reg.regular_add(m.discord_id, "barrow_deeps:default", "t")
+        reg.regular_add(m.discord_id, "barrow-deeps", "t")
     reg.config.roster_channel_id = 66
     ch = Chan(66, "roster")
     client = discord.Client(intents=discord.Intents.none())

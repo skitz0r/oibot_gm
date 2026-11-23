@@ -164,7 +164,7 @@ def test_a_minimum_takes_no_upper_limit_and_no_unknown_slot(reg):
 
 
 def test_a_schedule_takes_a_run_week_preset(reg):
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid=RID)
     configops.apply(reg, ConfigOp(op="schedule_set", target=RID, field="alt.cadence", value="short"), "t", is_owner=False)
     sd = reg.schedule_def(RID, "alt")
     from oibot_gm import presets
@@ -273,11 +273,11 @@ def test_the_raid_wizards_reset_goes_through_the_one_op_with_its_effects(reg, st
 
     monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
     monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: False)
-    reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     from test_member_inbox import real
 
     m = real(reg, 0)
-    reg.regular_add(m.discord_id, f"{RID}:alt", "t")
+    reg.regular_add(m.discord_id, "alt", "t")
     d = configops.describe_ops(reg, [ConfigOp(op="raid_reset", target=RID)])
     want = [d.lines[0].before, *d.consequences]  # the site's and plain text's raid_reset preview: what goes, in words
     assert "Alt run" in want[0]

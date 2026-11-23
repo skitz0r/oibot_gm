@@ -177,9 +177,9 @@ def test_applications_list_shape_and_decide(client, bot, reg):
     reg.set_recruitment("t", questions=[{"label": "Why us?", "required": True}])
     spec = next(iter(reg.profile.classes["Priest"]))
     rid, sid = "barrow_deeps", "alt"
-    reg.set_schedule(rid, sid, {"slots": "Tue 19:30, Thu 19:30", "name": "Alt run"}, "t")
+    reg.set_schedule(sid, {"slots": "Tue 19:30, Thu 19:30", "name": "Alt run"}, "t", raid=rid)
     a = reg.apply(500_000_000_000_000_001, "discNewbie", "Newbie", "Priest", spec, None, None, None, None, surname="Brightwood",
-                  schedules=[f"{rid}:{sid}"], answers=[{"label": "Why us?", "answer": "Friends raid here."}])
+                  schedules=[sid], answers=[{"label": "Why us?", "answer": "Friends raid here."}])
     reg.apply(500_000_000_000_000_002, "discOther", "Otherone", "Priest", spec, None, None, None, None, answers=[{"label": "Why us?", "answer": "x"}])
     reg.decide(500_000_000_000_000_002, False, "t", "full on priests")
     h = as_user(client, OFFICER_UID)

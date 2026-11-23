@@ -10,7 +10,7 @@ import asyncio
 import types
 
 import pytest
-from conftest import OWNER, join, lock_with_board, open_test_run
+from conftest import OWNER, join, lock_with_board, open_test_run, weekly
 from test_parity_verbs import Bot, Chan, fill_ask
 
 from oibot_gm import configops, discord_policy
@@ -246,7 +246,7 @@ def test_run_sheet_posts_where_it_was_asked(reg, rs):
 
 def test_live_runs_text_has_the_board_and_unopened_runs(reg, rs):
     reg.set_raid_override("barrow_deeps", "first_open", "2026-01-01T00:00", "t")
-    reg.set_raid_override("barrow_deeps", "slots", "Tue 19:30, Thu 19:30, Sat 19:30", "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30, Thu 19:30, Sat 19:30")
     bot = Bot(reg, rs)
     ev, names = board_run(reg, rs)
     run(bot.save_board(reg, rs, ev, [names[:2]], by="t"))
@@ -254,12 +254,12 @@ def test_live_runs_text_has_the_board_and_unopened_runs(reg, rs):
     assert f"\n<data>\n{ev.key} board: g1 {names[0]}, {names[1]} · bench: {', '.join(names[2:])}\n</data>" in text, "names people chose are fenced as data (stage C L1)"
     assert "## Upcoming runs not opened yet" in text
     line = next(ln for ln in text.splitlines() if ln.startswith("- barrow_deeps: "))
-    assert line.count(" default") == 6 and " 19:30 default" in line
+    assert line.count(" barrow-deeps") == 6 and " 19:30 barrow-deeps" in line  # each run by its schedule id
 
 
 def test_open_time_matches_a_listed_run_to_its_schedule(reg):
     reg.set_raid_override("barrow_deeps", "first_open", "2026-01-01T00:00", "t")
-    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00"}, "t")
+    reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid="barrow_deeps")
     nxt = next(t for s, t in rc.upcoming(reg, "barrow_deeps", reg.now_local(), 24 * 21) if s["id"] == "alt")
     start, sid = configops._open_time(reg, "barrow_deeps", nxt.strftime("%Y-%m-%d %H:%M"))
     assert (start, sid) == (nxt, "alt"), "a listed time opens that schedule's run, not a one-off"

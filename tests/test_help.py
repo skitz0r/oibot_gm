@@ -13,7 +13,7 @@ from datetime import timedelta
 
 import pytest
 
-from conftest import OWNER, join, lock_with_board, open_test_run
+from conftest import OWNER, join, lock_with_board, open_test_run, weekly
 
 from oibot_gm import comp, discord_help, help as help_mod, raidcycle as rc
 from oibot_gm.news import NewsStore, Proposal, ProposalStore, new_id
@@ -34,10 +34,10 @@ def real_member(reg, uid, name, cls="Priest", spec="Holy"):
 
 def applications(reg):
     if not reg.schedules("barrow_deeps"):
-        reg.set_raid_override("barrow_deeps", "slots", "Tue 19:30", "t")
+        weekly(reg, "barrow_deeps", "Tue 19:30")
     reg.set_recruitment("t", note="looking for healers", questions=[{"label": "Why us?", "required": True}, {"label": "Raid experience"}])
     reg.apply(NEWCOMER, "Newbie", "Newname", "Mage", "Frost", None, "https://logs.example/1", None, None, surname="Surname",
-              schedules=["barrow_deeps:default"], answers=[{"label": "Why us?", "answer": "Friends here " + INJECT}])
+              schedules=["barrow-deeps"], answers=[{"label": "Why us?", "answer": "Friends here " + INJECT}])
     reg.apply(APPLICANT2, "Other", "Othername", "Warrior", "Protection", None, None, None, None, answers=[{"label": "Why us?", "answer": "tanks"}])
     reg.decide(APPLICANT2, False, "Officer", "not a fit right now")
 
@@ -391,7 +391,7 @@ def test_run_snapshot_board_roles_closed_runs_and_next_sheet(reg, rs):
     old = open_test_run(reg, rs, days=6)
     old.state, old.log = "cancelled", ["cancelled by Boss: server down"]
     rs.save(old, "cancelled")
-    reg.set_raid_override("barrow_deeps", "slots", "Tue 19:30", "t")
+    weekly(reg, "barrow_deeps", "Tue 19:30")
     s = state(reg, rs, OWNER, True)
     assert "closed runs of Barrow Deeps: " in s and "server down" in s
     assert "next sheet: Barrow Deeps run " in s and "its sheet opens " in s and "19:30" not in s.split("next sheet:")[1].split("\n")[0]

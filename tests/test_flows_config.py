@@ -13,6 +13,7 @@ from oibot_gm import flows_config as fc  # noqa: F401 — registers the flows
 from oibot_gm.registry import parse_slots
 from oibot_gm.wizard import FLOWS, lint
 from wizard_harness import FakeInteraction, Harness
+from conftest import weekly
 
 LA = ZoneInfo("America/Los_Angeles")
 
@@ -69,9 +70,10 @@ def test_raid_config_multi_section_edit_saves_in_one_commit(reg, store, owner):
         await open_raid(h, reg)
         assert "cadence" not in options(h, "Pick a section"), "sheet timing is each schedule's own (C7)"
         await h.pick("Pick a section", "times")
-        await h.press("Add a run time")
+        await h.press("Add a schedule")  # phase 3: a raid has no run times of its own
+        await h.pick("What kind of schedule?", "weekly")
         assert isinstance(h.modal, fc.MultiForm) and h.modal._items["nights"].max_values == 7
-        await submit_multi(h, nights=["Tue", "Thu"], hour="19", minute="30")
+        await submit_multi(h, name="Raid nights", nights=["Tue", "Thu"], hour="19", minute="30")
         assert "Tue 7:30 PM" in h.text and "Thu 7:30 PM" in h.text and "19:30" not in h.text
         await h.pick("Change this schedule", "cadence")  # the schedule's own week: a preset
         await h.pick("Pick a run's week", "standard")
@@ -80,7 +82,7 @@ def test_raid_config_multi_section_edit_saves_in_one_commit(reg, store, owner):
         await h.pick("Change a switch", "autofill=off")
         await h.press("Back")
         await h.press("Back to the sections")
-        assert "2 unsaved changes" in h.text  # the run times + the schedule (its week and a switch)
+        assert "1 unsaved change" in h.text  # the schedule (its run times, its week and a switch)
         await h.pick("Pick a section", "weights")
         await h.submit(h.modal, rank="5", main="2", sat_out="2", signup_order="1")
         await h.pick("Pick a section", "length")
@@ -99,8 +101,8 @@ def test_raid_config_multi_section_edit_saves_in_one_commit(reg, store, owner):
         assert "✅" in h.text and h.screen["view"] is None
     asyncio.run(go())
     assert commits(store) == n0 + 1  # ONE commit for every section
-    rd, sd = reg.raid_def("barrow_deeps"), reg.schedule_def("barrow_deeps", "default")
-    assert rd["slots"] == ["Tue 19:30", "Thu 19:30"]
+    rd, sd = reg.raid_def("barrow_deeps"), reg.schedule_def("barrow_deeps", "raid-nights")
+    assert sd["schedule"]["slots"] == ["Tue 19:30", "Thu 19:30"] and rd["slots"] == []
     assert (sd["signup_lead_hours"], sd["nudge_hours_before"], sd["lock_hours_before"], sd["confirm_hours_before"]) == (120, 72, 24, 6)
     assert rd["weights"]["rank"] == 5 and rd["lockout_days"] == 5 and rd["duration_hours"] == 4.5
     assert sd["autofill"] is False and rd["split_policy"] == "rotation" and rd["notes"] == "Bring fire resistance."
@@ -108,11 +110,13 @@ def test_raid_config_multi_section_edit_saves_in_one_commit(reg, store, owner):
 
 def test_a_refused_cadence_is_caught_in_its_section_and_writes_nothing(reg, store, owner):
     h = Harness(reg)
+    weekly(reg)
     n0, before = commits(store), (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
 
     async def go():
         await open_raid(h, reg)
         await h.pick("Pick a section", "times")
+        await h.pick("Pick a schedule", "barrow-deeps")
         await h.pick("Change this schedule", "cadence")
         await h.pick("Pick a run's week", "custom")
         await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="24", lock_hours_before="48", confirm_hours_before="6", fill_ask_hours="inherit")
@@ -136,7 +140,7 @@ def test_a_refusal_at_save_keeps_the_draft_and_leaves_config_and_git_untouched(r
     async def go():
         await open_raid(h, reg)
         await h.pick("Pick a section", "times")
-        await h.press("Add another schedule")
+        await h.press("Add a schedule")
         await h.pick("What kind of schedule?", "lockout")
         await submit_multi(h, name="Reset night", days=["3"], hour="21", minute="0")
         await h.press("Back to the sections")
@@ -155,11 +159,13 @@ def test_a_refusal_at_save_keeps_the_draft_and_leaves_config_and_git_untouched(r
 
 def test_cancel_from_the_hub_writes_nothing(reg, store, owner):
     h = Harness(reg)
+    weekly(reg)
     n0, before = commits(store), (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
 
     async def go():
         await open_raid(h, reg)
         await h.pick("Pick a section", "times")
+        await h.pick("Pick a schedule", "barrow-deeps")
         await h.pick("Change this schedule", "cadence")
         await h.pick("Pick a run's week", "same_week")
         await h.press("Back to the sections")
@@ -174,16 +180,18 @@ def test_cancel_from_the_hub_writes_nothing(reg, store, owner):
 def test_run_times_add_and_remove_round_trip_through_parse_slots(reg, owner):
     h = Harness(reg)
     wiz = {}
+    sid = weekly(reg, "barrow_deeps", "Mon 20:00")
 
     async def go():
         await FLOWS["raid_config"](h.command(), reg, raid="barrow_deeps", section="times")  # another flow jumps straight in
+        await h.pick("Pick a schedule", sid)
         assert "Add a run time" in h.buttons()
         wiz["w"] = h.screen["view"]
         await h.press("Add a run time")
         await submit_multi(h, nights=["Sat", "Tue"], hour="21", minute="15")
-        assert wiz["w"].draft["slots"] == ["Tue 21:15", "Sat 21:15"]  # sorted by the week
+        assert wiz["w"].sched_slots(sid) == ["Mon 20:00", "Tue 21:15", "Sat 21:15"]  # sorted by the week
         await h.press("✕ Tue 9:15 PM")
-        assert wiz["w"].draft["slots"] == ["Sat 21:15"] and "Dropped Tue 9:15 PM" in h.text
+        assert wiz["w"].sched_slots(sid) == ["Mon 20:00", "Sat 21:15"] and "Dropped Tue 9:15 PM" in h.text
         await h.press("Add a run time")
         await submit_multi(h, nights=["Sat"], hour="21", minute="15")
         assert "❌" in h.text and "Sat 9:15 PM is already a run time" in h.text
@@ -191,8 +199,8 @@ def test_run_times_add_and_remove_round_trip_through_parse_slots(reg, owner):
         await h.press("Save")
         await h.press("Save")
     asyncio.run(go())
-    slots = reg.raid_def("barrow_deeps")["slots"]
-    assert slots == ["Sat 21:15"] and parse_slots(slots) == slots
+    slots = reg.schedule_entry(sid)["slots"]
+    assert slots == ["Mon 20:00", "Sat 21:15"] and parse_slots(slots) == slots
 
 
 def test_the_minimums_section_sets_one_minimum_with_a_reason(reg, owner):
