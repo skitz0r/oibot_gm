@@ -686,7 +686,8 @@ The first start writes one commit per guild (big-guys-for and oi have raid-level
 their timing written out) and posts one ops line per guild. Note the data repo's head before the restart.
 
 Going back to the phase-1 code: stop the bot, run `uv run python scripts/lower_schedules.py --minimums-only`
-(`--dry-run` first), start the older code. Timing written on schedules reads there as each schedule's own values,
+(`--dry-run` first), start the older code. The older code is **main at 53b9153** (phase 1) — never the branch commit
+4ef2e35, which cannot propose a run on its own (its solver lost a function its callers still used). Timing written on schedules reads there as each schedule's own values,
 unchanged. What cannot come back: a raid-level timing value that had no schedule (named in the ops line), a role's
 old maximum, a tank or healer aim. Going back further than phase 1: run the script without the flag.
 

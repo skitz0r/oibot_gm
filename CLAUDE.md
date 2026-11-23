@@ -5,7 +5,7 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
 ## Principles (do not violate)
 - **Code computes, Claude explains.** Rosters come from the CP-SAT solver, loot scores from `loot/scoring.py`. The model only judges against the policy, explains, and flags. It never edits state directly; NL requests become structured ops (`nl.py`) that code applies.
 - **Humans decide.** Every award/roster change goes through an approve/override step. Overrides carry a reason and are stored as precedents.
-- **Game version is data.** Anything version-specific lives in `profiles/<version>/*.yaml` (classes, buff matrix, comp rules, raids, items, loot defaults). No `if tbc:` in code. Raids (instances: size, lockout, duration, desired comp) are profile defaults + guild overrides (`guild.yaml: raids`) — read them through `Registry.raid_def` / `role_bounds`, never `profile.raids` directly for guild-facing numbers.
+- **Game version is data.** Anything version-specific lives in `profiles/<version>/*.yaml` (classes, buff matrix, comp rules, raids, items, loot defaults). No `if tbc:` in code. Raids (instances: size, lockout, duration, minimums) are profile defaults + guild overrides (`guild.yaml: raids`) — read them through `Registry.raid_def` / `role_bounds`, never `profile.raids` directly for guild-facing numbers.
 - **Provenance is explicit.** `fixtures/<guild>/provenance.md` is injected into prompts; keep it truthful when fixtures change. Never let the model claim a raider entered something.
 - **Member text is data, not instructions.** Notes, names, chat go into delimited blocks; outputs are schema-validated and names checked against the candidate set.
 - **Secrets only in `.env`** (gitignored). Never print them.
@@ -27,8 +27,8 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
   (one DM per distinct error per 30 min). Decisions: out/dual_interface_decisions.md.
 - **Iconography rule (user decision 2026-09-17):** in-game icons stand on their own — class, spec, role and aura icons never get a text label beside them on the site; a role count is the role icon plus a number; a buff row is icons only (tooltips carry the names). Don't add "3 tank" style labels, "seated" totals or buff-name strings next to icons. A **spec icon alone** denotes role + spec on a member line (no role icon beside it; role icons are for counts only). DMs and Discord cards reuse the board's group layout — one member per line, never the whole roster on one line.
 - **Copy rule (user decision 2026-10-24):** every label, hint, tooltip, empty state and card line — site and Discord — says what
-  the thing does FOR THE READER, in the glossary's word (`docs/manual.md` §1a *The words*): limits (owner) not bounds, aims
-  (officers) not (comp) targets, rostered not seated (a seat is a place on the roster, that word stays), who could play not the pool, a run's week not cadence; never solver,
+  the thing does FOR THE READER, in the glossary's word (`docs/manual.md` §1a *The words*): a minimum, never limits or aims (nor bounds,
+  (comp) targets), rostered not seated (a seat is a place on the roster, that word stays), who could play not the pool, a run's week not cadence; never solver,
   derived, rev, series, ephemeral, ev/rc/ctx, matrix, override(s) as a config noun (the loot verb *Override…* stays). An empty
   list, card or section names what is missing and how to fill it (never "none yet" / "not set" / "none" / "—" alone); a bare
   dash in a table cell or an icon column stays (the Iconography rule — no words beside icons), and a review diff's "not set →
@@ -209,7 +209,10 @@ src/oibot_gm/
                        apply(bot, reg, picks [(uid, label, armory id)], by, *, by_id, via) → [{uid, label, id, ok, text}]: officers
                        (live), each pick re-checked on the current snapshot (ROW_GONE / ANOTHER_CHARACTER / link_refusal) and linked through
                        find_for_link + link_character on its own; nothing links without an officer's pick
-  roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
+  roster/              solver.py (CP-SAT select+group, pins/forces, per-player bonus; SolveOptions.minimums = slot → per-roster minimum, NEVER a
+                       constraint: _minimum_terms rewards each seat up to a minimum MINIMUM_REWARD = 2 × EXTRA_ROLE_COST, _extra_role_terms costs a
+                       tank / healer past theirs EXTRA_ROLE_COST; no role maximum; SolveOptions.lead_rostered = a follow-on never charges the lead's
+                       rostered as extra; scaled_role_minimums = the game's tank / healer minimums, rounded up — design §5.67 phase 2), explain.py (advisories), coverage.py (slot-aware)
   loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
                        Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),
                        session.py (LootSession keyed (guild, run), Drop/drop_id, Proposal + pending Override, batch_rev/drops_rev, LootChanged/LootBusy,
@@ -298,6 +301,16 @@ src/oibot_gm/
                        writes the file without them at its next save — so stop the bot, run scripts/lower_schedules.py (registry.lower_schedules:
                        each raid's entries back under raids.<id> as raid_override reads them, the list removed, one commit per guild; an
                        unreadable entry refuses that guild), then start the older code;
+                       Phase 2 (§5.67, C7): SCHEDULE_TIMING = the nine values each stored schedule carries written out (write_out_timing on every
+                       _set_raid_rows; timing_suggestion(raid) seeds a new one and is what "inherit" means); a raid refuses timing or a cadence preset
+                       (TIMING_ON_SCHEDULE); effective_raid(base, over) = raid_def's pure merge; lift_timing(cfg, raids, skip) at every load (on a copy:
+                       timing off every raid onto its schedules, a `default` entry where the game gives run times, live run dicts stamped with
+                       fill_ask_hours, a refused raid kept) → timing_moved / timing_dropped, saved by migrate_schedules in the same commit, the start's
+                       second ops line from timing_saved; minimums (D16): raids.<id>.minimums {slot: {min, note?}}, minimums(raid, size) = THE reader
+                       (the game's tank / healer scaled up, a raid's own half up, never below 1), set_minimums = THE writer (NO_UPPER_LIMIT,
+                       MINIMUM_ON_RAID, role_limit_refusal), lift_minimums at load (comp / comp_targets → minimums; maxima and tank / healer aims
+                       dropped; its ops line), lower_minimums = scripts/lower_schedules.py --minimums-only (the way back to phase 1 = main 53b9153,
+                       never 4ef2e35); a lift that fails at load leaves the file and is one ops warning (lift_failed_line);
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
                        applies in Discord before registering: every first-character path checks it — Discord, plain text, the Me page);
                        PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check;
@@ -319,8 +332,7 @@ src/oibot_gm/
                        Attendance (§5.47, D49): done_runs (cached), attendance(member, window_days, bench=) → (attended, total) = rostered (+ confirmed on
                        recurring) of the runs they were a regular of / joined and not away; attendance_runs (rows), attendance_tracked, attendance_known
                        (None until ATTENDANCE_MIN_RUNS real runs: neutral), attendance_text = THE sentence; window = loot_cfg attendance.window_days
-                       Phase 3 (§5.44): set_comp_targets(raid|run, {slot: {min,max,note}|None}, by, rev=) = THE writer of officer comp targets (bounds
-                       stay the owner's; outside them → "change the bounds first (owner)"), comp_slot / comp_slot_words; schedule_removal_effects →
+                       Phase 3 (§5.44): comp_slot / comp_slot_words (a minimum's slot; set_minimums replaced set_comp_targets); schedule_removal_effects →
                        Effects(regulars, open_runs, loses).lines()/sentence() (loses = the open runs' lock fate: the raid's weights, no regulars);
                        schedule_runs_open; timezone_runs(zone, rs) = THE rows (old/new/moved, locked, movable) behind timezone_change_effects(zone, rs,
                        mode) and timezone_refusal (a locked run + no mode → refused); set timezone carries field keep|move (ops_from_fields
@@ -410,7 +422,7 @@ src/oibot_gm/
                        /me loot-ask = flows_appeal, a question about one of your own awards;
                        /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
                        /roster overview (always ephemeral, per-schedule fields, officers' Post button)|add|remove|members|list|confirm|rank|set-main|char|professions|armory (flows_armory)|
-                       absences|absent|back|comp|applicants|applicant (officers; `comp` = flows_config.CompTargetsWizard, the desired comp's targets;
+                       absences|absent|back|comp|applicants|applicant (officers; `comp` = flows_config.CompTargetsWizard, a raid's minimums;
                        `poll` retired, PlanButton is a stub); /gm config show = config_show_embed (one field per configops.config_summary section);
                        Rosters (design §5.30, out of the roster redesign): a run's roster is ephemeral in config `rosters[]` (key/size/cutoffs per run) and WHO
                        holds a seat lives only in the run file (rc.rostered_runs reads it); RegisteredCharacter.rosters holds only REGULARS, as series keys
@@ -444,7 +456,7 @@ src/oibot_gm/
                        lockout · pickup templates; `default` = the raid's own slots) + cadence (schedule_def: slots, signup_lead/lock/confirm hours,
                        weights) → upcoming/schedule_starts/open_run(schedule=) (ephemeral roster per run, key suffix -<schedule id> unless default);
                        run_rosters(ev) = the schedule's expected rosters N (health/needs/sheet measure against N × size, the lock aims for N), Join/Bench/No thanks (in/sub/out), propose() at lock (weights, pins,
-                       role min/max, splits into several rosters per slot), confirmations (placement asks on the run key), free_seat/seat_player/
+                       the raid's minimums, splits into several rosters per slot), confirmations (placement asks on the run key), free_seat/seat_player/
                        expire_confirmations, fill engine (after lock only: benched joiners + Bench first → pool → offspec → alt swaps, paired with a backfill
                        when the vacated role would go short; asks expire after fill_ask_hours). Per-raid `nudge`/`nudge_hours_before`/`autofill`/`open_dm`
                        come from raid_def. No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
@@ -612,7 +624,7 @@ src/oibot_gm/
   wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)
   wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow + AbsenceClearWizard = I'm back) · flows_raid ·
                        flows_config (+ OwnerTransferWizard; AuraWizard = a draft hub per buff, one Save this buff through configops.apply_ops; CompTargetsBlock = the
-                       Group make-up screen's targets block, in RaidConfigWizard and in CompTargetsWizard = /roster comp; ChannelsWizard
+                       Minimums block (officers), in RaidConfigWizard (officers; no sheet timing) and in CompTargetsWizard = /roster comp; ChannelsWizard
                        (/gm config channels: ChannelSelect / — not set — → draft → Review → apply_ops), ChannelSetWizard (the eight shortcuts' one confirm),
                        OfficersWizard (/gm config officers: RoleSelect, Map <legacy name>…), CompanionsWizard (/gm config companion: the hub → Issue… label
                        modal → member picker → decide → the DM; Revoke… → decide), ArmoryGuildWizard (/gm config armory = flow armory_guild, §5.1: unlinked → the name
@@ -636,7 +648,9 @@ src/oibot_gm/
                        coalesce merges raid / schedule / buff / family / plain / absolute recruit / comp ops into one write each; aura_reset_one_sentence;
                        flows_config._save_settings = the settings wizards' (timezone, about) Save through apply_ops.
                        Phase 3 (§5.44): config_summary(reg, bot, audience) → [SummarySection] (owner: host_facts) + summary_text; the `comp` structured
-                       kind → comp_target ops → Registry.set_comp_targets; schedule_pause_sentence; the timezone CONSEQUENCE_HOOK
+                       kind → comp_target ops → Registry.set_minimums (raid_set / raid_reset / schedule_set / schedule_remove / comp are officers', not
+                       OWNER_OPS — news.owner_setting reads it; plain text's `comp` group "Raids, schedules and policy", `raids` = "Auras"; a schedule's
+                       run's-week preset is `schedule_set <id>.cadence`); schedule_pause_sentence; the timezone CONSEQUENCE_HOOK
                        Professions (the owner, 2026-11-16): NOT written from plain text — the schema tells the parser so ("Not settable here") and
                        _character_rows refuses the four old fields (PROFESSION_FIELDS) with PROFESSIONS_NOT_HERE; the editors are /me professions and the
                        Me page, a linked character follows the armory. The listening gate (discord_bot.LISTEN_QUESTION / LISTEN_CRITERIA) treats "I have /
@@ -661,7 +675,7 @@ src/oibot_gm/
                        list_guild_guides / withdraw_guild_guide / restore_guild_guide (§5.63: actor; no upload or get tool — no BattleTag in a transcript).
                        Setup tools (raid_set, schedule_*, raid_reset, aura_*, family_set, set_channel, set_config, set_recruitment, set_plain_permissions) send
                        TYPED changes through ops_change(guild, changes, preview) → POST /api/ops/change (`confirmed`; preview=True returns the Described lines);
-                       set_comp_target (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44
+                       set_minimum (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change, /gm config plain (the D37 READ view, registered here); handle_change for every
                        plain-text path (ConfigConfirmView re-authorizes the presser; a diff nobody presses in 10 min DELETES itself —
                        PendingView.expire, DELETE_ON_TIMEOUT; a policy reading nobody confirms in 15 min UNWINDS its edit as Discard would
@@ -826,7 +840,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
                        sets the selection; SSE is per guild (`publish(topic, guild)`; None = every page); Discord-side site URLs carry `?g=<key>`.
                        Phase 3 (§5.44): POST /api/ask (TellTheBot's question half over HelpMixin.help_answer: officer view for officers, member view
-                       otherwise; an officer's request to act → {act: true}), GET /api/config/summary, /api/readiness + targets/bounds/rev/slots,
+                       otherwise; an officer's request to act → {act: true}), GET /api/config/summary, /api/readiness + minimums/minimum/rev/slots,
                        /api/meta timezones (grouped, picked never typed) + about_max + cadence_presets, schedule_json next_if_active + the server's sentences
                        Listening (§5.59): GET /api/plain-permissions adds listen / listen_modes / listen_words / listen_ready / listen_recent (listen_json:
                        `when` in local12 words, channel_name); POST /api/admin/plain-permissions (api_ops) takes listen / set_listen into the same plain change
@@ -834,7 +848,7 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        components/CharacterTable.tsx (the Me page's characters; Retire / Delete / Make main / Save print only /api/me/characters' preview `sentences`), components/ProfessionLine.tsx (a character's professions on one line: icon + skill ONLY — no recipe chips since 2026-11-13, the tooltip carries the specialization and the recipe count; Me and Members) + ProfessionsEditor.tsx (one character's professions in place from the ⋮ › Professions…; with meta.professions.recipe_list the Add box is RecipePicker.tsx = a search of that profession's recipes over /api/professions/find?profession= — a pick = the recipe id, twins by category, held ones left out, the server's empty / "more" sentences — and `unmatched` recipes are marked and sent back untouched; without the list a typed name; Save prints only the preview's `sentences` — Me: /api/me/characters, Members: /api/members/set — §5.60, §5.64), AbsencesModal/AbsencesCard/AbsencesTable.tsx (From picked on a calendar + For how long, the server's absence_consequence above Add the absence, I'm back; the Absences tab a card per absence below sm),
                        components/ConfirmModal.tsx (useConfirm), components/ReviewModal.tsx (THE edit-mode review: ReviewModal + useOpsSave = the tiered Save over
                        /api/ops/change, the result sheet, stale-token / restart handling; api.ts opsApi + OpsChange / Described / OpsReply), components/PlainPermissions.tsx (Ops page: who may do what, where; §5.59 phase 2: the Listening column — a Watches / Replies badge, the owner's
-                       Off · Watches · Replies sent as `listen` in the one plain change — and Recent decisions (plain.module.css: a card per verdict below sm, the `listen` topic)), components/RaidCard.tsx (the Raids card's pieces — §5.54: Section / Panel / Pair, WhenItRuns (live_runs + next_run), RunWeek fed by a rule OR an editor's draft (WeekRule), SeatWeights; HOUR_WORDS / SWITCH_WORDS / WEIGHT_WORDS = THE words of a run's week, read by the card and both editors; §5.56: WhenItRuns takes either page's raid (RunsOf) and RunStrip = one run's week with a now mark from ev_json.week — both on the Rosters cards too), components/ScheduleCard.tsx (Raids page schedules + the editor IN PLACE of the row: Pause/Resume, diff-only Save, presets that light up when matched, the draft's timeline, the server's preview), components/TellTheBot.tsx (the officers' box: /api/ask → or the plain-text preview + Apply; officer pages' rail + each SheetCard; NEVER on Me — D40), components/LevelChip.tsx (THE ready / thin / short chip: Readiness and Rosters' Regulars, words from meta.level_words), components/CompTargets.tsx (the limits + aims rows, Set aims / Edit aims → a `comp` change; a phone-safe grid editor; SlotIcon draws dps as melee + ranged; Readiness + Raids), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
+                       Off · Watches · Replies sent as `listen` in the one plain change — and Recent decisions (plain.module.css: a card per verdict below sm, the `listen` topic)), components/RaidCard.tsx (the Raids card's pieces — §5.54: Section / Panel / Pair, WhenItRuns (live_runs + next_run), RunWeek fed by a rule OR an editor's draft (WeekRule), SeatWeights; HOUR_WORDS / SWITCH_WORDS / WEIGHT_WORDS = THE words of a run's week, read by the card and both editors; §5.56: WhenItRuns takes either page's raid (RunsOf) and RunStrip = one run's week with a now mark from ev_json.week — both on the Rosters cards too), components/ScheduleCard.tsx (Raids page schedules + the editor IN PLACE of the row: Pause/Resume, diff-only Save, presets that light up when matched, the draft's timeline, the server's preview), components/TellTheBot.tsx (the officers' box: /api/ask → or the plain-text preview + Apply; officer pages' rail + each SheetCard; NEVER on Me — D40), components/LevelChip.tsx (THE ready / thin / short chip: Readiness and Rosters' Regulars, words from meta.level_words), components/CompTargets.tsx (a raid's minimums, one row each: At least + Why, Set minimums / Edit minimums → a `comp` change, officers; a phone-safe grid editor; SlotIcon draws dps as melee + ranged; Readiness + Raids), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
                        components/ChannelsCard.tsx + SetupCard.tsx (Config: channels edit mode via useOpsSave; Setup / Host cards),
                        components/ItemName.tsx (§5.65) = THE item name: with an id and /api/meta.item_url (setItemUrl, set by App) a plain link (new tab,
                        noopener noreferrer, `{id}` filled), else text; no page names Wowhead or loads its script; used on Professions, Loot › Tonight ·

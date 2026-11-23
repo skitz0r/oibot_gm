@@ -699,7 +699,7 @@ bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,men
 
 **Surfaces.** Discord: `/gm config raid` → *Schedules* (section key `times`; a raid with only its run times opens straight on them, so the old flow is unchanged; list / add by kind / change name, rosters, cadence, behaviour, pause, remove; all in the draft, `sched_checked` refuses on the spot with the registry's own rules; Save lists per-schedule changes and each schedule's next three runs). `/raid open` offers *Next run* · *Another upcoming run…* (every recurring schedule's upcoming runs labelled by schedule name) · *Ad hoc run…* (a pickup template, or *One-off — pick a day and time*: `ADHOC_SCHEDULE`). Web: `/api/raids` carries `schedules` (`schedule_json`: machine forms for the editors plus `label`, `slot_labels`, `time_label`, `next` in words), `POST /api/admin/raid/schedule {instance, id, fields}` and `/api/admin/raid/schedule/remove`; `/api/raid/{rid}/open` takes `schedule` (`adhoc` = a one-off; a `when` with no schedule opens the upcoming run at exactly that time, else a one-off — `rc.open_schedule`, shared with plain text's `run_open`); the Raids page has a Schedules block per raid (`components/ScheduleCard.tsx`: class badge, regulars count, fields per class, each inherited value's source, confirmations, seat order), the Rosters page *Open next run* and *Start ad hoc run*. Plain text: `schedule_set` (field `<id>.<setting>`, `<id>.lockout` = "days at time") and `schedule_remove`; `run_open` takes a schedule id in `field`. MCP: `schedule_set`, `schedule_remove`, `open_run(schedule=)`; schedules come back in `list_raids` / `get_raid`. Help: the static *Raid schedule* guide lists each schedule's next three runs; `/ask` gets every schedule in words. Out of scope: two different instances under one signup.
 
-**Stored at guild level since 2026-11-22** (§5.67): the entries live in `guild.yaml: schedules:` with a lineup; `raid_def` still hands them back as `raids.<id>.schedules` / `slots`.
+**Stored at guild level since 2026-11-22** (§5.67): the entries live in `guild.yaml: schedules:` with a lineup; `raid_def` still hands them back as `raids.<id>.schedules` / `slots`. **Since 2026-11-23** (§5.67 phase 2) the cadence fields above are each schedule's own: a raid holds no sheet timing, every stored schedule carries the nine values written out, and "inherit" means the game's suggestion.
 
 ### 5.28 Applications in Discord (built 2026-09-27)
 
@@ -2337,6 +2337,10 @@ them: D37 (plain-text permissions edited on the web only — untouched here), D4
 officer pages only), D44 (no DM to a server owner about a superuser's change), D47 (no DM to regulars when a schedule goes),
 D27 (no "ask to be a regular" button — not built). Every page and wizard below writes through configops (ops_from_fields →
 authorize_ops by privilege → apply_ops); no surface calls a registry verb directly.
+
+**Since 2026-11-23 (§5.67 phase 2, D16)** the two tiers below are one map of minimums: `Registry.set_minimums` replaced
+`set_comp_targets`, a raid holds `minimums` (no `comp` bounds, no `comp_targets`, nothing on a run), no role has an upper
+limit, officers edit them, and MCP's tool is `set_minimum`. The text below is the history of what phase 3 built.
 
 **Comp targets: one writer, two tiers (RD-03 / RD-12).** `Registry.set_comp_targets(raid_or_run, {slot: {min, max, note} |
 None}, by, rev=)` is the only writer of officer targets: a `_config_verb` on the raid section, every slot validated first
@@ -5356,7 +5360,7 @@ officer, owner or tool view of who watches what; a chart image in Discord; histo
 history of anything but the lowest price and quantity listed; sale prices. The history file's real size after a week is
 still to be measured and recorded in the operator notes.
 
-### 5.67 Raids, events and schedules: schedules stored at guild level (phase 1 built 2026-11-22)
+### 5.67 Raids, events and schedules: schedules stored at guild level (phase 1 built 2026-11-22; phase 2 2026-11-23)
 
 **Why.** The owner's direction (2026-11-22): raids and schedules are distinct things. A schedule says WHEN one or more
 raids run; a raid says what the instance is. Until now a schedule lived under the raid it ran (`raids.<id>.schedules`,
@@ -5416,7 +5420,90 @@ left as it was, the line naming the entry. `--dry-run` shows what would change; 
 `OIBOT_DATA_DIR`, else `../oibot_gm-data`. The order: stop the bot, run the script, then start the older code. (A
 follow-on's `starts` is written back too; older code ignores it.) This code lifts a lowered file again at its next start.
 
-**Later phases** (spec §9) change what people see: timing written onto each schedule and dropped from the raid,
-officers editing schedules, guild-unique schedule ids with regulars keyed by them and no `default` schedule, events
-with their own identity and reschedule, lineups of up to four raids with a start each, then the pages, the Discord
-wizards and the words. Tests: `tests/test_guild_schedules.py`.
+**Phase 2 built (2026-11-23): raids without times, one minimum, officers edit.** Spec §9 item 2 (D8, D16, C6, C7,
+C10, C17, C19); plan `docs/superpowers/plans/2026-11-23-raids-without-times.md`.
+
+*Timing is each schedule's own (C7).* `SCHEDULE_TIMING` = the nine values a schedule owns: `signup_lead_hours`,
+`nudge_hours_before`, `lock_hours_before`, `confirm_hours_before`, `fill_ask_hours`, `nudge`, `autofill`, `open_dm`,
+`confirm`. Every stored entry carries all nine written out (`write_out_timing(row, rd)`: what the row resolves to
+against the effective raid; a value the row holds is never replaced), done by `_set_raid_rows` on every write. A new
+schedule is seeded from `Registry.timing_suggestion(raid)` (the profile's raid and `RAID_DEFAULTS`; a pickup from
+`ADHOC_DEFAULTS`), and "inherit" on a schedule's field now means that suggestion for its first raid, never an old
+raid-level value. A raid refuses timing whenever a timing key or a `cadence` preset is present, on every surface, with
+`TIMING_ON_SCHEDULE` ("Sheet timing belongs to each schedule now. Change it on the schedule."); the run's-week preset
+moved to schedules (`schedule_set <id>.cadence`, the schedule editors). An edit that moves a schedule's opening or lock
+past its stored reminder moves the reminder (halfway; a pickup's to an hour before its lock) instead of refusing. A
+one-off keeps `ADHOC_DEFAULTS` exactly. `split_policy` and `weights` are not timing: the raid keeps a default a schedule
+may override (C6). `effective_raid(base, over)` is the pure merge behind `raid_def`; it is unchanged for timing, and
+after the lift no override holds any (only a raid whose phase-1 lift was refused can, and it keeps reading it).
+Clearing a `default` schedule's run times keeps a row that holds timing an officer set (`_bare_default`).
+
+*The timing lift.* At every load `lift_timing(cfg, raids, skip)` (on a copy) writes out every readable entry's nine
+values against what its raid read then, takes every timing key off every raid override (an override left empty is
+dropped) and stamps `fill_ask_hours` on each live run dict that lacks it (never a test run) with the value the old merge
+gave, so `ask_deadline` reads the same — the only run-dict write (C10). A raid with game run times and raid-level timing
+but no stored entry gets a `default` entry holding it. A raid-level value no schedule takes is dropped and named — this
+includes a raid that is only the second entry of another raid's lineup, since a follow-on reads its lead's timing. A
+raid the phase-1 lift refused (`skip`) is left exactly as it was. `Registry.timing_moved` / `timing_dropped` keep the
+lines; `migrate_schedules()` saves them in the same one commit as the phase-1 lift ("sheet timing moved onto each
+schedule"; every phase-1 file gets one such save, since its entries gain written-out timing, with no ops line when
+nothing moved) and puts the start's line into `timing_saved`. `_schedules_migrate` then posts it as a second info line:
+"Sheet timing now belongs to each schedule. Moved: Hyjal Summit · tuesday: reminder 3 days before. Dropped, with no
+schedule to take it: Barrow Deeps: reminder 36 hours before." A later start writes nothing and says nothing.
+
+*One minimum per role or class (D16).* A raid's make-up is one map, `raids.<id>.minimums: {slot: {min, note?}}`, a slot
+being a role (tank, healer, melee, ranged), a class (`Paladin`) or `Class:Spec`; the note is the officers' reason,
+shown as a tooltip. No role has an upper limit anywhere. `Registry.minimums(raid, size)` = the guild's entries over
+the profile's over the game's tank / healer minimums; the game's are `comp_rules` scaled by `solver.scaled_role_minimums`
+(rounded UP), a raid's own entries are scaled by n × size / raid size rounded half up and never below 1 when the
+entry is 1 or more; zero entries are left out. `role_bounds` is `{role: {min}}` only. `set_minimums(raid, {slot:
+{min, note?} | None}, by)` is THE writer (one commit; None = back to the game's); it refuses a `max` (`NO_UPPER_LIMIT`),
+a roster key (`MINIMUM_ON_RAID`; `configops._minimum_raid` refuses an exact run, event or roster key the same way on
+every surface and reads a raid's name as the raid), a slot that isn't
+a role, class or spec, a minimum past the raid's size and a reason past `COMP_NOTE_MAX`. The old role fields
+(`tank_min` … `dps_max`, a `comp` map) are refused by `role_limit_refusal` ("Set a role's minimum as a minimum: at least
+3 healers."). `lift_minimums` (at load, on a copy, same commit) keeps comp's tank and healer minimums and every class,
+spec, melee or ranged entry of `comp_targets` with its reason, and drops every maximum, comp's dps, a tank / healer
+aim (comp's wins), an entry with no minimum and a run dict's own `comp_targets`; its line is a third info line at start
+("Make-up is one minimum per role or class now: …"). Neither live guild held `comp` or `comp_targets` when this
+shipped, so only the game's minimums apply there, now without a maximum. A timing or make-up lift that fails at load
+leaves the file as it was and is one ops warning per guild (`lift_failed_line`: what was left, then how to fix it).
+
+*The solver.* `SolveOptions.minimums` (slot → per-roster minimum, laid over the game's) replaces `role_min` /
+`role_max`; phase 1's hard per-roster role floor and every role maximum are gone, and no minimum is ever a
+constraint. `_minimum_terms`: per slot and per roster (the whole pool for one roster), each seat that counts toward a
+minimum, up to it, earns `MINIMUM_REWARD` = 2 × `EXTRA_ROLE_COST`, so everyone who joined for a short slot is rostered
+before any of its seats goes elsewhere, and a seat that fills a minimum is taken even when it is a tank or healer past
+theirs. `_extra_role_terms`: each tank or healer above their minimum in a roster costs `EXTRA_ROLE_COST` (more than any
+seat earns otherwise), so one sits only when nobody else joined or officers placed them; a healer past the minimum with
+a damage offspec is switched instead. `SolveOptions.lead_rostered` = a follow-on's players the lead rostered: on the
+follow-on the allowance is the minimum or the lead's own players in the role, whichever is more, so a follow-on never
+charges the lead's rostered as extra and the two 10s stay the lead's 20 split in two (§5.62). A hybrid counts toward
+one spec minimum, never two. First come (one-offs, `first_come_out`) acts on tank and healer minimums only: a tank or
+healer past theirs waits until every other joiner has a seat. A class, spec, melee or ranged short is shown on the run
+(`gaps()['classes']`, "short 1 Paladin" on the card and the fill state) and never asked for: the fill engine asks for
+roles only.
+
+*Officers edit raids and schedules (D8, C17).* `raid_set`, `raid_reset`, `schedule_set`, `schedule_remove` and the
+`comp` kind left `configops.OWNER_OPS`; the site's change route, the admin translators, `/gm config raid` (officers; the
+*Minimums* section, no sheet timing), `/roster comp`, the Raids and Readiness pages and MCP follow it. Plain text: the
+four raid and schedule ops join the `comp` group, relabelled "Raids, schedules and policy" (officers by default); the
+`raids` group is now "Auras" (owner). Group ids are unchanged, so stored policies still load. The MCP tool is
+`set_minimum` (was `set_comp_target`); op and kind names stay. `news.owner_setting` reads `OWNER_OPS`, so a news-review
+proposal that changes a raid or a schedule is approvable by officers; aura changes stay the owner's. The raid wizard's
+Reset goes through the one `raid_reset` op with its removal words, rev and audit line.
+
+*Going back.* Older code means **main at 53b9153** (phase 1), never the branch commit 4ef2e35 (its solver lost a
+function its callers still used, so it can't propose a run). Stop the bot, run `uv run python scripts/lower_schedules.py
+--minimums-only --dry-run`, then without `--dry-run`, then start 53b9153. `--minimums-only` runs `lower_minimums`:
+each raid's tank and healer minimums go back to `comp: {role: {min}}` (both written, the missing one from the
+profile), every other minimum to `comp_targets: {slot: {min, note?}}`, `minimums` removed, one commit per guild; the
+schedules stay where they are, and the phase-1 code reads each schedule's written-out timing as its own values,
+unchanged. What cannot come back: a raid-level timing value that had no schedule (named in the start's line), a role's
+old maximum, a tank or healer aim. Going back past phase 1: the script without the flag (minimums first, then
+schedules, as above).
+
+**Later phases** (spec §9) change what people see: guild-unique schedule ids with regulars keyed by them and no
+`default` schedule, events with their own identity and reschedule, lineups of up to four raids with a start each, then
+the pages, the Discord wizards and the words. Tests: `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`,
+`tests/test_minimums.py`, `tests/test_minimums_solver.py`, `tests/test_officer_raids.py`.

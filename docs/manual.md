@@ -31,8 +31,9 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   with an optional reason, and no upper limit (*"at least 3 healers"*). The lock fills every minimum first and never
   stops on one: a run that joiners can't fill to a minimum still gets its roster, and the run shows what it is short. A
   tank or healer past the minimum gets a seat only when nobody else can take it. Until the guild sets its own, a raid's
-  tank and healer minimums come from the game, scaled to the run's size; a smaller run (a 10-player run of a 20-player
-  raid) scales every minimum the same way. A class or spec short is shown on the run (*short 1 Paladin*) and nobody is
+  tank and healer minimums come from the game, scaled to the run's size and rounded up. A smaller run (a 10-player run
+  of a 20-player raid) scales the guild's own minimums too, to the nearest whole number with a half rounded up, and a
+  minimum of 1 or more never scales below 1. A class or spec short is shown on the run (*short 1 Paladin*) and nobody is
   asked to fill it; only a short tank or healer gets fill asks. Set minimums under **Group make-up** on the Raids or
   Readiness page, with `/roster comp`, in `/gm config raid` › *Minimums* or in plain text ("at least 3 healers in Barrow Deeps"). They belong to the raid,
   never to one run.
@@ -772,7 +773,9 @@ policy). A raid's own run times are its first schedule (*Raid nights*); it can h
 schedule holds its own **sheet timing** in full: when its sheet opens, nudges, locks and asks to confirm, how long
 fill asks wait, autofill and the DM on open. A new schedule starts from the game's suggestion for its raid (a pickup
 template from the ad hoc values below); setting one of them back to the default gives it the suggestion again. The
-raid's own settings no longer hold timing: change it on the schedule. Moving a schedule's opening or lock past its
+raid's own settings no longer hold timing: change it on the schedule. A guild that set timing on a raid before has it
+on that raid's schedules from its next start, and the ops channel gets one line saying where each value went and which
+ones no schedule took. Moving a schedule's opening or lock past its
 reminder moves the reminder back to halfway between them. Weights and split policy stay the raid's unless the
 schedule sets its own. Three kinds:
 - **Weekly nights** — run times like the raid's own ("Saturdays 8:00 PM"). A Tuesday main night and a Saturday alt
@@ -1299,7 +1302,8 @@ edits that new family and leaves the one it shared alone.
   plain text only. A guild that kept role ranges and officers' wants before has them as minimums from its next start:
   each tank and healer range's lower number, each class, spec, melee or ranged want's lower number with its reason; the
   upper numbers, the damage dealers' range, an officers' tank or healer want and one run's own wants are dropped, and
-  the ops channel gets one line naming each.
+  the ops channel gets one line naming each. If a value there can't be read, nothing of it moves and the ops channel
+  gets one warning saying what was left and how to fix it.
 - The same readiness as data: MCP `raid_readiness` (one raid or all) and `GET /api/readiness` — headcount, each role's
   have/need with who could cover it, buffs nobody brings, every minimum with its reason, what is short, and who could
   play by role (officers only; a member's request gets 403). The analytics card reads the same numbers,
