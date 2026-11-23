@@ -192,7 +192,7 @@ def test_forecast_counts_regulars_minus_absences(reg):
     assert rows[1]["short"] == {"tank": 1} and rows[1]["away"] == [ms_[0].display_name] and rows[0]["short"] == {}
     assert all("AM" in r["when"] or "PM" in r["when"] for r in rows), "12-hour words for people"
     reg.regular_remove(ms_[0].discord_id, KEY, "t")
-    reg.set_schedule("barrow-deeps", {"active": False}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"active": False}, "t")
     assert rc.series_forecast(reg, KEY) == [], "a paused series has no forecast"
 
 

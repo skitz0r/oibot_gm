@@ -218,18 +218,19 @@ def msg(data: Any) -> str:
     return str(data)
 
 
-def ops_change(guild: str | None, changes: list[dict], preview: bool = False) -> str | dict:
+def ops_change(guild: str | None, changes: list[dict], preview: bool = False, revs: dict[str, str] | None = None) -> str | dict:
     """THE write path of the setup tools (design §5.43): typed changes ({kind, target, fields}) to POST /api/ops/change —
     the bot builds the ops (configops.ops_from_fields), so no tool carries the plain-text value grammar. `preview`:
-    the Described preview (lines current → new, refused lines with who may and where, consequences, review), nothing
-    saved — read it to the person. Otherwise applied at once (`confirmed`: the person asked for it here), answering the
+    the Described preview (lines current → new, refused lines with who may and where, consequences, review, and the
+    `revs` of what it showed), nothing saved — read it to the person. `revs`: a preview's, sent back with the apply so a
+    change made since is refused (409) instead of overwritten. Otherwise applied at once (`confirmed`: the person asked for it here), answering the
     applied lines; a write that was refused raises with why (anything else in the call still applied, and says so)."""
     if preview:
         d = api(guild).post("/api/ops/change", {"changes": changes})
         out = d.get("described") or {}
         return {"preview": out.get("lines", []), "refused": d.get("refused", []), "consequences": out.get("consequences", []), "review": d.get("review", False),
-                "describe": d.get("describe", [])}
-    d = api(guild).post("/api/ops/change", {"changes": changes, "apply": True, "confirmed": True})
+                "describe": d.get("describe", []), "revs": d.get("revs") or {}}
+    d = api(guild).post("/api/ops/change", {"changes": changes, "apply": True, "confirmed": True, **({"revs": dict(revs)} if revs else {})})
     applied, refused = d.get("applied") or [], d.get("refused") or []
     if refused and not applied:
         raise ToolError("; ".join(refused))
@@ -697,11 +698,12 @@ def schedule_remove(schedule: str, preview: bool = False, guild: Guild = None) -
 
 
 @mcp.tool()
-def raid_reset(raid: str, preview: bool = False, guild: Guild = None) -> str | dict:
+def raid_reset(raid: str, preview: bool = False, revs: dict[str, str] | None = None, guild: Guild = None) -> str | dict:
     """Drop every change the guild made to a raid (officers): its schedules, minimums, weights and notes go back to the
-    game profile's. `preview=True` lists what goes."""
+    game profile's. `preview=True` lists what goes and returns `revs`; pass those `revs` back with the reset so a
+    schedule added (or changed) since the preview is refused instead of removed unseen."""
     rid = get_raid(raid, guild)["id"]
-    return ops_change(guild, [{"kind": "raid_reset", "target": rid}], preview)
+    return ops_change(guild, [{"kind": "raid_reset", "target": rid}], preview, revs=revs)
 
 
 @mcp.tool()

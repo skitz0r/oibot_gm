@@ -69,7 +69,7 @@ def test_paused_and_ad_hoc_schedules_read_in_words(one, reg):
 def test_a_paused_schedule_says_paused_once(one, reg):
     """Regression: schedule_label's ' · paused' plus the page's 'paused for now' read 'paused' twice."""
     bot, c = one
-    reg.set_schedule("fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays", "active": False}, "t", raid="barrow_deeps")
+    reg.set_schedule("fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays", "active": False}, "t")
     body = c.get("/schedule").text
     row = body.split("Fridays", 1)[1].split("</li>", 1)[0]
     assert row.count("paused") == 1 and "paused for now" in row and "next:" not in row

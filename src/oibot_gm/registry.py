@@ -631,6 +631,10 @@ def _raid_section(self, instance, *a, **k) -> str:
     return f"raids:{instance}"
 
 
+def _raid_all_section(self, instance, *a, **k) -> str:
+    return f"raid_all:{instance}"
+
+
 def _schedule_section(self, sid, *a, **k) -> str:
     return f"schedule:{str(sid or '').strip().lower()}"
 
@@ -2910,7 +2914,7 @@ class Registry:
             self._notify("config", [message])
 
     # ---- section revs (design §2.4): computed on demand from the stored shape, never a stored field bumped by hand
-    REV_SECTIONS = ("settings", "buffs", "recruitment", "plain", "loot")  # plus raids:<instance id> and schedule:<id>; loot = the scoring weights (guild.yaml loot:)
+    REV_SECTIONS = ("settings", "buffs", "recruitment", "plain", "loot")  # plus raids:<instance id>, schedule:<id> and raid_all:<instance id>; loot = the scoring weights (guild.yaml loot:)
     # what no rev covers: the scheduler's own bookkeeping (run rosters, card and sheet message ids) — an owner's edit during a
     # raid week must never be refused because a card was re-posted
     REV_SKIP = ("rosters", "feed_tokens")  # feed_tokens: a companion's last_seen must never 409 an owner's settings edit
@@ -2920,6 +2924,10 @@ class Registry:
         own = {"raids", "schedules", "schedule_aliases", "buffs", "families", "recruitment", "invite_url", "member_role_ids", "plain", "loot"}
         if section.startswith("raids:"):
             return dict(cfg.get("raids", {}).get(section[6:]) or {})
+        if section.startswith("raid_all:"):  # a raid reset's: the raid's own changes AND every schedule it would remove
+            rid = section[9:]
+            return {"raid": dict(cfg.get("raids", {}).get(rid) or {}),
+                    "schedules": [e for e in cfg.get("schedules") or [] if _lead_raid(e) == rid]}
         if section.startswith("schedule:"):  # one schedule, by its id (phase 3): absent = the id is free
             sid = section[9:]
             return next((e for e in cfg.get("schedules") or [] if isinstance(e, dict) and e.get("id") == sid), None)
@@ -2933,7 +2941,7 @@ class Registry:
             return cfg.get("loot") or {}
         if section == "settings":
             return {k: v for k, v in cfg.items() if k not in own and k not in self.REV_SKIP and "_message_id" not in k}
-        raise RegistryError(f"unknown config section {section} (one of {', '.join(self.REV_SECTIONS)}, raids:<id>, schedule:<id>)")
+        raise RegistryError(f"unknown config section {section} (one of {', '.join(self.REV_SECTIONS)}, raids:<id>, schedule:<id>, raid_all:<id>)")
 
     def config_rev(self, section: str) -> str:
         """A fingerprint of one config section as stored: `settings` (channels, timezone, roles, owner, about…),
@@ -5248,13 +5256,14 @@ class Registry:
         `instance`; any other id is the guild's, and `instance` must be its first raid (else NO_SCHEDULE)."""
         return schedule_def_of(self.raid_def(instance), sid)
 
-    def _schedule_raid(self, sid: str, raid: str | None) -> tuple[str, bool]:
-        """(the first raid of schedule `sid`, is it new?) — an existing id names its own raid (`raid`, when given, must be
-        it: else ID_TAKEN); a new one needs `raid` (else NO_SCHEDULE)."""
+    def schedule_raid(self, sid: str, raid: str | None) -> tuple[str, bool]:
+        """(the first raid of schedule `sid`, is it new?) — naming a `raid` means CREATE: an existing id with a raid named
+        is refused (ID_TAKEN, even when the raid is its own — two officers creating one id never rewrite each other's);
+        a new one needs `raid` (else NO_SCHEDULE)."""
         have = next((e for e in self.config.schedules if isinstance(e, dict) and str(e.get("id") or "").strip().lower() == sid), None)
         if have is not None:
             rid = _lead_raid(have)
-            if raid and raid != rid:
+            if raid:
                 raise RegistryError(ID_TAKEN.format(sid=sid))
             if unread_schedule(have) is not None:
                 raise RegistryError(f"The schedule called {sid} can't be read. Correct it by hand in guild.yaml first.")
@@ -5280,7 +5289,7 @@ class Registry:
         bad = [f for f in fields if f not in SCHEDULE_FIELDS]
         if bad:
             raise RegistryError(f"unknown schedule setting {bad[0]} (one of {', '.join(SCHEDULE_FIELDS)})")
-        instance, new = self._schedule_raid(sid, raid)
+        instance, new = self.schedule_raid(sid, raid)
         snap = self._snapshot_raid(instance)
         try:
             return self._set_schedule(instance, new, sid, fields, by)
@@ -5997,8 +6006,10 @@ class Registry:
         self.save_config(f"auras: the guild's changes cleared (by {by})")
         return "auras: back to the game defaults"
 
-    @_config_verb(_raid_section)
+    @_config_verb(_raid_all_section)
     def clear_raid_override(self, instance: str, by: str) -> str:
+        """Drop the guild's changes to a raid and every schedule whose lineup starts with it. Its rev is `raid_all:<id>`
+        (the raid's override AND those schedules), so a reset never removes a schedule added after its preview."""
         self.config.raids.pop(instance, None)
         self._set_raid_rows(instance, [])  # its schedules and run times go with it
         self.save_config(f"raid {instance}: the guild's changes cleared (by {by})")

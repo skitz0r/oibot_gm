@@ -1056,7 +1056,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
         has = bool(self.reg.raid_override(self.raid))
         name = self.reg.raid_def(self.raid).get("name", self.raid)
-        self._reset_rev = self.reg.config_rev(f"raids:{self.raid}")
+        self._reset_rev = self.reg.config_rev(f"raid_all:{self.raid}")  # the raid AND its schedules, as the screen showed them
         d = configops.describe_ops(self.reg, [self.reset_op()]) if has else None
         goes = d.lines[0].before if d and d.lines else None  # the same words the site's and plain text's preview print
         text = (" ".join(raid_reset_consequence(self.reg, self.raid, unsaved=len(self.draft)))
@@ -1074,7 +1074,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             await self.finish(i, f"**{name}** was already on the game's defaults; nothing changed.")
             return
         res = await configops.apply_ops(self.reg, [self.reset_op()], by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None), via="discord",
-                                        revs={f"{configops.CONFIG_REV}raids:{self.raid}": getattr(self, "_reset_rev", None) or self.reg.config_rev(f"raids:{self.raid}")})
+                                        revs={f"{configops.CONFIG_REV}raid_all:{self.raid}": getattr(self, "_reset_rev", None) or self.reg.config_rev(f"raid_all:{self.raid}")})
         if not res["applied"]:
             bad = "; ".join(r["line"] for r in res["results"] if not r["ok"]) or "Nothing was changed."
             await self.show(i, f"❌ {bad}", self.button("Back to the sections", self.to_hub, discord.ButtonStyle.primary), self.button("Cancel", self.cancel))

@@ -438,6 +438,8 @@ export interface RaidRule {
   schedules: Schedule[];
   /** the raid section rev an edit-mode Save sends back as revs["config:raids:<id>"] */
   rev?: string;
+  /** what a Reset sends back as revs["config:raid_all:<id>"]: the raid's changes AND the schedules the reset removes */
+  reset_rev?: string;
 }
 export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[]; schedule_kinds: string[]; schedule_cadence: string[]; max_rosters: number }
 export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number; balance?: string | null; reason?: SplitReason | null; reason_text?: string | null }

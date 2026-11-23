@@ -107,7 +107,7 @@ def test_a_lockout_schedule_follows_a_3_day_reset_across_dst(reg):
     offsets = {t.utcoffset() for t in starts}
     assert offsets == {timedelta(hours=-8), timedelta(hours=-7)}  # both sides of 2027-03-14
     # days 1 and 3 (a 3-day lockout): day 3 of the window starting Fri 12 Mar is Sun 14 Mar, the spring-forward day
-    reg.set_schedule("reset", {"days": "1, 3", "time": "02:30"}, "t", raid=RID)
+    reg.set_schedule("reset", {"days": "1, 3", "time": "02:30"}, "t")
     s = next(x for x in reg.schedules(RID) if x["id"] == "reset")
     got = rc.schedule_starts(reg, RID, s, datetime(2027, 3, 12, 0, 0, tzinfo=LA), 72)
     gap = next(t for t in got if t.astimezone(LA).date() == date(2027, 3, 14))
@@ -134,7 +134,7 @@ def test_rosters_2_doubles_the_advertised_seats_and_the_health_target(reg, rs):
 
     opened(reg)
     weekly(reg, RID, "Tue 19:30")
-    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t")
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
     team = rc.run_team(reg, ev)
@@ -159,7 +159,7 @@ def test_rosters_2_doubles_the_advertised_seats_and_the_health_target(reg, rs):
 def test_rosters_2_aims_the_lock_at_two_when_roles_allow(reg, rs):
     opened(reg)
     weekly(reg, RID, "Tue 19:30")
-    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t")
     reg.set_minimums(RID, {"tank": {"min": 1}, "healer": {"min": 1}}, "t")
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
@@ -205,7 +205,7 @@ def test_set_and_remove_are_one_commit_each_and_inherit_goes_back_to_the_raid(re
     n0 = commits(store)
     lines = reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run", "lock_hours_before": 12}, "t", raid=RID)
     assert commits(store) == n0 + 1 and lines == ["Barrow Deeps · Alt run: new schedule, Saturdays 8:00 PM"]
-    reg.set_schedule("alt", {"lock_hours_before": "inherit", "rosters": 2}, "t", raid=RID)
+    reg.set_schedule("alt", {"lock_hours_before": "inherit", "rosters": 2}, "t")
     s = next(x for x in reg.schedules(RID) if x["id"] == "alt")
     # inherit = the game's suggestion, written out again
     assert s["lock_hours_before"] == reg.timing_suggestion(RID)["lock_hours_before"] == reg.schedule_def(RID, "alt")["lock_hours_before"]
@@ -521,7 +521,7 @@ def _two_roster_run(reg, rs):
     reg.seed_test_members(30, "t")  # 4 tanks, 7 healers, 19 dps
     opened(reg)
     weekly(reg, RID, "Tue 19:30")
-    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t")
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     return rc.open_run(reg, rs, RID, t, by="t")
 
@@ -561,7 +561,7 @@ def test_a_declared_second_roster_is_placeable_and_built_once_the_joiners_need_i
     fit in fewer, even with tanks for one — and empty rosters drawn on the board never force one."""
     opened(reg)
     weekly(reg, RID, "Tue 19:30")
-    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"rosters": 2}, "t")
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)[0][1]
     ev = rc.open_run(reg, rs, RID, t, by="t")
     k, bounds = rc.groups_per_roster(reg, 10), reg.role_bounds(RID, 10)

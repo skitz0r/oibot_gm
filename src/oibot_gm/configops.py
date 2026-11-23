@@ -922,7 +922,7 @@ def _schedule_write(reg: Registry, op: ConfigOp, by: str, rev: str | None = None
     """THE schedule_set write (one op or several merged): one Registry.set_schedule call."""
     sid, fields, raid = _schedule_write_fields(op)
     if not fields:  # a raid named alone: refused as set_schedule would (ID_TAKEN, NO_SCHEDULE), a new one needs what it is
-        _rid, new = reg._schedule_raid(sid, raid)
+        _rid, new = reg.schedule_raid(sid, raid)
         if new:
             raise RegistryError("A new schedule needs its kind, its run times, or its lockout days and time.")
         return f"{reg.series_label(sid)}: nothing to change"
@@ -1557,6 +1557,8 @@ def config_section(op: ConfigOp) -> str | None:
             return f"schedule:{_schedule_sid(op)}"
         except RegistryError:
             return None
+    if op.op == "raid_reset":  # the raid's changes AND the schedules the reset removes: one added since the preview is a 409
+        return f"raid_all:{(op.target or '').strip()}" if op.target else None
     if op.op in _RAID_SECTION_OPS:
         return f"raids:{(op.target or '').strip()}" if op.target else None
     return _SECTION_OF.get(op.op)
@@ -2459,7 +2461,7 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
         raise RegistryError(f"unknown raid {rid} (one of {', '.join(reg.profile.raids)})")
     name = reg.raid_def(rid).get("name", rid)
     cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
-    if cur is not None and raid and raid != rid:
+    if cur is not None and raid:  # a named raid means create (Registry.schedule_raid): an id in use is taken
         raise RegistryError(ID_TAKEN.format(sid=sid))
     new = _schedule_words(reg, rid, fields, sid)
     after = _runs_preview(reg, rid, schedule=sid, schedule_fields=fields) if any(f in PREVIEW_SCHEDULE_FIELDS for f in fields) else ""
@@ -3800,9 +3802,7 @@ def _schedule_ops(reg: Registry, target: str | None, fields: dict) -> list[Confi
         raid = rows[0]["raid"]
         fields.setdefault("rosters", rows[0]["rosters"])
         if len(rows) > 1:
-            fields.setdefault("follow", rows[1])
-        elif any(x["id"] == sid for x in reg.all_schedules()):
-            fields.setdefault("follow", None)  # an existing schedule's lineup of one raid: its follow-on goes
+            fields.setdefault("follow", rows[1])  # a lineup creates (its raid is named): an edit uses rosters / follow
     if raid:
         head.append(ConfigOp(op="schedule_set", target=sid, field="raid", value=str(raid).strip().lower()))
     return head + [ConfigOp(op="schedule_set", target=sid, field=str(f).strip().lower(), value=_value_text(v)) for f, v in fields.items()]

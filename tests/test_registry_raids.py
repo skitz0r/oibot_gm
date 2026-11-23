@@ -35,24 +35,24 @@ def _sched(reg, sid="tue"):
 def test_schedule_hours_and_nudge_window(reg):
     """Sheet timing is each schedule's own (phase 2): the same rules as the raid's were, on the schedule."""
     reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid="barrow_deeps")
-    reg.set_schedule("tue", {"lock_hours_before": "12"}, "t", raid="barrow_deeps")
+    reg.set_schedule("tue", {"lock_hours_before": "12"}, "t")
     assert _sched(reg)["lock_hours_before"] == 12
     # the stored reminder (36, the profile's halfway) still falls between open (48) and lock (12): it stays
     assert _sched(reg)["nudge_hours_before"] == 36
-    reg.set_schedule("tue", {"nudge_hours_before": "20"}, "t", raid="barrow_deeps")
+    reg.set_schedule("tue", {"nudge_hours_before": "20"}, "t")
     assert _sched(reg)["nudge_hours_before"] == 20
     with pytest.raises(RegistryError, match="between signup opening and lock"):
-        reg.set_schedule("tue", {"nudge_hours_before": "6"}, "t", raid="barrow_deeps")  # before the lock
+        reg.set_schedule("tue", {"nudge_hours_before": "6"}, "t")  # before the lock
     with pytest.raises(RegistryError, match="between signup opening and lock"):
-        reg.set_schedule("tue", {"nudge_hours_before": "60"}, "t", raid="barrow_deeps")  # before signups open
+        reg.set_schedule("tue", {"nudge_hours_before": "60"}, "t")  # before signups open
     with pytest.raises(RegistryError, match="confirmation deadline"):
-        reg.set_schedule("tue", {"confirm_hours_before": "30"}, "t", raid="barrow_deeps")
+        reg.set_schedule("tue", {"confirm_hours_before": "30"}, "t")
     with pytest.raises(RegistryError, match="number of hours"):
-        reg.set_schedule("tue", {"fill_ask_hours": "soon"}, "t", raid="barrow_deeps")
+        reg.set_schedule("tue", {"fill_ask_hours": "soon"}, "t")
     with pytest.raises(RegistryError, match="negative"):
-        reg.set_schedule("tue", {"fill_ask_hours": "-1"}, "t", raid="barrow_deeps")
+        reg.set_schedule("tue", {"fill_ask_hours": "-1"}, "t")
     with pytest.raises(RegistryError, match="open before they lock"):
-        reg.set_schedule("tue", {"lock_hours_before": "48"}, "t", raid="barrow_deeps")
+        reg.set_schedule("tue", {"lock_hours_before": "48"}, "t")
     assert _sched(reg)["lock_hours_before"] == 12 and _sched(reg)["nudge_hours_before"] == 20, "a refused change leaves the last good values"
 
 

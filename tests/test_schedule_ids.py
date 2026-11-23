@@ -201,6 +201,8 @@ def test_a_schedule_is_addressed_by_its_id_alone(reg):
     assert reg.schedule_entry("tue")["slots"] == ["Wed 19:30"] and reg.schedule_def(RID, "tue")["schedule"]["id"] == "tue"
     with pytest.raises(RegistryError, match="already called tue"):
         reg.set_schedule("tue", {"slots": "Thu 19:30"}, "t", raid="hyjal_summit_forever")
+    with pytest.raises(RegistryError, match="already called tue"):  # its own raid too: a named raid means create
+        reg.set_schedule("tue", {"slots": "Thu 19:30"}, "t", raid=RID)
     with pytest.raises(RegistryError, match="no schedule called nope"):
         reg.set_schedule("nope", {"active": False}, "t")
     assert sid == "tue"

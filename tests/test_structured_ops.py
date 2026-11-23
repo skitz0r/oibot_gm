@@ -9,7 +9,7 @@ import json
 import subprocess
 
 import pytest
-from conftest import OFFICER_ROLE, OWNER
+from conftest import OFFICER_ROLE, OWNER, weekly
 from fastapi.testclient import TestClient
 from test_mcp import TOKEN, FakeBot, bearer
 from test_people import real
@@ -118,11 +118,12 @@ def test_a_refused_field_restores_the_buff_through_the_core(reg, store):
 
 def test_warn_class_and_consequences(reg):
     W = lambda op: configops.is_warn(reg, op)  # noqa: E731
+    weekly(reg, "barrow_deeps", "Tue 19:30", "tue")  # a real schedule id
     assert W(ConfigOp(op="set", path="signup_channel", value="<#5>")) and W(ConfigOp(op="set", path="timezone", value="Europe/London"))
     assert not W(ConfigOp(op="set", path="about", value="hi"))
-    assert W(ConfigOp(op="role_add", value="1")) and W(ConfigOp(op="schedule_remove", target="default"))
-    assert W(ConfigOp(op="schedule_set", target="default", field="active", value="false"))
-    assert not W(ConfigOp(op="schedule_set", target="default", field="name", value="x"))
+    assert W(ConfigOp(op="role_add", value="1")) and W(ConfigOp(op="schedule_remove", target="tue"))
+    assert W(ConfigOp(op="schedule_set", target="tue", field="active", value="false"))
+    assert not W(ConfigOp(op="schedule_set", target="tue", field="name", value="x"))
     assert W(ConfigOp(op="aura_set", target="blood_pact", field="family", value="own")) and not W(ConfigOp(op="aura_set", target="blood_pact", field="note", value="x"))
     assert W(ConfigOp(op="aura_reset")) and W(ConfigOp(op="aura_reset", target="blood_pact"))  # one buff too: both surfaces ask first
     assert W(ConfigOp(op="recruit", field="open", value="false")) and not W(ConfigOp(op="recruit", field="open", value="true"))
@@ -397,7 +398,7 @@ def test_admin_schedule_translators(owner_client, reg):
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     fields = {"active": False, "lock_hours_before": None, "weights": {"regular": 6, "rank": None}}
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"id": "alt", "fields": fields},
-                          lambda sh: "; ".join(sh.set_schedule("alt", fields, "x", raid="barrow_deeps")))
+                          lambda sh: "; ".join(sh.set_schedule("alt", fields, "x")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule/remove", {"id": "alt"},
                           lambda sh: sh.remove_schedule("alt", "x"))

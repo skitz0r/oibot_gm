@@ -40,7 +40,7 @@ def test_a_change_only_valid_as_a_whole_is_accepted(reg):
     (sheet timing is each schedule's own: phase 2)."""
     reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid="barrow_deeps")
     lead = reg.schedule_def("barrow_deeps", "tue")["signup_lead_hours"]
-    reg.set_schedule("tue", {"nudge_hours_before": lead + 40, "signup_lead_hours": lead + 60}, "t", raid="barrow_deeps")
+    reg.set_schedule("tue", {"nudge_hours_before": lead + 40, "signup_lead_hours": lead + 60}, "t")
     assert reg.schedule_def("barrow_deeps", "tue")["nudge_hours_before"] == lead + 40
     reg.set_minimums("barrow_deeps", {"tank": {"min": 4}, "healer": {"min": 3}}, "t")  # one minimum per role, no upper limit (D16)
     assert reg.minimums("barrow_deeps") == {"tank": 4, "healer": 3}

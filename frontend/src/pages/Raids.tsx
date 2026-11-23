@@ -79,7 +79,8 @@ function RuleCard({ r, meta, slots, weightKeys, policies, maxRosters, others, ta
     if (!(await ask({ title: `Reset ${r.name} to the game's defaults?`, message: `The guild's ${n} change${n === 1 ? "" : "s"} to this raid go back to the game's default${n === 1 ? "" : "s"}: ${what}.${r.overridden.includes("slots") || r.overridden.includes("schedules") ? " Its schedules go too: no sheet opens for this raid until you add one again." : ""}${r.live ? ` The ${r.live} live sheet${r.live === 1 ? "" : "s"} keep their times.` : ""}`, confirmLabel: "Reset", color: "red" }))) return;
     setBusy(true);
     try {
-      const x = await saveOps([{ kind: "raid_reset", target: r.id }], { ...raidRevs(r), title: `Reset ${r.name}` });
+      // the reset's own rev covers the schedules it removes: one added since the page loaded is a 409, never removed unseen
+      const x = await saveOps([{ kind: "raid_reset", target: r.id }], { revs: { ...raidRevs(r).revs, ...(r.reset_rev ? { [`config:raid_all:${r.id}`]: r.reset_rev } : {}) }, title: `Reset ${r.name}` });
       if (x?.applied?.length) { setMode(null); onSaved(); }
     } catch (e) { fail(e); } finally { setBusy(false); }
   }

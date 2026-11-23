@@ -2079,7 +2079,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "first_open_words": reg.local12(fo) if fo else "", "opened": bool(fo and fo <= now),
                         "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid),
                         "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rs, rid),
-                        "schedules": [schedule_json(reg, rid, s) for s in reg.schedules(rid)], "rev": reg.config_rev(f"raids:{rid}")})
+                        "schedules": [schedule_json(reg, rid, s) for s in reg.schedules(rid)], "rev": reg.config_rev(f"raids:{rid}"),
+                        # what a reset carries back (revs["config:raid_all:<id>"]): the raid AND the schedules it removes
+                        "reset_rev": reg.config_rev(f"raid_all:{rid}")})
         return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES),
                 "schedule_kinds": list(SCHEDULE_KINDS), "schedule_cadence": list(SCHEDULE_CADENCE), "max_rosters": MAX_SCHEDULE_ROSTERS}
 

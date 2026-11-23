@@ -45,10 +45,10 @@ def test_schedule_follow_is_validated_and_read_back(reg):
     reg.set_schedule("wed", {"slots": "Wed 18:30"}, "t", raid=FOLLOW)  # Barrow Deeps has no run times of its own in the profile
     assert next(x for x in reg.schedules(FOLLOW) if x["id"] == "wed")["follow"] is None  # every schedule carries the key
     with pytest.raises(RegistryError, match="unknown raid"):
-        reg.set_schedule("tue", {"follow": "nope x2"}, "t", raid=LEAD)
+        reg.set_schedule("tue", {"follow": "nope x2"}, "t")  # an edit names no raid (a named raid means create)
     with pytest.raises(RegistryError, match="itself"):
-        reg.set_schedule("tue", {"follow": "hyjal_summit_forever x2"}, "t", raid=LEAD)
-    reg.set_schedule("tue", {"follow": "none"}, "t", raid=LEAD)
+        reg.set_schedule("tue", {"follow": "hyjal_summit_forever x2"}, "t")
+    reg.set_schedule("tue", {"follow": "none"}, "t")
     assert next(x for x in reg.schedules(LEAD) if x["id"] == "tue")["follow"] is None
     with pytest.raises(RegistryError, match="kept for follow-on"):
         reg.set_schedule("after", {"slots": "Tue 18:30"}, "t", raid=LEAD)

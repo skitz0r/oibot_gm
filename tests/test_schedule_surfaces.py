@@ -151,12 +151,92 @@ def test_mcp_sends_the_id_and_a_new_schedules_raid(monkeypatch):
                     [{"kind": "schedule_remove", "target": "alt"}]]
 
 
+SPLITS_ALLOWED = {"old_key_raid", "lowered_id"}  # the migration's reader of an older key's raid, and the way back's id
+CLASS_SPEC = re.compile(r"\s*cls,\s*(?:_,\s*)?spec\s*=")  # a 'Class:Spec' key read into its class and spec: no series key
+SERIES_SPLIT = re.compile(r"\b(key|k|target|sid|old)\b[^\n]{0,12}?\)?\.(?:r?partition|split)\(\":\"")
+
+
 def test_no_series_key_is_split_any_more():
-    src = "".join(p.read_text() for p in (ROOT / "src/oibot_gm").rglob("*.py"))
-    assert not re.search(r"\b(key|k|target)\)?\.partition\(\":\"\)", src)  # \b: a 'Class:Spec' key (sk) is no series key
+    """No code splits a schedule key on ':' (partition or split) — a key reads through config.schedule_aliases. The two
+    named migration helpers are the only readers of an older '<raid>:<schedule>' key. \b: a 'Class:Spec' key (sk) is
+    no series key."""
+    hits = []
+    for f in sorted((ROOT / "src/oibot_gm").rglob("*.py")):
+        fn = None
+        for n, line in enumerate(f.read_text().splitlines(), 1):
+            d = re.match(r"\s*(?:async\s+)?def\s+(\w+)", line)
+            if d:
+                fn = d.group(1)
+            if SERIES_SPLIT.search(line) and fn not in SPLITS_ALLOWED and not CLASS_SPEC.match(line):
+                hits.append(f"{f.relative_to(ROOT)}:{n} ({fn}): {line.strip()}")
+    assert not hits, "\n".join(hits)
 
 
 def test_a_removed_schedules_name_never_shows_its_key(reg):
     from oibot_gm import wizard_opts
 
     assert wizard_opts.schedule_names(reg, ["gone"]) == ["A removed schedule"]
+
+
+def test_a_reset_never_removes_a_schedule_added_after_its_preview(officer_client, reg):  # noqa: F811
+    """Fix round 1: a raid reset checks `raid_all:<rid>` — the raid's changes AND the schedules it removes — so a schedule
+    added after the preview is a 409 and stays; the raid's own rev still ignores schedules (a rules Save never 409s on one)."""
+    from oibot_gm.registry import ConfigChanged
+
+    weekly(reg, RID, "Tue 19:30", "tue")
+    pv = officer_client.post(CHANGE, json={"changes": [{"kind": "raid_reset", "target": RID}]}).json()
+    revs = pv["revs"]
+    assert f"config:raid_all:{RID}" in revs, revs
+    reg.set_schedule("late", {"kind": "weekly", "slots": "Thu 20:00"}, "Ana", raid=RID)  # someone adds one meanwhile
+    r = officer_client.post(CHANGE, json={"changes": [{"kind": "raid_reset", "target": RID}], "apply": True, "confirmed": True, "revs": revs})
+    assert r.status_code == 409 and f"raid_all:{RID}" in r.json()["changed"], r.text
+    assert {s["id"] for s in reg.schedules(RID)} == {"tue", "late"}
+    r = officer_client.post(CHANGE, json={"token": pv["token"], "apply": True})  # the preview's token carries the same rev
+    assert not r.json().get("applied") and {s["id"] for s in reg.schedules(RID)} == {"tue", "late"}, r.text
+    # the admin translator checks the rev it is sent (a reset is routine there: it applies when nothing changed)
+    body = {"instance": RID, "confirmed": True}
+    want = {f"config:raid_all:{RID}": reg.config_rev(f"raid_all:{RID}")}
+    reg.set_schedule("sun", {"kind": "weekly", "slots": "Sun 20:00"}, "Ana", raid=RID)
+    r = officer_client.post("/api/admin/raid/reset", json={**body, "revs": want})
+    assert r.status_code == 409 and "sun" in {s["id"] for s in reg.schedules(RID)}, r.text
+    with pytest.raises(ConfigChanged):  # the verb itself (Discord's reset screen sends the same rev)
+        reg.clear_raid_override(RID, "x", rev=want[f"config:raid_all:{RID}"])
+    # a schedule edit between a raid-rules preview and its Save never 409s the rules
+    rules = reg.config_rev(f"raids:{RID}")
+    reg.set_schedule("tue", {"name": "Tuesday"}, "Ana")
+    r = officer_client.post(CHANGE, json={"changes": [{"kind": "raid", "target": RID, "fields": {"notes": "bring pots"}}], "apply": True,
+                                          "confirmed": True, "revs": {f"config:raids:{RID}": rules}})
+    assert r.status_code == 200 and r.json().get("applied"), r.text
+
+
+def test_naming_a_raid_creates_and_never_rewrites_an_existing_schedule(reg):
+    first = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": RID, "kind": "weekly", "slots": "Sat 20:00"}))[0]
+    configops.apply(reg, first, "Ana", False)
+    again = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": RID, "kind": "weekly", "slots": "Sun 21:00"}))[0]
+    assert "Another schedule is already called alt." in configops.describe(reg, again)
+    with pytest.raises(RegistryError, match="Another schedule is already called alt"):
+        configops.apply(reg, again, "Bo", False)
+    lineup = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"lineup": [{"raid": RID, "rosters": 1}]}))[0]
+    with pytest.raises(RegistryError, match="Another schedule is already called alt"):
+        configops.apply(reg, lineup, "Bo", False)
+    with pytest.raises(RegistryError, match="Another schedule is already called alt"):
+        reg.set_schedule("alt", {"slots": "Sun 21:00"}, "Bo", raid=RID)
+    assert reg.schedule_entry("alt")["slots"] == ["Sat 20:00"]
+    configops.apply(reg, ConfigOp(op="schedule_set", target="alt", field="slots", value="Sun 21:00"), "Bo", False)  # an edit names no raid
+    assert reg.schedule_entry("alt")["slots"] == ["Sun 21:00"]
+
+
+def test_mcp_raid_reset_hands_its_preview_revs_back(monkeypatch):
+    sent = []
+
+    class Api:
+        def post(self, path, body):
+            sent.append(body)
+            return {"described": {"lines": []}, "revs": {"config:raid_all:barrow_deeps": "abc"}, "applied": ["ok"]}
+
+    monkeypatch.setattr(ms, "api", lambda guild=None: Api())
+    monkeypatch.setattr(ms, "get_raid", lambda raid, guild=None: {"id": RID})
+    pv = ms.raid_reset("Barrow Deeps", preview=True)
+    assert pv["revs"] == {"config:raid_all:barrow_deeps": "abc"}
+    ms.raid_reset("Barrow Deeps", revs=pv["revs"])
+    assert sent[-1]["revs"] == {"config:raid_all:barrow_deeps": "abc"} and sent[-1]["confirmed"] is True

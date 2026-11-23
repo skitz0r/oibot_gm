@@ -326,7 +326,7 @@ def test_confirm_all_pending_with_the_list_in_the_officer_context(reg):
 def test_raid_reset_preview_is_in_words(reg):
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-12-09T15:00:00-08:00"}, "t")
     weekly(reg, "barrow_deeps", "Tue 19:30, Thu 20:00")
-    reg.set_schedule("barrow-deeps", {"lock_hours_before": 12}, "t", raid="barrow_deeps")  # sheet timing is the schedule's (C7)
+    reg.set_schedule("barrow-deeps", {"lock_hours_before": 12}, "t")  # sheet timing is the schedule's (C7)
     reg.set_minimums("barrow_deeps", {"healer": {"min": 3}}, "t")
     d = configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps"))
     assert "Wed 9 Dec 2026 3:00 PM" in d and "minimums: at least 3 healers" in d
@@ -728,7 +728,7 @@ def test_the_config_dump_labels_raid_overrides_and_schedule_settings(reg):
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-12-09T15:00:00-08:00"}, "t")
     weekly(reg, "barrow_deeps", "Tue 19:30")
     reg.set_schedule("late", {"slots": "Thu 21:00", "lock_hours_before": 30}, "t", raid="barrow_deeps")
-    reg.set_schedule("barrow-deeps", {"lock_hours_before": 20}, "t", raid="barrow_deeps")  # stored apart from the raid's run times
+    reg.set_schedule("barrow-deeps", {"lock_hours_before": 20}, "t")  # stored apart from the raid's run times
     text = configops.current_config_text(reg, officer=True)
     dump = text.split("```yaml\n", 1)[1].split("```", 1)[0]
     assert "first_open" not in dump and "19:30" not in dump, "raid overrides leave the bare dump"

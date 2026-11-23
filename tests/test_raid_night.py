@@ -616,7 +616,7 @@ def test_no_signup_channel_warns_once_per_run(reg, rs):
     bot = NightBot(reg, rs)
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
     weekly(reg, "barrow_deeps", "Wed 20:00")
-    reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t", raid="barrow_deeps")  # sheet timing is the schedule's
+    reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
     run(bot.scheduler_tick_guild(reg))
     first = [t for lvl, t in bot.ops.lines if "did not open: no signup channel" in t]
     assert first and all("PM" in t or "AM" in t for t in first)
@@ -761,7 +761,7 @@ def test_runs_history_pages_beyond_the_first_eight(reg, rs, web_bot):
 def test_upcoming_rows_carry_the_instant_and_say_when_no_channel_can_take_the_sheet(reg, rs, web_bot):
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
     weekly(reg, "barrow_deeps", "Wed 20:00")
-    reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t", raid="barrow_deeps")  # sheet timing is the schedule's
+    reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
     bd = next(x for x in web_bot.c.get("/api/rosters", headers=H()).json()["raids"] if x["id"] == "barrow_deeps")
     assert bd["upcoming"] and all(u["start_iso"] and u["key"] for u in bd["upcoming"])
     assert bd["upcoming"][0]["needs_channel"] is True and bd["signup_channel"] is False
@@ -1132,12 +1132,12 @@ def test_rosters_page_open_of_the_raids_own_scheduled_run_from_the_adhoc_picker(
     assert p["kind"] == "scheduled" and p["schedule"] == "barrow-deeps"  # phase 3: always the schedule's id
     tpl = "adhoc"  # the page's template select: One-off
     sent = {"start": p["start"], "key": p["key"],
-            "schedule": (p["schedule"] or "default") if p["kind"] == "scheduled" else (p["schedule"] or ("adhoc" if tpl == "adhoc" else tpl))}
+            "schedule": p["schedule"] if p["kind"] == "scheduled" else (p["schedule"] or ("adhoc" if tpl == "adhoc" else tpl))}
     r = c.post("/api/raid/barrow_deeps/open", json=sent, headers=H())
     assert r.status_code == 200 and r.json()["key"] == p["key"], r.text
     from pathlib import Path
     page = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Rosters.tsx").read_text()
-    assert 'p.kind === "scheduled" ? (p.schedule || "default")' in page, "the page sends what this test sends"
+    assert 'p.kind === "scheduled" ? p.schedule :' in page, "the page sends what this test sends"
     old = {**sent, "schedule": "adhoc"}  # what the page sent before the fix
     assert c.post("/api/raid/barrow_deeps/open", json=old, headers=H()).status_code == 409
 

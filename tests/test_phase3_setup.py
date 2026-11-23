@@ -400,7 +400,7 @@ def test_readiness_route_carries_minimums_and_slots(owner_client, reg):
 
 def test_raids_route_schedule_words_paused_and_sentences(owner_client, reg, rs):
     alt_schedule(reg)
-    reg.set_schedule("alt", {"active": False}, "t", raid="barrow_deeps")
+    reg.set_schedule("alt", {"active": False}, "t")
     raids = owner_client.get("/api/raids", headers=bearer()).json()["raids"]
     s = next(x for r in raids if r["id"] == "barrow_deeps" for x in r["schedules"] if x["id"] == "alt")
     assert s["next"] == [] and len(s["next_if_active"]) == 3 and not any(MILITARY.search(x) for x in s["next_if_active"])
@@ -440,7 +440,7 @@ def test_schedule_writes_from_the_raids_page_carry_the_raid_rev(owner_client, re
     the schedule's own (config:schedule:<id>), which the server checks."""
     alt_schedule(reg)
     rev = reg.config_rev("schedule:alt")  # phase 3: a schedule has a rev of its own
-    reg.set_schedule("alt", {"name": "Alt night"}, "someone else", raid="barrow_deeps")
+    reg.set_schedule("alt", {"name": "Alt night"}, "someone else")
     for path, body in (("/api/admin/raid/schedule/remove", {"id": "alt"}),
                        ("/api/admin/raid/schedule", {"id": "alt", "fields": {"active": False}})):
         r = owner_client.post(path, json={**body, "revs": {"config:schedule:alt": rev}}, headers=bearer())
@@ -608,7 +608,7 @@ def test_the_raid_wizards_minimums_section_is_the_minimums_block(reg, rs, office
 
 def test_the_schedule_screen_says_paused_never_next_runs(reg, rs, officer_only):
     alt_schedule(reg)
-    reg.set_schedule("alt", {"active": False}, "t", raid="barrow_deeps")
+    reg.set_schedule("alt", {"active": False}, "t")
     h = Harness(reg, rs)
 
     async def go():

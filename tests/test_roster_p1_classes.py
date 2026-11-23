@@ -43,7 +43,7 @@ def test_class_is_derived_from_the_kind():
 
 def test_adhoc_takes_the_raids_identity_but_not_its_recurring_timing(reg):
     opened(reg)
-    reg.set_schedule("barrow-deeps", {"lock_hours_before": 24, "confirm_hours_before": 12, "nudge_hours_before": 36}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"lock_hours_before": 24, "confirm_hours_before": 12, "nudge_hours_before": 36}, "t")
     reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)
     rd, pug, dflt = reg.raid_def(RID), reg.schedule_def(RID, "pug"), reg.schedule_def(RID, "barrow-deeps")
     assert pug["class"] == "adhoc" and dflt["class"] == "recurring"
@@ -55,7 +55,7 @@ def test_adhoc_takes_the_raids_identity_but_not_its_recurring_timing(reg):
     # where each value comes from, for the editors
     # (phase 2: every stored schedule holds its timing written out, so each reads as its own)
     assert pug["schedule"]["source"]["lock_hours_before"] == "own" and dflt["schedule"]["source"]["lock_hours_before"] == "own"
-    reg.set_schedule("pug", {"lock_hours_before": 4}, "t", raid=RID)
+    reg.set_schedule("pug", {"lock_hours_before": 4}, "t")
     pug = reg.schedule_def(RID, "pug")
     assert pug["schedule"]["source"]["lock_hours_before"] == "own" and pug["lock_hours_before"] == 4
     assert pug["nudge_hours_before"] == 5, "the ad hoc officer card stays an hour before its own lock"
@@ -74,21 +74,21 @@ def test_the_one_off_schedule_is_virtual(reg):
 
 def test_schedule_weights_merge_per_key_and_refuse_junk(reg):
     opened(reg)
-    reg.set_schedule("barrow-deeps", {"weights": {"regular": 6, "rank": 0}}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"weights": {"regular": 6, "rank": 0}}, "t")
     w = reg.schedule_def(RID, "barrow-deeps")["weights"]
     assert (w["regular"], w["rank"], w["main"]) == (6, 0, RAID_WEIGHT_DEFAULTS["main"])
-    reg.set_schedule("barrow-deeps", {"weights": {"rank": "inherit"}}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"weights": {"rank": "inherit"}}, "t")
     w = reg.schedule_def(RID, "barrow-deeps")["weights"]
     assert (w["regular"], w["rank"]) == (6, RAID_WEIGHT_DEFAULTS["rank"])
     assert reg.schedule_def(RID, "barrow-deeps")["schedule"]["source"]["weights"]["regular"] == "own"
     for bad in ({"luck": 3}, {"rank": -1}, {"rank": "lots"}):
         with pytest.raises(RegistryError):
-            reg.set_schedule("barrow-deeps", {"weights": bad}, "t", raid=RID)
+            reg.set_schedule("barrow-deeps", {"weights": bad}, "t")
 
 
 def test_confirm_is_a_raid_and_schedule_setting(reg):
     opened(reg)
-    reg.set_schedule("barrow-deeps", {"confirm": "false"}, "t", raid=RID)
+    reg.set_schedule("barrow-deeps", {"confirm": "false"}, "t")
     assert reg.schedule_def(RID, "barrow-deeps")["confirm"] is False
     with pytest.raises(RegistryError, match="belongs to each schedule"):  # phase 2: no longer the raid's
         reg.set_raid_override(RID, "confirm", "false", "t")

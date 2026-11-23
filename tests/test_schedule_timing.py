@@ -39,7 +39,7 @@ def test_run_times_alone_seed_their_schedule(reg):
 def test_a_stored_value_is_kept_and_inherit_means_the_suggestion(reg):
     reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "confirm_hours_before": 12}, "t", raid=RID)
     assert entry(reg, RID, "tue")["confirm_hours_before"] == 12
-    reg.set_schedule("tue", {"confirm_hours_before": "inherit"}, "t", raid=RID)
+    reg.set_schedule("tue", {"confirm_hours_before": "inherit"}, "t")
     assert entry(reg, RID, "tue")["confirm_hours_before"] == reg.timing_suggestion(RID)["confirm_hours_before"]
 
 
@@ -53,14 +53,14 @@ def test_the_raid_refuses_timing(reg, field):
 
 def test_moving_the_lock_past_the_reminder_moves_the_reminder(reg):
     reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "signup_lead_hours": 48, "lock_hours_before": 24, "nudge_hours_before": 30}, "t", raid=RID)
-    reg.set_schedule("tue", {"lock_hours_before": 36}, "t", raid=RID)
+    reg.set_schedule("tue", {"lock_hours_before": 36}, "t")
     e = entry(reg, RID, "tue")
     assert e["lock_hours_before"] == 36 and e["nudge_hours_before"] == R.default_nudge_hours(48, 36)
 
 
 def test_a_reminder_inside_the_new_window_stays(reg):
     reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "signup_lead_hours": 48, "lock_hours_before": 12, "nudge_hours_before": 30}, "t", raid=RID)
-    reg.set_schedule("tue", {"lock_hours_before": 24}, "t", raid=RID)
+    reg.set_schedule("tue", {"lock_hours_before": 24}, "t")
     assert entry(reg, RID, "tue")["nudge_hours_before"] == 30
 
 
@@ -84,7 +84,7 @@ def test_a_schedule_edit_never_reaches_an_open_run(reg, rs):
     start = (reg.now_local() + timedelta(days=5)).replace(hour=19, minute=30, second=0, microsecond=0)
     t = rc.ensure_run(reg, RID, start, schedule="tue")
     keep = {k: t[k] for k in ("cutoff_hard_hours", "confirm_hours", "fill_ask_hours")}
-    reg.set_schedule("tue", {"lock_hours_before": 36, "confirm_hours_before": 12}, "t", raid=RID)
+    reg.set_schedule("tue", {"lock_hours_before": 36, "confirm_hours_before": 12}, "t")
     after = reg.config.roster(t["key"])
     assert {k: after[k] for k in keep} == keep
 

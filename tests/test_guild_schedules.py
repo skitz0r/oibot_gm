@@ -107,7 +107,7 @@ def test_a_stale_schedule_rev_refuses_a_schedule_edit(reg):
     rev = reg.config_rev("schedule:tue")
     reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     with pytest.raises(R.ConfigChanged):
-        reg.set_schedule("tue", {"slots": "Wed 19:30"}, "t", rev=rev, raid=RID)
+        reg.set_schedule("tue", {"slots": "Wed 19:30"}, "t", rev=rev)
 
 
 def test_clearing_a_raid_clears_its_schedules(reg):
@@ -126,7 +126,7 @@ def test_the_file_holds_schedules_at_the_top(reg):
 def test_a_follow_on_start_survives_an_unrelated_edit(reg):
     reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30", "follow": f"{OTHER} x2"}, "t", raid=RID)
     stored(reg, RID)[0]["lineup"][1]["starts"] = 180  # nothing writes `starts` in this phase; a stored one must not be lost
-    reg.set_schedule("tue", {"name": "Tuesday"}, "t", raid=RID)
+    reg.set_schedule("tue", {"name": "Tuesday"}, "t")
     assert stored(reg, RID)[0]["lineup"] == [{"raid": RID, "rosters": 1}, {"raid": OTHER, "rosters": 2, "starts": 180}]
     assert stored(reg, RID)[0]["name"] == "Tuesday"
 
@@ -416,7 +416,7 @@ def test_a_stored_entry_with_a_unicode_digit_is_skipped_at_load(data_root, open_
 def test_editing_a_raid_keeps_its_block_before_a_later_raid(reg):
     reg.set_schedule("tue", {"kind": "weekly", "slots": "Tue 19:30"}, "t", raid=RID)
     reg.set_schedule("wed", {"kind": "weekly", "slots": "Wed 20:00"}, "t", raid=OTHER)
-    reg.set_schedule("tue", {"name": "Tuesday"}, "t", raid=RID)
+    reg.set_schedule("tue", {"name": "Tuesday"}, "t")
     reg.set_schedule("sat", {"kind": "weekly", "slots": "Sat 20:00"}, "t", raid=RID)
     assert [(e["lineup"][0]["raid"], e["id"]) for e in reg.config.schedules] == [(RID, "tue"), (RID, "sat"), (OTHER, "wed")]
 

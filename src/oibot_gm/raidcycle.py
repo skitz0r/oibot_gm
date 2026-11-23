@@ -800,7 +800,8 @@ def next_runs_preview(reg: Registry, instance: str, *, fields: dict | None = Non
     if fields:
         sh.set_raid_overrides(instance, dict(fields), "preview")
     if schedule and schedule_fields:
-        sh.set_schedule(schedule, dict(schedule_fields), "preview", raid=instance)
+        new = schedule not in {s["id"] for s in sh.all_schedules()}  # a named raid means create: an existing one names none
+        sh.set_schedule(schedule, dict(schedule_fields), "preview", raid=instance if new else None)
     ref = (now_ or sh.now_local()).astimezone(sh.tz)
     out = []
     for s in sh.schedules(instance):
