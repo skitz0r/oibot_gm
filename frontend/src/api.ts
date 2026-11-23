@@ -424,9 +424,12 @@ export interface Schedule {
 }
 export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; people?: Person[]; tz: string }
 export interface RaidRule {
-  id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string; comp: Record<string, { min?: number; max?: number }>;
-  slots: string[]; slot_labels?: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; fill_ask_hours: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number; autofill: boolean; open_dm: boolean; confirm?: boolean;
-  overridden: string[]; comp_targets: Record<string, CompTarget>; comp_groups: string[];
+  id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string;
+  /** sheet timing is each schedule's own (`schedules[].effective`), never the raid's */
+  slots: string[]; slot_labels?: string[]; weights: Record<string, number>; split_policy: string;
+  /** the guild's own minimums as stored (with their reasons), and what every run reads (Registry.minimums: the game's tank and healer ones included) */
+  minimums: Record<string, MinimumEntry>; minimum: Record<string, number>;
+  overridden: string[]; comp_groups: string[];
   /** the raid's sheets open or locked now (never a test run) and the next run an active schedule opens — the card's "When it runs" */
   live_runs?: LiveRun[]; next_run?: NextRun | null;
   first_open_local: string; /** Registry.local12 words for a person ("Wed 9 Dec 3:00 PM"); first_open_local is the input's machine form */ first_open_words?: string; opened: boolean; window: [string, string]; live: number;
@@ -638,18 +641,20 @@ export const opsApi = {
   apply: (token: string, changes?: OpsChange[], seen?: string, revs?: Record<string, string>) => api.post<OpsReply>("/api/ops/change", { token, apply: true, changes, seen, revs }),
 };
 
-// ---- phase 3: comp targets, readiness, the effective configuration, the Tell the bot box
-/** An officers' comp target (Registry.set_comp_targets): at least, at most (optional), why (optional). */
-export interface CompTarget { min: number; max?: number | null; note?: string | null }
-/** One desired-comp line as readiness measures it (comp.readiness): `source` officer | derived; `why` = the reason in words. */
-export interface CompLine { key: string; want: number; min: number; max: number | null; have: number; level: string; why: string; note: string | null; source: string; flex?: number; flex_who?: string[] }
+// ---- phase 3: minimums, readiness, the effective configuration, the Tell the bot box
+/** A raid's minimum as stored (registry.min_entry): a number, or {min, note}; no upper number (D16). */
+export type MinimumEntry = number | { min: number; note?: string | null };
+/** One minimum as the `comp` change writes it: at least, and why (optional). */
+export interface Minimum { min: number; note?: string | null }
+/** One minimum as readiness measures it (comp.readiness): `source` officer (the guild's) | derived; `why` = the reason in words. */
+export interface CompLine { key: string; want: number; min: number; have: number; level: string; why: string; note: string | null; source: string; flex?: number; flex_who?: string[] }
 export interface ReadinessRole { role: string; have: number; need: number; level: string; hint: string | null; cover: Record<string, string[]> }
 export interface ReadinessRaid {
   raid: string; name: string; size: number; level: "green" | "amber" | "red";
   headcount: { mains: number; size: number; alts: number; on_roster: number; unnamed: number; level: string };
   roles: ReadinessRole[]; missing_buffs: { id: string; name: string; abbr: string; colour: string; art: string | null }[];
-  comp: CompLine[]; short: { key: string; have: number; want: number; why: string }[]; over: { key: string; have: number; max: number; why: string }[]; notes: string[];
-  series: Series[]; targets: Record<string, CompTarget>; bounds: Record<string, { min: number; max: number }>; rev: string; comp_groups: string[];
+  comp: CompLine[]; short: { key: string; have: number; want: number; why: string }[]; notes: string[];
+  series: Series[]; minimums: Record<string, MinimumEntry>; minimum: Record<string, number>; rev: string; comp_groups: string[];
 }
 /** A target slot: a role, a class or Class:Spec, with its words (`label`) for selects and tooltips. */
 export interface CompSlot { value: string; label: string; kind: "role" | "class" | "spec" }

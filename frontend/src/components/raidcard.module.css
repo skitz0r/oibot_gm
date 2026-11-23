@@ -75,11 +75,11 @@
 a.runWhen:hover { text-decoration: underline; }
 .runWhat { font-size: 13px; color: var(--mantine-color-dimmed); }
 
-/* ---- the aims editor: a grid, never a sideways scroll — on a phone the Why takes its own line */
-.aimgrid { display: grid; grid-template-columns: 32px 100px 100px minmax(160px, 1fr) 32px; column-gap: 10px; row-gap: 6px; align-items: center; }
+/* ---- the minimums editor: a grid, never a sideways scroll — on a phone the Why takes its own line (dense: the remove button stays on the row it removes) */
+.aimgrid { display: grid; grid-template-columns: 32px 100px minmax(160px, 1fr) 32px; column-gap: 10px; row-gap: 6px; align-items: center; }
 .aimhead { font-size: 12px; font-weight: 600; color: var(--mantine-color-dimmed); }
 @media (max-width: 48em) {
-  .aimgrid { grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .aimgrid { grid-template-columns: 32px minmax(0, 1fr) 32px; grid-auto-flow: row dense; }
   .aimWhy { grid-column: 1 / -1; }
   .aimhead.aimWhy { display: none; }
 }

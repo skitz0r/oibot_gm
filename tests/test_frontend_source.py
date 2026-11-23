@@ -805,3 +805,34 @@ def test_the_prices_tab():
     reads = " ".join(s for _, s in tsx_strings(SRC / "pages" / "Prices.tsx"))
     for composed in ("Prices as of", "none listed", "aren't watching", "Register first", "holds 100", "kept prices since", "Lowest in the last"):
         assert composed not in reads, f"the server says {composed!r}"
+
+
+def test_raids_and_readiness_have_no_raid_timing_and_one_minimum():
+    """Phase 2 (raids without times; C7, D8, D16): sheet timing is each schedule's own, so the Raids page's rules
+    editor holds none of it; a raid's make-up is one minimum per role or class (no limits row, no aims, no upper
+    number); every officer on the page edits (no `owner` prop on RuleCard); the schedule editor shows the schedule's
+    own values and never says what "the raid's" would be."""
+    raids = (SRC / "pages" / "Raids.tsx").read_text()
+    card = raids[raids.index("function RuleCard("):]
+    assert "owner" not in card[:card.index(") {\n")], "RuleCard takes no owner prop: every officer edits"
+    use = raids[raids.index("<RuleCard"):]
+    assert "owner=" not in use[:use.index("/>")]
+    assert "The owner edits the rules" not in raids
+    for key in ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"):
+        assert key not in raids, f"Raids.tsx still names the raid's {key}"
+    for rel in ("components/CompTargets.tsx", "pages/Readiness.tsx"):
+        text = (SRC / rel).read_text()
+        for word in ("limits", "aims", "at most"):
+            assert word not in text.lower(), f"{rel} still says {word!r}"
+        assert "max:" not in text, f"{rel} still sends or reads an upper number"
+    comp = (SRC / "components" / "CompTargets.tsx").read_text()
+    assert "No minimums set. The lock uses the game's minimum for tanks and healers. Add one for a role or class below." in comp
+    assert "Save the minimums" in comp and 'kind: "comp"' in comp and "`config:raids:${rid}`" in comp
+    assert "(owner)" not in comp and "(officers)" not in comp
+    ready = (SRC / "pages" / "Readiness.tsx").read_text()
+    assert "Against the minimums" in ready and "on the Raids page</Anchor>" not in ready
+    sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
+    assert "the raid's" not in sched
+    for gone in ("SOURCE_WORDS", "inherited(", "ADHOC_DEFAULT"):
+        assert gone not in sched, f"ScheduleCard.tsx still has {gone}"
+    assert "the game's suggestion" in sched

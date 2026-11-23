@@ -5,10 +5,10 @@ import type { WeekStep } from "./board/types";
 import css from "./raidcard.module.css";
 
 /** The raid card's pieces (the Raids page; mockup out/mockups/raidcard): a section heading with its one-line hint, when
- *  the raid runs, a run's week as a timeline and the who-gets-a-seat bars. Read-only: the owner edits all of it under
- *  Edit rules — the editors feed RunWeek their draft so the timeline moves as a value is typed. The words of a run's
- *  week live here once (HOUR_WORDS / SWITCH_WORDS / WEIGHT_WORDS): the card, the rules editor and the schedule editor
- *  all read them, so a step has one name everywhere. */
+ *  the raid runs, a run's week as a timeline and the who-gets-a-seat bars. Read-only: officers edit the raid under Edit
+ *  rules and a schedule's week in its editor (sheet timing is each schedule's own), which feeds RunWeek its draft so the
+ *  timeline moves as a value is typed. The words of a run's week live here once (HOUR_WORDS / SWITCH_WORDS /
+ *  WEIGHT_WORDS): the card, the rules editor and the schedule editor all read them, so a step has one name everywhere. */
 
 export function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -41,23 +41,26 @@ export const SWITCH_HINT: Record<string, string> = {
   nudge: "one DM to the regulars who haven't answered", autofill: "off: an officer fills open seats from the Rosters page", open_dm: "every main while the schedule has no regulars", confirm: "off: a seat on the roster is final at the lock",
 };
 
-/** What RunWeek reads: a raid's rules, or an editor's draft shaped like one. */
-export type WeekRule = Pick<RaidRule, "signup_lead_hours" | "nudge_hours_before" | "lock_hours_before" | "confirm_hours_before" | "fill_ask_hours" | "nudge" | "confirm" | "autofill" | "open_dm" | "overridden">
-  & Partial<Pick<RaidRule, "slots" | "slot_labels" | "schedules">>;
+/** What RunWeek reads: a schedule's week, or its editor's draft. An hour left empty in a draft is null: its step isn't drawn. */
+export type WeekRule = {
+  signup_lead_hours: number | null; nudge_hours_before: number | null; lock_hours_before: number | null; confirm_hours_before: number | null; fill_ask_hours: number | null;
+  nudge: boolean; confirm?: boolean; autofill: boolean; open_dm: boolean; overridden: string[];
+} & Partial<Pick<RaidRule, "slots" | "slot_labels" | "schedules">>;
 
-type Tick = { label: string; hours: number; changed: boolean; why: string };
+type Tick = { label: string; hours: number | null; changed: boolean; why: string };
 
 /** A run's week, counted back from the raid: sheet opens · reminder · locks · confirm by · the raid. A step the raid
  *  doesn't take (reminder off, no confirmations) has no tick — the sentence below says so. Amber = changed from the
  *  game's default. `start` / `startWhy` override the raid's own run times (an editor's draft). */
 export function RunWeek({ r, start: startOverride, startWhy: startWhyOverride, sentence = true }: { r: WeekRule; start?: string; startWhy?: string; sentence?: boolean }) {
   const over = (...ks: string[]) => ks.some((k) => r.overridden.includes(k));
-  const ticks: Tick[] = [
+  const all: Tick[] = [
     { label: HOUR_WORDS.signup_lead_hours, hours: r.signup_lead_hours, changed: over("signup_lead_hours"), why: HOUR_HINT.signup_lead_hours },
     ...(r.nudge ? [{ label: HOUR_WORDS.nudge_hours_before, hours: r.nudge_hours_before, changed: over("nudge", "nudge_hours_before"), why: HOUR_HINT.nudge_hours_before }] : []),
     { label: HOUR_WORDS.lock_hours_before, hours: r.lock_hours_before, changed: over("lock_hours_before"), why: HOUR_HINT.lock_hours_before },
     ...(r.confirm !== false ? [{ label: HOUR_WORDS.confirm_hours_before, hours: r.confirm_hours_before, changed: over("confirm", "confirm_hours_before"), why: HOUR_HINT.confirm_hours_before }] : []),
-  ].sort((a, b) => b.hours - a.hours);
+  ];
+  const ticks = all.filter((t): t is Tick & { hours: number } => t.hours !== null).sort((a, b) => b.hours - a.hours);
   const labels = r.slot_labels || r.slots || [];
   // several schedules each set their own start: the raid's default times alone would leave the others out
   const many = (r.schedules || []).length > 1;
@@ -95,7 +98,7 @@ function weekSentence(r: WeekRule): { text: string; changed: boolean }[] {
   const over = (...ks: string[]) => ks.some((k) => r.overridden.includes(k));
   return [
     { text: r.autofill ? "After the lock, the bot asks people to fill open seats (a role swap waits for an officer)" : "After the lock, an officer fills open seats (Fill seats on the Rosters page)", changed: over("autofill") },
-    { text: `a fill ask waits ${r.fill_ask_hours} h for an answer`, changed: over("fill_ask_hours") },
+    ...(r.fill_ask_hours === null ? [] : [{ text: `a fill ask waits ${r.fill_ask_hours} h for an answer`, changed: over("fill_ask_hours") }]),
     { text: r.open_dm ? "the regulars (every main while the schedule has none) get a DM when the sheet opens" : "no DM when the sheet opens", changed: over("open_dm") },
     ...(r.nudge ? [] : [{ text: "no reminder before the lock", changed: over("nudge") }]),
     ...(r.confirm !== false ? [] : [{ text: "the rostered aren't asked to confirm", changed: over("confirm") }]),
@@ -112,7 +115,7 @@ export type RunsOf = { live_runs?: LiveRun[]; next_run?: NextRun | null; first_o
 export function WhenItRuns({ r, owner, here = false, upcoming, nothing: nothingText }: { r: RunsOf; owner: boolean; here?: boolean; upcoming?: React.ReactNode; nothing?: React.ReactNode }) {
   const live = r.live_runs || [];
   const nothing = !live.length && !(upcoming ?? r.next_run) && !(r.first_open_words && !r.opened);
-  const how = (r.schedules || []).length ? "its schedules are paused or have no run coming" : owner ? "add a schedule below, or open a run from the Rosters page" : "the owner adds a schedule below; an officer can open a run from the Rosters page";
+  const how = (r.schedules || []).length ? "its schedules are paused or have no run coming" : owner ? "add a schedule below, or open a run from the Rosters page" : "add a schedule on the Raids page, or open a run from the Rosters page";
   return (
     <ul className={css.runs}>
       {live.map((e) => (

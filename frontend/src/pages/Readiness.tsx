@@ -16,9 +16,9 @@ import { useLive } from "../hooks/useLive";
 const LEVEL_WHY: Record<string, string> = { green: "who could play covers the raid", amber: "it could field the raid with little to spare", red: "it can't field the raid from who could play" };
 
 /** Readiness (officers; design §3.3 Cluster C, RD-12): per raid, the pool against its size, roles with who could cover,
- *  the buffs nobody brings, and the DESIRED COMP — the officers' targets (Edit targets) against what the pool has; then the
- *  regulars' coverage with the 4-week forecast. Everything is comp.readiness (GET /api/readiness — the analytics card,
- *  MCP raid_readiness and /ask read the same numbers); the bounds are the owner's, on the Raids page. */
+ *  the buffs nobody brings, and the raid's MINIMUMS (D16: one number per role, class or spec, officers edit them here or
+ *  on the Raids page) against what the pool has; then the regulars' coverage with the 4-week forecast. Everything is
+ *  comp.readiness (GET /api/readiness — the analytics card, MCP raid_readiness and /ask read the same numbers). */
 export function ReadinessPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<Readiness | null>(null);
   const editing = useRef(0);  // tables in edit mode: a change elsewhere never reloads under them
@@ -29,7 +29,7 @@ export function ReadinessPage({ meta }: { meta: Meta }) {
   if (!data) return <Text c="dimmed">Loading…</Text>;
   return (
     <Stack gap="lg">
-      <PageTitle title="Readiness" intro="What the guild could field for each raid, and how it stands against the aims. Officers set the aims here (or with /roster comp); the limits — the fewest and most of each role a run takes — are the owner's, in the raid's rules on the Raids page." />
+      <PageTitle title="Readiness" intro="What the guild could field for each raid, and how it stands against the raid's minimums — the fewest of each role or class a run takes. Officers set them here, on the Raids page or with /roster comp." />
       {data.raids.map((r) => <RaidReadiness key={r.raid} r={r} meta={meta} slots={data.slots} onSaved={load}
         onEditing={(on) => { editing.current += on ? 1 : -1; if (!on && editing.current < 0) editing.current = 0; }} />)}
     </Stack>
@@ -70,16 +70,16 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
         </Group>
 
         <Box>
-          <Group justify="space-between" mb={4}><Eyebrow>Against the aims</Eyebrow><Anchor component={Link} to={`/raids#raid-${r.raid}`} size="xs">Limits on the Raids page</Anchor></Group>
+          <Box mb={4}><Eyebrow>Against the minimums</Eyebrow></Box>
           <Table verticalSpacing={4}>
-              <Table.Thead><Table.Tr><Table.Th w={40} /><Table.Th w={56}>Have</Table.Th><Table.Th w={70}>Aim</Table.Th><Table.Th>Why</Table.Th></Table.Tr></Table.Thead>
+              <Table.Thead><Table.Tr><Table.Th w={40} /><Table.Th w={56}>Have</Table.Th><Table.Th w={80}>Minimum</Table.Th><Table.Th>Why</Table.Th></Table.Tr></Table.Thead>
               <Table.Tbody>
                 {r.comp.map((c) => (
                   <Table.Tr key={c.key}>
                     <Table.Td><SlotIcon meta={meta} slot={c.key} label={words(c.key)} /></Table.Td>
-                    <Table.Td><Text size="sm" fw={600} c={c.have < c.want ? "red" : c.max !== null && c.have > c.max ? "yellow" : "teal"} style={{ fontVariantNumeric: "tabular-nums" }}>{c.have}</Text></Table.Td>
-                    <Table.Td style={{ fontVariantNumeric: "tabular-nums" }}>{c.max !== null && c.max !== c.want ? `${c.want}–${c.max}` : c.want}</Table.Td>
-                    <Table.Td style={{ whiteSpace: "normal" }}><Group gap={6} wrap="wrap">{c.source === "officer" && <Badge size="xs" variant="light" color="teal">officers' aim</Badge>}<Text size="xs" c="dimmed">{c.note || c.why}</Text></Group></Table.Td>
+                    <Table.Td><Text size="sm" fw={600} c={c.have < c.want ? "red" : "teal"} style={{ fontVariantNumeric: "tabular-nums" }}>{c.have}</Text></Table.Td>
+                    <Table.Td style={{ fontVariantNumeric: "tabular-nums" }}>{c.want}</Table.Td>
+                    <Table.Td style={{ whiteSpace: "normal" }}><Group gap={6} wrap="wrap">{c.source === "officer" && <Badge size="xs" variant="light" color="teal">the guild's</Badge>}<Text size="xs" c="dimmed">{c.note || c.why}</Text></Group></Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -89,8 +89,8 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
         </Box>
 
         <Box>
-          <Group gap="sm" align="baseline" wrap="wrap"><Eyebrow>Group make-up</Eyebrow><Text size="xs" c="dimmed">how many of each role a run takes</Text></Group>
-          <Box mt={4}><CompTargets meta={meta} rid={r.raid} size={r.size} targets={r.targets} bounds={r.bounds} slots={slots} rev={r.rev} editable onReadiness onSaved={onSaved} onEditing={onEditing} /></Box>
+          <Group gap="sm" align="baseline" wrap="wrap"><Eyebrow>Group make-up</Eyebrow><Text size="xs" c="dimmed">the fewest of each role or class a run takes</Text></Group>
+          <Box mt={4}><CompTargets meta={meta} rid={r.raid} size={r.size} minimums={r.minimums} minimum={r.minimum} slots={slots} rev={r.rev} editable onSaved={onSaved} onEditing={onEditing} /></Box>
           {r.comp_groups.length > 0 && <Text size="xs" c="dimmed" mt={4}>Group layout: {r.comp_groups.join(", ")} (set in plain text)</Text>}
         </Box>
 
