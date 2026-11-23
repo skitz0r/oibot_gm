@@ -608,7 +608,7 @@ def test_the_owners_sentence_as_ops(reg, rs):
     unlock_hyjal(reg)
     day = (reg.now_local() + timedelta(days=6)).strftime("%Y-%m-%d")
     ops = [ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="barrow_deeps x2"),
-           ConfigOp(op="schedule_set", target=LEAD, field="tue.slots", value="Tue 18:30"),
+           configops.coalesce([ConfigOp(op="schedule_set", target="tue", field="raid", value=LEAD), ConfigOp(op="schedule_set", target="tue", field="slots", value="Tue 18:30")])[0],
            # Hyjal's profile first_open is 2026-12-09, so a Tuesday schedule's first run already falls on 2026-12-15 and the
            # owner's sentence needs no date op; the raid-wide first_open is only described here (applying it moves the lockouts)
            ConfigOp(op="raid_set", target=LEAD, field="first_open", value="2026-12-15 18:30")]
@@ -620,11 +620,11 @@ def test_the_owners_sentence_as_ops(reg, rs):
     bad = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="hyjal_summit_forever x2")
     assert "not the raid itself" in configops.describe(reg, bad)
     assert configops.apply(reg, ops[1], by="t", is_owner=True)  # the schedule is created by its run times first
-    fw = ConfigOp(op="schedule_set", target=LEAD, field="tue.follow", value="barrow_deeps x2")
+    fw = ConfigOp(op="schedule_set", target="tue", field="follow", value="barrow_deeps x2")
     assert "no follow-on → then Barrow Deeps ×2" in configops.describe(reg, fw)
     assert configops.apply(reg, fw, by="t", is_owner=True)
     assert next(s for s in reg.schedules(LEAD) if s["id"] == "tue")["follow"] == {"raid": FOLLOW, "rosters": 2}
-    off = ConfigOp(op="schedule_set", target=LEAD, field="tue.follow", value="none")
+    off = ConfigOp(op="schedule_set", target="tue", field="follow", value="none")
     assert "no follow-on" in configops.describe(reg, off)
 
 

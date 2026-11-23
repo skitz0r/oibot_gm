@@ -54,7 +54,7 @@ def mcp_tool_names() -> set[str]:
 
 @pytest.mark.parametrize("change", [
     {"kind": "raid", "target": RID, "fields": {"notes": "officers wrote this"}},
-    {"kind": "schedule", "target": f"{RID}:tue", "fields": {"kind": "weekly", "slots": "Tue 19:30"}},
+    {"kind": "schedule", "target": "tue", "fields": {"raid": RID, "kind": "weekly", "slots": "Tue 19:30"}},
     {"kind": "comp", "target": RID, "fields": {"healer": {"min": 3}}},
 ])
 def test_an_officer_saves_raid_and_schedule_changes_on_the_site(officer_client, change, reg):
@@ -64,12 +64,12 @@ def test_an_officer_saves_raid_and_schedule_changes_on_the_site(officer_client, 
 
 
 def test_the_admin_raid_routes_take_an_officer(officer_client, reg):
-    r = officer_client.post("/api/admin/raid/schedule", json={"instance": RID, "id": "tue", "fields": {"kind": "weekly", "slots": "Tue 19:30"}, "confirmed": True})
+    r = officer_client.post("/api/admin/raid/schedule", json={"id": "tue", "fields": {"raid": RID, "kind": "weekly", "slots": "Tue 19:30"}, "confirmed": True})
     assert r.status_code == 200, r.text
     assert next(s for s in reg.schedules(RID) if s["id"] == "tue")["slots"] == ["Tue 19:30"]
     r = officer_client.post("/api/admin/raid", json={"instance": RID, "notes": "bring pots", "confirmed": True})
     assert r.status_code == 200 and reg.raid_def(RID)["notes"] == "bring pots"
-    body = {"instance": RID, "id": "tue", "confirmed": True}
+    body = {"id": "tue", "confirmed": True}
     r = officer_client.post("/api/admin/raid/schedule/remove", json=body)
     if r.json().get("review_required"):  # a removal carries consequences: confirmed with the revs its preview returned (D51)
         r = officer_client.post("/api/admin/raid/schedule/remove", json={**body, "revs": r.json()["revs"]})
@@ -130,7 +130,7 @@ def test_the_raids_route_carries_minimums_and_no_raid_timing(officer_client, reg
 def test_plain_text_lets_officers_change_a_raid_by_default(reg):
     officer = reg.test_members()[0].discord_id
     assert reg.may_plain("comp", officer, officer=True, channel=PLAIN_WEB) is None
-    allowed, refused = configops.authorize(reg, [ConfigOp(op="schedule_set", target=RID, field="alt.slots", value="Sat 20:00"),
+    allowed, refused = configops.authorize(reg, [ConfigOp(op="schedule_set", target="alt", field="slots", value="Sat 20:00"),
                                                  ConfigOp(op="raid_set", target=RID, field="notes", value="x")], officer, officer=True, channel=PLAIN_WEB)
     assert len(allowed) == 2 and not refused
     allowed, refused = configops.authorize(reg, [ConfigOp(op="aura_set", target="blood_pact", field="note", value="x")], officer, officer=True, channel=PLAIN_WEB)
@@ -165,7 +165,7 @@ def test_a_minimum_takes_no_upper_limit_and_no_unknown_slot(reg):
 
 def test_a_schedule_takes_a_run_week_preset(reg):
     reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid=RID)
-    configops.apply(reg, ConfigOp(op="schedule_set", target=RID, field="alt.cadence", value="short"), "t", is_owner=False)
+    configops.apply(reg, ConfigOp(op="schedule_set", target="alt", field="cadence", value="short"), "t", is_owner=False)
     sd = reg.schedule_def(RID, "alt")
     from oibot_gm import presets
 

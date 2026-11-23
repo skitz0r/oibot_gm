@@ -116,7 +116,7 @@ def test_schedule_removal_effects_names_regulars_and_open_runs(reg, rs):
     assert eff.regulars == [m.display_name] and eff.open_runs == [reg.config.roster(ev.team)["name"]]
     s = eff.sentence()
     assert s.startswith("The Alt run schedule is removed.") and f"{m.display_name} comes off its regulars and sees a notice" in s and "keeps its time and sheet" in s
-    cons = configops.op_consequences(reg, ConfigOp(op="schedule_remove", target="barrow_deeps", field="alt"))
+    cons = configops.op_consequences(reg, ConfigOp(op="schedule_remove", target="alt"))
     assert cons == eff.lines()
     with pytest.raises(RegistryError, match="no schedule called"):
         reg.schedule_removal_effects("nope", rs)
@@ -129,9 +129,9 @@ def test_rosters_copy_reaches_the_next_run_only(reg, rs):
     assert rc.rosters_copy(reg, "barrow_deeps", "alt", 2, rs) == "From the next run: the sheet advertises 2 × 10 seats."
     open_real(reg, rs)
     assert rc.rosters_copy(reg, "barrow_deeps", "alt", 2, rs) == "From the next run: the sheet advertises 2 × 10 seats. The run already open keeps its 1 × 10."
-    text = configops.describe(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.rosters", value="2"))
+    text = configops.describe(reg, ConfigOp(op="schedule_set", target="alt", field="rosters", value="2"))
     assert "From the next run: the sheet advertises 2 × 10 seats." in text
-    d = configops.describe_ops(reg, [ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.rosters", value="2")])
+    d = configops.describe_ops(reg, [ConfigOp(op="schedule_set", target="alt", field="rosters", value="2")])
     assert any("The run already open keeps its 1 × 10." in n for n in d.lines[0].notes)
 
 
@@ -436,18 +436,19 @@ def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypat
 
 
 def test_schedule_writes_from_the_raids_page_carry_the_raid_rev(owner_client, reg, rs):
-    """Regression: Pause / Resume / Remove posted with no config:raids rev, so a stale page overwrote a change."""
+    """Regression: Pause / Resume / Remove posted with no rev, so a stale page overwrote a change. Phase 3: the rev is
+    the schedule's own (config:schedule:<id>), which the server checks."""
     alt_schedule(reg)
     rev = reg.config_rev("schedule:alt")  # phase 3: a schedule has a rev of its own
     reg.set_schedule("alt", {"name": "Alt night"}, "someone else", raid="barrow_deeps")
-    for path, body in (("/api/admin/raid/schedule/remove", {"instance": "barrow_deeps", "id": "alt"}),
-                       ("/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": {"active": False}})):
+    for path, body in (("/api/admin/raid/schedule/remove", {"id": "alt"}),
+                       ("/api/admin/raid/schedule", {"id": "alt", "fields": {"active": False}})):
         r = owner_client.post(path, json={**body, "revs": {"config:schedule:alt": rev}}, headers=bearer())
         assert r.status_code == 409 and r.json()["changed"] == ["schedule:alt"], r.text
     assert any(x["id"] == "alt" and x["active"] for x in reg.schedules("barrow_deeps"))
     src = (FRONT / "components" / "ScheduleCard.tsx").read_text()
     saves = [ln for ln in src.splitlines() if re.search(r'saveOps\(\[\{ kind: "schedule(?:_remove)?"', ln)]  # useOpsSave (D51)
-    assert len(saves) == 3 and all("...raidRevs(r)" in p for p in saves), saves
+    assert len(saves) == 3 and all("...scheduleRevs(s)" in p for p in saves), saves
 
 
 def test_mcp_guild_overview_carries_the_summary(owner_client, reg, monkeypatch):

@@ -127,10 +127,10 @@ Raids (officer): raid_set: target=<raid id: barrow_deeps|hyjal_summit_forever|on
   Several raid_set ops on one raid in a row are saved together.
   raid_reset (officer): target=<raid id> — drop the guild's changes to that raid (back to the game's defaults).
 Schedules (officer): WHEN a raid runs and its sheet timing. Each schedule has an id of its own across the guild (ids under "Each
-  raid's settings and its schedules" below). schedule_set: target=<raid id>, field=<schedule id>.<setting>, value.
-  A new schedule id (one no schedule has yet) is created by its first op,
-  which must say what it is: <id>.slots (weekly: comma list of 'Sat 20:00' run times), <id>.lockout (value "<days> at <HH:MM>",
-  e.g. "1, 3 at 20:00" = days 1 and 3 of every lockout; day 1 = the reset day) or <id>.kind=pickup (a template officers open on demand).
+  raid's settings and its schedules" below). schedule_set: target=<schedule id alone, never with the raid>, field=<setting>, value.
+  A new schedule id (one no schedule has yet) is created by its ops: field=raid, value=<raid id> names its first raid (first), then
+  what it is: slots (weekly: comma list of 'Sat 20:00' run times), lockout (value "<days> at <HH:MM>",
+  e.g. "1, 3 at 20:00" = days 1 and 3 of every lockout; day 1 = the reset day) or kind=pickup (a template officers open on demand).
   Other settings: name (e.g. "Alt run") | active (true|false: false = paused, opens nothing) | rosters (1-4: rosters the run expects;
   the sheet advertises size × this) | follow ("<raid id> x<N>": a second raid the same night from the same signup, starting when the
   first ends — "barrow_deeps x2" = two 10-man Barrow Deeps groups; "none" clears it) | slots | lockout
@@ -141,7 +141,8 @@ Schedules (officer): WHEN a raid runs and its sheet timing. Each schedule has an
   | open_dm (true|false: DM every main when a sheet opens) | confirm (true|false: the lock asks the rostered to confirm)
   | split_policy — a timing setting given value "inherit" goes back to the game's suggestion; split_policy "inherit" goes back to the raid's.
   Several schedule_set ops on one schedule in a row are saved together (so "open 48h before and lock 36h before" can't fail half way).
-  schedule_remove: target=<raid id>, field=<schedule id>.
+  Runs already open keep their times.
+  schedule_remove: target=<schedule id>.
 Auras (owner): aura_set: what the guild learns about a buff. target=<buff id, e.g. fortitude|blood_pact|windfury_totem|devotion_aura>,
     field=<scope (party|raid)|family (a family id or another buff's id: "X and Y don't stack" = set the weaker one's family to the other's id; 'own' = stands alone)|strength (number, 1 = full)|status (confirmed|reported|assumed)|note>, value.
   family_set (owner): who benefits from a stacking family and how much. target=<family id, e.g. fortitude|arcane_intellect|stamina (new ids are created)>,
@@ -235,8 +236,8 @@ class ConfigOp(BaseModel):
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
-    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, regular, comp_target*, comp_groups), schedule id alone (schedule_set, schedule_remove), run key (run_*, pin, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
+    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set/schedule_set: the setting name from the schema (schedule_set: raid = a new schedule's first raid); run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: the minimum as a whole number; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
@@ -853,23 +854,79 @@ def follow_of_op(reg: Registry, rid: str, text: str | None) -> dict | None:
     return fw
 
 
-def _removed_id(reg: Registry, op: ConfigOp) -> str:
-    """schedule_remove's schedule id; with a `target` raid, the schedule must be one of that raid's (else NO_SCHEDULE)."""
+SCHEDULE_ID_ALONE = "Name a schedule by its id alone."
+SETTING_ALONE = "Name the setting alone, without the schedule's id in front."
+
+
+def _schedule_sid(op: ConfigOp) -> str:
+    """A schedule op's schedule id: its `target`, the guild-unique id alone (phase 3). An older '<raid>:<schedule>'
+    target is refused in one sentence (SCHEDULE_ID_ALONE), never split."""
     from .registry import NO_SCHEDULE
 
-    sid = (op.field or op.value or "").strip().lower()
-    rid = (op.target or "").strip()
-    if rid and rid in reg.profile.raids and not any(s["id"] == sid for s in reg.schedules(rid)):
-        raise RegistryError(NO_SCHEDULE.format(sid=sid or "?"))
+    sid = (op.target or "").strip().lower()
+    if ":" in sid:
+        raise RegistryError(SCHEDULE_ID_ALONE)
+    if not sid:
+        raise RegistryError(NO_SCHEDULE.format(sid="?"))
     return sid
 
 
+def _removed_id(reg: Registry, op: ConfigOp) -> str:
+    """schedule_remove's schedule id (its target)."""
+    return _schedule_sid(op)
+
+
 def _schedule_ref(op: ConfigOp) -> tuple[str, str]:
-    """schedule_set's field '<schedule id>.<setting>' → (id, setting)."""
-    sid, _, setting = (op.field or "").strip().partition(".")
-    if not sid or not setting:
-        raise RegistryError("schedule_set field is <schedule id>.<setting>, e.g. alt.slots")
-    return sid.strip().lower(), setting.strip().lower()
+    """schedule_set's (schedule id, setting): target = the id, field = the setting alone ('raid' names a new schedule's
+    first raid). An older '<id>.<setting>' field is refused (SETTING_ALONE)."""
+    sid = _schedule_sid(op)
+    setting = (op.field or "").strip().lower()
+    if not setting:
+        raise RegistryError("Name the setting to change.")
+    if "." in setting:
+        raise RegistryError(SETTING_ALONE)
+    return sid, setting
+
+
+def _schedule_parts(op: ConfigOp) -> list[ConfigOp]:
+    return list(op.parts) if isinstance(op, MergedOp) else [op]
+
+
+def _schedule_raid(reg: Registry, op: ConfigOp) -> str | None:
+    """The first raid of a schedule op's schedule: the schedule's own when it exists, else the `raid` its write names
+    (a new schedule), else None."""
+    sid = _schedule_sid(op)
+    try:
+        return reg.schedule_entry(sid)["raid"]
+    except RegistryError:
+        pass
+    for p in _schedule_parts(op):
+        if p.op == "schedule_set" and (p.field or "").strip().lower() == "raid":
+            return (p.value or "").strip().lower() or None
+    return None
+
+
+def _schedule_write_fields(op: ConfigOp) -> tuple[str, dict, str | None]:
+    """A schedule_set op (or several merged) as Registry.set_schedule's (id, fields, raid)."""
+    sid, raid, fields = _schedule_sid(op), None, {}
+    for p in _schedule_parts(op):
+        _sid, setting = _schedule_ref(p)
+        if setting == "raid":
+            raid = (p.value or "").strip().lower() or None
+        else:
+            fields.update(_schedule_fields(setting, p.value))
+    return sid, fields, raid
+
+
+def _schedule_write(reg: Registry, op: ConfigOp, by: str, rev: str | None = None) -> str:
+    """THE schedule_set write (one op or several merged): one Registry.set_schedule call."""
+    sid, fields, raid = _schedule_write_fields(op)
+    if not fields:  # a raid named alone: refused as set_schedule would (ID_TAKEN, NO_SCHEDULE), a new one needs what it is
+        _rid, new = reg._schedule_raid(sid, raid)
+        if new:
+            raise RegistryError("A new schedule needs its kind, its run times, or its lockout days and time.")
+        return f"{reg.series_label(sid)}: nothing to change"
+    return "; ".join(reg.set_schedule(sid, fields, by, raid=raid, rev=rev))
 
 
 def _schedule_fields(setting: str, value: str | None) -> dict:
@@ -1055,7 +1112,7 @@ def _merge_key(op: ConfigOp):
         return ("raid_set", op.target)
     if op.op == "schedule_set" and op.target:
         try:
-            return ("schedule_set", op.target, _schedule_ref(op)[0])
+            return ("schedule_set", _schedule_sid(op))
         except RegistryError:
             return None
     if op.op in ("aura_set", "family_set") and op.target:
@@ -1073,7 +1130,7 @@ def _merge_key(op: ConfigOp):
 
 def coalesce(ops: list[ConfigOp]) -> list[ConfigOp]:
     """Merge consecutive ops on the same thing into one MergedOp each (Apply on Discord, /api/ops/change and the
-    structured path use it after authorizing): raid_set on one raid, schedule_set on one raid and schedule, aura_set on
+    structured path use it after authorizing): raid_set on one raid, schedule_set on one schedule, aura_set on
     one buff, family_set on one family, plain ops, the absolute recruit fields. Everything else stays as it is, in order."""
     out: list[ConfigOp] = []
     for op in ops:
@@ -1112,11 +1169,7 @@ def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) 
         for p in op.parts:
             kw.update(_recruit(reg, p)[0])
         return reg.set_recruitment(by, rev=rev, **kw)
-    sid = _schedule_ref(op)[0]
-    fields = {}
-    for p in op.parts:
-        fields.update(_schedule_fields(_schedule_ref(p)[1], p.value))
-    return "; ".join(reg.set_schedule(sid, fields, by, raid=op.target or None, rev=rev))
+    return _schedule_write(reg, op, by, rev=rev)
 
 
 def _test_op(value: str | None) -> tuple[str, str]:
@@ -1499,12 +1552,11 @@ _RAID_SECTION_OPS = {"raid_set", "raid_reset", "schedule_set", "schedule_remove"
 def config_section(op: ConfigOp) -> str | None:
     """The config section an op writes (what its rev is taken of), or None for anything that isn't a config write. A
     schedule op's is its schedule's (schedule:<id>, phase 3)."""
-    if op.op == "schedule_set":
-        sid = (op.field or "").strip().partition(".")[0].strip().lower()
-        return f"schedule:{sid}" if sid else None
-    if op.op == "schedule_remove":
-        sid = (op.field or op.value or "").strip().lower()
-        return f"schedule:{sid}" if sid else None
+    if op.op in ("schedule_set", "schedule_remove"):
+        try:
+            return f"schedule:{_schedule_sid(op)}"
+        except RegistryError:
+            return None
     if op.op in _RAID_SECTION_OPS:
         return f"raids:{(op.target or '').strip()}" if op.target else None
     return _SECTION_OF.get(op.op)
@@ -2213,6 +2265,11 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
     `strict`: a people / run action the registry refuses raises its RegistryError instead of returning the refusal as a
     line, so a caller can list it as refused (no Apply) rather than as a proposed change. `by_id`: who asks."""
     cfg = reg.config
+    if isinstance(op, MergedOp) and op.op == "schedule_set":  # one schedule's write as a whole: a new one's raid is in a part
+        try:
+            return _describe_schedule(reg, op) + " (saved together)"
+        except RegistryError as e:
+            return f"schedule {op.target or '?'}: {e}"
     if isinstance(op, MergedOp):
         return "; ".join(describe(reg, p, channel) for p in op.parts) + " (saved together)"
     if op.op in ("loot", "wishlist", "tier", "loot_weights"):  # the loot council, wishlists, item tiers, the scoring weights (loot_ops)
@@ -2382,23 +2439,28 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
 
 def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
     """'Barrow Deeps · Alt run: Saturdays 8:00 PM → Saturdays 9:00 PM' — the schedule's current value → the new one,
-    in words. Raises RegistryError when the op can't apply (unknown raid or schedule, a value that won't parse)."""
-    rid = op.target or ""
-    if rid not in reg.profile.raids:
-        raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
-    name = reg.raid_def(rid).get("name", rid)
+    in words (every part of a merged op). Raises RegistryError when the op can't apply (an id with ':', no such
+    schedule and no raid named for a new one, a value that won't parse)."""
+    from .registry import ID_TAKEN, NO_SCHEDULE
+
     if op.op == "schedule_remove":
-        sid = (op.field or op.value or "").strip().lower()
-        cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
-        if cur is None:
-            raise RegistryError(f"{name} has no schedule {sid or '?'}")
+        cur = reg.schedule_entry(_schedule_sid(op))
+        rid, sid = cur["raid"], cur["id"]
+        name = reg.raid_def(rid).get("name", rid)
         held = sorted({m.display_name for m, _c in reg.schedule_regulars(sid)})
         return (f"{name}: remove schedule {cur['name']} ({reg.schedule_label(rid, cur)})"
                 + "; runs already open keep their times"
                 + (f"; its {len(held)} regular{'s' if len(held) != 1 else ''} come off it ({', '.join(held)}) — nobody is DMed" if held else ""))
-    sid, setting = _schedule_ref(op)
-    fields = _schedule_fields(setting, op.value)
+    sid, fields, raid = _schedule_write_fields(op)
+    rid = _schedule_raid(reg, op)
+    if rid is None:
+        raise RegistryError(NO_SCHEDULE.format(sid=sid))
+    if rid not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {rid} (one of {', '.join(reg.profile.raids)})")
+    name = reg.raid_def(rid).get("name", rid)
     cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
+    if cur is not None and raid and raid != rid:
+        raise RegistryError(ID_TAKEN.format(sid=sid))
     new = _schedule_words(reg, rid, fields, sid)
     after = _runs_preview(reg, rid, schedule=sid, schedule_fields=fields) if any(f in PREVIEW_SCHEDULE_FIELDS for f in fields) else ""
     if cur is None:
@@ -2414,7 +2476,7 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
         except (RegistryError, TypeError, ValueError):
             pass
     was = {k: v for k, v in now.items() if v is not None or k == "follow"}  # no follow-on yet reads "no follow-on"
-    return f"{name} · {cur['name']}: {_schedule_words(reg, rid, was, sid) or 'nothing of its own'} → {new}{after}"
+    return f"{name} · {cur['name']}: {_schedule_words(reg, rid, was, sid) or 'nothing of its own'} → {new or 'nothing to change'}{after}"
 
 
 def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int | None = None) -> str:
@@ -2738,8 +2800,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op == "raid_reset":
         return reg.clear_raid_override(op.target or "", by, rev=rev)
     if op.op == "schedule_set":
-        sid, setting = _schedule_ref(op)
-        return "; ".join(reg.set_schedule(sid, _schedule_fields(setting, op.value), by, raid=op.target or None, rev=rev))
+        return _schedule_write(reg, op, by, rev=rev)
     if op.op == "schedule_remove":
         return reg.remove_schedule(_removed_id(reg, op), by, rev=rev)
     if op.op == "aura_set":
@@ -3722,19 +3783,29 @@ def _plain_merged(reg: Registry, parts: list[ConfigOp]) -> dict:
     return patch
 
 
-def _schedule_target(reg: Registry, target: str | None) -> tuple[str, str]:
-    """A structured schedule target → (its first raid, schedule id): a schedule's id alone (phase 3), or
-    '<raid id>:<schedule id>' — how a client names the raid of a NEW schedule."""
-    rid, sep, sid = str(target or "").partition(":")
-    if not sep:
-        sid = rid.strip().lower()
-        try:
-            return reg.schedule_entry(sid)["raid"], sid
-        except RegistryError:
-            raise RegistryError("a new schedule is named '<raid id>:<schedule id>', e.g. barrow_deeps:alt") from None
-    if not rid.strip():
-        raise RegistryError("a schedule is named '<raid id>:<schedule id>', e.g. barrow_deeps:alt")
-    return rid.strip(), sid.strip().lower()  # an empty schedule id: the verb says which ones the raid has
+def _schedule_ops(reg: Registry, target: str | None, fields: dict) -> list[ConfigOp]:
+    """A structured schedule draft as schedule_set ops on its id (`target`, the id alone — SCHEDULE_ID_ALONE for an older
+    '<raid>:<schedule>'). A new schedule names its first raid: `raid`, or `lineup` [{raid, rosters[, starts]}] (its
+    first entry the raid and its rosters, a second the follow-on). The raid's op comes first, so the merged write knows it."""
+    from .registry import parse_lineup
+
+    sid = _schedule_sid(ConfigOp(op="schedule_set", target=target))
+    fields = dict(fields)
+    lineup, raid = fields.pop("lineup", None), fields.pop("raid", None)
+    head: list[ConfigOp] = []
+    if lineup is not None:
+        rows = parse_lineup(lineup)
+        if raid and str(raid).strip().lower() != rows[0]["raid"]:
+            raise RegistryError("The lineup's first raid and the raid named differ. Name one raid.")
+        raid = rows[0]["raid"]
+        fields.setdefault("rosters", rows[0]["rosters"])
+        if len(rows) > 1:
+            fields.setdefault("follow", rows[1])
+        elif any(x["id"] == sid for x in reg.all_schedules()):
+            fields.setdefault("follow", None)  # an existing schedule's lineup of one raid: its follow-on goes
+    if raid:
+        head.append(ConfigOp(op="schedule_set", target=sid, field="raid", value=str(raid).strip().lower()))
+    return head + [ConfigOp(op="schedule_set", target=sid, field=str(f).strip().lower(), value=_value_text(v)) for f, v in fields.items()]
 
 
 def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict | None, *, channels: list[dict] | None = None) -> list[ConfigOp]:
@@ -3788,11 +3859,9 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
     if k == "raid_reset":
         return [ConfigOp(op="raid_reset", target=(target or "").strip())]
     if k == "schedule":
-        rid, sid = _schedule_target(reg, target)
-        return [ConfigOp(op="schedule_set", target=rid, field=f"{sid}.{str(f).strip().lower()}", value=_value_text(v)) for f, v in fields.items()]
+        return _schedule_ops(reg, target, fields)
     if k == "schedule_remove":
-        rid, sid = _schedule_target(reg, target)
-        return [ConfigOp(op="schedule_remove", target=rid, field=sid)]
+        return [ConfigOp(op="schedule_remove", target=_schedule_sid(ConfigOp(op="schedule_remove", target=target)))]
     if k == "buff":
         bid = (target or "").strip()
         cur = reg.buff(bid)
@@ -4191,6 +4260,27 @@ def schedule_pause_sentence(reg: Registry, rid: str, sid: str, pause: bool, rs=N
     return f"Nothing new opens from {name}. {held} Its regulars stay."
 
 
+SCHEDULE_TIME_SETTINGS = {"kind", "slots", "days", "time", "lockout", "cadence", "signup_lead_hours", "nudge_hours_before",
+                          "lock_hours_before", "confirm_hours_before", "fill_ask_hours"}  # what sets a run's start or its week
+
+
+def _schedule_keeps(reg: Registry, op: ConfigOp) -> list[str]:
+    """C10: an edit of a schedule's run times or its week leaves the runs it already opened as they are — said once
+    (consequences.schedule_keeps_sentence) when it has open runs. A new schedule has none; a pause says its own."""
+    if op.op != "schedule_set":
+        return []
+    try:
+        sid, setting = _schedule_ref(op)
+    except RegistryError:
+        return []
+    if setting not in SCHEDULE_TIME_SETTINGS or sid not in {s["id"] for s in reg.all_schedules()}:
+        return []
+    from .consequences import schedule_keeps_sentence
+
+    said = schedule_keeps_sentence(len(reg.schedule_runs_open(sid)))
+    return [said] if said else []
+
+
 def _timezone_consequences(reg: Registry, op: ConfigOp) -> list[str]:
     """A timezone change with runs already open or locked: each run whose clock reading moves, in the words of
     Registry.timezone_change_effects (the TimezoneWizard, the Config page's review and MCP's preview print them)."""
@@ -4200,6 +4290,7 @@ def _timezone_consequences(reg: Registry, op: ConfigOp) -> list[str]:
 
 
 CONSEQUENCE_HOOKS.append(_timezone_consequences)
+CONSEQUENCE_HOOKS.append(_schedule_keeps)
 
 
 def aura_reset_one_sentence(reg: Registry, target: str) -> str:
@@ -4242,11 +4333,11 @@ def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None =
         return list(dict.fromkeys(s for p in op.parts for s in op_consequences(reg, p, roles_after)))
     out: list[str] = []
     try:
-        if op.op == "schedule_remove" and op.target in reg.profile.raids:
+        if op.op == "schedule_remove":
             out += reg.schedule_removal_effects(_removed_id(reg, op)).lines()
         elif op.op == "schedule_set" and _warn_schedule(reg, op):
             sid, _ = _schedule_ref(op)
-            out.append(schedule_pause_sentence(reg, op.target or "", sid, True))
+            out.append(schedule_pause_sentence(reg, reg.schedule_entry(sid)["raid"], sid, True))
         elif op.op == "aura_reset" and not (op.target or "").strip():
             out.append(reg.aura_reset_sentence())
         elif op.op == "aura_reset":
@@ -4433,8 +4524,9 @@ def _split_line(text: str) -> tuple[str, str | None, str | None, list[str]]:
     return label, before, after, [notes] if dash else []
 
 
-def _part(reg: Registry, op: ConfigOp, by_id: int | None = None) -> tuple[str, DescribedPart, list[str]]:
-    """(the thing's label, its one part, notes) for one op — the setup ops structured explicitly, others from describe()."""
+def _part(reg: Registry, op: ConfigOp, by_id: int | None = None, *, raid: str | None = None) -> tuple[str, DescribedPart, list[str]]:
+    """(the thing's label, its one part, notes) for one op — the setup ops structured explicitly, others from describe().
+    `raid`: a schedule op's first raid when the op alone can't say it (a part of a new schedule's merged write)."""
     try:
         if op.op == "aura_set":
             b = reg.buff(op.target or "")
@@ -4506,25 +4598,29 @@ def _part(reg: Registry, op: ConfigOp, by_id: int | None = None) -> tuple[str, D
             if rid is None:
                 return "Guild settings", DescribedPart(label="Officer roles", before=words(have), after=f"{words(have)} {'+' if op.op == 'role_add' else '−'} {op.value} (by name)"), []
             return "Guild settings", DescribedPart(label="Officer roles", before=words(have), after=words(after)), []
-        if op.op in ("raid_set", "raid_reset", "schedule_set", "schedule_remove"):
+        if op.op in ("schedule_set", "schedule_remove"):
+            sid = _schedule_sid(op)
+            rid = _schedule_raid(reg, op) or raid or ""
+            name = reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else ""
+            s = next((x for x in reg.schedules(rid) if x["id"] == sid), None) if rid in reg.profile.raids else None
+            if op.op == "schedule_remove":
+                return f"{name} · {s['name'] if s else sid}", DescribedPart(label="Schedule", before=reg.schedule_label(rid, s) if s else None, after="removed"), []
+            _sid, setting = _schedule_ref(op)
+            label = f"{name} · {s['name'] if s else sid}" if name else sid
+            if setting == "raid":  # a new schedule's first raid
+                return label, DescribedPart(label="Raid", before=None if s is None else name, after=reg.raid_def(op.value or "").get("name", op.value) if (op.value or "") in reg.profile.raids else op.value), []
+            if s is None:  # a new schedule: what it will be
+                return label, DescribedPart(label=_cap(setting.replace("_", " ")), before="new", after=_schedule_words(reg, rid, _schedule_fields(setting, op.value))), []
+            text = describe(reg, op, PLAIN_WEB)
+            _l, before, after, notes = _split_line(text.split(": ", 1)[1] if ": " in text else text)
+            return label, DescribedPart(label=_cap(setting.replace("_", " ")), before=before, after=after), notes
+        if op.op in ("raid_set", "raid_reset"):
             rid = op.target or ""
             name = reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else rid
             text = describe(reg, op, PLAIN_WEB)
-            if op.op == "schedule_remove":
-                sid = (op.field or op.value or "").strip().lower()
-                s = next((x for x in reg.schedules(rid) if x["id"] == sid), None) if rid in reg.profile.raids else None
-                return f"{name} · {s['name'] if s else sid}", DescribedPart(label="Schedule", before=reg.schedule_label(rid, s) if s else None, after="removed"), []
             if op.op == "raid_reset":
                 over = reg.raid_override(rid)  # its schedules too (raid_rows)
                 return name, DescribedPart(label="The guild's changes", before=_overrides_words(reg, rid, over) if over else "none", after="the game's defaults"), []
-            if op.op == "schedule_set":
-                sid, setting = _schedule_ref(op)
-                s = next((x for x in reg.schedules(rid) if x["id"] == sid), None)
-                label = f"{name} · {s['name'] if s else sid}"
-                if s is None:  # a new schedule: what it will be
-                    return label, DescribedPart(label=_cap(setting.replace("_", " ")), before="new", after=_schedule_words(reg, rid, _schedule_fields(setting, op.value))), []
-                _l, before, after, notes = _split_line(text.split(": ", 1)[1] if ": " in text else text)
-                return label, DescribedPart(label=_cap(setting.replace("_", " ")), before=before, after=after), notes
             f = (op.field or "").strip()
             _l, before, after, notes = _split_line(text)
             return name, DescribedPart(label=_cap(f.replace("_", " ")), before=before, after=after if after is not None else text), notes
@@ -4590,11 +4686,18 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
     for op in merged:
         parts_ops = op.parts if isinstance(op, MergedOp) else [op]
         label, parts, notes = None, [], []
+        try:
+            raid = _schedule_raid(reg, op) if op.op == "schedule_set" else None  # a new schedule's raid, for each of its parts
+        except RegistryError:
+            raid = None
         for p in parts_ops:
-            lab, part, n = _part(reg, p, by_id)
+            lab, part, n = _part(reg, p, by_id, raid=raid)
             label = label or lab
             parts.append(part)
             notes += [x for x in n if x not in notes]
+        named = next((p.value for p in parts_ops if p.op == "schedule_set" and (p.field or "").strip().lower() == "name" and p.value), None)
+        if named and raid in reg.profile.raids:  # a schedule (re)named in this write reads by its new name
+            label = f"{reg.raid_def(raid).get('name', raid)} · {named}"
         try:
             text = describe(reg, op, channel, by_id=by_id)
         except Exception as e:  # noqa: BLE001

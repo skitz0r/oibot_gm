@@ -956,6 +956,13 @@ def parse_days(value) -> list[int]:
     return sorted(out)
 
 
+def old_key_raid(key: str) -> str:
+    """The raid an OLDER "<raid>:<schedule>" regular key named (before phase 3's ids) — read for the migration's words
+    and its trust check alone (remap_regulars, series_label). No schedule is ever found by it: a key reads through
+    config.schedule_aliases."""
+    return str(key or "").split(":", 1)[0]
+
+
 def parse_follow(value) -> dict | None:
     """A schedule's follow-on: {raid, rosters} from a map or the text '<raid id> x<N>' ('barrow_deeps x2'; a bare id =
     one roster); None / '' / 'none' / 'clear' = no follow-on. A map may also carry `starts` (minutes after the lead's
@@ -2845,7 +2852,7 @@ class Registry:
         changed, apps = set(), set()
 
         def raid_name(key: str) -> str:  # an old key read for its words only (this migration is the one place)
-            rid = key.partition(":")[0]
+            rid = old_key_raid(key)
             return (self.base_profile.raids.get(rid) or {}).get("name") or rid
 
         for m in self.members.values():
@@ -2858,7 +2865,7 @@ class Registry:
                     elif k in aliases:
                         if aliases[k] not in keep:
                             keep.append(aliases[k])
-                    elif k.partition(":")[0] not in trusted:
+                    elif old_key_raid(k) not in trusted:
                         keep.append(k)  # its raid wasn't lifted in full (refused, unreadable, a failed lift): kept as it is
                     else:
                         dropped.append(f"{m.display_name}: dropped a regular spot on a removed {raid_name(k)} schedule")
@@ -2874,7 +2881,7 @@ class Registry:
                 elif k in aliases:
                     if aliases[k] not in keep:
                         keep.append(aliases[k])
-                elif k.partition(":")[0] not in trusted:
+                elif old_key_raid(k) not in trusted:
                     keep.append(k)
                 else:
                     dropped.append(f"{a.display_name}'s application: dropped a removed {raid_name(k)} schedule")
@@ -6537,7 +6544,7 @@ class Registry:
         hit = next((label for k, label in self.series(None) if k == key), None)
         if hit:
             return hit
-        rid = key.partition(":")[0] if ":" in key else None  # an old key read for its words only
+        rid = old_key_raid(key) if ":" in key else None  # an old key read for its words only
         name = (self.profile.raids.get(rid) or {}).get("name") if rid else None
         return f"A removed {name} schedule" if name else "A removed schedule"
 

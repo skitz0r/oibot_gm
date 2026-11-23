@@ -1094,7 +1094,11 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         return out
 
     def schedule_diff(self) -> list[str]:
-        """The Schedules draft as sentences: added, removed, and per schedule what changed (times, name, rosters, cadence)."""
+        """The Schedules draft as sentences: added, removed, and per schedule what changed (times, name, rosters, cadence);
+        a schedule whose times or week change with runs already open says they keep theirs (C10, the ops' own sentence)."""
+        from .configops import SCHEDULE_TIME_SETTINGS
+        from .consequences import schedule_keeps_sentence
+
         stored_rd, view = self.reg.raid_def(self.raid), self.sview()
         before = {s["id"]: s for s in schedules_of(stored_rd)}
         after = {s["id"]: s for s in schedules_of(view)}
@@ -1120,9 +1124,14 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             if b["name"] != s["name"]:
                 changes.append(f"renamed **{s['name']}**")
             ob, oa = schedule_def_of(stored_rd, sid)["schedule"]["own"], schedule_def_of(view, sid)["schedule"]["own"]
-            changes += [f"{FIELD_WORDS.get(f, f).lower()} {words(f, ob.get(f))} → **{words(f, oa.get(f))}**" for f in ob.keys() | oa.keys() if ob.get(f) != oa.get(f)]
+            timing = [f for f in ob.keys() | oa.keys() if ob.get(f) != oa.get(f)]
+            changes += [f"{FIELD_WORDS.get(f, f).lower()} {words(f, ob.get(f))} → **{words(f, oa.get(f))}**" for f in timing]
             if changes:
                 out.append(f"• {b['name']}: " + "; ".join(changes))
+            if label(b) != label(s) or any(f in SCHEDULE_TIME_SETTINGS for f in timing):  # C10: its open runs keep theirs
+                keeps = schedule_keeps_sentence(len(self.reg.schedule_runs_open(sid)))
+                if keeps:
+                    out.append(f"-# {keeps}")
         out += [f"• Remove schedule **{b['name']}**" for sid, b in before.items() if sid not in after]
         return out
 
@@ -1162,7 +1171,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             from . import ops as ops_mod
 
             name = self.reg.raid_def(self.raid).get("name", self.raid)
-            await ops_mod.audited(feed, self.reg, i.user.display_name, f"{name} raid rules: " + "; ".join(d.lstrip("• ").replace("**", "") for d in diff),
+            await ops_mod.audited(feed, self.reg, i.user.display_name, f"{name} raid rules: " + "; ".join(d.lstrip("• ").replace("**", "") for d in diff if not d.startswith("-#")),
                                   via="discord", by_id=i.user.id)
         self.draft = {}
         await self.finish(i, f"✅ Saved **{self.reg.raid_def(self.raid).get('name', self.raid)}**:\n" + "\n".join(diff))

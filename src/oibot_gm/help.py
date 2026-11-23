@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from . import prices, professions
 from .constants import ROLES
-from .registry import CLOCK12, Registry, slot_words
+from .registry import CLOCK12, Registry, RegistryError, slot_words
 
 ROOT = Path(__file__).resolve().parents[2]
 MANUAL = ROOT / "docs" / "manual.md"
@@ -462,15 +462,13 @@ def _duration(seconds: int) -> str:
 def schedule_choice_label(reg: Registry, key: str) -> str:
     """An applicant's schedule id in words (the web's helper of the same name, without importing the web)."""
     sid = reg.config.schedule_aliases.get(str(key), str(key))
-    rid = reg.first_raid(sid)
-    if rid not in reg.profile.raids:
-        return key
-    name = reg.raid_def(rid).get("name", rid)
-    sc = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
-    if sc is None:
-        return name
+    try:
+        sc = reg.schedule_entry(sid)
+    except RegistryError:
+        return reg.series_label(key)  # a removed schedule: "A removed Barrow Deeps schedule", never the key
+    rid = sc["raid"]
     title = sc.get("name") or None  # phase 3: every schedule has a name of its own
-    return f"{name} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
+    return f"{reg.raid_def(rid).get('name', rid)} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
 
 
 def _char(reg: Registry, c) -> str:
@@ -663,7 +661,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     runs_now = rc.how_many_rosters(reg, players, size, rb, want=n_rosters) if live else len(ev.all_rosters)
     kind = rc.run_kind(reg, ev)
     series = rc.run_series(reg, ev)
-    head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'none'} · {kind}" + (f" ({reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
+    head += (f" · schedule {rc.run_schedule_id(reg, ev) or 'none'} · {kind}" + (f" ({reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
              + ("" if rc.run_confirms(reg, ev) else " · nobody is asked to confirm")
              + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else "")
              + (f" · then {then}" if (then := rc.follow_words_of(reg, ev)) else "")

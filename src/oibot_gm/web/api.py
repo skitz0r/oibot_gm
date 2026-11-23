@@ -128,15 +128,13 @@ def public_card(bot, reg) -> dict:
 def schedule_choice_label(reg, key: str) -> str:
     """An applicant's schedule id as words: 'Barrow Deeps · Tuesdays and Thursdays 7:30 PM'."""
     sid = reg.config.schedule_aliases.get(str(key), str(key))
-    rid = reg.first_raid(sid)
-    if rid not in reg.profile.raids:
-        return key
-    name = reg.raid_def(rid).get("name", rid)
-    sc = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
-    if sc is None:
-        return name
+    try:
+        sc = reg.schedule_entry(sid)
+    except RegistryError:
+        return reg.series_label(key)  # a removed schedule: "A removed Barrow Deeps schedule", never the key
+    rid = sc["raid"]
     title = sc.get("name") or None  # phase 3: every schedule has a name of its own
-    return f"{name} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
+    return f"{reg.raid_def(rid).get('name', rid)} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
 
 
 def recruitment_json(reg) -> dict:
@@ -862,7 +860,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "active": bool(s.get("active", True)), "rosters": int(s.get("rosters") or 1),
                 "seats": size * int(s.get("rosters") or 1), "slots": list(s.get("slots") or []), "slot_labels": [reg.slot_label(x) for x in s.get("slots") or []],
                 "days": list(s.get("days") or []), "time": s.get("time") or "", "time_label": reg.time_label(s.get("time")) if s.get("time") else "",
-                "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]), "is_default": False,
+                "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]),
+                # its lineup's raids (the first is `rid`) and the rev an edit sends back as revs["config:schedule:<id>"]
+                "raids": [rid] + ([s["follow"]["raid"]] if s.get("follow") else []), "rev": reg.config_rev(f"schedule:{s['id']}"),
                 "effective": {k: sd[k] for k in SCHEDULE_CADENCE}, "follow": s.get("follow"), "follow_words": reg.follow_words(s.get("follow")),
                 **schedule_words(reg, rid, s)}
 

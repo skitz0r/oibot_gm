@@ -64,7 +64,7 @@ def ranks(*, current: str | None = None) -> list[Opt]:
 
 
 def series(reg: Registry, *, current: str | None = None) -> list[Opt]:
-    """The recurring series (schedules that have regulars) as '<raid>:<schedule>' values, labelled 'Barrow Deeps · Raid nights'."""
+    """The recurring series (schedules that have regulars) as schedule-id values, labelled 'Barrow Deeps · Raid nights'."""
     return [Opt(k, label[:100], f"{len(reg.regulars(k))} regular(s)", default=k == current) for k, label in reg.series("recurring")][:MAX_OPTIONS]
 
 
@@ -84,14 +84,15 @@ def schedules(reg: Registry, *, current: list[str] | None = None) -> list[Opt]:
 
 
 def schedule_names(reg: Registry, keys: list[str]) -> list[str]:
-    """Stored schedule ids as a person reads them; a schedule removed since shows as its id."""
+    """Stored schedule ids as a person reads them; a schedule removed since reads as Registry.series_label says
+    ("A removed Barrow Deeps schedule"), never its id."""
     out = []
     for key in keys:
         sid = reg.config.schedule_aliases.get(str(key), str(key))
         try:
             s = reg.schedule_entry(sid)
         except RegistryError:
-            out.append(f"{sid} (no longer scheduled)")
+            out.append(reg.series_label(key))
             continue
         out.append(f"{reg.raid_def(s['raid']).get('name', s['raid'])} · {reg.schedule_label(s['raid'], s)}")
     return out

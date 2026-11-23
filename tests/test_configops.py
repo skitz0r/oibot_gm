@@ -28,9 +28,9 @@ def test_raid_set_describe_and_apply(reg):
     assert reg.raid_def("barrow_deeps")["weights"]["rank"] == 3
     with pytest.raises(RegistryError, match="Change it on the schedule"):
         configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="nudge_hours_before", value="2"), "owner", is_owner=True)
-    configops.apply(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.slots", value="Sat 20:00"), "officer", is_owner=False)
+    configops.apply(reg, configops.coalesce([ConfigOp(op="schedule_set", target="alt", field="raid", value="barrow_deeps"), ConfigOp(op="schedule_set", target="alt", field="slots", value="Sat 20:00")])[0], "officer", is_owner=False)
     with pytest.raises(RegistryError, match="nudge must fall"):  # the same rule, on the schedule
-        configops.apply(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.nudge_hours_before", value="2"), "officer", is_owner=False)
+        configops.apply(reg, ConfigOp(op="schedule_set", target="alt", field="nudge_hours_before", value="2"), "officer", is_owner=False)
 
 
 def test_set_channel(reg):

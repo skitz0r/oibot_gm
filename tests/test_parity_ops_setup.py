@@ -179,22 +179,22 @@ def test_cadence_preset(reg):
     with pytest.raises(RegistryError, match="Change it on the schedule"):
         configops.apply(reg, raid, "Owner", True)
     reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid="barrow_deeps")
-    op = ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.cadence", value="short")
+    op = ConfigOp(op="schedule_set", target="alt", field="cadence", value="short")
     d = configops.describe(reg, op)
     assert d.startswith("Barrow Deeps · Weekly: ") and d.endswith("→ signup lead hours: 48 hours before, nudge hours before: 36 hours before, "
                                                                  "lock hours before: 24 hours before, confirm hours before: 12 hours before")
     configops.apply(reg, op, "Owner", True)
     sd = reg.schedule_def("barrow_deeps", "alt")
     assert {f: float(sd[f]) for f in presets.CADENCE_FIELDS} == {f: float(v) for f, v in presets.preset_fields("short").items()}
-    assert "a run's week is one of the presets: " in configops.describe(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.cadence", value="lazy"))
+    assert "a run's week is one of the presets: " in configops.describe(reg, ConfigOp(op="schedule_set", target="alt", field="cadence", value="lazy"))
 
 
 def test_coalesce_saves_settings_that_only_work_together(reg):
     reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid="barrow_deeps")
-    ops = [ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.lock_hours_before", value="60"),
-           ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.signup_lead_hours", value="100"),
+    ops = [ConfigOp(op="schedule_set", target="alt", field="lock_hours_before", value="60"),
+           ConfigOp(op="schedule_set", target="alt", field="signup_lead_hours", value="100"),
            ConfigOp(op="dm", value="off"),
-           ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.name", value="Alt run")]
+           ConfigOp(op="schedule_set", target="alt", field="name", value="Alt run")]
     with pytest.raises(RegistryError, match="signups must open before they lock"):
         configops.apply(reg, ops[0], "Owner", True)  # alone, the first can't apply
     merged = configops.coalesce(ops)
@@ -208,8 +208,9 @@ def test_coalesce_saves_settings_that_only_work_together(reg):
     assert len(raid) == 1
     configops.apply(reg, raid[0], "Owner", True)  # consecutive raid settings: one write
     assert (reg.raid_def("barrow_deeps")["notes"], reg.raid_def("barrow_deeps")["lockout_days"]) == ("bring pots", 5)
-    sched = configops.coalesce([ConfigOp(op="schedule_set", target="barrow_deeps", field="new.name", value="New run"),
-                                ConfigOp(op="schedule_set", target="barrow_deeps", field="new.slots", value="Sun 20:00")])
+    sched = configops.coalesce([ConfigOp(op="schedule_set", target="new", field="raid", value="barrow_deeps"),
+                                ConfigOp(op="schedule_set", target="new", field="name", value="New run"),
+                                ConfigOp(op="schedule_set", target="new", field="slots", value="Sun 20:00")])
     assert len(sched) == 1
     configops.apply(reg, sched[0], "Owner", True)  # a new schedule's name before its run times: fine as one write
     assert next(s for s in reg.schedules("barrow_deeps") if s["id"] == "new")["name"] == "New run"
@@ -218,8 +219,8 @@ def test_coalesce_saves_settings_that_only_work_together(reg):
 def test_confirm_view_coalesces(reg, rs):
     bot = SetupBot(reg, rs)
     reg.set_schedule("alt", {"slots": "Sat 20:00"}, "t", raid="barrow_deeps")
-    ops = [ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.lock_hours_before", value="60"),
-           ConfigOp(op="schedule_set", target="barrow_deeps", field="alt.signup_lead_hours", value="100")]
+    ops = [ConfigOp(op="schedule_set", target="alt", field="lock_hours_before", value="60"),
+           ConfigOp(op="schedule_set", target="alt", field="signup_lead_hours", value="100")]
     log = []
 
     async def edit(content=None, **kw):
@@ -238,11 +239,14 @@ def test_confirm_view_coalesces(reg, rs):
 
 def test_run_time_changes_preview_the_next_runs(reg):
     reg.set_raid_override("barrow_deeps", "first_open", "2026-01-01T00:00", "t")
-    d = configops.describe(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="thu.slots", value="Thu 20:00"))
+    d = configops.describe(reg, configops.coalesce([ConfigOp(op="schedule_set", target="thu", field="raid", value="barrow_deeps"),
+                                                    ConfigOp(op="schedule_set", target="thu", field="slots", value="Thu 20:00")])[0])
+    assert configops.describe(reg, ConfigOp(op="schedule_set", target="thu", field="slots", value="Thu 20:00")).endswith("There is no schedule called thu.")
     assert "Thu 8:00 PM — after it: Barrow Deeps · Weekly: next Thu " in d and "20:00" not in d
     refused = configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Thu 20:00"))
     assert "Run times belong to a schedule now" in refused  # phase 3: a raid has no run times of its own
-    bad = configops.describe(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="x.lockout", value="9 at 20:00"))
+    bad = configops.describe(reg, configops.coalesce([ConfigOp(op="schedule_set", target="x", field="raid", value="barrow_deeps"),
+                                                      ConfigOp(op="schedule_set", target="x", field="lockout", value="9 at 20:00")])[0])
     assert "refused" in bad or "day" in bad
     weekly(reg, "barrow_deeps", "Tue 19:30")
     tz = configops.describe(reg, ConfigOp(op="set", path="timezone", value="America/New_York"))

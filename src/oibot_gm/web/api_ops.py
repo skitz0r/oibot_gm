@@ -353,22 +353,23 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
 
     @app.post("/api/admin/raid/schedule")
     async def admin_raid_schedule(request: Request):
-        """Change or create one schedule (officers, D8 — authorize_ops decides it live): {instance, id, fields: {setting:
-        value}} — a sheet-timing value of null goes back to the game's suggestion. One registry write (Registry.set_schedule):
-        validated as a whole, one commit."""
+        """Change or create one schedule (officers, D8 — authorize_ops decides it live): {id, fields: {setting: value}} —
+        `id` = the schedule's guild-unique id; a NEW schedule names its first raid in `fields` (`raid`, or `lineup`
+        [{raid, rosters}]); an `instance` sent by an older page is ignored. A sheet-timing value of null goes back to the
+        game's suggestion. One registry write (Registry.set_schedule): validated as a whole, one commit."""
         v, d = await body(request, officer=True)
-        inst, sid = parse(d, InstanceBody).instance, str(d.get("id") or "").strip()
+        sid = str(d.get("id") or "").strip()
         fields = d.get("fields")
         if not isinstance(fields, dict) or not fields:
             raise HTTPException(400, "fields: a map of schedule settings to change")
-        res = await translate(v, [{"kind": "schedule", "target": f"{inst}:{sid}", "fields": fields}], d)
-        return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"]) or f"{inst}: no changes"}
+        res = await translate(v, [{"kind": "schedule", "target": sid, "fields": fields}], d)
+        return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"]) or "Nothing changed."}
 
     @app.post("/api/admin/raid/schedule/remove")
     async def admin_raid_schedule_remove(request: Request):
+        """Remove one schedule by its id: {id} (an `instance` sent by an older page is ignored)."""
         v, d = await body(request, officer=True)  # officers (D8): authorize_ops decides it live
-        inst = parse(d, InstanceBody).instance
-        res = await translate(v, [{"kind": "schedule_remove", "target": f"{inst}:{str(d.get('id') or '').strip()}"}], d)
+        res = await translate(v, [{"kind": "schedule_remove", "target": str(d.get("id") or "").strip()}], d)
         return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"])}
 
     @app.post("/api/admin/raid")

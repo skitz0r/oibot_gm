@@ -292,8 +292,8 @@ def test_changed_tools_send_one_body(mocked):
     assert mocked[-1][2]["changes"] == [{"kind": "comp", "target": "barrow_deeps", "fields": {"healer": None}}]
     ms.raid_set("barrow", "notes", "bring flasks")
     assert mocked[-1][2]["changes"] == [{"kind": "raid", "target": "barrow_deeps", "fields": {"notes": "bring flasks"}}]
-    ms.schedule_set("barrow", "alt", fields={"kind": "weekly", "slots": "Sat 20:00"})
-    assert mocked[-1] == ("POST", "/api/ops/change", {"changes": [{"kind": "schedule", "target": "barrow_deeps:alt", "fields": {"kind": "weekly", "slots": "Sat 20:00"}}],
+    ms.schedule_set("alt", fields={"kind": "weekly", "slots": "Sat 20:00"}, raid="barrow")
+    assert mocked[-1] == ("POST", "/api/ops/change", {"changes": [{"kind": "schedule", "target": "alt", "fields": {"kind": "weekly", "slots": "Sat 20:00", "raid": "barrow_deeps"}}],
                                                       "apply": True, "confirmed": True})
     ms.set_answer("bd", "Kessa", "out", note="sick")
     assert mocked[-1][2]["note"] == "sick"

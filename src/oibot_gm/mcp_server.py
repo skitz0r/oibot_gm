@@ -364,7 +364,7 @@ def config_summary(guild: Guild = None) -> dict:
 
 @mcp.tool()
 def list_regulars(raid: str, schedule: str | None = None, guild: Guild = None) -> dict:
-    """The REGULARS of a raid's recurring schedules: per series (raid:schedule) its name, words label, whether it is
+    """The REGULARS of a raid's recurring schedules: per series (its schedule id, `key`) its name, words label, whether it is
     active, rosters per run, each regular (display name, character, class, spec, role), the role counts against the
     tank/healer minimums (level green / amber / red, who could cover, whom to recruit) and the 4-week forecast.
     `raid` = id or name; `schedule` = one schedule id (default: every recurring schedule of the raid). Read-only."""
@@ -372,7 +372,7 @@ def list_regulars(raid: str, schedule: str | None = None, guild: Guild = None) -
     data = api(guild).get("/api/readiness", raid=rid)
     rows = [s for r in data.get("raids", []) for s in r.get("series", [])]
     if schedule:
-        rows = [s for s in rows if s.get("id") == schedule.strip().lower()]
+        rows = [s for s in rows if s.get("key") == schedule.strip().lower()]
         if not rows:
             raise ToolError(f"{raid} has no recurring schedule {schedule} (get_raid lists them; pickup templates have no regulars)")
     return {"raid": rid, "series": rows}
@@ -665,34 +665,35 @@ def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dic
 
 
 @mcp.tool()
-def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False,
-                 guild: Guild = None) -> str | dict:
-    """Change settings of a raid's schedule (officers) — or create the schedule. One `field` + `value`, or several at
-    once as `fields` {field: value} in ONE validated write (a new schedule's kind and run times together). Schedules are
-    listed per raid by list_raids / get_raid (`schedules`: id, name, kind, plain-words label, next runs); a schedule's id
-    is unique across the guild. field = kind (weekly|lockout|pickup) | name | active (bool) | rosters (1-4) | slots (a
-    list ['Sat 20:00', 'Sun 20:00']) | days (a list [1, 3] = days of each lockout, 1 = reset day) | time ('20:00') |
-    cadence (standard|short|same_week: a preset of the four sheet-timing hours) | signup_lead_hours | nudge_hours_before |
-    lock_hours_before | confirm_hours_before | fill_ask_hours | nudge | autofill | open_dm | confirm (bools) — the
-    schedule's own sheet timing | split_policy | weights (the schedule's own seat weights {rank, main, sat_out,
-    signup_order, regular}; a key set to null follows the raid) | follow ('<raid id> x<N>' or null: a second raid the
-    same night from the same signup, starting when the first ends). A sheet-timing field set to null goes back to the
-    game's suggestion; split_policy null goes back to the raid's. A new schedule starts with its kind, slots, or days/time. `preview=True`: what would change, nothing saved."""
-    rid = get_raid(raid, guild)["id"]
+def schedule_set(schedule: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None,
+                 raid: str | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
+    """Change settings of a schedule (officers) — or create one. `schedule` = the schedule's id alone (unique across the
+    guild; list_raids / get_raid list each raid's `schedules` with id, name, plain-words label and next runs). One `field`
+    + `value`, or several at once as `fields` {field: value} in ONE validated write (a new schedule's kind and run times
+    together). A NEW schedule names its first raid: `raid` (id or name). field = kind (weekly|lockout|pickup) | name |
+    active (bool) | rosters (1-4) | slots (a list ['Sat 20:00', 'Sun 20:00']) | days (a list [1, 3] = days of each
+    lockout, 1 = reset day) | time ('20:00') | cadence (standard|short|same_week: a preset of the four sheet-timing hours)
+    | signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge |
+    autofill | open_dm | confirm (bools) — the schedule's own sheet timing | split_policy | weights (the schedule's own
+    seat weights {rank, main, sat_out, signup_order, regular}; a key set to null follows the raid) | follow ('<raid id>
+    x<N>' or null: a second raid the same night from the same signup, starting when the first ends). A sheet-timing field
+    set to null goes back to the game's suggestion; split_policy null goes back to the raid's. Runs already open keep
+    their times. `preview=True`: what would change, nothing saved."""
     want = {str(k).strip(): v for k, v in (fields or {}).items()}
     if field:
         want[field.strip()] = value
     if not want:
         raise ToolError("give a field and value, or fields = {field: value, …}")
-    return ops_change(guild, [{"kind": "schedule", "target": f"{rid}:{schedule}", "fields": want}], preview)
+    if raid:
+        want["raid"] = get_raid(raid, guild)["id"]
+    return ops_change(guild, [{"kind": "schedule", "target": schedule.strip(), "fields": want}], preview)
 
 
 @mcp.tool()
-def schedule_remove(raid: str, schedule: str, preview: bool = False, guild: Guild = None) -> str | dict:
-    """Remove a raid's schedule by its id (officers). Runs already open keep
-    their times; its regulars come off it (they see a notice, nobody is DMed). `preview=True` names them first."""
-    rid = get_raid(raid, guild)["id"]
-    return ops_change(guild, [{"kind": "schedule_remove", "target": f"{rid}:{schedule}"}], preview)
+def schedule_remove(schedule: str, preview: bool = False, guild: Guild = None) -> str | dict:
+    """Remove a schedule by its id alone (officers). Runs already open keep their times; its regulars come off it (they
+    see a notice, nobody is DMed). `preview=True` names them first."""
+    return ops_change(guild, [{"kind": "schedule_remove", "target": schedule.strip()}], preview)
 
 
 @mcp.tool()

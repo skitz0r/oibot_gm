@@ -836,3 +836,17 @@ def test_raids_and_readiness_have_no_raid_timing_and_one_minimum():
     for gone in ("SOURCE_WORDS", "inherited(", "ADHOC_DEFAULT"):
         assert gone not in sched, f"ScheduleCard.tsx still has {gone}"
     assert "the game's suggestion" in sched
+
+
+def test_the_schedule_editor_names_a_schedule_by_its_id():
+    """Phase 3 (Task 2): every schedule write targets the schedule's id alone and carries its own rev
+    (config:schedule:<id>); a new schedule sends its lineup (this raid, then the follow-on) and takes an id no schedule in
+    the guild holds — there is no `default` schedule any more."""
+    src = (SRC / "components" / "ScheduleCard.tsx").read_text()
+    assert "target: `${r.id}:" not in src and 'target: s.id' in src and "target: id" in src
+    assert "config:schedule:${s.id}" in src and "...raidRevs(r)" not in src
+    assert "lineup: [{ raid: r.id, rosters }" in src and "is_default" not in src
+    assert "slug(d.name, d.kind, taken)" in src
+    rosters = (SRC / "pages" / "Rosters.tsx").read_text()
+    assert 'split(":")' not in rosters and '|| "default"' not in rosters
+    assert "schedule: s.key" in rosters and "schedule: o.key" in rosters

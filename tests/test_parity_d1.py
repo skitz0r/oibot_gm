@@ -762,7 +762,7 @@ def test_raid_set_apply_line_and_change_log_read_in_12_hour_words(reg):
     def military(text):
         return re.search(r"\b([01]\d|2[0-3]):[0-5]\d\b(?! ?[AP]M)|\d{4}-\d\d-\d\dT", text)
 
-    line = configops.apply(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="tue.slots", value="Tue 19:30, Thu 20:00"), "Owner", True)
+    line = configops.apply(reg, configops.coalesce([ConfigOp(op="schedule_set", target="tue", field="raid", value="barrow_deeps"), ConfigOp(op="schedule_set", target="tue", field="slots", value="Tue 19:30, Thu 20:00")])[0], "Owner", True)
     assert line == "Barrow Deeps · Weekly: new schedule, Tuesdays 7:30 PM, Thursdays 8:00 PM", line  # run times are a schedule's (phase 3)
     line = configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="first_open", value="2026-12-09 15:00"), "Owner", True)
     assert "3:00 PM" in line and not military(line), line
@@ -771,7 +771,7 @@ def test_raid_set_apply_line_and_change_log_read_in_12_hour_words(reg):
     assert len(merged) == 1
     line = configops.apply(reg, merged[0], "Owner", True)
     assert "6:30 PM" in line and not military(line), line
-    configops.apply(reg, ConfigOp(op="schedule_set", target="barrow_deeps", field="tue.slots", value="Wed 21:15"), "Owner", True)
+    configops.apply(reg, ConfigOp(op="schedule_set", target="tue", field="slots", value="Wed 21:15"), "Owner", True)
     assert reg.raid_rows("barrow_deeps")[0]["slots"] == ["Wed 21:15"], "the stored form stays 24-hour"
     assert "slots" not in reg.config.raids["barrow_deeps"], "run times live in the guild-level schedules"
     for row in recent_changes(reg.key, 10):

@@ -309,27 +309,29 @@ def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, store, ow
 # ---------------------------------------------------------------- plain text
 
 def test_plain_text_schedule_ops_describe_in_words_and_apply(reg, store):
-    op = ConfigOp(op="schedule_set", target=RID, field="alt.slots", value="Sat 20:00")
+    op = configops.coalesce([ConfigOp(op="schedule_set", target="alt", field="raid", value=RID),
+                             ConfigOp(op="schedule_set", target="alt", field="slots", value="Sat 20:00")])[0]  # a new schedule names its raid
     assert configops.describe(reg, op).startswith("Barrow Deeps: new schedule alt — Sat 8:00 PM — after it: Barrow Deeps · Weekly: next Sat ")
     assert "20:00" not in configops.describe(reg, op)
     assert configops.apply(reg, op, "Officer", is_owner=False) == "Barrow Deeps · Weekly: new schedule, Saturdays 8:00 PM"  # officers (D8)
-    lock = ConfigOp(op="schedule_set", target=RID, field="alt.lock_hours_before", value="12")
+    lock = ConfigOp(op="schedule_set", target="alt", field="lock_hours_before", value="12")
     assert configops.describe(reg, lock) == "Barrow Deeps · Weekly: lock hours before: 24 hours before → lock hours before: 12 hours before"
     configops.apply(reg, lock, "Owner", is_owner=True)
-    back = ConfigOp(op="schedule_set", target=RID, field="alt.lock_hours_before", value="inherit")  # back to what a new schedule starts with
+    back = ConfigOp(op="schedule_set", target="alt", field="lock_hours_before", value="inherit")  # back to what a new schedule starts with
     assert configops.describe(reg, back).endswith("12 hours before → lock hours before: the game's suggestion (24 hours before)")
-    split = ConfigOp(op="schedule_set", target=RID, field="alt.split_policy", value="inherit")  # a split goes back to the raid's (C6)
+    split = ConfigOp(op="schedule_set", target="alt", field="split_policy", value="inherit")  # a split goes back to the raid's (C6)
     assert configops.describe(reg, split).endswith("→ split policy: the raid's (balanced)")
-    configops.apply(reg, ConfigOp(op="schedule_set", target=RID, field="alt.name", value="Alt run"), "Owner", is_owner=True)
-    lk = ConfigOp(op="schedule_set", target=RID, field="reset.lockout", value="1, 3 at 20:00")
+    configops.apply(reg, ConfigOp(op="schedule_set", target="alt", field="name", value="Alt run"), "Owner", is_owner=True)
+    lk = configops.coalesce([ConfigOp(op="schedule_set", target="reset", field="raid", value=RID),
+                             ConfigOp(op="schedule_set", target="reset", field="lockout", value="1, 3 at 20:00")])[0]
     assert configops.describe(reg, lk).startswith("Barrow Deeps: new schedule reset — days of each lockout, day 1 and 3, 8:00 PM — after it: Barrow Deeps · ")
     configops.apply(reg, lk, "Owner", is_owner=True)
     assert next(s for s in reg.schedules(RID) if s["id"] == "reset")["days"] == [1, 3]
-    rm = ConfigOp(op="schedule_remove", target=RID, field="alt")
+    rm = ConfigOp(op="schedule_remove", target="alt")
     assert configops.describe(reg, rm) == "Barrow Deeps: remove schedule Alt run (Saturdays 8:00 PM); runs already open keep their times"
     assert configops.apply(reg, rm, "Owner", is_owner=True) == "Barrow Deeps: schedule Alt run removed"
-    bad = ConfigOp(op="schedule_set", target=RID, field="nothing", value="x")
-    assert "<schedule id>.<setting>" in configops.describe(reg, bad)
+    bad = ConfigOp(op="schedule_set", target=f"{RID}:alt", field="name", value="x")
+    assert "Name a schedule by its id alone." in configops.describe(reg, bad)
     assert "schedule_set" in configops.SCHEMA_TEXT and "schedule_remove" in configops.ConfigOp.model_fields["op"].description
     assert len(configops.ConfigOp.model_fields) <= 13
 
@@ -367,16 +369,16 @@ def api(reg, rs, monkeypatch):
 def test_web_routes_list_set_remove_and_open_by_schedule(api, reg, rs):
     c, bot = api
     opened(reg)
-    r = c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "alt", "fields": {"slots": ["Sat 20:00"], "name": "Alt run", "rosters": 2}}, headers=bearer())
+    r = c.post("/api/admin/raid/schedule", json={"id": "alt", "fields": {"raid": RID, "slots": ["Sat 20:00"], "name": "Alt run", "rosters": 2}}, headers=bearer())
     assert r.status_code == 200 and r.json()["message"] == "Barrow Deeps · Alt run: new schedule, Saturdays 8:00 PM · 2 rosters"
-    bad = c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "alt", "fields": {"rosters": 9}}, headers=bearer())
+    bad = c.post("/api/admin/raid/schedule", json={"id": "alt", "fields": {"rosters": 9}}, headers=bearer())
     assert bad.status_code == 400 and "rosters" in bad.json()["error"]
     raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
     alt = next(s for s in raid["schedules"] if s["id"] == "alt")
     assert alt["label"] == "Saturdays 8:00 PM · 2 rosters" and alt["seats"] == 20 and alt["slot_labels"] == ["Sat 8:00 PM"]
     assert len(alt["next"]) == 3 and all("PM" in x and "20:00" not in x for x in alt["next"])
     assert alt["effective"]["lock_hours_before"] == 24 and set(alt["own"]) == set(R.SCHEDULE_TIMING)  # its timing, written out
-    c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "pug", "fields": {"kind": "pickup", "name": "Pickup"}}, headers=bearer())
+    c.post("/api/admin/raid/schedule", json={"id": "pug", "fields": {"raid": RID, "kind": "pickup", "name": "Pickup"}}, headers=bearer())
     rosters = next(x for x in c.get("/api/rosters", headers=bearer()).json()["raids"] if x["id"] == RID)
     assert {s["id"] for s in rosters["schedules"]} == {"alt", "pug"} and all(u["schedule"] == "alt" for u in rosters["upcoming"])
     need_time = c.post(f"/api/raid/{RID}/open", json={"schedule": "pug"}, headers=bearer())
@@ -386,7 +388,7 @@ def test_web_routes_list_set_remove_and_open_by_schedule(api, reg, rs):
     when = (reg.now_local() + timedelta(days=1)).strftime("%Y-%m-%d 21:00")
     c.post(f"/api/raid/{RID}/open", json={"schedule": "pug", "when": when}, headers=bearer())
     assert bot.opened[-1][2] == "pug"
-    gone = post_confirmed(c, "/api/admin/raid/schedule/remove", {"instance": RID, "id": "pug"}, headers=bearer())
+    gone = post_confirmed(c, "/api/admin/raid/schedule/remove", {"id": "pug"}, headers=bearer())
     assert gone.status_code == 200 and "removed" in gone.json()["message"]
 
 
@@ -409,14 +411,14 @@ def test_mcp_schedule_tools_call_the_routes():
 
     ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
     try:
-        assert ms.schedule_set("Barrow Deeps", "alt", "lock_hours_before", "12") == "ok"
-        assert ms.schedule_remove(RID, "alt") == "ok"
+        assert ms.schedule_set("alt", "lock_hours_before", "12") == "ok"
+        assert ms.schedule_remove("alt") == "ok"
         assert ms.open_run(RID, schedule="alt") == "ok"
     finally:
         ms.use(None)
     posts = [(p, b) for m, p, b in seen if m == "POST"]
-    assert posts[0] == ("/api/ops/change", {"changes": [{"kind": "schedule", "target": f"{RID}:alt", "fields": {"lock_hours_before": "12"}}], "apply": True, "confirmed": True})
-    assert posts[1] == ("/api/ops/change", {"changes": [{"kind": "schedule_remove", "target": f"{RID}:alt"}], "apply": True, "confirmed": True})
+    assert posts[0] == ("/api/ops/change", {"changes": [{"kind": "schedule", "target": "alt", "fields": {"lock_hours_before": "12"}}], "apply": True, "confirmed": True})
+    assert posts[1] == ("/api/ops/change", {"changes": [{"kind": "schedule_remove", "target": "alt"}], "apply": True, "confirmed": True})
     assert posts[2] == (f"/api/raid/{RID}/open", {"when": "", "schedule": "alt", "follow": ""})
 
 
@@ -497,8 +499,8 @@ def test_the_raids_route_says_when_a_raid_runs_from_the_runs_themselves(api, reg
     opened(reg)
     raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
     assert raid["live_runs"] == [] and raid["next_run"] is None and all(not s["slots"] for s in raid["schedules"]), "no run times yet: nothing coming"
-    c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "alt", "fields": {"slots": ["Sat 20:00"], "name": "Alt run"}}, headers=bearer())
-    c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "pug", "fields": {"kind": "pickup", "name": "Pickup"}}, headers=bearer())
+    c.post("/api/admin/raid/schedule", json={"id": "alt", "fields": {"raid": RID, "slots": ["Sat 20:00"], "name": "Alt run"}}, headers=bearer())
+    c.post("/api/admin/raid/schedule", json={"id": "pug", "fields": {"raid": RID, "kind": "pickup", "name": "Pickup"}}, headers=bearer())
     ok = c.post(f"/api/raid/{RID}/open", json={"schedule": "alt"}, headers=bearer())
     assert ok.status_code == 200
     raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
@@ -506,8 +508,8 @@ def test_the_raids_route_says_when_a_raid_runs_from_the_runs_themselves(api, reg
     assert len(live) == 1 and live[0]["state"] == "open" and live[0]["schedule"] == "Alt run" and "-alt-" in live[0]["key"] and bot.opened[-1][2] == "alt"
     assert not re.search(r"\b0\d [A-Z][a-z]{2}\b", live[0]["when"] + raid["next_run"]["when"]), "no leading zero on a day a person reads"
     assert raid["next_run"]["schedule"] == "Alt run"
-    c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "wed", "fields": {"slots": ["Wed 20:00"], "name": "Wednesday"}}, headers=bearer())
-    paused = post_confirmed(c, "/api/admin/raid/schedule", {"instance": RID, "id": "alt", "fields": {"active": False}}, headers=bearer())
+    c.post("/api/admin/raid/schedule", json={"id": "wed", "fields": {"raid": RID, "slots": ["Wed 20:00"], "name": "Wednesday"}}, headers=bearer())
+    paused = post_confirmed(c, "/api/admin/raid/schedule", {"id": "alt", "fields": {"active": False}}, headers=bearer())
     assert paused.status_code == 200, paused.json()
     raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
     assert raid["next_run"]["schedule"] == "Wednesday", "a paused schedule opens nothing: the next run is the other schedule's"

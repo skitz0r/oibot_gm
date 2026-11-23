@@ -407,7 +407,9 @@ export interface Person { uid: string; display_name: string; characters: { label
 /** One schedule of a raid (mirrors web/api.py schedule_json). Machine forms (`slots`, `days`, `time`) are for the editors;
  *  everything a person reads comes as words from the server (`label`, `slot_labels`, `time_label`, `next`). */
 export interface Schedule {
-  id: string; name: string; kind: "weekly" | "lockout" | "pickup"; active: boolean; rosters: number; seats: number; is_default: boolean;
+  id: string; name: string; kind: "weekly" | "lockout" | "pickup"; active: boolean; rosters: number; seats: number;
+  /** its lineup's raid ids (the first is the raid it is listed under) and its own rev (revs["config:schedule:<id>"]) */
+  raids?: string[]; rev?: string;
   /** derived from the kind: weekly / lockout = recurring (regulars), pickup = ad hoc (first come, the ad hoc defaults) */
   class?: "recurring" | "adhoc"; class_label?: string; series?: string | null; regulars?: number;
   /** where each inherited value comes from: own | raid | adhoc (defaults); weights per key */

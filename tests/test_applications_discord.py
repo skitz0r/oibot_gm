@@ -201,7 +201,7 @@ def test_the_review_card_stays_within_discords_limits(reg, monkeypatch):
     assert len(e.fields) <= FIELDS_MAX and all(len(f.value) <= FIELD_VALUE_MAX and len(f.name) <= 256 for f in e.fields)
     assert len(e) <= 6000
     can = next(f for f in e.fields if f.name == "Can raid")
-    assert f"{reg.raid_def(RID)['name']} · " in can.value and "no longer scheduled" in can.value  # human labels, never '<raid>:<id>'
+    assert f"{reg.raid_def(RID)['name']} · " in can.value and "A removed schedule" in can.value and "gone" not in can.value  # human labels, never '<raid>:<id>'
     answers = [f for f in e.fields if f.name.startswith("Question number")]
     assert len(answers) == 15 and all(f.value.endswith("…") for f in answers)
     # D32: the officers' Applications page holds the full answers — the overflow field points there

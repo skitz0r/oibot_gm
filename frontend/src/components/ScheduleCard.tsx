@@ -42,11 +42,17 @@ export function raidRevs(r: RaidRule): { revs?: Record<string, string> } {
   return r.rev ? { revs: { [`config:raids:${r.id}`]: r.rev } } : {};
 }
 
+/** A schedule's own rev (phase 3: a schedule is addressed by its guild-unique id): every write to it carries the rev
+ *  the page loaded, so an edit someone made meanwhile is a 409, never overwritten. A new schedule has none yet. */
+export function scheduleRevs(s: Schedule | null): { revs?: Record<string, string> } {
+  return s?.rev ? { revs: { [`config:schedule:${s.id}`]: s.rev } } : {};
+}
+
 /** A raid's schedules: WHEN it runs. Each is weekly nights, day N of each lockout, or a pickup template officers open on
  *  demand, with the rosters a run expects and its own week (sheet timing is each schedule's, C7). The editor opens IN
  *  PLACE of the row it edits (a new one under the list) — the card's one edit mode at a time (design §5.54); `editable`
  *  is false while another edit mode is open, so the buttons wait. Every officer edits (D8). */
-export function Schedules({ r, meta, editable, policies, maxRosters, others, onSaved, onEditing }: { r: RaidRule; meta?: Meta; editable: boolean; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; onSaved: () => void; onEditing?: (on: boolean) => void }) {
+export function Schedules({ r, meta, editable, policies, maxRosters, others, taken, onSaved, onEditing }: { r: RaidRule; meta?: Meta; editable: boolean; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; taken: string[]; onSaved: () => void; onEditing?: (on: boolean) => void }) {
   const [edit, setEditState] = useState<Schedule | "new" | null>(null);
   const setEdit = (v: Schedule | "new" | null) => { if ((v === null) !== (edit === null)) onEditing?.(v !== null); setEditState(v); };
   const [ask, confirmDialog] = useConfirm();
@@ -54,17 +60,17 @@ export function Schedules({ r, meta, editable, policies, maxRosters, others, onS
   /** Remove and Pause are warn-class (D51): the ReviewModal is their confirm, with the server's sentences (the regulars by
    *  name, the runs already open; what pausing stops) — one review step, never a second dialog before it. */
   async function remove(s: Schedule) {
-    try { await saveOps([{ kind: "schedule_remove", target: `${r.id}:${s.id}` }], { ...raidRevs(r), title: `Remove ${s.name}?` }); } catch (e) { fail(e); }
+    try { await saveOps([{ kind: "schedule_remove", target: s.id }], { ...scheduleRevs(s), title: `Remove ${s.name}?` }); } catch (e) { fail(e); }
     onSaved();
   }
   /** Pause / Resume beside Edit (design RD-10): one field — never hidden behind the editor's Save. Pausing is reviewed;
    *  resuming is routine, asked here with the server's sentence. */
   async function pause(s: Schedule, on: boolean) {
     if (!on && !(await ask({ title: `Resume ${s.name}?`, message: s.resume_sentence || "It opens sheets again.", confirmLabel: "Resume" }))) return;
-    try { await saveOps([{ kind: "schedule", target: `${r.id}:${s.id}`, fields: { active: !on } }], { ...raidRevs(r), title: `${on ? "Pause" : "Resume"} ${s.name}?` }); } catch (e) { fail(e); }
+    try { await saveOps([{ kind: "schedule", target: s.id, fields: { active: !on } }], { ...scheduleRevs(s), title: `${on ? "Pause" : "Resume"} ${s.name}?` }); } catch (e) { fail(e); }
     onSaved();
   }
-  const editor = (s: Schedule | null) => <ScheduleEditor key={s ? s.id : "new"} r={r} meta={meta} s={s} policies={policies} maxRosters={maxRosters} others={others} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} onStale={onSaved} />;
+  const editor = (s: Schedule | null) => <ScheduleEditor key={s ? s.id : "new"} r={r} meta={meta} s={s} policies={policies} maxRosters={maxRosters} others={others} taken={taken} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} onStale={onSaved} />;
   return (
     <Box px="md" pb="md">
       <Group justify="space-between" mb={6} wrap="wrap">
@@ -131,10 +137,14 @@ function toDraft(s: Schedule | null): Draft {
 const ADHOC_WEIGHT: Record<string, number> = { rank: 0, main: 1, sat_out: 0, signup_order: 6, regular: 0 };
 const PRESET_KEYS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before"] as const;
 
+/** Ids no new schedule takes (registry.RESERVED_SCHEDULE_IDS: older run dicts and files carry them). */
+const RESERVED_IDS = ["adhoc", "test", "after", "default"];
+
+/** A new schedule's id from its name: unique across the GUILD (`taken` = every raid's schedule ids), never a reserved one. */
 function slug(name: string, kind: string, taken: string[]): string {
   const base = (name || kind).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 12) || kind;
   let id = base, n = 2;
-  while (taken.includes(id) || id === "default") id = `${base}-${n++}`;
+  while (taken.includes(id) || RESERVED_IDS.includes(id)) id = `${base}-${n++}`;
   return id;
 }
 
@@ -143,7 +153,7 @@ function slug(name: string, kind: string, taken: string[]): string {
  *  default) when it is saved. The timeline above the fields is the draft's week as it stands (an empty step isn't
  *  drawn) and a preset lights up while the hours match it. One POST, one registry write: a refusal comes back as a
  *  toast and nothing is saved. */
-function ScheduleEditor({ r, meta, s, policies, maxRosters, others, onClose, onSaved, onStale }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; onClose: () => void; onSaved: () => void; onStale?: () => void }) {
+function ScheduleEditor({ r, meta, s, policies, maxRosters, others, taken, onClose, onSaved, onStale }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; taken: string[]; onClose: () => void; onSaved: () => void; onStale?: () => void }) {
   const [d, setD] = useState<Draft>(() => toDraft(s));
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<OpsReply | null>(null);
@@ -166,7 +176,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, onClose, onS
   const startWhy = adhoc ? "a pickup template opens nothing by itself" : d.kind === "lockout" ? `day 1 is the day the ${r.lockout_days}-day lockout resets` : d.slots.map(slotLabel).join(" · ") || "one sheet per run time per week";
   const presetOn = (p: Record<string, unknown>) => PRESET_KEYS.every((k) => effNum(k) === Number(p[k]));
 
-  const id = s ? s.id : slug(d.name, d.kind, r.schedules.map((x) => x.id));
+  const id = s ? s.id : slug(d.name, d.kind, taken);
   /** The draft as schedule fields — for an existing schedule ONLY the fields that differ from what was loaded (design RD-10:
    *  a Save never re-sends `active: true` over a pause made elsewhere a moment ago, nor any setting nobody touched). */
   function fieldsOf(dd: Draft): Record<string, unknown> {
@@ -182,11 +192,14 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, onClose, onS
       f.follow = x.follow_raid ? { raid: x.follow_raid, rosters: Number(x.follow_rosters) } : null;
       f.weights = Object.fromEntries(WEIGHTS.map((k) => [k, x.weights[k] === undefined || x.weights[k] === "" ? null : Number(x.weights[k])]));
       if (x.kind === "pickup") for (const k of ADHOC_HIDDEN) delete f[k];
-      if (s?.is_default) delete f.kind;
       return f;
     };
     const want = all(dd);
-    if (!s) return want;
+    if (!s) {  // a new schedule names its raids: its lineup = this raid (with its rosters), then the follow-on
+      const { rosters, follow, ...rest } = want;
+      const fw = follow as { raid: string; rosters: number } | null;
+      return { ...rest, lineup: [{ raid: r.id, rosters }, ...(fw ? [fw] : [])] };
+    }
     const base = all(toDraft(s));
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(want)) {
@@ -207,7 +220,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, onClose, onS
     if (!Object.keys(f).length || (!s && !f.slots && !f.days && d.kind !== "pickup")) { setPreview(null); return; }
     const n = ++seq.current;
     const t = setTimeout(() => {
-      opsApi.preview([{ kind: "schedule", target: `${r.id}:${id}`, fields: f }]).then((x) => { if (n === seq.current) setPreview(x); }).catch(() => { if (n === seq.current) setPreview(null); });
+      opsApi.preview([{ kind: "schedule", target: id, fields: f }]).then((x) => { if (n === seq.current) setPreview(x); }).catch(() => { if (n === seq.current) setPreview(null); });
     }, 500);
     return () => clearTimeout(t);
   }, [JSON.stringify(d)]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -220,7 +233,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, onClose, onS
     if (!Object.keys(fields).length) { ok("nothing changed"); onClose(); return; }
     setBusy(true);
     try {
-      const x = await saveOps([{ kind: "schedule", target: `${r.id}:${id}`, fields }], { ...raidRevs(r), title: s ? `Edit ${s.name}` : `Add ${d.name || "a schedule"}` });
+      const x = await saveOps([{ kind: "schedule", target: id, fields }], { ...scheduleRevs(s), title: s ? `Edit ${s.name}` : `Add ${d.name || "a schedule"}` });
       if (!x) return;  // Back to edits: the draft stays
       // a 409 (changed meanwhile): the page reloads under the open editor, the draft stays, the next Save carries the new rev
       if (x.changed?.length) onStale?.();

@@ -120,9 +120,9 @@ def test_warn_class_and_consequences(reg):
     W = lambda op: configops.is_warn(reg, op)  # noqa: E731
     assert W(ConfigOp(op="set", path="signup_channel", value="<#5>")) and W(ConfigOp(op="set", path="timezone", value="Europe/London"))
     assert not W(ConfigOp(op="set", path="about", value="hi"))
-    assert W(ConfigOp(op="role_add", value="1")) and W(ConfigOp(op="schedule_remove", target="barrow_deeps", field="default"))
-    assert W(ConfigOp(op="schedule_set", target="barrow_deeps", field="default.active", value="false"))
-    assert not W(ConfigOp(op="schedule_set", target="barrow_deeps", field="default.name", value="x"))
+    assert W(ConfigOp(op="role_add", value="1")) and W(ConfigOp(op="schedule_remove", target="default"))
+    assert W(ConfigOp(op="schedule_set", target="default", field="active", value="false"))
+    assert not W(ConfigOp(op="schedule_set", target="default", field="name", value="x"))
     assert W(ConfigOp(op="aura_set", target="blood_pact", field="family", value="own")) and not W(ConfigOp(op="aura_set", target="blood_pact", field="note", value="x"))
     assert W(ConfigOp(op="aura_reset")) and W(ConfigOp(op="aura_reset", target="blood_pact"))  # one buff too: both surfaces ask first
     assert W(ConfigOp(op="recruit", field="open", value="false")) and not W(ConfigOp(op="recruit", field="open", value="true"))
@@ -392,14 +392,14 @@ def test_admin_raid_translator(owner_client, reg):
 
 def test_admin_schedule_translators(owner_client, reg):
     fields = {"kind": "weekly", "slots": ["Sat 20:00"], "name": "Alt run", "rosters": 2}
-    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": fields},
+    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"id": "alt", "fields": {"raid": "barrow_deeps", **fields}},
                           lambda sh: "; ".join(sh.set_schedule("alt", fields, "x", raid="barrow_deeps")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     fields = {"active": False, "lock_hours_before": None, "weights": {"regular": 6, "rank": None}}
-    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": fields},
+    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"id": "alt", "fields": fields},
                           lambda sh: "; ".join(sh.set_schedule("alt", fields, "x", raid="barrow_deeps")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
-    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule/remove", {"instance": "barrow_deeps", "id": "alt"},
+    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule/remove", {"id": "alt"},
                           lambda sh: sh.remove_schedule("alt", "x"))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/reset", {"instance": "barrow_deeps"}, lambda sh: sh.clear_raid_override("barrow_deeps", "x"))
@@ -449,8 +449,8 @@ def test_admin_translators_review_a_warn_class_batch_before_writing(owner_client
         ("/api/admin/config", {"field": "officer_roles", "value": []}) if reg.config.officer_role_ids else None,
         ("/api/admin/aura", {"id": "blood_pact", "scope": "raid"}),
         ("/api/admin/aura/reset", {}),
-        ("/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": {"active": False}}),
-        ("/api/admin/raid/schedule/remove", {"instance": "barrow_deeps", "id": "alt"}),
+        ("/api/admin/raid/schedule", {"id": "alt", "fields": {"active": False}}),
+        ("/api/admin/raid/schedule/remove", {"id": "alt"}),
         ("/api/admin/recruitment", {"open": False}),
         ("/api/admin/plain-permissions", {"dm": "ignore"}),
     ]
@@ -527,8 +527,8 @@ def test_mcp_setup_tools_send_typed_changes(monkeypatch):
         assert sent[-1]["changes"] == [{"kind": "family", "target": None, "fields": {"name": "Stamina", "value": {"all": 3, "spec:Holy": 1}}}]  # typed, never 'all: 3'
         ms.raid_set("barrow", fields={"slots": ["Tue 19:30"], "weight_rank": 3})
         assert sent[-1]["changes"][0] == {"kind": "raid", "target": "barrow_deeps", "fields": {"slots": ["Tue 19:30"], "weight_rank": 3}}
-        ms.schedule_set("barrow", "alt", fields={"active": False})
-        assert sent[-1]["changes"][0] == {"kind": "schedule", "target": "barrow_deeps:alt", "fields": {"active": False}}
+        ms.schedule_set("alt", fields={"active": False})
+        assert sent[-1]["changes"][0] == {"kind": "schedule", "target": "alt", "fields": {"active": False}}
         ms.set_channel("signup", "#raids")
         assert sent[-1]["changes"][0] == {"kind": "settings", "fields": {"channel:signup": "#raids"}}
         pv = ms.aura_set("blood_pact", "scope", "raid", preview=True)

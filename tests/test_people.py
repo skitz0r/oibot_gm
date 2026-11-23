@@ -360,7 +360,7 @@ def test_removing_a_schedule_drops_its_regulars_without_a_dm(reg, bot):
     a, b = real(reg, 0), real(reg, 1)
     reg.regular_add(a.discord_id, "alt", "t")
     reg.regular_add(b.discord_id, "alt", "t")
-    op = ConfigOp(op="schedule_remove", target="barrow_deeps", field="alt")
+    op = ConfigOp(op="schedule_remove", target="alt")
     assert "2 regulars come off it" in configops.describe(reg, op) and "nobody is DMed" in configops.describe(reg, op)  # the diff line
     assert any("come off its regulars and see a notice on their Me page" in c for c in configops.op_consequences(reg, op))
     line = reg.remove_schedule("alt", "Owner")

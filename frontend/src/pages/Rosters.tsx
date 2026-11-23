@@ -121,9 +121,9 @@ function StartAdhoc({ r, others, busy, onAct }: { r: RaidRuns; others: { id: str
     if (!p || waits) return;
     close();
     await onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { start: p.start, key: p.key, follow: followBody,
-      // a time that IS a scheduled run opens as that schedule's run (null = the raid's own run times → "default");
+      // a time that IS a scheduled run opens as that schedule's run (the preview names its id);
       // sending "adhoc" there would resolve to a one-off key and the server would refuse the stale preview (409)
-      schedule: p.kind === "scheduled" ? (p.schedule || "default") : (p.schedule || (tpl === "adhoc" ? "adhoc" : tpl)) });
+      schedule: p.kind === "scheduled" ? p.schedule : (p.schedule || (tpl === "adhoc" ? "adhoc" : tpl)) });
   }
   return (
     <>
@@ -280,11 +280,11 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
   // the sentence is the server's (consequences.regular_remove), the write carries the member record's rev (stale → 409)
   async function remove(x: Series["regulars"][number]) {
     if (!(await ask({ title: `Take ${x.display_name} off the regulars?`, message: x.remove, confirmLabel: "Remove", cancelLabel: "Back", color: "red" }))) return;
-    await onAct(`reg${s.key}${x.uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: s.id, uid: x.uid, on: false, rev: x.rev });
+    await onAct(`reg${s.key}${x.uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: s.key, uid: x.uid, on: false, rev: x.rev });
   }
   async function add() {
     if (!person) return;
-    await onAct(`reg${s.key}add`, "/api/admin/raid/regulars", { raid: r.id, schedule: s.id, uid: person.uid, character: char || person.characters[0]?.label, on: true });
+    await onAct(`reg${s.key}add`, "/api/admin/raid/regulars", { raid: r.id, schedule: s.key, uid: person.uid, character: char || person.characters[0]?.label, on: true });
     setWho(null); setChar(null);
   }
   return (
@@ -357,7 +357,7 @@ function Regulars({ r, meta, people, onAct, busy }: { r: RaidRuns; meta: Meta; p
    *  row's button spins while it writes. */
   async function clear(o: NonNullable<RaidRuns["orphan_regulars"]>[number]) {
     if (!(await ask({ title: `Clear ${o.character} from ${o.label}?`, message: o.clear, confirmLabel: "Clear", cancelLabel: "Back", color: "red" }))) return;
-    await onAct(`orph${o.key}${o.uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: o.key.split(":")[1], uid: o.uid, on: false, rev: o.rev });
+    await onAct(`orph${o.key}${o.uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: o.key, uid: o.uid, on: false, rev: o.rev });
   }
   if (!series.length && !orphans.length) return <Text size="sm" c="dimmed">No recurring schedule yet — add weekly run times on the Raids page; ad hoc runs have no regulars.</Text>;
   return (

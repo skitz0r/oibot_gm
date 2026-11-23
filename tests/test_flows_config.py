@@ -203,6 +203,28 @@ def test_run_times_add_and_remove_round_trip_through_parse_slots(reg, owner):
     assert slots == ["Mon 20:00", "Sat 21:15"] and parse_slots(slots) == slots
 
 
+def test_a_schedules_new_week_says_its_open_run_keeps_its_times(reg, rs, owner):
+    """C10 on Discord: the review of a schedule whose week changes, with a run already open, says that run keeps its times."""
+    from oibot_gm import raidcycle as rc
+
+    h = Harness(reg)
+    sid = weekly(reg)
+    now = reg.now_local()
+    start = next(t for t in rc.next_runs_of(reg, "barrow_deeps", reg.schedule_entry(sid), n=3) if t - now >= timedelta(hours=24))
+    rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=sid)
+
+    async def go():
+        await open_raid(h, reg)
+        await h.pick("Pick a section", "times")
+        await h.pick("Pick a schedule", sid)
+        await h.pick("Change this schedule", "cadence")
+        await h.pick("Pick a run's week", "same_week")
+        await h.press("Back to the sections")
+        await h.press("Save")
+        assert "The open run keeps its old times." in h.text
+    asyncio.run(go())
+
+
 def test_the_minimums_section_sets_one_minimum_with_a_reason(reg, owner):
     h = Harness(reg)
 

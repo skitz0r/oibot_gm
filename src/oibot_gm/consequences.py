@@ -257,6 +257,16 @@ def ended_line(reg: Registry, ev: rc.RaidEvent) -> str:
     return f"{rc.run_on(reg, ev)} is finished. If that was a mistake, Reopen on the closed card works for {rc.reopen_window()}."
 
 
+def schedule_keeps_sentence(n: int) -> str | None:
+    """C10: what an edit of a schedule's run times or week does to the `n` runs it already opened — they keep theirs.
+    None when it has none open (nothing to say)."""
+    if n <= 0:
+        return None
+    if n == 1:
+        return "The open run keeps its old times."
+    return f"The {n} open runs keep their old times."
+
+
 def series_words(reg: Registry, key: str) -> str:
     """A schedule id as a sentence names it: '<raid> <schedule name>' ('Barrow Deeps Raid nights'); one no schedule
     answers to: 'a removed Barrow Deeps schedule' (Registry.series_label's words, never the key)."""

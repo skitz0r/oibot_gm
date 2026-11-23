@@ -466,9 +466,13 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     dump.add("schedule_pause_sentence", "pause, nothing open", configops.schedule_pause_sentence(reg, RID, "alt", True, rs))
     dump.add("schedule_pause_sentence", "pause, runs open", configops.schedule_pause_sentence(reg, RID, "barrow-deeps", True, rs))
     dump.add("schedule_pause_sentence", "resume", configops.schedule_pause_sentence(reg, RID, "alt", False, rs))
+    for n in (0, 1, 3):  # C10: a schedule's times or week edited while it has runs open
+        said = cq.schedule_keeps_sentence(n)
+        assert (said is None) == (n == 0)
+        dump.add("schedule_keeps_sentence", f"{n} open runs", [said] if said else [])
     Op = configops.ConfigOp
     reg.config.officer_role_ids = [5]
-    for op in (Op(op="schedule_remove", target=RID, field="alt"), Op(op="aura_reset"), Op(op="aura_reset", target=b.id),
+    for op in (Op(op="schedule_remove", target="alt"), Op(op="aura_reset"), Op(op="aura_reset", target=b.id),
                Op(op="role_remove", value="5"), Op(op="recruit", path="open", value="off"),
                Op(op="set", path="timezone", value="America/New_York", field="keep")):
         try:
@@ -491,7 +495,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     dump.add("forget_consequence", "an evening in the guild's zone", cq.forget_consequence(own, REAL, reg.tz))
     dump.add("op_consequences(plain listen)", "reply", configops.op_consequences(reg, Op(op="plain", target="listen <#11>", value="reply")))
     dump.add("_timezone_consequences", "move", configops._timezone_consequences(reg, Op(op="set", path="timezone", value="America/New_York", field="move")))
-    d = configops.describe_ops(reg, [Op(op="schedule_remove", target=RID, field="alt")])
+    d = configops.describe_ops(reg, [Op(op="schedule_remove", target="alt")])
     dump.add("describe_ops consequences", "schedule remove", d.consequences)
     dump.add("plain-text diff (as_discord)", "schedule remove", [x for x in d.as_discord().splitlines() if x.startswith("⚠")])
 
