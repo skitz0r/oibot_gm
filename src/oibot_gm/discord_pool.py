@@ -47,7 +47,7 @@ def _site(reg: Registry, path: str) -> str | None:
 
 def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.LayoutView, str]:
     """One native card per raid: who the pool could field at this size (roles have/need, buffs nobody brings) and
-    where the desired comp is short or over. Icons + numbers only; the Members and Raids pages hold the detail.
+    where the raid's minimums are short. Icons + numbers only; the Members and Raids pages hold the detail.
     Returns (view, level). The numbers are comp.readiness (one computation for the card, the API, MCP and /ask);
     `rs` is the bot's RaidStore, so "on roster" counts the seats in the run files exactly as GET /api/readiness does."""
     ui = discord.ui
@@ -55,7 +55,6 @@ def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.L
     d = comp_mod.readiness(reg, roster.get("instance") or key, rs)  # the same numbers GET /api/readiness, MCP and /ask read
     name, size, worst, hc = d["name"], d["size"], d["level"], d["headcount"]
     short = [c for c in d["comp"] if c["level"] == "red" and c["key"] not in ROLES]
-    over = d["over"]
     head = f"## {name}\n**{hc['mains']}** / {size} mains" + (f" · {hc['alts']} alts" if hc["alts"] else "") + (f" · {hc['unnamed']} unnamed" if hc["unnamed"] else "")
     rid = roster.get("instance") or key
     thumb = views.raid_thumb_url(reg, rid) if rid in reg.profile.raids else None
@@ -69,8 +68,6 @@ def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.L
     for cv in d.get("series") or []:  # regulars coverage per recurring series (replaces the old "on roster" count)
         lines.append(f"**{cv['name']}**{' (paused)' if not cv['active'] else ''} {views.coverage_line(ico, cv)}")
         lines += views.forecast_lines(ico, cv)
-    if over:
-        lines.append("**Over cap** " + "   ".join(f"{_comp_icon(ico, c['key'])} {c['have']}/{c['max']}" for c in over[:8]))
     parts = [top, ui.Separator(), ui.TextDisplay("\n".join(x for x in lines if x.strip()) or "every slot filled")]
     links = [ui.Button(label=label, style=discord.ButtonStyle.link, url=url) for label, url in (("Members", _site(reg, "/app/members")), ("Raid rules", _site(reg, "/app/raids"))) if url]
     parts += [ui.Separator(), ui.TextDisplay(f"-# Change the ideals in plain text here: @mention me, e.g. “{roster.get('instance') or key}: we want 3 tanks”, “cap hunters at 3”.")]

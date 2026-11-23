@@ -459,7 +459,7 @@ class GuildConfig(BaseModel):
     officer_roles: list[str] = Field(default_factory=list)  # legacy names; empty once resolved (unresolvable names stay, for the ops warning)
     # rosters: {key, name, size, schedule: "Tue 19:30", instance, cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders, open_dm}
     rosters: list[dict] = Field(default_factory=list)
-    # raids: guild overrides per instance id over profiles/<game>/raids.yaml: {lockout_days, duration_hours, comp: {tank/healer/dps: {min,max}}, notes}
+    # raids: guild overrides per instance id over profiles/<game>/raids.yaml: {lockout_days, duration_hours, minimums: {slot: {min, note?}}, notes}
     raids: dict[str, dict] = Field(default_factory=dict)
     # schedules: WHEN raids run, at guild level — [{id, lineup: [{raid, rosters[, starts]}], kind, slots, …}] (to_stored_schedule);
     # a schedule is known by (its first lineup raid, id). A raid's `default` entry holds its own run times. Read through
@@ -777,7 +777,7 @@ RAID_DEFAULTS = {"lockout_days": 7, "duration_hours": 3, "signup_lead_hours": 12
 ADHOC_DEFAULTS = {"signup_lead_hours": 168, "nudge_hours_before": 3, "lock_hours_before": 2, "confirm_hours_before": 1, "fill_ask_hours": 1,
                   "nudge": False, "open_dm": False, "confirm": False, "autofill": True, "split_policy": "balanced"}
 ADHOC_WEIGHTS = {"rank": 0, "main": 1, "sat_out": 0, "signup_order": 6, "regular": 0}
-RAID_IDENTITY = ("name", "size", "comp", "lockout_days", "duration_hours", "first_open", "notes", "comp_targets", "comp_groups", "slots", "schedules")
+RAID_IDENTITY = ("name", "size", "minimums", "lockout_days", "duration_hours", "first_open", "notes", "comp_groups", "slots", "schedules")
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
 CLOCK12 = "%a %d %b %I:%M %p"  # the one human-facing clock format; %H:%M is for machines
 UNTIERED_WEIGHT = 0.5  # loot: the upgrade value of an item with no tier data (Registry.loot_cfg `untiered_weight`)
@@ -1365,16 +1365,15 @@ def schedule_def_of(rd: dict, sid: str | None) -> dict:
 
 def effective_raid(base: dict, over: dict) -> dict:
     """The effective raid definition: the profile's raid (`base`) with the guild's override (`over`) on top, then
-    RAID_DEFAULTS — comp merged per role, weights per key, the reminder derived halfway when nothing sets it, the
-    true/false settings parsed. Pure: Registry.raid_def is effective_raid(profile raid, raid_override)."""
+    RAID_DEFAULTS — minimums merged per slot (each as {min, note?}), weights per key, the reminder derived halfway when
+    nothing sets it, the true/false settings parsed. Pure: Registry.raid_def is effective_raid(profile raid, raid_override)."""
     base = dict(base or {})
     out = {**base}
+    if base.get("minimums"):
+        out["minimums"] = {slot: min_entry(v) for slot, v in base["minimums"].items()}
     for k, v in (over or {}).items():
-        if k == "comp":
-            comp = {r: dict(b) for r, b in (base.get("comp") or {}).items()}
-            for r, b in (v or {}).items():
-                comp[r] = {**comp.get(r, {}), **b}
-            out["comp"] = comp
+        if k == "minimums":
+            out["minimums"] = {**(out.get("minimums") or {}), **{slot: min_entry(e) for slot, e in (v or {}).items()}}
         elif k == "weights":
             out["weights"] = {**(base.get("weights") or {}), **(v or {})}
         else:
@@ -1637,13 +1636,124 @@ def pool_health_data(reg: "Registry", roster: dict, placed: set[int] | None = No
             "unresponsive": not_on_roster, "unnamed": unnamed, "mains": len(mains), "on_roster": len(on_roster), "alts": len(alts)}
 
 
-COMP_NOTE_MAX = 200  # an officer's reason for a comp target (prose, shown on the readiness card)
+COMP_NOTE_MAX = 200  # an officer's reason for a minimum (prose, shown on the readiness card)
 COMP_ROLE_WORDS = {"tank": ("tank", "tanks"), "healer": ("healer", "healers"), "melee": ("melee", "melee"), "ranged": ("ranged", "ranged"), "dps": ("damage dealer", "damage dealers")}
+# a raid's make-up is one minimum per role or class (design D16): the refusals every surface shows
+NO_UPPER_LIMIT = "A minimum has no upper limit. Give only the minimum."
+MINIMUM_ON_RAID = "Minimums belong to the raid. Set them on the raid, not on one run."
 
 
 def _comp_words(role: str, n: int) -> str:
     one, many = COMP_ROLE_WORDS.get(role, (role, role))
     return f"{n} {one if n == 1 else many}"
+
+
+def min_entry(v) -> dict:
+    """One stored minimum as {min, note?}: the profile writes a bare number, a guild {min, note?}."""
+    if isinstance(v, dict):
+        note = str(v.get("note") or "").strip()
+        return {"min": int(v.get("min") or 0), **({"note": note} if note else {})}
+    return {"min": int(v or 0)}
+
+
+def slot_words(slot: str, n: int | None = None) -> str:
+    """A minimum's slot in words: 'Healers' / 'Paladins' / 'Holy Paladins'; with `n`, counted: '1 healer', '2 Holy
+    Paladins', '3 melee'."""
+    cls, _, spec = slot.partition(":")
+    if n is None:
+        if slot in COMP_ROLE_WORDS:
+            return COMP_ROLE_WORDS[slot][1].capitalize()
+        return f"{spec} {cls}s" if spec else f"{cls}s"
+    if slot in COMP_ROLE_WORDS:
+        return _comp_words(slot, n)
+    return f"{n} {f'{spec} {cls}' if spec else cls}{'' if n == 1 else 's'}"
+
+
+def lift_minimums(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
+    """An older guild.yaml held a raid's make-up twice: `comp` (the owner's {min, max} per tank / healer / dps) and
+    `comp_targets` (the officers' {min, max, note} per role, class or spec). Phase 2 keeps one map, `minimums` (D16):
+    comp's tank and healer minimums, and every class, spec, melee or ranged entry of comp_targets with its reason. A
+    tank or healer entry of comp_targets (comp's wins), every maximum and comp's dps are dropped, and so is a run
+    dict's own comp_targets. → one line per raid or run that changed ("Barrow Deeps: kept at least 3 healers; dropped
+    at most 4 healers"); [] when nothing was left to lift. Idempotent; pure on cfg (`raids` = the profile's, for names)."""
+    raids = raids or {}
+    out: list[str] = []
+
+    def name(rid):
+        return (raids.get(rid) or {}).get("name") or rid
+
+    for rid in list(cfg.raids):
+        o = cfg.raids[rid]
+        if not isinstance(o, dict) or not ({"comp", "comp_targets"} & set(o)):
+            continue
+        comp, aims = o.get("comp") or {}, o.get("comp_targets") or {}
+        mins = {slot: min_entry(e) for slot, e in (o.get("minimums") or {}).items()}
+        kept, dropped = [], []
+        for role, b in comp.items():
+            b = b if isinstance(b, dict) else {}
+            if role in ("tank", "healer") and b.get("min") not in (None, ""):
+                mins[role] = {**mins.get(role, {}), "min": int(b["min"])}
+                kept.append(f"at least {_comp_words(role, int(b['min']))}")
+            elif b.get("min"):
+                dropped.append(f"at least {_comp_words(role, int(b['min']))}")
+            if b.get("max") not in (None, ""):
+                dropped.append(f"at most {_comp_words(role, int(b['max']))}")
+        for slot, t in aims.items():
+            t = t if isinstance(t, dict) else {"min": t}
+            if slot in ("tank", "healer"):
+                dropped.append(f"the officers' {_comp_words(slot, int(t.get('min') or 0))}")
+            else:
+                e = min_entry(t)
+                mins[slot] = e
+                kept.append(f"at least {slot_words(slot, e['min'])}")
+            if t.get("max") not in (None, ""):
+                dropped.append(f"at most {slot_words(slot, int(t['max']))}")
+        rest = {k: v for k, v in o.items() if k not in ("comp", "comp_targets", "minimums")}
+        if mins:
+            rest["minimums"] = mins
+        if rest:
+            cfg.raids[rid] = rest
+        else:
+            cfg.raids.pop(rid)
+        parts = (["kept " + ", ".join(kept)] if kept else []) + (["dropped " + ", ".join(dropped)] if dropped else [])
+        if parts:
+            out.append(f"{name(rid)}: " + "; ".join(parts))
+    for t in cfg.rosters:
+        if isinstance(t, dict) and "comp_targets" in t:
+            t.pop("comp_targets")
+            out.append(f"{t.get('name') or name(t.get('instance'))} run {t.get('key')}: its own make-up dropped")
+    return out
+
+
+def minimums_line(lines: list[str]) -> str:
+    """The start's one ops line for lift_minimums' lines (Registry.migrate_schedules → timing_saved)."""
+    return "Make-up is one minimum per role or class now: " + " · ".join(lines) + "."
+
+
+def lower_minimums(cfg: "GuildConfig", raids: dict) -> list[str]:
+    """The way back to code from before minimums (scripts/lower_schedules.py): each raid's tank and healer minimums go
+    back to `comp: {role: {min}}` (both written, the missing one from the profile's `raids`), every other minimum to
+    `comp_targets: {slot: {min, note?}}`, and `minimums` is removed. → one line per raid lowered. Pure on cfg."""
+    out: list[str] = []
+    for rid in list(cfg.raids):
+        o = cfg.raids[rid]
+        if not isinstance(o, dict) or "minimums" not in o:
+            continue
+        mins = {slot: min_entry(e) for slot, e in (o.get("minimums") or {}).items()}
+        rest = {k: v for k, v in o.items() if k != "minimums"}
+        roles = {r: mins.pop(r) for r in ("tank", "healer") if r in mins}
+        if roles:
+            prof = (raids.get(rid) or {}).get("minimums") or {}
+            rest["comp"] = {r: {"min": (roles[r] if r in roles else min_entry(prof[r]))["min"]} for r in ("tank", "healer") if r in roles or r in prof}
+        if mins:
+            rest["comp_targets"] = mins
+        if rest:
+            cfg.raids[rid] = rest
+        else:
+            cfg.raids.pop(rid)
+        name = (raids.get(rid) or {}).get("name") or rid
+        out.append(f"{name}: " + (", ".join(f"at least {slot_words(s, e['min'])}" for s, e in {**roles, **mins}.items()) or "no minimums"))
+    return out
 
 
 class Effects(BaseModel):
@@ -2418,7 +2528,16 @@ class Registry:
         except (RegistryError, ValueError, TypeError) as e:
             log.warning("schedules: the sheet timing of %s was not moved (%s)", self.key, e)
             self.timing_moved, self.timing_dropped, timing_owed = [], [], False
-        self._schedules_owed = self._lift_owed or timing_owed
+        # phase 2 (D16): an older file's comp limits and aims become one minimum per role or class, on a copy as above
+        try:
+            trial = cfg.model_copy(deep=True)
+            self.minimums_lifted = lift_minimums(trial, raids)
+            minimums_owed = trial.model_dump() != cfg.model_dump()
+            cfg = trial
+        except (RegistryError, ValueError, TypeError) as e:
+            log.warning("schedules: the make-up of %s was not lifted (%s)", self.key, e)
+            self.minimums_lifted, minimums_owed = [], False
+        self._schedules_owed = self._lift_owed or timing_owed or minimums_owed
         self.schedules_unread: list[str] = []
         for e in cfg.schedules:
             why = unread_schedule(e)
@@ -2432,18 +2551,23 @@ class Registry:
     def migrate_schedules(self, by: str = "migration") -> list[str]:
         """Save an older file's lifted schedules (load_config) once: one commit when the load lifted anything, then
         nothing on later calls. → the lift's lines, [] when nothing was saved or no raid had a schedule to move (a raid
-        whose old keys held nothing is saved without a line). The same commit carries the timing lift (lift_timing):
-        its ops line goes into `timing_saved` for the start hook. A preview copy never writes."""
+        whose old keys held nothing is saved without a line). The same commit carries the timing lift (lift_timing)
+        and the make-up lift (lift_minimums): one ops line each goes into `timing_saved` for the start hook. A preview
+        copy never writes."""
         if getattr(self, "_shadow", False) or not (self.schedules_lifted or getattr(self, "_schedules_owed", False)):
             return []
         with self.config_lock:
             lines = self.schedules_lifted
-            what = "schedules moved to the guild level" if getattr(self, "_lift_owed", True) else "sheet timing moved onto each schedule"
-            self.save_config(f"{what} (by {by})", notify=False)  # a failure keeps the lines: the next start tries again
             moved, dropped = list(getattr(self, "timing_moved", [])), list(getattr(self, "timing_dropped", []))
+            mins = list(getattr(self, "minimums_lifted", []))
+            what = ("schedules moved to the guild level" if getattr(self, "_lift_owed", True)
+                    else "sheet timing moved onto each schedule" if moved or dropped or not mins else "make-up is one minimum per role or class")
+            self.save_config(f"{what} (by {by})", notify=False)  # a failure keeps the lines: the next start tries again
             if moved or dropped:
                 self.timing_saved = [*getattr(self, "timing_saved", []), timing_line(moved, dropped)]
-            self.schedules_lifted, self.timing_moved, self.timing_dropped = [], [], []
+            if mins:
+                self.timing_saved = [*getattr(self, "timing_saved", []), minimums_line(mins)]
+            self.schedules_lifted, self.timing_moved, self.timing_dropped, self.minimums_lifted = [], [], [], []
             self._schedules_owed = self._lift_owed = False
         return lines
 
@@ -2469,10 +2593,6 @@ class Registry:
         own = {"raids", "schedules", "buffs", "families", "recruitment", "invite_url", "member_role_ids", "plain", "loot"}
         if section.startswith("raids:"):
             rid = section[6:]
-            if rid not in self.profile.raids and self.config.roster(rid) is not None:
-                # a RUN key (set_comp_targets on one run): its own comp targets live on the run's entry in `rosters`, which
-                # REV_SKIP leaves out of every other section — so the rev covers exactly what a run-level target edits
-                return {"comp_targets": (self.config.roster(rid) or {}).get("comp_targets") or {}}
             blob = dict(cfg.get("raids", {}).get(rid) or {})
             mine = [e for e in cfg.get("schedules") or [] if _lead_raid(e) == rid]  # the raid's own schedules count as its section
             if mine:
@@ -4716,7 +4836,7 @@ class Registry:
         rd = self.raid_def(instance)
         over = self.config.raids.get(instance, {})
         return {"key": instance, "name": rd.get("name", instance), "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "instance": instance,
-                "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or []}
+                "minimums": {slot: min_entry(e) for slot, e in (over.get("minimums") or {}).items()}, "comp_groups": over.get("comp_groups") or []}
 
     def first_open(self, instance: str | None):
         """Anchor datetime (aware) for the instance's lockout windows, or None."""
@@ -4747,23 +4867,25 @@ class Registry:
         start = anchor + _td(days=days * k)
         return start, start + _td(days=days)
 
-    def role_bounds(self, instance: str | None, size: int) -> dict[str, dict[str, int]]:
-        """tank/healer/dps {min,max} for a run: the raid's desired comp when it has one (scaled if the roster
-        size differs from the raid's), else the generic comp_rules scaled to the size."""
-        from .roster.solver import scaled_role_bounds
+    def minimums(self, instance: str | None, size: int | None = None) -> dict[str, int]:
+        """The raid's minimums, one number per slot (a role, a class or Class:Spec; design D16): the guild's entries over
+        the profile's over the game's tank / healer minimums (comp_rules, scaled to the size). A raid's own entries are
+        for its full size: scaled by round(n × size / raid size) when `size` differs. Zero entries are left out."""
+        from .roster.solver import scaled_role_minimums
 
         rd = self.raid_def(instance)
-        comp = rd.get("comp")
-        if comp and comp.get("tank") and comp.get("healer"):
-            f = size / int(rd.get("size") or size or 1) if rd.get("size") else 1.0
-            out = {}
-            for role in ("tank", "healer", "dps"):
-                b = comp.get(role) or {}
-                lo, hi = int(b.get("min", 0)), int(b.get("max", size))
-                out[role] = {"min": max(0, round(lo * f)), "max": max(1, round(hi * f))}
-            return out
-        b = scaled_role_bounds(self.profile.comp_rules, size)
-        return {"tank": b["tank"], "healer": b["healer"], "dps": {"min": 0, "max": size}}
+        full = int(rd.get("size") or DEFAULT_RAID_SIZE)
+        size = int(size or full)
+        out = {r: n for r, n in scaled_role_minimums(self.profile.comp_rules, size).items() if r in ("tank", "healer")}
+        for slot, e in (rd.get("minimums") or {}).items():
+            n = min_entry(e)["min"]
+            out[slot] = n if size == full else max(0, round(n * size / full))
+        return {slot: n for slot, n in out.items() if n}
+
+    def role_bounds(self, instance: str | None, size: int) -> dict[str, dict[str, int]]:
+        """{tank: {min}, healer: {min}, dps: {min: 0}} for a run of `size` (Registry.minimums): no role has an upper limit."""
+        mins = self.minimums(instance, size)
+        return {"tank": {"min": mins.get("tank", 0)}, "healer": {"min": mins.get("healer", 0)}, "dps": {"min": 0}}
 
     def schedules(self, instance: str | None) -> list[dict]:
         """The raid's effective schedules (see schedules_of)."""
@@ -4940,7 +5062,7 @@ class Registry:
         return lines
 
     def comp_slot(self, slot: str) -> str:
-        """A comp target's slot as stored: a role (tank, healer, melee, ranged), a class ('Paladin') or a spec
+        """A minimum's slot as stored: a role (tank, healer, melee, ranged), a class ('Paladin') or a spec
         ('Paladin:Holy'); anything else → RegistryError."""
         slot = str(slot or "").strip()
         if slot in ROLES:
@@ -4952,86 +5074,68 @@ class Registry:
 
     def comp_slot_words(self, slot: str) -> str:
         """A slot in words: 'healer' → 'Healers', 'Paladin' → 'Paladins', 'Paladin:Holy' → 'Holy Paladins'."""
-        if slot in ROLES:
-            return COMP_ROLE_WORDS[slot][1].capitalize()
-        cls, _, spec = slot.partition(":")
-        return f"{spec} {cls}s" if spec else f"{cls}s"
+        return slot_words(slot)
 
     @_config_verb(_raid_section)
-    def set_comp_targets(self, raid: str, targets: dict, by: str) -> list[str]:
-        """Officers' comp TARGETS ("we aim for", what readiness measures — dual interfaces §3.3 Cluster C, RD-12) for a
-        raid (its runs inherit them) or one run (its key): {slot: {min, max, note} | None} — None removes the target so
-        the derived value applies again; a target is the whole entry (min, an optional max, an optional reason).
-        Bounds ("at least / at most" the solver seats) stay the owner's (raid_set); a target outside them is refused
-        with the owner pointer. Every slot is validated before anything changes; one save_config, one commit."""
+    def set_minimums(self, raid: str, values: dict, by: str) -> list[str]:
+        """A raid's minimums (design D16): {slot: {min, note?} | None} — a slot is a role (tank, healer, melee, ranged),
+        a class or Class:Spec; None takes the guild's own away so the game's minimum applies again. One number per slot
+        and no upper limit: a `max` is refused (NO_UPPER_LIMIT), a run key too (MINIMUM_ON_RAID — a run reads its raid's),
+        a minimum past the raid's size and a reason past COMP_NOTE_MAX. Every slot is checked before anything changes;
+        one save_config, one commit. → "<Raid> · Healers: at least 3" per slot that changed."""
         key = str(raid or "").strip()
-        run = self.config.roster(key)
-        if run is None and key not in self.profile.raids:
-            raise RegistryError(f"no raid or run {key or '?'}")
-        instance = (run or {}).get("instance") or key
-        size = int((run or {}).get("size") or self.raid_def(instance).get("size") or DEFAULT_RAID_SIZE)
-        bounds = self.role_bounds(instance, size)
-        holder = run if run is not None else (self.config.raids.get(key) or {})
-        cur = {k: dict(v) for k, v in (holder.get("comp_targets") or {}).items()}
+        if key not in self.profile.raids:
+            if self.config.roster(key) is not None:
+                raise RegistryError(MINIMUM_ON_RAID)
+            raise RegistryError(f"no raid {key or '?'}")
+        size = int(self.raid_def(key).get("size") or DEFAULT_RAID_SIZE)
+        holder = self.config.raids.get(key) or {}
+        cur = {k: min_entry(v) for k, v in (holder.get("minimums") or {}).items()}
         lines = []
-        for raw, t in (targets or {}).items():
+        for raw, t in (values or {}).items():
             slot = self.comp_slot(raw)
-            words = self.comp_slot_words(slot)
+            words = slot_words(slot)
             if t is None:
                 if slot in cur:
                     cur.pop(slot)
-                    lines.append(f"{words}: back to the default aim")
+                    lines.append(f"{words}: back to the game's minimum")
                 continue
             if not isinstance(t, dict):
-                raise RegistryError(f"{words}: an aim is {{min, max, note}}")
+                raise RegistryError(f"{words}: a minimum is a number and an optional reason.")
+            if t.get("max") not in (None, ""):
+                raise RegistryError(NO_UPPER_LIMIT)
             try:
-                lo = int(t.get("min") or 0)
-                hi = None if t.get("max") in (None, "") else int(t["max"])
+                n = int(t.get("min") or 0)
             except (TypeError, ValueError):
-                raise RegistryError(f"{words}: at least / at most are whole numbers") from None
-            note = str(t.get("note") or "").strip() or None
-            if lo < 0 or (hi is not None and hi < 0):
-                raise RegistryError(f"{words}: an aim can't be negative")
-            if hi is not None and hi < lo:
-                raise RegistryError(f"{words}: at most {hi} is below at least {lo}")
-            if lo > size:
-                raise RegistryError(f"{words}: at least {lo} but a run seats {size}")
-            role = slot if slot in ("tank", "healer") else ("dps" if slot in ("melee", "ranged") else None)
-            if role and role in bounds:
-                b = bounds[role]
-                if lo > int(b["max"]):
-                    raise RegistryError(f"at least {_comp_words(slot, lo)} but the raid allows at most {int(b['max'])} — change the limits first (owner)")
-                if hi is not None and slot == role and hi < int(b["min"]):
-                    raise RegistryError(f"at most {_comp_words(slot, hi)} but the raid takes at least {int(b['min'])} — change the limits first (owner)")
-            if note and len(note) > COMP_NOTE_MAX:
-                raise RegistryError(f"{words}: the reason holds {COMP_NOTE_MAX} characters ({len(note)} given)")
-            entry = {"min": lo, **({"max": hi} if hi is not None else {}), **({"note": note} if note else {})}
+                raise RegistryError(f"{words}: a minimum is a whole number.") from None
+            if n < 0:
+                raise RegistryError(f"{words}: a minimum can't be below 0.")
+            if n > size:
+                raise RegistryError(f"{words}: at least {n} is more than the {size} a run seats.")
+            note = str(t.get("note") or "").strip()
+            if len(note) > COMP_NOTE_MAX:
+                raise RegistryError(f"{words}: the reason holds {COMP_NOTE_MAX} characters, and {len(note)} were given.")
+            entry = {"min": n, **({"note": note} if note else {})}
             if cur.get(slot) == entry:
                 continue
             cur[slot] = entry
-            lines.append(f"{words}: at least {lo}" + (f", at most {hi}" if hi is not None else "") + (f" ({note})" if note else ""))
+            lines.append(f"{words}: at least {n}" + (f" ({note})" if note else ""))
         if not lines:
             return []
-        if run is None:
-            holder = self.config.raids.setdefault(key, {})
+        holder = self.config.raids.setdefault(key, {})
         if cur:
-            holder["comp_targets"] = cur
+            holder["minimums"] = cur
         else:
-            holder.pop("comp_targets", None)
-            if run is None and not holder:
-                self.config.raids.pop(key, None)
-        name = (run or {}).get("name") or self.raid_def(instance).get("name", instance)
-        self.save_config(f"{key} aims: {'; '.join(lines)} (by {by})"[:400])
+            holder.pop("minimums", None)
+        self._prune_raid(key)
+        name = self.raid_def(key).get("name", key)
+        self.save_config(f"{key} minimums: {'; '.join(lines)} (by {by})"[:400])
         return [f"{name} · {ln}" for ln in lines]
 
     def _check_raid(self, instance: str) -> None:
         """The cross-field rules, on the merged result (profile → guild override → defaults), never on one field at a
-        time: the comp's min ≤ max, and every schedule's (its timing ordering among them — _check_schedules)."""
-        eff = self.raid_def(instance)
-        for role, b in (eff.get("comp") or {}).items():
-            if b.get("min", 0) > b.get("max", 999):
-                raise RegistryError(f"{role}: min {b['min']} above max {b['max']}")
-        self._check_schedules(eff)
+        time: every schedule's (its timing ordering among them — _check_schedules)."""
+        self._check_schedules(self.raid_def(instance))
 
     def _check_schedules(self, eff: dict) -> None:
         """Every schedule on the merged raid: unique ids, the cadence ordering with its overrides, slots for a weekly
@@ -5159,14 +5263,23 @@ class Registry:
                 over["first_open"] = t.isoformat()
             value = self.local12(over["first_open"]) if over.get("first_open") else "no first lockout set — weekly runs start at the next run time; a day-of-lockout schedule needs one"  # stored ISO, shown in words
         elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
+            # the old limit fields: a tank or healer minimum is that role's minimum (design D16); no upper limit
             role, bound = field.split("_")
+            if bound == "max":
+                raise RegistryError(NO_UPPER_LIMIT)
+            if role == "dps":
+                raise RegistryError("Damage dealers have no minimum of their own. Set one for melee or ranged.")
             try:
                 n = int(value)
             except (TypeError, ValueError):
                 raise RegistryError(f"{field} must be a whole number")
             if n < 0:
                 raise RegistryError(f"{field} can't be negative")
-            over.setdefault("comp", {}).setdefault(role, {})[bound] = n
+            size = int(self.raid_def(instance).get("size") or DEFAULT_RAID_SIZE)
+            if n > size:
+                raise RegistryError(f"{slot_words(role)}: at least {n} is more than the {size} a run seats.")
+            mins = over.setdefault("minimums", {})
+            mins[role] = {**min_entry(mins.get(role) or {}), "min": n}
         else:
             raise RegistryError(f"unknown raid field {field}")
         if commit:

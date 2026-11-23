@@ -286,7 +286,7 @@ def test_readiness_route(c, reg):
     rows = r.json()["raids"]
     assert [x["raid"] for x in rows] == list(reg.profile.raids)
     one = c.get("/api/readiness", params={"raid": "barrow_deeps"}, headers=bearer()).json()["raids"]
-    assert len(one) == 1 and one[0]["raid"] == "barrow_deeps" and {"headcount", "roles", "comp", "short", "over", "missing_buffs", "plan"} <= set(one[0])
+    assert len(one) == 1 and one[0]["raid"] == "barrow_deeps" and {"headcount", "roles", "comp", "short", "missing_buffs", "plan"} <= set(one[0])
     assert c.get("/api/readiness", params={"raid": "nowhere"}, headers=bearer()).status_code == 404
     assert c.get("/api/readiness").status_code == 401
 

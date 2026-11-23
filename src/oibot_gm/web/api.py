@@ -1193,7 +1193,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             buffs = {b.id: b for b in reg.profile.buffs}  # the page draws missing buffs as icon-only chips (name in the tooltip)
             r["missing_buffs"] = [{**x, "abbr": getattr(buffs.get(x["id"]), "abbr", x["name"][:3]), "colour": getattr(buffs.get(x["id"]), "colour", "#888"),
                                    "art": getattr(buffs.get(x["id"]), "art", None)} for x in r["missing_buffs"]]
-            return {**r, "targets": dict((reg.config.raids.get(rid) or {}).get("comp_targets") or {}),
+            return {**r, "targets": dict((reg.config.raids.get(rid) or {}).get("minimums") or {}),
                     "bounds": reg.role_bounds(rid, size), "rev": reg.config_rev(f"raids:{rid}"),
                     "comp_groups": list((reg.config.raids.get(rid) or {}).get("comp_groups") or [])}
         rows = await asyncio.to_thread(lambda: [one(rid) for rid in ids])
@@ -2063,9 +2063,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
                         "slots": list(eff["slots"]), "slot_labels": [reg.slot_label(x) for x in eff["slots"]], "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
-                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "autofill": bool(eff.get("autofill", True)), "open_dm": bool(eff.get("open_dm", False)), "confirm": bool(eff.get("confirm", True)), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
-                        "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
-                        "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
+                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "autofill": bool(eff.get("autofill", True)), "open_dm": bool(eff.get("open_dm", False)), "confirm": bool(eff.get("confirm", True)), "notes": eff.get("notes") or "", "comp": {r: ({"min": n} if (n := reg.minimums(rid).get(r)) else {}) for r in ("tank", "healer", "dps")},
+                        "overridden": sorted(k for k in over if k not in ("minimums", "weights")) + [f"{r}_min" for r in (over.get("minimums") or {}) if r in ("tank", "healer")] + [f"weight_{k}" for k in (over.get("weights") or {})],
+                        "comp_targets": over.get("minimums") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "first_open_words": reg.local12(fo) if fo else "", "opened": bool(fo and fo <= now),
                         "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid),
                         "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rs, rid),

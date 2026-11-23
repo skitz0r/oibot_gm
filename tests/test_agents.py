@@ -269,7 +269,7 @@ def seed(reg):
 
 
 PROP = {"title": "Barrow Deeps wants a third healer", "news": [URL], "affects": "raid barrow_deeps comp healer", "kind": "guild_setting",
-        "change": "Barrow Deeps healers 2–3", "edit": {"op": "comp_target", "target": "barrow_deeps", "field": "healer", "value": "2-3"}, "evidence": "Blood Pact now stacks", "confidence": "high"}
+        "change": "Barrow Deeps at least 2 healers", "edit": {"op": "comp_target", "target": "barrow_deeps", "field": "healer", "value": "2"}, "evidence": "Blood Pact now stacks", "confidence": "high"}
 # an owner-only guild setting (configops.OWNER_OPS): only the owner approves it, and the apply job re-checks the approver
 OWNER_PROP = {**PROP, "title": "Blood Pact stacks with Fortitude", "affects": "profiles/forever/buffs.yaml: blood_pact.family",
               "change": "Blood Pact and Fortitude stack", "edit": {"op": "aura_set", "target": "blood_pact", "field": "family", "value": "own"}}
@@ -303,7 +303,7 @@ def test_the_review_posts_and_officers_decide(reg, rs, monkeypatch, out_dir):
     assert r.status_code == 200, r.text
     p = ProposalStore(reg.store, reg.key).get(pid)
     assert p.state == "applied" and p.decided_by == "Viewer" and p.note
-    assert reg.config.raids["barrow_deeps"]["comp_targets"]["healer"]["min"] == 2
+    assert reg.config.raids["barrow_deeps"]["minimums"]["healer"]["min"] == 2
     assert [s for _, s in bot.cards] == ["proposed", "approved", "applying", "applied"]
 
 

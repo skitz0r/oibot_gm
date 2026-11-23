@@ -361,10 +361,13 @@ def _role_counts(ico, players) -> str:
 
 
 def gaps_text(ico, nd: dict) -> str:
-    """What a run is short, from rc.needs(): seats as a number, role shortfalls as role icon + number (never "2 tank");
-    "" when it is short of nothing — the caller says that in its own sentence."""
+    """What a run is short, from rc.needs(): seats as a number, role shortfalls as role icon + number (never "2 tank"),
+    then a class minimum it is short in words ("1 Paladin" — shown, never asked for); "" when it is short of nothing —
+    the caller says that in its own sentence."""
     bits = [f"{nd['headcount']} seat{'s' if nd['headcount'] != 1 else ''}"] if nd["headcount"] else []
     bits += [f"{ico('role', r)} {n}" for r, n in nd["roles"].items()]
+    if nd.get("classes"):
+        bits.append(rc.class_short_words(nd["classes"]))
     return "   ".join(bits)
 
 
@@ -822,7 +825,7 @@ def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool) -> 
     tally = (f"✅ {sum(1 for c in rows if c['answer'] == 'yes')} · ⏳ {sum(1 for c in rows if c['answer'] is None)} · ❌ {sum(1 for c in rows if c['answer'] in ('no', 'expired'))}"
              if rows else rc.NO_CONFIRMATIONS)
     lines = [f"**{len(ev.seated())}** rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + "   " + _role_counts(ico, ev.seated()), tally]
-    short = bool(nd["headcount"] or nd["roles"])
+    short = bool(nd["headcount"] or nd["roles"] or nd.get("classes"))
     lines.append(f"**Short** {gaps_text(ico, nd)}" if short else "**Full**")
     if officer:
         waiting = [c["display_name"] + (" (site)" if c["channel"] == "web" else "") for c in rows if c["answer"] is None]

@@ -22,7 +22,7 @@ from oibot_gm import configops, help as help_mod
 from oibot_gm import raid_views as views
 from oibot_gm import raidcycle as rc
 from oibot_gm.configops import ConfigOp
-from oibot_gm.registry import RAID_WEIGHT_DEFAULTS, RegistryError
+from oibot_gm.registry import ADHOC_DEFAULTS, RAID_WEIGHT_DEFAULTS, RegistryError
 from oibot_gm.web import app as web
 
 RID = "barrow_deeps"
@@ -311,7 +311,10 @@ def test_web_route_adds_and_removes_regulars_and_members_step_down(reg, rs, monk
     raid = next(r for r in c.get("/api/raids", headers=bearer()).json()["raids"] if r["id"] == RID)
     dflt = next(s for s in raid["schedules"] if s["id"] == "default")
     pug = next(s for s in raid["schedules"] if s["id"] == "pug")
-    assert (dflt["class"], dflt["regulars"], pug["class"], pug["source"]["lock_hours_before"]) == ("recurring", 1, "adhoc", "adhoc")
+    # phase 2: every stored schedule holds its timing written out, so the pickup's lock is its own value — the ad hoc
+    # default's (the site's empty-field hint for a pickup says "ad hoc default" from ADHOC_DEFAULTS either way)
+    assert (dflt["class"], dflt["regulars"], pug["class"], pug["source"]["lock_hours_before"]) == ("recurring", 1, "adhoc", "own")
+    assert pug["effective"]["lock_hours_before"] == ADHOC_DEFAULTS["lock_hours_before"]
     off = c.post("/api/admin/raid/regulars", json={"raid": RID, "member": str(m.discord_id), "on": False}, headers=bearer())
     assert off.status_code == 200 and not reg.regulars(KEY)
     # the owner (the bearer token's viewer) stepping down from their own regular raid on the Me page

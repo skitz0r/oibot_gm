@@ -105,6 +105,7 @@ DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before")
 ROLES = ("tank", "healer", "dps")
+MIN_ROLES = ("tank", "healer")  # the roles with a minimum on this screen (design D16: one number, no upper limit)
 ROLE_WORDS = {"tank": "tanks", "healer": "healers", "dps": "dps"}
 WEIGHTS = tuple(RAID_WEIGHT_DEFAULTS)
 WEIGHT_LABEL = {"rank": "Rank", "main": "Main over alt", "sat_out": "Sat out last time", "signup_order": "Signed up early", "regular": "Regular of the schedule"}
@@ -119,7 +120,7 @@ BOOL_WORDS = {"nudge": "Nudge the unanswered", "autofill": "Fill seats automatic
 SECTIONS = [  # (key, label, fields it edits)
     ("times", "Schedules", ("slots", "schedules")),
     ("cadence", "A run's week", CADENCE),
-    ("comp", "Group make-up", tuple(f"{r}_{b}" for r in ROLES for b in ("min", "max"))),
+    ("comp", "Group make-up", tuple(f"{r}_min" for r in MIN_ROLES)),
     ("weights", "Selection weights", tuple(f"weight_{k}" for k in WEIGHTS)),
     ("length", "Lockout & length", ("lockout_days", "duration_hours")),
     ("first_open", "First lockout opens", ("first_open",)),
@@ -175,7 +176,7 @@ def field_value(eff: dict, field: str, tz: str):
         fo = parse_first_open(eff.get("first_open"), tz)
         return fo.isoformat() if fo else ""
     role, bound = field.split("_")
-    b = (eff.get("comp") or {}).get(role) or {}
+    b = (eff.get("minimums") or {}).get(role) or {}  # one minimum per role (design D16): no upper limit, so "max" reads the run size
     return int(b.get(bound, 0 if bound == "min" else int(eff.get("size") or DEFAULT_RAID_SIZE)))
 
 
@@ -219,7 +220,7 @@ def next_runs(reg: Registry, slots: Sequence[str], first_open: datetime | None, 
 # One screen, two tiers, the same words everywhere: BOUNDS ("at least / at most" the solver seats — the owner's, raid_set,
 # the Group make-up section above) and TARGETS ("we aim for", what readiness measures — officers, comp_target). /gm config
 # raid › Group make-up (owner) opens this block from its comp screen; /roster comp (officers) opens only this block. A Save
-# goes through configops (ops_from_fields "comp" → authorize_ops by privilege → apply_ops = Registry.set_comp_targets, one
+# goes through configops (ops_from_fields "comp" → authorize_ops by privilege → apply_ops = Registry.set_minimums, one
 # write) — never the registry verb directly, so the officer/owner split lives in configops.
 
 TARGET_MAX_PICK = 24  # selects hold 25 options: 0…24 (a target past that is a plain-text one)
@@ -268,7 +269,7 @@ class CompTargetsBlock:
 
     def bounds_line(self) -> str:
         b = self.reg.role_bounds(self.raid, self.t_size())
-        return "-# Limits (the owner's) — the fewest and the most of each role a run takes: " +" · ".join(f"{ROLE_WORDS[r]} {b[r]['min']}–{b[r]['max']}" for r in ROLES if r in b)
+        return "-# Limits (the owner's) — the fewest of each role a run takes: " + " · ".join(f"{ROLE_WORDS[r]} {b[r]['min']}" for r in ROLES if r in b)
 
     async def targets(self, i: discord.Interaction, note: str = "") -> None:
         from .configops import _target_words
@@ -330,7 +331,7 @@ class CompTargetsBlock:
             entry = {"min": int(v.get("min") or 0), "max": None if v.get("max") in (None, "", "none") else int(v["max"]), "note": (v.get("note") or "").strip() or None}
             raid = self.raid
             try:  # the registry's own rules on a throw-away copy (bounds, max ≥ min, the run size, the reason's cap)
-                self.reg.preview(lambda sh: sh.set_comp_targets(raid, {slot: entry}, "preview"))
+                self.reg.preview(lambda sh: sh.set_minimums(raid, {slot: {k: v for k, v in entry.items() if v is not None}}, "preview"))
             except RegistryError as e:
                 async def again(ix: discord.Interaction) -> None:
                     await self.t_form(ix, slot)
@@ -478,7 +479,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             return (f"opens {hours_words(fv('signup_lead_hours'))} · nudge {hours_words(fv('nudge_hours_before'))} · "
                     f"locks {hours_words(fv('lock_hours_before'))} · confirm {hours_words(fv('confirm_hours_before'))} before")
         if key == "comp":
-            return " · ".join(f"{ROLE_WORDS[r]} {fv(f'{r}_min')}–{fv(f'{r}_max')}" for r in ROLES)
+            return " · ".join(f"{ROLE_WORDS[r]} at least {fv(f'{r}_min')}" for r in MIN_ROLES)
         if key == "weights":
             return " · ".join(f"{WEIGHT_LABEL[k].lower()} {fv(f'weight_{k}')}" for k in WEIGHTS)
         if key == "length":
@@ -959,11 +960,11 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
     async def comp(self, i: discord.Interaction) -> None:
         from .configops import _comp_current, _target_words
 
-        opts = [Opt(r, ROLE_WORDS[r].capitalize(), f"{self.cur(f'{r}_min')}–{self.cur(f'{r}_max')} now") for r in ROLES]
+        opts = [Opt(r, ROLE_WORDS[r].capitalize(), f"at least {self.cur(f'{r}_min')} now") for r in MIN_ROLES]
         targets = _comp_current(self.reg, self.raid)
         lines = [f"**Group make-up** for a {self.size()}-player run.",
-                 "**Limits** (yours): the fewest and the most of each role a run takes — "
-                 + " · ".join(f"{ROLE_WORDS[r]} {self.cur(f'{r}_min')}–{self.cur(f'{r}_max')}" for r in ROLES) + ". Saved with this wizard's Save.",
+                 "**Limits** (yours): the fewest of each role a run takes — "
+                 + " · ".join(f"{ROLE_WORDS[r]} {self.cur(f'{r}_min')}" for r in MIN_ROLES) + ". Saved with this wizard's Save.",
                  "**Aims** (officers): what readiness compares the guild with — "
                  + ("; ".join(f"{self.reg.comp_slot_words(k)} {_target_words(t)}" for k, t in sorted(targets.items()))
                     or "no aims set yet, so readiness uses the default aims (the limits and the raid buffs); press Aims… to set one")
@@ -976,19 +977,11 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         role = values[0]
 
         async def picked(it: discord.Interaction, lo: int) -> None:
-            await self.comp_max(it, role, lo)
-        await self.pick_number(i, f"**{ROLE_WORDS[role].capitalize()}** — the fewest a run seats (now {self.cur(f'{role}_min')}).",
-                               f"Fewest {ROLE_WORDS[role]}", 0, self.size(), self.cur(f"{role}_min"), picked, self.comp)
-
-    async def comp_max(self, i: discord.Interaction, role: str, lo: int) -> None:
-        async def picked(it: discord.Interaction, hi: int) -> None:
             snapshot = dict(self.draft)
             self.put(f"{role}_min", lo)
-            self.put(f"{role}_max", hi)
-            await self.checked(it, snapshot, self.comp, f"{ROLE_WORDS[role].capitalize()} → {lo}–{hi}.")
-        cur_hi = max(lo, self.cur(f"{role}_max"))
-        await self.pick_number(i, f"**{ROLE_WORDS[role].capitalize()}**: at least **{lo}**. The most a run seats (now {self.cur(f'{role}_max')})?",
-                               f"Most {ROLE_WORDS[role]}", lo, self.size(), cur_hi, picked, self.comp)
+            await self.checked(it, snapshot, self.comp, f"{ROLE_WORDS[role].capitalize()} → at least {lo}.")
+        await self.pick_number(i, f"**{ROLE_WORDS[role].capitalize()}** — the fewest a run seats (now {self.cur(f'{role}_min')}).",
+                               f"Fewest {ROLE_WORDS[role]}", 0, self.size(), self.cur(f"{role}_min"), picked, self.comp)
 
     async def pick_number(self, i: discord.Interaction, text: str, placeholder: str, lo: int, hi: int, current: int,
                           on_pick: Callable[[discord.Interaction, int], Awaitable[None]], back, page: int | None = None) -> None:

@@ -3,8 +3,8 @@
 - pool_players: every planned/active main as a solver Player
 - optimize: run the group solver on the pool at a roster's size, slot-aware coverage per group
 - raid_buff_status: raid-wide cast buffs (how many providers; blessings filled in priority order)
-- ideal_comp: a deterministic "desired comp" for a raid size from the buff matrix and comp rules,
-  overlaid with officer targets (roster config `comp_targets`), each line carrying its justification
+- ideal_comp: a deterministic "desired comp" for a raid size from the buff matrix and the raid's minimums,
+  overlaid with the guild's own minimums (guild.yaml raids.<id>.minimums), each line carrying its justification
 """
 from __future__ import annotations
 
@@ -231,7 +231,6 @@ class CompLine:
     want: int
     have: int
     why: str
-    max: int | None = None
     source: str = "derived"  # derived | officer
     level: str = "green"
     flex: int = 0  # mains whose offspec could fill this slot instead
@@ -281,20 +280,19 @@ def _flex(players: list[Player], key: str, profile: GameProfile) -> list[str]:
 
 
 def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: dict | None = None, instance: str | None = None, reg=None) -> IdealComp:
-    """Derived targets: role bounds (scaled), one provider per group for party auras that matter to most
-    groups, enough providers for raid buffs (blessings = one per choice). Officer targets override."""
+    """Derived wants: the tank and healer minimums (Registry.minimums, scaled), one provider per group for party auras
+    that matter to most groups, enough providers for raid buffs (blessings = one per choice). The guild's own minimums
+    (`targets`, {slot: {min, note?}}) override."""
     rules = profile.comp_rules
     groups = -(-size // rules["group_size"])
     rd = reg.raid_def(instance) if reg else dict(profile.raids.get(instance or "", {}) or {})
-    from_raid = bool(rd.get("comp"))
-    bounds = reg.role_bounds(instance, size) if reg else solver.scaled_role_bounds(rules, size)
+    mins = reg.minimums(instance, size) if reg else solver.scaled_role_minimums(rules, size)
+    bounds = {r: {"min": int(mins.get(r, 0))} for r in ("tank", "healer")}
     ic = IdealComp(size=size, groups=groups)
-    src = "the raid's limits (owner)" if from_raid else "the game's comp rules"
     note = (rd.get("tank_needs") or {}).get("note")
-    ic.lines.append(CompLine("tank", bounds["tank"]["min"], 0, f"{src}: {bounds['tank']['min']}–{bounds['tank']['max']} for a {size}-player run" + (f" ({note})" if note else ""), max=bounds["tank"]["max"]))
-    ic.lines.append(CompLine("healer", bounds["healer"]["min"], 0, f"{src}: {bounds['healer']['min']}–{bounds['healer']['max']} for a {size}-player run", max=bounds["healer"]["max"]))
-    if from_raid and bounds.get("dps", {}).get("min"):
-        ic.lines.append(CompLine("dps", bounds["dps"]["min"], 0, f"{src}: {bounds['dps']['min']}–{bounds['dps']['max']} damage dealers", max=bounds["dps"]["max"]))
+    for role in ("tank", "healer"):
+        src = "the raid's minimum" if role in (rd.get("minimums") or {}) else "the game's minimum"
+        ic.lines.append(CompLine(role, bounds[role]["min"], 0, f"{src}: {bounds[role]['min']} for a {size}-player run" + (f" ({note})" if note and role == "tank" else "")))
     # class wants from the buff matrix: party auras worth having (max benefit ≥ 3) want one provider per group
     # that has beneficiaries; the pool tells us how many such groups there are (else assume by role share)
     wants: dict[str, tuple[int, str]] = {}
@@ -331,31 +329,28 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
             wants[cls] = (n, why)
     for key, (n, why) in wants.items():
         ic.lines.append(CompLine(key, n, 0, why))
-    # officer overrides
+    # the guild's own minimums
     for key, t in (targets or {}).items():
         line = next((l for l in ic.lines if l.key == key), None)
         want = int(t.get("min", line.want if line else 0))
-        mx = t.get("max")
-        why = t.get("note") or "officer target"
+        why = t.get("note") or "the raid's minimum"
         if line:
-            line.want, line.max, line.why, line.source = want, (int(mx) if mx is not None else line.max), why, "officer"
+            line.want, line.why, line.source = want, why, "officer"
         else:
-            ic.lines.append(CompLine(key, want, 0, why, max=int(mx) if mx is not None else None, source="officer"))
+            ic.lines.append(CompLine(key, want, 0, why, source="officer"))
     # fill have + level
     for l in ic.lines:
         l.have = _count(players, l.key, profile)
         l.flex_who = _flex(players, l.key, profile)
         l.flex = len(l.flex_who)
-        if l.max is not None and l.have > l.max:
-            l.level = "amber"
-        elif l.have >= l.want:
+        if l.have >= l.want:
             l.level = "green"
         elif l.have + l.flex >= l.want or l.have >= max(1, l.want - 1):
             l.level = "amber"  # reachable with offspec switches, or one short
         else:
             l.level = "red"
     swaps = [f"{p.signup_name} {p.spec}→{p.offspec} ({profile.spec(p.cls, p.offspec).role})" for p in players if p.offspec and p.offspec != p.spec and p.cls in profile.classes and p.offspec in profile.classes[p.cls] and profile.spec(p.cls, p.offspec).role != p.role]
-    order = {r: i for i, r in enumerate(ROLES + ("dps",))}
+    order = {r: i for i, r in enumerate(ROLES)}
     ic.lines.sort(key=lambda l: (0 if l.key in order else 1, order.get(l.key, 0), -l.want, l.key))
     ic.notes = ([f"offspec flexibility ({len(swaps)}): " + ", ".join(swaps[:8]) + ("…" if len(swaps) > 8 else "")] if swaps else ["offspec flexibility: nobody has registered an offspec in another role"]) + profile.buff_assumptions()
     return ic
@@ -382,8 +377,8 @@ def readiness(reg: Registry, rid: str, rs=None) -> dict:
      headcount: {mains, size, alts, on_roster, unnamed, level},
      roles: [{role, have, need, level, hint, cover: {offspec: [..], flex: [..], alt: [..]}}],
      buffs: [{id, name, providers: [names]}], missing_buffs: [{id, name}],
-     comp: [{key, want, min, max, have, level, why, note, source, flex, flex_who}],
-     short: [{key, have, want, why}], over: [{key, have, max, why}], notes: [str],
+     comp: [{key, want, min, have, level, why, note, source, flex, flex_who}],
+     short: [{key, have, want, why}], notes: [str],
      plan: {mains, by_role: {role: n}, flex: {role: [names]}, single_provider: [{buff, who}], no_provider: [buff names]},
      series: raidcycle.series_outlook(rid) — each recurring series' regulars against the tank/healer minimums (green / amber /
      red, with who could cover or whom to recruit) and its 4-week forecast}"""
@@ -392,23 +387,22 @@ def readiness(reg: Registry, rid: str, rs=None) -> dict:
     roster = reg.raid_shell(rid)
     h = pool_health_data(reg, roster, placed_on_runs(rs, rid))
     n, size, alts, on_roster = h["headcount"]
-    targets = roster.get("comp_targets") or {}
+    targets = roster.get("minimums") or {}
     ic = ideal_comp(reg.profile, size, pool_players(reg), targets, rid, reg)
-    comp = [{"key": ln.key, "want": ln.want, "min": ln.want, "max": ln.max, "have": ln.have, "level": ln.level, "why": ln.why,
+    comp = [{"key": ln.key, "want": ln.want, "min": ln.want, "have": ln.have, "level": ln.level, "why": ln.why,
              "note": (targets.get(ln.key) or {}).get("note") if ln.source == "officer" else None, "source": ln.source,
              "flex": ln.flex, "flex_who": list(ln.flex_who)} for ln in ic.lines]
     short = [{"key": c["key"], "have": c["have"], "want": c["want"], "why": c["why"]} for c in comp if c["have"] < c["want"]]
-    over = [{"key": c["key"], "have": c["have"], "max": c["max"], "why": c["why"]} for c in comp if c["max"] is not None and c["have"] > c["max"]]
     missing = [{"id": b["id"], "name": b["name"]} for b in h["buffs"] if not b["providers"]]
     roles = [{"role": r["role"], "have": r["have"], "need": r["need"], "level": r["level"], "hint": r["hint"],
               "cover": {k: list(v) for k, v in r["cover"].items()}} for r in h["roles"]]
     plan = reg.plan_summary()
     levels = [h["headcount_level"]] + [r["level"] for r in roles if r["need"]] + (["red"] if any(c["level"] == "red" and c["key"] not in ROLES for c in comp) else [])
-    level = "red" if "red" in levels else ("amber" if "amber" in levels or over else "green")
+    level = "red" if "red" in levels else ("amber" if "amber" in levels else "green")
     return {"raid": rid, "name": roster.get("name") or rid, "size": size, "level": level,
             "headcount": {"mains": n, "size": size, "alts": alts, "on_roster": on_roster, "unnamed": int(h.get("unnamed") or 0), "level": h["headcount_level"]},
             "roles": roles, "buffs": [{"id": b["id"], "name": b["name"], "providers": list(b["providers"])} for b in h["buffs"]], "missing_buffs": missing,
-            "comp": comp, "short": short, "over": over, "notes": list(ic.notes),
+            "comp": comp, "short": short, "notes": list(ic.notes),
             "plan": {"mains": plan["mains"], "by_role": dict(plan["by_role"]), "flex": {r: list(v) for r, v in plan["flex"].items() if v},
                      "single_provider": [{"buff": b, "who": who[0]} for b, who in plan["providers"].items() if len(who) == 1],
                      "no_provider": [b for b, who in plan["providers"].items() if not who]},

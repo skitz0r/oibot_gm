@@ -1066,10 +1066,8 @@ def _readiness(ask: Ask) -> list[str]:
             out.append(f"  nobody who could play brings: {_names((b['name'] for b in d['missing_buffs']), 12)}")
         if d["short"]:
             out.append("  aims short: " + " · ".join(f"{c['key']} {c['have']}/{c['want']} ({c['why'][:90]})" for c in d["short"][:8]))
-        if d["over"]:
-            out.append("  over cap: " + " · ".join(f"{c['key']} {c['have']}/{c['max']} ({c['why'][:90]})" for c in d["over"][:8]))
         if d["comp"]:  # the whole desired comp, met targets too, each with its justification ("what is X's desired comp and why")
-            out.append("  aims: " + " · ".join(f"{c['key']} {c['have']} of {c['want']}" + (f"–{c['max']}" if c["max"] is not None else "+") + f" {c['level']}"
+            out.append("  aims: " + " · ".join(f"{c['key']} {c['have']} of {c['want']}+ {c['level']}"
                                                        + (" (officer)" if c["source"] == "officer" else "") + f" ({(c['note'] or c['why'])[:90]})" for c in d["comp"][:14]))
     if plan:
         out.append("who could play: mains by role " + " · ".join(f"{r} {n}" for r, n in plan["by_role"].items())
@@ -1318,7 +1316,7 @@ def core_lines(ask: Ask) -> list[str]:
     for rid in reg.profile.raids:
         rd = reg.raid_def(rid)
         over = reg.raid_override(rid)
-        comp = " ".join(f"{r} {b.get('min', '?')}-{b.get('max', '?')}" for r, b in (rd.get("comp") or {}).items())
+        comp = " ".join(f"{slot} {n}" for slot, n in reg.minimums(rid).items())  # one minimum per role or class (D16)
         fo = reg.first_open(rid)
         try:
             ws, we = reg.lockout_window(rid, now)
@@ -1329,8 +1327,8 @@ def core_lines(ask: Ask) -> list[str]:
         lines.append(f"raid {rid} ({rd.get('name', rid)}): size {rd.get('size')}, slots {', '.join(reg.slot_label(x) for x in rd.get('slots') or []) or 'none (nothing opens)'}, sheet opens {rd['signup_lead_hours']}h before, "
                      f"nudge {'at ' + str(rd['nudge_hours_before']) + 'h before' if rd.get('nudge', True) else 'off'}, locks {rd['lock_hours_before']}h before, confirmations expire {rd['confirm_hours_before']}h before, "
                      f"fill asks time out after {rd['fill_ask_hours']}h, autofill {rd.get('autofill', True)}, open_dm {rd.get('open_dm', False)}, split {rd.get('split_policy')}, weights {rd.get('weights')}, lockout {rd['lockout_days']}d{window}, duration {rd.get('duration_hours')}h, comp {comp}"
-                     + (f", first open {reg.local12(fo)}" if fo else "") + (f", aims {over['comp_targets']}" if over.get("comp_targets") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
-                     + (f", changed from the game's default: {', '.join(k for k in over if k not in ('comp_targets', 'comp_groups'))}" if any(k not in ("comp_targets", "comp_groups") for k in over) else "")
+                     + (f", first open {reg.local12(fo)}" if fo else "") + (f", aims {over['minimums']}" if over.get("minimums") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
+                     + (f", changed from the game's default: {', '.join(k for k in over if k not in ('minimums', 'comp_groups'))}" if any(k not in ("minimums", "comp_groups") for k in over) else "")
                      + (f", notes “{_safe(notes)[:120]}{'…' if len(notes) > 120 else ''}”" if notes else ""))
         for s in reg.schedules(rid):  # when it runs: each schedule in words, its own cadence overrides, its next runs
             own = reg.schedule_def(rid, s["id"])["schedule"]["own"]

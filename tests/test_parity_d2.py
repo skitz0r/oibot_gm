@@ -112,12 +112,11 @@ def test_discord_cards_say_the_run_in_the_shared_words(reg, rs):
     assert "{d:+d}" not in src and "Bench instead" not in src and "Unregistered ×" not in src
 
 
-def test_readiness_gives_the_desired_comp_and_the_over_cap_reason(reg, rs):
-    reg.config.raids["barrow_deeps"] = {"comp_targets": {"healer": {"min": 1, "max": 2, "note": "cap because Trueshot"}}}
-    s = state(reg, rs, OWNER, True, "what is the desired comp and are we over cap?")
-    over = next(l for l in s.splitlines() if l.startswith("  over cap: ") and "healer" in l)
-    assert "cap because Trueshot" in over
-    assert any(l.startswith("  aims: ") and "healer" in l and "(officer)" in l for l in s.splitlines())
+def test_readiness_gives_the_desired_comp_and_the_minimums_reason(reg, rs):
+    reg.config.raids["barrow_deeps"] = {"minimums": {"Hunter": {"min": 1, "note": "Trueshot for the melee"}}}
+    s = state(reg, rs, OWNER, True, "what is the desired comp and are we short?")
+    assert any(l.startswith("  aims: ") and "Hunter" in l and "(officer)" in l and "Trueshot for the melee" in l for l in s.splitlines())
+    assert not any(l.startswith("  over cap: ") for l in s.splitlines())  # a minimum has no upper limit (D16)
 
 
 def test_unconfirmed_list_survives_a_long_member_list(reg, rs):

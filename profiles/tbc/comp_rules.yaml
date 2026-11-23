@@ -3,11 +3,11 @@ raid_size: 25
 group_size: 5
 groups: 5
 
-# Hard role bounds for the selected raid. Instance-specific needs live in
-# raids.yaml and are surfaced as advisories, not hard constraints.
+# The game's role minimums (no upper limit) at raid_size, scaled to a run's size. A raid's own live in
+# raids.yaml (minimums); the solver fills them first and never stops on one.
 roles:
-  tank:   {min: 2, max: 4}
-  healer: {min: 5, max: 8}
+  tank:   {min: 2}
+  healer: {min: 5}
 
 selection:
   # Objective terms (points). Buff synergy from buffs.yaml is added on top.

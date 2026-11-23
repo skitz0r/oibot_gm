@@ -357,9 +357,9 @@ def test_a_members_loot_question_shows_their_own_awards_only(reg, rs):
 def test_readiness_is_json_with_the_documented_shape(reg):
     d = comp.readiness(reg, "barrow_deeps")
     json.dumps(d)
-    assert set(d) >= {"raid", "name", "size", "level", "headcount", "roles", "buffs", "missing_buffs", "comp", "short", "over", "notes", "plan"}
+    assert set(d) >= {"raid", "name", "size", "level", "headcount", "roles", "buffs", "missing_buffs", "comp", "short", "notes", "plan"} and "over" not in d
     assert d["headcount"]["mains"] == len([m for m in reg.members.values() if m.main]) and d["level"] in ("green", "amber", "red")
-    assert all(set(c) >= {"key", "want", "min", "max", "have", "level", "why", "note", "source"} for c in d["comp"])
+    assert all(set(c) >= {"key", "want", "min", "have", "level", "why", "note", "source"} and "max" not in c for c in d["comp"])  # no upper limit (D16)
     assert {r["role"] for r in d["roles"]} == {"tank", "healer", "melee", "ranged"}
     with pytest.raises(KeyError):
         comp.readiness(reg, "nowhere")

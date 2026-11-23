@@ -229,7 +229,7 @@ def test_pressing_join_again_keeps_the_first_come_place(reg, rs):
     rc.set_signup(reg, rs, ev, first_dps, None, "in")  # pressed Join again a moment later
     players = rc.players_for(reg, ev)
     assert [p.signup_name for p in players][:5] == [m.display_name for m in ms_[:5]], "still fifth in line"
-    late = rc.first_come_out(players, 10, {"tank": 2, "healer": 2}, {}, set())
+    late = rc.first_come_out(players, 10, {"tank": 2, "healer": 2}, set())
     assert first_dps.display_name not in late and late == {m.display_name for m in ms_[10:]}, "the last joiners sit out, not the re-presser"
 
 

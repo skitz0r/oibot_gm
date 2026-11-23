@@ -13,7 +13,7 @@ def test_raid_def_defaults_from_profile(reg):
     assert rd["fill_ask_hours"] == 4
     assert rd["weights"] == RAID_WEIGHT_DEFAULTS
     assert rd["nudge_hours_before"] == default_nudge_hours(48, 24) == 36
-    assert rd["comp"]["tank"] == {"min": 2, "max": 2}
+    assert rd["minimums"] == {"tank": {"min": 2}, "healer": {"min": 2}} and "comp" not in rd
 
 
 def test_raid_def_unknown_instance_is_all_defaults(reg):
@@ -22,9 +22,9 @@ def test_raid_def_unknown_instance_is_all_defaults(reg):
 
 
 def test_role_bounds_scale_with_size(reg):
-    assert reg.role_bounds("barrow_deeps", 10) == {"tank": {"min": 2, "max": 2}, "healer": {"min": 2, "max": 3}, "dps": {"min": 5, "max": 6}}
+    assert reg.role_bounds("barrow_deeps", 10) == {"tank": {"min": 2}, "healer": {"min": 2}, "dps": {"min": 0}}
     b20 = reg.role_bounds("barrow_deeps", 20)
-    assert b20["tank"] == {"min": 4, "max": 4} and b20["healer"]["min"] == 4
+    assert b20["tank"] == {"min": 4} and b20["healer"]["min"] == 4
 
 
 def _sched(reg, sid="tue"):
@@ -59,9 +59,9 @@ def test_refused_raid_override_is_not_kept(reg):
     with pytest.raises(RegistryError, match="belongs to each schedule"):
         reg.set_raid_override("barrow_deeps", "nudge_hours_before", "30", "t")
     assert "barrow_deeps" not in reg.config.raids
-    with pytest.raises(RegistryError):
-        reg.set_raid_override("barrow_deeps", "tank_min", "3", "t")
-    assert reg.raid_def("barrow_deeps")["comp"]["tank"] == {"min": 2, "max": 2}
+    with pytest.raises(RegistryError, match="no upper limit"):
+        reg.set_raid_override("barrow_deeps", "tank_max", "3", "t")
+    assert "barrow_deeps" not in reg.config.raids and reg.minimums("barrow_deeps")["tank"] == 2
 
 
 def test_set_raid_override_bools_weights_policy(reg):
@@ -87,15 +87,17 @@ def test_set_raid_override_bools_weights_policy(reg):
 
 
 def test_set_raid_override_comp_and_reset(reg):
-    reg.set_raid_override("barrow_deeps", "healer_max", "4", "t")
-    assert reg.raid_def("barrow_deeps")["comp"]["healer"] == {"min": 2, "max": 4}
-    with pytest.raises(RegistryError, match="above max"):
-        reg.set_raid_override("barrow_deeps", "tank_min", "3", "t")
+    reg.set_raid_override("barrow_deeps", "healer_min", "3", "t")
+    assert reg.config.raids["barrow_deeps"]["minimums"] == {"healer": {"min": 3}}
+    with pytest.raises(RegistryError, match="no upper limit"):
+        reg.set_raid_override("barrow_deeps", "healer_max", "4", "t")
+    with pytest.raises(RegistryError, match="more than the 10"):
+        reg.set_raid_override("barrow_deeps", "tank_min", "11", "t")
     reg.set_raid_override("barrow_deeps", "slots", "tue 19:30, Thursday 20:00", "t")
     assert reg.raid_def("barrow_deeps")["slots"] == ["Tue 19:30", "Thu 20:00"]
     assert reg.clear_raid_override("barrow_deeps", "t")
     assert "barrow_deeps" not in reg.config.raids
-    assert reg.raid_def("barrow_deeps")["comp"]["healer"] == {"min": 2, "max": 3} and reg.raid_def("barrow_deeps")["slots"] == []
+    assert reg.minimums("barrow_deeps")["healer"] == 2 and reg.raid_def("barrow_deeps")["slots"] == []
 
 
 def test_parse_slots():

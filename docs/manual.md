@@ -27,14 +27,15 @@ Before any button that changes something, the bot says what happens in at most t
 is told and how, what can still be undone — so it reads aloud the first time (*"Kestrel goes to No thanks for Barrow
 Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it on their Me page."*).
 
-- **Limits** (owner) — the fewest and most of each role (tank, healer, dps) a run takes; the lock builds rosters
-  within them (one nobody could fill to its minimum says *Locked short*). The owner sets them on the Raids page
-  (**Edit rules**, *tank min / max*, *healer min*, *dps min*…), with `/gm config raid` (*Group make-up*) or in plain text.
-  Until the owner sets a make-up, they come from the game's rules scaled to the run's size, with any number of dps.
-- **Aims** (officers) — the make-up the guild wants for a raid, per role, class or spec, each with its reason; the
-  Readiness page compares the guild with them. Any officer sets them in the aims row under **Group make-up** on the Raids or
-  Readiness page (*Set aims* / *Edit aims*, **Save aims**), with `/roster comp` (*Aims* in Discord) or in plain text ("we want 3–4 healers"). A role aim (tank, healer, melee,
-  ranged) outside the owner's limits is refused; class and spec aims aren't checked against the limits.
+- **Minimum** — the fewest of a role (tank, healer, melee, ranged), a class or a spec a run of a raid takes: one number,
+  with an optional reason, and no upper limit (*"at least 3 healers"*). The lock fills every minimum first and never
+  stops on one: a run that joiners can't fill to a minimum still gets its roster, and the run shows what it is short. A
+  tank or healer past the minimum gets a seat only when nobody else can take it. Until the guild sets its own, a raid's
+  tank and healer minimums come from the game, scaled to the run's size; a smaller run (a 10-player run of a 20-player
+  raid) scales every minimum the same way. A class or spec short is shown on the run (*short 1 Paladin*) and nobody is
+  asked to fill it; only a short tank or healer gets fill asks. Set minimums under **Group make-up** on the Raids or
+  Readiness page, with `/roster comp` or in plain text ("at least 3 healers in Barrow Deeps"). They belong to the raid,
+  never to one run.
 - **A run's week** — when a run's sheet **opens** (a few days before the run; it differs per raid), when those who
   haven't answered get a **reminder** (by default halfway between the opening and the lock), when it **locks** (a day
   before; the roster is decided then) and when the rostered must **confirm by** (6 hours before). The owner sets them per
@@ -81,7 +82,7 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   (§8c *Listening*).
 - **Memory** (owner) — a listening channel where the bot keeps what members say that is worth asking about later, as their words with the day, and repeats it when asked: "Mara said on 25 Sep that …". *Remembers* means anywhere it answers; *Remembers here only* means only in that channel. Anyone can make it **Forget** their own words (§8c *Memory*).
 - **Who could play** — every member's main: the headcount the Readiness page and the analytics cards measure against
-  the raid's size, limits and aims. Alts and offspecs don't add to the headcount; they show as who could cover a role.
+  the raid's size and minimums. Alts and offspecs don't add to the headcount; they show as who could cover a role.
 - **Your record** — your characters (name, spec, offspec, extra roles, which is your main, their professions) and your
   absences. You keep it on the Me page or with `/me char` and `/me absent`; professions are set from the character's
   **Professions…** on the Me page; a character linked to the armory keeps them up to date by itself. Officers can edit it for you, and they set your rank.
@@ -192,8 +193,8 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   has an **updates thread** underneath where every ask, answer, freed seat, confirmation and expiry is logged. The
   **loot council's thread** lives here too (else in the ops channel), §9.
 - **Analytics channel (officers)** — one card per raid: how many could play (mains) against its size, role counts
-  have/need, buffs nobody brings, and where the aims are short or over cap. The cards are edited in place
-  (no re-posting), with a change-log line when the registry changes. Officers change the aims here in plain
+  have/need, buffs nobody brings, and where the minimums are short. The cards are edited in place
+  (no re-posting), with a change-log line when the registry changes. Officers change the minimums here in plain
   text by @mentioning the bot. The character bank is the **Members** page; building groups is the **Rosters** board.
 - **Ops channel (officers)** — every action the bot takes, one line each. The same lines go to a rotating log file on
   the host (`out/oibot.log`). **Errors** also DM the owner — once per kind of error per 30 minutes: the same error again
@@ -753,8 +754,8 @@ tools list the library and withdraw or restore a version; they never upload or g
 
 ## 4. Raids, runs and the signup cycle
 
-A **raid** is an instance and its rules: size, lockout, expected duration, its **limits** (the fewest and most
-tanks / healers / dps a run takes), and — what drives everything — its **slots**. **A run's week** (when a sheet
+A **raid** is an instance and its rules: size, lockout, expected duration, its **minimums** (the fewest tanks,
+healers, or of a class a run takes — §1a), and — what drives everything — its **slots**. **A run's week** (when a sheet
 opens, locks and must be confirmed by) belongs to each schedule, below. At launch: **Barrow Deeps**
 (10-player, 3-day lockout guess), **Hyjal Summit** (20-player, weekly), **Onyxia's Lair** (40-player,
 5-day like Classic). Each raid has a **first opens at** (seeded 9 Dec 2026, 3:00 PM PST for all three); no
@@ -766,7 +767,7 @@ A **slot** is a recurring run time in the guild's timezone (US Pacific), e.g. Tu
 several. One **run** = one slot occurrence = one sheet. A run is **open**, then **locked**, then **done**
 (or **cancelled**). Members never keep standing availability; they answer each sheet.
 
-**Schedules** say *when* a raid runs; the raid itself keeps what it is (size, limits, lockout, weights, split
+**Schedules** say *when* a raid runs; the raid itself keeps what it is (size, minimums, lockout, weights, split
 policy). A raid's own run times are its first schedule (*Raid nights*); it can have more, each with a name. Each
 schedule holds its own **sheet timing** in full: when its sheet opens, nudges, locks and asks to confirm, how long
 fill asks wait, autofill and the DM on open. A new schedule starts from the game's suggestion for its raid (a pickup
@@ -789,8 +790,8 @@ places, *Roster 1* and *Roster 2*), and the count reads *18 / 10 × 2 joined*. T
 as more people joined than one roster holds, even when the tanks or healers who joined only cover one: the missing
 seats stay open and are filled like any short seat. Everyone who joined for the short role gets a place before one of
 its seats is left empty. Someone pinned out or kept on the bench never counts as cover, so a short role doesn't
-stop the lock: the rosters are built and the empty seats wait to be filled. The one exception is when the same few
-players who can switch between tanking and healing are needed as both at once: then the lock finds no rosters.
+stop the lock: the rosters are built and the empty seats wait to be filled. That holds when the same few players who
+can switch between tanking and healing are needed as both at once too: they take one role each and the rest waits.
 With one roster's worth of joiners or fewer it builds a second
 roster only when the tanks and healers allow two. A
 schedule can be **paused** (nothing opens from it). Runs from a schedule other than the raid's own run times carry
@@ -806,7 +807,8 @@ its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same 
   **2 h** before, fill asks wait **1 h**, and seats go **first come, first rostered** (the joiners in the order they
   first pressed Join take the seats — pressing Join again, switching character or saying yes to an officer's ask keeps
   your place; Bench or No thanks and then Join again puts you at the back — except that a seat still needed for a tank or healer minimum is kept for the first later joiner who plays
-  that role). An officer's *Bench* pin (or a comp-policy *always bench*) takes that joiner out of the line, so the
+  that role, and a tank or healer who joins once that role's minimum is met waits until everyone else who joined has
+  a seat, then takes what is left in the order they joined). An officer's *Bench* pin (or a comp-policy *always bench*) takes that joiner out of the line, so the
   next joiner gets the seat; a comp-policy *never bench* name keeps a seat even if they joined late. Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. A one-off's
   key ends in `-adhoc` (`bd-1212-2100-adhoc`). The Raids page shows each schedule's class, and for a pickup template
   the editor hides the fields that mean nothing there (signup lead, reminder, DM on open); every value it inherits says
@@ -906,7 +908,7 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
   answered and aren't away — they are expected anyway, so the suggestions go beyond them — plus anyone already asked and
   not yet answered. After lock: who is rostered.
 - **Cheapest first**, each with a reason written by the bot (e.g. "short 1 healer · Ana can also play Holy · DPS
-  stays 6 of 5 minimum"): someone on **Bench** who plays the role or a joiner's **declared flex role** (*/me plan
+  stays 6"): someone on **Bench** who plays the role or a joiner's **declared flex role** (*/me plan
   roles*) · a joiner's **offspec** or a **regular who hasn't answered** · an **alt** of the role (never one already
   rostered on this raid in the same lockout) · a **member who isn't a regular**. When every seat is already taken,
   switches by people coming go first — a new healer would only push a DPS to the bench at lock. A switch that would
@@ -1154,7 +1156,7 @@ time in words, lines only officers would read marked *officers*. **History**
 lists the newest eight past runs per raid and *Show older runs* pages the rest; a row opens the run read-only in a
 side panel (a `#run-<key>` link opens it too).
 
-Seat selection at lock is deterministic: the raid's limits per role, buff synergy, the comp policy's
+Seat selection at lock is deterministic: the raid's minimums (filled first, never a stop), buff synergy, the comp policy's
 standing instructions, officer pins, and the schedule's **weights** (the raid's unless the schedule sets its own) —
 rank (core > raider > trial), main over alt, sat out last window (matched by member, so a Discord rename keeps it),
 earlier signup, and being one of the schedule's **regulars** on their regular character. An ad hoc run is first come
@@ -1284,24 +1286,24 @@ edits that new family and leaves the one it shared alone.
 ## 6. Analytics (officers)
 
 - **One card per raid** in the analytics channel, native (no images): mains vs the raid size, a role icon with
-  have/need for each role (⚠ = short), ⛔ followed by the buffs nobody who could play brings, **Short** and **Over cap**
-  lines from the aims (class or spec icon with have/want), and links to the Members and Raids pages.
-- **Aims** per raid: until the officers set their own, the default aims come from the game's rules (the raid buffs and
-  the comp rules). Two tiers, the same words everywhere: **limits** — the fewest and the most of each role a run takes —
-  are the owner's (*Group make-up* in `/gm config raid`, *tank min / max* on the Raids page, `tank_min` in plain text);
-  **aims** — what readiness compares the guild with — are the officers': per role (tank, healer, melee, ranged), class
-  or spec, *at least*, an optional *at most* and *why* (the selects also offer a value already stored past their range,
-  such as a max equal to the run size). Set them in the aims row under **Group make-up** on the **Readiness** or Raids page (*Set aims* / *Edit aims*:
-  slot icon · at least · at most · why, one **Save aims**), with `/roster comp` (pick the raid, *Set an aim for…*
-  a role, a class or *A particular spec…*, then at least / at most / why in one form; *Remove an aim*; **Save
-  aims**), in plain text ("reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin aim")
-  or MCP `set_comp_target`. One write per raid whichever way; a role aim outside the limits is refused with *"at least 4
-  healers but the raid allows at most 3 — change the limits first (owner)"*. An aim without a reason shows *no reason
-  given*; the reason you give is kept with the aim and shown by the Readiness page, `/ask` (readiness) and MCP
-  `raid_readiness`, next to the line it explains. The group layout (`comp_groups`) stays plain text only.
+  have/need for each role (⚠ = short), ⛔ followed by the buffs nobody who could play brings, a **Short** line from the
+  minimums (class or spec icon with have/want), and links to the Members and Raids pages.
+- **Minimums** per raid (§1a): one number per role (tank, healer, melee, ranged), class or spec, with an optional
+  reason, and no upper limit. Until the guild sets its own, the tank and healer minimums come from the game and the
+  class wants from the raid buffs (one provider per group for a party aura, one paladin per blessing). Set them under
+  **Group make-up** on the **Readiness** or Raids page, with `/roster comp` (pick the raid, a role, a class or *A
+  particular spec…*, then the number and why), in plain text ("at least 3 healers in Barrow Deeps", "clear the paladin
+  minimum") or MCP `set_comp_target`. One write per raid whichever way. A maximum is refused (*"A minimum has no upper
+  limit. Give only the minimum."*), so is one run's own (*"Minimums belong to the raid. Set them on the raid, not on
+  one run."*) and a minimum past the raid's size. The reason is kept with the minimum and shown by the Readiness page,
+  `/ask` (readiness) and MCP `raid_readiness`, next to the line it explains. The group layout (`comp_groups`) stays
+  plain text only. A guild that kept limits and aims before has them as minimums from its next start: each tank and
+  healer limit's lower number, each class, spec, melee or ranged aim's lower number with its reason; the upper numbers,
+  the damage dealers' limit, an officers' tank or healer aim and one run's own aims are dropped, and the ops channel
+  gets one line naming each.
 - The same readiness as data: MCP `raid_readiness` (one raid or all) and `GET /api/readiness` — headcount, each role's
-  have/need with who could cover it, buffs nobody brings, every aim with its reason, what is short or
-  over cap, and who could play by role (officers only; a member's request gets 403). The analytics card reads the same numbers,
+  have/need with who could cover it, buffs nobody brings, every minimum with its reason, what is short, and who could
+  play by role (officers only; a member's request gets 403). The analytics card reads the same numbers,
   so the card, `/ask`, the API and MCP never disagree.
 - Every member's characters live on the Members page and **groups** are built on the Rosters board (Place the rest /
   Propose); the old bank, optimised-groups and comp images are gone.
@@ -1314,7 +1316,7 @@ edits that new family and leaves the one it shared alone.
 ## 7. Officers: day-to-day commands
 
 - Registry: `/roster list|confirm|rank|set-main|char|professions|armory|add|remove|members|absences|absent|back|comp` (`comp` = the
-  aims, §6). They take at most a member
+  raid's minimums, §6). They take at most a member
   (Discord's own picker) and a fixed choice; the character, rank or schedule is picked from a list and confirmed before anything saves.
   `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete, and the
   armory's Link to the armory… · Unlink… · Keep professions by hand · Follow the armory again · Sync now, which also show what looks off: *the

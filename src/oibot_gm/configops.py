@@ -509,7 +509,7 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
 # accepts these too but lists them apart, so the gap is written down rather than silent
 PARITY_PENDING: dict[str, dict[str, str]] = {
     # (phase 3 closed the comp-target rows: /roster comp, the Readiness page / Raids page's Desired comp through
-    # POST /api/ops/change `comp` changes, MCP set_comp_target — Registry.set_comp_targets underneath. comp_groups stays
+    # POST /api/ops/change `comp` changes, MCP set_comp_target — Registry.set_minimums underneath. comp_groups stays
     # plain text only on every surface — D48 — so its row names the plain-text paths.)
 }
 # features that live on ONE surface by design (§2.1) and are not ops at all — written down so the parity test can refuse a
@@ -927,10 +927,8 @@ def _overrides_words(reg: Registry, rid: str, over: dict) -> str:
                 out.append(f"{OVERRIDE_WORDS.get(k, k.replace('_', ' '))} {_value_words(k, v)}")
             elif k == "schedules":
                 out.append(("schedules " + ", ".join(f"{s.get('name') or s.get('id')} ({reg.schedule_label(rid, s)})" for s in v)) if v else "no schedules of its own")
-            elif k == "comp_targets":
-                out.append("aims " + ", ".join(f"{slot} {t.get('min', '?')}" + (f"–{t['max']}" if t.get("max") is not None else "") for slot, t in (v or {}).items()))
-            elif k == "comp":
-                out.append("limits " + ", ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in (v or {}).items()))
+            elif k == "minimums":
+                out.append("minimums " + ", ".join(f"{slot} {t.get('min', '?') if isinstance(t, dict) else t}" for slot, t in (v or {}).items()))
             elif k == "weights":
                 out.append("weights " + ", ".join(f"{w} {n}" for w, n in (v or {}).items()))
             elif k == "comp_groups":
@@ -1013,7 +1011,7 @@ def _merge_key(op: ConfigOp):
     if op.op == "loot_weights":
         return ("loot_weights",)  # every weight of a Save: one write
     if op.op in ("comp_target", "comp_target_clear") and op.target:
-        return ("comp", op.target.strip())  # one raid's (or run's) targets: one Registry.set_comp_targets write
+        return ("comp", op.target.strip())  # one raid's minimums: one Registry.set_minimums write
     if op.op == "recruit" and (op.field or "").strip().lower() in RECRUIT_MERGE:
         return ("recruit",)
     return None
@@ -1054,7 +1052,7 @@ def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) 
         return reg.set_plain_policy(reg.merge_plain_policy(_plain_merged(reg, op.parts)), by, rev=rev)
     if op.op in ("comp_target", "comp_target_clear"):
         targets = {reg.comp_slot(p.field or p.path or ""): _comp_entry(reg, p) for p in op.parts}
-        return "; ".join(reg.set_comp_targets(op.target or "", targets, by, rev=rev)) or "the aims already read that — nothing changed"
+        return "; ".join(reg.set_minimums(op.target or "", targets, by, rev=rev)) or "the aims already read that — nothing changed"
     if op.op == "recruit":
         kw: dict = {}
         for p in op.parts:
@@ -1304,23 +1302,24 @@ def _range(value: str | None) -> tuple[int | None, int | None]:
 
 
 def _comp_current(reg: Registry, key: str) -> dict:
-    """The comp targets stored for a run (its key) or a raid (its id): {slot: {min, max?, note?}}."""
-    holder = reg.config.roster(key) or reg.config.raids.get(key) or {}
-    return dict(holder.get("comp_targets") or {})
+    """The guild's own minimums stored for a raid (its id): {slot: {min, note?}} ({} for anything else)."""
+    from .registry import min_entry
+
+    return {slot: min_entry(e) for slot, e in ((reg.config.raids.get(key) or {}).get("minimums") or {}).items()}
 
 
 def _comp_entry(reg: Registry, op: ConfigOp) -> dict | None:
-    """A comp_target op as the whole entry Registry.set_comp_targets takes (None = clear): a structured op carries it as
-    JSON ({min, max, note} — ops_from_fields); a plain-text op carries 'min', 'min-max' or '-max' and a reason, and the
-    parts it leaves out keep the stored target's."""
+    """A comp_target op as the whole entry Registry.set_minimums takes (None = clear): a structured op carries it as
+    JSON ({min, note} — ops_from_fields); a plain-text op carries 'min' and a reason, and the parts it leaves out keep
+    the stored minimum's. A maximum given ('min-max', '-max', a `max`) rides along so set_minimums refuses it."""
     if op.op == "comp_target_clear":
         return None
     v = _typed(op.value)
     if isinstance(v, dict):
-        return {"min": v.get("min") or 0, "max": v.get("max"), "note": v.get("note")}
+        return {"min": v.get("min") or 0, **({"max": v["max"]} if v.get("max") not in (None, "") else {}), "note": v.get("note")}
     cur = _comp_current(reg, _key(reg, op)).get((op.field or op.path or "").strip()) or {}
     lo, hi = _range(op.value)
-    return {"min": lo if lo is not None else cur.get("min", 0), "max": hi if hi is not None else cur.get("max"),
+    return {"min": lo if lo is not None else cur.get("min", 0), **({"max": hi} if hi is not None else {}),
             "note": (op.reason or op.text or cur.get("note") or "").strip() or None}
 
 
@@ -2254,7 +2253,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
         if f.startswith("weight_"):
             cur = (rd.get("weights") or {}).get(f[7:])
         elif f.split("_")[0] in ("tank", "healer", "dps") and "_" in f:
-            cur = ((rd.get("comp") or {}).get(f.split("_")[0], {}) or {}).get(f.split("_")[-1])
+            cur = ((rd.get("minimums") or {}).get(f.split("_")[0], {}) or {}).get(f.split("_")[-1])
         else:
             cur = rd.get(f)
         return f"raid {op.target} {f}: {cur if cur is not None else '—'} → {op.value}" + (_runs_preview(reg, op.target or "", fields={f: op.value}) if f in PREVIEW_RAID_FIELDS else "")
@@ -2679,10 +2678,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             t.pop("comp_groups", None)
         reg.save_config(f"{key} group layout → {labels or 'default'} (by {by})")
         return f"{key}: groups = {', '.join(labels) if labels else 'default layout'}"
-    if op.op in ("comp_target", "comp_target_clear"):  # THE verb: Registry.set_comp_targets (one write; bounds stay the owner's)
+    if op.op in ("comp_target", "comp_target_clear"):  # THE verb: Registry.set_minimums (one write)
         key = _key(reg, op)
         slot = reg.comp_slot(op.field or op.path or "")
-        lines = reg.set_comp_targets(key, {slot: _comp_entry(reg, op)}, by, rev=rev)
+        lines = reg.set_minimums(key, {slot: _comp_entry(reg, op)}, by, rev=rev)
         return "; ".join(lines) or f"{reg.comp_slot_words(slot)}: already {_target_words(_comp_current(reg, key).get(slot))} — nothing changed"
     if op.op in ("policy_append", "policy"):
         from . import policy as policy_mod
@@ -3819,7 +3818,7 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
         if bad:
             raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default, listen, set_listen, remember, set_remember)")
         return ops
-    if k == "comp":  # officers' comp targets: target = a raid id (or a run key); fields = {slot: {min, max, note} | null}
+    if k == "comp":  # a raid's minimums: target = a raid id; fields = {slot: {min, note} | null} (Registry.set_minimums)
         key = (target or "").strip()
         cur = _comp_current(reg, key)
         for slot, t in fields.items():
@@ -3925,7 +3924,7 @@ def _raid_ops(reg: Registry, inst: str, d: dict) -> list[ConfigOp]:
     for role in ("tank", "healer", "dps"):
         for bound in ("min", "max"):
             val = ((d.get("comp") or {}).get(role) or {}).get(bound)
-            if val not in (None, "") and str(val) != str(((cur.get("comp") or {}).get(role) or {}).get(bound, "")):
+            if val not in (None, "") and str(val) != str(((cur.get("minimums") or {}).get(role) or {}).get(bound, "")):
                 want[f"{role}_{bound}"] = str(val)
     unknown = [f for f in d if f not in ("slots", "weights", "comp", "first_open", "instance") + RAID_HOURS_FIELDS + RAID_FORM_FIELDS + RAID_BOOL_FIELDS]
     if unknown:

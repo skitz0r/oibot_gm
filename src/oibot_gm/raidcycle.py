@@ -15,7 +15,7 @@ from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
 from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, FOLLOW_SCHEDULE, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
-                       RegisteredCharacter, RegistryError, can_cover, now, schedule_class, series_key)
+                       RegisteredCharacter, RegistryError, can_cover, now, schedule_class, series_key, slot_words)
 from .roster import explain, solver
 from .store import GitStore
 
@@ -1388,7 +1388,9 @@ def gaps(reg: Registry, ev: RaidEvent) -> dict:
     read it: seats and the tank/healer minimums times the rosters in play. Before lock that is the rosters the run
     expects up front (its schedule's `rosters`) and the players are the Join answers (their signed role); after lock
     it is the locked rosters and the seated players (their seat's role — the solver may have switched an offspec).
-    {size, rosters, seats, have{role}, need{role}, roles{tank|healer: short}, headcount (free seats), locked}"""
+    `classes` = what the class, spec, melee and ranged minimums × the rosters are short: shown on the run, never asked
+    for (the fill engine reads `roles` only).
+    {size, rosters, seats, have{role}, need{role}, roles{tank|healer: short}, classes{slot: short}, headcount (free seats), locked}"""
     size = run_size(reg, ev)
     locked = ev.state != "open" and bool(ev.all_rosters)
     n = len(ev.all_rosters) if locked else run_rosters(reg, ev)
@@ -1397,15 +1399,35 @@ def gaps(reg: Registry, ev: RaidEvent) -> dict:
     have = {r: sum(1 for p in players if p.role == r) for r in ROLES}
     need = {r: int(bounds[r]["min"]) * n if r in ("tank", "healer") else 0 for r in ROLES}
     short = {r: need[r] - have[r] for r in ("tank", "healer") if need[r] > have[r]}
-    return {"size": size, "rosters": n, "seats": size * n, "have": have, "need": need, "roles": short,
+    classes = {}
+    for slot, k in reg.minimums(ev.instance, size).items():
+        if slot in ("tank", "healer"):
+            continue
+        got = sum(1 for p in players if slot_holds(slot, p))
+        if k * n > got:
+            classes[slot] = k * n - got
+    return {"size": size, "rosters": n, "seats": size * n, "have": have, "need": need, "roles": short, "classes": classes,
             "headcount": max(0, size * n - len(players)), "locked": locked}
+
+
+def slot_holds(slot: str, p) -> bool:
+    """Does a player (a seat or a signup: role, cls, spec) count toward a minimum's slot — a role, a class or Class:Spec?"""
+    if slot in ROLES:
+        return p.role == slot
+    cls, _, spec = slot.partition(":")
+    return p.cls == cls and (not spec or p.spec == spec)
+
+
+def class_short_words(classes: dict[str, int]) -> str:
+    """'1 Paladin, 2 Holy Priests' — a run's class shorts (gaps()['classes']) in words, '' when none."""
+    return ", ".join(slot_words(slot, n) for slot, n in classes.items())
 
 
 def needs(reg: Registry, ev: RaidEvent, team: dict | None = None) -> dict:
     """What the sheet is short (rc.gaps): headcount and per-role minimums. Before lock: Join signups vs the raid size
     times the rosters the run expects. After lock: freed seats across the locked roster(s)."""
     g = gaps(reg, ev)
-    return {"headcount": g["headcount"], "roles": g["roles"], "size": g["size"]}
+    return {"headcount": g["headcount"], "roles": g["roles"], "size": g["size"], "classes": g["classes"]}
 
 
 def _rank_key(reg: Registry, m: Member) -> tuple:
@@ -2504,13 +2526,17 @@ def another_run_hint(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult]
     return f"Leftovers, Bench and everyone else who could play ({len(any_role)}) are enough for another run{how}."
 
 
-def first_come_out(players: list[Player], seats: int, role_min: dict[str, int], role_max: dict[str, int], fixed: set[str]) -> set[str]:
+EXTRA_ROLES = ("tank", "healer")  # a role past its minimum waits for everyone else (no role has an upper limit — D16)
+
+
+def first_come_out(players: list[Player], seats: int, role_min: dict[str, int], fixed: set[str]) -> set[str]:
     """Ad hoc seating is first come, first rostered (D4): the joiners in signup order take the seats, except that a seat
-    still needed for a tank/healer minimum is kept for the first later joiner who plays that role (and a role at its
-    maximum takes no more). `fixed` (pinned in / placed on the board) are seated first. Returns the joiners who come
-    too late — the lock benches them (hard), the solver only arranges the groups of the rest."""
+    still needed for a tank/healer minimum is kept for the first later joiner who plays that role, and a tank or healer
+    joiner whose role already meets its minimum waits until every other joiner has a seat, then takes what is left in
+    signup order. `fixed` (pinned in / placed on the board) are seated first. Returns the joiners who come too late —
+    the lock benches them (hard), the solver only arranges the groups of the rest."""
     signed = sorted((p for p in players if p.status == "signed"), key=lambda p: p.pos)
-    have = {r: 0 for r in set(role_min) | set(role_max)}
+    have = {r: 0 for r in set(role_min) | set(EXTRA_ROLES)}
     taken: list[str] = []
     for p in signed:
         if p.signup_name in fixed:
@@ -2518,16 +2544,17 @@ def first_come_out(players: list[Player], seats: int, role_min: dict[str, int], 
             if p.role in have:
                 have[p.role] += 1
     out: set[str] = set()
+    waiting: list[Player] = []
     rest = [p for p in signed if p.signup_name not in fixed]
     for i, p in enumerate(rest):
         free = seats - len(taken)
         if free <= 0:
             out.add(p.signup_name)
             continue
-        if p.role in role_max and have.get(p.role, 0) >= role_max[p.role]:
-            out.add(p.signup_name)
-            continue
         fills = p.role in role_min and have.get(p.role, 0) < role_min[p.role]
+        if p.role in EXTRA_ROLES and not fills:
+            waiting.append(p)  # past its role's minimum: seated only with a seat nobody else takes
+            continue
         later = rest[i + 1:]
         reserved = sum(min(max(0, n - have.get(r, 0)), sum(1 for q in later if q.role == r)) for r, n in role_min.items())
         if not fills and free <= reserved:
@@ -2536,13 +2563,19 @@ def first_come_out(players: list[Player], seats: int, role_min: dict[str, int], 
         taken.append(p.signup_name)
         if p.role in have:
             have[p.role] += 1
+    for p in waiting:
+        if len(taken) < seats:
+            taken.append(p.signup_name)
+        else:
+            out.add(p.signup_name)
     return out
 
 
 def merged_role_min(rb: dict, policy: dict[str, int] | None) -> dict[str, int]:
-    """The lock's role minimums: the raid's tank/healer minimums (role_bounds) with the comp policy's role_min laid
-    over them PER ROLE — a policy line about healers never drops the tank minimum."""
-    return {**{r: int(rb[r]["min"]) for r in ("tank", "healer") if rb.get(r, {}).get("min")}, **{r: int(n) for r, n in (policy or {}).items()}}
+    """The lock's role minimums: the raid's tank/healer minimums (role_bounds — a 0 the raid set is kept, so the game's
+    own doesn't come back in the solver) with the comp policy's role_min laid over them PER ROLE — a policy line about
+    healers never drops the tank minimum."""
+    return {**{r: int(rb[r]["min"]) for r in ("tank", "healer") if r in rb}, **{r: int(n) for r, n in (policy or {}).items()}}
 
 
 def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None) -> tuple[list[Player], list[RosterResult], int]:
@@ -2581,6 +2614,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         roster_bonus = {0: {p.signup_name: 3 * w for p in players if player_uid(ev, p) in missed_first}}
     pool = {p.signup_name for p in players}
     role_min = merged_role_min(rb, cc["role_min"])
+    minimums = {**reg.minimums(raid_id, size), **role_min}  # every class, spec, melee or ranged minimum too (D16)
     late: set[str] = set()
     benched = {x for x in pin_out + [resolve(n) for n in cc["always_bench"]] if x and x in pool and x not in placed}
     kept = {x for x in pin_in + list(placed) + [resolve(n) for n in cc["never_bench"]] if x and x in pool and x not in pin_out}
@@ -2588,8 +2622,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         # a joiner benched by a pin / always_bench takes no first-come seat, and a never_bench joiner keeps one —
         # otherwise the same name lands in force_in and force_out, or a seat goes unfilled (INFEASIBLE)
         late = first_come_out([p for p in players if p.signup_name not in benched], size * n_rosters,
-                              {r: n * n_rosters for r, n in role_min.items()},
-                              {r: int(rb[r]["max"]) * n_rosters for r in ("tank", "healer") if rb[r].get("max")}, kept)
+                              {r: n * n_rosters for r, n in role_min.items() if r in EXTRA_ROLES}, kept)
     opts = solver.SolveOptions(
         time_limit_s=time_limit, raid_size=size,
         keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),
@@ -2598,7 +2631,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] + sorted(late - kept) if x and x in pool and x not in placed),
         pins={n: gi for n, gi in placed.items() if gi < k * n_rosters} or None,
         prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
-        minimums=role_min or None,
+        minimums=minimums or None,
         lead_rostered=lead_rostered,
         bonus=bonus,
     )
@@ -3290,20 +3323,22 @@ def short_why(reg: Registry, ev: RaidEvent) -> str | None:
     who haven't answered. None when there is nothing to add (or the run is over)."""
     if ev.state in ("done", "cancelled"):
         return None
+    cls_short = class_short_words(gaps(reg, ev)["classes"])
+    head = [f"short {cls_short}"] if cls_short else []  # a class minimum is shown here, never asked for
     if ev.state != "open" and ev.all_rosters:
         asks = [a for a in ev.fill_asks if a.pending]
         asked = {a.discord_id for a in asks}
         seated = {player_uid(ev, p) for p in ev.seated()}
         bench = [s for s in ev.signups.values() if s.status in ("in", "sub") and s.discord_id not in seated and s.discord_id not in asked]
-        parts = ([f"{len(asks)} ask{'' if len(asks) == 1 else 's'} out"] if asks else []) + ([f"{len(bench)} on the bench could fill it"] if bench else [])
+        parts = head + ([f"{len(asks)} ask{'' if len(asks) == 1 else 's'} out"] if asks else []) + ([f"{len(bench)} on the bench could fill it"] if bench else [])
         return ", ".join(parts) or None
     waiting = not_answered(reg, ev)
     if not waiting:
-        return None
+        return ", ".join(head) or None
     names = [c.label for _m, c in waiting[:5]] + ([f"+{len(waiting) - 5} more"] if len(waiting) > 5 else [])
     k = len(waiting)
     noun = (f"{k} regular{'' if k == 1 else 's'}" if expected_from(reg, ev) == "regulars" else str(k))
-    return f"{noun} {'hasn' if k == 1 else 'haven'}'t answered: {', '.join(names)}"
+    return ", ".join(head + [f"{noun} {'hasn' if k == 1 else 'haven'}'t answered: {', '.join(names)}"])
 
 
 def answer_word(ev: RaidEvent, status: str | None, roster: int | None) -> str:

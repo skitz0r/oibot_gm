@@ -387,11 +387,11 @@ def test_a_stored_entry_that_is_not_a_mapping_is_kept_skipped_and_named(data_roo
 
 
 def test_a_write_refused_after_the_lift_puts_the_old_keys_back(reg):
-    """The lift runs (old keys → rows), both fields parse, and the whole-raid check refuses the pair: the override and
-    the guild-level list are exactly as they were, old keys included."""
+    """The lift runs (old keys → rows), the first field is written and the second refused (a role has no upper limit,
+    design D16): the override and the guild-level list are exactly as they were, old keys included."""
     _old_keys(reg)
     before = (copy.deepcopy(reg.config.raids), copy.deepcopy(reg.config.schedules))
-    with pytest.raises(RegistryError, match="min 5 above max 1"):
+    with pytest.raises(RegistryError, match="no upper limit"):
         reg.set_raid_overrides(RID, {"tank_min": 5, "tank_max": 1}, "t")
     assert (reg.config.raids, reg.config.schedules) == before
 
@@ -571,3 +571,22 @@ def test_the_script_refuses_a_guild_with_an_unreadable_entry(data_root):
     said = _lower_script().lower(data_root)
     assert len(said) == 1 and "late" in said[0] and "nothing" in said[0].lower()
     assert (data_root / GUILD / "guild.yaml").read_text() == text and commit_count(store) == n0
+
+
+def test_the_script_lowers_minimums_only_when_asked(data_root):
+    entry = {"id": "default", "lineup": [{"raid": "barrow_deeps", "rosters": 1}], "slots": ["Tue 19:30"]}
+    _write_old(data_root, {"raids": {"barrow_deeps": {"notes": "x", "minimums": {"healer": {"min": 3}, "Paladin": {"min": 1, "note": "blessings"}}}},
+                           "schedules": [entry]})
+    store = GitStore(data_root, push=False)
+    n0 = commit_count(store)
+    script = _lower_script()
+    said = script.lower(data_root, minimums_only=True)
+    assert len(said) == 1 and "minimums" in said[0] and commit_count(store) == n0 + 1
+    doc = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())
+    assert doc["schedules"] == [entry]  # the phase-1 code reads them where they are
+    assert doc["raids"]["barrow_deeps"] == {"notes": "x", "comp": {"tank": {"min": 2}, "healer": {"min": 3}},
+                                            "comp_targets": {"Paladin": {"min": 1, "note": "blessings"}}}
+    assert script.lower(data_root, minimums_only=True) == [f"{GUILD}: no minimums, nothing to lower"] and commit_count(store) == n0 + 1
+    script.lower(data_root)  # all the way back: the schedules too
+    doc = yaml.safe_load((data_root / GUILD / "guild.yaml").read_text())
+    assert "schedules" not in doc and doc["raids"]["barrow_deeps"]["slots"] == ["Tue 19:30"] and commit_count(store) == n0 + 2

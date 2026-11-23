@@ -52,7 +52,7 @@ def test_adhoc_takes_the_raids_identity_but_not_its_recurring_timing(reg):
     assert pug["class"] == "adhoc" and dflt["class"] == "recurring"
     for k, v in ADHOC_DEFAULTS.items():
         assert pug[k] == v, k
-    assert (pug["size"], pug["comp"], pug["lockout_days"], pug["duration_hours"]) == (rd["size"], rd["comp"], rd["lockout_days"], rd["duration_hours"])
+    assert (pug["size"], pug["minimums"], pug["lockout_days"], pug["duration_hours"]) == (rd["size"], rd["minimums"], rd["lockout_days"], rd["duration_hours"])
     assert pug["weights"] == {**RAID_WEIGHT_DEFAULTS, **ADHOC_WEIGHTS}
     assert (dflt["lock_hours_before"], dflt["confirm"], dflt["nudge"]) == (24, True, True)
     # where each value comes from, for the editors
@@ -221,9 +221,9 @@ def test_first_come_out_keeps_seats_for_the_minimums():
         return Player(signup_name=name, pos=pos, status="signed", cls="Warrior", spec="Fury", role=role, character=name, map_confidence="high", unmapped=False)
 
     players = [p(f"d{i}", "melee", i) for i in range(1, 9)] + [p("t1", "tank", 9), p("h1", "healer", 10), p("d9", "melee", 11)]
-    late = rc.first_come_out(players, 5, {"tank": 1, "healer": 1}, {"tank": 2}, set())
+    late = rc.first_come_out(players, 5, {"tank": 1, "healer": 1}, set())
     assert late == {"d4", "d5", "d6", "d7", "d8", "d9"}, "three first joiners, then the seats held for the tank and healer"
-    assert rc.first_come_out(players, 20, {"tank": 1}, {}, set()) == set()
+    assert rc.first_come_out(players, 20, {"tank": 1}, set()) == set()
 
 
 @pytest.mark.slow

@@ -183,22 +183,20 @@ def test_run_times_add_and_remove_round_trip_through_parse_slots(reg, owner):
     assert slots == ["Sat 21:15"] and parse_slots(slots) == slots
 
 
-def test_group_make_up_pages_past_25_and_never_offers_min_above_max(reg, owner):
+def test_group_make_up_pages_past_25_and_sets_one_minimum(reg, owner):
     h = Harness(reg)
 
     async def go():
         await open_raid(h, reg, "onyxias_lair")  # 40-player: 0..40 is two pages
         await h.pick("Pick a section", "comp")
-        await h.pick("Pick a role", "dps")
-        assert "page 2 of 2" in h.text and "26" in options(h, "Fewest dps")  # opens on the page holding the current min
-        await h.pick("Fewest dps", "27")
-        assert options(h, "Most dps")[0] == "27"  # the max starts at the chosen min
-        await h.pick("Most dps", "30")
+        assert options(h, "Pick a role") == ["tank", "healer"]  # one minimum per role, no upper limit
+        await h.pick("Pick a role", "healer")
+        assert "page 1 of 2" in h.text and "8" in options(h, "Fewest healers")  # opens on the page holding the current minimum
+        await h.pick("Fewest healers", "10")
         await h.press("Save")
         await h.press("Save")
     asyncio.run(go())
-    comp = reg.raid_def("onyxias_lair")["comp"]["dps"]
-    assert (comp["min"], comp["max"]) == (27, 30)
+    assert reg.raid_def("onyxias_lair")["minimums"]["healer"] == {"min": 10} and reg.minimums("onyxias_lair")["healer"] == 10
 
 
 def _next_dst_change(after: date) -> date:

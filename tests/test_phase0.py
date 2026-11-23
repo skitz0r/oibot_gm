@@ -41,8 +41,8 @@ def test_a_change_only_valid_as_a_whole_is_accepted(reg):
     lead = reg.schedule_def("barrow_deeps", "tue")["signup_lead_hours"]
     reg.set_schedule("barrow_deeps", "tue", {"nudge_hours_before": lead + 40, "signup_lead_hours": lead + 60}, "t")
     assert reg.schedule_def("barrow_deeps", "tue")["nudge_hours_before"] == lead + 40
-    reg.set_raid_overrides("barrow_deeps", {"tank_max": 5, "tank_min": 4}, "t")  # min above the OLD max, fine with the new one
-    assert reg.raid_def("barrow_deeps")["comp"]["tank"] == {"min": 4, "max": 5} or reg.raid_def("barrow_deeps")["comp"]["tank"]["min"] == 4
+    reg.set_raid_overrides("barrow_deeps", {"tank_min": 4, "healer_min": 3}, "t")  # one minimum per role, no upper limit (D16)
+    assert reg.minimums("barrow_deeps") == {"tank": 4, "healer": 3}
 
 
 def test_single_field_path_still_checks_the_whole(reg):
