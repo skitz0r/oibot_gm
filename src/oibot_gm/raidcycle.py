@@ -381,6 +381,8 @@ def event_parts(rs: "RaidStore", ev: "RaidEvent") -> list["RaidEvent"]:
     """Every part of `ev`'s run, any state, in order (part 0 first). A part has exactly one `event`, so it belongs to
     exactly one run; and every later part's dict is made by its first part's open (ensure_run), so one first part
     holds one chain. A raid taken out of the lineup (`dropped`, apply_lineup) is no longer a part."""
+    if ev.dropped:  # taken out of its run: it answers as itself (cancelled), never as the live run
+        return [ev]
     eid = event_id(ev)
     parts = {e.key: e for e in rs.events.values() if event_id(e) == eid and not e.dropped}
     parts.setdefault(ev.key, ev)
@@ -388,8 +390,10 @@ def event_parts(rs: "RaidStore", ev: "RaidEvent") -> list["RaidEvent"]:
 
 
 def first_part(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent":
-    """The first raid of `ev`'s run (the one with the sheet, the answers and the timing); `ev` itself when it is."""
-    if not is_follow(ev):
+    """The first raid of `ev`'s run (the one with the sheet, the answers and the timing); `ev` itself when it is, and
+    when `ev` was taken out of its run's lineup (`dropped`: a cancel, a move or an edit called on it answers as that
+    cancelled raid, never as the live run)."""
+    if not is_follow(ev) or ev.dropped:
         return ev
     first = rs.events.get(ev.follows) if ev.follows else None
     if first is None:
@@ -1389,15 +1393,21 @@ class LineupChange(BaseModel):
     """What an edit of a run's lineup does (plan_lineup; apply_lineup writes it): the new raids' entries ({raid, rosters,
     starts}), the later parts taken out (their run keys), the new order of the run keys (index 0 the first part; None
     = a new part, in `added`'s order), the parts whose roster count changes (run key → count), what each removed part
-    held — the people with a board place or a pin on it, and its answers to leave before it —, and the whole new
-    lineup with every entry's start in minutes after the first raid's (entry 0 at 0)."""
+    held — its board places, its pins, its answers to leave before it and its open fill asks —, the KEPT later parts
+    whose start changes (run key → its new start in minutes after the first raid's), who gets a `moved` notice for that
+    (everyone with a row on the first raid but an away row; [] when no kept start changes), and the whole new lineup
+    with every entry's start in minutes after the first raid's (entry 0 at 0)."""
 
     added: list[dict] = Field(default_factory=list)
     removed: list[str] = Field(default_factory=list)
     order: list[Optional[str]] = Field(default_factory=list)
     rosters: dict[str, int] = Field(default_factory=dict)
     dropped_places: dict[str, int] = Field(default_factory=dict)
+    dropped_pins: dict[str, int] = Field(default_factory=dict)
     dropped_leaving: dict[str, int] = Field(default_factory=dict)
+    dropped_asks: dict[str, int] = Field(default_factory=dict)
+    moved: dict[str, int] = Field(default_factory=dict)
+    told: list[int] = Field(default_factory=list)
     lineup: list[dict] = Field(default_factory=list)
 
 
@@ -1463,13 +1473,9 @@ def lineup_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list
     return None
 
 
-def _board_people(p: "RaidEvent") -> int:
-    """How many people hold a board place or a pin on run `p` (a board place is a signup's display name in a group)."""
-    names = {n for g in (p.layout or []) for n in g}
-    for uid in p.pins:
-        sg = p.signups.get(str(uid))
-        names.add(sg.display_name if sg else f"#{uid}")
-    return len(names)
+def _board_places(p: "RaidEvent") -> int:
+    """How many board places run `p`'s board holds (a place is a signup's display name in a group)."""
+    return len({n for g in (p.layout or []) for n in g})
 
 
 def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[dict]) -> LineupChange:
@@ -1496,11 +1502,18 @@ def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[di
         ch.order.append(p.key)
         if e["rosters"] != int((reg.config.team(p.team) or {}).get("rosters") or 1):
             ch.rosters[p.key] = e["rosters"]
+        was = p.starts or round((p.start - first.start).total_seconds() / 60)
+        if int(e["starts"]) != was:  # a kept raid starts at another time: everyone who answered is told (reschedule's notice)
+            ch.moved[p.key] = int(e["starts"])
     for p in live:
         if p.instance not in raids:
             ch.removed.append(p.key)
-            ch.dropped_places[p.key] = _board_people(p)
+            ch.dropped_places[p.key] = _board_places(p)
+            ch.dropped_pins[p.key] = len(p.pins)
             ch.dropped_leaving[p.key] = len([u for u in p.leaving if str(u) in first.signups])
+            ch.dropped_asks[p.key] = len([a for a in p.fill_asks if a.pending])
+    if ch.moved:
+        ch.told = [sg.discord_id for sg in first.signups.values() if sg.source != "absence"]
     return ch
 
 
@@ -1510,8 +1523,10 @@ def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: Lineup
     takes its new `part`, `starts`, `starts_at` and `followed_by`; its run dict its new `part`, `starts`, weekday line,
     cut-offs (part 0's shifted by its start), rosters and `followed_by`. A new raid is a new part: a dict from part 0's
     (_part_dict, a fresh new_run_key) and its run file (open_event; part 0's save copies the answers onto it). A
-    removed part's run file is cancelled (`closed_at`, `dropped`, its open asks closed, the log line "removed from the
-    lineup by {by}") and its dict dropped — no notice, no card. Part 0's dict takes the whole `lineup` and its rosters;
+    removed part's run file is cancelled (`closed_at`, `dropped`, the log line "removed from the lineup by {by}") —
+    saved BEFORE its dict is dropped, so a crash between leaves no open part without a dict — no notice, no card. Its
+    open fill asks are the caller's to close, under that part's plan_lock (every writer of ev.fill_asks holds it):
+    RaidMixin.edit_lineup does, and edits their cards. Part 0's dict takes the whole `lineup` and its rosters;
     part 0's signups are never touched, and every remaining later part still mirrors them (sync_parts, on part 0's
     save, last). One save_config and one store batch. → the run keys of the run in their new order."""
     first = first_part(rs, ev)
@@ -1523,6 +1538,12 @@ def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: Lineup
     words = reg.later_words(change.lineup[1:])
     line = f"lineup changed by {by}: {reg.raid_def(first.instance).get('name', first.instance)}" + (f", then {words}" if words else " alone")
     with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
+        for key in change.removed:  # first: a removed raid is a closed, dropped file before its dict goes
+            p = later[key]
+            p.prev_state, p.state, p.closed_at = p.state, "cancelled", now()
+            p.dropped, p.followed_by = True, None
+            p.log.append(f"removed from the lineup by {by}")
+            rs.save(p, f"removed from the lineup by {by}")
         chain: list[tuple[dict, "RaidEvent | None"]] = []
         taken = {t["key"] for t in reg.config.rosters if isinstance(t, dict)}
         for k, (key, e) in enumerate(zip(change.order[1:], change.lineup[1:]), start=1):
@@ -1562,15 +1583,6 @@ def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: Lineup
         gone = {later[k].team for k in change.removed if k in later}
         reg.config.rosters = [t for t in reg.config.rosters if not (isinstance(t, dict) and t.get("key") in gone)]
         reg.save_config(f"run {first.key} {line}", notify=False)
-        for key in change.removed:
-            p = later[key]
-            p.prev_state, p.state, p.closed_at = p.state, "cancelled", now()
-            p.dropped, p.followed_by = True, None
-            for a in p.fill_asks:
-                if a.pending:
-                    a.answer, a.answered_at, a.held = "cancelled", now(), False
-            p.log.append(f"removed from the lineup by {by}")
-            rs.save(p, f"removed from the lineup by {by}")
         evs: list[RaidEvent] = []
         for t, p in chain:
             at = after_minutes(start, int(t["starts"]))

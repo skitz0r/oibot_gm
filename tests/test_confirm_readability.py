@@ -869,6 +869,28 @@ def lineup_cases(reg, rs, runs, ms, dump):
     add("remove, only answers to leave before it", held, L(hy, ony))
     rc.leave_follow(reg, rs, on, ms[10])
     add("remove two, answers to leave before each", held, L(hy))
+    # fix round 1: a kept raid's new time and who is told, open asks, a raid not open yet, the first raid alone
+    add("reorder, both kept raids start at another time", three, L(hy, ony, (RID, 2)))
+    add("remove the second, the third starts earlier", three, L(hy, ony))
+    add("the first raid alone, two rosters", solo, L((hy, 2)))
+    bd.fill_asks.append(rc.FillAsk(discord_id=ms[11].discord_id, display_name=ms[11].display_name, kind="other", role="healer",
+                                   character="X", spec="Holy", reason="short 1 healer", phase="prelock"))
+    bd.layout = [[m.display_name for m in ms[:4]]]
+    rs.save(bd, "an ask and a board")
+    add("remove, places, plans to leave early and an open ask, the third earlier", held, L(hy, ony))
+    late = (reg.now_local() + timedelta(days=15)).replace(hour=22, minute=30, second=0, microsecond=0)
+    night = rc.open_run(reg, rs, hy, late, by="t", schedule=rc.ADHOC_SCHEDULE, lineup=L(RID, ony))
+    join(reg, rs, night, ms)
+    nb = rc.event_parts(rs, night)[1]
+    nb.layout = [[m.display_name for m in ms[:3]]]
+    rs.save(nb, "board")
+    add("past midnight, both kept raids move", night, L(hy, ony, RID))
+    add("past midnight, the second taken out with its board", night, L(hy, ony))
+    was = reg.raid_def(ony).get("first_open")
+    reg.set_raid_overrides(ony, {"first_open": (start + timedelta(days=60)).isoformat()}, "t")
+    add("add a raid before it first opens", solo, L(hy, ony))
+    add("add two, the second before it first opens", solo, L(hy, RID, ony))
+    reg.set_raid_overrides(ony, {"first_open": was}, "t")
     # the refusals, one each
     for case, ev, lineup in (("another first raid", three, L(RID, hy)), ("no such raid", three, L(hy, "nowhere")),
                              ("five raids", three, L(hy, RID, ony, "nowhere", "elsewhere")), ("a raid twice", three, L(hy, RID, RID)),

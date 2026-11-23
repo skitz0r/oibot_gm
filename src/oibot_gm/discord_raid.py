@@ -1568,10 +1568,12 @@ class RaidMixin:
         None = code acting on the guild's own behalf). Refused → RegistryError with rc.lineup_refusal's sentence,
         nothing written. `preview` → the confirm's sentences (consequences.lineup_consequence). Else, under the board
         lock of every raid of the run: rc.plan_lineup + rc.apply_lineup (run keys never change; a removed raid's run is
-        cancelled, its dict dropped); then the sheet is edited in place (same message), a removed raid's officer cards
-        and any open ask card on it are edited to their final state, one line in the run's thread, one audit line.
-        Nobody is DMed and nobody gets a notice: the sheet shows the new lineup. → the done line."""
-        from .consequences import lineup_consequence
+        cancelled and dropped, its dict dropped). Then each removed raid's open fill asks close as `cancelled` under its
+        plan_lock (every writer of ev.fill_asks holds it — a fan-out in flight sees the cancelled run before its next DM,
+        as with cancel_run) and their cards are edited to say so; its officer cards go to their final state. When a kept
+        raid's start changes, everyone who answered gets reschedule's `moved` notice (Me page, /me view). The sheet is
+        edited in place (same message), one line in the run's thread, one audit line. Nobody is DMed. → the done line."""
+        from .consequences import _clock_on, at_on, lineup_consequence
 
         if by_id is not None and (await guild_routing.resolve_role(self, reg, int(by_id), max_age=guild_routing.PRIV_LIVE)).role not in ("owner", "officer"):
             raise RegistryError(rc.LINEUP_OFFICER_ONLY)
@@ -1590,18 +1592,32 @@ class RaidMixin:
                 raise RegistryError(why)
             change = rc.plan_lineup(reg, rs, first, lineup)
             removed = [rs.events[k] for k in change.removed]
-            cards = {p.key: [(a.dm_channel_id, a.dm_message_id) for a in p.fill_asks if a.pending and a.dm_message_id] for p in removed}
             rc.apply_lineup(reg, rs, first, change, by)
         name = reg.raid_def(first.instance).get("name", first.instance)
         for p in removed:
             raid = reg.raid_def(p.instance).get("name", p.instance)
-            for cid, mid in cards[p.key]:
-                await self.edit_ask_card(reg, cid, mid, f"{raid} was taken out of the {name} run, so this ask is closed.")
+            async with self.plan_lock(reg, p.key):  # taken AFTER the state flip: an ask a fan-out added meanwhile closes too
+                fills = [a for a in p.fill_asks if a.pending]
+                for a in fills:
+                    a.answer, a.answered_at, a.held = "cancelled", rc.now(), False
+                if fills:
+                    rs.save(p, f"removed from the lineup: {len(fills)} ask(s) closed")
+            for a in fills:
+                await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id, f"{raid} was taken out of the {name} run, so this ask is closed.")
             await self.refresh_cards(reg, p)
+        moved = []
+        for key, at in change.moved.items():
+            p = rs.events[key]
+            moved.append((reg.raid_def(p.instance).get("name", p.instance), rc.after_minutes(first.start, at)))
+        for uid in change.told:  # an outcome, never a DM (the DM rule): reschedule's notice, one member save each
+            reg.notify(uid, "moved", " ".join(f"{raid} now starts {reg.local12(t)}." for raid, t in moved), run=first.key)
         await self.refresh_sheet(reg, first)
-        words = reg.later_words(change.lineup[1:])
-        now_words = f"{name}, then {words}" if words else f"{name} alone"
-        await self.post_run_update(reg, first, f"🗂 lineup changed by {by}: {now_words}")
+        at = {raid: _clock_on(reg, first.start, t) for raid, t in moved}
+        later = [reg.follow_words(e) + (f" {at_on(at[n])}" if (n := reg.raid_def(e["raid"]).get("name", e["raid"])) in at else "")
+                 for e in change.lineup[1:]]
+        now_words = f"{name}, then " + ", then ".join(later) if later else f"{name} alone"
+        await self.post_run_update(reg, first, f"🗂 lineup changed by {by}: {now_words}"
+                                   + (f" · {len(change.told)} who answered see a notice" if change.told else ""))
         await ops_mod.audited(self.ops, reg, by, f"changed {first.key}'s lineup to {now_words}"
                               + (f", removing {', '.join(change.removed)}" if change.removed else ""), via=via, by_id=by_id)
         return [f"The run is now {now_words}."]

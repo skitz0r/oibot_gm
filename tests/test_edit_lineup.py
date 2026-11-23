@@ -65,7 +65,8 @@ def test_add_reorder_and_remove_keep_part_keys(bot, reg, rs):
     first = open_run(reg, rs, [{"raid": BD, "rosters": 2}, {"raid": "extra_a", "rosters": 1}])
     join(reg, rs, first, reg.test_members()[:5])
     bd, xa = rc.event_parts(rs, first)[1:]
-    assert edit(bot, reg, rs, first, L(H, "extra_a", BD, "extra_b")) == ["The run is now Hyjal Summit, then Extra A, then Barrow Deeps, then Extra B."]
+    assert edit(bot, reg, rs, first, L(H, "extra_a", BD, "extra_b")) == [
+        "The run is now Hyjal Summit, then Extra A at 9:30 PM, then Barrow Deeps at 11:30 PM, then Extra B."], "the kept raids' new times"
     parts = rc.event_parts(rs, first)
     assert [p.key for p in parts[:3]] == [first.key, xa.key, bd.key], "the kept parts keep their keys, in their new places"
     assert (xa.part, bd.part, parts[3].part, parts[3].instance) == (1, 2, 3, "extra_b")
@@ -107,18 +108,16 @@ def test_removing_a_raid_drops_only_its_board_places(bot, reg, rs):
     rs.save(bd, "board")
     rc.leave_follow(reg, rs, bd, ms[5])
     before = ({k: s.model_dump() for k, s in first.signups.items()}, first.layout, dict(first.pins))
-    notices = {m.discord_id: len(m.notices) for m in reg.members.values()}
     said = run(bot.edit_lineup(reg, rs, first, L(H, "extra_a"), by="Jon", by_id=OWNER, preview=True))
-    assert said == ["The lineup becomes Hyjal Summit, then Extra A.",
-                    "3 board places on Barrow Deeps are dropped, with 1 answer to leave before it.",
-                    "Everyone's answer now covers the new lineup."]
+    assert said == ["The lineup becomes Hyjal Summit, then Extra A at 9:30 PM.",
+                    "Everyone's answer covers the new lineup, and the 6 who answered see a notice.",
+                    "Barrow Deeps is taken out with its 2 board places, 1 pin and 1 plan to leave early."]
     edit(bot, reg, rs, first, L(H, "extra_a"))
     assert ({k: s.model_dump() for k, s in first.signups.items()}, first.layout, dict(first.pins)) == before
     assert rs.events[bd.key].state == "cancelled" and rs.events[bd.key].pins, "its pins stay in its cancelled file, for the record"
     xa = rc.event_parts(rs, first)[1]
     assert xa.signups[str(ms[5].discord_id)].status == "in", "leaving before Barrow Deeps was about Barrow Deeps alone"
-    assert {m.discord_id: len(m.notices) for m in reg.members.values()} == notices, "nobody gets a notice"
-    assert bot.dms == {} and bot.updates[-1] == "🗂 lineup changed by Jon: Hyjal Summit, then Extra A"
+    assert bot.dms == {} and bot.updates[-1] == "🗂 lineup changed by Jon: Hyjal Summit, then Extra A at 9:30 PM · 6 who answered see a notice"
     audits = [t for _lvl, t in bot.ops.lines if "lineup" in t]
     assert len(audits) == 1 and bd.key in audits[0]
     assert_one_chain(reg, rs, first)
@@ -182,7 +181,7 @@ def test_a_schedules_run_changes_alone(bot, reg, rs):
     first = rc.open_run(reg, rs, H, t, by="scheduler", schedule=sid)
     said = cq.lineup_consequence(reg, rs, first, L(H, (BD, 2)))
     assert said == ["The lineup becomes Hyjal Summit, then Barrow Deeps ×2.",
-                    "Everyone's answer now covers the new lineup, and the schedule keeps its own."]
+                    "Everyone's answer now covers the new lineup, and the schedule keeps its own lineup."]
     edit(bot, reg, rs, first, L(H, (BD, 2)))
     assert reg.schedule_entry(sid) == entry, "the schedule is never touched"
     assert rc.event_of_occurrence(rs, sid, first.occurrence) is first
@@ -231,3 +230,106 @@ def test_the_old_one_off_pair_drops_its_second_raid_and_takes_another(data_root,
     assert_one_chain(reg, rs, lead)
     again = rc.RaidStore(store, rs.key)  # a restart reads the same chain back
     assert [p.key for p in rc.event_parts(again, again.events[lk])] == [lk, ony.key]
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def test_a_kept_raid_that_starts_at_another_time_tells_everyone_who_answered(bot, reg, rs):
+    """Taking out raid 2 pulls raid 3 earlier by raid 2's length: its new time is in the confirm, and everyone who
+    answered gets reschedule's `moved` notice (an away row is not an answer). Nobody is DMed."""
+    from test_reschedule import moved_notices, real_people
+
+    first = open_run(reg, rs, [{"raid": BD, "rosters": 1}, {"raid": "extra_a", "rosters": 1}])
+    ms = real_people(reg, 4)
+    join(reg, rs, first, ms[:3])
+    xa = rc.event_parts(rs, first)[2]
+    said = cq.lineup_consequence(reg, rs, first, L(H, "extra_a"))
+    assert said == ["The lineup becomes Hyjal Summit, then Extra A at 9:30 PM.",
+                    "Everyone's answer covers the new lineup, and the 3 who answered see a notice."]
+    edit(bot, reg, rs, first, L(H, "extra_a"))
+    assert xa.start == first.start + timedelta(hours=3) and xa.part == 1
+    for m in ms[:3]:
+        assert [n["text"] for n in moved_notices(reg, m.discord_id)] == [f"Extra A now starts {reg.local12(xa.start)}."]
+    assert moved_notices(reg, ms[3].discord_id) == [] and bot.dms == {}
+    # a raid added at the end moves nobody's kept raid: no notice, no time
+    assert cq.lineup_consequence(reg, rs, first, L(H, "extra_a", "extra_b")) == [
+        "The lineup becomes Hyjal Summit, then Extra A, then Extra B.", "Everyone's answer now covers the new lineup."]
+
+
+def test_an_ask_on_a_removed_raid_closes_under_its_plan_lock_and_its_card_says_so(bot, reg, rs, monkeypatch):
+    first = open_run(reg, rs, [{"raid": BD, "rosters": 1}, {"raid": "extra_a", "rosters": 1}])
+    ms = reg.test_members()[:3]
+    join(reg, rs, first, ms[:2])
+    bd = rc.event_parts(rs, first)[1]
+
+    def ask(m, mid):
+        return rc.FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="other", role="healer", character="X",
+                          spec="Holy", reason="short 1 healer", phase="prelock", dm_channel_id=50, dm_message_id=mid)
+
+    bd.fill_asks.append(ask(ms[2], 501))  # an officer's pre-lock Ask on the later raid
+    rs.save(bd, "asked")
+    assert cq.lineup_consequence(reg, rs, first, L(H, "extra_a"))[-1] == "Barrow Deeps is taken out with its 1 open ask."
+    real = rc.apply_lineup
+
+    def apply_then_late_ask(*a, **k):  # a fan-out in flight appends one more after the write
+        out = real(*a, **k)
+        bd.fill_asks.append(ask(ms[1], 502))
+        return out
+
+    monkeypatch.setattr(rc, "apply_lineup", apply_then_late_ask)
+    edited = []
+
+    async def edit_card(reg_, cid, mid, text):
+        edited.append((mid, text))
+        return True
+
+    monkeypatch.setattr(bot, "edit_ask_card", edit_card)
+    edit(bot, reg, rs, first, L(H, "extra_a"))
+    assert [a.answer for a in rs.events[bd.key].fill_asks] == ["cancelled", "cancelled"]
+    assert sorted(edited) == [(501, "Barrow Deeps was taken out of the Hyjal Summit run, so this ask is closed."),
+                              (502, "Barrow Deeps was taken out of the Hyjal Summit run, so this ask is closed.")]
+
+
+def test_adding_a_raid_before_it_first_opens_is_allowed_and_said(bot, reg, rs):
+    first = open_run(reg, rs, [{"raid": BD, "rosters": 1}])
+    later = first.start + timedelta(days=30)
+    reg.set_raid_overrides("extra_b", {"first_open": later.isoformat()}, "t")
+    said = cq.lineup_consequence(reg, rs, first, L(H, BD, "extra_b"))
+    assert said[-1] == f"Extra B first opens {reg.local12(reg.first_open('extra_b'))}, after this run starts."
+    assert len(said) <= 3
+    edit(bot, reg, rs, first, L(H, BD, "extra_b"))
+    assert [p.instance for p in rc.event_parts(rs, first)] == [H, BD, "extra_b"]
+
+
+def test_a_dropped_raid_answers_as_itself(bot, reg, rs):
+    first = open_run(reg, rs, [{"raid": BD, "rosters": 1}, {"raid": "extra_a", "rosters": 1}])
+    bd = rc.event_parts(rs, first)[1]
+    edit(bot, reg, rs, first, L(H, "extra_a"))
+    bd = rs.events[bd.key]
+    assert rc.first_part(rs, bd) is bd and rc.lead_of(rs, bd) is None and rc.event_parts(rs, bd) == [bd]
+    with pytest.raises(RegistryError, match="already cancelled"):
+        run(bot.cancel_run(reg, rs, bd, "Jon", None))
+    assert first.state == "open" and all(p.state == "open" for p in rc.event_parts(rs, first)), "the live run stands"
+    assert rc.reschedule_refusal(reg, rs, bd, first.start + timedelta(hours=1), None) == rc.MOVE_CLOSED
+    assert rc.lineup_refusal(reg, rs, bd, L(H)) == rc.LINEUP_CLOSED
+
+
+def test_a_removed_raid_is_closed_on_file_before_its_dict_goes(bot, reg, rs, monkeypatch):
+    first = open_run(reg, rs, [{"raid": BD, "rosters": 1}])
+    bd = rc.event_parts(rs, first)[1]
+    change = rc.plan_lineup(reg, rs, first, L(H))
+
+    def crash(*a, **k):
+        raise RuntimeError("power cut")
+
+    monkeypatch.setattr(reg, "save_config", crash)
+    with pytest.raises(RuntimeError):
+        rc.apply_lineup(reg, rs, first, change, "Jon")
+    again = rc.RaidStore(reg.store, rs.key)
+    assert again.events[bd.key].state == "cancelled" and again.events[bd.key].dropped
+
+
+def test_the_first_raids_roster_count_alone_reads_aloud(reg, rs):
+    first = open_run(reg, rs, [])
+    assert cq.lineup_consequence(reg, rs, first, L((H, 2))) == ["The run becomes Hyjal Summit alone, with 2 rosters.",
+                                                                "Everyone's answer now covers the new lineup."]
