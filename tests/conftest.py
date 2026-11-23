@@ -7,6 +7,7 @@ owner token is local-only by default (OIBOT_MCP_LOCAL_ONLY), so the default clie
 pass their own client and headers."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from datetime import timedelta
@@ -47,6 +48,16 @@ def _no_reference_price_reads(monkeypatch):
         raise OSError("no network in tests")
 
     monkeypatch.setattr(price_reference, "fetch_text", refuse)
+
+
+@pytest.fixture(autouse=True)
+def _no_host_env(monkeypatch):
+    """A host's .env must not reach the suite: the site address and the per-workload budget caps are unset.
+    A test that wants one sets it itself."""
+    monkeypatch.delenv("OIBOT_WEB_URL", raising=False)
+    for name in list(os.environ):
+        if name.startswith("OIBOT_BUDGET_USD_"):
+            monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
