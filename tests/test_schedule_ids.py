@@ -433,6 +433,8 @@ def test_an_entry_fixed_after_the_first_lift_keeps_its_regulars(old_store_with, 
     assert reg.members[NYX].main.rosters == ["barrow-deeps", "late"] and reg.regulars_dropped == []
     reg.migrate_schedules()
     assert _keys_on_disk(store, NYX) == ["barrow-deeps", "late"] and reg.config.schedule_aliases["barrow_deeps:late"] == "late"
+    third = open_registry(store)
+    assert not third._schedules_owed and not third._regulars_owed and third.ids_lifted == []
 
 
 def test_a_refused_raid_fixed_later_keeps_its_regulars(old_store_with, open_registry, data_root):
@@ -471,6 +473,44 @@ def test_a_run_dicts_schedule_is_never_read_through_the_aliases_again(reg):
     assert rc.run_schedule_id(reg, ev) == "tuesday" and rc.run_series(reg, ev) == "tuesday"
     old = rc.RaidEvent(key="bd-1215-2130-tuesday-x", team="gone", instance=RID, starts_at=start.isoformat(), schedule="tuesday")
     assert rc.run_schedule_id(reg, old) == "tuesday-2"  # a bare old stamp with no run dict reads through the alias
+    reg.set_schedule("tuesday-2", {"kind": "pickup"}, "t")
+    assert rc.run_kind(reg, old) == "adhoc" and rc.run_kind(reg, ev) == "recurring"  # each by its own schedule's kind
+
+
+def test_a_fixed_entry_never_takes_an_id_an_alias_gives_another(old_store_with, open_registry, data_root):
+    """An UNREADABLE Hyjal `tuesday` first in the list, a readable Barrow Deeps `tuesday` after it: Barrow keeps the id
+    at the first lift; the Hyjal entry, fixed by hand, becomes `tuesday-2` — Barrow's regulars and run untouched."""
+    hyjal = {"id": "tuesday", "lineup": [{"raid": "hyjal_summit_forever", "rosters": 9}], "kind": "weekly", "slots": ["Tue 18:30"]}
+    barrow = {"id": "tuesday", "lineup": [{"raid": RID, "rosters": 1}], "kind": "weekly", "slots": ["Tue 21:30"]}
+    run = {"key": "bd-1215-2130-tuesday", "name": "Barrow Deeps Tue 15 Dec 9:30 PM", "size": 10, "instance": RID, "kind": "recurring",
+           "series": "barrow_deeps:tuesday", "schedule_id": "tuesday", "fill_ask_hours": 4.0}
+    store = old_store_with({"schedules": [hyjal, barrow], "rosters": [run]},
+                           members={NYX: ("Nyx", ["barrow_deeps:tuesday"]), ANA: ("Ana", ["hyjal_summit_forever:tuesday"])})
+    reg = open_registry(store)
+    reg.migrate_schedules()
+    assert reg.config.schedule_aliases == {"barrow_deeps:tuesday": "tuesday"}
+    assert _keys_on_disk(store, NYX) == ["tuesday"] and _keys_on_disk(store, ANA) == ["hyjal_summit_forever:tuesday"]
+
+    def fix(doc):
+        doc["schedules"][0]["lineup"][0]["rosters"] = 1
+
+    reg = open_registry(_fix_by_hand(data_root, fix))
+    assert [(s["raid"], s["id"]) for s in reg.all_schedules()] == [("hyjal_summit_forever", "tuesday-2"), (RID, "tuesday")]
+    assert reg.config.schedule_aliases == {"barrow_deeps:tuesday": "tuesday", "hyjal_summit_forever:tuesday": "tuesday-2"}
+    assert reg.members[NYX].main.rosters == ["tuesday"] and reg.members[ANA].main.rosters == ["tuesday-2"]
+    t = reg.config.roster("bd-1215-2130-tuesday")
+    assert (t["series"], t["schedule_id"]) == ("tuesday", "tuesday")
+    reg.migrate_schedules()
+    assert _keys_on_disk(store, ANA) == ["tuesday-2"] and _keys_on_disk(store, NYX) == ["tuesday"]
+    third = open_registry(store)
+    assert not third._schedules_owed and not third._regulars_owed and third.ids_lifted == []
+
+
+def test_a_refused_new_schedule_leaves_the_aliases_as_they_were(reg):
+    before = dict(reg.config.schedule_aliases)
+    with pytest.raises(RegistryError):
+        reg.set_schedule("late", {"kind": "weekly", "slots": "Wed 20:00", "lock_hours_before": 200}, "t", raid=RID)
+    assert reg.config.schedule_aliases == before and reg.all_schedules() == []
 
 
 def test_an_applicants_stray_key_goes_at_the_first_lift(old_store_with, open_registry):

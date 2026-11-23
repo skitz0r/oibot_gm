@@ -958,7 +958,7 @@ def parse_days(value) -> list[int]:
 
 def old_key_raid(key: str) -> str:
     """The raid an OLDER "<raid>:<schedule>" regular key named (before phase 3's ids) — read for the migration's words
-    and its trust check alone (remap_regulars, series_label). No schedule is ever found by it: a key reads through
+    and its trust check alone (remap_regulars, series_label, lift_schedule_ids' id owners). No schedule is ever found by it: a key reads through
     config.schedule_aliases."""
     return str(key or "").split(":", 1)[0]
 
@@ -1862,6 +1862,9 @@ def lift_schedule_ids(cfg: "GuildConfig", raids: dict) -> tuple[list[str], bool]
     raids = raids or {}
     aliases = cfg.schedule_aliases
     values = set(aliases.values())  # the schedules an alias already answers for
+    owners: dict[str, set] = {}  # an id an alias gives → the raids whose aliases give it
+    for k, v in aliases.items():
+        owners.setdefault(v, set()).add(old_key_raid(k))
     readable = [isinstance(e, dict) and unread_schedule(e) is None for e in cfg.schedules]
     others = {str(e.get("id")).strip().lower() for e, ok in zip(cfg.schedules, readable) if isinstance(e, dict) and e.get("id")
               and str(e.get("id")).strip().lower() != _OLD_DEFAULT}
@@ -1878,8 +1881,10 @@ def lift_schedule_ids(cfg: "GuildConfig", raids: dict) -> tuple[list[str], bool]
                 new = lifted_schedule_id(rid, seen | others)
             e = {**e, "id": new, "name": e.get("name") or DEFAULT_SCHEDULE_NAME, "kind": "weekly"}
             e = {"id": e["id"], "lineup": e["lineup"], **{k: v for k, v in e.items() if k not in ("id", "lineup")}}
-        elif old in seen:
-            e = {**e, "id": _unique_id(old, seen | others | set(RESERVED_SCHEDULE_IDS))}
+        elif old in seen or (old in owners and rid not in owners[old]):
+            # an id an alias already gives another entry stays with that entry, wherever this one sits in the list
+            # (an entry unread at the first lift and fixed since must never take it over)
+            e = {**e, "id": _unique_id(old, seen | others | values | set(RESERVED_SCHEDULE_IDS))}
         new = e["id"]
         seen.add(new)
         if new != old:
@@ -5125,18 +5130,21 @@ class Registry:
         return _raid_override_of(self.config, instance)
 
     def _snapshot_raid(self, instance: str) -> tuple:
-        """What a raid write may change — its override and the guild-level list — so a refusal can put both back."""
+        """What a raid write may change — its override, the guild-level list and the aliases a new schedule gets — so a
+        refusal can put them all back."""
         import copy
 
-        return copy.deepcopy(self.config.raids.get(instance)), copy.deepcopy(self.config.schedules)
+        return (copy.deepcopy(self.config.raids.get(instance)), copy.deepcopy(self.config.schedules),
+                dict(self.config.schedule_aliases))
 
     def _restore_raid(self, instance: str, snap: tuple) -> None:
-        before, scheds = snap
+        before, scheds, aliases = snap
         if before is None:
             self.config.raids.pop(instance, None)
         else:
             self.config.raids[instance] = before
         self.config.schedules = scheds
+        self.config.schedule_aliases = aliases
 
     def _lift_raid(self, instance: str) -> None:
         """An override still holding the old `slots` / `schedules` keys (a file from before schedules moved): move what
