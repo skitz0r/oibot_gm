@@ -761,7 +761,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     reschedule_cases(reg, rs, runs, ms, dump)
 
     # ---- editing a run's lineup before the lock (phase 3, Task 6)
-    lineup_cases(reg, rs, runs, ms, dump)
+    lineup_cases(reg, rs, runs, ms, dump, monkeypatch)
 
     dump.write()
     assert not dump.problems, f"{len(dump.problems)} confirm sentences break the Confirm rule:\n" + "\n".join(dump.problems)
@@ -834,7 +834,7 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     dump.add("reschedule_refusal", "started", rc.MOVE_STARTED)
 
 
-def lineup_cases(reg, rs, runs, ms, dump):
+def lineup_cases(reg, rs, runs, ms, dump, monkeypatch):
     """consequences.lineup_consequence across its cases (add, reorder, a roster count, remove with and without what the
     removed raid held, a schedule's run) and rc.lineup_refusal's every sentence."""
     hy, ony = "hyjal_summit_forever", "onyxias_lair"
@@ -898,6 +898,31 @@ def lineup_cases(reg, rs, runs, ms, dump):
     add("add a raid before it first opens", solo, L(hy, ony))
     add("add two, the second before it first opens", solo, L(hy, RID, ony))
     reg.set_raid_overrides(ony, {"first_open": was}, "t")
+    # fix round 2: a loss is never dropped — four raids past midnight, and a swap with a raid not open yet
+    import copy as _copy
+
+    extra = {**_copy.deepcopy(reg.profile.raids[RID]), "id": "extra_a", "name": "Extra A", "duration_hours": 2}
+    for raids in {id(reg.profile.raids): reg.profile.raids, id(reg.base_profile.raids): reg.base_profile.raids}.values():
+        monkeypatch.setitem(raids, "extra_a", extra)  # a fourth raid on the session profile, taken off again (no reorder)
+    reg.set_raid_overrides("extra_a", {"first_open": "2026-01-01T00:00"}, "t")
+    four = rc.open_run(reg, rs, hy, late + timedelta(days=2), by="t", schedule=rc.ADHOC_SCHEDULE, lineup=L(RID, ony, "extra_a"))
+    join(reg, rs, four, ms)
+    fb = rc.event_parts(rs, four)[1]
+    fb.layout, fb.pins = [[m.display_name for m in ms[:4]]], {str(ms[5].discord_id): "in", str(ms[6].discord_id): "out"}
+    rs.save(fb, "board")
+    said = cq.lineup_consequence(reg, rs, four, L(hy, ony, "extra_a"))
+    assert "Barrow Deeps is taken out with its 4 board places and 2 pins." in said, said
+    dump.add("lineup_consequence", "four raids past midnight, raid 2 out with a board and pins", said)
+    swap = rc.open_run(reg, rs, hy, late + timedelta(days=4), by="t", schedule=rc.ADHOC_SCHEDULE, lineup=L(RID, ony))
+    join(reg, rs, swap, ms)
+    sb = rc.event_parts(rs, swap)[1]
+    sb.fill_asks.append(rc.FillAsk(discord_id=ms[11].discord_id, display_name=ms[11].display_name, kind="other", role="healer",
+                                   character="X", spec="Holy", reason="short 1 healer", phase="prelock"))
+    rs.save(sb, "an ask")
+    reg.set_raid_overrides("extra_a", {"first_open": (late + timedelta(days=60)).isoformat()}, "t")
+    said = cq.lineup_consequence(reg, rs, swap, L(hy, ony, "extra_a"))
+    assert "Barrow Deeps is taken out with its open ask." in said and any("Extra A first opens" in x for x in said), said
+    dump.add("lineup_consequence", "a swap, the removed raid's open ask, the added raid not open yet", said)
     # the refusals, one each
     for case, ev, lineup in (("another first raid", three, L(RID, hy)), ("no such raid", three, L(hy, "nowhere")),
                              ("five raids", three, L(hy, RID, ony, "nowhere", "elsewhere")), ("a raid twice", three, L(hy, RID, RID)),

@@ -1576,7 +1576,7 @@ class RaidMixin:
         as with cancel_run) and their cards are edited to say so; its officer cards go to their final state. When a kept
         raid's start changes, everyone who answered gets reschedule's `moved` notice (Me page, /me view). The sheet is
         edited in place (same message), one line in the run's thread, one audit line. Nobody is DMed. → the done line."""
-        from .consequences import _clock_on, at_on, lineup_consequence
+        from .consequences import lineup_consequence, lineup_words
 
         if by_id is not None and (await guild_routing.resolve_role(self, reg, int(by_id), max_age=guild_routing.PRIV_LIVE)).role not in ("owner", "officer"):
             raise RegistryError(rc.LINEUP_OFFICER_ONLY)
@@ -1615,10 +1615,7 @@ class RaidMixin:
         for uid in change.told:  # an outcome, never a DM (the DM rule): reschedule's notice, one member save each
             reg.notify(uid, "moved", " ".join(f"{raid} now starts {reg.local12(t)}." for raid, t in moved), run=first.key)
         await self.refresh_sheet(reg, first)
-        at = {raid: _clock_on(reg, first.start, t) for raid, t in moved}
-        later = [reg.follow_words(e) + (f" {at_on(at[n])}" if (n := reg.raid_def(e["raid"]).get("name", e["raid"])) in at else "")
-                 for e in change.lineup[1:]]
-        now_words = f"{name}, then " + ", then ".join(later) if later else f"{name} alone"
+        now_words = lineup_words(reg, rs, first, change)
         await self.post_run_update(reg, first, f"🗂 lineup changed by {by}: {now_words}"
                                    + (f" · {len(change.told)} who answered see a notice" if change.told else ""))
         await ops_mod.audited(self.ops, reg, by, f"changed {first.key}'s lineup to {now_words}"

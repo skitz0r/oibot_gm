@@ -268,7 +268,7 @@ def test_an_ask_on_a_removed_raid_closes_under_its_plan_lock_and_its_card_says_s
 
     bd.fill_asks.append(ask(ms[2], 501))  # an officer's pre-lock Ask on the later raid
     rs.save(bd, "asked")
-    assert cq.lineup_consequence(reg, rs, first, L(H, "extra_a"))[-1] == "Barrow Deeps is taken out with its 1 open ask."
+    assert cq.lineup_consequence(reg, rs, first, L(H, "extra_a"))[-1] == "Barrow Deeps is taken out with its open ask."
     real = rc.apply_lineup
 
     def apply_then_late_ask(*a, **k):  # a fan-out in flight appends one more after the write
@@ -333,3 +333,25 @@ def test_the_first_raids_roster_count_alone_reads_aloud(reg, rs):
     first = open_run(reg, rs, [])
     assert cq.lineup_consequence(reg, rs, first, L((H, 2))) == ["The run becomes Hyjal Summit alone, with 2 rosters.",
                                                                 "Everyone's answer now covers the new lineup."]
+
+
+def test_a_dropped_raid_has_no_later_raids(bot, reg, rs):
+    first = open_run(reg, rs, [{"raid": BD, "rosters": 1}, {"raid": "extra_a", "rosters": 1}])
+    bd = rc.event_parts(rs, first)[1]
+    edit(bot, reg, rs, first, L(H, "extra_a"))
+    assert rc.later_parts(rs, rs.events[bd.key]) == []
+
+
+def test_the_moved_notice_goes_to_the_people_reschedule_tells(bot, reg, rs):
+    """One rule (rc.answered_ids): Join, Bench and No thanks are told, an away row isn't."""
+    from test_reschedule import moved_notices, real_people
+
+    first = open_run(reg, rs, [{"raid": BD, "rosters": 1}, {"raid": "extra_a", "rosters": 1}])
+    ms = real_people(reg, 4)
+    for m, status in zip(ms, ("in", "sub", "out")):
+        rc.set_signup(reg, rs, first, m, None, status, source="test")
+    rc.set_signup(reg, rs, first, ms[3], None, "out", source="absence")
+    ch = rc.plan_lineup(reg, rs, first, L(H, "extra_a"))
+    assert ch.told == rc.answered_ids(first) == [m.discord_id for m in ms[:3]]
+    edit(bot, reg, rs, first, L(H, "extra_a"))
+    assert [bool(moved_notices(reg, m.discord_id)) for m in ms] == [True, True, True, False]

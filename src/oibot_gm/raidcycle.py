@@ -406,7 +406,10 @@ def first_part(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent":
 
 
 def later_parts(rs: "RaidStore", ev: "RaidEvent") -> list["RaidEvent"]:
-    """The raids after the first of `ev`'s run, in order, any state ([] for a run of one raid)."""
+    """The raids after the first of `ev`'s run, in order, any state ([] for a run of one raid, and for a raid taken out
+    of its lineup: it is a run of its own now)."""
+    if ev.dropped:
+        return []
     return [p for p in event_parts(rs, ev) if is_follow(p)]
 
 
@@ -1278,6 +1281,13 @@ MOVE_OFFICER_ONLY = "Only an officer moves a run or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
 
+def answered_ids(first: "RaidEvent") -> list[int]:
+    """Who a change to a run's start times tells (the `moved` notice: reschedule and a lineup edit alike): everyone with
+    a row on the first raid — Join, Bench or No thanks, a test puppet's included — but an away row, which nobody
+    answered."""
+    return [sg.discord_id for sg in first.signups.values() if sg.source != "absence"]
+
+
 class Moved(BaseModel):
     """What a reschedule did (or, as a preview, would do): the run's raids, the old and new start (ISO), the run's own
     timing set now (run dict keys), who gets a `moved` notice, the away rows taken off and written, whether the first
@@ -1460,7 +1470,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
                 cb = min(at, now_ + MOVE_CONFIRM_GRACE)
             p.confirm_by = cb.isoformat()
     cleared, written = recompute_absences(reg, first) if delta else ([], [])
-    told = [sg.discord_id for sg in first.signups.values() if sg.source != "absence"] if delta else []
+    told = answered_ids(first) if delta else []
     team = t0 or run_team(reg, first)
     hard = first.start - timedelta(hours=float(team_setting(team, "cutoff_hard_hours")))
     ins = {sg.discord_id for sg in first.signups.values() if sg.status == "in"}
@@ -1615,7 +1625,7 @@ def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[di
             ch.dropped_leaving[p.key] = len([u for u in p.leaving if str(u) in first.signups])
             ch.dropped_asks[p.key] = len([a for a in p.fill_asks if a.pending])
     if ch.moved:
-        ch.told = [sg.discord_id for sg in first.signups.values() if sg.source != "absence"]
+        ch.told = answered_ids(first)
     return ch
 
 

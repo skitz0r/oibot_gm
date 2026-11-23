@@ -270,71 +270,110 @@ def at_on(words: str) -> str:
     return f"at {words}" if len(words.split()) <= 2 else f"on {words}"
 
 
-def lineup_consequence(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) -> list[str]:
-    """The confirm of editing a run's lineup before the lock (rc.plan_lineup — nothing written), at most three
-    sentences, each twenty words or fewer:
-    1. the new lineup, with the new 12-hour start of every KEPT raid whose start changes ("…, then Onyxia's Lair at 9:30
-       PM."; when that runs long, the lineup and then "Onyxia's Lair now starts 9:30 PM." on their own);
-    2. that everyone's answer covers the new lineup, and — when a kept raid's start changes — how many who answered see a
-       notice (reschedule's `moved` notice; nobody is DMed);
-    3. the first of: what a removed raid takes with it (its board places, pins, plans to leave early, open asks — counted
-       apart), an ADDED raid starting before it first opens (C9: allowed, said), that a schedule's run changes alone (a
-       reader editing Tuesday's run may expect Tuesdays to change) — folded into sentence 2 when that has room.
-    A refusal is rc.lineup_refusal's own sentence, not this."""
-    first = rc.first_part(rs, ev)
-    ch = rc.plan_lineup(reg, rs, first, lineup)
+def _moved_at(reg: Registry, rs, first: rc.RaidEvent, ch, *, clock_only: bool = False) -> dict[str, str]:
+    """raid id → the new start of each KEPT raid whose start changes, as a person reads it (_clock_on; `clock_only`:
+    the clock alone even on another day), in lineup order."""
+    out = {}
+    for k, at in ch.moved.items():
+        t = rc.after_minutes(first.start, at)
+        out[rs.events[k].instance] = reg.local12(t, "%I:%M %p") if clock_only else _clock_on(reg, first.start, t)
+    return out
+
+
+def lineup_words(reg: Registry, rs, first: rc.RaidEvent, ch, *, times: bool = True, clock_only: bool = False) -> str:
+    """THE new lineup in words — 'Hyjal Summit, then Onyxia's Lair at 9:30 PM, then Barrow Deeps ×2' with each kept raid's
+    new start when `times` (on another day 'on Wed 9 Dec 1:30 AM'; `clock_only`: 'at 1:30 AM'), or 'Hyjal Summit alone,
+    with 2 rosters' — the confirm (lineup_consequence) and RaidMixin.edit_lineup's done and thread lines alike."""
     name0 = reg.raid_def(first.instance).get("name", first.instance)
     later = ch.lineup[1:]
-    when = {rs.events[k].instance: _clock_on(reg, first.start, rc.after_minutes(first.start, at)) for k, at in ch.moved.items()}
-    head: list[str] = []
     if not later:
         n0 = int(ch.lineup[0]["rosters"])
-        head.append(f"The run becomes {name0} alone, with {n0} rosters." if n0 > 1 else f"The run becomes {name0} alone.")
-    else:
-        lead = reg.follow_words(ch.lineup[0])
-        inline = f"The lineup becomes {lead}, then " + ", then ".join(
-            reg.follow_words(e) + (f" {at_on(when[e['raid']])}" if e["raid"] in when else "") for e in later) + "."
-        if not when or _words(inline) <= 20:
-            head.append(inline)
-        else:
-            head.append(f"The lineup becomes {lead}, then {reg.later_words(later)}.")
-            items = [f"{reg.raid_def(r).get('name', r)} {'now starts ' if i == 0 else ''}{w}" for i, (r, w) in enumerate(when.items())]
-            head.append(_and(items) + ".")
+        return f"{name0} alone, with {n0} rosters" if n0 > 1 else f"{name0} alone"
+    when = _moved_at(reg, rs, first, ch, clock_only=clock_only) if times else {}
+    return f"{reg.follow_words(ch.lineup[0])}, then " + ", then ".join(
+        reg.follow_words(e) + (f" {at_on(when[e['raid']])}" if e["raid"] in when else "") for e in later)
+
+
+def _one_or_n(n: int, one: str, many: str | None = None) -> str:
+    """'board place' for one (after 'its' / 'their' a count of one, alone in its sentence, reads as the thing alone),
+    '3 board places'."""
+    return one if n == 1 else f"{n} {many or one + 's'}"
+
+
+def lineup_consequence(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) -> list[str]:
+    """The confirm of editing a run's lineup before the lock (rc.plan_lineup — nothing written): at most three
+    sentences of twenty words or fewer, ranked so that a loss is NEVER dropped:
+    1. what a removed raid takes with it — its board places, pins, plans to leave early and open asks, counted apart
+       (falling back to "…taken out with everything on its board") — always there when a removed raid held anything;
+    2. who is told — when a kept raid's start changes, how many who answered see reschedule's `moved` notice;
+    3. the rest: the new times of the kept raids that move, an ADDED raid starting before it first opens (C9: allowed,
+       said), the new lineup itself (the sheet shows it, so it may go), then that a schedule's run changes alone.
+    The times degrade before anything else goes: the lineup with each new time (a day form past midnight), then the
+    clock alone, then "Onyxia's Lair now starts 1:30 AM, and the 12 who answered see a notice.", and last "The run
+    becomes 3 raids, and the 12 who answered see their new start times." A refusal is rc.lineup_refusal's own
+    sentence, not this."""
+    first = rc.first_part(rs, ev)
+    ch = rc.plan_lineup(reg, rs, first, lineup)
+    fits = lambda xs: all(_words(x) <= 20 for x in xs)  # noqa: E731
     n = len(ch.told)
-    told = ("" if not when or n == 0 else ", and the one who answered sees a notice" if n == 1
-            else f", and the {n} who answered see a notice")
-    answers = f"Everyone's answer {'now ' if not told else ''}covers the new lineup{told}."
-    extras: list[str] = []
+    moves = bool(ch.moved)
+    told = ("" if n == 0 else "the one who answered sees a notice" if n == 1 else f"the {n} who answered see a notice")
+    # 1. what is taken out with a removed raid
+    loss = None
     held = [rs.events[k] for k in ch.removed
             if ch.dropped_places.get(k) or ch.dropped_pins.get(k) or ch.dropped_leaving.get(k) or ch.dropped_asks.get(k)]
     if held:
         one = len(held) == 1
+        its = "its" if one else "their"
         raids = rc.join_words([reg.raid_def(p.instance).get("name", p.instance) for p in held])
         counts = [(sum(ch.dropped_places.values()), "board place", None), (sum(ch.dropped_pins.values()), "pin", None),
                   (sum(ch.dropped_leaving.values()), "plan to leave early", "plans to leave early"),
                   (sum(ch.dropped_asks.values()), "open ask", None)]
-        items = [_n(k, one_w, many) for k, one_w, many in counts if k]
-        full = f"{raids} {'is' if one else 'are'} taken out with {'its' if one else 'their'} {_and(items)}."
-        short = f"Taking out {raids} drops {_and(items)}."
-        extras.append(full if _words(full) <= 20 else short if _words(short) <= 20
-                      else f"{raids} {'is' if one else 'are'} taken out with everything on {'its' if one else 'their'} board.")
+        counts = [c for c in counts if c[0]]
+        alone = len(counts) == 1  # "its open ask" for one thing alone; in a list every thing keeps its number
+        items = _and([_one_or_n(k, one_w, many) if alone else _n(k, one_w, many) for k, one_w, many in counts])
+        full = f"{raids} {'is' if one else 'are'} taken out with {its} {items}."
+        short = f"Taking out {raids} drops {its} {items}."
+        loss = (full if _words(full) <= 20 else short if _words(short) <= 20
+                else f"{raids} {'is' if one else 'are'} taken out with everything on {its} board.")
     added = {e["raid"] for e in ch.added}
-    if added:
-        early = before_first_open_sentence(reg, [ch.lineup[0], *ch.added], first.start, only=added)
-        if early:
-            extras.append(early)
-    if first.schedule:
-        with_note = answers[:-1] + ", and the schedule keeps its own lineup."
-        if not told and _words(with_note) <= 20:
-            answers = with_note
-        else:
-            extras.append("Its schedule keeps its own lineup.")
-    out = head + [answers]
-    if len(out) + len(extras) > 3 and len(head) == 2 and told:  # the new times and who is told share one sentence
-        merged = head[1][:-1] + told + "."
-        if _words(merged) <= 20:
-            out = [head[0], merged]
-    return out + extras[: max(0, 3 - len(out))]
+    early = before_first_open_sentence(reg, [ch.lineup[0], *ch.added], first.start, only=added) if added else None
+    # 2 + 3. the lineup, the times and who is told, most detailed first
+    plain = f"The run becomes {lineup_words(reg, rs, first, ch, times=False)}." if not ch.lineup[1:] else \
+        f"The lineup becomes {lineup_words(reg, rs, first, ch, times=False)}."
+    heads: list[list[str]] = []
+    if moves:
+        answers = f"Everyone's answer covers the new lineup, and {told}." if told else "Everyone's answer covers the new lineup."
+        heads.append([f"The lineup becomes {lineup_words(reg, rs, first, ch)}.", answers])
+        heads.append([f"The lineup becomes {lineup_words(reg, rs, first, ch, clock_only=True)}.", answers])
+        for clock_only in (False, True):
+            when = _moved_at(reg, rs, first, ch, clock_only=clock_only)
+            times = _and([f"{reg.raid_def(r).get('name', r)} {'now starts ' if i == 0 else ''}{w}" for i, (r, w) in enumerate(when.items())])
+            merged = f"{times}, and {told}." if told else f"{times}."
+            heads.append([plain, merged])
+            heads.append([merged])
+        k = len(ch.lineup)
+        heads.append([f"The run becomes {k} raids, and {told.replace('see a notice', 'see their new start times').replace('sees a notice', 'sees their new start times')}."
+                      if told else f"The run becomes {k} raids, and some start at new times."])
+    else:
+        answers = "Everyone's answer now covers the new lineup."
+        heads += [[plain, answers], [plain], [answers]]
+    must = [loss] if loss else []
+    extra = [early] if early else []
+    pick = next((h for h in heads if len(h) + len(must) + len(extra) <= 3 and fits(h)), None)
+    if pick is None:  # C9 can't be kept beside the loss and who is told: it goes, never the loss
+        extra = []
+        pick = next((h for h in heads if len(h) + len(must) <= 3 and fits(h)), heads[-1])
+    out = list(pick)
+    if first.schedule:  # a reader editing Tuesday's run may expect Tuesdays to change: said where there is room
+        i = next((i for i, x in enumerate(out) if x == "Everyone's answer now covers the new lineup."), None)
+        if i is not None:
+            out[i] = "Everyone's answer now covers the new lineup, and the schedule keeps its own lineup."
+        elif len(out) + len(must) + len(extra) < 3:
+            extra.append("Its schedule keeps its own lineup.")
+    out = out + must + extra
+    assert not held or loss in out, "a removed raid's losses are never dropped from the confirm"
+    return out
 
 
 def later_places_sentence(reg: Registry, held: list) -> str:

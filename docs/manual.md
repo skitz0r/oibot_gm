@@ -1219,13 +1219,14 @@ raid stays (*"The first raid of a run can't change. Start a new run instead."*),
 the starts hold as for a schedule, and a raid the game doesn't have is refused. Each raid without its own start begins
 when the one before it ends, so taking out the second raid brings the third forward, and a new order moves every raid
 after the first. When a raid that stays starts at another time the confirm gives its new time (*"The lineup becomes
-Hyjal Summit, then Onyxia's Lair at 9:30 PM."*) and everyone who answered gets a notice on the Me page and in `/me view`
+Hyjal Summit, then Onyxia's Lair at 9:30 PM."*; on a long lineup the clock alone, or that the people who
+answered see their new start times) and everyone who answered gets a notice on the Me page and in `/me view`
 (*"Onyxia's Lair now starts Thu 10 Dec 9:30 PM."*), as when a run moves. Adding a raid that hasn't first opened by its
 start is allowed, and the confirm says when it opens. Only that run changes — its schedule keeps its own lineup, and the
-confirm says so on a schedule's run. The first raid's answers are never touched, and every raid of the new lineup takes
+confirm says so on a schedule's run when it has room. The first raid's answers are never touched, and every raid of the new lineup takes
 them, a new raid included (*"Everyone's answer now covers the new lineup."*). A raid that stays keeps its board, its pins
-and the plans to leave before it, in its new place. A raid taken out is cancelled with what it held, counted in the
-confirm first (*"Barrow Deeps is taken out with its 3 board places, 1 pin and 1 plan to leave early."*); an open ask on
+and the plans to leave before it, in its new place. A raid taken out is cancelled with what it held, always counted in
+the confirm (*"Barrow Deeps is taken out with its 3 board places, 1 pin and 1 plan to leave early."*); an open ask on
 it closes and its card says so. A raid taken out answers as itself afterwards: cancelling it again says it is already
 cancelled and never touches the run. Nobody gets a DM: the sheet is edited in place to the new lineup (*Hyjal Summit,
 then Onyxia's Lair*), and the run's thread hears it. Once the roster locks the lineup is fixed (*"The lineup is fixed
