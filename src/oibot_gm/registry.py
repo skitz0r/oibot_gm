@@ -877,7 +877,9 @@ SCHEDULE_KINDS = ("weekly", "lockout", "pickup")  # weekly slots · day N of eac
 SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours",
                     "nudge", "autofill", "open_dm", "confirm", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
 # `weights`: a partial seat-order map {rank, main, sat_out, signup_order, regular} merged per key over the raid's (ad hoc: ADHOC_WEIGHTS)
-SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow") + SCHEDULE_CADENCE
+SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow", "lineup") + SCHEDULE_CADENCE
+# `lineup` (set_schedule): the whole lineup [{raid, rosters[, starts]}] at once, replacing rosters / follow / then — a
+# schedule row keeps its raids past the second under `then` (to_stored_schedule / from_stored_schedule)
 # the nine values a schedule OWNS (C7): every stored schedule carries them written out in full (write_out_timing), seeded
 # from the game's suggestion for its raid (Registry.timing_suggestion; a pickup row from ADHOC_DEFAULTS). A raid refuses
 # them (TIMING_ON_SCHEDULE). split_policy and weights are not timing: the raid keeps a default a schedule may override (C6).
@@ -1000,17 +1002,20 @@ def parse_follow(value) -> dict | None:
     return {"raid": rid, "rosters": n, **({"starts": starts} if starts is not None else {})}
 
 
-LINEUP_MAX = 2  # a schedule's raids in one night: the lead and at most one follow-on
+LINEUP_MAX = 4  # a run's raids in one night: the first and up to three after it, all from one signup
+LINEUP_MAX_WORDS = "A run holds at most 4 raids."
+LINEUP_ORDER = "Each raid starts after the one before it."
 
 
 def parse_lineup(value) -> list[dict]:
-    """A guild-level schedule's lineup, validated: [{raid, rosters[, starts]}], the lead first and at most LINEUP_MAX
-    raids. `starts` (minutes after the lead's start) is for a later entry only, never the lead. The raid ids are
-    checked against the profile by the caller (this is a free function, like parse_follow)."""
+    """A guild-level schedule's (or a run's) lineup, validated: [{raid, rosters[, starts]}], the first raid first and at
+    most LINEUP_MAX raids (LINEUP_MAX_WORDS). `starts` (minutes after the first raid's start) is for a later entry only,
+    never the first. The raid ids are checked against the profile by the caller (this is a free function, like
+    parse_follow); the order of the starts is Registry.lineup_offsets'."""
     if not isinstance(value, list) or not value:
         raise RegistryError("A schedule needs at least one raid.")
     if len(value) > LINEUP_MAX:
-        raise RegistryError(f"A schedule runs at most {LINEUP_MAX} raids in one night.")
+        raise RegistryError(LINEUP_MAX_WORDS)
     out, seen = [], set()
     for i, e in enumerate(value):
         rid = str((e or {}).get("raid") or "").strip().lower() if isinstance(e, dict) else ""
@@ -1034,13 +1039,35 @@ def parse_lineup(value) -> list[dict]:
     return out
 
 
-def to_stored_schedule(raid: str, row: dict) -> dict:
-    """A norm_schedule row of `raid` in the guild-level stored shape: id, then the lineup (the raid with the row's
-    rosters, then its follow-on if any), then the row's other settings. from_stored_schedule is its exact inverse."""
+def parse_then(value) -> list[dict] | None:
+    """A row's `then`: the raids after its follow-on (lineup[2:]), each a parse_follow map; None / [] = none. The
+    lineup as a whole (how many, a raid twice) is checked by to_stored_schedule's parse_lineup."""
+    if value in (None, "", []):
+        return None
+    if not isinstance(value, list):
+        raise RegistryError("The raids after the second are a list of raids.")
+    out = [parse_follow(e) for e in value]
+    if any(e is None for e in out):
+        raise RegistryError("Each raid in a schedule needs a name.")
+    if len(out) > LINEUP_MAX - 2:
+        raise RegistryError(LINEUP_MAX_WORDS)
+    return out
+
+
+def row_lineup(raid: str, row: dict) -> list[dict]:
+    """A schedule row's whole lineup, unvalidated: `raid` with the row's rosters, its follow-on, then its `then`."""
     lineup = [{"raid": raid, "rosters": row.get("rosters", 1)}]
     if row.get("follow"):
         lineup.append(dict(row["follow"]))
-    return {"id": row["id"], "lineup": parse_lineup(lineup), **{k: v for k, v in row.items() if k not in ("id", "rosters", "follow")}}
+    return lineup + [dict(e) for e in row.get("then") or []]
+
+
+def to_stored_schedule(raid: str, row: dict) -> dict:
+    """A norm_schedule row of `raid` in the guild-level stored shape: id, then the lineup (the raid with the row's
+    rosters, then its follow-on if any, then the raids under `then`), then the row's other settings.
+    from_stored_schedule is its exact inverse."""
+    return {"id": row["id"], "lineup": parse_lineup(row_lineup(raid, row)),
+            **{k: v for k, v in row.items() if k not in ("id", "rosters", "follow", "then")}}
 
 
 def _lead_raid(entry) -> str | None:
@@ -1051,13 +1078,15 @@ def _lead_raid(entry) -> str | None:
 
 def from_stored_schedule(entry: dict) -> tuple[str, dict]:
     """A guild-level stored schedule back to (its first raid, the norm_schedule row it came from): `rosters` only when
-    not 1, `follow` only when the lineup has a second raid."""
+    not 1, `follow` only when the lineup has a second raid, `then` (lineup[2:]) only when it has a third."""
     lineup = parse_lineup(entry.get("lineup"))
     row = {"id": entry["id"]}
     if lineup[0]["rosters"] != 1:
         row["rosters"] = lineup[0]["rosters"]
     if len(lineup) > 1:
         row["follow"] = lineup[1]
+    if len(lineup) > 2:
+        row["then"] = lineup[2:]
     row.update({k: v for k, v in entry.items() if k not in ("id", "lineup")})
     return lineup[0]["raid"], row
 
@@ -1299,6 +1328,8 @@ def schedule_value(field: str, value):
         return value
     if field == "follow":
         return parse_follow(value)
+    if field == "then":  # a row's raids past the second (set_schedule writes them through `lineup`)
+        return parse_then(value)
     raise RegistryError(f"unknown schedule setting {field} (one of {', '.join(SCHEDULE_FIELDS)})")
 
 
@@ -2581,7 +2612,8 @@ class Registry:
                 day, hm = slot.split()
                 by_time.setdefault(hm, []).append(DAY_PLURAL.get(day[:3].title(), day))
             text = ", ".join(f"{join_words(days)} {self.time_label(hm)}" for hm, days in sorted(by_time.items(), key=lambda kv: order.get(kv[1][0][:3], 9))) or "No run times yet"
-        return (text + (f" · {n} rosters" if n > 1 else "") + (f" · then {self.follow_words(s.get('follow'))}" if s.get("follow") else "")
+        later = ([s["follow"]] if s.get("follow") else []) + list(s.get("then") or [])
+        return (text + (f" · {n} rosters" if n > 1 else "") + (f" · then {self.later_words(later)}" if later else "")
                 + ("" if s.get("active", True) else " · paused"))
 
     def follow_words(self, follow: dict | None) -> str:
@@ -2591,6 +2623,29 @@ class Registry:
         name = self.raid_def(follow["raid"]).get("name", follow["raid"])
         n = int(follow.get("rosters") or 1)
         return f"{name} ×{n}" if n > 1 else name
+
+    def later_words(self, later: list[dict] | None) -> str:
+        """'Barrow Deeps ×2, then Onyxia's Lair' — the raids after the first, in order ('' when none)."""
+        return ", then ".join(self.follow_words(e) for e in later or [] if e)
+
+    def lineup_offsets(self, lineup: list[dict]) -> list[int]:
+        """Each lineup entry's start in minutes after the first raid's (C12): 0, then the entry's stored `starts`, else
+        the previous entry's offset plus the previous raid's duration_hours. Each must come after the one before
+        (LINEUP_ORDER, a RegistryError)."""
+        out: list[int] = []
+        for i, e in enumerate(lineup):
+            if i == 0:
+                out.append(0)
+                continue
+            if e.get("starts") is not None:
+                at = int(e["starts"])
+            else:
+                prev = lineup[i - 1]["raid"]
+                at = out[-1] + round(float(self.raid_def(prev).get("duration_hours") or RAID_DEFAULTS["duration_hours"]) * 60)
+            if at <= out[-1]:
+                raise RegistryError(LINEUP_ORDER)
+            out.append(at)
+        return out
 
     def day_label(self, iso_day: str, with_year: bool = False) -> str:
         """'2026-12-24' -> 'Thu 24 Dec' (a date a person reads; ISO stays for the data repo and the API)."""
@@ -5311,6 +5366,13 @@ class Registry:
                 raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'}; start it with its kind (weekly, lockout or pickup) or its run times")
             entry = {"id": sid, "kind": kind}
             stored.append(entry)
+        fields = dict(fields)
+        if "lineup" in fields:  # the whole lineup at once: its first raid is the schedule's, the rest replace follow / then
+            rows = parse_lineup(fields.pop("lineup"))
+            if rows[0]["raid"] != instance:
+                raise RegistryError("The first raid of a schedule can't change. Add a new schedule for the other raid.")
+            fields = {"rosters": rows[0]["rosters"], "follow": rows[1] if len(rows) > 1 else None,
+                      "then": rows[2:] or None, **fields}
         for f, v in fields.items():
             if f == "weights" and isinstance(v, dict):  # per key: a key set to inherit / None drops back to the default
                 cur = dict(entry.get("weights") or {})
@@ -5326,6 +5388,12 @@ class Registry:
                 entry.pop(f, None)
             else:
                 entry[f] = nv
+        if not entry.get("follow") and entry.get("then"):  # the second raid cleared: the third moves up, the order kept
+            entry["follow"], rest = entry["then"][0], entry["then"][1:]
+            if rest:
+                entry["then"] = rest
+            else:
+                entry.pop("then")
         if {"signup_lead_hours", "lock_hours_before"} & set(fields) and "nudge_hours_before" not in fields \
                 and entry.get("nudge_hours_before") is not None:
             # outside the new window: the reminder is derived again (halfway — default_nudge_hours; a pickup row's an
@@ -5569,12 +5637,17 @@ class Registry:
                 raise RegistryError(f"{name}: the nudge must fall between signup opening and lock (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)")
             if not 1 <= int(s.get("rosters") or 1) <= MAX_SCHEDULE_ROSTERS:
                 raise RegistryError(f"{name}: a run holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
-            f = s.get("follow")
-            if f:
+            later = ([s["follow"]] if s.get("follow") else []) + list(s.get("then") or [])
+            for f in later:
                 if f["raid"] not in self.profile.raids:
                     raise RegistryError(f"{name}: unknown raid {f['raid']} for the follow-on (one of {', '.join(self.profile.raids)})")
                 if f["raid"] == eff.get("id"):
                     raise RegistryError(f"{name}: a follow-on is another raid, not the raid itself")
+            if later and eff.get("id") in self.profile.raids:
+                try:
+                    self.lineup_offsets([{"raid": eff["id"], "rosters": 1}, *later])
+                except RegistryError as e:
+                    raise RegistryError(f"{name}: {e}") from None
             if s["kind"] == "weekly" and not s.get("slots"):
                 raise RegistryError(f"{name}: a weekly schedule needs at least one run time")
             if s["kind"] == "lockout":

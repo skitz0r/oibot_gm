@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, FOLLOW_SCHEDULE, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
-                       RegisteredCharacter, RegistryError, can_cover, now, schedule_class, schedule_def_of, slot_words)
+from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, FOLLOW_SCHEDULE, LINEUP_MAX, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
+                       RegisteredCharacter, RegistryError, can_cover, join_words, now, schedule_class, schedule_def_of, slot_words)
 from .roster import explain, solver
 from .store import GitStore
 
@@ -50,6 +50,8 @@ OFF = "none"
 LEAVING_NOTE = "leaving after the first raid"  # the follow-on's out row for someone who stays for the lead only
 FOLLOW_ANSWER_REFUSAL = "Answer on the {lead} sheet. It covers the whole night."
 LEAD_SEAT_BONUS = 1000  # a follow-on's solve: the lead's rostered beat every seat weight combined, so the splits are the lead's roster split
+# a later raid of a run (part ≥ 1) is never locked by itself while an earlier raid is open: the first raid's lock builds them all
+LATER_PART_LOCK = "Lock {first} first. Its lock builds every raid of the run."
 # a member's own Join / Bench after lock: the sheet's SignupButton and plain text (configops.authorize) refuse it in these words
 LOCKED_JOIN = "The roster is locked — answer your confirmation DM, or press Can't make it on the sheet."
 STATES = ("open", "locked", "done", "cancelled")
@@ -212,9 +214,10 @@ class RaidEvent(BaseModel):
     reminded_by: Optional[str] = None
     closed_at: Optional[str] = None  # when it became done / cancelled (cleanup_ephemeral's grace, reopen's window)
     prev_state: Optional[str] = None  # the state before done / cancelled (reopen_run restores it)
-    # a follow-on (design §5.62): a second raid the same night from the same signup. `follows` = the lead run's key (on the
-    # follow-on), `followed_by` = the follow-on's key (on the lead). The follow-on's signups are materialised from the
-    # lead's (rc.sync_follow) and never answered directly; `leaving` = the discord ids out of the follow-on alone
+    # a later raid of a run (design §5.62; up to LINEUP_MAX raids from one signup): `follows` = the FIRST part's key (on
+    # every later part), `followed_by` = the next part's key (on every part but the last). A later part's signups are
+    # materialised from the first part's (rc.sync_parts) and never answered directly; `leaving` = the discord ids out of
+    # that part alone
     follows: Optional[str] = None
     followed_by: Optional[str] = None
     leaving: list[int] = Field(default_factory=list)
@@ -341,16 +344,61 @@ def follow_start(reg: Registry, instance: str, start: datetime) -> datetime:
 
 
 def is_follow(ev: "RaidEvent") -> bool:
-    return bool(ev.follows)
+    """A later raid of a run (part ≥ 1): no sheet, its answers the first raid's."""
+    return ev.part > 0 or bool(ev.follows)
+
+
+def part_no(ev: "RaidEvent") -> int:
+    """Which raid of its run `ev` is (0 = the first): its stamp; a follow-on of older code not stamped yet is part 1."""
+    return ev.part if ev.event else (1 if ev.follows else 0)
+
+
+def event_id(ev: "RaidEvent") -> str:
+    """The run a part belongs to: its `event` stamp (the first part's key), else — a file from before the stamps — the
+    first part's key it `follows`, else its own key."""
+    return ev.event or ev.follows or ev.key
+
+
+def same_event(a: "RaidEvent", b: "RaidEvent") -> bool:
+    """Two parts of one run (a run is the same event as itself)."""
+    return event_id(a) == event_id(b)
+
+
+def event_parts(rs: "RaidStore", ev: "RaidEvent") -> list["RaidEvent"]:
+    """Every part of `ev`'s run, any state, in order (part 0 first). A part has exactly one `event`, so it belongs to
+    exactly one run; and every later part's dict is made by its first part's open (ensure_run), so one first part
+    holds one chain."""
+    eid = event_id(ev)
+    parts = {e.key: e for e in rs.events.values() if event_id(e) == eid}
+    parts.setdefault(ev.key, ev)
+    return sorted(parts.values(), key=lambda e: (part_no(e), e.starts_at, e.key))
+
+
+def first_part(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent":
+    """The first raid of `ev`'s run (the one with the sheet, the answers and the timing); `ev` itself when it is."""
+    if not is_follow(ev):
+        return ev
+    first = rs.events.get(ev.follows) if ev.follows else None
+    if first is None:
+        first = next((p for p in event_parts(rs, ev) if not is_follow(p)), None)
+    return first or ev
+
+
+def later_parts(rs: "RaidStore", ev: "RaidEvent") -> list["RaidEvent"]:
+    """The raids after the first of `ev`'s run, in order, any state ([] for a run of one raid)."""
+    return [p for p in event_parts(rs, ev) if is_follow(p)]
 
 
 def lead_of(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent | None":
-    """The lead run of a follow-on (its answers are the lead's), else None."""
-    return rs.events.get(ev.follows) if ev.follows else None
+    """The first part of a later part's run (its answers are the first part's), else None."""
+    if not is_follow(ev):
+        return None
+    first = first_part(rs, ev)
+    return first if first is not ev else None
 
 
 def follow_of(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent | None":
-    """The follow-on run of a lead, else None."""
+    """The next part of a run (the part after `ev`), else None."""
     return rs.events.get(ev.followed_by) if ev.followed_by else None
 
 
@@ -367,23 +415,45 @@ def follow_dict(reg: Registry, ev: "RaidEvent") -> dict | None:
     return reg.config.team(t["followed_by"]) if t and t.get("followed_by") else None
 
 
-def follow_short(reg: Registry, ev: "RaidEvent") -> dict[str, int]:
-    """What the follow-on's tank and healer minimums × its rosters are short, counted on the lead's Join answers (the
-    health card's one follow-on line; {} when none or covered)."""
-    ft = follow_dict(reg, ev)
-    if not ft:
-        return {}
-    size, n = int(ft.get("size") or DEFAULT_RAID_SIZE), int(ft.get("rosters") or 1)
-    rb = reg.role_bounds(ft.get("instance"), size)
+def later_dicts(reg: Registry, ev: "RaidEvent") -> list[dict]:
+    """The run dicts of the raids after the first of a FIRST part's run, in order (each dict's `followed_by` names the
+    next); [] for a later part or a run of one raid. No store needed: the sheet, the cards and the confirms read it."""
+    if is_follow(ev):
+        return []
+    out, seen = [], {ev.team}
+    t = reg.config.team(ev.team)
+    while t and t.get("followed_by") and t["followed_by"] not in seen and len(out) < LINEUP_MAX - 1:
+        seen.add(t["followed_by"])
+        t = reg.config.team(t["followed_by"])
+        if t is not None:
+            out.append(t)
+    return out
+
+
+def dict_start(reg: Registry, first: "RaidEvent", t: dict) -> datetime:
+    """When a later part's dict starts: the first part's start plus its `starts` minutes (an older dict without them:
+    the first raid's length after it)."""
+    return first.start + timedelta(minutes=int(t["starts"])) if t.get("starts") else follow_start(reg, first.instance, first.start)
+
+
+def parts_short(reg: Registry, ev: "RaidEvent") -> list[tuple[str, dict[str, int]]]:
+    """(raid name, {role: short}) for each later raid of a first part whose tank and healer minimums × its rosters the
+    first part's Join answers can't cover — the health card's later-raid lines; [] when none or all covered."""
     ins = ev.by_status("in")
     have = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer")}
-    return {r: int(rb[r]["min"]) * n - have[r] for r in ("tank", "healer") if int(rb[r]["min"]) * n > have[r]}
+    out = []
+    for t in later_dicts(reg, ev):
+        size, n = int(t.get("size") or DEFAULT_RAID_SIZE), int(t.get("rosters") or 1)
+        rb = reg.role_bounds(t.get("instance"), size)
+        short = {r: int(rb[r]["min"]) * n - have[r] for r in ("tank", "healer") if int(rb[r]["min"]) * n > have[r]}
+        if short:
+            out.append((reg.raid_def(t.get("instance")).get("name", t.get("instance")), short))
+    return out
 
 
 def follow_words_of(reg: Registry, ev: "RaidEvent") -> str:
-    """'Barrow Deeps ×2' for a lead's follow-on ('' when none)."""
-    ft = follow_dict(reg, ev)
-    return reg.follow_words({"raid": ft.get("instance"), "rosters": ft.get("rosters") or 1}) if ft else ""
+    """'Barrow Deeps ×2, then Onyxia's Lair' — the raids after a first part, in order ('' when none or a later part)."""
+    return reg.later_words([{"raid": t.get("instance"), "rosters": t.get("rosters") or 1} for t in later_dicts(reg, ev)])
 
 
 def lead_name_of(reg: Registry, ev: "RaidEvent") -> str:
@@ -532,10 +602,32 @@ def schedule_starts(reg: Registry, instance: str, sched: dict, now: datetime, ho
     `rd`: an effective raid dict to read first_open / lockout_days from (a wizard's unsaved draft); default the stored raid."""
     rd = rd if rd is not None else reg.raid_def(instance)
     if sched.get("kind") == "lockout":
-        return _lockout_starts(reg, rd, sched, now, horizon_hours)
-    if sched.get("kind") == "pickup":
+        starts = _lockout_starts(reg, rd, sched, now, horizon_hours)
+    elif sched.get("kind") == "pickup":
         return []
-    return [t for _s, t in _weekly_starts(reg, rd, sched.get("slots") or [], now, horizon_hours)]
+    else:
+        starts = [t for _s, t in _weekly_starts(reg, rd, sched.get("slots") or [], now, horizon_hours)]
+    return _after_first_opens(reg, instance, sched, starts)
+
+
+def schedule_lineup(instance: str, sched: dict) -> list[dict]:
+    """A schedule's whole lineup: its first raid with its rosters, then its follow-on and the raids under `then`."""
+    from .registry import row_lineup
+
+    return row_lineup(instance, sched)
+
+
+def _after_first_opens(reg: Registry, instance: str, sched: dict, starts: list[datetime]) -> list[datetime]:
+    """C8: a start is dropped when a later raid of the schedule's lineup would begin before that raid first opens."""
+    lineup = schedule_lineup(instance, sched)
+    if len(lineup) < 2:
+        return starts
+    try:
+        offsets = reg.lineup_offsets(lineup)
+    except RegistryError:
+        return starts
+    opens = [(reg.first_open(e["raid"]), at) for e, at in zip(lineup[1:], offsets[1:])]
+    return [t for t in starts if not any(fo is not None and fo > t + timedelta(minutes=at) for fo, at in opens)]
 
 
 def occurrences(reg: Registry, now: datetime, horizon_hours: float | None = None, *, lead: bool = False) -> list[tuple[dict, datetime]]:
@@ -633,26 +725,42 @@ def fit_cutoffs(available_h: float, nudge_h: float, lock_h: float, confirm_h: fl
 
 
 def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None,
-               follow: dict | None = None, *, occurrence: str | None = None, rs: "RaidStore | None" = None) -> dict:
-    """CREATE the run dict that carries one run's settings (size, cutoffs from its schedule's cadence, how many rosters it
-    expects) under a new key (new_run_key; finding an existing run is the caller's: find_run). `schedule` = the schedule
-    id it comes from (None: the schedule with a run at exactly `start`, else a one-off — open_schedule; a test run: a
-    rehearsal on the game's suggested timing). `cutoffs` = {soft, hard, confirm} in hours to override the cadence (test
-    runs compress it to minutes) — and makes it a TEST run. `cutoffs["test_channel"]`: where the command was used — the
-    test run's cards post there (D20). The dict is stamped with its identity: `occurrence` (a schedule's run: the start
-    the schedule gave it, default `start` in guild wall time; None for a one-off), `event` (its own key), `part` 0,
-    `starts` 0. `follow` ({raid, rosters}; None = the schedule's own) also creates the follow-on's dict (design §5.62):
-    the lead's dict gains `follow` and `followed_by`, the follow-on's carries `follows` and the stamps of part 1; both are
-    saved in the one config write. `rs`: the store whose run files a new key must not meet."""
+               follow: dict | None = None, *, occurrence: str | None = None, rs: "RaidStore | None" = None,
+               lineup: list[dict] | None = None) -> dict:
+    """CREATE the run dicts of one run — one per raid of its lineup — that carry its settings (size, cutoffs from its
+    schedule's cadence, how many rosters it expects) under new keys (new_run_key; finding an existing run is the
+    caller's: find_run). `schedule` = the schedule id it comes from (None: the schedule with a run at exactly `start`,
+    else a one-off — open_schedule; a test run: a rehearsal on the game's suggested timing). `cutoffs` = {soft, hard,
+    confirm} in hours to override the cadence (test runs compress it to minutes) — and makes it a TEST run (one raid).
+    `cutoffs["test_channel"]`: where the command was used — the test run's cards post there (D20). Part 0's dict is
+    stamped with its identity: `occurrence` (a schedule's run: the start the schedule gave it, default `start` in guild
+    wall time; None for a one-off), `event` (its own key), `part` 0, `starts` 0.
+    `lineup` = the LATER raids [{raid, rosters[, starts]}] (None = the schedule's own follow-on and `then`; `follow` = a
+    one-entry alias): each gets its own dict (part k): part 0's settings with its raid, size and rosters, `follows` =
+    part 0's key, `followed_by` = the next part's key, `part`, `starts` (minutes after part 0, Registry.lineup_offsets),
+    the cutoffs part 0's shifted by `starts` (its lock, nudge and confirm fall at part 0's instants), no confirmations,
+    no reminders, no DM at open, no series. Part 0's dict holds the whole `lineup` (with each entry's offset) and
+    `followed_by`. Every dict is checked before a key is drawn and all are saved in ONE config write, so a refused
+    lineup (LINEUP_MAX_WORDS, a raid twice, an unknown raid, LINEUP_ORDER) writes nothing. `rs`: the store whose run
+    files a new key must not meet. → part 0's dict."""
+    from .registry import parse_lineup
+
     test = bool(cutoffs)
     if not schedule and not test:  # none named: the schedule that runs at that start, else a one-off (open_schedule)
         schedule = open_schedule(reg, instance, start, None)
-    key = new_run_key(reg, rs, instance)
     if test and not schedule:  # a rehearsal of the raid: a recurring run on the game's suggested timing, its own cutoffs
         rd = schedule_def_of({**reg.raid_def(instance), "schedules": [{"id": _REHEARSAL, "kind": "weekly"}]}, _REHEARSAL)
     else:
         rd = reg.schedule_def(instance, schedule)
     sched = rd["schedule"]
+    later = lineup if lineup is not None else ([follow] if follow else schedule_lineup(instance, sched)[1:])
+    later = [] if test else [e for e in later if e]
+    full = parse_lineup([{"raid": instance, "rosters": int(sched.get("rosters") or 1)}, *later])  # LINEUP_MAX_WORDS, a raid twice
+    for e in full[1:]:
+        if e["raid"] not in reg.profile.raids or e["raid"] == instance:
+            raise RegistryError(f"a follow-on is another raid of the profile (one of {', '.join(reg.profile.raids)})")
+    offsets = reg.lineup_offsets(full)  # LINEUP_ORDER
+    key = new_run_key(reg, rs, instance)
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
     c = cutoffs or {}
     if not c:  # test runs pass their own compressed cutoffs and mean them
@@ -678,31 +786,32 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         t["test_by"] = c.get("test_by")
         if c.get("test_channel"):
             t["test_channel"] = int(c["test_channel"])  # the asking channel: the run's officer cards post there (D20)
-    fw = follow if follow is not None else (sched.get("follow") or None)
-    if fw and not cutoffs:  # a follow-on (design §5.62): the second run's dict, part 1 of the same event
-        if fw["raid"] not in reg.profile.raids or fw["raid"] == instance:
-            raise RegistryError(f"a follow-on is another raid of the profile (one of {', '.join(reg.profile.raids)})")
-        dur = float(rd.get("duration_hours") or RAID_DEFAULTS["duration_hours"])
-        fstart = follow_start(reg, instance, start)
-        fkey = key
-        while fkey == key:
-            fkey = new_run_key(reg, rs, fw["raid"])
-        frd = reg.raid_def(fw["raid"])
-        ft = {**t, "key": fkey, "instance": fw["raid"], "size": int(frd.get("size") or DEFAULT_RAID_SIZE),
-              "name": f"{frd.get('name', fw['raid'])} · after {rd.get('name', instance)} {reg.local12(start)}",
-              "schedule": fstart.strftime("%a %H:%M"), "schedule_id": FOLLOW_SCHEDULE, "series": None, "confirm": False,
-              "rosters": int(fw.get("rosters") or 1), "follows": key, "reminders": OFF, "open_dm": False,
-              # its lock, nudge and confirm fall at the same instants as the lead's (its start is `dur` later)
-              "cutoff_soft_hours": t["cutoff_soft_hours"] + dur, "cutoff_hard_hours": t["cutoff_hard_hours"] + dur, "confirm_hours": t["confirm_hours"] + dur,
-              "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced",
-              "part": 1, "starts": round((fstart - start).total_seconds() / 60)}
-        for k in ("follow", "followed_by", "message_id", "channel_id", "thread_id"):  # never the lead's sheet nor its pairing
-            ft.pop(k, None)
-        reg.config.rosters.append(ft)
-        t["follow"] = {"raid": fw["raid"], "rosters": int(fw.get("rosters") or 1)}
-        t["followed_by"] = fkey
+    parts: list[dict] = []
+    if len(full) > 1:  # the later raids (design §5.62): one dict each, parts 1.. of the same event, from part 0's signup
+        keys = {key}
+        for k, (e, at) in enumerate(zip(full[1:], offsets[1:]), start=1):
+            pkey = key
+            while pkey in keys:
+                pkey = new_run_key(reg, rs, e["raid"])
+            keys.add(pkey)
+            frd, hours = reg.raid_def(e["raid"]), at / 60
+            pt = {**t, "key": pkey, "instance": e["raid"], "size": int(frd.get("size") or DEFAULT_RAID_SIZE),
+                  "name": f"{frd.get('name', e['raid'])} · after {rd.get('name', instance)} {reg.local12(start)}",
+                  "schedule": (start + timedelta(minutes=at)).strftime("%a %H:%M"), "schedule_id": FOLLOW_SCHEDULE, "series": None, "confirm": False,
+                  "rosters": int(e["rosters"]), "follows": key, "reminders": OFF, "open_dm": False,
+                  # its lock, nudge and confirm fall at the same instants as part 0's (its start is `at` minutes later)
+                  "cutoff_soft_hours": t["cutoff_soft_hours"] + hours, "cutoff_hard_hours": t["cutoff_hard_hours"] + hours, "confirm_hours": t["confirm_hours"] + hours,
+                  "part": k, "starts": at}
+            for f in ("lineup", "followed_by", "message_id", "channel_id", "thread_id"):  # never part 0's sheet nor its chain
+                pt.pop(f, None)
+            if parts:
+                parts[-1]["followed_by"] = pkey
+            parts.append(pt)
+        t["lineup"] = [{**e, "starts": at} for e, at in zip(full, offsets)]
+        t["followed_by"] = parts[0]["key"]
+    reg.config.rosters.extend(parts)
     reg.config.rosters.append(t)
-    reg.save_config(f"run {key} ({t['name']}) created by {by}", notify=False)
+    reg.save_config(f"run {key} ({t['name']}) created by {by}" + (f" with {len(parts)} later raid{'s' if len(parts) > 1 else ''}" if parts else ""), notify=False)
     return t
 
 
@@ -719,12 +828,13 @@ def closed_run_refusal(rs: "RaidStore", ev: "RaidEvent | None") -> str | None:
 
 
 def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None,
-             schedule: str | None = None, follow: dict | None = None) -> "RaidEvent":
+             schedule: str | None = None, follow: dict | None = None, lineup: list[dict] | None = None) -> "RaidEvent":
     """Open (or find the live) run for `instance` at `start`: a schedule's run is found by its occurrence (live: handed
-    back; closed: RegistryError with closed_run_refusal's sentence, nothing written), a one-off or a test run by a live
-    run at that minute (live_at); else a new run (ensure_run + open_event per part). A rehearsal at that minute that
-    another tester opened is refused. `follow` ({raid, rosters}, or the schedule's own) opens the follow-on run with a
-    new night (design §5.62): no sheet, its answers the lead's."""
+    back, its missing later raids completed — complete_parts; closed: RegistryError with closed_run_refusal's sentence,
+    nothing written), a one-off or a test run by a live run at that minute (live_at); else a new run (ensure_run, then
+    open_event for part 0 and complete_parts for the rest). A rehearsal at that minute that another tester opened is
+    refused. `lineup` = the LATER raids [{raid, rosters[, starts]}] (None = the schedule's own; `follow` = a one-entry
+    alias): each opens as a part of the same run (design §5.62) — no sheet, its answers the first part's."""
     test = bool(cutoffs)
     if not schedule and not test:  # none named: the schedule that runs at that start, else a one-off (open_schedule)
         schedule = open_schedule(reg, instance, start, None)
@@ -739,17 +849,46 @@ def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by:
             who = reg.members.get(int(theirs)) if str(theirs).isdigit() else None
             raise RegistryError(f"{who.display_name if who else 'Another officer'} opened a test run at {reg.local12(start)} — "
                                 "join theirs or clear it (nothing was opened)")
+        complete_parts(reg, rs, have)  # an open cut off between its parts (a restart) is finished, once
         return have
-    t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow, rs=rs)
+    t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow, rs=rs, lineup=lineup)
     ev = open_event(reg, rs, t, start)
-    if t.get("followed_by") and not ev.followed_by:
-        ft = reg.config.roster(t["followed_by"]) or {}
-        fstart = start + timedelta(minutes=int(ft.get("starts") or 0))
-        fev = open_event(reg, rs, ft, fstart)
-        ev.followed_by = fev.key
-        ev.log.append(f"then {reg.raid_def(fev.instance).get('name', fev.instance)} ×{int(ft.get('rosters') or 1)} at {reg.local12(fstart)} from this signup")
-        rs.save(ev, "follow-on opened")  # the save syncs the follow-on's answers
+    complete_parts(reg, rs, ev)
     return ev
+
+
+def complete_parts(reg: Registry, rs: "RaidStore", first: "RaidEvent") -> list["RaidEvent"]:
+    """Open the later raids of a live FIRST part whose run dict exists and whose run file doesn't — an open cut off
+    between its parts (a restart, a failed write) — and link each part to the next (`followed_by`). Called by open_run
+    (new and found runs) and by the scheduler for every live first part each minute. Never posts a sheet (a later part
+    has none) and never makes a dict: the chain is the one ensure_run wrote. A part already on file in any state is
+    never opened again. Saves part 0 once when something changed (its save copies the answers onto the new parts).
+    → the parts opened now."""
+    if is_follow(first) or first.state in ("done", "cancelled"):
+        return []
+    dicts = later_dicts(reg, first)
+    if not dicts:
+        return []
+    opened: list[RaidEvent] = []
+    prev, changed = first, False
+    for t in dicts:
+        ev = next((e for e in rs.events.values() if e.team == t["key"]), None)
+        if ev is None:
+            at = dict_start(reg, first, t)
+            ev = open_event(reg, rs, t, at)
+            opened.append(ev)
+            first.log.append(f"then {reg.raid_def(ev.instance).get('name', ev.instance)} ×{int(t.get('rosters') or 1)} at {reg.local12(at)} from this signup")
+            changed = True
+        if prev.followed_by != ev.key:
+            prev.followed_by = ev.key
+            if prev is first:
+                changed = True
+            else:
+                rs.save(prev, "next raid linked")
+        prev = ev
+    if changed:
+        rs.save(first, "later raids opened" if opened else "later raids linked")  # the save syncs their answers
+    return opened
 
 
 def forget_test_members(reg: Registry, rs: "RaidStore", uids: list[int], by: str) -> list["RaidEvent"]:
@@ -963,8 +1102,8 @@ class RaidStore:
                 fn(self.key, ev.key)
             except Exception:  # noqa: BLE001 — a listener must never break a save
                 log.exception("run listener failed")
-        if ev.followed_by:  # a lead: its follow-on's answers follow (never the other way round)
-            sync_follow(self, ev)
+        if ev.followed_by and not is_follow(ev):  # a first part: every later part's answers follow (never the other way round)
+            sync_parts(self, ev)
 
     def live(self) -> list[RaidEvent]:
         return sorted([e for e in self.events.values() if e.state not in ("done", "cancelled")], key=lambda e: e.starts_at)
@@ -1166,28 +1305,34 @@ def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
     ev.regulars = [m.discord_id for m, _ in reg.regulars(ev.series)] if ev.series and not ev.test else []
 
 
-def sync_follow(rs: "RaidStore", lead: RaidEvent) -> bool:
-    """The follow-on's signups ARE the lead's (design §5.62): copied from the lead every time the lead is saved, the
-    members leaving after the lead as out (source callout, LEAVING_NOTE) — every out on the follow-on alone (their
-    own Leave, an officer's removal, a freed seat) is in `leaving` — and a row of someone with no row on the lead (a
-    pool member's fill yes) kept. Pins, the board and the rosters are the follow-on's own. Saves the follow-on only when something changed; returns whether it did."""
-    fev = follow_of(rs, lead)
-    if fev is None or fev.state in ("done", "cancelled"):
-        return False
-    want: dict[str, Signup] = {}
-    for uid, s in lead.signups.items():
-        c = s.model_copy()
-        if s.discord_id in fev.leaving and c.status != "out":
-            c.status, c.source, c.note, c.joined_at = "out", "callout", LEAVING_NOTE, None
-        want[uid] = c
-    for uid, s in fev.signups.items():  # a row of the follow-on's own (a pool member's yes to a follow-on fill) stays
-        want.setdefault(uid, s)
-    # the same answer pressed again only moves the lead's updated_at (the last touch): not a change to the follow-on
-    if {k: v.model_dump(exclude={"updated_at"}) for k, v in want.items()} == {k: v.model_dump(exclude={"updated_at"}) for k, v in fev.signups.items()}:
-        return False
-    fev.signups = want
-    rs.save(fev, "answers follow the lead")
-    return True
+def sync_parts(rs: "RaidStore", first: RaidEvent) -> bool:
+    """Every later part's signups ARE the first part's (design §5.62): copied from the first part every time it is
+    saved, onto each LIVE later part on its own — the members leaving that part as out (source callout, LEAVING_NOTE):
+    every out on that part alone (their own Leave, an officer's removal, a freed seat) is in its `leaving` — and a row
+    of someone with no row on the first part (a pool member's fill yes on that part) kept. Pins, the board and the
+    rosters are each part's own. Saves a part only when something changed; returns whether any did."""
+    changed = False
+    for fev in later_parts(rs, first):
+        if fev.state in ("done", "cancelled"):
+            continue
+        want: dict[str, Signup] = {}
+        for uid, s in first.signups.items():
+            c = s.model_copy()
+            if s.discord_id in fev.leaving and c.status != "out":
+                c.status, c.source, c.note, c.joined_at = "out", "callout", LEAVING_NOTE, None
+            want[uid] = c
+        for uid, s in fev.signups.items():  # a row of the part's own (a pool member's yes to a fill on it) stays
+            want.setdefault(uid, s)
+        # the same answer pressed again only moves the first part's updated_at (the last touch): not a change to the part
+        if {k: v.model_dump(exclude={"updated_at"}) for k, v in want.items()} == {k: v.model_dump(exclude={"updated_at"}) for k, v in fev.signups.items()}:
+            continue
+        fev.signups = want
+        rs.save(fev, "answers follow the first raid")
+        changed = True
+    return changed
+
+
+sync_follow = sync_parts  # the two-raid name (design §5.62)
 
 
 # ---------------------------------------------------------------- who a run is for (roster redesign Phase 1)
@@ -1484,7 +1629,7 @@ def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = CONFLICT_WINDO
     for other in rs.live():
         if other.key == ev.key:
             continue
-        if other.key in (ev.follows, ev.followed_by):  # a run and its follow-on share their people (design §5.62)
+        if same_event(other, ev):  # the raids of one run share their people (design §5.62)
             continue
         if abs((other.start - ev.start).total_seconds()) > window_hours * 3600:
             continue
@@ -2720,12 +2865,19 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     n_rosters = max(how_many_rosters(reg, players, size, rb, want=run_rosters(reg, ev)), -(-used // k) if used else 1)
     strategy = strategy or run_strategy(reg, ev)
     bonus = seat_bonus(reg, rs, ev, players)
-    lead = lead_of(rs, ev)
     lead_rostered: tuple[str, ...] = ()
-    if lead is not None and lead.all_rosters:  # a follow-on: the lead's rostered come first — the splits are the lead's roster split (design §5.62)
-        on_lead = {player_uid(lead, p) for p in lead.seated()}
-        lead_rostered = tuple(p.signup_name for p in players if player_uid(ev, p) in on_lead)
-        bonus = {**bonus, **{n: int(bonus.get(n, 0)) + LEAD_SEAT_BONUS for n in lead_rostered}}
+    if is_follow(ev):  # a later raid: the people rostered on the raids before it come first — its splits are theirs (design §5.62)
+        k = part_no(ev)
+        earlier = [p for p in event_parts(rs, ev) if part_no(p) < k and p.all_rosters]
+        times: dict[int, int] = {}  # discord id → how many earlier raids rostered them
+        for p in earlier:
+            for uid in {player_uid(p, x) for x in p.seated()} - {None}:
+                times[uid] = times.get(uid, 0) + 1
+        # every one of them gets LEAD_SEAT_BONUS (and the solver never charges them as an extra tank or healer); someone
+        # rostered on more of the earlier raids gets it once per raid, so a later raid keeps the night's longest players
+        on_earlier = {p.signup_name: times[u] for p in players if (u := player_uid(ev, p)) in times}
+        lead_rostered = tuple(on_earlier)
+        bonus = {**bonus, **{n: int(bonus.get(n, 0)) + LEAD_SEAT_BONUS * c for n, c in on_earlier.items()}}
     roster_bonus = None
     if strategy == "rotation":
         w = int(rd["weights"].get("sat_out", 2))
@@ -3032,12 +3184,12 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str, *, not
     if uid is not None:
         seat_gone(reg, ev, uid, why, notice=notice)  # their open Confirm ask closes (a later Confirm is refused) and their inbox hears why
     on_roster_change(rs.key, ev, removed=[uid if uid is not None else name], roster_of={uid if uid is not None else name: i})
-    if ev.followed_by and uid is not None:  # out of the lead is out of the night: the follow-on seat goes too (idempotent;
-        fev = follow_of(rs, ev)  # the scheduler's next fill tick covers it, RaidMixin.drop_seated asks at once)
-        if fev is not None and fev.state == "locked" and fev.seat_of(uid):
-            if fev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again (as the scheduler's expiry does)
-                fev.fill_state = "idle"
-            free_seat(reg, rs, fev, uid, why, notice=False)
+    if ev.followed_by and not is_follow(ev) and uid is not None:  # out of the first raid is out of the night: every later
+        for fev in later_parts(rs, ev):  # raid's seat goes too (idempotent; the scheduler's next fill tick covers it,
+            if fev.state == "locked" and fev.seat_of(uid):  # RaidMixin.drop_seated asks at once)
+                if fev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again (as the scheduler's expiry does)
+                    fev.fill_state = "idle"
+                free_seat(reg, rs, fev, uid, why, notice=False)
     return p
 
 
@@ -3272,9 +3424,22 @@ def cancel_effects(reg: Registry, ev: RaidEvent) -> dict:
             "open_asks": [m.display_name for m, _a in open_placement_rows(reg, ev)] if locked else [],
             "fill_asks": [a.display_name for a in ev.fill_asks if a.pending],
             "answered": len([s for s in ev.signups.values() if s.status in STATUSES]),
-            # a lead's cancel takes its follow-on with it; a follow-on cancelled alone leaves its lead standing
-            "follow": reg.raid_def((follow_dict(reg, ev) or {}).get("instance")).get("name") if ev.followed_by else None,
-            "lead": reg.raid_def((lead_dict(reg, ev) or {}).get("instance")).get("name") if ev.follows else None}
+            # a cancel on any raid of a run cancels the whole run: `later` = the raids after the first (names, in order),
+            # `follow` = them in words, `lead` = the first raid's name when `ev` is a later raid
+            **_cancel_lineup(reg, ev)}
+
+
+def _cancel_lineup(reg: Registry, ev: RaidEvent) -> dict:
+    lt = lead_dict(reg, ev) if is_follow(ev) else reg.config.team(ev.team)
+    name = lambda t: reg.raid_def(t.get("instance")).get("name", t.get("instance"))  # noqa: E731
+    later: list[str] = []
+    if lt is not None:
+        first = RaidEvent(key=lt["key"], team=lt["key"], instance=lt.get("instance"), starts_at=ev.starts_at)
+        later = [name(t) for t in later_dicts(reg, first)]
+    if not later and ev.followed_by and (ft := follow_dict(reg, ev)):  # a dict chain gone (cleaned up): the next raid at least
+        later = [name(ft)]
+    return {"later": later, "follow": join_words(later) if later and not is_follow(ev) else None,
+            "lead": name(lt) if is_follow(ev) and lt is not None else None}
 
 
 # ---------------------------------------------------------------- opening: which run a picked time is (design B4)
@@ -3342,7 +3507,10 @@ def open_when(reg: Registry, instance: str, value: str | None, schedule: str | N
     if not nxt:
         fo = reg.first_open(instance)
         has = [s for s in reg.schedules(instance) if s["kind"] != "pickup" and (sched is None or s["id"] == sid)]
-        why = (f"its slots all fall before it opens on {reg.local12(fo)}" if has and fo and fo > reg.now_local() else "it has no recurring slots yet")
+        later_fo = [t for s in has for e in schedule_lineup(instance, s)[1:] if (t := reg.first_open(e["raid"])) and t > reg.now_local()]
+        why = (f"its slots all fall before it opens on {reg.local12(fo)}" if has and fo and fo > reg.now_local()
+               else f"a later raid of its run first opens {reg.local12(min(later_fo))}" if later_fo  # C8: those nights are skipped
+               else "it has no recurring slots yet")
         raise RegistryError(f"No next slot for this raid: {why}. Pick a date and time instead, or set it up on the Raids page.")
     return nxt[0][1], nxt[0][0]["id"], ""
 
@@ -3359,35 +3527,46 @@ def dst_words(reg: Registry, note: str, start: datetime) -> str:
 OPEN_FOLLOW_REFUSAL = "A follow-on can't be added to a run that is already open."
 
 
-def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | None = None, schedule: str | None = None, follow: dict | None = None) -> dict:
+def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | None = None, schedule: str | None = None, follow: dict | None = None,
+                 lineup: list[dict] | None = None) -> dict:
     """What Open would do, before anything is written (POST /api/raid/{rid}/open/preview; the wizard's confirm shows
     the same facts): {kind, schedule, schedule_name, occurrence, start (ISO — the exact instant Open must carry back), label
     (12-hour guild time), when_note (the DST line or ""), exists (the live run's state at that key, or None), channel
     (the signup channel id the sheet posts in, or None), rules (what kind of run it is, in sentences), past, closed
-    (done | cancelled when that time's run is closed — Open is refused), refusal (the sentence why, or None), follow
-    ({raid, name, rosters, when} — `follow` given, else the schedule's own; None on a one-off without one; a run already
-    open at that time: ITS follow-on, or None) and follow_line (the sentence the confirm prints: "Then Barrow Deeps ×2
-    at 9:30 PM, from the same signup.", OPEN_FOLLOW_REFUSAL when a follow-on was asked of a run already open, or "")}."""
+    (done | cancelled when that time's run is closed — Open is refused), refusal (the sentence why, or None), later
+    ([{raid, name, rosters, when}] — the later raids: `lineup` given (or `follow`, one entry), else the schedule's own;
+    a run already open at that time: ITS later raids), follow (later[0] or None), follow_line (the sentence the confirm
+    prints: "Then Barrow Deeps ×2 at 9:30 PM, from the same signup.", OPEN_FOLLOW_REFUSAL when later raids were asked of
+    a run already open, or "") and before_open (consequences.before_first_open_sentence: a raid of the lineup that
+    first opens after its start, or None — C9)}."""
+    from .consequences import before_first_open_sentence
+
     start, sid, note = open_when(reg, instance, value, schedule)
     w = which_run(reg, instance, start, sid)
     ev = find_run(reg, rs, instance, start, w["schedule"])
     live = ev if ev is not None and ev.state not in ("done", "cancelled") else None
     refusal = closed_run_refusal(rs, ev)
     rules = " ".join(open_rules(reg, instance, w["schedule"], w["kind"]))
-    fw = follow if follow is not None else (reg.schedule_def(instance, w["schedule"])["schedule"].get("follow") if w["schedule"] != ADHOC_SCHEDULE else None)
-    fstart = follow_start(reg, instance, start) if fw else None
+    asked = lineup if lineup is not None else ([follow] if follow else None)
+    if asked is None:
+        asked = schedule_lineup(instance, reg.schedule_def(instance, w["schedule"])["schedule"])[1:] if w["schedule"] != ADHOC_SCHEDULE else []
+    later: list[tuple[dict, datetime]] = []
     follow_line = ""
-    if live is not None:  # Open points at the run already there: its own follow-on, never the one asked for (design §5.62)
-        asked, fev = fw, follow_of(rs, live)
-        ft = follow_dict(reg, live) if fev is not None else None
-        fw = {"raid": fev.instance, "rosters": int(ft.get("rosters") or 1) if ft else 1} if fev is not None else None
-        fstart = fev.start if fev is not None else None
-        if fw is None and asked:
+    if live is not None:  # Open points at the run already there: its own later raids, never the ones asked for (design §5.62)
+        later = [({"raid": t.get("instance"), "rosters": int(t.get("rosters") or 1)}, dict_start(reg, live, t)) for t in later_dicts(reg, live)]
+        if not later and asked:
             follow_line = OPEN_FOLLOW_REFUSAL
-    fjson = {"raid": fw["raid"], "name": reg.raid_def(fw["raid"]).get("name", fw["raid"]), "rosters": int(fw.get("rosters") or 1), "when": reg.local12(fstart)} if fw else None
-    if fw:
-        follow_line = f"Then {reg.follow_words(fw)} at {reg.local12(fstart, '%I:%M %p')}, from the same signup."
-    return {**w, "follow": fjson, "follow_line": follow_line, "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
+    elif asked:
+        full = [{"raid": instance, "rosters": 1}, *asked]
+        offsets = reg.lineup_offsets(full)
+        later = [(e, start + timedelta(minutes=at)) for e, at in zip(full[1:], offsets[1:])]
+    ljson = [{"raid": e["raid"], "name": reg.raid_def(e["raid"]).get("name", e["raid"]), "rosters": int(e.get("rosters") or 1), "when": reg.local12(at)}
+             for e, at in later]
+    if later:
+        follow_line = "Then " + ", then ".join(f"{reg.follow_words(e)} at {reg.local12(at, '%I:%M %p')}" for e, at in later) + ", from the same signup."
+    before = None if live is not None else before_first_open_sentence(reg, [{"raid": instance, "rosters": 1}, *asked], start)
+    return {**w, "later": ljson, "follow": ljson[0] if ljson else None, "follow_line": follow_line, "before_open": before,
+            "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
             "closed": ev.state if refusal else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
 
@@ -3435,7 +3614,7 @@ def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime |
             rows.append({"schedule": s["id"], "schedule_name": s.get("name") or s["id"], "start": reg.local12(t), "start_iso": t.isoformat(),
                          "occurrence": occ, "open_key": None, "closed": ev is not None,
                          "opens": reg.local12(opens), "opens_iso": opens.isoformat(), "needs_channel": no_channel and opens <= now,
-                         "can_open": why is None, "why": why, "follow": reg.follow_words(s.get("follow"))})
+                         "can_open": why is None, "why": why, "follow": reg.later_words(schedule_lineup(instance, s)[1:])})
             if len(rows) >= n:
                 break
         out += rows

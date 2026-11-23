@@ -133,7 +133,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     ins, subs, outs = (ev.by_status(s) for s in ("in", "sub", "out"))
     rd = reg.raid_def(ev.instance)
     name = rd.get("name", ev.instance or "raid")
-    then = rc.follow_words_of(reg, ev)  # a lead: "Hyjal Summit, then Barrow Deeps ×2" (design §5.62)
+    then = rc.follow_words_of(reg, ev)  # a first raid: "Hyjal Summit, then Barrow Deeps ×2, then Onyxia's Lair" (design §5.62)
     if then:
         name = f"{name}, then {then}"
     size = int(team.get("size") or rd.get("size") or 20)
@@ -168,7 +168,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         _soft, hard, confirm = run_times(reg, ev, team)
         confirms = rc.run_confirms(reg, ev)
         e.title = f"{tag}{name}"
-        e.description = (f"<t:{unix}:F> · <t:{unix}:R>" + (f"\nthen {then} <t:{int(rc.follow_start(reg, ev.instance, ev.start).timestamp())}:t>" if then else "") + f"\n**{len(ins)}** / {size * want}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
+        e.description = (f"<t:{unix}:F> · <t:{unix}:R>" + "".join(f"\nthen {reg.follow_words({'raid': t.get('instance'), 'rosters': t.get('rosters') or 1})} <t:{int(rc.dict_start(reg, ev, t).timestamp())}:t>" for t in rc.later_dicts(reg, ev)) + f"\n**{len(ins)}** / {size * want}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
                          + f"\n🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
         by_cls: dict[str, list] = {}
         for sg in ins:
@@ -559,10 +559,8 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
         body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] - r['have']}" for r in short))
         hints = [x["hint"] for x in rc.cover_hints(short)] if officer else []  # names of who could cover: officers only; "not on the sheet" once
         body.extend("-# " + x for x in hints)  # a line each ("Could tank: … · …" has its own dots); `-#` only renders at the start of a line
-    fshort = rc.follow_short(reg, ev)  # the follow-on's tanks and healers, counted on this sheet's Join answers
-    if fshort:
-        fid = rc.follow_dict(reg, ev)["instance"]
-        body.append(f"**{reg.raid_def(fid).get('name', fid)} follow-on** short " + "   ".join(f"{ico('role', r)} {k}" for r, k in fshort.items()))
+    for fname, fshort in rc.parts_short(reg, ev):  # each later raid's tanks and healers, counted on this sheet's Join answers
+        body.append(f"**{fname} follow-on** short " + "   ".join(f"{ico('role', r)} {k}" for r, k in fshort.items()))
     missing = [b for b in h["buffs"] if not b["providers"]]
     if missing:
         body.append("⛔ " + " ".join(ico("buff", b["id"]) for b in missing if ico("buff", b["id"])))

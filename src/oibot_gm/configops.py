@@ -940,7 +940,7 @@ def _schedule_fields(setting: str, value: str | None) -> dict:
         if not sep:
             raise RegistryError('lockout is "<days> at <time>", e.g. "1, 3 at 20:00"')
         return {"kind": "lockout", "days": days, "time": at.strip()}
-    return {setting: _typed(value) if setting in ("weights", "follow") else value}
+    return {setting: _typed(value) if setting in ("weights", "follow", "lineup") else value}
 
 
 def _typed(value):
@@ -1000,6 +1000,11 @@ def _schedule_words(reg: Registry, rid: str, fields: dict, sid: str | None = Non
         elif f == "follow":  # the text 'barrow_deeps x2' or the site's {raid, rosters}
             fw = schedule_value(f, v)
             out.append(f"then {reg.follow_words(fw)}" if fw else "no follow-on")
+        elif f == "lineup":  # a new schedule's whole lineup of three or four raids (_schedule_ops)
+            from .registry import parse_lineup
+
+            rows = parse_lineup(_typed(v))
+            out.append(f"{reg.follow_words(rows[0])}, then {reg.later_words(rows[1:])}" if len(rows) > 1 else reg.follow_words(rows[0]))
         else:
             out.append(f"{f} “{v}”")
     return ", ".join(out)
@@ -3802,9 +3807,14 @@ def _schedule_ops(reg: Registry, target: str | None, fields: dict) -> list[Confi
         if raid and str(raid).strip().lower() != rows[0]["raid"]:
             raise RegistryError("The lineup's first raid and the raid named differ. Name one raid.")
         raid = rows[0]["raid"]
-        fields.setdefault("rosters", rows[0]["rosters"])
-        if len(rows) > 1:
-            fields.setdefault("follow", rows[1])  # a lineup creates (its raid is named): an edit uses rosters / follow
+        if len(rows) > 2:  # three or four raids: the whole lineup in one field (its raid is named, so it creates)
+            import json
+
+            fields.setdefault("lineup", json.dumps(rows))
+        else:
+            fields.setdefault("rosters", rows[0]["rosters"])
+            if len(rows) > 1:
+                fields.setdefault("follow", rows[1])  # a lineup creates (its raid is named): an edit uses rosters / follow
     if raid:
         head.append(ConfigOp(op="schedule_set", target=sid, field="raid", value=str(raid).strip().lower()))
     return head + [ConfigOp(op="schedule_set", target=sid, field=str(f).strip().lower(), value=_value_text(v)) for f, v in fields.items()]

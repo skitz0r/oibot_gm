@@ -176,9 +176,15 @@ class RaidSchedulerMixin:
             await self._warn_unopened(reg, now)
         # every live run is processed even when its sheet channel can't be resolved: the steps that post to a
         # channel (refresh_sheet, post_run_update, cards) fail soft on their own
+        for ev in rs.live():  # an open cut off between its raids (a restart) gets its missing later raids, once
+            if not rc.is_follow(ev):
+                try:
+                    rc.complete_parts(reg, rs, ev)
+                except Exception:  # noqa: BLE001 — never stops the guild's minute; tried again at the next
+                    log.exception("later raids of %s not opened", ev.key)
         for ev in rs.live():
-            if rc.is_follow(ev) and (lead := rc.lead_of(rs, ev)) is not None and lead.state == "open":
-                continue  # a follow-on waits for its lead's lock (design §5.62): no health card, no lock of its own
+            if rc.is_follow(ev) and any(p.state == "open" for p in rc.event_parts(rs, ev) if rc.part_no(p) < rc.part_no(ev)):
+                continue  # a later raid waits until every raid before it is locked (design §5.62): no health card, no lock of its own
             team = rc.run_team(reg, ev)
             officer_ch = self.officer_channel(reg, ev)
             soft, hard, confirm = run_times(reg, ev, team)

@@ -119,13 +119,10 @@ def _cancel(reg: Registry, ev: rc.RaidEvent) -> list[str]:
         return closed
     fx = rc.cancel_effects(reg, ev)
     fills = len(fx["fill_asks"])
-    if fx.get("lead"):  # a follow-on has no sheet of its own and the night's sheet stays: only its rosters go
-        mine = reg.raid_def(ev.instance).get("name", ev.instance)
-        r = len(fx["rostered"])
-        head = (f"The {mine} follow-on is called off for the people on it." if not fx["locked"] else
-                f"The {mine} follow-on is called off for the one person rostered on it." if r == 1 else
-                f"The {mine} follow-on is called off for the {r} people rostered on it.")
-        return [head, f"The {fx['lead']} run goes ahead, and nobody gets a DM.", "A cancelled run can't be reopened."]
+    if fx.get("lead"):  # a later raid: a cancel on any raid of a run cancels the whole run (its sheet is the first raid's)
+        with_ = [n for n in fx["later"] if n] or [reg.raid_def(ev.instance).get("name", ev.instance)]
+        return [f"The whole {fx['lead']} run is cancelled, with {rc.join_words(with_)}.",
+                "Nobody gets a DM, but the sheet and every ask card say Cancelled.", "A cancelled run can't be reopened."]
     if not fx["locked"]:
         n = fx["answered"]
         head = (f"The sheet closes for the {_n(n, 'person', 'people')} who answered" if n > 1 else
@@ -138,8 +135,25 @@ def _cancel(reg: Registry, ev: rc.RaidEvent) -> list[str]:
         if not asks:
             head = head.replace("The sheet closes, the", "The sheet closes and the", 1)
     if fx.get("follow"):
-        return [head, f"The {fx['follow']} follow-on is cancelled with it, and nobody gets a DM.", "A cancelled run can't be reopened."]
+        many = len(fx["later"]) > 1
+        return [head, f"The {fx['follow']} follow-on{'s are' if many else ' is'} cancelled with it, and nobody gets a DM.", "A cancelled run can't be reopened."]
     return [head, "Nobody gets a DM, but the sheet and every ask card say Cancelled.", "A cancelled run can't be reopened."]
+
+
+def before_first_open_sentence(reg: Registry, lineup: list[dict], start) -> str | None:
+    """C9: the open confirm's line when a raid of the run's `lineup` (the whole lineup, the first raid first) would begin
+    before that raid first opens — the first such raid, in words; None when every raid is open by its start."""
+    from datetime import timedelta
+
+    try:
+        offsets = reg.lineup_offsets(lineup)
+    except RegistryError:
+        return None
+    for e, at in zip(lineup, offsets):
+        fo = reg.first_open(e["raid"])
+        if fo is not None and fo > start + timedelta(minutes=at):
+            return f"{reg.raid_def(e['raid']).get('name', e['raid'])} first opens {reg.local12(fo)}, after this run starts."
+    return None
 
 
 def leave_follow_consequence(reg: Registry, ev: rc.RaidEvent, seated: bool, lead_seated: bool) -> list[str]:

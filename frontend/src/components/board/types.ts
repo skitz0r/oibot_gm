@@ -50,6 +50,10 @@ export interface OpenPreview {
   closed?: "done" | "cancelled" | null; refusal?: string | null;  // that time's run is closed: Open is refused (rc.closed_run_refusal)
   /** the follow-on Open would add (its raid id and name, rosters, start in words) and that in one line ("then Barrow Deeps ×2 at 9:30 PM" | "") */
   follow?: { raid: string; name: string; rosters: number; when: string } | null; follow_line?: string;
+  /** every later raid of the run (up to three), in order */
+  later?: { raid: string; name: string; rosters: number; when: string }[];
+  /** a raid of the run first opens after its start, in one sentence (consequences.before_first_open_sentence), else null */
+  before_open?: string | null;
 }
 
 

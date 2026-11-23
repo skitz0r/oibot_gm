@@ -149,6 +149,7 @@ function StartAdhoc({ r, others, busy, onAct }: { r: RaidRuns; others: { id: str
               <Text size="sm" c="dimmed">{p.rules}</Text>
               {p.when_note && <Text size="sm" c="dimmed">{p.when_note}</Text>}
               {p.follow_line && <Text size="sm">{p.follow_line}</Text>}
+              {p.before_open && <Text size="sm">{p.before_open}</Text>}
               {p.exists && <Text size="sm" c="dimmed">A run for that time already exists ({p.exists}); Open points you at it instead of making a second.</Text>}
               <Text size="sm" c="dimmed">{p.posts}</Text>
             </Stack>
@@ -175,7 +176,7 @@ function UpcomingRows({ r, busy, onAct }: { r: RaidRuns; busy: string | null; on
     let p: OpenPreview;
     try { p = await api.post<OpenPreview>(`/api/raid/${r.id}/open/preview`, { start: u.start_iso, schedule: u.schedule }); } catch (err) { fail(err); return; }
     if (p.refusal) { fail(new Error(p.refusal)); return; }
-    const message = [`${p.label} guild time · ${yourClock(p.start)} your time`, p.rules, p.posts].join("\n");  // the server's words; the browser adds only the reader's own clock
+    const message = [`${p.label} guild time · ${yourClock(p.start)} your time`, p.rules, p.follow_line, p.before_open, p.posts].filter(Boolean).join("\n");  // the server's words; the browser adds only the reader's own clock
     if (!(await ask({ title: `Open ${r.name} · ${u.start} now?`, message, confirmLabel: "Open now" }))) return;
     await onAct(`up${u.schedule}${u.occurrence}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: u.schedule, occurrence: p.occurrence });
   }

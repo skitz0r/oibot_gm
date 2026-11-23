@@ -789,12 +789,16 @@ class RaidMixin:
         for t in list(cfg.rosters):
             if not t.get("ephemeral"):
                 continue
-            if t.get("follows") and cfg.team(t["follows"]) is None:  # an orphaned follow-on: its lead's entry is gone
+            if t.get("follows") and cfg.team(t["follows"]) is None:  # an orphaned later raid: its first raid's entry is gone
                 cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
                 gone.append(t["key"])
                 continue
-            # a lead's entry waits for its follow-on's run too, so the pair goes together; a follow-on goes on its own
-            keys = {t["key"], t.get("followed_by")} - {None}
+            # an entry waits for the runs of every raid after it too, so a run's raids go together (design §5.62): the
+            # first raid's entry outlives every later raid's run, so a later raid is never an orphan while it plays
+            keys, nxt = {t["key"]}, t.get("followed_by")
+            while nxt and nxt not in keys:
+                keys.add(nxt)
+                nxt = (cfg.team(nxt) or {}).get("followed_by")
             evs = [e for e in rs.events.values() if e.team in keys]
             if evs and all(e.state == "cancelled" or (e.state == "done" and not rc.closed_recently(e)) for e in evs):
                 cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
@@ -851,8 +855,8 @@ class RaidMixin:
         and pins take no lock while the sheet is open, so one written during the solve (a No thanks, a pin out) makes
         the lock solve again on the live run (rc.solve_inputs), up to rc.LOCK_SOLVES times; still moving after that,
         the lock fails and the sheet stays open — nobody is rostered from answers they already changed."""
-        if rc.is_follow(ev) and (lead := rc.lead_of(rs, ev)) is not None and lead.state == "open":
-            raise RegistryError(f"Lock {run_title(reg, lead)} — its lock builds the follow-on too")
+        if rc.is_follow(ev) and any(p.state == "open" for p in rc.event_parts(rs, ev) if rc.part_no(p) < rc.part_no(ev)):
+            raise RegistryError(rc.LATER_PART_LOCK.format(first=run_title(reg, rc.first_part(rs, ev))))
         team = rc.run_team(reg, ev)
         async with self.solving(reg, ev.key), self.board_lock(reg, ev.key):
             if ev.state != "open":
@@ -934,30 +938,49 @@ class RaidMixin:
                 await sig.send(f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "") + f" is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}", allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:  # noqa: BLE001
                 log.warning("lock line failed (%s): %s", ev.key, e)
-        tail = await self.lock_follow(reg, rs, ev, by)
+        first = rc.first_part(rs, ev)
+        chaining: set = self.__dict__.setdefault("_parts_locking", set())
+        tail = None if (reg.key, first.key) in chaining else await self.lock_parts(reg, rs, first, by)
         return f"{ev.key}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)" + (f" · {tail}" if tail else "")
 
-    async def lock_follow(self, reg, rs, ev, by: str) -> str | None:
-        """The lead's lock builds the follow-on too (design §5.62): once
-        the lead is locked, the follow-on solves from the night's answers with the lead's rostered preferred
-        (rc.LEAD_SEAT_BONUS), flips to locked and posts its own lock cards; it never confirms. None when the run has no
-        live open follow-on. A failed follow-on solve leaves it open with its lock_error, like any run — the scheduler
-        retries it, the lead stands. Anything the follow-on's lock raises (rc.SolverBusy, a cancel between the state
-        check and the lock, a Discord error) never turns the lead's lock into a failure: one ops warn per follow-on and
-        the tail "follow-on not locked: <why>" — the lead's line stays a success."""
-        fev = rc.follow_of(rs, ev)
-        if fev is None or fev.state != "open":
+    async def lock_parts(self, reg, rs, first, by: str) -> str | None:
+        """The first raid's lock builds every later raid of the run (design §5.62), in order: each solves from the run's
+        answers with the people rostered on the raids before it preferred (rc.LEAD_SEAT_BONUS), flips to locked and posts
+        its own lock cards; it never confirms. A short role never stops one (the solver rosters whoever can play and the
+        part locks short). It stops at the first part that stays open: a failed solve leaves that part open with its
+        lock_error, like any run, and every part after it waits (the scheduler retries the first open part, then the
+        rest). Anything a part's lock raises (rc.SolverBusy, a cancel between the state check and the lock, a Discord
+        error) never turns an earlier lock into a failure: one ops warn per part and the tail "follow-on not locked:
+        <why>". Also called after a later part's own lock (the scheduler's retry) to carry on down the chain. None when
+        nothing was tried. → the parts' lines, joined."""
+        if first.state != "locked":
             return None
+        chaining: set = self.__dict__.setdefault("_parts_locking", set())
+        chaining.add((reg.key, first.key))
+        tails: list[str] = []
         try:
-            return await self.lock_run(reg, rs, fev, by=by)
-        except Exception as e:  # noqa: BLE001 — the lead is locked whatever happens to its follow-on
-            why = str(e) or type(e).__name__
-            log.warning("follow-on lock failed (%s after %s): %s", fev.key, ev.key, why)
-            warned: set = self.__dict__.setdefault("_follow_lock_warned", set())
-            if (reg.key, fev.key) not in warned:
-                warned.add((reg.key, fev.key))
-                await self.ops.emit(reg.config, "warn", f"{fev.key}: follow-on not locked with {ev.key}: {why}")
-            return f"follow-on not locked: {why}"
+            for fev in rc.later_parts(rs, first):
+                if fev.state == "locked":
+                    continue
+                if fev.state != "open":  # a later part cancelled or ended on its own (older runs): nothing after it is built
+                    break
+                try:
+                    line = await self.lock_run(reg, rs, fev, by=by)
+                except Exception as e:  # noqa: BLE001 — an earlier part stays locked whatever happens to a later one
+                    why = str(e) or type(e).__name__
+                    log.warning("later raid lock failed (%s after %s): %s", fev.key, first.key, why)
+                    warned: set = self.__dict__.setdefault("_follow_lock_warned", set())
+                    if (reg.key, fev.key) not in warned:
+                        warned.add((reg.key, fev.key))
+                        await self.ops.emit(reg.config, "warn", f"{fev.key}: follow-on not locked with {first.key}: {why}")
+                    tails.append(f"follow-on not locked: {why}")
+                    break
+                tails.append(line)
+                if fev.state != "locked":  # its solve failed: it stays open with its lock_error, the parts after it wait
+                    break
+        finally:
+            chaining.discard((reg.key, first.key))
+        return " · ".join(tails) or None
 
     async def confirm_one(self, reg, ev, sg, roster_i: int, group_i: int, by: str) -> bool:
         """Seat one signup on the run's roster and ask them to confirm: by DM, or — DMs off — as a pending ask on the
@@ -1179,10 +1202,11 @@ class RaidMixin:
         the whole night too (design §5.62): the follow-on's row is already out (rc.sync_follow), and
         a seat they hold on the locked follow-on is freed the way the lead's is (drop_seated: thread line, fill). A seat
         freed on the lead takes the follow-on's with it in drop_seated / rc.free_seat."""
-        fev = rc.follow_of(rs, lead)
-        if fev is None or sheet_state(fev) != "locked" or not fev.seat_of(m):
+        if rc.is_follow(lead):
             return
-        await self.drop_seated(reg, rs, fev, rc.run_team(reg, fev), m, why, note)
+        for fev in rc.later_parts(rs, lead):  # every later raid of the run where they hold a seat
+            if sheet_state(fev) == "locked" and fev.seat_of(m):
+                await self.drop_seated(reg, rs, fev, rc.run_team(reg, fev), m, why, note)
 
     async def stay_for_follow(self, reg, rs, ev, m, by: str, by_id: int | None = None, via: str = "discord") -> str:
         """I'm staying: undo leaving early on a follow-on (rc.stay_for_follow). The site's Me row (POST /api/me/run/{key}/stay) is its one caller."""
@@ -1315,8 +1339,8 @@ class RaidMixin:
         """A rostered member is out after lock: free the seat, edit their ask card, post it, ask the bench to fill.
         `notice=False`: their own act (rc.seat_gone writes them no notice about it). On a lead the follow-on's seat goes
         too (rc.free_seat), and the follow-on's thread line and fill follow the lead's (design §5.62)."""
-        fev = rc.follow_of(rs, ev) if ev.followed_by else None
-        follow_held = fev is not None and sheet_state(fev) == "locked" and fev.seat_of(m) is not None
+        held = ([p for p in rc.later_parts(rs, ev) if sheet_state(p) == "locked" and p.seat_of(m) is not None]
+                if ev.followed_by and not rc.is_follow(ev) else [])  # out of the first raid is out of every later one
         rc.free_seat(reg, rs, ev, m, why, notice=notice)
         await self.seat_released(reg, ev, m, why)
         if announce:
@@ -1327,18 +1351,19 @@ class RaidMixin:
             sent, nd = await self.run_fill(reg, rs, ev, team, by=why)
             if sent:
                 await self.post_run_update(reg, ev, f"🧩 replacement for {m.display_name}:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
-        if follow_held:  # rc.free_seat freed it with the lead's: the follow-on's own line, cards and fill
+        for fev in held:  # rc.free_seat freed them with the first raid's: each later raid's own line, cards and fill
             await self.drop_seated(reg, rs, fev, rc.run_team(reg, fev), m, why, note, announce, notice=False)
 
     # ---- opening and cancelling runs (commands, the web and plain-text ops share these)
-    async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None, follow: dict | None = None) -> rc.RaidEvent:
+    async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None, follow: dict | None = None,
+                                lineup: list[dict] | None = None) -> rc.RaidEvent:
         """Open (or find) the run for `instance` at `start` (from `schedule`, None = the schedule with a run at exactly
         that start, else a one-off — rc.open_run), post its
         sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
         place it), and say so on the ops feed. A start more than a few minutes in the past is refused
         (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts."""
         rc.refuse_past_start(reg, start)
-        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow)
+        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow, lineup=lineup)
         channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel and not ev.message_id:
             await self.post_sheet(reg, rs, ev, channel)
@@ -1347,7 +1372,7 @@ class RaidMixin:
             if officer_ch is not None:
                 await self.post_health(reg, rs, ev, officer_ch, nudge=False, early=True)
         await self.ops.emit(reg.config, "info", f"{by} opened {ev.key} ({len(ev.signups)} pre-filled out from absences)" + ("" if ev.message_id else " — no signup channel: sheet not posted")
-                             + (f" then {reg.raid_def(fev.instance).get('name', fev.instance)} {fev.key}" if (fev := rc.follow_of(rs, ev)) else ""))
+                             + "".join(f" then {reg.raid_def(p.instance).get('name', p.instance)} {p.key}" for p in rc.later_parts(rs, ev)))
         return ev
 
     async def open_test_run(self, reg, rs, raid: str, *, start_in: int, nudge_in: int, lock_in: int, confirm_in: int, dm: bool, by: str, by_id: int | None,
@@ -1387,7 +1412,13 @@ class RaidMixin:
         The fill / pre-lock asks close under plan_lock (every writer of ev.fill_asks holds it), taken AFTER the state
         flip: a fan-out in flight sees the cancel before its next DM (RaidMixin._send_asks), stops, edits a card that
         went out meanwhile, and releases the lock — so the cancel waits for one DM at most, never a whole batch.
-        Clearing the test bench passes notify=False: its cancels post nothing where real members read."""
+        Clearing the test bench passes notify=False: its cancels post nothing where real members read.
+        A run of several raids (design §5.62) is cancelled whole from ANY of its raids: a later raid's cancel is its first
+        raid's, and the first raid's takes every live later raid with it — one audit line naming them all."""
+        if audit and rc.is_follow(ev):
+            first = rc.first_part(rs, ev)
+            if first is not ev and first.state not in ("done", "cancelled"):
+                return await self.cancel_run(reg, rs, first, by, reason, notify=notify, by_id=by_id, via=via, audit=audit)
         async with self.board_lock(reg, ev.key):
             if ev.state in ("done", "cancelled"):
                 raise RegistryError(f"{run_title(reg, ev)} is already {ev.state} — nothing was changed.")
@@ -1420,20 +1451,13 @@ class RaidMixin:
                 posted = True
             except Exception as e:  # noqa: BLE001
                 log.warning("cancel line failed (%s): %s", ev.key, e)
-        fev = rc.follow_of(rs, ev)
-        tail = ""
-        if fev is not None and fev.state not in ("done", "cancelled"):  # the lead's cancel takes its follow-on with it (design §5.62)
-            await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False)
-            tail = f" and its follow-on {fev.key}"
-        if ev.follows and audit and (lead := rc.lead_of(rs, ev)) is not None and lead.followed_by == ev.key:  # cancelled on its own: the lead stands alone
-            lead.followed_by = None
-            lead.log.append(f"the {reg.raid_def(ev.instance).get('name', ev.instance)} follow-on was cancelled; this run stands")
-            rs.save(lead, "follow-on cancelled")
-            t = reg.config.team(lead.team)
-            if t is not None and t.get("followed_by"):
-                t.pop("followed_by", None)
-                reg.save_config(f"run {lead.team}: follow-on cancelled", notify=False)
-            await self.refresh_sheet(reg, lead)
+        gone = []
+        if not rc.is_follow(ev):  # the first raid's cancel takes every live later raid of the run with it (design §5.62)
+            for fev in rc.later_parts(rs, ev):
+                if fev.state not in ("done", "cancelled"):
+                    await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False)
+                    gone.append(fev.key)
+        tail = (f" and its follow-on {gone[0]}" if len(gone) == 1 else f" and its follow-ons {', '.join(gone)}") if gone else ""
         if audit:
             await ops_mod.audited(self.ops, reg, by, f"cancelled {ev.key}{tail}" + (f": {reason}" if reason else ""), via=via, level="warn", by_id=by_id)
         told = [f"{len(cards) + len(fills)} open ask card(s) now say Cancelled"] if cards or fills else []

@@ -24,7 +24,7 @@ def test_one_raid_one_roster_stores_no_extras():
 
 @pytest.mark.parametrize("bad", [
     [], "barrow_deeps",
-    [{"raid": "a", "rosters": 1}, {"raid": "b", "rosters": 1}, {"raid": "c", "rosters": 1}],
+    [{"raid": r, "rosters": 1} for r in "abcde"],  # LINEUP_MAX = 4 (phase 3, Task 4)
     [{"rosters": 1}],
     [{"raid": "a", "rosters": 0}], [{"raid": "a", "rosters": 5}],
     [{"raid": "a", "rosters": 1, "starts": 60}],
@@ -34,6 +34,16 @@ def test_one_raid_one_roster_stores_no_extras():
 def test_a_bad_lineup_is_refused(bad):
     with pytest.raises(RegistryError):
         R.parse_lineup(bad)
+
+
+def test_a_four_raid_row_and_its_stored_entry_round_trip():
+    row = R.norm_schedule({"id": "tue", "kind": "weekly", "slots": ["Tue 19:30"], "follow": "barrow_deeps x2",
+                           "then": [{"raid": "onyxias_lair", "rosters": 1}, {"raid": "x", "rosters": 2, "starts": 600}]})
+    entry = R.to_stored_schedule("hyjal_summit_forever", row)
+    assert [e["raid"] for e in entry["lineup"]] == ["hyjal_summit_forever", "barrow_deeps", "onyxias_lair", "x"] and "then" not in entry
+    assert R.from_stored_schedule(entry) == ("hyjal_summit_forever", row)
+    with pytest.raises(RegistryError, match="A run holds at most 4 raids."):
+        R.parse_lineup([{"raid": r} for r in "abcde"])
 
 
 def test_a_second_entry_may_carry_its_start():

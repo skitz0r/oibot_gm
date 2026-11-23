@@ -197,6 +197,13 @@ def run_cases(reg, rs, ms):
             lock_with_board(reg, rs, lead, [m.display_name for m in ms[:10]], hours_to_confirm=2)
             lock_with_board(reg, rs, fev, [m.display_name for m in ms[:10]], hours_to_confirm=2)
         cases[f"lead {state}"], cases[f"follow-on {state}"] = lead, fev
+    # a run of three raids (Task 4): the cancel names the whole lineup from any of its raids
+    start = (reg.now_local() + timedelta(days=5)).replace(hour=18, minute=30, second=0, microsecond=0)
+    first = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t", schedule=rc.ADHOC_SCHEDULE,
+                        lineup=[{"raid": RID, "rosters": 2}, {"raid": "onyxias_lair", "rosters": 1}])
+    join(reg, rs, first, ms)
+    parts = rc.event_parts(rs, first)
+    cases["three raids, first"], cases["three raids, second"], cases["three raids, third"] = parts
     return cases
 
 
@@ -320,6 +327,13 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     dump.add("reopen_refusal", "done, over an hour ago", rc.reopen_refusal(reg, d, d.start + timedelta(days=30)) or "")
     dump.add("closed_run_refusal", "done", rc.closed_run_refusal(rs, d) or "")
     dump.add("closed_run_refusal", "cancelled", rc.closed_run_refusal(rs, runs["cancelled"]) or "")
+    # C9: an open whose later raid first opens after the run starts (Task 4)
+    when = runs["three raids, first"].start
+    reg.set_raid_overrides("onyxias_lair", {"first_open": (when + timedelta(days=9)).astimezone(reg.tz).strftime("%Y-%m-%dT%H:%M")}, "t")
+    lineup3 = [{"raid": "hyjal_summit_forever", "rosters": 1}, {"raid": RID, "rosters": 2}, {"raid": "onyxias_lair", "rosters": 1}]
+    dump.add("before_first_open_sentence", "the third raid opens later", [cq.before_first_open_sentence(reg, lineup3, when) or ""])
+    assert cq.before_first_open_sentence(reg, lineup3[:2], when) is None  # every raid open by its start: no line
+    reg.set_raid_overrides("onyxias_lair", {"first_open": None}, "t")
     far = reg.now_local() + timedelta(days=40)
     dump.add("open_row_refusal", "too far ahead", rc.open_row_refusal(reg, rs, RID, far, "barrow-deeps", far - timedelta(days=2)) or "")
     dump.add("open_row_refusal", "too far ahead, the sheet opens before Open works", rc.open_row_refusal(reg, rs, RID, far, "barrow-deeps", far - timedelta(days=30)) or "")

@@ -16,7 +16,9 @@ LEAD, FOLLOW = "hyjal_summit_forever", "barrow_deeps"
 
 
 def unlock_hyjal(reg) -> None:
+    """Both raids open already: a schedule skips a night its follow-on would start before that raid first opens (C8)."""
     reg.set_raid_overrides(LEAD, {"first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(FOLLOW, {"first_open": "2026-01-01T00:00"}, "t")
 
 
 # ---------------------------------------------------------------- Task 1: config
@@ -70,7 +72,8 @@ def test_open_pair_opens_two_runs_with_one_signup(reg, rs):
     assert (fev.event, fev.part, fev.starts) == (lead.key, 1, 180)
     assert fev.start == lead.start + timedelta(hours=3)  # Hyjal lasts 3 h
     t, ft = reg.config.roster(lead.team), reg.config.roster(fev.team)
-    assert t["follow"] == {"raid": FOLLOW, "rosters": 2} and t["followed_by"] == ft["key"] and ft["follows"] == t["key"]
+    assert t["lineup"] == [{"raid": LEAD, "rosters": 1, "starts": 0}, {"raid": FOLLOW, "rosters": 2, "starts": 180}]
+    assert t["followed_by"] == ft["key"] and ft["follows"] == t["key"] and "followed_by" not in ft
     assert ft["rosters"] == 2 and ft["size"] == 10 and ft["confirm"] is False and ft["kind"] == t["kind"] and ft["series"] is None
     assert ft["cutoff_hard_hours"] == t["cutoff_hard_hours"] + 3  # the same instant as the lead's lock
     assert fev.message_id is None and fev.signups == {}  # no sheet, no answers of its own yet
@@ -230,7 +233,7 @@ def test_a_follow_on_cannot_lock_before_its_lead(reg, rs):
     reg.seed_test_members(24, "t")
     bot = NightBot(reg, rs)
     lead, fev = open_pair(reg, rs)
-    with pytest.raises(RegistryError, match="its lock builds the follow-on too"):
+    with pytest.raises(RegistryError, match="first. Its lock builds every raid of the run."):
         run(bot.lock_run(reg, rs, fev, by="Jon"))
     assert fev.state == "open" and lead.state == "open"
 
@@ -413,14 +416,16 @@ def test_cancel_lead_cancels_follow_on(reg, rs, monkeypatch):
     assert len(audits) == 1 and fev.key in audits[0] and lead.key in audits[0]
 
 
-def test_cancel_follow_on_alone_leaves_the_lead_standing(reg, rs, monkeypatch):
+def test_cancel_on_the_follow_on_cancels_the_whole_run(reg, rs, monkeypatch):
+    """Phase 3 (Task 4): a cancel on any raid of a run cancels the whole run — the follow-on no longer goes alone."""
     bot = NightBot(reg, rs)
     lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
     run(bot.cancel_run(reg, rs, fev, "Jon", None))
-    assert fev.state == "cancelled" and lead.state == "locked" and lead.followed_by is None
-    assert reg.config.roster(lead.team).get("followed_by") is None
+    assert rs.events[fev.key].state == "cancelled" and lead.state == "cancelled" and lead.followed_by == fev.key
+    audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
+    assert len(audits) == 1 and fev.key in audits[0] and lead.key in audits[0]
     run(bot.cleanup_ephemeral(reg, rs))
-    assert reg.config.roster(lead.team) is not None and reg.config.roster(fev.team) is None
+    assert reg.config.roster(lead.team) is None and reg.config.roster(fev.team) is None
 
 
 def test_cleanup_drops_the_pair_together(reg, rs, monkeypatch):
@@ -447,8 +452,8 @@ def test_the_sentences(reg, rs, monkeypatch):
     lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
     assert "Barrow Deeps follow-on is cancelled with it" in " ".join(cq.consequence("cancel", reg, lead))
     follow_cancel = cq.consequence("cancel", reg, fev)
-    assert follow_cancel[0] == "The Barrow Deeps follow-on is called off for the 20 people rostered on it."
-    assert follow_cancel[1] == "The Hyjal Summit run goes ahead, and nobody gets a DM."
+    assert follow_cancel[0] == "The whole Hyjal Summit run is cancelled, with Barrow Deeps."
+    assert follow_cancel[1] == "Nobody gets a DM, but the sheet and every ask card say Cancelled."
     refill = rc.refill_sentence(reg, fev)
     assert cq.leave_follow_consequence(reg, fev, True, True) == ["You stay on the Hyjal Summit roster.", "Your Barrow Deeps place is freed.", refill]
     assert cq.leave_follow_consequence(reg, fev, True, False) == ["Your Hyjal Summit answer stands.", "Your Barrow Deeps place is freed.", refill]
@@ -518,9 +523,9 @@ def test_sheet_and_cards_say_then_and_after(reg, rs):
     e, _view = raid_views.sheet_message(reg, lead, rc.run_team(reg, lead), ico)
     assert e.title.endswith("Hyjal Summit, then Barrow Deeps ×2") and "\nthen Barrow Deeps ×2 <t:" in e.description
     join(reg, rs, lead, reg.test_members()[:5])
-    assert rc.follow_short(reg, lead)  # five joiners can't cover two 10s' tanks and healers
+    assert rc.parts_short(reg, lead)  # five joiners can't cover two 10s' tanks and healers
     assert "Barrow Deeps follow-on" in card_text(raid_views.health_layout(reg, rs, lead, rc.run_team(reg, lead), ico))
-    assert rc.follow_short(reg, fev) == {}  # a follow-on has no follow-on of its own
+    assert rc.parts_short(reg, fev) == []  # a follow-on has no follow-on of its own
     join(reg, rs, lead, reg.test_members()[5:10])
     fev = rs.events[fev.key]
     lock_with_board(reg, rs, fev, [m.display_name for m in reg.test_members()[:10]])

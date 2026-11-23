@@ -83,6 +83,7 @@ def test_a_rehearsal_never_meets_a_real_run_and_belongs_to_its_tester(reg, rs):
 
 def test_a_closed_occurrence_is_refused_and_a_follow_on_gets_its_own_key(reg, rs):
     reg.set_raid_overrides(HYJAL, OPENED, "t")
+    reg.set_raid_overrides(RID, OPENED, "t")  # C8 (Task 4): a night its follow-on isn't open yet is skipped
     sid = weekly(reg, HYJAL, "Tue 18:30")
     reg.set_schedule(sid, {"follow": f"{RID} x2"}, "t")
     t = first_slot(reg, HYJAL)
@@ -343,3 +344,39 @@ def test_the_way_back_refuses_a_new_key_and_passes_a_stamped_old_pair(data_root,
     store.flush()
     said = _lower_script().lower(data_root, ids_only=True, dry_run=True)
     assert said == [f"{GUILD}: refused, nothing changed. The older code can't find the run {reg.config.roster(new.team)['name']}, so end or cancel it first."]
+
+
+def test_the_old_one_off_pair_keeps_working_as_a_two_raid_run(data_root, old_store_with, monkeypatch):
+    """Task 4 on big-guys-for's live shape: the same keys and sheet message, the lead's answers on both raids, no part
+    opened by the scheduler's minute, the lead's lock locks both, and a cancel (on either) cancels both."""
+    from oibot_gm import raid_views
+
+    t = _soon(48).replace(hour=18, minute=30)
+    cfg, _dicts, files = _big_guys_pair(t)
+    reg, rs, _store = _old_guild(data_root, old_store_with, cfg, files)
+    rc.migrate_at_start(reg, rs)
+    lk, fk = files[0]["key"], files[1]["key"]
+    lead = rs.events[lk]
+    assert [p.key for p in rc.event_parts(rs, lead)] == [lk, fk] and rc.later_parts(rs, lead)[0].part == 1
+    assert rc.first_part(rs, rs.events[fk]) is lead and rc.complete_parts(reg, rs, lead) == []
+    e, _view = raid_views.sheet_message(reg, lead, rc.run_team(reg, lead), lambda *a, **k: "")
+    assert e.title.endswith("Hyjal Summit, then Barrow Deeps")
+    assert f"\nthen Barrow Deeps <t:{int((t + timedelta(hours=3)).timestamp())}:t>" in e.description
+    lead.signups["903"] = lead.signups["900"].model_copy(update={"discord_id": 903, "display_name": "P3", "character": "P3"})
+    rs.save(lead, "harness: one more joiner")
+    assert set(rs.events[fk].signups) == set(lead.signups), "the lead's answers are the follow-on's"
+    bot = NightBot(reg, rs)
+    monkeypatch.setattr(bot, "post_health", lambda *a, **k: asyncio.sleep(0))
+    run(bot.scheduler_tick_guild(reg))
+    assert sorted(rs.events) == sorted([lk, fk]) and rs.events[lk].message_id == 777
+
+    def board(reg_, rs_, ev, save=True):
+        ev.rosters = rc.board_rosters(reg_, ev, [["P0", "P1", "P2"]], rc.run_size(reg_, ev))
+        return [], ev.rosters[0]
+
+    monkeypatch.setattr(rc, "propose", board)
+    run(bot.lock_run(reg, rs, lead, by="Jon"))
+    assert (rs.events[lk].state, rs.events[fk].state) == ("locked", "locked")
+    run(bot.cancel_run(reg, rs, rs.events[fk], "Jon", None))
+    assert (rs.events[lk].state, rs.events[fk].state) == ("cancelled", "cancelled")
+    assert sorted(rs.events) == sorted([lk, fk]) and rs.events[lk].message_id == 777

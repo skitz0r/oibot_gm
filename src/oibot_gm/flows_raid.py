@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 import discord
 
 from . import configops
+from .consequences import before_first_open_sentence
 from . import raidcycle as rc
 from . import wizard_opts as wo
 from .raid_buttons import RUN_WORDS
@@ -316,9 +317,12 @@ class OpenWizard(Wizard):
             n = int(sd["schedule"].get("rosters") or 1)
             if n > 1:
                 lines.append(f"-# It has {n} rosters of {sd.get('size', '?')}, so the sheet offers {n * int(sd.get('size') or 0)} seats.")
-        fw = self.reg.schedule_def(self.rid, sid)["schedule"].get("follow") if sid and sid != rc.ADHOC_SCHEDULE else None
-        if fw:  # D2: the wizard shows a schedule's follow-on; it sets none
-            lines.append(f"-# Then {self.reg.follow_words(fw)} at {self.reg.local12(rc.follow_start(self.reg, self.rid, start), '%I:%M %p')}, from the same signup.")
+        lineup = (rc.schedule_lineup(self.rid, self.reg.schedule_def(self.rid, sid)["schedule"]) if sid and sid != rc.ADHOC_SCHEDULE
+                  else [{"raid": self.rid, "rosters": 1}])
+        if len(lineup) > 1:  # D2: the wizard shows a schedule's later raids; it sets none
+            offsets = self.reg.lineup_offsets(lineup)
+            lines.append("-# Then " + ", then ".join(f"{self.reg.follow_words(e)} at {self.reg.local12(start + timedelta(minutes=at), '%I:%M %p')}"
+                                                     for e, at in zip(lineup[1:], offsets[1:])) + ", from the same signup.")
         if self.draft["note"]:
             lines.append(when_note(self.draft["note"], start))
         ev = self.existing(start)
@@ -332,6 +336,8 @@ class OpenWizard(Wizard):
         fo = self.reg.first_open(self.rid)
         if fo is not None and start < fo:
             lines.append(f"-# This is before the raid's first lockout opens ({self.reg.local12(fo)}).")
+        elif not ev and (before := before_first_open_sentence(self.reg, lineup, start)):  # C9: a later raid opens after its start
+            lines.append(f"-# {before}")
         if not self.reg.config.signup_channel_id:
             lines.append("-# No signup channel is set, so the sheet will be posted in this channel.")
         await self.show(interaction, "\n".join(lines),
@@ -531,9 +537,10 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
                 line = f"❌ {e}"
             await wiz.finish(si, line)
 
-        fev = rc.follow_of(rs, ev) if ev.followed_by else None  # a lead's Can't is the whole night (design §5.62)
-        held = fev is not None and fev.state == "locked" and fev.seat_of(uid)
-        desc = (f"Submitting marks you out of the night. Your {raid_name(reg, fev)} place goes too." if held
+        # a first raid's Can't is the whole night (design §5.62): every later raid's place goes too
+        held = [p for p in rc.later_parts(rs, ev) if p.state == "locked" and p.seat_of(uid)] if not rc.is_follow(ev) else []
+        desc = (f"Submitting marks you out of the night. Your {raid_name(reg, held[0])} place goes too." if len(held) == 1
+                else "Submitting marks you out of the night. Your places on the later raids go too." if held
                 else "Submitting marks you out (and frees your seat if you're rostered).")
         form = Form(f"Out · {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", [
             Field("note", "Note for the officers (optional)", required=False, paragraph=True, max_length=300,
