@@ -2596,8 +2596,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] + sorted(late - kept) if x and x in pool and x not in placed),
         pins={n: gi for n, gi in placed.items() if gi < k * n_rosters} or None,
         prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
-        role_min=role_min or None,
-        role_max={r: rb[r]["max"] for r in ("tank", "healer") if rb[r].get("max")},
+        minimums=role_min or None,
         bonus=bonus,
     )
     # "another one": for a split the rosters must differ, for a single run the groups must
@@ -2605,7 +2604,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     # bench what-ifs re-solve the model per benched player (the bench hangs off rosters[0]): capped by explain.WHATIF_*,
     # only at lock (never for previews), skipped for big splits / sheets
     do_whatif = whatif and explain.whatif_allowed(n_rosters, len(players))
-    tank_min = (opts.role_min or {}).get("tank", 0)
+    tank_min = (opts.minimums or {}).get("tank", 0)
     rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=do_whatif and i == 0, tank_min=tank_min) for i, r in enumerate(rosters)]
     return players, rosters, n_rosters
 

@@ -127,7 +127,7 @@ def groups_for(reg: Registry, players: list[Player], roster: dict, time_limit_s:
     bounds = reg.role_bounds(roster.get("instance"), size)
     have = {r: sum(1 for p in players if p.role == r or (p.offspec and reg.profile.spec(p.cls, p.offspec).role == r)) for r in ROLES}
     role_min = {r: min(bounds[r]["min"], have[r]) for r in ("tank", "healer")}
-    opts = solver.SolveOptions(raid_size=size, role_min=role_min, prefer_group=seed_preferences(reg.profile, players, labels), prefer_weight=12,
+    opts = solver.SolveOptions(raid_size=size, minimums=role_min, prefer_group=seed_preferences(reg.profile, players, labels), prefer_weight=12,
                                force_in=tuple(p.signup_name for p in players), time_limit_s=time_limit_s, workers=4)
     try:
         result = solver.solve(reg.profile, players, raid_id, opts)
@@ -192,7 +192,7 @@ def optimize(reg: Registry, roster: dict, time_limit_s: float = 6.0) -> tuple[li
     # the pool is not a sheet: role minimums are advisory, so relax them to what the pool can satisfy
     have = {r: sum(1 for p in players if p.role == r or (p.offspec and reg.profile.spec(p.cls, p.offspec).role == r)) for r in ROLES}
     role_min = {r: min(bounds[r]["min"], have[r]) for r in ("tank", "healer")}
-    opts = solver.SolveOptions(raid_size=size, role_min=role_min, prefer_group=seed_preferences(reg.profile, players, labels), prefer_weight=12,
+    opts = solver.SolveOptions(raid_size=size, minimums=role_min, prefer_group=seed_preferences(reg.profile, players, labels), prefer_weight=12,
                                time_limit_s=time_limit_s, workers=4)
     try:
         result = solver.solve(reg.profile, players, raid_id, opts)

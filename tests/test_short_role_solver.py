@@ -11,7 +11,7 @@ from oibot_gm.roster.solver import SolveOptions, solve_rosters
 
 pytestmark = pytest.mark.slow
 FOREVER = GameProfile.load(Path(__file__).resolve().parents[1] / "profiles" / "forever")
-OPTS = dict(raid_size=10, role_min={"tank": 2, "healer": 2}, role_max={"tank": 2, "healer": 3})
+OPTS = dict(raid_size=10, minimums={"tank": 2, "healer": 2})
 
 
 def pool(shape):

@@ -270,8 +270,8 @@ def test_healer_policy_keeps_the_tank_minimum(reg, rs, monkeypatch):
     seen = _capture_solve(monkeypatch)
     rc.propose(reg, rs, ev, save=False)
     rb = reg.role_bounds("barrow_deeps", rc.run_size(reg, ev))
-    assert seen["opts"].role_min["healer"] == 3
-    assert seen["opts"].role_min.get("tank") == rb["tank"]["min"], seen["opts"].role_min
+    assert seen["opts"].minimums["healer"] == 3
+    assert seen["opts"].minimums.get("tank") == rb["tank"]["min"], seen["opts"].minimums
 
 
 def test_role_min_merge_is_per_role(reg):

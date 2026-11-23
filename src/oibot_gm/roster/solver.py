@@ -1,13 +1,13 @@
 """Roster selection + party layout as one CP-SAT model.
 
-Selection: which N of the signups raid (role bounds, prefer signed over bench,
-prefer attendance). Layout: assign the selected to groups of 5 to maximise
+Selection: which N of the signups raid (minimums filled first, prefer signed over
+bench, prefer attendance). Layout: assign the selected to groups of 5 to maximise
 party-buff synergy from the GameProfile's buff matrix. Deterministic; the LLM
 only explains the result.
 
 `solve_rosters` builds the model in named steps that share one `_Model` state:
-setup → variables → seat/group constraints → role bounds → forces, pairs, pins →
-avoid → objective terms (seat quality, preferences, synergy, symmetry, balance) →
+setup → variables → seat/group constraints → forces, pairs, pins → avoid →
+objective terms (seat quality, minimums, extra tanks/healers, preferences, synergy, symmetry, balance) →
 solve → extract. The order of the steps is part of the model (variable and
 constraint indices), so keep it when editing."""
 from __future__ import annotations
@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from ortools.sat.python import cp_model
 
+from ..constants import ROLES
 from ..models import GroupReport, Player, RosterResult, SpecInfo
 from ..profiles import Buff, GameProfile
 
@@ -29,11 +30,12 @@ class SolveOptions:
     pins: dict[str, int] | None = None  # signup_name -> group index (0-based)
     keep_together: tuple[tuple[str, str], ...] = ()
     keep_apart: tuple[tuple[str, str], ...] = ()
-    raid_size: int | None = None  # override the profile's raid_size (e.g. a 10-man team); role bounds scale with it
+    raid_size: int | None = None  # override the profile's raid_size (e.g. a 10-man team); the game's minimums scale with it
     prefer_group: dict[str, int] | None = None  # signup_name -> 1-based group, soft (bonus if honoured)
     prefer_weight: int = 15
-    role_min: dict[str, int] | None = None  # role -> minimum, overrides the profile/scaled bounds
-    role_max: dict[str, int] | None = None  # role -> maximum (e.g. the raid's desired comp)
+    # slot -> per-roster minimum, laid over the game's scaled tank/healer minimums; a slot is a role (tank, healer,
+    # melee, ranged), a class (Paladin) or Class:Spec. A preference filled first, never a constraint (design D16)
+    minimums: dict[str, int] | None = None
     bonus: dict[str, int] | None = None  # signup_name -> extra selection value (rank, main, sat-out, signup order)
     allow_offspec: bool = True  # let the solver switch players to their offspec to meet role minimums
     offspec_penalty: int = 8  # objective cost per switch
@@ -44,8 +46,17 @@ class SolveOptions:
 DEFAULT_OPTIONS = SolveOptions()  # the shared default for solve()/solve_rosters(); never mutate it
 
 
+def scaled_role_minimums(rules: dict, raid_size: int) -> dict[str, int]:
+    """Role minimums from comp_rules, scaled to a different raid size (ceil)."""
+    import math
+
+    f = raid_size / rules["raid_size"]
+    return {role: math.ceil(b["min"] * f) if b.get("min") else 0 for role, b in rules["roles"].items()}
+
+
 def scaled_role_bounds(rules: dict, raid_size: int) -> dict[str, dict[str, int]]:
-    """Role min/max from comp_rules, scaled to a different raid size (ceil for mins)."""
+    """Role min/max from comp_rules, scaled to a different raid size (ceil for mins). Registry.role_bounds and
+    comp.ideal_comp still read it until minimums are stored (Task 5); the solver reads scaled_role_minimums."""
     import math
 
     f = raid_size / rules["raid_size"]
@@ -78,11 +89,11 @@ def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opt
     s = _setup(profile, players, raid_id, opts, rosters, strategy)
     _build_vars(s)
     _add_seat_and_group_constraints(s)
-    _add_role_bounds(s)
     _add_forces_pairs_and_pins(s)
     _add_avoid(s, avoid, avoid_groups, min_changes)
     _selection_terms(s, roster_bonus)
-    _short_role_terms(s, roster_bonus)
+    _minimum_terms(s, roster_bonus)
+    _extra_role_terms(s, roster_bonus)
     _preference_terms(s)
     _synergy_terms(s)
     _raid_cover_terms(s)
@@ -112,7 +123,7 @@ class _Model:
     k: int  # groups per roster
     n_groups: int  # groups over all rosters
     seats_total: int  # seats the pool can fill over all rosters
-    role_bounds: dict[str, dict[str, int]]  # role -> {min, max}, per roster
+    minimums: dict[str, int]  # slot (role, class or Class:Spec) -> minimum, per roster
     specs: dict[str, SpecInfo]  # signup_name -> signed spec (offspec switches are applied after the solve)
     m: cp_model.CpModel = field(default_factory=cp_model.CpModel)
     x: dict[str, cp_model.IntVar] = field(default_factory=dict)  # name -> seated at all
@@ -135,24 +146,20 @@ class _Model:
 
 def _setup(profile: GameProfile, players: list[Player], raid_id: str, opts: SolveOptions, rosters: int,
            strategy: str) -> _Model:
-    """Sizes and bounds: groups per roster from the comp rules, role min/max scaled to `raid_size` then overridden
-    by `role_min`/`role_max` (a max never drops below the min), the signed spec of every player."""
+    """Sizes and minimums: groups per roster from the comp rules, the game's tank/healer minimums scaled to
+    `raid_size` with `opts.minimums` laid over them per slot, the signed spec of every player."""
     rules = profile.comp_rules
     profile.raids[raid_id]  # the raid must exist (KeyError otherwise)
     gsize = rules["group_size"]
     target = opts.raid_size or rules["raid_size"]
     k = max(1, -(-target // gsize))  # groups per roster
-    bounds_src = scaled_role_bounds(rules, target) if opts.raid_size else rules["roles"]
-    role_bounds = {kk: dict(v) for kk, v in bounds_src.items()}
-    for role, n in (opts.role_min or {}).items():
-        role_bounds.setdefault(role, {"min": 0, "max": target})["min"] = n
-        role_bounds[role]["max"] = max(role_bounds[role]["max"], n)
-    for role, n in (opts.role_max or {}).items():
-        role_bounds.setdefault(role, {"min": 0, "max": target})["max"] = max(n, role_bounds[role]["min"])
+    game = scaled_role_minimums(rules, target)
+    minimums = {r: game[r] for r in ("tank", "healer") if game.get(r)}
+    minimums.update({slot: int(n) for slot, n in (opts.minimums or {}).items()})
     s = _Model(
         profile=profile, players=players, opts=opts, rosters=rosters, strategy=strategy, rules=rules,
         gsize=gsize, target=target, k=k, n_groups=k * rosters, seats_total=min(target * rosters, len(players)),
-        role_bounds=role_bounds, specs={p.signup_name: profile.spec(p.cls, p.spec) for p in players},
+        minimums=minimums, specs={p.signup_name: profile.spec(p.cls, p.spec) for p in players},
     )
     s.quality = {r: [] for r in range(rosters)}
     s.roster_syn = {r: [] for r in range(rosters)}
@@ -216,6 +223,17 @@ def _group_role_expr(s: _Model, role: str, g: int) -> list:
     return terms
 
 
+def _slot_expr(s: _Model, slot: str, r: int | None = None) -> list:
+    """Seats that count toward a minimum's slot, over the whole pool or one roster: a role (offspec switches
+    counted, as `_role_expr`), a class (every seat of a player of that class) or `Class:Spec` (the seats of players
+    who signed with that spec)."""
+    if slot in ROLES:
+        return _role_expr(s, slot, r)
+    cls, _, spec = slot.partition(":")
+    return [s.x[p.signup_name] if r is None else s.xr[p.signup_name, r]
+            for p in s.players if p.cls == cls and (not spec or p.spec == spec)]
+
+
 # ---------------------------------------------------------------- constraints
 
 
@@ -235,27 +253,6 @@ def _add_seat_and_group_constraints(s: _Model) -> None:
         m.Add(sum(s.y[p.signup_name, g] for p in s.players) <= s.gsize)
         m.Add(sum(_group_role_expr(s, "healer", g)) <= s.rules["grouping"]["healer_max_per_group"])
         m.Add(sum(_group_role_expr(s, "tank", g)) <= s.rules["grouping"]["tank_max_per_group"])
-
-
-def _capable(s: _Model, role: str) -> int:
-    """Players who could take a seat of `role` (their own spec or an offspec): a player forced out (a pin out, always
-    bench, first come's late joiners — whatever `opts.force_out` holds) can't, so they never count."""
-    out = set(s.opts.force_out)
-    return sum(1 for p in s.players if p.signup_name not in out
-               and (p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role)))
-
-
-def _add_role_bounds(s: _Model) -> None:
-    """Each role stays within its min/max per roster (over the whole pool for a single roster). The minimum is
-    capped at what the pool can supply per roster (`capable // rosters`, players forced out not counted) so a thin
-    sheet still solves."""
-    for role, bounds in s.role_bounds.items():
-        capable = _capable(s, role)
-        for r in range(s.rosters):
-            have = _role_expr(s, role, r if s.rosters > 1 else None)
-            if have:
-                s.m.Add(sum(have) >= min(bounds["min"], capable // s.rosters if s.rosters > 1 else capable))
-                s.m.Add(sum(have) <= bounds["max"])
 
 
 def _add_forces_pairs_and_pins(s: _Model) -> None:
@@ -328,28 +325,55 @@ def _selection_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) 
 SHORT_ROLE_MARGIN = 10_000  # buff points: more than the synergy, raid cover and group preference one seat can add
 
 
-def _short_role_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
-    """A role short across several rosters (fewer who can play it than min × rosters, players forced out not
-    counted): every seat of it filled, up to min × rosters, earns a reward larger than anything one seat earns otherwise — twice the largest seat value (the
-    `first` strategy's double) plus the largest roster bonus, its half-weight balance gap on top, and SHORT_ROLE_MARGIN
-    for synergy — so everyone who joined for the role is rostered before a seat of it is left empty (the rule set in
-    review, 2026-11-22), the odd player beating even a lead's rostered player (LEAD_SEAT_BONUS rides in `bonus`). A
-    preference, never a bound: a hybrid who could fill two short roles fills one, a player forced out earns nothing,
-    and a board that fills every seat still solves."""
-    if s.rosters < 2:
-        return
+def _extra_role_cost(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> int:
+    """EXTRA_ROLE_COST: more than anything one seat earns otherwise — twice the largest seat value (the `first`
+    strategy's double) plus the largest roster bonus, its half-weight balance gap on top, and SHORT_ROLE_MARGIN for
+    synergy. MINIMUM_REWARD is twice it, so a seat that fills a minimum is taken even when it is also a tank or healer
+    past theirs (a Holy Paladin for a Paladin minimum)."""
     top = 2 * max((abs(_seat_value(s, p)) for p in s.players), default=0)
     top += max((abs(int(v)) for b in (roster_bonus or {}).values() for v in b.values()), default=0)
-    reward = (top + top // 2 + SHORT_ROLE_MARGIN) * SCALE
-    for role, bounds in s.role_bounds.items():
-        want = int(bounds["min"] or 0) * s.rosters
-        capable = _capable(s, role)
-        have = _role_expr(s, role)
-        if not want or capable >= want or not have:
+    return (top + top // 2 + SHORT_ROLE_MARGIN) * SCALE
+
+
+def _per_roster(s: _Model) -> tuple:
+    """The rosters a per-roster term is laid over: each roster, or the whole pool (None) for one roster."""
+    return tuple(range(s.rosters)) if s.rosters > 1 else (None,)
+
+
+def _minimum_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
+    """Every minimum is filled first (design D16): per slot and per roster, each seat that counts toward it, up to
+    the minimum, earns MINIMUM_REWARD — so everyone who joined for a short slot is rostered before one of its seats
+    goes to anyone else (the rule set in review, 2026-11-22), the odd player beating even a lead's rostered player
+    (LEAD_SEAT_BONUS rides in `bonus`). A preference, never a bound: a hybrid who could fill two minimums fills one,
+    a player forced out earns nothing, a minimum the joiners can't meet leaves the rest of the roster as it would be,
+    and a board that fills every seat still solves."""
+    reward = 2 * _extra_role_cost(s, roster_bonus)
+    for slot, n in s.minimums.items():
+        if n <= 0:
             continue
-        filled = s.m.NewIntVar(0, want, f"short_{role}")
-        s.m.Add(filled <= sum(have))
-        s.terms.append(reward * filled)
+        for r in _per_roster(s):
+            have = _slot_expr(s, slot, r)
+            if not have:
+                continue
+            filled = s.m.NewIntVar(0, n, f"min_{slot}_{r}")
+            s.m.Add(filled <= sum(have))
+            s.terms.append(reward * filled)
+
+
+def _extra_role_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
+    """No role has an upper limit, but the seats past the minimums go to damage dealers: each tank or healer above
+    their minimum in a roster costs EXTRA_ROLE_COST, more than any seat earns otherwise, so one sits only when nobody
+    else joined (every seat is filled) or officers placed them (forced in, pinned, on the board)."""
+    cost = _extra_role_cost(s, roster_bonus)
+    for role in ("tank", "healer"):
+        n = int(s.minimums.get(role, 0))
+        for r in _per_roster(s):
+            have = _role_expr(s, role, r)
+            if not have:
+                continue
+            extra = s.m.NewIntVar(0, len(s.players), f"extra_{role}_{r}")
+            s.m.Add(extra >= sum(have) - n)
+            s.terms.append(-cost * extra)
 
 
 def _preference_terms(s: _Model) -> None:
