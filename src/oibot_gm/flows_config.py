@@ -499,7 +499,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
                     + f" · split {SPLIT_WORDS.get(fv('split_policy'), ('?',))[0].lower()}")
         if key == "notes":
             return self.say("notes", fv("notes"))
-        return "drop this guild's changes for the raid" if self.raid in self.reg.config.raids else "already on the game's defaults"
+        return "drop this guild's changes for the raid" if self.reg.raid_override(self.raid) else "already on the game's defaults"
 
     # ---- screen 1: which raid
     async def start(self, i: discord.Interaction, section: str | None = None) -> None:
@@ -1131,7 +1131,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
     # ---- Reset
     async def reset(self, i: discord.Interaction) -> None:
-        has = self.raid in self.reg.config.raids
+        has = bool(self.reg.raid_override(self.raid))
         name = self.reg.raid_def(self.raid).get("name", self.raid)
         text = (f"Reset **{name}** to the game's defaults? Every guild change for this raid goes — run times and schedules, a run's week, make-up, weights, notes."
                 + (f"\n-# Your {len(self.draft)} unsaved change(s) are dropped too." if self.draft else "")) if has else f"**{name}** is already on the game's defaults."
@@ -1141,7 +1141,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
     async def do_reset(self, i: discord.Interaction) -> None:
         await self.working(i, "Resetting…")
         name = self.reg.raid_def(self.raid).get("name", self.raid)
-        if self.raid not in self.reg.config.raids:  # re-read: someone may have reset it meanwhile
+        if not self.reg.raid_override(self.raid):  # re-read: someone may have reset it meanwhile
             await self.finish(i, f"**{name}** was already on the game's defaults; nothing changed.")
             return
         self.reg.clear_raid_override(self.raid, i.user.display_name)

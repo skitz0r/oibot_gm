@@ -478,7 +478,7 @@ def effective_profile(reg, section: str | None = None) -> dict:
     if section in (None, "raids"):
         rows = []
         for rid, base_rd in base.raids.items():
-            over = cfg.raids.get(rid, {})
+            over = reg.raid_override(rid)
             eff = reg.raid_def(rid)
             rows.append({"id": rid, **{k: v for k, v in eff.items() if k not in ("bosses",)}, "overridden": sorted(over),
                          "default": {k: base_rd.get(k) for k in over if k in base_rd}})

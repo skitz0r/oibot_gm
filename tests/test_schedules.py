@@ -68,7 +68,7 @@ def test_a_raid_with_only_slots_is_the_default_schedule_and_nothing_changes(reg,
     # Phase 1: every run dict names its schedule, class and series; nothing else about a plain run changed
     assert (team["schedule_id"], team["kind"], team["series"]) == ("default", "recurring", f"{RID}:default") and "rosters" not in team
     assert (ev.kind, ev.series) == ("recurring", f"{RID}:default")
-    assert rc.run_rosters(reg, ev) == 1 and reg.config.raids[RID].get("schedules") is None
+    assert rc.run_rosters(reg, ev) == 1 and reg.raid_rows(RID) == [{"id": "default", "slots": ["Tue 19:30", "Thu 20:00"]}]  # run times alone
     # the scheduler's own view (each schedule within its signup lead) is the old slot_starts at the raid's lead
     lead = float(reg.raid_def(RID)["signup_lead_hours"])
     assert [t for _s, t in rc.upcoming(reg, RID, now, lead=True)] == [t for _s, t in rc.slot_starts(reg, RID, now, lead)]
@@ -187,10 +187,10 @@ def test_rosters_2_aims_the_lock_at_two_when_roles_allow(reg, rs):
 ])
 def test_refusals_leave_config_and_git_untouched(reg, store, sid, fields, why):
     reg.set_schedule(RID, "keep", {"slots": "Mon 20:00"}, "t")
-    before, n0 = copy.deepcopy(reg.config.raids), commits(store)
+    before, n0 = copy.deepcopy((reg.config.raids, reg.config.schedules)), commits(store)
     with pytest.raises(RegistryError, match=why.replace("(", r"\(").replace(")", r"\)")):
         reg.set_schedule(RID, sid, fields, "t")
-    assert reg.config.raids == before and commits(store) == n0
+    assert (reg.config.raids, reg.config.schedules) == before and commits(store) == n0
 
 
 def test_duplicate_ids_and_a_lockout_without_first_open_are_refused(reg, store):
@@ -210,7 +210,7 @@ def test_set_and_remove_are_one_commit_each_and_inherit_goes_back_to_the_raid(re
     assert "lock_hours_before" not in s and reg.schedule_def(RID, "alt")["lock_hours_before"] == reg.raid_def(RID)["lock_hours_before"]
     assert reg.schedule_label(RID, s) == "Saturdays 8:00 PM · 2 rosters"
     assert reg.remove_schedule(RID, "alt", "t") == "Barrow Deeps: schedule Alt run removed"
-    assert commits(store) == n0 + 3 and reg.schedules(RID) == [] and "schedules" not in reg.config.raids[RID]
+    assert commits(store) == n0 + 3 and reg.schedules(RID) == [] and reg.raid_rows(RID) == [] and "schedules" not in reg.config.raids.get(RID, {})
     reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
     reg.remove_schedule(RID, "default", "t")  # the default schedule is the raid's slots
     assert reg.raid_def(RID)["slots"] == [] and reg.schedules(RID) == []
@@ -276,7 +276,7 @@ def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, store, ow
     reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
     reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
     h = Harness(reg)
-    before = copy.deepcopy(reg.config.raids)
+    before = copy.deepcopy((reg.config.raids, reg.config.schedules))
 
     async def go():
         await open_raid(h, reg)
@@ -298,7 +298,7 @@ def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, store, ow
         await h.press("Back to the sections")
         await h.press("Cancel")
     asyncio.run(go())
-    assert reg.config.raids == before  # Cancel: nothing written
+    assert (reg.config.raids, reg.config.schedules) == before  # Cancel: nothing written
 
 
 # ---------------------------------------------------------------- plain text

@@ -2059,7 +2059,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rs = bot.raids.store(reg)
         out = []
         for rid in reg.profile.raids:
-            eff, over, fo = reg.raid_def(rid), reg.config.raids.get(rid, {}), reg.first_open(rid)
+            eff, over, fo = reg.raid_def(rid), reg.raid_override(rid), reg.first_open(rid)
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
                         "slots": list(eff["slots"]), "slot_labels": [reg.slot_label(x) for x in eff["slots"]], "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],

@@ -1317,7 +1317,7 @@ def core_lines(ask: Ask) -> list[str]:
     now = reg.now_local()
     for rid in reg.profile.raids:
         rd = reg.raid_def(rid)
-        over = cfg.raids.get(rid, {}) if cfg.raids else {}
+        over = reg.raid_override(rid)
         comp = " ".join(f"{r} {b.get('min', '?')}-{b.get('max', '?')}" for r, b in (rd.get("comp") or {}).items())
         fo = reg.first_open(rid)
         try:

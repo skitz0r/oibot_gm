@@ -381,7 +381,7 @@ def test_admin_raid_translator(owner_client, reg):
     if str(((cur.get("comp") or {}).get("tank") or {}).get("min", "")) != "1":
         want["tank_min"] = "1"
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid", body, lambda sh: "; ".join(sh.set_raid_overrides("barrow_deeps", want, "x")))
-    assert reg.config.raids["barrow_deeps"] == sh.config.raids["barrow_deeps"]
+    assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     assert owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lock_hours_before": body["lock_hours_before"]}, headers=bearer()).json()["message"] == "barrow_deeps: no changes"
     r = owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lock_hours_before": 1, "confirm_hours_before": 5}, headers=bearer())
     assert r.status_code == 400 and "lock must come before" in r.json()["error"]
@@ -391,16 +391,16 @@ def test_admin_schedule_translators(owner_client, reg):
     fields = {"kind": "weekly", "slots": ["Sat 20:00"], "name": "Alt run", "rosters": 2}
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": fields},
                           lambda sh: "; ".join(sh.set_schedule("barrow_deeps", "alt", fields, "x")))
-    assert reg.config.raids["barrow_deeps"] == sh.config.raids["barrow_deeps"]
+    assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     fields = {"active": False, "lock_hours_before": None, "weights": {"regular": 6, "rank": None}}
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": fields},
                           lambda sh: "; ".join(sh.set_schedule("barrow_deeps", "alt", fields, "x")))
-    assert reg.config.raids["barrow_deeps"] == sh.config.raids["barrow_deeps"]
+    assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule/remove", {"instance": "barrow_deeps", "id": "alt"},
                           lambda sh: sh.remove_schedule("barrow_deeps", "alt", "x"))
-    assert reg.config.raids["barrow_deeps"] == sh.config.raids["barrow_deeps"]
+    assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/reset", {"instance": "barrow_deeps"}, lambda sh: sh.clear_raid_override("barrow_deeps", "x"))
-    assert "barrow_deeps" not in reg.config.raids
+    assert "barrow_deeps" not in reg.config.raids and reg.raid_rows("barrow_deeps") == []
 
 
 def test_admin_config_translator(owner_client, reg):

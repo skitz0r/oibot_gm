@@ -340,7 +340,10 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
     cfg = readable_config(reg.config)  # never the companion token records (hashes, labels): a member may be the requester
     cfg.pop("rosters", None)  # the ephemeral run rosters are noise here; live runs are listed on their own below
     roles = cfg.pop("member_role_ids", None)
-    overrides = cfg.pop("raids", None) or {}  # the stored overrides get their own section below, each value beside its words
+    over_ids = list(cfg.pop("raids", None) or {})  # the stored overrides get their own section below, each value beside its words
+    cfg.pop("schedules", None)  # and so do the schedules: a raid's run times and schedules are read with its overrides
+    over_ids += [r for r in reg.profile.raids if r not in over_ids and reg.raid_rows(r)]
+    overrides = {rid: reg.raid_override(rid) for rid in over_ids}
     if roles and officer:  # role ids mean nothing to the parser (or the person it answers): the names from the role cache
         cfg["member_roles"] = [reg.role_names.get(int(r), f"role:{r}") for r in roles]
     members = [f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank + (' (' + reg.professions_summary(c) + ')' if c.professions else '') for c in m.active())}]"
@@ -2266,7 +2269,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
     if op.op == "aura_reset":
         return f"auras: drop the guild's changes to {op.target or 'every aura'}"
     if op.op == "raid_reset":
-        over = cfg.raids.get(op.target or "", {}) or {}
+        over = reg.raid_override(op.target or "")  # its schedules too (raid_rows)
         return f"raid {op.target}: " + (f"drop the guild's changes — {_overrides_words(reg, op.target or '', over)} → the game's defaults" if over else "nothing to drop (already the game's defaults)")
     if op.op in ("schedule_set", "schedule_remove"):
         try:
@@ -4410,7 +4413,7 @@ def _part(reg: Registry, op: ConfigOp, by_id: int | None = None) -> tuple[str, D
                 s = next((x for x in reg.schedules(rid) if x["id"] == sid), None) if rid in reg.profile.raids else None
                 return f"{name} · {s['name'] if s else sid}", DescribedPart(label="Schedule", before=reg.schedule_label(rid, s) if s else None, after="removed"), []
             if op.op == "raid_reset":
-                over = reg.config.raids.get(rid, {}) or {}
+                over = reg.raid_override(rid)  # its schedules too (raid_rows)
                 return name, DescribedPart(label="The guild's changes", before=_overrides_words(reg, rid, over) if over else "none", after="the game's defaults"), []
             if op.op == "schedule_set":
                 sid, setting = _schedule_ref(op)

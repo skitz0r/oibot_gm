@@ -771,7 +771,8 @@ def test_raid_set_apply_line_and_change_log_read_in_12_hour_words(reg):
     assert len(merged) == 1
     line = configops.apply(reg, merged[0], "Owner", True)
     assert "Wed 9:15 PM" in line and "6:30 PM" in line and not military(line), line
-    assert reg.config.raids["barrow_deeps"]["slots"] == ["Wed 21:15"], "the stored form stays 24-hour"
+    assert reg.raid_rows("barrow_deeps")[0]["slots"] == ["Wed 21:15"], "the stored form stays 24-hour"
+    assert "slots" not in reg.config.raids["barrow_deeps"], "run times live in the guild-level schedules"
     for row in recent_changes(reg.key, 10):
         assert not military(row["text"]), row["text"]
 
