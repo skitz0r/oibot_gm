@@ -784,7 +784,10 @@ for two. The board on the Rosters page shows every roster the run expects before
 places, *Roster 1* and *Roster 2*), and the count reads *18 / 10 × 2 joined*. The lock builds the second roster as soon
 as more people joined than one roster holds, even when the tanks or healers who joined only cover one: the missing
 seats stay open and are filled like any short seat. Everyone who joined for the short role gets a place before one of
-its seats is left empty. The lock still builds the rosters when someone can't be placed. With one roster's worth of joiners or fewer it builds a second
+its seats is left empty. Someone pinned out or kept on the bench never counts as cover, so a short role doesn't
+stop the lock: the rosters are built and the empty seats wait to be filled. The one exception is when the same few
+players who can switch between tanking and healing are needed as both at once: then the lock finds no rosters.
+With one roster's worth of joiners or fewer it builds a second
 roster only when the tanks and healers allow two. A
 schedule can be **paused** (nothing opens from it). Runs from a schedule other than the raid's own run times carry
 its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same minute are two runs.

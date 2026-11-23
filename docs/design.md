@@ -4479,15 +4479,20 @@ its own board, pins, fill asks (a must-act DM, as on any run), cards, updates th
 
 **A short role across several rosters (the rule set in review, 2026-11-22).** When a role is short across a run's rosters,
 everyone who joined for it is rostered before a seat of that role is left empty, on a follow-on and on any run with
-several rosters. It is a strong PREFERENCE, never a bound, so it can never stop a lock: `solver._short_role_terms`
+several rosters. It is a strong PREFERENCE, never a bound, so the rule itself never stops a lock: `solver._short_role_terms`
 rewards each seat of a short role filled (fewer who can play it than min × rosters; up to min × rosters seats) with more
 than one seat can earn otherwise — twice the largest seat value (which carries `LEAD_SEAT_BONUS` on a follow-on) plus the
 largest roster bonus, half that again for the balance gap, and `SHORT_ROLE_MARGIN` for synergy, all × `SCALE`. The
-per-roster floor `min(min, capable // rosters)` and each roster's maximum are unchanged, a role fully supplied gets no
-reward, a player forced out (pin out, always-bench, first come's late joiners) earns nothing, a hybrid who could fill two
-short roles fills one, and a board that already fills every seat still solves. Tests: `tests/test_follow_on_solver.py`,
-`tests/test_schedules.py` (tanks and healers on an ordinary ×2 run, a pin out) and `tests/test_short_role_solver.py`
-(the hybrid, the full board).
+per-roster floor is `min(min, capable // rosters)` with each roster's maximum on top, where `capable` (`solver._capable`)
+leaves out every player forced out (pin out, always-bench, first come's late joiners): four tanks with one pinned out
+are three who can play, so a ×2 run's floor is one tank a roster, not two. A role fully supplied gets no reward, a player
+forced out earns nothing, a hybrid who could fill two short roles fills one, and a board that already fills every seat
+still solves. One case the floor still gets wrong: a hybrid counts toward the `capable` of BOTH roles they can play, so
+two Guardian / Restoration druids beside two warriors and two priests ask a ×2 run for two tanks and two healers a
+roster from six people, and that lock finds no roster (`rc.how_many_rosters` counts the same way, and it counts pinned-out
+players too — the runs it promises can be more than the pins allow, which the solver's floor then absorbs). Tests:
+`tests/test_follow_on_solver.py`, `tests/test_schedules.py` (tanks and healers on an ordinary ×2 run, a pin out) and
+`tests/test_short_role_solver.py` (the hybrid, the full board, a tank forced out at the floor and at the reward).
 
 **A Can't on the lead is the whole night**, on every path that frees a lead seat: `rc.free_seat` on a run with
 `followed_by` also frees the same member's seat on the locked follow-on (`notice=False`, idempotent — expired confirmations,

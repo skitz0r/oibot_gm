@@ -237,12 +237,20 @@ def _add_seat_and_group_constraints(s: _Model) -> None:
         m.Add(sum(_group_role_expr(s, "tank", g)) <= s.rules["grouping"]["tank_max_per_group"])
 
 
+def _capable(s: _Model, role: str) -> int:
+    """Players who could take a seat of `role` (their own spec or an offspec): a player forced out (a pin out, always
+    bench, first come's late joiners — whatever `opts.force_out` holds) can't, so they never count."""
+    out = set(s.opts.force_out)
+    return sum(1 for p in s.players if p.signup_name not in out
+               and (p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role)))
+
+
 def _add_role_bounds(s: _Model) -> None:
     """Each role stays within its min/max per roster (over the whole pool for a single roster). The minimum is
-    capped at what the pool can supply per roster (`capable // rosters`) so a thin sheet still solves."""
+    capped at what the pool can supply per roster (`capable // rosters`, players forced out not counted) so a thin
+    sheet still solves."""
     for role, bounds in s.role_bounds.items():
-        capable = sum(1 for p in s.players
-                      if p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role))
+        capable = _capable(s, role)
         for r in range(s.rosters):
             have = _role_expr(s, role, r if s.rosters > 1 else None)
             if have:
@@ -321,8 +329,8 @@ SHORT_ROLE_MARGIN = 10_000  # buff points: more than the synergy, raid cover and
 
 
 def _short_role_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
-    """A role short across several rosters (fewer who can play it than min × rosters): every seat of it filled, up to
-    min × rosters, earns a reward larger than anything one seat earns otherwise — twice the largest seat value (the
+    """A role short across several rosters (fewer who can play it than min × rosters, players forced out not
+    counted): every seat of it filled, up to min × rosters, earns a reward larger than anything one seat earns otherwise — twice the largest seat value (the
     `first` strategy's double) plus the largest roster bonus, its half-weight balance gap on top, and SHORT_ROLE_MARGIN
     for synergy — so everyone who joined for the role is rostered before a seat of it is left empty (the rule set in
     review, 2026-11-22), the odd player beating even a lead's rostered player (LEAD_SEAT_BONUS rides in `bonus`). A
@@ -335,8 +343,7 @@ def _short_role_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None)
     reward = (top + top // 2 + SHORT_ROLE_MARGIN) * SCALE
     for role, bounds in s.role_bounds.items():
         want = int(bounds["min"] or 0) * s.rosters
-        capable = sum(1 for p in s.players
-                      if p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role))
+        capable = _capable(s, role)
         have = _role_expr(s, role)
         if not want or capable >= want or not have:
             continue

@@ -43,3 +43,23 @@ def test_a_board_that_fills_every_seat_still_solves_with_a_role_short():
     rosters = solve_rosters(FOREVER, ps, "barrow_deeps", SolveOptions(**OPTS, force_in=tuple(board)), rosters=2)
     seated = {p.signup_name for r in rosters for p in r.selected}
     assert seated == set(board) and "p02" not in seated
+
+
+def test_a_tank_forced_out_does_not_count_toward_the_per_roster_floor():
+    """Two 10s with four tanks, one of them pinned out: three tanks can play, so one roster gets two and the other one —
+    a roster is found, the three free tanks are seated and the pinned-out one is not."""
+    ps = pool([("Warrior", "Protection", "tank", None, 4), ("Priest", "Holy", "healer", None, 5), ("Mage", "Fire", "ranged", None, 14)])
+    rosters = solve_rosters(FOREVER, ps, "barrow_deeps", SolveOptions(**OPTS, force_out=("p00",)), rosters=2)
+    seated = {p.signup_name for r in rosters for p in r.selected}
+    assert {"p01", "p02", "p03"} <= seated, "the three free tanks are rostered"
+    assert "p00" not in seated
+
+
+def test_a_tank_forced_out_does_not_hide_that_tanks_are_short():
+    """Two 10s with four tanks, one pinned out and one only on the bench: tanks are short (three can play, four are
+    wanted), so the benched tank is rostered too rather than a seat of hers going to a mage."""
+    ps = pool([("Warrior", "Protection", "tank", None, 4), ("Priest", "Holy", "healer", None, 5), ("Mage", "Fire", "ranged", None, 14)])
+    ps[3] = ps[3].model_copy(update={"status": "bench"})
+    rosters = solve_rosters(FOREVER, ps, "barrow_deeps", SolveOptions(**OPTS, force_out=("p00",)), rosters=2)
+    seated = {p.signup_name for r in rosters for p in r.selected}
+    assert {"p01", "p02", "p03"} <= seated and "p00" not in seated
