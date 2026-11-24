@@ -623,3 +623,80 @@ def test_the_script_lowers_ids_only_when_asked(old_store, open_registry, data_ro
     again = open_registry(GitStore(data_root, push=False))  # this code lifts it again to the same ids and keys
     assert {e["id"] for e in again.config.schedules} == {"tuesday", "barrow-deeps", "onyxias-lair"}
     assert again.members[m.discord_id].main.rosters == ["barrow-deeps", "tuesday"]
+
+
+def _commit_all(data_root, message: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=data_root, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", message], cwd=data_root, check=True)
+
+
+def _raid_file(data_root, guild: str, name: str, state: str) -> None:
+    """An old run file as today's data holds one: `instance` null (an early file's own shape)."""
+    import json as _json
+
+    d = data_root / guild / "raids"
+    d.mkdir(exist_ok=True)
+    (d / f"{name}.json").write_text(_json.dumps({"key": name, "team": name, "instance": None, "state": state,
+                                                 "starts_at": "2026-02-03T19:30:00-08:00"}))
+    _commit_all(data_root, f"run {name}")
+
+
+@pytest.mark.parametrize("flags", [{}, {"minimums_only": True}, {"ids_only": True}], ids=["all", "minimums", "ids"])
+def test_the_script_skips_a_finished_run_that_names_no_raid(old_store, open_registry, data_root, flags):
+    """The rehearsal's F1: an old FINISHED run file with `instance: null` crashed every mode (AttributeError in
+    old_event_key) after committing one guild. Finished history is skipped."""
+    open_registry(old_store).migrate_schedules()
+    _raid_file(data_root, GUILD, "old-night", "done")
+    n0 = commit_count(old_store)
+    said = _lower_script().lower(data_root, **flags)
+    assert len(said) == 1 and "refused" not in said[0], said
+    assert commit_count(old_store) == n0 + 1
+
+
+def test_the_script_refuses_a_live_run_that_names_no_raid(old_store, open_registry, data_root):
+    open_registry(old_store).migrate_schedules()
+    _raid_file(data_root, GUILD, "odd-night", "open")
+    text = (data_root / GUILD / "guild.yaml").read_text()
+    n0 = commit_count(old_store)
+    said = _lower_script().lower(data_root)
+    assert len(said) == 1 and said[0].startswith(f"{GUILD}: refused, nothing changed. The run ")
+    assert said[0].endswith("names no raid, so the older code can't read it. End or cancel it first.")
+    assert (data_root / GUILD / "guild.yaml").read_text() == text and commit_count(old_store) == n0
+
+
+def _second_guild(data_root, key: str = "zz-second") -> None:
+    import shutil
+
+    shutil.copytree(data_root / GUILD, data_root / key)
+    doc = yaml.safe_load((data_root / key / "guild.yaml").read_text())
+    doc.update({"key": key, "discord_guild_id": 2})
+    (data_root / key / "guild.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
+    _commit_all(data_root, "second guild")
+
+
+def test_the_script_is_all_or_nothing_across_guilds(old_store, open_registry, data_root):
+    """Two guilds, the second refused: nothing is written anywhere (the first used to be committed before the second
+    stopped the script); the first's line says it was checked and not written. --guild lowers the one that passes."""
+    open_registry(old_store).migrate_schedules()
+    _second_guild(data_root)
+    _raid_file(data_root, "zz-second", "odd-night", "locked")
+    texts = {g: (data_root / g / "guild.yaml").read_text() for g in (GUILD, "zz-second")}
+    n0 = commit_count(old_store)
+    script = _lower_script()
+    said = script.lower(data_root)
+    assert said[0] == script.NOT_WRITTEN.format(name=GUILD)
+    assert said[1].startswith("zz-second: refused, nothing changed.") and "names no raid" in said[1]
+    assert {g: (data_root / g / "guild.yaml").read_text() for g in texts} == texts and commit_count(old_store) == n0
+    assert script.main([str(data_root)]) == 1 and commit_count(old_store) == n0
+    said = script.lower(data_root, guilds=[GUILD])
+    assert len(said) == 1 and said[0].startswith(f"{GUILD}: moved") and commit_count(old_store) == n0 + 1
+    assert (data_root / "zz-second" / "guild.yaml").read_text() == texts["zz-second"]
+
+
+def test_the_script_turns_an_unexpected_failure_into_that_guilds_refusal(old_store, data_root, capsys):
+    (data_root / GUILD / "raids").mkdir(exist_ok=True)
+    (data_root / GUILD / "raids" / "broken.json").write_text("{not json")
+    n0 = commit_count(old_store)
+    said = _lower_script().lower(data_root)
+    assert said == [f"{GUILD}: refused, nothing changed. Its files couldn't be read, so fix them or leave this guild out with --guild."]
+    assert commit_count(old_store) == n0 and "JSONDecodeError" in capsys.readouterr().err

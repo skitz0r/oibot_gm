@@ -38,7 +38,10 @@ Either way:
     # then check out the older code and start the bot again
 
 Data root: the path given, else OIBOT_DATA_DIR, else the sibling ../oibot_gm-data checkout (store.resolve_data_root).
-A guild with a stored schedule that can't be read is refused and left exactly as it was; the line names the entry.
+All or nothing: every guild is checked first and nothing is written unless every guild passes (a refused guild's line
+says why, the others say they were not written; exit status 1). `--guild KEY` (repeatable) lowers only those guilds.
+A guild with a stored schedule that can't be read is refused and left exactly as it was; the line names the entry. A
+finished run file that names no raid (old history) is skipped; a live one refuses its guild.
 Code from this phase lifts a lowered file again at its next start (Registry.load_config)."""
 from __future__ import annotations
 
@@ -124,6 +127,10 @@ def _run_refusal(gdir: Path, cfg: GuildConfig, raids: dict | None = None, now: d
         t = dicts.get(raw.get("team")) or {}
         live = raw.get("state") not in ("done", "cancelled")
         run = _run_words(raw, raids, tz)
+        if not raw.get("instance"):  # an old file naming no raid: finished history is never read again; a live one can't be
+            if live:
+                said.append(f"The run {run} names no raid, so the older code can't read it. End or cancel it first.")
+            continue
         # the run dict's schedule_id keeps the old suffix ('adhoc', 'after', 'test'); the file's stamp (phase 3) holds
         # a real schedule id only, so a stamped one-off reads its dict
         sid = t.get("schedule_id") or raw.get("schedule")
@@ -151,40 +158,30 @@ def _run_refusal(gdir: Path, cfg: GuildConfig, raids: dict | None = None, now: d
     return " ".join(said) or None
 
 
-def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, ids_only: bool = False) -> list[str]:
-    """One line per guild under `data_root`: what was lowered (or would be), that nothing was left to lower, or why
-    the guild was refused. One commit per guild lowered; nothing written on a dry run or a refusal. The ids are lowered
-    first (and only, with `ids_only`), then the minimums, then the schedules unless `minimums_only`."""
-    store = GitStore(data_root, push=False)
-    out: list[str] = []
-    for gdir in sorted(p for p in data_root.iterdir() if (p / "guild.yaml").exists()):
-        path = gdir / "guild.yaml"
-        doc = yaml.safe_load(path.read_text()) or {}
-        try:
-            raids = GameProfile.load(ROOT / "profiles" / doc["game_profile"]).raids
-        except Exception:  # noqa: BLE001 — the names only: without the profile the lines use the raid ids (and no profile minimum)
-            raids = {}
-        cfg = GuildConfig(**doc)
-        members, applicants = _records(gdir, "members", Member), _records(gdir, "applicants", Applicant)
-        before_m = [m.model_dump_json() for m in members]
-        before_a = [a.model_dump_json() for a in applicants]
-        had_ids = bool(doc.get("schedule_aliases"))
-        try:
-            why = _run_refusal(gdir, cfg, raids)
-            if why:
-                raise RegistryError(why)
-            ids = lower_schedule_ids(cfg, members, applicants)
-        except RegistryError as e:
-            out.append(f"{gdir.name}: refused, nothing changed. {e}")
-            continue
-        changed_m = [m for m, b in zip(members, before_m) if m.model_dump_json() != b]
-        changed_a = [a for a, b in zip(applicants, before_a) if a.model_dump_json() != b]
-        ids_moved = had_ids or bool(ids or changed_m or changed_a)
-        id_words = ["ids: " + (", ".join(ids) or "back to raid and id")] if ids_moved else []
+def _plan(gdir: Path, store: GitStore, dry_run: bool, minimums_only: bool, ids_only: bool):
+    """One guild, read and lowered IN MEMORY: (its line, the write that commits it or None). RegistryError = refused."""
+    path = gdir / "guild.yaml"
+    doc = yaml.safe_load(path.read_text()) or {}
+    try:
+        raids = GameProfile.load(ROOT / "profiles" / doc["game_profile"]).raids
+    except Exception:  # noqa: BLE001 — the names only: without the profile the lines use the raid ids (and no profile minimum)
+        raids = {}
+    cfg = GuildConfig(**doc)
+    members, applicants = _records(gdir, "members", Member), _records(gdir, "applicants", Applicant)
+    before_m = [m.model_dump_json() for m in members]
+    before_a = [a.model_dump_json() for a in applicants]
+    had_ids = bool(doc.get("schedule_aliases"))
+    why = _run_refusal(gdir, cfg, raids)
+    if why:
+        raise RegistryError(why)
+    ids = lower_schedule_ids(cfg, members, applicants)
+    changed_m = [m for m, b in zip(members, before_m) if m.model_dump_json() != b]
+    changed_a = [a for a, b in zip(applicants, before_a) if a.model_dump_json() != b]
+    ids_moved = had_ids or bool(ids or changed_m or changed_a)
+    id_words = ["ids: " + (", ".join(ids) or "back to raid and id")] if ids_moved else []
 
-        def write(what: str, keep_schedules: bool) -> None:
-            if dry_run:
-                return
+    def writer(what: str, keep_schedules: bool):
+        def write() -> None:
             doc["raids"] = cfg.raids
             doc.pop("schedule_aliases", None)
             if keep_schedules:
@@ -200,35 +197,63 @@ def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, i
                 for a in changed_a:
                     store.write_text(Path(gdir.name) / "applicants" / f"{a.discord_id}.json", a.model_dump_json(indent=1))
                 store.commit(f"{gdir.name}: {what} (by scripts/lower_schedules.py)"[:400])
+        return None if dry_run else write
 
-        verb = "would move" if dry_run else "moved"
-        if ids_only:
-            if ids_moved:
-                write(f"schedule ids back to raid and id for older code: {'; '.join(id_words)}", True)
-                out.append(f"{gdir.name}: {verb} the schedule ids back: {' · '.join(ids) or 'regulars keyed by raid and id'}")
-            else:
-                out.append(f"{gdir.name}: no schedule ids of their own, nothing to lower")
-            continue
-        mins = lower_minimums(cfg, raids)
-        if minimums_only or not doc.get("schedules"):
-            dropped_empty = not minimums_only and "schedules" in doc
-            if mins or dropped_empty or ids_moved:
-                what = (f"minimums back to limits and aims for older code: {'; '.join(id_words + mins)}" if mins or ids_moved
-                        else "empty guild-level schedules list removed for older code")
-                write(what, keep_schedules=not dropped_empty)
-            tail = "" if minimums_only else ", no guild-level schedules"
-            out.append(f"{gdir.name}: {verb} the minimums back: {' · '.join(id_words + mins)}{tail}" if mins or ids_moved
-                       else f"{gdir.name}: no minimums{tail}, nothing to lower")
+    verb = "would move" if dry_run else "moved"
+    if ids_only:
+        if ids_moved:
+            return (f"{gdir.name}: {verb} the schedule ids back: {' · '.join(ids) or 'regulars keyed by raid and id'}",
+                    writer(f"schedule ids back to raid and id for older code: {'; '.join(id_words)}", True))
+        return f"{gdir.name}: no schedule ids of their own, nothing to lower", None
+    mins = lower_minimums(cfg, raids)
+    if minimums_only or not doc.get("schedules"):
+        dropped_empty = not minimums_only and "schedules" in doc
+        w = None
+        if mins or dropped_empty or ids_moved:
+            what = (f"minimums back to limits and aims for older code: {'; '.join(id_words + mins)}" if mins or ids_moved
+                    else "empty guild-level schedules list removed for older code")
+            w = writer(what, keep_schedules=not dropped_empty)
+        tail = "" if minimums_only else ", no guild-level schedules"
+        return (f"{gdir.name}: {verb} the minimums back: {' · '.join(id_words + mins)}{tail}" if mins or ids_moved
+                else f"{gdir.name}: no minimums{tail}, nothing to lower"), w
+    lines = lower_schedules(cfg, raids)
+    return (f"{gdir.name}: {verb} back under each raid: {' · '.join(id_words + mins + lines)}",
+            writer(f"schedules moved back under each raid for older code: {'; '.join(id_words + mins + lines)}", keep_schedules=False))
+
+
+NOT_WRITTEN = "{name}: checked, and not written because another guild was refused."
+
+
+def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, ids_only: bool = False,
+          guilds: list[str] | None = None) -> list[str]:
+    """One line per guild under `data_root` (only those named in `guilds`, when given): what was lowered (or would be),
+    that nothing was left to lower, or why the guild was refused. ALL OR NOTHING: every guild is checked and lowered in
+    memory first, and only when none is refused is anything written — one commit per guild. One refused guild = nothing
+    written anywhere (the others' lines say so), never data half-lowered; `guilds` lowers the ones that pass on their
+    own. Any unexpected failure while reading a guild is that guild's refusal, in one sentence, never a traceback. The ids
+    are lowered first (and only, with `ids_only`), then the minimums, then the schedules unless `minimums_only`."""
+    store = GitStore(data_root, push=False)
+    planned: list[tuple[str, str, object, bool]] = []  # (guild, line, write, refused)
+    for gdir in sorted(p for p in data_root.iterdir() if (p / "guild.yaml").exists()):
+        if guilds and gdir.name not in guilds:
             continue
         try:
-            lines = lower_schedules(cfg, raids)
+            line, write = _plan(gdir, store, dry_run, minimums_only, ids_only)
         except RegistryError as e:
-            out.append(f"{gdir.name}: refused, nothing changed. {e}")
-            continue
-        write(f"schedules moved back under each raid for older code: {'; '.join(id_words + mins + lines)}", keep_schedules=False)
-        out.append(f"{gdir.name}: {verb} back under each raid: {' · '.join(id_words + mins + lines)}")
+            planned.append((gdir.name, f"{gdir.name}: refused, nothing changed. {e}", None, True))
+        except Exception as e:  # noqa: BLE001 — one guild's unreadable data is its refusal, never a crash mid-way
+            print(f"{gdir.name}: {e!r}", file=sys.stderr)  # the detail, for whoever fixes the files
+            planned.append((gdir.name, f"{gdir.name}: refused, nothing changed. Its files couldn't be read, so fix them "
+                                       "or leave this guild out with --guild.", None, True))
+        else:
+            planned.append((gdir.name, line, write, False))
+    if any(refused for *_x, refused in planned):
+        return [line if refused or write is None else NOT_WRITTEN.format(name=name) for name, line, write, refused in planned]
+    for _name, _line, write, _r in planned:
+        if write is not None:
+            write()
     store.flush()
-    return out
+    return [line for _n, line, _w, _r in planned]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -238,14 +263,16 @@ def main(argv: list[str] | None = None) -> int:
     which = ap.add_mutually_exclusive_group()
     which.add_argument("--ids-only", action="store_true", help="lower only the schedule ids and regulars (back to the phase-2 code)")
     which.add_argument("--minimums-only", action="store_true", help="lower the ids and the minimums (back to the phase-1 code); the schedules stay")
+    ap.add_argument("--guild", action="append", metavar="KEY", help="only this guild's folder (repeatable); every guild by default")
     a = ap.parse_args(argv)
     data = a.data or resolve_data_root(ROOT)
     if is_fixture_root(ROOT, data) and not a.data:
         print(f"refusing: no data repo found (resolved to the fixtures at {data}); pass the path", file=sys.stderr)
         return 2
-    for line in lower(data, a.dry_run, a.minimums_only, a.ids_only):
+    said = lower(data, a.dry_run, a.minimums_only, a.ids_only, a.guild)
+    for line in said:
         print(line)
-    return 0
+    return 1 if any(": refused, nothing changed." in line for line in said) else 0
 
 
 if __name__ == "__main__":
