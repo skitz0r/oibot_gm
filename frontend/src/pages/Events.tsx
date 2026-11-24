@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Button, Group, Text } from "@mantine/core";
+import { Alert, Button, Group, Text } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { api, ApiError, type Box, type EventList, type EventView, type Meta } from "../api";
 import { ListPage, type ListGroup } from "../components/ListPage";
@@ -16,6 +16,9 @@ import { EventBoard } from "../components/events/EventBoard";
 import { useAfterDrag } from "../components/board/shared";
 import { useRescheduleBox } from "../components/events/RescheduleBox";
 import { boxOf, EventHead } from "../components/events/shared";
+import { EventMore } from "../components/events/EventMore";
+import { guardNav } from "../components/LeaveGuard";
+import type { NightSheet } from "../components/board/types";
 import { useLive } from "../hooks/useLive";
 import { usePoll } from "../hooks/usePoll";
 import css from "./listpage.module.css";
@@ -99,7 +102,7 @@ function EventPane({ evKey, meta, tick, onChanged }: { evKey: string; meta: Meta
   if (held && lastLive.current && (gone || closed)) return <LiveEvent ev={lastLive.current} meta={meta} onChanged={onChanged} />;
   if (gone) return <Text c="dimmed">{gone}</Text>;
   if (!ev) return <Text c="dimmed">Loading…</Text>;
-  if (closed) return <HistoryView ev={ev} meta={meta} />;
+  if (closed) return <HistoryView ev={ev} meta={meta} onChanged={onChanged} />;
   return <LiveEvent ev={ev} meta={meta} onChanged={onChanged} />;
 }
 
@@ -141,9 +144,16 @@ function LiveEvent({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChang
       <EventHead title={ev.title} chip={ev.chip} open={ev.state === "open"}>
         <Group gap="xs" wrap="wrap">
           {ev.actions.reschedule && ev.boxes.reschedule && <Button variant="default" onClick={reschedule}>Reschedule</Button>}
+          {/* Edit lineup: the builder with the first raid fixed (LineupPage mode="edit-lineup"); gone once the roster locks */}
+          {ev.actions.edit_lineup && <Button variant="default" onClick={() => guardNav(`/events/${encodeURIComponent(ev.key)}/lineup`)}>Edit lineup</Button>}
           {ev.actions.lock && ev.boxes.lock && <Button onClick={lock}>Lock now</Button>}
+          <EventMore ev={ev} meta={meta} onChanged={onChanged} />
         </Group>
       </EventHead>
+      {/* a scheduled lock that failed (the run stays open and retries): the server's sentence, per raid */}
+      {ev.parts.map((p) => (p.sheet as unknown as NightSheet | null)?.lock_error ? (
+        <div key={p.key} className={css.sect}><Alert color="red" variant="light" p="xs"><Text size="sm">{(p.sheet as unknown as NightSheet).lock_error}</Text></Alert></div>
+      ) : null)}
       <EventDetails details={ev.details} />
       <SignupsSection ev={ev} meta={meta} onDone={onChanged} />
       <RoleSwitches meta={meta} view={ev} onReload={onChanged} />

@@ -607,7 +607,7 @@ def test_comp_wizard_opens_the_sandbox_and_links_its_board(reg, rs, officer, mon
         await h.press("Try a comp")
     run(go())
     ev = next(e for e in rs.live() if rc.is_test_run(reg, e))
-    assert f"https://gm.example/app/rosters?g={reg.key}#run-{ev.key}" in h.text and ev.message_id is None
+    assert f"https://gm.example/app/events/{ev.key}?g={reg.key}" in h.text and ev.message_id is None
     assert len(ev.by_status("in")) == len(reg.test_members())
 
 

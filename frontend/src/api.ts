@@ -584,7 +584,7 @@ export interface Plan { phase: "prelock" | "fill"; short: { headcount: number; r
 /** What Fill seats would send: the shortfall, who is still being waited on, the plan, and `batch` = exactly what a send with the plan's rev (no picks) DMs now. */
 export interface FillPreview { short: { headcount: number; roles: Record<string, number>; size?: number }; waiting: string[]; batch: FillAskRow[]; plan?: Plan }
 /** An open Confirm ask on a LIVE run (GET /api/members, design §5.58): `words` = "<raid> on <day>" (the link's text, to
- *  /rosters#run-<key>), `line` = the standing line ("… waits for their Confirm"), `how_words` = how it reaches them. */
+ *  /events/<key>), `line` = the standing line ("… waits for their Confirm"), `how_words` = how it reaches them. */
 export interface MemberAsk { roster: string; answer: string | null; raid: string; when: string; key: string | null; words: string; line: string; how: "dm" | "web"; how_words: string }
 /** One member on the Members page. `left` = the day the bot noticed they are not in the Discord server (words; null
  *  while they are), `left_line` its line, `remove_consequence` Remove record's sentence (only when left); `away` = the

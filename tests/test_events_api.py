@@ -626,3 +626,66 @@ def test_a_four_step_lineup_opens_on_a_four_raid_profile(store, profile, monkeyp
     five = body | {"when": wall(reg, start_in(reg, 6)), "lineup": later + [{"raid": "extra_b", "rosters": 1}]}
     r = c.post(f"/api/raid/{HYJAL}/open/preview", json=five, headers=H())
     assert r.status_code == 400 and r.json()["box"]["verb"] is None
+
+
+# ---------------------------------------------------------------- Edit lineup (phase 4, Task 10)
+
+def test_edit_lineup_reads_its_event_and_says_what_a_draft_makes(web_bot, reg, rs):
+    """The Edit lineup page reads ONE route: the event's own lineup (any raid's key answers as its event), its start's
+    clock for the builder, the palette; a draft POSTed there answers "What this makes" — the facts, each step's start in
+    the server's 12-hour words, and the Save box itself (consequences.lineup_box) — and writes nothing."""
+    c, h = web_bot.c, H()
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    later = rc.event_parts(rs, ev)[1]
+    g = c.get(f"/api/event/{later.key}/lineup", headers=h)
+    assert g.status_code == 200, g.text
+    g = g.json()
+    assert (g["key"], g["title"], g["start_time"]) == (ev.key, reg.local12(ev.start), "18:30")
+    assert g["lineup"] == rc.run_lineup(reg, rs, ev) and g["refusal_box"] is None
+    assert g["raids"] == event_view.new_event_options(reg)["raids"] and g["lineup_max"] == registry.LINEUP_MAX
+    assert g["lineup_full"] == registry.LINEUP_MAX_WORDS
+    before = rc.run_lineup(reg, rs, ev)
+    draft = [{"raid": HYJAL, "rosters": 1, "starts": 0}, {"raid": RID, "rosters": 1, "starts": 180}]
+    p = c.post(f"/api/event/{ev.key}/lineup", json={"lineup": draft}, headers=h)
+    assert p.status_code == 200, p.text
+    p = p.json()
+    facts = {f["label"]: f["value"] for f in p["facts"]}
+    assert facts == {"One signup sheet": "Hyjal Summit, then Barrow Deeps", "Seats": "20, then 10"}
+    assert [(s["raid"], s["starts"], s["time_words"]) for s in p["lineup"]] == [(HYJAL, 0, "6:30 PM"), (RID, 180, "9:30 PM")]
+    assert p["box"] == cq.lineup_box(reg, rs, ev, draft) and p["box"]["verb"] == "Save lineup"
+    assert any("Barrow Deeps" in d and "→" in d for d in p["box"]["diff"])
+    assert rc.run_lineup(reg, rs, ev) == before, "a draft writes nothing"
+    assert p["same"] is False
+    # the event's own lineup sent back is the server's 'nothing changes' — `same`, never drawn as a refusal
+    same = c.post(f"/api/event/{ev.key}/lineup", json={"lineup": before}, headers=h).json()
+    assert same["same"] is True and same["box"]["verb"] is None
+    bad = c.post(f"/api/event/{ev.key}/lineup", json={"lineup": "x"}, headers=h)
+    assert bad.status_code == 400
+
+
+def test_edit_lineup_on_a_locked_event_is_its_refusal(web_bot, reg, rs):
+    """After the lock the route answers the server's LINEUP_LOCKED box (Back only) and no draft can be made."""
+    c, h = web_bot.c, H()
+    ev = rc.open_run(reg, rs, RID, start_in(reg, 1), by="t")
+    ms = people(reg, 10)
+    join(reg, rs, ev, ms)
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms])
+    g = c.get(f"/api/event/{ev.key}/lineup", headers=h).json()
+    assert g["refusal_box"] == cq.refusal_box_for(rc.LINEUP_LOCKED) and g["refusal_box"]["sentences"] == [rc.LINEUP_LOCKED]
+    assert c.get("/api/event/nope/lineup", headers=h).status_code == 404
+
+
+def test_edit_lineups_save_box_goes_stale_and_the_fresh_one_goes_through(web_bot, reg, rs):
+    """The Save press carries the fp of the box on screen: when the event changed while it was open, 409 with the fresh
+    box and nothing written; the next press with THAT box's fp saves."""
+    c, h = web_bot.c, H()
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    draft = [{"raid": HYJAL, "rosters": 1, "starts": 0}, {"raid": RID, "rosters": 1, "starts": 180}]
+    old = c.post(f"/api/run/{ev.key}/lineup", json={"lineup": draft, "preview": True}, headers=h).json()["box"]
+    join(reg, rs, ev, people(reg, 3))  # someone joins while the box is open: the event's fingerprint moves
+    stale = c.post(f"/api/run/{ev.key}/lineup", json={"lineup": draft, "seen": old["fp"]}, headers=h)
+    assert stale.status_code == 409 and stale.json()["box"]["fp"] != old["fp"]
+    assert [e["rosters"] for e in rc.run_lineup(reg, rs, ev)] == [1, 2], "nothing written"
+    ok = c.post(f"/api/run/{ev.key}/lineup", json={"lineup": draft, "seen": stale.json()["box"]["fp"]}, headers=h)
+    assert ok.status_code == 200, ok.text
+    assert [e["rosters"] for e in rc.run_lineup(reg, rs, ev)] == [1, 1]

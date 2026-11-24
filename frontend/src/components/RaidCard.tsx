@@ -110,18 +110,18 @@ export type RunsOf = { live_runs?: LiveRun[]; next_run?: NextRun | null; first_o
 
 /** When the raid runs, from the runs themselves (design §5.54): the sheets open or locked right now, then the next run
  *  its schedules will open, then — before the first sheet ever opens — when that is. A raid with none of these says so
- *  and how to change it. The Rosters page (design §5.56) passes `here` (a live run's time jumps to its card on this
- *  page), `upcoming` (its rows with Open, in place of the next-run line) and `nothing` (its own way out). */
-export function WhenItRuns({ r, owner, here = false, upcoming, nothing: nothingText }: { r: RunsOf; owner: boolean; here?: boolean; upcoming?: React.ReactNode; nothing?: React.ReactNode }) {
+ *  and how to change it; a live run's time links its event on the Events page. `upcoming` (rows with Open, in place of
+ *  the next-run line) and `nothing` (a page's own way out) were the Rosters page's; Task 11 retires this block. */
+export function WhenItRuns({ r, owner, upcoming, nothing: nothingText }: { r: RunsOf; owner: boolean; upcoming?: React.ReactNode; nothing?: React.ReactNode }) {
   const live = r.live_runs || [];
   const nothing = !live.length && !(upcoming ?? r.next_run) && !(r.first_open_words && !r.opened);
-  const how = (r.schedules || []).length ? "its schedules are paused or have no run coming" : owner ? "add a schedule below, or open a run from the Rosters page" : "add a schedule on the Raids page, or open a run from the Rosters page";
+  const how = (r.schedules || []).length ? "its schedules are paused or have no run coming" : owner ? "add a schedule below, or make a New event on the Events page" : "add a schedule on the Schedules page, or make a New event on the Events page";
   return (
     <ul className={css.runs}>
       {live.map((e) => (
         <li key={e.key} className={css.run}>
           <span className={[css.runDot, e.state === "locked" ? css.runLocked : css.runOpen].join(" ")} />
-          {here ? <a href={`#run-${e.key}`} className={css.runWhen}>{e.when}</a> : <Link to={`/rosters#run-${e.key}`} className={css.runWhen}>{e.when}</Link>}
+          <Link to={`/events/${encodeURIComponent(e.key)}`} className={css.runWhen}>{e.when}</Link>
           <span className={css.runWhat}>{e.state_word || e.state} · {e.schedule}</span>{/* the server's state words (rc.RUN_STATE_WORDS) — the Rosters card's chip says the same */}
         </li>
       ))}

@@ -17,7 +17,7 @@ import { TellTheBot } from "../TellTheBot";
 import { PinMark, RoleCounts, SeatLine, markOf, runName, type Act, type OnBoard } from "./shared";
 import { RunStrip } from "../RaidCard";
 import type { LockPreview, NightSheet } from "./types";
-import css from "../../pages/rosters.module.css";
+import css from "./board.module.css";
 
 /** One live run's card (design §5.56), in the order a raid leader reads it: the time, its state and kind; the run's week
  *  as a strip with a now mark; one headcount with its owner (joined before the lock, rostered after) and the role counts;
@@ -442,13 +442,13 @@ function OthersLine({ label, items, outLabel, outs, away, menu }: { label: strin
 
 /** The detail accordion, "What happened · N lines": fill asks (an ask still out can be withdrawn), callouts with their
  *  notes, and the log — each line with its stamp in words, officer-only lines marked. Nothing to show = no accordion.
- *  `readOnly`: the history drawer. */
-export function Detail({ e, meta, onAct, busy, readOnly = false }: { e: NightSheet; meta?: Meta; onAct?: Act; busy?: string | null; readOnly?: boolean }) {
+ *  `readOnly`: nothing to press (a finished run); `open`: unfolded from the start (the event's Asks and callouts…). */
+export function Detail({ e, meta, onAct, busy, readOnly = false, open = false }: { e: NightSheet; meta?: Meta; onAct?: Act; busy?: string | null; readOnly?: boolean; open?: boolean }) {
   const fa = e.fill_asks || [], co = e.callouts || [], rows = e.log_rows || (e.log || []).map((t) => ({ at: "", when: "", text: t, officer: false }));
   const lines = fa.length + co.length + rows.length;
   if (!lines) return null;
   return (
-    <Accordion variant="contained" mt="md" chevronPosition="left">
+    <Accordion variant="contained" mt="md" chevronPosition="left" defaultValue={open ? "detail" : null}>
       <Accordion.Item value="detail">
         <Accordion.Control><Text size="sm" c="dimmed">What happened · {lines} line{lines === 1 ? "" : "s"}</Text></Accordion.Control>
         <Accordion.Panel>

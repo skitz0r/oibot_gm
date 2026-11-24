@@ -452,9 +452,10 @@ def test_clearing_a_minimum_the_guild_never_set_says_nothing_changes(web_bot, re
 
 
 def test_help_links_readiness_on_the_raids_page(reg, monkeypatch):
+    """Readiness is a view of the Raids page (phase 4): a help answer naming it links the Raids page (help.PAGE_ALIASES)."""
     from oibot_gm import help as help_mod
 
     monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
-    assert help_mod.PAGES["readiness"][:2] == ("/app/raids?view=readiness", "Raids")
-    assert help_mod.site_url(reg, help_mod.PAGES["readiness"][0]) == f"https://gm.example/app/raids?view=readiness&g={reg.key}"
+    assert "readiness" not in help_mod.PAGES
+    assert help_mod.page_link(reg, "readiness", True) == f"-# See it all on the [Raids page](<https://gm.example/app/raids?g={reg.key}>)."
     assert help_mod.site_url(reg, "/app/me") == f"https://gm.example/app/me?g={reg.key}"

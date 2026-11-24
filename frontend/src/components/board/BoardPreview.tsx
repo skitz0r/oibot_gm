@@ -2,7 +2,7 @@ import { Box, Group, Stack, Text } from "@mantine/core";
 import type { Board, Meta, SplitReason } from "../../api";
 import { RaidWide } from "../GroupsBlock";
 import { Aura, RosterHeader, SeatLine, SplitReasonLine, splitBank } from "./shared";
-import css from "../../pages/rosters.module.css";
+import css from "./board.module.css";
 
 /** Read-only rendering of a board (the split preview): the same groups, badges and raid-wide row as the board. */
 export function BoardPreview({ meta, board, reason }: { meta: Meta; board: Board; reason?: SplitReason | null }) {

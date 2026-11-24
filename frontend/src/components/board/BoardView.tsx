@@ -11,7 +11,7 @@ import { GameIcon } from "../Icons";
 import { Aura, PinMark, RosterHeader, SeatLine, SplitReasonLine, chunk, fillNames, markOf, sortBank, splitBank, live, type BankSort, type OnBoard } from "./shared";
 import { SplitModal } from "./SplitModal";
 import { MemberMenu, type MoveTarget } from "./MemberMenu";
-import css from "../../pages/rosters.module.css";
+import css from "./board.module.css";
 
 type From = { r: number; g: number } | null;
 type Drag = { name: string; from: From };

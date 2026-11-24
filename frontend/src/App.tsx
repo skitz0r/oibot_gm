@@ -3,15 +3,14 @@ import { REFRESH_EVENT } from "./hooks/usePoll";
 import { Alert, AppShell, Avatar, Box, Burger, Button, Group, Menu, Modal, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconCalendarRepeat, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus, IconCoin } from "@tabler/icons-react";
-import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { IconCalendarEvent, IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconCalendarRepeat, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus, IconCoin } from "@tabler/icons-react";
+import { Link, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { LeaveGuard, guardClick } from "./components/LeaveGuard";
 import { setBoxMeta } from "./components/ConfirmBox";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
 import { setItemUrl } from "./components/ItemName";
 import { MePage } from "./pages/Me";
-import { RostersPage } from "./pages/Rosters";
 import { RaidsPage } from "./pages/Raids";
 import { MembersPage } from "./pages/Members";
 import { OpsPage } from "./pages/Ops";
@@ -35,7 +34,7 @@ const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", labe
 /** price watch §4.3: the Prices tab, for every member, where the game version has auction houses (after Professions) */
 const PRICES = { to: "/prices", label: "Prices", icon: IconCoin };
 const OFFICER = [
-  { to: "/rosters", label: "Rosters", icon: IconTable },
+  { to: "/events", label: "Events", icon: IconCalendarEvent },  // the Rosters page became the Events page (phase 4)
   { to: "/schedules", label: "Schedules", icon: IconCalendarRepeat },
   { to: "/raids", label: "Raids", icon: IconMountain },
   { to: "/members", label: "Members", icon: IconUsers },
@@ -94,6 +93,21 @@ function GuildSelector({ meta }: { meta: Meta }) {
       </Menu.Dropdown>
     </Menu>
   );
+}
+
+/** The Rosters page became the Events page (phase 4, Task 10): /rosters → /events; an old deep link
+ *  /rosters#run-<key> (Discord cards, notices, bookmarks) → /events/<key>. A later raid's key answers as its event (the
+ *  Events page moves the address to the event's own), a key that is gone prints the server's sentence there. */
+function RostersRedirect() {
+  const { hash, search } = useLocation();
+  const key = hash.startsWith("#run-") ? decodeURIComponent(hash.slice(5)) : "";
+  return <Navigate to={key ? `/events/${encodeURIComponent(key)}${search}` : `/events${search}`} replace />;
+}
+
+/** /events/:key/lineup's page needs the key in its own route (Edit lineup). */
+function EditLineupRoute({ meta }: { meta: Meta }) {
+  const { key } = useParams();
+  return <LineupPage key={key} meta={meta} mode="edit-lineup" />;
 }
 
 /** /readiness (and ?raid=x) → the Raids page's Readiness view of that raid. */
@@ -187,14 +201,15 @@ export default function App() {
           )}
           <Routes>
             <Route path="/me" element={<MePage meta={meta} />} />
-            <Route path="/rosters" element={officer(<RostersPage meta={meta} />)} />
+            <Route path="/rosters" element={<RostersRedirect />} />
             <Route path="/raids" element={officer(<RaidsPage meta={meta} />)} />
             <Route path="/raids/:id" element={officer(<RaidsPage meta={meta} />)} />
             {/* Readiness is the Raids page's third view now; an old link keeps its raid */}
             <Route path="/readiness" element={<ReadinessRedirect />} />
             {/* the schedule editor, until the Schedules page (Task 11) replaces this page */}
-            {/* New event (the lineup builder); /events itself is the Events page's (Task 8) — until then the Rosters page */}
+            {/* New event and Edit lineup: the lineup builder (pages/LineupPage); the Events page lists and shows events */}
             <Route path="/events/new" element={officer(<LineupPage meta={meta} mode="new-event" />)} />
+            <Route path="/events/:key/lineup" element={officer(<EditLineupRoute meta={meta} />)} />
             <Route path="/events" element={officer(<EventsPage meta={meta} />)} />
             <Route path="/events/:key" element={officer(<EventsPage meta={meta} />)} />
             <Route path="/events/coming/:sid/:occurrence" element={officer(<EventsPage meta={meta} />)} />

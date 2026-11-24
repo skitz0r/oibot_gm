@@ -8,6 +8,8 @@ existing topics `run:` (any run saved), `member` and `config` (a schedule edited
 - GET /api/event/{key} → event_view.event_json (any part's key answers as its event; finished and cancelled too), its
   open raids' boards from event_board's cache (the lock's placement; `board_state` working while it is solved, and the
   page hears `run:<event key>` when it is ready)
+- GET /api/event/{key}/lineup → event_view.lineup_edit_json (Edit lineup's start); POST it {lineup} →
+  event_view.lineup_draft_json (its "What this makes" and Save box, nothing written — the Save is POST /api/run/{key}/lineup)
 - GET /api/event/coming/{sid}/{occurrence} → event_view.coming_json; 404 {error, key} when the night has an event now
   (`key`: the page goes there) or is no longer on its schedule (`key` null).
 - POST /api/run/{key}/switch → one Role switches row (rc.event_switches): before the lock RaidMixin.set_answer (Join
@@ -77,6 +79,32 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         board = await event_board.cache_of(bot).get(v.reg, rs, ev)
         return await asyncio.to_thread(event_view.event_json, v.reg, rs, ev, v.uid,
                                        sheet=lambda p, rosters=None, open_seats=True: ev_json(v.reg, rs, p, rosters=rosters, open_seats=open_seats), board=board)
+
+    @app.get("/api/event/{key}/lineup")
+    async def event_lineup(request: Request, key: str):
+        """The Edit lineup page's start (event_view.lineup_edit_json): the event's own lineup and clock, the palette, and
+        on a locked or finished event the server's refusal box. Reads only — no board solve."""
+        v = await who(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key)
+        if ev is None or ev.dropped:
+            return JSONResponse({"error": NO_EVENT}, status_code=404)
+        return await asyncio.to_thread(event_view.lineup_edit_json, v.reg, rs, ev)
+
+    @app.post("/api/event/{key}/lineup")
+    async def event_lineup_draft(request: Request, key: str):
+        """{lineup: [{raid, rosters, starts}] — the WHOLE draft, its first raid first} → Edit lineup's "What this makes"
+        (event_view.lineup_draft_json: facts, each step's start in words, the Save box, `same`). Nothing written: the
+        Save is POST /api/run/{key}/lineup."""
+        v, d = await body(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key)
+        if ev is None or ev.dropped:
+            return JSONResponse({"error": NO_EVENT}, status_code=404)
+        lineup = d.get("lineup")
+        if not isinstance(lineup, list) or not all(isinstance(e, dict) for e in lineup):
+            return JSONResponse({"error": "Name the run's raids, its first raid first, each with its rosters."}, status_code=400)
+        return await asyncio.to_thread(event_view.lineup_draft_json, v.reg, rs, ev, lineup)
 
     @app.post("/api/run/{key}/switch")
     async def event_switch(request: Request, key: str):

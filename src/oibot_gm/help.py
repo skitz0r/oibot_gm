@@ -32,17 +32,21 @@ MANUAL = ROOT / "docs" / "manual.md"
 # key → (path, the page's name in the rail, officers only). page_link is the one renderer.
 PAGES = {"me": ("/app/me", "Me", False), "professions": ("/app/professions", "Professions", False), "prices": ("/app/prices", "Prices", False),
          "loot_log": ("/app/loot-log", "Loot log", False), "help": ("/app/help", "Help", False),
-         "rosters": ("/app/rosters", "Rosters", True), "raids": ("/app/raids", "Raids", True), "readiness": ("/app/raids?view=readiness", "Raids", True),  # the Raids page's Readiness view
+         "events": ("/app/events", "Events", True), "schedules": ("/app/schedules", "Schedules", True), "raids": ("/app/raids", "Raids", True),
          "members": ("/app/members", "Members", True), "applications": ("/app/applications", "Applications", True),
          "loot": ("/app/loot", "Loot", True), "policy": ("/app/policy", "Policy", True), "ops": ("/app/ops", "Ops", True),
          "config": ("/app/config", "Config", True)}
+# pages that are gone, answered by the page that took their place (phase 4: the Rosters page became Events, Readiness a
+# view of the Raids page) — a model that still names one links the new page
+PAGE_ALIASES = {"rosters": "events", "readiness": "raids"}
 
 
 def page_link(reg, key: str, officer: bool) -> str | None:
     """The line under an answer that links the page with the full view: '-# See it all on the [Professions page](<url>).'
     None for no page, a page the model made up, an officers' page for a member, Prices where the version has no auction
-    houses, or a site with no address (site_url)."""
-    row = PAGES.get((key or "").strip().lower())
+    houses, or a site with no address (site_url). A gone page's name (PAGE_ALIASES) links the page that took its place."""
+    key = (key or "").strip().lower()
+    row = PAGES.get(PAGE_ALIASES.get(key, key))
     if row is None or (row[2] and not officer):
         return None
     if key == "prices":
@@ -1059,7 +1063,7 @@ def _readiness(ask: Ask) -> list[str]:
                        + (" · ".join(f"{r} {n}" + (f"/{cv['need'][r]}" if cv["need"].get(r) else "") for r, n in cv["counts"].items())
                           + (f" · short {', '.join(f'{n} {r}' for r, n in cv['short'].items())}" if cv["short"] else "")
                           + (f" · coverage {cv.get('level')}" + (f" (could cover: {', '.join(cv.get('cover') or [])})" if cv.get("cover") else "") + (f" (recruit: {', '.join(cv.get('recruit') or [])})" if cv.get("recruit") else "") if cv.get("level") else "")
-                          if cv["regulars"] else "no regulars yet, so every main is expected — officers add them on the Rosters page"))
+                          if cv["regulars"] else "no regulars yet, so every main is expected — officers add them on the Schedules page"))
             for f in cv.get("forecast") or []:  # the 4-week forecast: regulars minus recorded absences (code-computed)
                 if f["short"]:
                     out.append(f"    forecast {f['day']}: short {', '.join(f'{k} {r}' for r, k in f['short'].items())}" + (f" ({', '.join(f['away'])} away)" if f["away"] else ""))

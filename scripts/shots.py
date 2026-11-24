@@ -22,7 +22,7 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 SCRATCH = "http://127.0.0.1:8799"  # scripts/serve_scratch.py
 SCRATCH_TOKEN = "a" * 64  # tests/test_mcp.TOKEN: the scratch server's owner login
 
-PAGES = ["/app/me", "/app/rosters", "/app/events", "/app/events/new", "/app/raids", "/app/members", "/app/loot", "/app/loot-log", "/app/professions", "/app/applications",
+PAGES = ["/app/me", "/app/events", "/app/events/new", "/app/schedules", "/app/raids", "/app/members", "/app/loot", "/app/loot-log", "/app/professions", "/app/applications",
          "/app/policy", "/app/agents", "/app/auras", "/app/ops", "/app/config", "/app/help", "/schedule"]
 # list pages (phase 4): on the phone the list shows first; the first [data-list-item] is tapped and the detail shot too
 DETAIL = {"/app/raids", "/app/events", "/app/schedules"}

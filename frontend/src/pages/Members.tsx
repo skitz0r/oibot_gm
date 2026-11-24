@@ -207,7 +207,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
         {!r.test && <ArmoryMark c={c} />}
         {charMenu(r, c)}
       </div>
-      {!!c.regular_on?.length && <Anchor component={Link} to="/rosters" size="xs" c="dimmed" ml={32}>regular of {c.regular_on.join(", ")}</Anchor>}
+      {!!c.regular_on?.length && <Anchor component={Link} to="/schedules" size="xs" c="dimmed" ml={32}>regular of {c.regular_on.join(", ")}</Anchor>}
       {hasProfs && (prof && prof.r.uid === r.uid && prof.c.label === c.label
         ? <Box mt={4} mb={6}><ProfessionsEditor meta={meta} label={c.label} professions={c.professions} onCancel={() => setProf(null)}
             onSaved={() => { setProf(null); load(); }} onSave={professionsSave(r, c)} /></Box>
@@ -244,7 +244,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
               <Tooltip key={a.roster} label={a.how_words}>
                 <Group gap={6} wrap="nowrap" align="flex-start">
                   <IconHourglass size={15} style={{ flexShrink: 0, marginTop: 3 }} />
-                  <Text size="sm">{a.key ? <Anchor component={Link} to={`/rosters#run-${a.key}`} size="sm">{a.words}</Anchor> : a.words}{a.line.slice(a.words.length)}</Text>
+                  <Text size="sm">{a.key ? <Anchor component={Link} to={`/events/${encodeURIComponent(a.key)}`} size="sm">{a.words}</Anchor> : a.words}{a.line.slice(a.words.length)}</Text>
                 </Group>
               </Tooltip>
             ))}

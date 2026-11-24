@@ -27,6 +27,18 @@ def state(reg, rs, uid, officer, q="", extras=None):
     return help_mod.guild_state(reg, rs, uid, officer, q, extras)
 
 
+def test_help_links_the_events_and_schedules_pages_and_never_a_gone_one(reg, monkeypatch):
+    """Phase 4, Task 10: the Rosters page is now the Events page. An answer can link Events and Schedules; a model that
+    still names Rosters (or Readiness) links the page that took its place, never a dead address."""
+    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
+    assert help_mod.PAGES["events"] == ("/app/events", "Events", True) and help_mod.PAGES["schedules"] == ("/app/schedules", "Schedules", True)
+    assert "rosters" not in help_mod.PAGES and "readiness" not in help_mod.PAGES
+    assert all("/app/rosters" not in row[0] for row in help_mod.PAGES.values())
+    assert help_mod.page_link(reg, "rosters", True) == f"-# See it all on the [Events page](<https://gm.example/app/events?g={reg.key}>)."
+    assert help_mod.page_link(reg, "events", False) is None, "an officers' page is never linked for a member"
+    assert "events" in help_mod.HelpAnswer.model_fields["page"].description
+
+
 def real_member(reg, uid, name, cls="Priest", spec="Holy"):
     m, _c = reg.add_character(uid, name, name, cls, spec, None, True)
     return m

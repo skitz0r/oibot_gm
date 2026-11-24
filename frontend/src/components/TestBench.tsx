@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useDirty } from "../hooks/useDirty";
 import { ActionIcon, Box, Button, Card, Group, SegmentedControl, Select, Stack, Switch, Text, Title, Tooltip } from "@mantine/core";
 import { IconFlask, IconInfoCircle, IconMinus, IconPlus } from "@tabler/icons-react";
-import { useNavigate } from "react-router-dom";
-import { api, type MemberRow, type Meta } from "../api";
+import { Link, useNavigate } from "react-router-dom";
+import { api, type Board, type MemberRow, type Meta, type Rosters, type Sheet } from "../api";
+import { SheetCard } from "./board/SheetCard";
 import type { WeekStep } from "./board/types";
 import { GameIcon } from "./Icons";
 import { Eyebrow, fail, ok } from "./Page";
@@ -165,9 +166,10 @@ export function TestBench({ meta, rows, onChanged }: { meta: Meta; rows: MemberR
 
         {state && !dirty && (
           <Rehearse meta={meta} state={state} raid={raid} raidName={raidName} setRaid={setRaid} puppets={puppets.length} busy={busy} onPost={post}
-            onComp={() => post("comp", "/api/test/comp", { raid }, (r) => { if (r.key) navigate(`/rosters#run-${r.key}`); })} />
+            onComp={() => post("comp", "/api/test/comp", { raid }, (r) => { if (r.key) navigate(`/events/${encodeURIComponent(r.key)}`); })} />
         )}
         {state && !dirty && state.runs.length > 0 && <AnswerAsPuppets meta={meta} state={state} puppets={puppets} busy={busy} onPost={post} />}
+        {state && state.runs.length > 0 && <TestRuns meta={meta} keys={state.runs.map((r) => r.key).join()} />}
         <Box pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}><TestFeed /></Box>
       </Stack>
       {confirmDialog}
@@ -186,7 +188,7 @@ function Rehearse({ meta, state, raid, raidName, setRaid, puppets, busy, onPost,
   const [tempo, setTempo] = useState(state.default_tempo);
   const [dm, setDm] = useState(false);
   const t = state.tempos.find((x) => x.id === tempo);
-  const where = raidName ? `The run's card then lives on Rosters under ${raidName} › Test, and its sheet refuses real members.` : "";
+  const where = raidName ? `The ${raidName} test run's card then shows under Test runs below, and its sheet refuses real members.` : "";
   return (
     <Stack gap="sm" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
       <Group gap="sm" wrap="wrap" align="center">
@@ -260,4 +262,40 @@ function roleOf(meta: Meta, k: Key): string {
 function roleOrder(meta: Meta, k: Key): number {
   const i = meta.roles.indexOf(roleOf(meta, k));
   return i < 0 ? 99 : i;
+}
+
+/** The live test runs' cards (the Rosters page's per-raid Test tab, moved here when that page became the Events page):
+ *  each the whole SheetCard — lock, fill, remind, the board — over the run's JSON from GET /api/rosters (`e.test`),
+ *  never in the Events list (event_view.listed); each links its event page, where the board is drawn as the lock would
+ *  place it. Reloads on its own runs' saves. */
+function TestRuns({ meta, keys }: { meta: Meta; keys: string }) {
+  const [data, setData] = useState<Rosters | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = (): Promise<void> => api.get<Rosters>("/api/rosters").then(setData).catch((e) => { fail(e); });
+  useEffect(() => { load(); }, [keys]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useLive(load, ["run:", "member"]);
+  async function act(key: string, path: string, payload?: unknown) {
+    setBusy(key);
+    try { const r = await api.post<{ message: string }>(path, payload ?? {}); ok(r.message); await load(); } catch (e) { fail(e); } finally { setBusy(null); }
+  }
+  /** a board edit answers with the new board: patch it in without a full reload */
+  function patchBoard(key: string, board: Board, needs?: Sheet["needs"], rev?: string) {
+    setData((d) => d && { ...d, raids: d.raids.map((r) => ({ ...r, open: r.open.map((e) => (e.key === key ? { ...e, board, needs: needs ?? e.needs, rev: rev ?? e.rev, has_layout: true } : e)), locked: r.locked.map((e) => (e.key === key ? { ...e, board, needs: needs ?? e.needs, rev: rev ?? e.rev } : e)) })) });
+  }
+  const runs = (data?.raids || []).flatMap((r) => [...r.open, ...r.locked].filter((e) => e.test).map((e) => ({ e, raid: r.name })));
+  if (!runs.length) return null;
+  return (
+    <Stack gap="sm" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
+      <Eyebrow plain>Test runs</Eyebrow>
+      {runs.map(({ e, raid }) => (
+        <Stack key={e.key} gap={4}>
+          <Group gap="sm" justify="space-between" wrap="wrap">
+            <Text size="sm" fw={700}>{raid}</Text>
+            <Button component={Link} to={`/events/${encodeURIComponent(e.key)}`} size="compact-sm" variant="subtle">Open its event page</Button>
+          </Group>
+          <SheetCard e={e} meta={meta} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} people={data?.people || []} />
+        </Stack>
+      ))}
+    </Stack>
+  );
 }

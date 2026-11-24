@@ -340,3 +340,28 @@ def test_who_could_cover_says_not_on_the_sheet_once_for_every_role_it_covers():
              {"role": "ranged", "have": 3, "need": 2, "hint": ""}]
     assert rc.cover_hints(roles) == [{"roles": ["melee"], "hint": "Could play melee: D (from the bench) · E (extra role)"},
                                      {"roles": ["tank", "healer"], "hint": "Could tank or heal: A, B, C (no answer yet)"}]
+
+
+def test_a_card_links_the_event_page(reg, rs, monkeypatch):
+    """Phase 4, Task 10: the Rosters page is gone — a Discord card's site link opens the run's EVENT on the Events page,
+    by its first raid's key (a later raid's card too), in this guild."""
+    from oibot_gm import raid_views
+
+    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
+    reg.set_raid_overrides("hyjal_summit_forever", {"first_open": "2026-01-01T00:00"}, "t")
+    reg.set_raid_overrides(RID, {"first_open": "2026-01-01T00:00"}, "t")
+    start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    ev = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t", lineup=[{"raid": RID, "rosters": 1}])
+    later = rc.event_parts(rs, ev)[1]
+    want = f"https://gm.example/app/events/{ev.key}?g={reg.key}"
+    assert raid_views.board_url(reg, later) == want and raid_views.board_url(reg, ev) == want
+    monkeypatch.setenv("OIBOT_WEB_URL", "")
+    assert raid_views.board_url(reg, ev) is None
+
+
+def test_old_rosters_addresses_land_on_the_events_page(c):
+    """The old server-side short addresses keep working: /rosters and /admin/build go to the Events page (the SPA's
+    RostersRedirect carries /app/rosters#run-<key> on to that event)."""
+    for old in ("/rosters", "/admin/build"):
+        r = c.get(old, follow_redirects=False)
+        assert r.status_code == 301 and r.headers["location"] == "/app/events", old

@@ -2,7 +2,7 @@
 @media (min-width: 62em) { .board { grid-template-columns: minmax(200px, 230px) minmax(0, 1fr); } }
 .groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 @media (max-width: 30em) { .groups { grid-template-columns: minmax(0, 1fr); } }
-/* Phone: every control on the Rosters page is at least 44 px tall and wide (design §5.56 phase 3) — the ⋮ menus, the
+/* Phone: every control on a board (the Events page, the Test bench) is at least 44 px tall and wide (design §5.56 phase 3) — the ⋮ menus, the
    compact buttons, the bank's sort control, the tabs — one rule here, never per-element sizes. Menus render in a portal,
    so their items take .menuItem (MemberMenu). */
 @media (max-width: 48em) {

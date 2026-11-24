@@ -375,6 +375,42 @@ def new_event_options(reg: Registry) -> dict:
             "lineup_full": LINEUP_MAX_WORDS}
 
 
+def lineup_edit_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent") -> dict:
+    """What the Edit lineup page starts from (GET /api/event/{key}/lineup; any raid's key answers as its event): {key
+    (part 0's), title (its start in words), start_time ('HH:MM' in the guild's CURRENT zone: the builder's clock),
+    lineup (rc.run_lineup: the raids it plays now, minutes after the first), raids / lineup_max / lineup_full (the
+    palette and the limit, as New event's), refusal_box (a locked or finished event: the server's LINEUP_LOCKED /
+    LINEUP_CLOSED box, Back only — else None)}."""
+    first = rc.first_part(rs, ev)
+    opts = new_event_options(reg)
+    why = (rc.LINEUP_CLOSED if first.state in ("done", "cancelled")
+           else rc.LINEUP_LOCKED if first.state != "open" or any(p.state == "locked" for p in rc.later_parts(rs, first)) else None)
+    return {"key": first.key, "title": reg.local12(first.start), "start_time": first.start.astimezone(reg.tz).strftime("%H:%M"),
+            "lineup": rc.run_lineup(reg, rs, first), "raids": opts["raids"], "lineup_max": opts["lineup_max"],
+            "lineup_full": opts["lineup_full"], "refusal_box": cq.refusal_box_for(why) if why else None}
+
+
+def lineup_draft_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", lineup: list[dict]) -> dict:
+    """Edit lineup's "What this makes" for a draft (POST /api/event/{key}/lineup; nothing written): {facts [One signup
+    sheet, Seats], lineup [{raid, name, rosters, starts, time_words, seats}] (each step's start as the save would make
+    it, in 12-hour words — [] when the draft can't be read), box (consequences.lineup_box: the Save box, or the
+    refusal's), same (the draft IS the event's lineup: nothing to save, never drawn as a refusal)}."""
+    first = rc.first_part(rs, ev)
+    box = cq.lineup_box(reg, rs, first, lineup)
+    steps: list[dict] = []
+    try:
+        full = rc._parse_run_lineup(lineup)
+        offsets = reg.lineup_offsets(full) if all(e["raid"] in reg.profile.raids for e in full) else []
+    except RegistryError:
+        full, offsets = [], []
+    for e, off in zip(full, offsets):
+        steps.append({"raid": e["raid"], "name": reg.raid_def(e["raid"]).get("name", e["raid"]), "rosters": int(e.get("rosters") or 1),
+                      "starts": off, "time_words": reg.local12(rc.after_minutes(first.start, off), "%I:%M %p"),
+                      "seats": int(reg.raid_def(e["raid"]).get("size") or 0)})
+    facts = [_fact("One signup sheet", rc.lineup_words(reg, steps)), _fact("Seats", seats_words(reg, steps))] if steps else []
+    return {"facts": facts, "lineup": steps, "box": box, "same": rc.lineup_refusal(reg, rs, first, lineup) == rc.LINEUP_SAME}
+
+
 def seats_words(reg: Registry, lineup: list[dict]) -> str:
     """'20, then 10 + 10' — each raid's seats, a roster each, in lineup order."""
     def one(e: dict) -> str:

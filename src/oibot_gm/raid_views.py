@@ -248,9 +248,12 @@ def raid_thumb_url(reg: Registry, rid: str | None) -> str | None:
 
 
 def board_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
-    """The run on the site's Rosters page, in this guild (?g= selects it; two guilds can hold one run key)."""
+    """The run's event on the site's Events page, in this guild (?g= selects it; two guilds can hold one run key): the
+    event's own address is its FIRST raid's key (a later raid's `follows`, rc.first_part's own link), so a later raid's
+    card opens the evening it belongs to. A raid taken out of a lineup links itself (the page says it is gone)."""
     web = os.environ.get("OIBOT_WEB_URL", "")
-    return f"{web}/app/rosters?g={reg.key}#run-{ev.key}" if web.startswith("http") else None
+    key = ev.follows if rc.is_follow(ev) and ev.follows and not ev.dropped else ev.key
+    return f"{web}/app/events/{key}?g={reg.key}" if web.startswith("http") else None
 
 
 def me_url(reg: Registry, ev: rc.RaidEvent) -> str | None:

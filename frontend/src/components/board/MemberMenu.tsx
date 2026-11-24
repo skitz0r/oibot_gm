@@ -6,7 +6,7 @@ import { fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
 import { useConfirmBox } from "../ConfirmBox";
 import { boxOf } from "../events/shared";
-import css from "../../pages/rosters.module.css";
+import css from "./board.module.css";
 
 /** Officers record anything a member can do on a run, for them (design B5) — the SAME filtered list the Discord SetWizard
  *  shows (GET /api/admin/actions → rc.member_actions): their open Confirm ask, their fill ask, Record a callout… (with a note),

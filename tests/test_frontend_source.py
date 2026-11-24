@@ -167,39 +167,49 @@ def test_settings_card_names_the_owner():
     assert "Discord id ${" not in page and "st.owner_name" in page
 
 
-def test_rosters_page_reads_by_its_shape():
-    """Design §5.56: every live run is a card in time order — no state tabs (the "Open for signup" tab hid the locked run
-    on raid night); the tabs are Regulars · History · Test. The run card's dates come from the server (Clock rule: no
-    two-digit day anywhere a person reads, a picker's format is the house one) and amber is gone from the page."""
-    page = (SRC / "pages" / "Rosters.tsx").read_text()
-    card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
-    board = (SRC / "components" / "board" / "BoardView.tsx").read_text()
-    tabs = re.findall(r'<Tabs\.Tab value="(\w+)"', page)
-    assert tabs == ["regulars", "history", "test"], tabs
-    assert "<WhenItRuns" in page and "upcoming=" in page and "can_open" in page
-    assert "<RunStrip" in card and "short_why" in card and '"rostered" : "joined"' in card
-    assert "Sparkles" not in page + board, "a plain icon, not one that reads as AI"
+def _events_files() -> dict[str, str]:
+    """The Events page and its pieces (phase 4: it replaced the Rosters page)."""
+    files = {"Events": (SRC / "pages" / "Events.tsx").read_text()}
+    for f in sorted((SRC / "components" / "events").glob("*.tsx")):
+        files[f.stem] = f.read_text()
+    return files
+
+
+def test_events_page_reads_by_its_shape_and_keeps_the_clock_rule():
+    """Was the Rosters page's shape test (design §5.56), now the Events page that replaced it (phase 4, Task 10): the
+    list's groups are Open · Coming up · History, each event's dates come from the server (Clock rule: no two-digit day
+    anywhere a person reads, a picker's format is the house one), and amber marks nothing on it."""
+    ev = _events_files()
+    page = _code_only(ev["Events"])
+    assert re.findall(r'label: "([^"]+)", items:', page) == ["Open", "Coming up", "History"]
+    assert "Sparkles" not in "".join(ev.values()) + (SRC / "components" / "board" / "BoardView.tsx").read_text(), "a plain icon, not one that reads as AI"
     for f in SRC.rglob("*.tsx"):
         text = f.read_text()
         assert 'day: "2-digit"' not in text, f"{f.name}: a two-digit day breaks the Clock rule"
+        assert not re.search(r"toLocale(?:Date|Time)?String\(", _code_only(text)), f"{f.name}: a time the browser composed, not the server's words"
         for fmt in re.findall(r'valueFormat="([^"]+)"', text):
             assert "DD" not in fmt and "HH" not in fmt, f"{f.name}: {fmt}"
-    for f in (page, card, board, (SRC / "components" / "board" / "FillModal.tsx").read_text(), (SRC / "components" / "board" / "shared.tsx").read_text()):
-        assert not re.search(r'(?:color|c)=\{?"yellow', f), "amber marks a value changed from the default; Rosters has none"
+    board = [(SRC / "components" / "board" / n).read_text() for n in ("BoardView.tsx", "SheetCard.tsx", "FillModal.tsx", "shared.tsx")]
+    for f in [*ev.values(), *board]:
+        assert not re.search(r'(?:color|c)=\{?"yellow', f), "amber marks a value changed from the default; the event has none"
 
 
-def test_the_rosters_page_is_a_card_per_night_in_time_order():
-    """The owner, 2026-11-22: every live run is its own card across raids, soonest first; a lead and its follow-on
-    share one; the raid cards under them keep the schedule, regulars and history and draw no live sheet."""
-    page = (SRC / "pages" / "Rosters.tsx").read_text()
-    nights, raid = page[page.index("function nightsOf"):page.index("function NightCard")], page[page.index("function RaidCard"):]
-    assert "raids.flatMap" in nights and "starts_at" in nights and "e.follows" in nights and "!e.test" in nights
-    assert page.index("<NightCard") < page.index("<RaidCard") and "No run has a sheet right now." in page
-    assert raid.count("<SheetCard") == 1 and "tests.map" in raid, "a raid's card draws only its test sheets"
+def test_test_runs_live_on_the_test_bench_never_in_the_events_list():
+    """The Rosters page's per-raid Test tab is gone (phase 4, Task 10): the rehearsals' cards — the whole SheetCard, its
+    lock, fill and remind — are on the Members page's Test bench, each linking its event page; the Events list never
+    holds one (event_view.listed), and Try a comp lands on the test run's event."""
+    bench = _code_only((SRC / "components" / "TestBench.tsx").read_text())
+    assert "<SheetCard" in bench and "e.test" in bench and '"/api/rosters"' in bench
+    assert "navigate(`/events/${" in bench and "navigate(`/rosters" not in bench and "#run-" not in bench
+    assert "lives on Rosters" not in bench
 
 
 def test_answer_for_someone_offers_only_members_without_an_answer():
-    """The owner, 2026-11-22: someone with a recorded answer (Join, Bench or No thanks) is changed from their row's menu."""
+    """The owner, 2026-11-22: someone with a recorded answer (Join, Bench or No thanks) is changed from their row's menu.
+    On the Events page the list is the server's (event_json `people`: members with no answer), passed as it comes; the
+    Test bench's SheetCard keeps its own filter."""
+    sign = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
+    assert "<SomeoneElse run={ev.key} people={ev.people}" in sign
     card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
     assert "<SomeoneElse run={e.key} people={people.filter((p) => !signups.some((s) => s.uid === p.uid))}" in card
 
@@ -221,7 +231,9 @@ def test_the_run_vocabulary_has_no_copy_in_the_frontend():
     from oibot_gm.constants import MARK, MARK_WORDS
     from oibot_gm.raid_buttons import RUN_WORDS
 
-    files = [SRC / "pages" / "Rosters.tsx", SRC / "pages" / "Me.tsx", SRC / "components" / "RaidCard.tsx", *sorted((SRC / "components" / "board").glob("*.tsx"))]
+    # the Rosters page's place is the Events page's (phase 4, Task 10): the page, its sections, the lineup editor
+    files = [SRC / "pages" / "Events.tsx", SRC / "pages" / "LineupPage.tsx", SRC / "pages" / "Me.tsx", SRC / "components" / "RaidCard.tsx",
+             SRC / "components" / "RegularsBlock.tsx", *sorted((SRC / "components" / "events").glob("*.tsx")), *sorted((SRC / "components" / "board").glob("*.tsx"))]
     words = ([w for k, w in RUN_WORDS.items() if k not in ("ask", "loot", "lock", "locked", "reopen")]  # short verbs other screens share
              + [w for w in rc.RUN_STATE_WORDS.values() if " " in w] + ["finished"]
              + [w for w in rc.ASK_HOW.values() if " " in w] + [w for k, w in rc.ASK_ANSWER_WORDS.items() if k in ("yes", "no", "expired")]
@@ -242,7 +254,9 @@ def test_the_run_vocabulary_has_no_copy_in_the_frontend():
     for field in ("meta.run_states", "markOf(meta", "run_labels", "run_words", "ask_kinds", "ask_answers"):
         assert field in card or field in (SRC / "components" / "board" / "shared.tsx").read_text(), field
     assert "s.badge" in (SRC / "pages" / "Me.tsx").read_text(), "Me's badge is the server's words (rc.answer_word)"
-    assert "<LevelChip" in (SRC / "pages" / "Rosters.tsx").read_text() and "<LevelChip" in (SRC / "components" / "raids" / "ReadinessView.tsx").read_text()
+    assert "<LevelChip" in (SRC / "components" / "RegularsBlock.tsx").read_text() and "<LevelChip" in (SRC / "components" / "raids" / "ReadinessView.tsx").read_text()
+    more = (SRC / "components" / "events" / "EventMore.tsx").read_text()
+    assert "meta.run_labels" in more, "the event's More menu names each verb as Discord's buttons do"
 
 
 def test_the_board_draws_no_text_beside_icons():
@@ -262,20 +276,42 @@ def test_the_board_draws_no_text_beside_icons():
     assert "Cancel run</Button>" not in card and "Post a line in the signup channel" not in card and "Tell the channel — a fixed line, no reason" in card
 
 
-def test_the_rosters_confirms_print_only_the_servers_sentence():
-    """Design §5.56 phase 3 (findings 32–34): every confirm on the Rosters page prints the server's sentence
-    (ev_json.consequences, a regular's `remove`, an orphan's `clear`, End's preview) — no template literal or string
-    literal composes a consequence in BoardView / SheetCard / Rosters, and no literal stands in when the server's is
-    missing. The board's sentences only get the names put in (shared.fillNames)."""
-    files = {n: _code_only((SRC / p).read_text()) for n, p in (("BoardView", "components/board/BoardView.tsx"), ("SheetCard", "components/board/SheetCard.tsx"), ("Rosters", "pages/Rosters.tsx"))}
+def test_the_event_confirms_print_only_the_servers_sentence():
+    """Design §5.56 phase 3 (findings 32–34), carried from the Rosters page to the Events page that replaced it (phase 4,
+    Task 10): every confirm prints the server's sentence (ev_json.consequences, End's preview, a regular's `remove`, an
+    orphan's `clear`, a §7b box) — no template literal or string literal composes a consequence in BoardView / SheetCard
+    / the event's More menu / the regulars, and no literal stands in when the server's is missing. The board's sentences
+    only get the names put in (shared.fillNames)."""
+    files = {n: _code_only((SRC / p).read_text()) for n, p in (("BoardView", "components/board/BoardView.tsx"), ("SheetCard", "components/board/SheetCard.tsx"),
+                                                                ("EventMore", "components/events/EventMore.tsx"), ("Regulars", "components/RegularsBlock.tsx"),
+                                                                ("Events", "pages/Events.tsx"), ("LineupPage", "pages/LineupPage.tsx"))}
     for name, code in files.items():
         assert not re.search(r"message:\s*[`\"']", code), f"{name}: a confirm message written in the browser"
         assert not re.search(r"consequences?\??\.\w+\s*\|\|\s*[`\"']", code), f"{name}: a browser sentence standing in for the server's"
+        assert not re.search(r"sentences:\s*\[\s*[`\"']", code), f"{name}: a box sentence written in the browser"
     assert "e.consequences?.remind" in files["SheetCard"] and "message: preview," in files["SheetCard"]
-    assert "Reopen works for an hour" not in files["SheetCard"] and "gets a confirmation DM" not in files["BoardView"]
-    assert "message: x.remove" in files["Rosters"] and "message: o.clear" in files["Rosters"] and "rev: o.rev" in files["Rosters"] and "rev: x.rev" in files["Rosters"]
+    assert "s.consequences?.remind" in files["EventMore"] and "boxOf(`End ${name}?`, preview, L.end, true)" in files["EventMore"]
+    assert "useConfirm(" not in files["EventMore"], "the event page's box, never the older modal"
+    assert "Reopen works for an hour" not in files["SheetCard"] + files["EventMore"] and "gets a confirmation DM" not in files["BoardView"]
+    assert "message: x.remove" in files["Regulars"] and "message: o.clear" in files["Regulars"] and "rev: o.rev" in files["Regulars"] and "rev: x.rev" in files["Regulars"]
     shared = _code_only((SRC / "components" / "board" / "shared.tsx").read_text())
     assert 'split("{name}").join(names.name)' in shared
+
+
+def test_the_events_more_menu_keeps_every_raid_night_lever():
+    """Phase 4, Task 10 (the capability inventory): what the Rosters page's card offered on a raid night and the approved
+    mockup does not draw stays on the event, in one compact More menu in its header — Fill seats / Suggest (the fill
+    screen), Remind, Pause / Resume automatic asks, Re-post the sheet, the loot council, End, the asks out (Withdraw) and,
+    on a finished event, Reopen — each per raid from the run's own JSON (part.sheet), greyed with the server's reason
+    when it can't, and asking first with the server's sentence where the Rosters card did."""
+    more = _code_only((SRC / "components" / "events" / "EventMore.tsx").read_text())
+    for needle in ("<FillModal", "<RepostSheetModal", "/remind`", "/pause`", "/api/loot/${", "/end`", "/reopen`", "<Detail e={{ ...asks, log_rows: [], log: [] }}",
+                   "s.may_remind", "s.remind_note", "s.may_end", "s.end_note", "s.may_reopen", "s.loot?.may_open", "classNames={{ item: css.menuItem }}"):
+        assert needle in more, needle
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert "<EventMore" in page and "Edit lineup" in page and "/lineup`" in page
+    hist = _code_only((SRC / "components" / "events" / "HistoryView.tsx").read_text())
+    assert "<EventMore" in hist, "Reopen an end by mistake, as the Rosters page's history drawer did"
 
 
 def test_move_to_posts_the_same_move_a_drag_does():
@@ -291,15 +327,22 @@ def test_move_to_posts_the_same_move_a_drag_does():
     assert 'send("autofill", { rev: e.rev })' in board, "Place the rest carries the board's rev"
 
 
-def test_rosters_controls_are_44px_on_a_phone():
-    """Finding 40: one phone-only rule makes every control on the page at least 44 px (the ⋮ buttons, compact buttons,
-    the sort control, the tabs), and the menus (portals) take .menuItem — never per-element sizes."""
-    css = (SRC / "pages" / "rosters.module.css").read_text()
-    rule = css[css.index("@media (max-width: 48em)"):]
-    assert "min-height: 44px; min-width: 44px" in rule and ".mantine-ActionIcon-root" in rule and ".mantine-SegmentedControl-label" in rule and ".menuItem" in rule
-    assert "className={rosterCss.touch}" in (SRC / "pages" / "Rosters.tsx").read_text()
-    for f in ("components/board/MemberMenu.tsx", "components/board/SheetCard.tsx"):
+def test_event_controls_are_44px_on_a_phone():
+    """Finding 40, carried to the Events page (phase 4, Task 10): one phone-only rule makes every control at least 44 px
+    (the ⋮ buttons, compact buttons, the sort control, the tabs) — the board's rule moved with the board to
+    components/board/board.module.css, the list pages' .touch wraps the Events page and the lineup editor — and the menus
+    (portals) take .menuItem, never per-element sizes."""
+    assert not (SRC / "pages" / "rosters.module.css").exists()
+    for path in ("components/board/board.module.css", "pages/listpage.module.css"):
+        css = (SRC / path).read_text()
+        rule = css[css.index("@media (max-width: 48em)"):]
+        assert "min-height: 44px; min-width: 44px" in rule and ".mantine-ActionIcon-root" in rule and ".mantine-SegmentedControl-label" in rule and ".menuItem" in rule, path
+    assert "className={css.touch}" in (SRC / "components" / "ListPage.tsx").read_text()
+    assert "className={css.touch}" in (SRC / "pages" / "LineupPage.tsx").read_text()
+    for f in ("components/board/MemberMenu.tsx", "components/board/SheetCard.tsx", "components/events/EventMore.tsx"):
         assert "classNames={{ item: css.menuItem }}" in (SRC / f).read_text(), f
+    for f in ("BoardView.tsx", "BoardPreview.tsx", "SheetCard.tsx", "MemberMenu.tsx"):
+        assert 'from "./board.module.css"' in (SRC / "components" / "board" / f).read_text(), f
 
 
 def _members_files() -> dict[str, str]:
@@ -852,9 +895,9 @@ def test_the_schedule_editor_names_a_schedule_by_its_id():
     assert "config:schedule:${s.id}" in src and "...raidRevs(r)" not in src
     assert "f.lineup = [{ raid: r.id, rosters: Number(x.rosters) }" in src and "is_default" not in src
     assert "slug(d.name, d.kind, taken, meta?.reserved_schedule_ids || [])" in src  # phase 4: the reserved ids are the server's
-    rosters = (SRC / "pages" / "Rosters.tsx").read_text()
-    assert 'split(":")' not in rosters and '|| "default"' not in rosters
-    assert "schedule: s.key" in rosters and "schedule: o.key" in rosters
+    regs = (SRC / "components" / "RegularsBlock.tsx").read_text()  # the Rosters page's Regulars tab, on Schedules until Task 11
+    assert 'split(":")' not in regs and '|| "default"' not in regs
+    assert "schedule: s.key" in regs and "schedule: o.key" in regs
 
 
 def test_the_run_card_reschedules_and_the_schedule_editor_sends_a_lineup():
@@ -974,7 +1017,7 @@ def test_the_builder_works_without_a_drag():
 def test_new_event_picks_a_time_never_types_one():
     page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text()); when = _code_only((SRC / "components" / "WhenPicker.tsx").read_text())
     assert "<WhenPicker" in page and "<DatePickerInput" in when and "clock12" in when and "TextInput" not in when + page
-    assert 'useDirty("lineup:new"' in page and "guardNav(" in page and "StartAdhoc" not in (SRC / "pages" / "Rosters.tsx").read_text()
+    assert 'useDirty("lineup:new"' in page and "guardNav(" in page and not (SRC / "pages" / "Rosters.tsx").exists()
 
 
 def test_a_taken_time_shows_no_borrowed_times():
@@ -1006,8 +1049,8 @@ def test_new_event_prints_only_the_servers_words():
     assert "Drop a raid here for step" in b and "-player · about" in b and "aria-label={`Move ${" in b
     assert "fetch(" not in b and "api." not in b, "the builder is pure: it never fetches"
     assert "<LineupPicture lineup={p.lineup}" in page, "a schedule's night is drawn as its own lineup"
-    rosters = _code_only((SRC / "pages" / "Rosters.tsx").read_text())
-    assert 'to="/events/new"' in rosters and "New event" in rosters
+    events = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert 'to="/events/new"' in events and "New event" in events
     assert 'path="/events/new"' in _code_only((SRC / "App.tsx").read_text())
 
 
@@ -1037,7 +1080,7 @@ def test_the_events_page_asks_with_the_servers_box_and_lives():
     assert 'useLive(load, ["run:", "member", "config"])' in page and "usePoll(load)" in page
     assert "ev.boxes.lock" in page and "`/api/run/${encodeURIComponent(ev.key)}/lock`" in page and "{ seen: fp }" in page
     assert "ev.boxes.cancel" in page and "{ seen: fp, notify: false }" in page and "{ preview: true }" in page
-    assert "Edit lineup" not in page, "Edit lineup arrives with Task 10"
+    assert "ev.actions.edit_lineup" in page, "Edit lineup (Task 10) only while the event may change its raids"
     assert "Show older" in page and "history_offset=" in page and 'to="/events/new"' in page
     assert "<HistoryView" in page and "<ComingUpView" in page
     box = _code_only((SRC / "components" / "events" / "RescheduleBox.tsx").read_text())
@@ -1116,7 +1159,7 @@ def test_the_events_page_fix_round_one():
     sign = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
     assert "useAnswerBox(ev.key, onDone)" in sign and "onAnswer={answerFor(p)}" in sign and "{answerDialog}" in sign
     assert "live ? <SomeoneElse" in sign and "ev.people.length > 0 ?" not in sign
-    for f in ("components/board/SheetCard.tsx", "components/TestBench.tsx", "pages/Rosters.tsx"):
+    for f in ("components/board/SheetCard.tsx", "components/TestBench.tsx"):
         assert "onAnswer" not in (SRC / f).read_text(), f
     for f in (SRC / "components" / "events").glob("*.tsx"):
         assert "useConfirm(" not in _code_only(f.read_text()), f.name
@@ -1150,3 +1193,52 @@ def test_the_event_board_fix_round_one():
     assert "export function useAfterDrag" in shared and "clearInterval" in shared and "pending.current = fn" in shared
     assert "function afterDrag" not in shared, "no per-call interval left"
     assert "const afterDrag = useAfterDrag()" in page
+
+
+def test_rosters_is_gone_and_redirects_to_events():
+    app = _code_only((SRC / "App.tsx").read_text())
+    assert not (SRC / "pages" / "Rosters.tsx").exists() and "RostersRedirect" in app and '"/events/:key/lineup"' in app
+
+
+def test_edit_lineup_keeps_the_first_raid():
+    page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    assert 'mode === "edit-lineup"' in page and "fixedFirst" in page and "/lineup" in page and "preview: true" in page
+
+
+def test_edit_lineup_prints_the_servers_box_and_guards_its_draft():
+    """Phase 4, Task 10: Edit lineup is the builder with its first raid fixed, seeded from the event's own lineup and
+    started at its clock; "What this makes" and every step's start are the server's (taken only while the answer's raids
+    and starts ARE the builder's — never times borrowed from another lineup); Save asks with the server's lineup box
+    and presses with the fp of the box on screen (a 409's fresh box goes through on the next press); a locked or finished
+    event shows the server's refusal and only Back; the draft is registered with its count and the event's title."""
+    page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    assert "/api/event/${" in page and "/lineup`" in page and "fixedFirst" in page and "startClock={edit.start_time}" in page
+    assert "useDirty(dirtyKey, changes > 0 && !edit?.refusal_box, { n: changes, name: dirtyName })" in page and "`lineup:${evKey}`" in page
+    assert "x.lineup.map((s) => `${s.raid}:${s.starts}`).join() === lineup.map((e) => `${e.raid}:${e.starts}`).join()" in page
+    assert "box: first.box" in page and "seen: fp" in page and "refresh:" in page
+    assert "edit.refusal_box" in page and "guardNav(back)" in page
+    assert "navigate(`/events/${evKey}`" in page or "navigate(back" in page
+    app = _code_only((SRC / "App.tsx").read_text())
+    assert 'mode="edit-lineup"' in app
+    events = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert "ev.actions.edit_lineup" in events, "hidden once the roster locks"
+
+
+def test_every_link_to_a_run_lands_on_its_event():
+    """Phase 4, Task 10: the Rosters page is gone. Old addresses redirect (/rosters → /events, /rosters#run-<key> →
+    /events/<key>, a later raid's key answers as its event, a gone key prints the server's sentence) and nothing on the
+    site links /rosters any more."""
+    app = _code_only((SRC / "App.tsx").read_text())
+    red = app[app.index("function RostersRedirect"):]
+    red = red[:red.index("\n}\n")]
+    assert 'hash.startsWith("#run-")' in red and "`/events/${encodeURIComponent(" in red and "`/events${search}`" in red and "replace" in red
+    assert 'path="/rosters" element={<RostersRedirect />}' in app
+    hits = []
+    for f in SRC.rglob("*.ts*"):
+        code = _code_only(f.read_text())
+        if f.name == "App.tsx":
+            code = code.replace('path="/rosters"', "")
+        if re.search(r"[\"'`]/rosters\b|#run-\$\{", code) and f.name not in ("Me.tsx",):
+            hits.append(f.name)
+    assert not hits, hits
+    assert '{ to: "/rosters"' not in app, "no rail entry points at a page that is gone"
