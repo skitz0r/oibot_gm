@@ -1100,3 +1100,31 @@ def test_the_event_board_draws_the_servers_picture_and_never_fights_a_drag():
     assert "row.button" in sw and "s.why" in sw and "switches.revs[row.part]" in sw and "seen: fp" in sw and "localStorage" in sw
     assert not re.search(r"[\"'`>]\s*(Switch|Answer for them|Ask)\s*[\"'`<]", sw), "the button words are the server's"
     assert "VisuallyHidden" in sw
+
+
+def test_the_events_page_fix_round_one():
+    """Phase 4, Task 8 fix round 1. (1) The Signups row ⋮ sends Join / Bench / No thanks through the SERVER's answer box
+    (useAnswerBox, the member fixed); MemberMenu's page-made confirm (useRecord) stays only for callouts, pins and the
+    confirm / fill answers — deferred to the Discord-confirms phase — and the Rosters page and the Test bench pass no
+    `onAnswer`, so they keep the old menu at this commit. (2a) Reschedule starts from the server's start_day /
+    start_time. (2d) Answer for someone stays mounted while live, the rows' box lives on the section, and EventPane keeps
+    the live view while a box is open. (2e) the latest GET wins. (2f) the "changed" line only for a 409's fresh box."""
+    menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
+    assert "onAnswer && ANSWERS.has(it.a.key) ? onAnswer(it.a.key, it.character) : record(uid, name, list, it)" in menu
+    assert "phase 5" in (SRC / "components" / "board" / "MemberMenu.tsx").read_text(), "the deferral is said in a comment"
+    assert "meta.classes" not in menu and "c.plays" in menu, "only the specs the server takes"
+    sign = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
+    assert "useAnswerBox(ev.key, onDone)" in sign and "onAnswer={answerFor(p)}" in sign and "{answerDialog}" in sign
+    assert "live ? <SomeoneElse" in sign and "ev.people.length > 0 ?" not in sign
+    for f in ("components/board/SheetCard.tsx", "components/TestBench.tsx", "pages/Rosters.tsx"):
+        assert "onAnswer" not in (SRC / f).read_text(), f
+    for f in (SRC / "components" / "events").glob("*.tsx"):
+        assert "useConfirm(" not in _code_only(f.read_text()), f.name
+    box = _code_only((SRC / "components" / "events" / "RescheduleBox.tsx").read_text())
+    assert "day: ev.start_day, time: ev.start_time" in box and "start_iso" not in box
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert "if (n !== seq.current) return;" in page and "useAnyBoxOpen()" in page and "held && lastLive.current" in page
+    confirm = _code_only((SRC / "components" / "ConfirmBox.tsx").read_text())
+    assert "setChanged(fresh.verb !== null)" in confirm and "setChanged(true); } else close(true)" not in confirm
+    assert '<Text fw={700} px={6}>{n}</Text>' in sign, "a 0 is plain text, never a greyed button"
+    assert "const first = await preview(now);\n      setBusy(false);" in menu, "the button behind an open box is not busy"

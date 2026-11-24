@@ -222,6 +222,10 @@ export interface EventView {
   sheet_url: string | null;
   /** Reschedule's picker: the GUILD's date (the New day's lower bound) and the Locks choices, the event's own among them */
   today: string; locks: { hours: number; words: string }[];
+  /** the start's day ('YYYY-MM-DD') and clock ('HH:MM') in the guild's CURRENT zone (Reschedule's picker starts there) */
+  start_day: string; start_time: string;
+  /** each answered member's characters (the row ⋮'s answer box) */
+  characters: Record<string, Person["characters"]>;
   /** the Role switches section (rc.event_switches): drawn only when `short` has a raid */
   switches: Switches;
 }
@@ -520,7 +524,8 @@ export interface ForecastRow { start: string; day: string; when: string; expecte
 export interface Series { key: string; id: string; name: string; label: string; active: boolean; seats: number; regulars: Regular[]; counts: Record<string, number>; need: Record<string, number>;
   level?: "green" | "amber" | "red" | null; no_spare?: string[]; cover?: string[]; recruit?: string[]; forecast?: ForecastRow[] }
 /** Someone who can be made a regular (real members with active characters, main first). */
-export interface Person { uid: string; display_name: string; characters: { label: string; cls: string; spec: string; role: string; is_main: boolean }[] }
+/** `plays` (the Events page, event_view.character_rows): the specs a character may answer as (rc.spec_role's rule). */
+export interface Person { uid: string; display_name: string; characters: { label: string; cls: string; spec: string; role: string; is_main: boolean; plays?: string[] }[] }
 /** One schedule of a raid (mirrors web/api.py schedule_json). Machine forms (`slots`, `days`, `time`) are for the editors;
  *  everything a person reads comes as words from the server (`label`, `slot_labels`, `time_label`, `next`). */
 export interface Schedule {

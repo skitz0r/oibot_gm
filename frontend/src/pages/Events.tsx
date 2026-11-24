@@ -5,7 +5,7 @@ import { useMediaQuery } from "@mantine/hooks";
 import { api, ApiError, type Box, type EventList, type EventView, type Meta } from "../api";
 import { ListPage, type ListGroup } from "../components/ListPage";
 import { fail, ok } from "../components/Page";
-import { useConfirmBox } from "../components/ConfirmBox";
+import { useAnyBoxOpen, useConfirmBox } from "../components/ConfirmBox";
 import { EventDetails } from "../components/events/EventDetails";
 import { SignupsSection } from "../components/events/SignupsSection";
 import { ActivitySection } from "../components/events/ActivitySection";
@@ -70,23 +70,35 @@ export function EventsPage({ meta }: { meta: Meta }) {
 }
 
 /** One event by its key: open or locked → its sections and actions; finished or cancelled → HistoryView. A key of a
- *  later raid answers as its event: the address becomes the event's own. A reload keeps what is drawn. */
+ *  later raid answers as its event: the address becomes the event's own. A reload keeps what is drawn; the latest GET
+ *  wins (a slow earlier answer never overwrites a newer one, even one held back by a drag). While a box is open the
+ *  live view stays mounted with its last answer, so an event that ended underneath never takes the box away: the box's
+ *  own refresh brings the server's refusal, and History follows once it is closed. */
 function EventPane({ evKey, meta, tick, onChanged }: { evKey: string; meta: Meta; tick: number; onChanged: () => void }) {
   const navigate = useNavigate();
   const [ev, setEv] = useState<EventView | null>(null);
   const [gone, setGone] = useState<string | null>(null);
+  const seq = useRef(0);
+  const lastLive = useRef<EventView | null>(null);
+  const held = useAnyBoxOpen();
   useEffect(() => {
+    const n = ++seq.current;
     api.get<EventView>(`/api/event/${encodeURIComponent(evKey)}`).then((v) => afterDrag(() => {  // never redrawn under a drag
+      if (n !== seq.current) return;  // a newer GET was sent meanwhile: its answer is the one drawn
       setEv(v); setGone(null);
       if (v.key !== evKey) navigate(`/events/${encodeURIComponent(v.key)}`, { replace: true });
     })).catch((e) => {
+      if (n !== seq.current) return;
       if (e instanceof ApiError && e.status === 404) setGone((e.body as { error?: string } | undefined)?.error || e.message);
       else fail(e);
     });
   }, [evKey, tick]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const closed = !!ev && (ev.state === "done" || ev.state === "cancelled");
+  if (ev && !closed) lastLive.current = ev;
+  if (held && lastLive.current && (gone || closed)) return <LiveEvent ev={lastLive.current} meta={meta} onChanged={onChanged} />;
   if (gone) return <Text c="dimmed">{gone}</Text>;
   if (!ev) return <Text c="dimmed">Loading…</Text>;
-  if (ev.state === "done" || ev.state === "cancelled") return <HistoryView ev={ev} meta={meta} />;
+  if (closed) return <HistoryView ev={ev} meta={meta} />;
   return <LiveEvent ev={ev} meta={meta} onChanged={onChanged} />;
 }
 

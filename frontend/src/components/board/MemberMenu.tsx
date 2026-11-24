@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActionIcon, Button, Group, Loader, Menu, Modal, Select, Stack, Text } from "@mantine/core";
 import { IconArrowsMove, IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, IconUserPlus } from "@tabler/icons-react";
-import { api, type Box, type MemberAction, type MemberActions, type Meta, type Person } from "../../api";
+import { api, type Box, type MemberAction, type MemberActions, type Person } from "../../api";
 import { fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
 import { useConfirmBox } from "../ConfirmBox";
@@ -51,8 +51,15 @@ export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?
 
 /** The row ⋮ menu on a sheet (joined, Bench, No thanks chips and the not-answered rows) and on a board chip: fetched when
  *  opened, so it is always the member's state now. `moves` (the board's chips): "Move to…" first — every group with room
- *  and Not placed / Not rostered — the board's tap-and-keyboard path (a drag needs a mouse; design §5.56 phase 3). */
-export function MemberMenu({ run, uid, name, onDone, moves }: { run: string; uid: string | null | undefined; name: string; onDone: () => Promise<void> | void; moves?: MoveTarget[] }) {
+ *  and Not placed / Not rostered — the board's tap-and-keyboard path (a drag needs a mouse; design §5.56 phase 3).
+ *  `onAnswer` (the Events page): Join / Join as… / Bench / No thanks open the SERVER's answer box (useAnswerBox, the member
+ *  fixed) instead of the page-made confirm below. Callouts, pins and the confirm / fill answers keep useRecord's confirm
+ *  for now — deferred to the Discord-confirms phase (phase 5), as are the Rosters page and the Test bench, which pass no
+ *  `onAnswer`. */
+export function MemberMenu({ run, uid, name, onDone, moves, onAnswer }: {
+  run: string; uid: string | null | undefined; name: string; onDone: () => Promise<void> | void; moves?: MoveTarget[];
+  onAnswer?: (action: string, character: string | null) => void;
+}) {
   const [list, setList] = useState<MemberActions | null>(null);
   const [record, dialog] = useRecord(run, onDone);
   const load = () => { setList(null); if (uid) api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`).then(setList).catch(fail); };
@@ -75,7 +82,7 @@ export function MemberMenu({ run, uid, name, onDone, moves }: { run: string; uid
           {uid && list && list.actions.length === 0 && <Menu.Item disabled>Nothing applies on this run</Menu.Item>}
           {uid && list && items(list.actions).map((it) => (
             <Menu.Item key={`${it.a.key}:${it.character || ""}`} leftSection={ICON[it.a.key]} color={DANGER.has(it.a.key) ? "red" : undefined}
-              onClick={() => record(uid, name, list, it)}>{it.label}</Menu.Item>
+              onClick={() => (onAnswer && ANSWERS.has(it.a.key) ? onAnswer(it.a.key, it.character) : record(uid, name, list, it))}>{it.label}</Menu.Item>
           ))}
         </Menu.Dropdown>
       </Menu>
@@ -94,31 +101,33 @@ const ANSWERS = new Set(["join", "bench", "no_thanks"]);
 const answersOf = (list: MemberActions | null) => (list?.actions || []).filter((a) => ANSWERS.has(a.key));
 const actionsOf = (run: string, uid: string) => api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`);
 
-/** The character choices for one answer: each character the server allows with each spec its class plays ("Tavi, Holy"). */
-function playsOf(person: Person | undefined, a: MemberAction | undefined, meta?: Meta) {
+/** The character choices for one answer: each character the server allows with each spec it may answer as — the
+ *  server's `plays` (its spec, offspec and flex roles; else its spec alone) — "Tavi, Holy". */
+function playsOf(person: Person | undefined, a: MemberAction | undefined) {
   if (!person || !a || a.key === "no_thanks") return [];
   const allowed = new Set(a.characters && a.characters.length ? a.characters : person.characters.map((c) => c.label));
-  return person.characters.filter((c) => allowed.has(c.label)).flatMap((c) => {
-    const specs = meta?.classes[c.cls] ? Object.keys(meta.classes[c.cls]) : [c.spec];
-    return [c.spec, ...specs.filter((x) => x !== c.spec)].map((sp) => ({ value: `${c.label}|${sp}`, label: `${c.label}, ${sp}` }));
-  });
+  return person.characters.filter((c) => allowed.has(c.label)).flatMap((c) =>
+    (c.plays && c.plays.length ? c.plays : [c.spec]).map((sp) => ({ value: `${c.label}|${sp}`, label: `${c.label}, ${sp}` })));
 }
 
-function defaultPick(person: Person, list: MemberActions): AnswerPick {
+/** The pick a box opens on: Join (else the first answer) as `home` — a row's own character and spec — else the main. */
+function defaultPick(person: Person, list: MemberActions, home?: { character: string; spec: string }): AnswerPick {
   const a = answersOf(list).find((x) => x.key === "join") || answersOf(list)[0];
   const main = person.characters.find((c) => c.is_main) || person.characters[0];
-  const plays = a && a.key !== "no_thanks" && main ? { character: main.label, spec: main.spec } : { character: null, spec: null };
+  const own = home || (main ? { character: main.label, spec: main.spec } : null);
+  const plays = a && a.key !== "no_thanks" && own ? own : { character: null, spec: null };
   return { uid: person.uid, action: a?.key || "", ...plays };
 }
 
-function AnswerFields({ run, people, meta, first, firstList, onPick }: {
-  run: string; people: Person[]; meta?: Meta; first: AnswerPick; firstList: MemberActions; onPick: (p: AnswerPick) => void;
+function AnswerFields({ run, people, first, firstList, onPick, home }: {
+  run: string; people: Person[]; first: AnswerPick; firstList: MemberActions; onPick: (p: AnswerPick) => void;
+  home?: { character: string; spec: string };
 }) {
   const [pick, setPick] = useState(first);
   const [list, setList] = useState<MemberActions | null>(firstList);
   const person = people.find((p) => p.uid === pick.uid);
   const answer = answersOf(list).find((a) => a.key === pick.action);
-  const plays = playsOf(person, answer, meta);
+  const plays = playsOf(person, answer);
   const set = (p: AnswerPick) => { setPick(p); onPick(p); };
   async function member(uid: string | null) {
     const who = people.find((p) => p.uid === uid);
@@ -132,15 +141,15 @@ function AnswerFields({ run, people, meta, first, firstList, onPick }: {
   }
   return (
     <Stack gap="xs">
-      <Select label="Member" searchable allowDeselect={false} value={pick.uid} onChange={member} comboboxProps={{ withinPortal: true }}
+      <Select label="Member" searchable allowDeselect={false} disabled={people.length < 2} value={pick.uid} onChange={member} comboboxProps={{ withinPortal: true }}
         data={people.map((p) => ({ value: p.uid, label: p.display_name }))} nothingFoundMessage="Nobody without an answer has that name." />
       <Select label="Answer" allowDeselect={false} disabled={!list} value={pick.action || null} comboboxProps={{ withinPortal: true }}
         data={answersOf(list).map((a) => ({ value: a.key, label: a.label }))}
         onChange={(k) => {
           if (!k || !person || !list) return;
           const a = answersOf(list).find((x) => x.key === k);
-          const keep = playsOf(person, a, meta).some((o) => o.value === `${pick.character}|${pick.spec}`);
-          const base = defaultPick(person, list);
+          const keep = playsOf(person, a).some((o) => o.value === `${pick.character}|${pick.spec}`);
+          const base = defaultPick(person, list, home);
           set({ ...pick, action: k, ...(k === "no_thanks" ? { character: null, spec: null } : keep ? {} : { character: base.character, spec: base.spec }) });
         }} />
       {plays.length > 0 && (
@@ -151,16 +160,27 @@ function AnswerFields({ run, people, meta, first, firstList, onPick }: {
   );
 }
 
-export function SomeoneElse({ run, people, meta, onDone }: { run: string; people: Person[]; meta?: Meta; onDone: () => Promise<void> | void }) {
+/** Where an answer box starts: whose (`person`), which answer (`action`, else Join) and which character and spec (else
+ *  the main, as it plays). `home` = the row's own character and spec (an answered member keeps theirs). */
+export type AnswerStart = { person: Person; action?: string; character?: string | null; spec?: string | null; home?: { character: string; spec: string } };
+
+/** THE answer box (box 8): `open(people, start)` previews the server's box for `start` and asks with its fields; every
+ *  pick asks again (`replace`), the live topics refresh it, Record answer sends the fp on screen as `seen` (a 409 = the
+ *  fresh box). `people` = whom the Member field offers (one = the member is fixed: a row's ⋮). The hook's owner stays
+ *  mounted while the box is open, so a live reload never takes the box away. `busy` ends as the box opens. */
+export function useAnswerBox(run: string, onDone: () => Promise<void> | void): [(people: Person[], start: AnswerStart) => Promise<void>, React.ReactNode, boolean] {
   const [ask, dialog, replace] = useConfirmBox(["run:", "member"]);
   const [busy, setBusy] = useState(false);
-  async function start() {
-    const person = people[0];
-    if (!person) return;
+  async function open(people: Person[], start: AnswerStart) {
+    const person = start.person;
     setBusy(true);
     try {
       const list = await actionsOf(run, person.uid);
-      const now: AnswerPick = defaultPick(person, list);  // the fields' current pick: the preview, the refresh and the write read it
+      const base = defaultPick(person, list, start.home);
+      const now: AnswerPick = {  // the fields' current pick: the preview, the refresh and the write read it
+        ...base, ...(start.action ? { action: start.action } : {}),
+        ...(start.action === "no_thanks" ? { character: null, spec: null } : start.character ? { character: start.character, spec: start.spec ?? base.spec } : {}),
+      };
       let seq = 0;
       const bodyOf = (p: AnswerPick) => ({ run, member: p.uid, action: p.action, character: p.character, ...(p.spec && p.action !== "no_thanks" ? { spec: p.spec } : {}) });
       const preview = async (p: AnswerPick): Promise<Box> => {
@@ -171,7 +191,7 @@ export function SomeoneElse({ run, people, meta, onDone }: { run: string; people
       let said = "";
       const done = await ask({
         box: first,
-        fields: <AnswerFields run={run} people={people} meta={meta} first={now} firstList={list}
+        fields: <AnswerFields run={run} people={people} first={now} firstList={list} home={start.home}
           onPick={(p) => { Object.assign(now, p); const n = ++seq; preview(p).then((b) => { if (n === seq) replace(b); }).catch(fail); }} />,
         refresh: () => preview(now),
         act: async (fp) => {
@@ -182,9 +202,15 @@ export function SomeoneElse({ run, people, meta, onDone }: { run: string; people
       if (done) { ok(said); await onDone(); }
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
+  return [open, dialog, busy];
+}
+
+export function SomeoneElse({ run, people, onDone }: { run: string; people: Person[]; onDone: () => Promise<void> | void }) {
+  const [open, dialog, busy] = useAnswerBox(run, onDone);
   return (
     <>
-      <Button size="xs" variant="default" loading={busy} disabled={!people.length} onClick={start}>Answer for someone</Button>
+      <Button size="xs" variant="default" loading={busy} disabled={!people.length}
+        onClick={() => { if (people[0]) open(people, { person: people[0] }); }}>Answer for someone</Button>
       {dialog}
     </>
   );

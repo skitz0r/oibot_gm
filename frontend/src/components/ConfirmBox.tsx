@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, Box as MBox, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { guildQuery, type Box, type Meta } from "../api";
 import { fail } from "./Page";
@@ -60,8 +60,19 @@ type Open = AskBox & { resolve: (done: boolean) => void };
  *  (/api/events prefixes) that make an open box ask `refresh` again; the stream is opened only while a box is open.
  *  The third value, `replace(box)`, swaps the open box for the server's answer to the box's OWN fields (Reschedule's
  *  picker, Answer for someone's member) — no "changed" line: the officer changed it, not someone else. */
+/** How many boxes are open on the page now: a view that would unmount a box's owner (the Events page turning an event
+ *  that ended underneath into its history) waits while one is open (useAnyBoxOpen). */
+let openBoxes = 0;
+const boxWatchers = new Set<() => void>();
+const boxCount = (d: number) => { openBoxes = Math.max(0, openBoxes + d); boxWatchers.forEach((f) => f()); };
+export function useAnyBoxOpen(): boolean {
+  return useSyncExternalStore((f) => { boxWatchers.add(f); return () => { boxWatchers.delete(f); }; }, () => openBoxes > 0);
+}
+
 export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<boolean>, React.ReactNode, (b: Box) => void] {
   const [open, setOpen] = useState<Open | null>(null);
+  const isOpen = open !== null;
+  useEffect(() => { if (!isOpen) return; boxCount(1); return () => boxCount(-1); }, [isOpen]);
   const [box, setBox] = useState<Box | null>(null);
   const [changed, setChanged] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -103,7 +114,9 @@ export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<bo
     setBusy(true);
     try {
       const fresh = await open.act(box.fp);
-      if (fresh) { setBox(fresh); setChanged(true); } else close(true);
+      // a 409's fresh box (it has a verb: the action still stands, its facts moved) says it changed; a refusal (verb
+      // null — the 400's box) is the verb's own sentence, never "This changed while the box was open"
+      if (fresh) { current.current = fresh; setBox(fresh); setChanged(fresh.verb !== null); } else close(true);
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
 

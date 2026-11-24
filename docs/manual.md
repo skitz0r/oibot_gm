@@ -1039,9 +1039,15 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    page updates by itself when someone answers or another officer moves a name, never under a drag in progress, and
    the Role switches list stays folded or unfolded as you left it. **Activity · N lines** is the event's log, folded
    until **Show the lines**, with the quiet **Cancel event** at its right. Lock now, Cancel event (red: it cannot be
-   undone) and Reschedule each show the bot's box first, and the press writes only what that box said: when the
-   event changed while the box was open (someone joined, another officer moved it) nothing is written and the box
-   comes back with the new sentences under *This changed while the box was open. Read it again before you press.*
+   undone) and Reschedule each show the bot's box first, and the press writes only what that box said: when what the
+   box says changed while it was open — another officer moved the event, or someone joined while a box that counts
+   them is open (Cancel event's *The 18 who joined…*, a scheduled event's Lock naming who is asked to confirm) —
+   nothing is written and the box comes back with the new sentences under *This changed while the box was open. Read
+   it again before you press.* A one-off's Lock names nobody, so a join does not change it and the lock goes ahead. A
+   refusal (a time already past, an event that ended meanwhile) is its own sentence with only **Back**. A box stays
+   open while the page updates behind it, even when the event ends underneath; its page follows once you close it.
+   On a name's **⋮**, Join, Join as …, Bench and No thanks show the same box as **Answer for someone**, with that
+   member fixed; a callout and the pins keep their own confirm for now.
    **Reschedule** opens on *Move Thu 26 Nov 6:30 PM?* and *Pick the new day and time with the picker.*: **New day**
    is a calendar (from the guild's today), **Starts** a list of quarter hours, and **Locks** (*2 hours before*, *24
    hours before* or the event's own) while it is open — a locked event's timing is fixed. Each pick asks the bot

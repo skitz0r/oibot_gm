@@ -217,6 +217,11 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
     raise RegistryError(f"unknown action {key}")
 
 
+def no_longer_applies(reg: Registry, ev, m: Member) -> str:
+    """An on-behalf action the member's state no longer offers (the write and the answer box's preview say it alike)."""
+    return f"That no longer applies to {m.display_name} on {rc.run_words(reg, ev)}."
+
+
 ON_BEHALF_WORDS = {"join": "set you to Join", "bench": "set you to Bench", "no_thanks": "set you to No thanks", "callout": "recorded that you can't make it",
                    "confirm_yes": "confirmed your seat", "confirm_no": "answered Can't make it for you", "fill_yes": "said yes to your fill ask for you",
                    "fill_no": "said no to your fill ask for you"}
@@ -233,7 +238,7 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
         raise RegistryError(f"{m.display_name} isn't on this run's side of the test bench — a test run takes its puppets and its tester only.")
     allowed = {a["key"] for a in rc.member_actions(reg, ev, m)}
     if key not in allowed:
-        raise RegistryError(f"That no longer applies to {m.display_name} on {rc.run_words(reg, ev)} any more.")
+        raise RegistryError(no_longer_applies(reg, ev, m))
     if key in ("join", "bench", "no_thanks"):
         status = {"join": "in", "bench": "sub", "no_thanks": "out"}[key]
         line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id, **({"spec": spec, "via": via} if spec and status != "out" else {}))

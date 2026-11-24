@@ -9,9 +9,6 @@ import { boxOf } from "./shared";
 /** What the picker holds: the new day ('YYYY-MM-DD'), the start ('HH:MM' guild wall time) and the lock (hours before). */
 type When = { day: string | null; time: string | null; lock: string };
 
-/** The guild wall time an aware ISO start carries ('2026-12-10T18:30:00-05:00' → day, time): the server writes it in the
- *  guild's zone, so its digits ARE the guild's day and clock — no browser clock, no conversion. */
-const wallOf = (iso: string) => ({ day: iso.slice(0, 10), time: iso.slice(11, 16) });
 
 /** The box's fields: New day from a calendar (its lower bound the GUILD's date from the server), Starts from quarter
  *  hours, and Locks while the event is open (once locked the sheet timing is fixed, so it is not offered). */
@@ -42,7 +39,7 @@ export function useRescheduleBox(event: EventView, onDone: () => void): [() => v
   async function open() {
     const ev = latest.current;
     if (!ev.boxes.reschedule) return;
-    const own: When = { ...wallOf(ev.start_iso), lock: String(ev.timing.lock_hours_before ?? "") };
+    const own: When = { day: ev.start_day, time: ev.start_time, lock: String(ev.timing.lock_hours_before ?? "") };
     const now: When = { ...own };
     const url = `/api/run/${encodeURIComponent(ev.key)}/reschedule`;
     const change = () => {

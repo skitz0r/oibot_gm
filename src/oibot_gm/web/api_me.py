@@ -215,9 +215,16 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
             spec = str(d.get("spec") or "").strip() or None
             try:
                 if key not in {a["key"] for a in rc.member_actions(v.reg, ev, m)}:
-                    raise RegistryError(f"That no longer applies to {m.display_name} on {rc.run_words(v.reg, ev)} any more.")
+                    raise RegistryError(inbox.no_longer_applies(v.reg, ev, m))
+                if spec and key in ("join", "bench"):  # the spec the write would refuse is refused here, in the box
+                    s = ev.signups.get(str(m.discord_id))
+                    label = d.get("character") or (s.character if s else (m.main.label if m.main else ""))
+                    c = next((c for c in m.active() if c.label == label), None)
+                    if c is None:
+                        raise RegistryError(f"{m.display_name} has no character named {label}.")
+                    rc.spec_role(v.reg, c, spec)
                 fresh = cq.answer_box(v.reg, ev, m, key, d.get("character") or None, spec, by_id=v.uid, rev=rc.member_state_rev(ev, m))
-            except RegistryError as e:
+            except (RegistryError, ValueError) as e:
                 return JSONResponse({"error": str(e), "box": cq.refusal_box_for(str(e))}, status_code=400)
             if d.get("preview"):
                 return {"box": fresh}

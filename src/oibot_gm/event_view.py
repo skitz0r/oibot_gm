@@ -132,6 +132,26 @@ def event_list(reg: Registry, rs: "rc.RaidStore", now: datetime, offset: int = 0
 
 # ---------------------------------------------------------------- one event
 
+def plays_of(reg: Registry, c) -> list[str]:
+    """The specs character `c` may answer as (its spec first, then its offspec and its flex roles' specs — rc.spec_role's
+    rule, so a pick from this list is never refused for the spec)."""
+    out = []
+    for spec in [c.spec, *reg.profile.classes.get(c.cls, {})]:
+        if spec and spec not in out:
+            try:
+                rc.spec_role(reg, c, spec)
+            except RegistryError:
+                continue
+            out.append(spec)
+    return out
+
+
+def character_rows(reg: Registry, m) -> list[dict]:
+    """A member's active characters as an answer box offers them, the main first: {label, cls, spec, role, is_main, plays}."""
+    return [{"label": c.label, "cls": c.cls, "spec": c.spec, "role": reg.profile.spec(c.cls, c.spec).role, "is_main": c.is_main,
+             "plays": plays_of(reg, c)} for c in sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower()))]
+
+
 def _who(s) -> dict:
     return {"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec}
 
@@ -238,9 +258,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     for p in parts:
         activity += list(reversed(rc.log_rows(reg, p)))
     activity.sort(key=lambda r: r["at"] or "", reverse=True)
-    people = [{"uid": str(m.discord_id), "display_name": m.display_name,
-               "characters": [{"label": c.label, "cls": c.cls, "spec": c.spec, "role": reg.profile.spec(c.cls, c.spec).role, "is_main": c.is_main}
-                              for c in sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower()))]}
+    people = [{"uid": str(m.discord_id), "display_name": m.display_name, "characters": character_rows(reg, m)}
               for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower())
               if not m.test and m.active() and str(m.discord_id) not in first.signups] if live else []
     started = first.start <= reg.now_local()
@@ -260,6 +278,11 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "lineup": lineup, "start_iso": first.start.isoformat(), "timing": timing, "people": people, "sheet_url": url,
             # Reschedule's picker: the Day's lower bound is the GUILD's date; Locks offers the event's own lock among the choices
             "today": reg.now_local().date().isoformat(),
+            # the start in the guild's CURRENT zone (Registry.local12's): a stored ISO keeps the offset it was written with
+            "start_day": first.start.astimezone(reg.tz).strftime("%Y-%m-%d"), "start_time": first.start.astimezone(reg.tz).strftime("%H:%M"),
+            # each answered member's characters (the row ⋮'s answer box, the member fixed)
+            "characters": {uid: character_rows(reg, m) for uid in {r["uid"] for rows_ in rows.values() for r in rows_}
+                           if (m := reg.members.get(int(uid))) is not None} if live else {},
             "locks": lock_choices(float(timing["lock_hours_before"])) if can_move and timing.get("lock_hours_before") is not None else []}
 
 

@@ -414,6 +414,53 @@ def test_answer_for_someone_previews_the_servers_box(web_bot, reg, rs):
     assert ev.signups[str(m.discord_id)].status == "in"
 
 
+def test_reschedule_starts_from_the_guilds_current_clock(officer_client, reg, rs):
+    """Fix round 1 (2a): the picker starts at the event's day and clock in the guild's CURRENT zone — a timezone changed
+    with `keep` leaves the stored ISO in the old offset, so its digits are not the guild's clock any more."""
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    old = reg.config.timezone
+    reg.config.timezone = "Asia/Tokyo" if old != "Asia/Tokyo" else "America/New_York"
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    local = ev.start.astimezone(reg.tz)
+    assert (j["start_day"], j["start_time"]) == (local.strftime("%Y-%m-%d"), local.strftime("%H:%M"))
+    assert j["start_iso"][11:16] != j["start_time"], "the stored offset's clock is not the guild's now"
+
+
+def test_the_row_menus_answer_box_offers_only_specs_the_server_takes(web_bot, reg, rs):
+    """Fix round 1 (1, 2c): each answered member's characters carry `plays` (rc.spec_role's specs), so the row ⋮'s box
+    never offers a spec the write refuses; a spec the character doesn't play is a refusal box (400), never a 500; the
+    action that no longer applies says so once."""
+    c, h = web_bot.c, H()
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    ms = people(reg, 3)
+    join(reg, rs, ev, ms[:1])
+    j = c.get(f"/api/event/{ev.key}", headers=h).json()
+    rows = j["characters"][str(ms[0].discord_id)]
+    assert rows[0]["label"] == ms[0].main.label and rows[0]["plays"][0] == ms[0].main.spec
+    for sp in rows[0]["plays"]:
+        rc.spec_role(reg, ms[0].main, sp)
+    body = {"run": ev.key, "member": str(ms[1].discord_id), "action": "join", "character": ms[1].main.label, "spec": "Nonsense", "preview": True}
+    r = c.post("/api/admin/action", json=body, headers=h)
+    assert r.status_code == 400 and r.json()["box"]["verb"] is None and "doesn't play Nonsense" in r.json()["box"]["sentences"][0]
+    r = c.post("/api/admin/action", json={**body, "spec": ms[1].main.spec, "action": "join", "member": str(ms[0].discord_id),
+                                         "character": ms[0].main.label}, headers=h)
+    assert r.status_code == 400 and r.json()["error"] == f"That no longer applies to {ms[0].display_name} on {rc.run_words(reg, ev)}.", \
+        "Join isn't offered to someone already joined: said once, no 'any more'"
+
+
+def test_a_lock_box_left_open_on_an_ended_event_gets_its_refusal(web_bot, reg, rs):
+    """Fix round 1 (2d): the event is cancelled while its Lock box is open — the box's refresh (`preview`) and the press
+    answer the refusal box (400, only Back), never a bare 404 that leaves Lock pressable."""
+    c, h = web_bot.c, H()
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    box = c.post(f"/api/run/{ev.key}/lock", json={"preview": True}, headers=h).json()["box"]
+    ev.state = "cancelled"  # another officer cancelled it meanwhile
+    rs.save(ev, "cancelled (test)")
+    for body in ({"preview": True}, {"seen": box["fp"]}):
+        r = c.post(f"/api/run/{ev.key}/lock", json=body, headers=h)
+        assert r.status_code == 400 and r.json()["box"]["verb"] is None, r.text
+
+
 # ---------------------------------------------------------------- the page words
 
 def test_meta_carries_the_page_words(officer_client):

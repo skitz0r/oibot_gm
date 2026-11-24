@@ -1631,9 +1631,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def run_lock(request: Request, key: str):
         """Lock the event (RaidMixin.lock_run). {preview?, seen?}: `preview` → {box} (consequences.lock_box), nothing
         written; `seen` = the box's fp the officer pressed on — when the box built now differs (someone joined, the run
-        changed) nothing is locked and the fresh box comes back (409)."""
+        changed) nothing is locked and the fresh box comes back (409). A run that ended or was cancelled, named by its
+        key, answers with its refusal box (400), so a Lock box left open on it says so instead of failing."""
         v, d = await body(request, officer=True)
-        rs, ev, t = live_event(v.reg, key)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key) or find_live(v.reg, rs, key)
         fresh = cq.lock_box(v.reg, ev, rs)
         if fresh["verb"] is None:  # already locked, finished or cancelled
             return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
