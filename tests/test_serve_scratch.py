@@ -116,3 +116,31 @@ def test_shots_has_no_default_site():
     src = (ROOT / "scripts" / "shots.py").read_text()
     assert 'default="http://127.0.0.1:8788"' not in src and "ap.error(" in src
     assert '"/app/readiness"' not in src and "?view=priority" in src and "?view=readiness" in src and "[data-list-item]" in src
+
+
+def test_the_scratch_bot_gets_the_servers_loop_so_live_updates_reach_pages():
+    """web/api's publish hands every topic to `bot.loop` (a real bot's Discord loop); the bot double has none, so the
+    scratch server makes its own loop the bot's at startup — a save from a second request then reaches /api/events."""
+    import asyncio
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    mod = _scratch()
+
+    class Double:
+        pass
+
+    app, bot, seen = FastAPI(), Double(), []
+
+    @app.get("/x")
+    async def x():
+        seen.append(asyncio.get_running_loop())
+        return {}
+
+    mod.attach_loop(app, bot)
+    with TestClient(app) as c:
+        c.get("/x")
+        assert bot.loop is seen[0], "the loop requests run on is the one publish posts to"
+    src = (ROOT / "scripts" / "serve_scratch.py").read_text()
+    assert "attach_loop(app, bot)" in src[src.index("def main"):]

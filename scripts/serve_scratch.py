@@ -12,7 +12,8 @@ What it does:
 - serves `web.create_app(tests/test_raid_night.NightBot)` — the suite's fullest bot double: the real RaidMixin verbs
   (open_run_and_post, lock, reschedule, lineup…) with Discord recorded, never called — with uvicorn on 127.0.0.1. The
   scratch login is the suite's MCP bearer token (tests/test_mcp.TOKEN, the guild's owner and so an officer), honoured
-  from this machine only; `scripts/shots.py http://127.0.0.1:8799 --guild demo` sends it.
+  from this machine only; `scripts/shots.py http://127.0.0.1:8799 --guild demo` sends it. The server's loop is the bot
+  double's (attach_loop), so live updates reach open pages: a change made by a second request shows without a reload.
 
 Safety: it refuses to start when DISCORD_TOKEN is set (a real bot's environment), on the live port, or on a data folder
 that is not strictly below the temp directory or that holds anything this script didn't write (MARKER). Before any of
@@ -23,6 +24,8 @@ the launchd controls do nothing."""
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import importlib
 import os
 import shutil
@@ -145,6 +148,21 @@ def sandbox(out: Path, setattr_=setattr) -> None:
     setattr_(memory, "MEMORIES", None)
 
 
+def attach_loop(app, bot) -> None:
+    """Live updates: web/api's publish hands every topic to `bot.loop` (a real bot's Discord loop) with
+    call_soon_threadsafe. The bot double has none, so at startup the server's own loop becomes the bot's: a save from
+    any request — a second browser, a curl — reaches every open page's /api/events stream, as on the live site."""
+    inner = app.router.lifespan_context
+
+    @contextlib.asynccontextmanager
+    async def lifespan(a):
+        bot.loop = asyncio.get_running_loop()
+        async with inner(a) as state:
+            yield state
+
+    app.router.lifespan_context = lifespan
+
+
 def import_demo(reg) -> None:
     import yaml
 
@@ -246,7 +264,10 @@ def main() -> None:
     import uvicorn
 
     print(f"serve_scratch: http://127.0.0.1:{args.port}/app/raids  (data {data}, guild {args.guild})")
-    uvicorn.run(web.create_app(NightBot(reg, rs)), host="127.0.0.1", port=args.port, log_level="warning")
+    bot = NightBot(reg, rs)
+    app = web.create_app(bot)
+    attach_loop(app, bot)  # server-sent events: the page updates live when a second request changes something
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":
