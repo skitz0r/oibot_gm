@@ -279,10 +279,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if len(evs) == 1:
             return evs[0]
         if len(evs) > 1:
-            raise HTTPException(400, f"several live runs for {reg.raid_def(raids[0]).get('name', raids[0])}: " + ", ".join(e.key for e in evs))
+            raise HTTPException(400, f"{reg.raid_def(raids[0]).get('name', raids[0])} has several live runs: " + ", ".join(dr.run_title(reg, e) for e in evs) + ". Say which one.")
         if len(raids) > 1:
             raise HTTPException(400, f"{key}: which raid? " + ", ".join(raids))
-        raise HTTPException(404, "that run is closed" if key in rs.events else f"no live run {key or '?'}" + (" (live: " + ", ".join(e.key for e in rs.live()) + ")" if rs.live() else ""))
+        raise HTTPException(404, "That run is closed." if key in rs.events else f"There is no live run {key or '?'}." + (" Live now: " + ", ".join(dr.run_title(reg, e) for e in rs.live()) + "." if rs.live() else ""))
 
     async def body(request: Request, officer: bool = False):
         if request.headers.get("x-requested-with") != "oibot":
@@ -1680,8 +1680,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rs = bot.raids.store(v.reg)
         ev = event_of(v.reg, rs, key)
         lineup = d.get("lineup")
-        if not isinstance(lineup, list):
-            return JSONResponse({"error": "Name the run's raids, its first raid first."}, status_code=400)
+        if not isinstance(lineup, list) or not all(isinstance(e, dict) for e in lineup):  # never a 500 on a malformed body
+            return JSONResponse({"error": "Name the run's raids, its first raid first, each with its rosters."}, status_code=400)
         try:
             if d.get("preview"):
                 lines = await bot.edit_lineup(v.reg, rs, ev, lineup, by=v.name, by_id=v.uid, via=v.via, preview=True)
@@ -1759,6 +1759,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         return follow_of_op(reg, rid, d.get("follow")) if d.get("follow") not in (None, "") else None
 
+    LATER_SHAPE = "Name the later raids, each with its rosters."
+
     def lineup_arg(reg, rid: str, d: dict) -> list[dict] | None:
         """The open / preview body's `lineup` (the LATER raids, [{raid, rosters, starts?}]; None / [] = none, `follow`
         or the schedule's own) → checked in code: each raid known and not the first raid itself (design §5.62); the
@@ -1766,14 +1768,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         later = d.get("lineup")
         if later in (None, "", []):
             return None
+        from ..configops import later_raids_refusal
+
         if not isinstance(later, list) or not all(isinstance(e, dict) for e in later):
-            raise RegistryError("Name the later raids, each with its rosters.")
-        for e in later:
-            r = str(e.get("raid") or "").strip().lower()
-            if r not in reg.profile.raids:
-                raise RegistryError(f"unknown raid {r or '?'} for the follow-on (one of {', '.join(reg.profile.raids)})")
-            if r == rid:
-                raise RegistryError("a follow-on is another raid, not the raid itself")
+            raise RegistryError(LATER_SHAPE)
+        why = later_raids_refusal(reg, rid, later)
+        if why:
+            raise RegistryError(why)
         return [dict(e) for e in later]
 
     @app.post("/api/raid/{rid}/open/preview")
@@ -1946,7 +1947,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if not live:
             raise HTTPException(400, "no live test run: open one first")
         if len(live) > 1:
-            raise HTTPException(400, "several live test runs — name one: " + ", ".join(e.key for e in live))
+            raise HTTPException(400, "Several test runs are live: " + ", ".join(dr.run_title(reg, e) for e in live) + ". Say which one.")
         return live[0]
 
     async def test_seed_do(v, d) -> dict:

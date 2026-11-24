@@ -9,6 +9,7 @@ import { classColour } from "../../theme";
 import { GameIcon } from "../Icons";
 import { Eyebrow, fail } from "../Page";
 import { useConfirm } from "../ConfirmModal";
+import { useDirty } from "../../hooks/useDirty";
 import { BoardPreview } from "./BoardPreview";
 import { BoardView } from "./BoardView";
 import { FillModal } from "./FillModal";
@@ -80,12 +81,13 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   }
   const pause = (paused: boolean) => onAct(`pause${e.key}`, `/api/run/${e.key}/pause`, { paused });
   /** Reschedule: the picked start → the server's preview (consequences.reschedule_consequence, printed as it comes) →
-   *  Move sends it back with the run's rev, so a run someone changed meanwhile is refused (409), never overwritten */
+   *  Move sends it back with the run's rev, so a run someone changed meanwhile is refused (409), never overwritten. The
+   *  picker stays open under the confirm: Back returns to it with the picked time kept. */
   async function reschedule(start: string) {
     let pv: RunPreview;
     try { pv = await api.post<RunPreview>(`/api/run/${e.key}/reschedule`, { start, preview: true }); } catch (err) { fail(err); return; }
-    setMoveOpen(false);
     if (!(await ask({ title: `Move ${name}?`, message: pv.sentences.join(" "), confirmLabel: "Move", cancelLabel: "Back" }))) return;
+    setMoveOpen(false);
     await onAct(`move${e.key}`, `/api/run/${e.key}/reschedule`, { start, rev: pv.rev });
   }
   // one button in every state (design B7), named as on Discord: Suggest… before the lock (the planner's suggestions),
@@ -346,12 +348,13 @@ function RescheduleModal({ e, opened, onClose, onPick }: { e: NightSheet; opened
   const initial = e.start_local ? `${e.start_local.replace("T", " ")}:00` : null;
   const [when, setWhen] = useState<string | null>(initial);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (opened) setWhen(initial); }, [opened, initial]);
+  useEffect(() => { if (opened) setWhen(initial); }, [opened]);  // eslint-disable-line react-hooks/exhaustive-deps -- a fresh draft per opening; a reload never resets it
+  useDirty(`reschedule:${e.key}`, opened);  // an open picker holds a draft
   return (
     <Modal opened={opened} onClose={onClose} title={`Reschedule ${runName(e as unknown as Sheet)}`} centered>
       <Stack gap="md">
         <DateTimePicker label="New start" description="guild time — every raid of the run moves with it" value={when} onChange={setWhen}
-          minDate={new Date().toISOString().slice(0, 10)} valueFormat="ddd D MMM YYYY h:mm A"
+          valueFormat="ddd D MMM YYYY h:mm A"
           timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }} popoverProps={{ withinPortal: true }} aria-label="the run's new start" />
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={onClose}>Back</Button>

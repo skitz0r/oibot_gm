@@ -230,7 +230,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, taken, onClo
     if (!Object.keys(f).length || (!s && !f.slots && !f.days && d.kind !== "pickup")) { setPreview(null); return; }
     const n = ++seq.current;
     const t = setTimeout(() => {
-      opsApi.preview([{ kind: "schedule", target: id, fields: f }]).then((x) => { if (n === seq.current) setPreview(x); }).catch(() => { if (n === seq.current) setPreview(null); });
+      opsApi.preview([{ kind: "schedule", target: id, fields: f }], scheduleRevs(s).revs).then((x) => { if (n === seq.current) setPreview(x); }).catch(() => { if (n === seq.current) setPreview(null); });
     }, 500);
     return () => clearTimeout(t);
   }, [JSON.stringify(d)]);  // eslint-disable-line react-hooks/exhaustive-deps

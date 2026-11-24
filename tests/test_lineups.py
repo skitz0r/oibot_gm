@@ -361,9 +361,8 @@ def test_a_structured_four_raid_lineup_creates_the_whole_schedule(reg):
     assert "then Barrow Deeps ×2, then Extra A, then Extra B" in configops.describe_ops(reg, ops).as_text(reg)
     configops.apply(reg, op, "Officer", False)
     assert [e["raid"] for e in reg.schedule_entry("late")["lineup"]] == [H, BD, "extra_a", "extra_b"]
-    again = configops.coalesce(configops.ops_from_fields(reg, "schedule", "late", {"lineup": [{"raid": H, "rosters": 1}, *LINEUP], "kind": "weekly"}))[0]
-    with pytest.raises(RegistryError, match="The schedule called late already exists"):  # a create (its kind named) on an id in use
-        configops.apply(reg, again, "Officer", False)
+    with pytest.raises(RegistryError, match="Another schedule is already called late"):  # a create (its kind named) on an id in use
+        configops.ops_from_fields(reg, "schedule", "late", {"lineup": [{"raid": H, "rosters": 1}, *LINEUP], "kind": "weekly"})
     # the site's editor on that schedule (no raid, no kind): the lineup is an EDIT (phase 3, Task 7)
     edit = configops.coalesce(configops.ops_from_fields(reg, "schedule", "late", {"lineup": [{"raid": H, "rosters": 2}, *LINEUP[:1]]}))[0]
     configops.apply(reg, edit, "Officer", False)

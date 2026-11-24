@@ -666,6 +666,26 @@ def test_cancel_shows_the_consequence_then_one_form_with_reason_and_notify(reg, 
     assert h.text.endswith(f"Cancelled {ev.key}: tank flu")
 
 
+def test_cancel_on_a_later_raid_after_the_first_finished_offers_no_channel_line(reg, rs, officer, channel):
+    """Carried (d): the first raid done, its later raid's cancel box has the reason alone — no Tell the channel?"""
+    for r in ("barrow_deeps", "hyjal_summit_forever"):
+        reg.set_raid_overrides(r, {"first_open": "2026-01-01T00:00"}, "t")
+    start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    first = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t", schedule=rc.ADHOC_SCHEDULE, lineup=[{"raid": "barrow_deeps", "rosters": 1}])
+    later = rc.later_parts(rs, first)[0]
+    first.state = "done"
+    rs.save(first, "done")
+    h, bot = harness(reg, rs)
+
+    async def go():
+        await FLOWS["raid_cancel"](h.command(), reg)
+        await h.press("Cancel the run…")
+        assert h.modal is not None and set(h.modal._items) == {"reason"}
+        await h.submit(reason="")
+    asyncio.run(go())
+    assert bot.calls == [("cancel_run", later.key, "Tester", None)]
+
+
 def test_cancel_dismissed_box_writes_nothing_and_a_closed_run_is_refused(reg, rs, officer, channel):
     ev = open_test_run(reg, rs)
     h, bot = harness(reg, rs)

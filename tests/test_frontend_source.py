@@ -864,3 +864,9 @@ def test_the_run_card_reschedules_and_the_schedule_editor_sends_a_lineup():
     assert "e.cancel_tells_channel !== false" in card  # a later raid whose first finished: no channel line to offer
     sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
     assert "f.lineup" in sched and "follow_raid" not in sched and "30 * (k + 1)" in sched
+    assert "Back" in card and card.index("setMoveOpen(false)") > card.index("confirmLabel: \"Move\""), "Back keeps the picked time"
+    assert "useDirty(`reschedule:" in card
+    # a picker's minDate from the browser's UTC date is tomorrow west of UTC in the evening, and Mantine clamps tonight's
+    # start to it: never toISOString for a minDate (the server refuses a past start in words)
+    for f in SRC.rglob("*.tsx"):
+        assert "minDate={new Date().toISOString()" not in f.read_text(), f

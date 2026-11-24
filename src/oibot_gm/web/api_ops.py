@@ -127,11 +127,11 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         res["refused"] = [*refused, *res["refused"]]
         return res
 
-    async def typed_ops(v, changes, raw_ops=None) -> list | JSONResponse:
+    async def typed_ops(v, changes, raw_ops=None, revs=None) -> list | JSONResponse:
         """configops.ops_from_changes for a request (§2.7): a draft that can't be expressed is a 400 in its own words; an
         unexpected error is reported (report_error: logged, the owner alerted) and answers the generic line — never a bare 500."""
         try:
-            return configops.ops_from_changes(v.reg, changes, raw_ops, channels=channels_of(v.reg))
+            return configops.ops_from_changes(v.reg, changes, raw_ops, channels=channels_of(v.reg), revs=revs if isinstance(revs, dict) else None)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         except Exception as e:  # noqa: BLE001
@@ -144,7 +144,7 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         again, never applied without a press)."""
         reg = v.reg
         warm_roles(reg)
-        ops = await typed_ops(v, d.get("changes"), d.get("ops"))
+        ops = await typed_ops(v, d.get("changes"), d.get("ops"), d.get("revs"))
         if isinstance(ops, JSONResponse):
             return ops
         if not ops:
@@ -317,7 +317,7 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         reg = v.reg
         d = d or {}
         warm_roles(reg)
-        ops = await typed_ops(v, changes)
+        ops = await typed_ops(v, changes, revs=d.get("revs"))
         if isinstance(ops, JSONResponse):
             return ops
         crevs = config_revs(d)

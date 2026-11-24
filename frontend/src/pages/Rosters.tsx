@@ -139,7 +139,6 @@ function StartAdhoc({ r, others, busy, onAct }: { r: RaidRuns; others: { id: str
           {follow && <Select label="Its rosters" allowDeselect={false} value={followN} onChange={(v) => setFollowN(v || "1")} data={["1", "2", "3", "4"].map((n) => ({ value: n, label: n }))} w={120} />}
           <DateTimePicker
             label="When it starts" clearable value={when} onChange={setWhen} placeholder="pick a date and time"
-            minDate={new Date().toISOString().slice(0, 10)}
             valueFormat="ddd D MMM YYYY h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }}
             popoverProps={{ withinPortal: true }} aria-label="when the ad hoc run starts"
           />

@@ -56,13 +56,14 @@ def test_pin_describe(reg, rs):
     ev = open_test_run(reg, rs)
     m = reg.test_members()[0]
     join(reg, rs, ev, [m])
-    assert configops.describe(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="in")) == f"run {ev.team}: pin {m.display_name} to roster (now: no pin)"
-    assert configops.describe(reg, ConfigOp(op="pin", target=ev.team, member=f"<@{m.discord_id}>", value="out")) == f"run {ev.team}: keep {m.display_name} on bench (now: no pin)"
-    assert configops.describe(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="clear")) == f"run {ev.team}: clear pin for {m.display_name} (now: no pin)"
+    run = configops.run_words(reg, ev)  # the run's name and time, never its key (phase 3)
+    assert configops.describe(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="in")) == f"{run}: pin {m.display_name} to the roster (now not pinned)"
+    assert configops.describe(reg, ConfigOp(op="pin", target=ev.team, member=f"<@{m.discord_id}>", value="out")) == f"{run}: keep {m.display_name} on the bench (now not pinned)"
+    assert configops.describe(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="clear")) == f"{run}: clear {m.display_name}'s pin (now not pinned)"
     ev.pins[str(m.discord_id)] = "out"
     rs.save(ev, "pin")
-    assert configops.describe(reg, ConfigOp(op="pin", target=ev.key, member=m.display_name, value="in")).endswith("(now: kept on bench)")
-    assert "in | out | clear" in configops.describe(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="maybe"))
+    assert configops.describe(reg, ConfigOp(op="pin", target=ev.key, member=m.display_name, value="in")).endswith("(now kept on the bench)")
+    assert "is in, out or clear." in configops.describe(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="maybe"))
 
 
 def test_pin_apply_refusals(reg, rs):
@@ -84,7 +85,7 @@ def test_pin_apply(reg, rs):
     m = reg.test_members()[0]
     join(reg, rs, ev, [m])
     out = configops.apply(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="in"), "officer", is_owner=False, raids=rs)
-    assert out == f"{ev.team}: pin {m.display_name} to roster"
+    assert out == f"{configops.run_words(reg, ev)}: pin {m.display_name} to the roster"
     assert rs.events[ev.key].pins.get(str(m.discord_id)) == "in"
     assert rc.RaidStore(reg.store, reg.key).events[ev.key].pins.get(str(m.discord_id)) == "in", "saved to the store"
     configops.apply(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="out"), "officer", is_owner=False)  # no live store: read from disk

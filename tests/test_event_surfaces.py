@@ -110,8 +110,75 @@ def test_plain_text_edits_a_lineup_and_opens_one(reg, rs):
     assert line.startswith("Hyjal Summit ") and " ".join(cq.lineup_consequence(reg, rs, first, [{"raid": HYJAL, "rosters": 1}, {"raid": ONY, "rosters": 1}])) in line
     run(configops.apply_async(reg, edit, "Officer", True, bot=bot, by_id=OWNER, via="chat"))
     assert [e["raid"] for e in rc.run_lineup(reg, rs, first)] == [HYJAL, ONY]
-    assert "The first raid of a run can't change" in configops.describe(reg, ConfigOp(op="run_lineup", target=first.key, value="hyjal_summit_forever x2, onyxias_lair, hyjal_summit_forever"))\
-        or "same raid twice" in configops.describe(reg, ConfigOp(op="run_lineup", target=first.key, value="onyxias_lair, onyxias_lair"))
+    assert "A run can't hold the same raid twice." in configops.describe(reg, ConfigOp(op="run_lineup", target=first.key, value="onyxias_lair, onyxias_lair"))
+    with pytest.raises(RegistryError) as e:
+        run(configops.apply_async(reg, ConfigOp(op="run_lineup", target=first.key, value="onyxias_lair, onyxias_lair"), "Officer", True, bot=bot, by_id=OWNER, via="chat"))
+    assert str(e.value) == "A run can't hold the same raid twice."
+
+
+def wide_reg(store, profile):
+    """conftest's guild on a profile copy with three more raids (test_lineups' widened profile, one raid more): five
+    raids, so a run of more than four can be asked for."""
+    import copy
+
+    from conftest import GUILD, TEST_MEMBERS
+
+    from oibot_gm.registry import Registry
+
+    p = copy.deepcopy(profile)
+    for rid, name in (("extra_a", "Extra A"), ("extra_b", "Extra B"), ("extra_c", "Extra C")):
+        p.raids[rid] = {**copy.deepcopy(p.raids[RID]), "id": rid, "name": name, "duration_hours": 2}
+    r = Registry(store, GUILD, p)
+    r.seed_test_members(TEST_MEMBERS, "t")
+    for rid in r.profile.raids:
+        r.set_raid_overrides(rid, OPENED, "t")
+    return r
+
+
+def test_plain_text_open_with_more_raids_than_a_run_holds_is_refused(store, profile, rs):
+    reg = wide_reg(store, profile)
+    start = (reg.now_local() + timedelta(days=4)).replace(hour=18, minute=30, second=0, microsecond=0)
+    op = ConfigOp(op="run_open", target=HYJAL, value=wall(reg, start), text="barrow_deeps, extra_a, extra_b, extra_c")
+    line = configops.describe(reg, op)
+    assert line.endswith(": " + rg.LINEUP_MAX_WORDS), line
+    with pytest.raises(RegistryError) as e:
+        run(configops.apply_async(reg, op, "Officer", True, bot=NightBot(reg, rs), by_id=OWNER, via="chat"))
+    assert str(e.value) == rg.LINEUP_MAX_WORDS and not rs.live()
+    with pytest.raises(RegistryError) as e:
+        configops.lineup_of_op(reg, HYJAL, "nope_raid")
+    assert str(e.value) == rc.LINEUP_GONE.format(raid="nope_raid")
+    with pytest.raises(RegistryError) as e:
+        configops.lineup_of_op(reg, HYJAL, "hyjal_summit_forever")
+    assert str(e.value) == "Hyjal Summit is the run's first raid. Pick another raid to follow it."
+
+
+def test_a_plain_text_lineup_edit_keeps_a_kept_raids_own_start(reg, rs):
+    """Barrow Deeps at its own start (5 h after Hyjal): adding Onyxia after it moves nobody; nobody gets a moved notice."""
+    opened_all(reg)
+    bot = NightBot(reg, rs)
+    first = open_one_off(reg, rs, days=4, raid=HYJAL, lineup=[{"raid": RID, "rosters": 1, "starts": 300}])
+    join(reg, rs, first, real_people(reg, 2))
+    bd = rc.later_parts(rs, first)[0]
+    was = bd.start
+    run(configops.apply_async(reg, ConfigOp(op="run_lineup", target=first.key, value="barrow_deeps, onyxias_lair"), "Officer", True, bot=bot, by_id=OWNER, via="chat"))
+    assert bd.start == was and [e["starts"] for e in rc.run_lineup(reg, rs, first)][:2] == [0, 300]
+    assert not any(n["kind"] == "moved" for m in reg.members.values() for n in m.notices), "nobody's night moved"
+    # taken out of the middle: the raid after it now follows another raid, so it starts when that one ends (C12)
+    run(configops.apply_async(reg, ConfigOp(op="run_lineup", target=first.key, value="onyxias_lair"), "Officer", True, bot=bot, by_id=OWNER, via="chat"))
+    hyjal_ends = round(float(reg.raid_def(HYJAL)["duration_hours"]) * 60)
+    assert [e["starts"] for e in rc.run_lineup(reg, rs, first)] == [0, hyjal_ends]
+
+
+def test_a_coalesced_start_and_timing_tell_each_person_once(reg, rs):
+    bot = NightBot(reg, rs)
+    ev = open_one_off(reg, rs, days=4)
+    people = real_people(reg, 3)
+    join(reg, rs, ev, people)
+    new = ev.start + timedelta(hours=2)
+    (op,) = configops.coalesce([ConfigOp(op="run_reschedule", target=ev.key, field="start", value=wall(reg, new)),
+                                ConfigOp(op="run_reschedule", target=ev.key, field="autofill", value="off")])
+    run(configops.apply_async(reg, op, "Officer", True, bot=bot, by_id=OWNER, via="chat"))
+    assert [len([n for n in reg.members[m.discord_id].notices if n["kind"] == "moved"]) for m in people] == [1, 1, 1]
 
 
 # ---------------------------------------------------------------- the site's routes
@@ -153,6 +220,11 @@ def test_the_lineup_route_previews_then_writes(w):
     assert got["start_local"] == reg.local(first.start, "%Y-%m-%dT%H:%M") and got["cancel_tells_channel"] is True
     r = w.c.post(f"/api/run/{first.key}/lineup", json={"lineup": [{"raid": RID, "rosters": 1}]}, headers=h)
     assert r.status_code == 400 and r.json()["error"] == rc.LINEUP_FIRST
+    r = w.c.post(f"/api/run/{first.key}/lineup", json={"lineup": ["hyjal", 3]}, headers=h)
+    assert r.status_code == 400, "a malformed lineup is a refusal, never a 500"
+    second = open_one_off(reg, rs, days=6, raid=HYJAL)
+    r = w.c.get("/api/run/Hyjal Summit", headers=h)  # two live Hyjal runs: named, never listed by key
+    assert r.status_code == 400 and first.key not in r.text and second.key not in r.text and "Say which one." in r.text
 
 
 def test_the_open_route_takes_later_raids(w):
@@ -212,10 +284,22 @@ def test_the_matrix_lists_both_ops():
 # ---------------------------------------------------------------- carried copy fixes
 
 def test_lines_a_person_reads_name_the_run_never_its_key(reg, rs):
-    """(a) plain-text refusals and results, the lock's returned line: the run's name and time, never the random key."""
+    """(a) plain-text refusals and results, the lock's returned line, the pin diff, the non-strict refusal fallback,
+    a confirmation's line and the timezone result: the run's name and time, never the random key."""
     bot = NightBot(reg, rs)
     ev = open_one_off(reg, rs, days=3)
     title = f"Barrow Deeps {reg.local12(ev.start)}"
+    m = real_people(reg, 1)[0]
+    pin = configops.describe(reg, ConfigOp(op="pin", target=ev.key, member=m.display_name, value="in"))
+    assert pin == f"{title}: pin {m.display_name} to the roster (now not pinned)", pin
+    refused = configops.describe(reg, ConfigOp(op="run_lineup", target=ev.key, value="barrow_deeps"))  # its own first raid named again
+    assert refused.startswith(f"The raids of {title}: ") and ev.key not in refused and "run_lineup" not in refused, refused
+    reg.add_placement_ask(m.discord_id, ev.team, m.main.label, by="t")
+    _m, _a, line = reg.claim_placement(m.discord_id, ev.team, True, "t")  # the Confirm card, the Me page, confirm_for, the bench
+    assert line == f"{m.display_name} confirmed {m.main.label} on {reg.config.roster(ev.team)['name']}" and ev.key not in line, line
+    # the timezone moved with its runs: the result names them
+    out = configops.apply(reg, ConfigOp(op="set", path="timezone", value="America/New_York", field="move"), "Owner", True, raids=rs)
+    assert ev.key not in out and "Barrow Deeps" in out, out
     for op in (ConfigOp(op="run_lock", target=ev.key), ConfigOp(op="run_cancel", target=ev.key),
                ConfigOp(op="run_open", target=RID, value=wall(reg, ev.start))):
         line = configops.describe(reg, op)
@@ -241,6 +325,38 @@ def test_a_schedule_edit_naming_its_own_raid_says_how(reg):
     other = configops.coalesce([ConfigOp(op="schedule_set", target="alt", field="raid", value=HYJAL),
                                 ConfigOp(op="schedule_set", target="alt", field="slots", value="Wed 20:00")])[0]
     assert rg.ID_TAKEN.format(sid="alt") in configops.describe(reg, other)
+
+
+def test_a_create_shaped_lineup_on_an_existing_id_is_id_taken_unless_the_edit_carries_its_rev(reg):
+    """A structured lineup with run times (create-shaped) on an id in use is a create: ID_TAKEN, nothing rewritten —
+    unless it carries the schedule's own rev (the site's edit Save), then it is the edit it looks like."""
+    opened_all(reg)
+    weekly(reg, RID, "Tue 19:30", "alt")
+    draft = {"lineup": [{"raid": RID, "rosters": 1}, {"raid": ONY, "rosters": 1}], "slots": ["Fri 20:00"]}
+    with pytest.raises(RegistryError) as e:
+        configops.ops_from_fields(reg, "schedule", "alt", dict(draft))
+    assert str(e.value) == rg.ID_TAKEN.format(sid="alt") and reg.schedule_entry("alt")["slots"] == ["Tue 19:30"]
+    revs = {"config:schedule:alt": reg.config_rev("schedule:alt")}
+    (op,) = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", dict(draft), revs=revs))
+    configops.apply(reg, op, "Ana", False)
+    assert reg.schedule_entry("alt")["slots"] == ["Fri 20:00"] and [e["raid"] for e in reg.schedule_entry("alt")["lineup"]] == [RID, ONY]
+
+
+def test_a_new_schedule_save_on_a_taken_id_is_id_taken(reg):
+    """The race Task 2 protects: officer B's new-schedule Save (it names its kind) a second after officer A's, same raid,
+    is told the id is taken — never to edit (and so overwrite) A's schedule."""
+    weekly(reg, RID, "Tue 19:30", "alt")
+    with pytest.raises(RegistryError) as e:
+        configops.ops_from_fields(reg, "schedule", "alt", {"lineup": [{"raid": RID, "rosters": 1}], "kind": "weekly", "slots": ["Sun 21:00"]})
+    assert str(e.value) == rg.ID_TAKEN.format(sid="alt")
+    (op,) = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": RID, "kind": "weekly", "slots": ["Sun 21:00"]}))
+    assert rg.ID_TAKEN.format(sid="alt") in configops.describe(reg, op)
+    with pytest.raises(RegistryError) as e:
+        configops.apply(reg, op, "Bo", False)
+    assert str(e.value) == rg.ID_TAKEN.format(sid="alt")
+    with pytest.raises(RegistryError) as e:
+        reg.set_schedule("alt", {"kind": "weekly", "slots": "Sun 21:00"}, "Bo", raid=RID)
+    assert str(e.value) == rg.ID_TAKEN.format(sid="alt") and reg.schedule_entry("alt")["slots"] == ["Tue 19:30"]
 
 
 def test_the_site_edits_an_existing_schedules_lineup(reg):

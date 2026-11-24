@@ -557,10 +557,10 @@ def out_form_hint(reg: Registry, held: list) -> str:
     if not held:
         return "Submitting marks you out (and frees your seat if you're rostered)."
     places = later_places_sentence(reg, held)
-    for text in (f"Submitting marks you out of the night. {places}", places, "Submitting marks you out of every raid of the night."):
+    for text in (f"Submitting marks you out of the night. {places}", places):
         if len(text) <= FORM_HINT_MAX:
             return text
-    return "You're out of every raid tonight."
+    return "Submitting marks you out of every raid of the night."  # 54 characters: always fits
 
 
 # ---------------------------------------------------------------- suggestions: the card's Suggest…, /raid fill on an open run

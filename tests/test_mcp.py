@@ -136,7 +136,8 @@ def test_get_run_by_key_and_by_raid_name(client, reg, rs):
 def test_several_live_runs_for_a_raid_is_an_error(client, reg, rs):
     a, b = open_test_run(reg, rs, days=2), open_test_run(reg, rs, days=5)
     r = client.get(f"/api/run/{a.instance}", headers=bearer())
-    assert r.status_code == 400 and a.key in r.json()["error"] and b.key in r.json()["error"]
+    err = r.json()["error"]  # the runs by name and time, never by key (list_runs gives the keys)
+    assert r.status_code == 400 and a.key not in err and b.key not in err and reg.local12(a.start) in err and reg.local12(b.start) in err
 
 
 def test_member_resolution_ambiguous_and_unknown(client, reg, rs):

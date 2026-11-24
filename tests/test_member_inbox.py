@@ -411,7 +411,7 @@ def test_every_pin_path_is_one_write_and_refreshes_the_sheet_footer(reg, rs, mon
     assert got[-1] == (ev.key, "Pinned: 1")
     op = configops.ConfigOp(op="pin", target=ev.key, member=ms[1].display_name, value="out")
     line = run(configops.apply_async(reg, op, "Jon", False, bot=bot, by_id=1, via="chat"))
-    assert line == f"{ev.team}: keep {ms[1].display_name} on bench"
+    assert line == f"{configops.run_words(reg, ev)}: keep {ms[1].display_name} on the bench"
     assert got[-1] == (ev.key, "Pinned: 1 · Kept off: 1"), "plain text's pin re-renders the sheet too"
     assert ev.pins.get(str(ms[1].discord_id)) == "out"
     with pytest.raises(RegistryError, match="isn't on this sheet"):

@@ -253,7 +253,7 @@ def test_confirm_for_describe_and_apply(g, rs):
         configops.apply(reg, yes, "Officer", True)
     bot = PlacementBot(rs)
     line = asyncio.run(configops.apply_async(reg, yes, "Officer", True, bot=bot))
-    assert line == f"{ms[1].display_name} confirmed {ms[1].main.label} on {ev.team}"
+    assert line == f"{ms[1].display_name} confirmed {ms[1].main.label} on {reg.config.roster(ev.team)['name']}" and ev.key not in line  # the run's name
     assert reg.members[ms[1].discord_id].placement_asks[-1]["answer"] == "yes"
     line = asyncio.run(configops.apply_async(reg, no, "Officer", True, bot=bot))
     assert "can't make" in line and reg.members[ms[2].discord_id].placement_asks[-1]["answer"] == "no"

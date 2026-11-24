@@ -879,10 +879,48 @@ def _lineup_args(reg: Registry, rs, first, op: ConfigOp) -> list[dict]:
     from .registry import parse_lineup_text
 
     later = parse_lineup_text(op.value)
-    head = rc.run_lineup(reg, rs, first)[0]
+    now = rc.run_lineup(reg, rs, first)
+    head = now[0]
     if later and later[0]["raid"] == first.instance:
         head, later = {"raid": first.instance, "rosters": later[0]["rosters"]}, later[1:]
-    return [{"raid": head["raid"], "rosters": head["rosters"]}] + later
+    full = [{"raid": head["raid"], "rosters": head["rosters"]}] + [dict(e) for e in later]
+    # a KEPT raid that follows the same raid as now keeps its own start (the text names none): nobody's night moves for a
+    # change nobody asked for. A raid whose raid before it changed (one taken out, a new order) starts when that one ends
+    # (C12), as the manual says; so does a kept start the new order would put out of sequence.
+    before = {e["raid"]: (now[i - 1]["raid"], e["starts"]) for i, e in enumerate(now) if i}
+    for i, e in enumerate(full[1:], start=1):
+        prev, at = before.get(e["raid"], (None, None))
+        if "starts" in e or prev != full[i - 1]["raid"]:
+            continue
+        e["starts"] = at
+        try:
+            reg.lineup_offsets(full[:i + 1])
+        except RegistryError:
+            del e["starts"]
+    return full
+
+
+def later_raids_refusal(reg: Registry, rid: str, later: list[dict]) -> str | None:
+    """Why a run's later raids can't follow `rid`, in one sentence, else None — THE check run_open's text, the site's
+    open body and follow_of_op share: more than a run holds (LINEUP_MAX_WORDS), a raid the game lacks (rc.LINEUP_GONE),
+    the first raid named again, a raid named twice."""
+    from . import raidcycle as rc
+    from .registry import LINEUP_MAX, LINEUP_MAX_WORDS
+
+    if len(later) + 1 > LINEUP_MAX:
+        return LINEUP_MAX_WORDS
+    seen: set = set()
+    for fw in later:
+        r = str(fw.get("raid") or "").strip().lower()
+        if r not in reg.profile.raids:
+            return rc.LINEUP_GONE.format(raid=r or "?")
+        if r == rid:
+            name = reg.raid_def(rid).get("name", rid)
+            return f"{name} is the run's first raid. Pick another raid to follow it."
+        if r in seen:
+            return "A run can't hold the same raid twice."
+        seen.add(r)
+    return None
 
 
 def lineup_of_op(reg: Registry, rid: str, text) -> list[dict] | None:
@@ -891,11 +929,9 @@ def lineup_of_op(reg: Registry, rid: str, text) -> list[dict] | None:
     from .registry import parse_lineup_text
 
     later = parse_lineup_text(text)
-    for fw in later:
-        if fw["raid"] not in reg.profile.raids:
-            raise RegistryError(f"unknown raid {fw['raid']} for the follow-on (one of {', '.join(reg.profile.raids)})")
-        if fw["raid"] == rid:
-            raise RegistryError("a follow-on is another raid, not the raid itself")
+    why = later_raids_refusal(reg, rid, later)
+    if why:
+        raise RegistryError(why)
     return later or None
 
 
@@ -907,10 +943,9 @@ def follow_of_op(reg: Registry, rid: str, text: str | None) -> dict | None:
     fw = parse_follow(text)
     if fw is None:
         return None
-    if fw["raid"] not in reg.profile.raids:
-        raise RegistryError(f"unknown raid {fw['raid']} for the follow-on (one of {', '.join(reg.profile.raids)})")
-    if fw["raid"] == rid:
-        raise RegistryError("a follow-on is another raid, not the raid itself")
+    why = later_raids_refusal(reg, rid, [fw])
+    if why:
+        raise RegistryError(why)
     return fw
 
 
@@ -1546,7 +1581,42 @@ def _key(reg: Registry, op: ConfigOp) -> str:
 
 
 PIN_VALUES = {"in": "in", "roster": "in", "seat": "in", "out": "out", "bench": "out", "clear": None, "none": None, "": None}
-PIN_TEXT = {"in": "pin {name} to roster", "out": "keep {name} on bench", None: "clear pin for {name}"}
+PIN_TEXT = {"in": "pin {name} to the roster", "out": "keep {name} on the bench", None: "clear {name}'s pin"}
+PIN_NOW = {"in": "pinned to the roster", "out": "kept on the bench"}  # what a member's pin is now; none = "not pinned"
+# a refused op, when the diff lists it rather than raising (the web / MCP plain path): what it was asked to do, in the
+# reader's words, then the run or person it names — never an op name or a run key
+ACTION_WORDS = {"run_open": "Open", "run_answer": "An answer on", "run_lock": "Lock", "run_cancel": "Cancel", "run_fill": "Fill seats on",
+                "run_strategy": "The split on", "run_autofill": "Auto-fill", "run_board": "The board of", "run_move": "A board move on",
+                "run_propose": "Proposed groups for", "run_sheet": "The sheet of", "confirm_for": "A confirmation on", "run_remind": "A reminder on",
+                "run_pause": "Automatic asks on", "run_withdraw": "Withdrawing an ask on", "run_reopen": "Reopen",
+                "run_reschedule": "Move", "run_lineup": "The raids of", "pin": "A pin on",
+                "character": "Characters", "absence_clear": "An absence", "dm": "DMs", "regular": "Regulars", "test": "Test bench",
+                "loot": "Loot council", "wishlist": "Wishlist", "tier": "Item tiers", "loot_weights": "Loot scoring",
+                "policy_append": "Policy", "policy": "Policy", "application": "Application", "proposal": "News proposal", "job": "Local job",
+                "schedule_set": "Schedule", "schedule_remove": "Remove schedule"}
+
+
+def refused_line(reg: Registry, op: ConfigOp, e: Exception) -> str:
+    """A refused op as one diff line a person reads: ACTION_WORDS, the run's name (a run op) or the member / schedule it
+    names, then the refusal itself."""
+    words = ACTION_WORDS.get(op.op, "This change")
+    subject = ""
+    if op.op in RUN_OPS or op.op == "pin":
+        try:
+            if op.op == "run_open":
+                subject = reg.raid_def(op.target).get("name", "") if op.target in reg.profile.raids else ""
+            elif op.op == "run_reopen":
+                subject = run_words(reg, _ended_event(reg, op.target)[1])
+            else:
+                subject = run_words(reg, _live_event(reg, op.target)[1])
+        except RegistryError:
+            subject = ""
+    elif op.op in ("character", "absence_clear", "dm", "regular") and op.member:
+        m = _member(reg, op.member)
+        subject = f"for {m.display_name}" if m else ""
+    elif op.op in ("schedule_set", "schedule_remove") and op.target:
+        subject = op.target.strip()
+    return f"{words} {subject}".strip() + f": {e}"
 
 
 def _pin_value(value: str | None) -> str | None:
@@ -2372,7 +2442,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
         try:
             return loot_ops.describe(reg, op)
         except (RegistryError, ValueError) as e:
-            return f"{op.op} {op.field or ''} {op.target or op.value or ''}: {e}".replace("  ", " ")
+            return refused_line(reg, op, e)
     if op.op == "plain":
         try:
             patch, line = _plain_patch(reg, op)
@@ -2439,22 +2509,21 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
         try:
             return _describe_new(reg, op)
         except (RegistryError, ValueError) as e:
-            return f"{op.op} {op.doc or op.target or op.member or op.value or ''}: {e}".replace("  ", " ")
+            return refused_line(reg, op, e)
     if op.op == "pin":
         m = _member(reg, op.member)
         name = m.display_name if m else (op.member or "?")
+        cur, run = None, op.target or "the run"
+        try:
+            _, ev = _live_event(reg, op.target)
+            cur, run = (ev.pins.get(str(m.discord_id)) if m else None), run_words(reg, ev)
+        except RegistryError:
+            pass
         try:
             want = _pin_value(op.value)
         except RegistryError:
-            return f"run {op.target or '?'}: pin {name} = {op.value!r}? (in | out | clear)"
-        cur = None
-        try:
-            _, ev = _live_event(reg, op.target)
-            cur = ev.pins.get(str(m.discord_id)) if m else None
-        except RegistryError:
-            pass
-        was = {"in": "pinned to roster", "out": "kept on bench"}.get(cur, "no pin")
-        return f"run {op.target or '?'}: {PIN_TEXT[want].format(name=name)} (now: {was})"
+            return f"{run}: a pin for {name} is in, out or clear."
+        return f"{run}: {PIN_TEXT[want].format(name=name)} (now {PIN_NOW.get(cur, 'not pinned')})"
     if op.op == "comp_groups":
         key = _key(reg, op)
         cur = (cfg.roster(key) or cfg.raids.get(key) or {}).get("comp_groups") or []
@@ -2511,7 +2580,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
         try:
             return _describe_schedule(reg, op)
         except RegistryError as e:
-            return f"{op.op} {op.target or '?'} {op.field or ''}: {e}"
+            return refused_line(reg, op, e)
     if op.op in ("comp_target", "comp_target_clear"):
         key = _key(reg, op)
         slot = (op.field or op.path or "").strip()
@@ -2527,7 +2596,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
         except RegistryError as e:
             if strict:
                 raise
-            return f"{op.op} {op.target or op.member or op.value or ''}: {e}".strip()
+            return refused_line(reg, op, e)
     return str(op)
 
 
@@ -2554,7 +2623,7 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
     name = reg.raid_def(rid).get("name", rid)
     cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
     if cur is not None and raid:  # a named raid means create (Registry.schedule_raid): an id in use is taken — its own
-        raise RegistryError((SCHEDULE_EXISTS if raid == rid else ID_TAKEN).format(sid=sid))  # raid named: how to edit it instead
+        raise RegistryError((SCHEDULE_EXISTS if raid == rid and "kind" not in fields else ID_TAKEN).format(sid=sid))  # an edit asked as a create: how to edit it
     new = _schedule_words(reg, rid, fields, sid)
     after = _runs_preview(reg, rid, schedule=sid, schedule_fields=fields) if any(f in PREVIEW_SCHEDULE_FIELDS for f in fields) else ""
     if cur is None:
@@ -2912,7 +2981,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         want = _pin_value(op.value)
         rs, ev = _live_event(reg, op.target, raids)
         inbox.pin_write(reg, rs, ev, m, want, by)  # THE pin write (with the bot: inbox.pin_member, from _apply_async)
-        return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
+        return f"{run_words(reg, ev)}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op == "raid_set":
         _raid_fields(op)  # a run's week preset is a schedule's: refused here, as the registry refuses each timing field
         return reg.set_raid_override(op.target or "", op.field or "", op.value, by, rev=rev)
@@ -3196,7 +3265,7 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
         want = _pin_value(op.value)
         rs, ev = _live_event(reg, op.target, raids)
         await inbox.pin_member(bot, reg, rs, ev, m, want, by=by, by_id=by_id, via=via or "discord", audit=False)  # apply_async audits the line
-        return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
+        return f"{run_words(reg, ev)}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op in ("run_autofill", "run_fill"):  # the solver / candidate search: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store, raids)
     if op.op == "loot_weights":  # (a MergedOp of them too) a git commit: off the event loop
@@ -3301,7 +3370,7 @@ def _apply_timezone(reg: Registry, op: ConfigOp, by: str, raids=None) -> str:
         reg.config.timezone = zone
         reg.save_config(f"timezone → {zone} (by {by})")
         moved = rc.move_runs_with_clock(reg, rs, rows, zone, by) if rows else []
-    return f"timezone = {zone}" + (f" — {len(moved)} open run{'s' if len(moved) != 1 else ''} moved with the clock ({join_words([e.key for e in moved])})" if moved else "")
+    return f"timezone = {zone}" + (f" — {len(moved)} open run{'s' if len(moved) != 1 else ''} moved with the clock ({join_words([run_words(reg, e) for e in moved])})" if moved else "")
 
 
 
@@ -3910,7 +3979,10 @@ def _plain_merged(reg: Registry, parts: list[ConfigOp]) -> dict:
     return patch
 
 
-def _schedule_ops(reg: Registry, target: str | None, fields: dict) -> list[ConfigOp]:
+CREATE_SHAPED = ("kind", "slots", "days", "time")  # what a new schedule's write names (what it is and when it runs)
+
+
+def _schedule_ops(reg: Registry, target: str | None, fields: dict, revs: dict | None = None) -> list[ConfigOp]:
     """A structured schedule draft as schedule_set ops on its id (`target`, the id alone — SCHEDULE_ID_ALONE for an older
     '<raid>:<schedule>'). A new schedule names its first raid: `raid`, or `lineup` [{raid, rosters[, starts]}] (its
     first entry the raid and its rosters, a second the follow-on). The raid's op comes first, so the merged write knows it."""
@@ -3924,14 +3996,20 @@ def _schedule_ops(reg: Registry, target: str | None, fields: dict) -> list[Confi
         exists = reg.schedule_entry(sid) is not None
     except RegistryError:
         exists = False
-    if lineup is not None and exists and not raid and "kind" not in fields:
+    edit_rev = bool((revs or {}).get(f"{CONFIG_REV}schedule:{sid}"))  # the site's edit Save carries the schedule's own rev
+    if lineup is not None and exists and not raid and "kind" not in fields and (edit_rev or not any(f in fields for f in CREATE_SHAPED)):
         # an EDIT of an existing schedule's lineup (the site's editor, MCP): the whole lineup in one field, no raid named —
-        # Registry.set_schedule keeps its first raid the schedule's own. A create names its kind (the site) or its raid
+        # Registry.set_schedule keeps its first raid the schedule's own. A create names its kind (the site) or its raid;
+        # a create-shaped draft (run times) without the schedule's rev is a create too: refused below, never a rewrite
         rows = parse_lineup(lineup)
         import json
 
         fields["lineup"] = json.dumps(rows)
         lineup = None
+    if lineup is not None and exists:
+        from .registry import ID_TAKEN
+
+        raise RegistryError(ID_TAKEN.format(sid=sid))  # a create on an id in use: never rewrites the schedule there
     if lineup is not None:
         rows = parse_lineup(lineup)
         if raid and str(raid).strip().lower() != rows[0]["raid"]:
@@ -3950,7 +4028,8 @@ def _schedule_ops(reg: Registry, target: str | None, fields: dict) -> list[Confi
     return head + [ConfigOp(op="schedule_set", target=sid, field=str(f).strip().lower(), value=_value_text(v)) for f, v in fields.items()]
 
 
-def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict | None, *, channels: list[dict] | None = None) -> list[ConfigOp]:
+def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict | None, *, channels: list[dict] | None = None,
+                    revs: dict | None = None) -> list[ConfigOp]:
     """A typed draft as ConfigOps — THE translation every structured caller shares (the web's edit modes and admin routes,
     MCP's tools, the AuraWizard). `kind` (STRUCTURED_KINDS) names what it edits and `target` which one; `fields` holds
     typed values (bools, numbers, lists, maps — never the plain-text grammar). Fields equal to the current value are left
@@ -4001,7 +4080,7 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
     if k == "raid_reset":
         return [ConfigOp(op="raid_reset", target=(target or "").strip())]
     if k == "schedule":
-        return _schedule_ops(reg, target, fields)
+        return _schedule_ops(reg, target, fields, revs)
     if k == "schedule_remove":
         return [ConfigOp(op="schedule_remove", target=_schedule_sid(ConfigOp(op="schedule_remove", target=target)))]
     if k == "buff":
@@ -4246,7 +4325,7 @@ def _raid_ops(reg: Registry, inst: str, d: dict) -> list[ConfigOp]:
     return [ConfigOp(op="raid_set", target=inst, field=f, value=v) for f, v in want.items()]
 
 
-def ops_from_changes(reg: Registry, changes, raw_ops=None, *, channels: list[dict] | None = None) -> list[ConfigOp]:
+def ops_from_changes(reg: Registry, changes, raw_ops=None, *, channels: list[dict] | None = None, revs: dict | None = None) -> list[ConfigOp]:
     """A request's `changes` ([{kind, target, fields}]) and/or raw `ops` ([ConfigOp as JSON], the plain grammar) as one
     ordered op list. RegistryError on a malformed entry (nothing is applied)."""
     ops: list[ConfigOp] = []
@@ -4256,7 +4335,7 @@ def ops_from_changes(reg: Registry, changes, raw_ops=None, *, channels: list[dic
         f = c.get("fields") or {}
         if not isinstance(f, dict):
             raise RegistryError("fields must be a map of setting → value")
-        ops += ops_from_fields(reg, str(c.get("kind") or ""), c.get("target"), f, channels=channels)
+        ops += ops_from_fields(reg, str(c.get("kind") or ""), c.get("target"), f, channels=channels, revs=revs)
     for o in raw_ops or []:
         if not isinstance(o, dict):
             raise RegistryError("each op is a ConfigOp object")

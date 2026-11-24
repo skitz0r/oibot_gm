@@ -198,7 +198,7 @@ def test_move_open_runs_with_the_clock_keeps_the_wall_clock_and_the_signups(reg,
     old = ev.start
     n0 = commits(store)
     line = configops.apply(reg, ConfigOp(op="set", path="timezone", value="America/New_York", field="move"), "Jon", True, raids=rs)
-    assert "1 open run moved with the clock" in line and ev.key in line and commits(store) == n0 + 1  # the zone and the run: one commit
+    assert "1 open run moved with the clock" in line and ev.key not in line and "Barrow Deeps" in line and commits(store) == n0 + 1  # the zone and the run: one commit
     moved = rs.events[ev.key]
     assert moved.key == ev.key and str(m.discord_id) in moved.signups  # the same run, nobody re-answers
     assert moved.start.astimezone(reg.tz).replace(tzinfo=None) == old.astimezone(old.tzinfo).replace(tzinfo=None)  # 8:00 PM stays 8:00 PM

@@ -5337,15 +5337,17 @@ class Registry:
         `instance`; any other id is the guild's, and `instance` must be its first raid (else NO_SCHEDULE)."""
         return schedule_def_of(self.raid_def(instance), sid)
 
-    def schedule_raid(self, sid: str, raid: str | None) -> tuple[str, bool]:
+    def schedule_raid(self, sid: str, raid: str | None, *, create: bool = False) -> tuple[str, bool]:
         """(the first raid of schedule `sid`, is it new?) — naming a `raid` means CREATE: an existing id with a raid named
-        is refused (ID_TAKEN, even when the raid is its own — two officers creating one id never rewrite each other's);
-        a new one needs `raid` (else NO_SCHEDULE)."""
+        is always refused, so two officers creating one id never rewrite each other's. The refusal is ID_TAKEN for another
+        raid, and for its own raid whenever the write is create-shaped (`create`: it names a kind — the site's new-schedule
+        Save); its own raid named on an edit-shaped write (plain text naming the schedule's raid again, no kind) is
+        SCHEDULE_EXISTS, which says how to edit it. A new one needs `raid` (else NO_SCHEDULE)."""
         have = next((e for e in self.config.schedules if isinstance(e, dict) and str(e.get("id") or "").strip().lower() == sid), None)
         if have is not None:
             rid = _lead_raid(have)
             if raid:
-                if raid == rid:  # its own raid named again: an edit asked as a create — say how to edit it
+                if raid == rid and not create:  # its own raid named again on an edit: say how to edit it
                     raise RegistryError(SCHEDULE_EXISTS.format(sid=sid))
                 raise RegistryError(ID_TAKEN.format(sid=sid))
             if unread_schedule(have) is not None:
@@ -5372,7 +5374,7 @@ class Registry:
         bad = [f for f in fields if f not in SCHEDULE_FIELDS]
         if bad:
             raise RegistryError(f"unknown schedule setting {bad[0]} (one of {', '.join(SCHEDULE_FIELDS)})")
-        instance, new = self.schedule_raid(sid, raid)
+        instance, new = self.schedule_raid(sid, raid, create="kind" in fields)
         snap = self._snapshot_raid(instance)
         try:
             return self._set_schedule(instance, new, sid, fields, by)
@@ -6986,7 +6988,8 @@ class Registry:
             last = next((a for a in reversed(m.placement_asks) if a["roster"] == roster), None)
             raise RegistryError(self.already_answered(last) if last and last.get("answer") else "Nothing to answer for that roster.")
         ask["answer"], ask["answered_at"], ask["answered_by"] = ("yes" if yes else "no"), now(), by
-        line = f"{m.display_name} confirmed {ask['character']} on {roster}" if yes else f"{m.display_name} can't make {roster} — seat re-opened"
+        run = (self.config.roster(roster) or {}).get("name") or "the run"  # the run as people read it (raid + 12-hour start), never its key
+        line = f"{m.display_name} confirmed {ask['character']} on {run}" if yes else f"{m.display_name} can't make {run} — seat re-opened"
         return m, ask, line
 
     @_member_write

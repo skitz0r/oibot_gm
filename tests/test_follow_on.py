@@ -630,7 +630,7 @@ def test_the_owners_sentence_as_ops(reg, rs):
     assert "6:30 PM" in lines[2] and "15" in lines[2] and "18:30" not in lines[2]
     assert "follow" in configops.SCHEMA_TEXT and "x<N>" in configops.SCHEMA_TEXT
     bad = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="hyjal_summit_forever x2")
-    assert "not the raid itself" in configops.describe(reg, bad)
+    assert "is the run's first raid. Pick another raid to follow it." in configops.describe(reg, bad)
     assert configops.apply(reg, ops[1], by="t", is_owner=True)  # the schedule is created by its run times first
     fw = ConfigOp(op="schedule_set", target="tue", field="follow", value="barrow_deeps x2")
     assert "no follow-on → then Barrow Deeps ×2" in configops.describe(reg, fw)
@@ -699,9 +699,9 @@ def test_open_route_takes_a_follow_on(reg, rs, monkeypatch):
     again = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": {"raid": FOLLOW, "rosters": 1}}, headers=bearer()).json()
     assert again["exists"] == "open" and again["follow"]["rosters"] == 2  # the run already there: ITS follow-on, not the one asked
     bad = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": "hyjal_summit_forever x2"}, headers=bearer())
-    assert bad.status_code == 400 and "not the raid itself" in bad.json()["error"]
+    assert bad.status_code == 400 and "is the run's first raid. Pick another raid to follow it." in bad.json()["error"]
     bad = fc.post(f"/api/raid/{LEAD}/open", json={"when": when, "schedule": "adhoc", "follow": "hyjal_summit_forever x2"}, headers=bearer())
-    assert bad.status_code == 400 and "not the raid itself" in bad.json()["error"]
+    assert bad.status_code == 400 and "is the run's first raid. Pick another raid to follow it." in bad.json()["error"]
 
 
 def test_me_routes_leave_and_stay(reg, rs, monkeypatch):

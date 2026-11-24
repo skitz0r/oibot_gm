@@ -213,15 +213,14 @@ def test_naming_a_raid_creates_and_never_rewrites_an_existing_schedule(reg):
     first = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": RID, "kind": "weekly", "slots": "Sat 20:00"}))[0]
     configops.apply(reg, first, "Ana", False)
     again = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": RID, "kind": "weekly", "slots": "Sun 21:00"}))[0]
-    exists = "The schedule called alt already exists. To change it, name the schedule without a raid."  # its own raid named
-    assert exists in configops.describe(reg, again)
-    with pytest.raises(RegistryError, match=exists):
+    taken = "Another schedule is already called alt"  # a create (its kind named), its own raid too: never told to edit it
+    assert taken in configops.describe(reg, again)
+    with pytest.raises(RegistryError, match=taken):
         configops.apply(reg, again, "Bo", False)
-    lineup = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"lineup": [{"raid": RID, "rosters": 1}], "kind": "weekly"}))[0]
-    with pytest.raises(RegistryError, match=exists):  # a create (its kind named) never rewrites the schedule
-        configops.apply(reg, lineup, "Bo", False)
-    with pytest.raises(RegistryError, match=exists):
-        reg.set_schedule("alt", {"slots": "Sun 21:00"}, "Bo", raid=RID)
+    with pytest.raises(RegistryError, match=taken):  # a create-shaped lineup on an id in use: refused as it is translated
+        configops.ops_from_fields(reg, "schedule", "alt", {"lineup": [{"raid": RID, "rosters": 1}], "kind": "weekly"})
+    with pytest.raises(RegistryError, match="The schedule called alt already exists. To change it, name the schedule without a raid."):
+        reg.set_schedule("alt", {"slots": "Sun 21:00"}, "Bo", raid=RID)  # plain text naming its own raid on an edit: how to edit it
     other = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": "hyjal_summit_forever", "kind": "weekly", "slots": "Sun 21:00"}))[0]
     with pytest.raises(RegistryError, match="Another schedule is already called alt"):  # another raid: a real clash
         configops.apply(reg, other, "Bo", False)
