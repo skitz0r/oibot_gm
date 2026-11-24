@@ -8,7 +8,8 @@ What it does:
   `GitStore(push=False)` — NEVER the real data repo (../oibot_gm-data), never a remote;
 - registers the demo characters (fixtures/demo/characters.yaml, anonymized) as members through Registry.import_members;
 - with `--seed`: a class minimum on Hyjal Summit, a weekly schedule with regulars, a one-off Hyjal Summit → Barrow
-  Deeps ×2 three days out with 18 mains joined (an open, two-raid event), and a locked Barrow Deeps one-off;
+  Deeps ×2 three days out with 18 mains joined (an open, two-raid event), a locked Barrow Deeps one-off and a finished
+  one four days ago (History, its board as it was locked);
 - serves `web.create_app(tests/test_raid_night.NightBot)` — the suite's fullest bot double: the real RaidMixin verbs
   (open_run_and_post, lock, reschedule, lineup…) with Discord recorded, never called — with uvicorn on 127.0.0.1. The
   scratch login is the suite's MCP bearer token (tests/test_mcp.TOKEN, the guild's owner and so an officer), honoured
@@ -215,7 +216,15 @@ def seed(reg, rs) -> None:
     lk.confirmations_sent_at = lk.locked_at
     lk.confirm_by = (lk.start - timedelta(hours=6)).isoformat()
     rs.save(lk, "locked (scratch board)")
-    print(f"serve_scratch: seeded schedule {sid}, an open two-raid event and a locked event (owner {OWNER})")
+    past = (now - timedelta(days=4)).replace(hour=20, minute=0, second=0, microsecond=0)  # History: its board as it was locked
+    done = rc.open_run(reg, rs, barrow, past, by="scratch")
+    for m in mains[8:18]:
+        rc.set_signup(reg, rs, done, m, None, "in", source="officer")
+    names = [m.main.label for m in mains[8:8 + size]]
+    done.rosters = rc.board_rosters(reg, done, [names[i:i + g] for i in range(0, len(names), g)], size)
+    done.state, done.locked_at, done.closed_at = "done", (past - timedelta(hours=2)).isoformat(), (past + timedelta(hours=3)).isoformat()
+    rs.save(done, "finished (scratch board)")
+    print(f"serve_scratch: seeded schedule {sid}, an open two-raid event, a locked and a finished event (owner {OWNER})")
 
 
 def main() -> None:

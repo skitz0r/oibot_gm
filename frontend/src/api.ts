@@ -146,7 +146,7 @@ export interface PageWords {
   open_in_discord: string; no_answer_yet: string; answers_one: string; bot_asks: string; officer_asks: string; every_main: string;
   used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
   rosters_of: string; placed_of: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string;
-  sheet_waits: string; sheet_not_posted: string; open_seat: string; board_working: string; board_failed: string;
+  sheet_waits: string; sheet_not_posted: string; open_seat: string; not_placed_off: string; board_working: string; board_failed: string;
   by_an_officer: string; no_times: string; no_reminder: string; for_seats: string; short_every_week: string;
   ready_every_week: string; short_weeks: string; paused_next: string; open_now: string; no_minimums: string; played_nowhere: string;
 }
@@ -222,7 +222,18 @@ export interface EventView {
   sheet_url: string | null;
   /** Reschedule's picker: the GUILD's date (the New day's lower bound) and the Locks choices, the event's own among them */
   today: string; locks: { hours: number; words: string }[];
+  /** the Role switches section (rc.event_switches): drawn only when `short` has a raid */
+  switches: Switches;
 }
+/** One move a short raid could take (rc.event_switches): `from` / `to` in words ('Shadow', 'Nyx, Shadow', 'no answer yet'),
+ *  `button` the server's word (Switch · Answer for them · Ask), `raids` the raids it helps, `box` its confirmation box;
+ *  part / seat / option / character / spec go back with POST /api/run/{part}/switch. */
+export interface SwitchRow {
+  uid: string; display_name: string; role: string; from: string; to: string; answered: boolean; button: string; raids: string[];
+  part: string; seat: number; option: number; character: string; spec: string; box: Box;
+}
+/** `short` = each raid short of a minimum (role → how many), `why` the sentence when it has no row; `revs` = each raid's plan rev. */
+export interface Switches { short: { raid: string; roles: Record<string, number>; why: string | null }[]; rows: SwitchRow[]; revs: Record<string, string> }
 /** GET /api/event/coming/{sid}/{occurrence}: `open` is what Open the sheet now carries back; `box` null while it can't. */
 export interface ComingView {
   title: string; chip: string; schedule: { id: string; name: string }; details: Fact[]; can_open: boolean; why: string | null;

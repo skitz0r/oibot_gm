@@ -11,6 +11,9 @@ import { SignupsSection } from "../components/events/SignupsSection";
 import { ActivitySection } from "../components/events/ActivitySection";
 import { ComingUpView } from "../components/events/ComingUpView";
 import { HistoryView } from "../components/events/HistoryView";
+import { RoleSwitches } from "../components/events/RoleSwitches";
+import { EventBoard } from "../components/events/EventBoard";
+import { afterDrag } from "../components/board/shared";
 import { useRescheduleBox } from "../components/events/RescheduleBox";
 import { boxOf, EventHead } from "../components/events/shared";
 import { useLive } from "../hooks/useLive";
@@ -73,17 +76,17 @@ function EventPane({ evKey, meta, tick, onChanged }: { evKey: string; meta: Meta
   const [ev, setEv] = useState<EventView | null>(null);
   const [gone, setGone] = useState<string | null>(null);
   useEffect(() => {
-    api.get<EventView>(`/api/event/${encodeURIComponent(evKey)}`).then((v) => {
+    api.get<EventView>(`/api/event/${encodeURIComponent(evKey)}`).then((v) => afterDrag(() => {  // never redrawn under a drag
       setEv(v); setGone(null);
       if (v.key !== evKey) navigate(`/events/${encodeURIComponent(v.key)}`, { replace: true });
-    }).catch((e) => {
+    })).catch((e) => {
       if (e instanceof ApiError && e.status === 404) setGone((e.body as { error?: string } | undefined)?.error || e.message);
       else fail(e);
     });
   }, [evKey, tick]);  // eslint-disable-line react-hooks/exhaustive-deps
   if (gone) return <Text c="dimmed">{gone}</Text>;
   if (!ev) return <Text c="dimmed">Loading…</Text>;
-  if (ev.state === "done" || ev.state === "cancelled") return <HistoryView ev={ev} />;
+  if (ev.state === "done" || ev.state === "cancelled") return <HistoryView ev={ev} meta={meta} />;
   return <LiveEvent ev={ev} meta={meta} onChanged={onChanged} />;
 }
 
@@ -130,7 +133,8 @@ function LiveEvent({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChang
       </EventHead>
       <EventDetails details={ev.details} />
       <SignupsSection ev={ev} meta={meta} onDone={onChanged} />
-      {/* Role switches and Board join here (the next step) */}
+      <RoleSwitches meta={meta} view={ev} onReload={onChanged} />
+      <EventBoard meta={meta} view={ev} onReload={onChanged} />
       <ActivitySection activity={ev.activity}
         action={ev.actions.cancel && ev.boxes.cancel ? <Button variant="subtle" color="gray" size="xs" onClick={cancel}>Cancel event</Button> : undefined} />
       {dialog}

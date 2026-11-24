@@ -8,6 +8,12 @@ export type Act = (k: string, p: string, b?: unknown) => Promise<void>;
 export type OnBoard = (key: string, board: Board, needs?: Sheet["needs"], rev?: string) => void;
 /** Shared between the board and the page: a refresh must not re-render the board under a drag in progress. */
 export const live = { dragging: false };
+/** Runs `fn` now, or once the drag in progress ends: a page's reload answered mid-drag is drawn after the drop, never
+ *  under the cursor (the Events page's board is redrawn from the server's answer, so the latest answer wins). */
+export function afterDrag(fn: () => void) {
+  if (!live.dragging) { fn(); return; }
+  const t = setInterval(() => { if (!live.dragging) { clearInterval(t); fn(); } }, 150);
+}
 
 /** How one night's several rosters are made (the split strategies), in the board's words (moved here from the old Raids page). */
 export const SPLIT_LABEL: Record<string, string> = { balanced: "Balanced", first: "Raid one first", rotation: "Rotation" };

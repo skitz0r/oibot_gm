@@ -79,7 +79,11 @@ PAGE_WORDS = {
     "sheet_waits": "Posts once a signup channel is set on the Config page's Channels tab", "sheet_not_posted": "Not in Discord yet",
     # the Board before the lock: an empty seat a minimum wants (beside its role icon), and the line over a picture that is
     # being placed again after a change (event_board: board_state "working")
-    "open_seat": "open seat", "board_working": "Placing everyone again after the last change. This is the board from before it.",
+    "open_seat": "open seat",
+    # the Board's Not placed list before the lock: a name an officer drops there is kept off the roster (a pin), and a
+    # drag back into a group lifts it (raidcycle.apply_move_shown)
+    "not_placed_off": "A name dropped here stays off the roster when the sheet locks. Drag it into a group to put it back.",
+    "board_working": "Placing everyone again after the last change. This is the board from before it.",
     # a board the bot could not work out at all (event_board: an unexpected failure, kept for those answers)
     "board_failed": "The bot couldn't work out where the lock would place everyone. The board shows the officers' moves.",
     # Schedules (schedule_view): a pickup's Repeats, a schedule with no run times, no reminder, the regulars' words and

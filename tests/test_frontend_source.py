@@ -1062,3 +1062,41 @@ def test_the_events_page_asks_with_the_servers_box_and_lives():
     assert "aria-expanded" in sign and 'kind="spec"' in sign
     act = _code_only((SRC / "components" / "events" / "ActivitySection.tsx").read_text())
     assert "Activity · " in act and "aria-expanded" in act
+
+
+def test_the_event_board_replaces_suggest_and_preview_lock():
+    board = _code_only((SRC / "components" / "events" / "EventBoard.tsx").read_text())
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    assert 'variant="event"' in board and "undo_box" in board and "board_footer" in board and "Suggest" not in board and "lock/preview" not in board
+    assert 'variant === "event"' in view and "open seat" in view and "live.dragging" in view and "useConfirmBox" in view
+
+
+def test_role_switches_are_one_line_moves():
+    sw = _code_only((SRC / "components" / "events" / "RoleSwitches.tsx").read_text())
+    assert "switches.short" in sw and "show_switches" in sw and "hide_switches" in sw and "/switch" in sw and "row.box" in sw
+    assert 'aria-hidden' in sw
+
+
+def test_the_event_board_draws_the_servers_picture_and_never_fights_a_drag():
+    """Phase 4, Task 9 (Review Focus 3 on the page): the board is the server's picture — a drop sends ONE move with
+    `shown: true` and the page draws what the server answers (no optimistic place); a reload that lands mid-drag waits
+    for the drop; working / failed print the server's words over the board it sends; open seats are the server's roles
+    (role icon + page_words.open_seat); Not placed says a name dropped there stays off the roster; Undo is the server's
+    box and verb; the history shows the board as it was locked. Role switches print the server's rows, why sentences and
+    button words, send the plan rev and `seen`, and keep their fold per viewer."""
+    board = _code_only((SRC / "components" / "events" / "EventBoard.tsx").read_text())
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    hist = _code_only((SRC / "components" / "events" / "HistoryView.tsx").read_text())
+    sw = _code_only((SRC / "components" / "events" / "RoleSwitches.tsx").read_text())
+    assert view.count('send("move"') == 1 and "shown: true" in view, "a drop is one move on the server's picture"
+    assert "page_words.open_seat" in view and "r.open" in view and "page_words.not_placed_off" in view
+    assert "board_working" in board and "board_error" in board and "<Loader" in board and 'board_state === "working"' in board
+    assert "undo: true" in board and "seen: fp" in board and "preview: true" in board and "useConfirmBox(" in board
+    assert '"Board, as it was locked"' in board and "<EventBoard" in hist
+    assert "afterDrag(" in page, "a reload answered mid-drag is drawn after the drop"
+    order = [page.index(s) for s in ("<SignupsSection", "<RoleSwitches", "<EventBoard", "<ActivitySection")]
+    assert order == sorted(order)
+    assert "row.button" in sw and "s.why" in sw and "switches.revs[row.part]" in sw and "seen: fp" in sw and "localStorage" in sw
+    assert not re.search(r"[\"'`>]\s*(Switch|Answer for them|Ask)\s*[\"'`<]", sw), "the button words are the server's"
+    assert "VisuallyHidden" in sw
