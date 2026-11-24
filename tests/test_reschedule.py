@@ -262,7 +262,13 @@ def test_lockout_and_conflicts_read_the_moved_start(reg, rs):
     reg.set_raid_overrides(HYJAL, OPENED, "t")
     bot = NightBot(reg, rs)
     people = real_people(reg, 10)
-    a = open_one_off(reg, rs, days=5)
+    # placed by the lockout's own calendar, never by today's date: A starts a day into a window, 19:30, so A + 5 hours
+    # stays in A's window and A + one lockout (+ 5 hours) lies in the next one, whatever day the suite runs
+    days = int(reg.raid_def(RID)["lockout_days"])
+    assert days >= 2
+    win_start, _ = reg.lockout_window(RID, reg.now_local() + timedelta(days=3))
+    a_start = (win_start + timedelta(days=1)).replace(hour=19, minute=30, second=0, microsecond=0)
+    a = rc.open_run(reg, rs, RID, a_start, by="t", schedule=rc.ADHOC_SCHEDULE)
     join(reg, rs, a, people)
     lock_with_board(reg, rs, a, [m.display_name for m in people[:5]], hours_to_confirm=2)
     old_win = reg.lockout_window(RID, a.start)
@@ -270,7 +276,7 @@ def test_lockout_and_conflicts_read_the_moved_start(reg, rs):
     assert reg.lockout_window(RID, same.start) == old_win
     seated = {p.character for p in a.seated()}
     assert rc.saved_this_lockout(reg, rs, same) == seated
-    new = a.start + timedelta(days=3)
+    new = a.start + timedelta(days=days)  # the same moment of the next window
     nxt = rc.open_run(reg, rs, RID, new + timedelta(hours=5), schedule=rc.ADHOC_SCHEDULE)
     assert reg.lockout_window(RID, nxt.start) != old_win and rc.saved_this_lockout(reg, rs, nxt) == set()
     hy_old = rc.open_run(reg, rs, HYJAL, a.start + timedelta(hours=1), schedule=rc.ADHOC_SCHEDULE)
