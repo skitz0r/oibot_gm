@@ -1361,3 +1361,31 @@ def test_the_event_page_shows_its_raid_night_facts_and_split_strategy():
     edit = lineup[lineup.index("function EditLineup"):]
     assert "navigate(`/events/${encodeURIComponent(evKey)}`" in edit and "setChanges" not in edit
     assert "JSON.stringify(lineup[k] ?? null) !== JSON.stringify(seed[k] ?? null)" in edit
+
+
+def test_the_officers_rail_is_the_final_set():
+    """Phase 4, Task 12: the officers' rail = Events, Schedules, Raids, then Members, Applications, Loot, Auras, Ops,
+    Policy, Agents, Config with the brief's icons; no entry for a page that is gone; Tell the bot covers every officer
+    page's own sub-paths (an event, a schedule, a raid, New event, Edit lineup)."""
+    app = _code_only((SRC / "App.tsx").read_text())
+    rail = app[app.index("const OFFICER = ["):]
+    rail = rail[:rail.index("];")]
+    entries = re.findall(r'\{ to: "([^"]+)", label: "([^"]+)", icon: (\w+) \}', rail)
+    assert [label for _, label, _ in entries] == ["Events", "Schedules", "Raids", "Members", "Applications", "Loot", "Auras",
+                                                  "Ops", "Policy", "Agents", "Config"]
+    icons = {label: icon for _, label, icon in entries}
+    assert icons["Events"] == "IconCalendarEvent" and icons["Schedules"] == "IconRepeat" and icons["Raids"] == "IconMountain"
+    for gone in ("/rosters", "/readiness", "/bank", "/admin"):
+        assert gone not in [to for to, _, _ in entries], gone
+    for to, _, _ in entries:
+        assert f'path="{to}"' in app, f"{to}: a rail entry with no page"
+    assert 'OFFICER.some((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + "/"))' in app, "Tell the bot on sub-paths"
+
+
+def test_shots_shoots_the_final_pages():
+    shots = (SRC.parents[1] / "scripts" / "shots.py").read_text()
+    pages = re.search(r"PAGES = \[(.*?)\]", shots, re.S).group(1)
+    for p in ("/app/events", "/app/events/new", "/app/schedules", "/app/schedules/new", "/app/raids"):
+        assert f'"{p}"' in pages, p
+    for gone in ("/app/rosters", "/app/readiness", "/app/bank"):
+        assert f'"{gone}"' not in pages, gone

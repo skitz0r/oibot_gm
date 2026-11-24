@@ -3,7 +3,7 @@ import { REFRESH_EVENT } from "./hooks/usePoll";
 import { Alert, AppShell, Avatar, Box, Burger, Button, Group, Menu, Modal, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconCalendarEvent, IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconCalendarRepeat, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus, IconCoin } from "@tabler/icons-react";
+import { IconCalendarEvent, IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconRepeat, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus, IconCoin } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { LeaveGuard, guardClick } from "./components/LeaveGuard";
 import { setBoxMeta } from "./components/ConfirmBox";
@@ -35,7 +35,7 @@ const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", labe
 const PRICES = { to: "/prices", label: "Prices", icon: IconCoin };
 const OFFICER = [
   { to: "/events", label: "Events", icon: IconCalendarEvent },  // the Rosters page became the Events page (phase 4)
-  { to: "/schedules", label: "Schedules", icon: IconCalendarRepeat },
+  { to: "/schedules", label: "Schedules", icon: IconRepeat },
   { to: "/raids", label: "Raids", icon: IconMountain },
   { to: "/members", label: "Members", icon: IconUsers },
   { to: "/applications", label: "Applications", icon: IconUserPlus },
