@@ -23,15 +23,6 @@ CLASSES = [("Warrior", "Protection"), ("Priest", "Holy"), ("Priest", "Holy"), ("
 
 
 @pytest.fixture(autouse=True)
-def _no_board_solves(monkeypatch):
-    """The board's lock placement is Task 3's (tests/test_event_board.py): here no background solve starts, so an
-    open event with joiners reads "working" with the officers' layout drawn."""
-    from oibot_gm import event_board
-
-    monkeypatch.setattr(event_board.BoardCache, "start", lambda self, *a, **k: None)
-
-
-@pytest.fixture(autouse=True)
 def _opened(reg):
     for rid in reg.profile.raids:  # the profile's raids first open 9 Dec: every event here is after it
         reg.set_raid_overrides(rid, {"first_open": "2026-01-01T00:00"}, "t")
@@ -194,13 +185,14 @@ def test_an_open_event_reads_by_its_sections(officer_client, reg, rs):
     assert j["boxes"]["lock"]["verb"] == "Lock" and j["actions"]["edit_lineup"] is True
     assert j["boxes"]["lock"] == cq.lock_box(reg, ev, rs) and j["boxes"]["cancel"] == cq.cancel_box(reg, ev, rs)
     assert (j["kind"], j["schedule"], j["state"], j["chip"], j["title"]) == ("one_off", None, "open", rc.RUN_STATE_WORDS["open"], reg.local12(ev.start))
-    assert j["actions"] == {"reschedule": True, "edit": True, "edit_lineup": True, "lock": True, "cancel": True, "open_now": False}
+    assert j["actions"] == {"reschedule": True, "edit": True, "edit_lineup": True, "lock": True, "cancel": True, "open_now": False, "clear": True}
     assert [p["key"] for p in j["parts"]] == [p.key for p in rc.event_parts(rs, ev)]
     hy, bd = j["parts"]
     assert hy["label"] == f"6:30 PM · Hyjal Summit" and bd["raid_name"] == "Barrow Deeps"
     assert hy["rosters_words"] == f"1 of {rc.run_size(reg, ev)}" and bd["rosters_words"].startswith("2 of ")
-    assert hy["placed_words"] == "0 of 18 joined" and hy["board_state"] == "working" and hy["sheet"]["key"] == ev.key, \
-        "18 joined: the lock's placement is being worked out, the officers' (empty) layout drawn meanwhile"
+    assert hy["placed_words"] == "0 of 18 joined" and hy["board_state"] == "open" and hy["sheet"]["key"] == ev.key, \
+        "18 joined: the officers' (empty) board drawn, everyone in Not placed — nothing solved"
+    assert len(hy["sheet"]["board"]["bank"]) == 18 and hy["autofill"] == {"working": False, "words": None, "failed": False}
     assert hy["short"] == rc.needs(reg, ev)["roles"]
     assert j["lineup"] == rc.run_lineup(reg, rs, ev) and j["start_iso"] == ev.start.isoformat()
     assert set(j["timing"]) == set(rc.EVENT_TIMING) - {"split_policy"} and rc.timing_changes(reg, ev, j["timing"]) == {}, "sent back as it is, it changes nothing"
@@ -344,7 +336,7 @@ def test_an_event_with_nobody_joined(officer_client, reg, rs):
     assert (s["joined"], s["bench"], s["no_thanks"]) == (0, 0, 0) and s["rows"]["in"] == s["rows"]["sub"] == s["rows"]["out"] == []
     assert s["no_answer"] == len(s["rows"]["none"]) == len(mains_unanswered(reg, ev)) == len(j["people"])
     for p in j["parts"]:
-        assert p["placed_words"] == "0 of 0 joined" and p["board_state"] == "ready" and p["sheet"]["board"]["rosters"]
+        assert p["placed_words"] == "0 of 0 joined" and p["board_state"] == "open" and p["sheet"]["board"]["rosters"]
         assert p["short"] == rc.needs(reg, rs.events[p["key"]])["roles"]
     assert [f["label"] for f in j["details"]][0] == "Lineup" and j["boxes"]["lock"]["verb"] == "Lock"
     assert isinstance(j["activity"], list) and j["actions"]["lock"] is True
@@ -771,10 +763,9 @@ def test_the_lock_rule_of_edit_lineup_is_one_function(reg, rs):
 
 def test_split_strategy_asks_with_the_servers_box_and_the_picture_and_lock_follow_it(web_bot, reg, rs, monkeypatch):
     """One raid's split strategy through the existing route: the pick box (Back only), the strategy it already has
-    (Back only), another one (its box, `seen`), stale → 409; the write moves the board's fingerprint (the picture is
-    placed again) and the lock's own solve (_solve_run, no strategy passed) uses it; refused once locked."""
-    from oibot_gm import event_board as eb
-
+    (Back only), another one (its box, `seen`), stale → 409; the write moves what the lock reads (rc.solve_inputs: the
+    next Auto-fill groups and the lock split by it) and the lock's own solve (_solve_run, no strategy passed) uses it;
+    refused once locked."""
     c, h = web_bot.c, H()
     ev = rc.open_run(reg, rs, RID, start_in(reg, 3), by="t")
     join(reg, rs, ev, people(reg, 12))
@@ -788,13 +779,13 @@ def test_split_strategy_asks_with_the_servers_box_and_the_picture_and_lock_follo
     b = c.post(url, json={"preview": True, "strategy": other}, headers=h).json()["box"]
     assert b["verb"] == "Use this split" and b == cq.strategy_box(reg, ev, other) and len(b["sentences"]) == 3
     assert [x["id"] for x in c.get(f"/api/event/{ev.key}", headers=h).json()["strategies"]] == list(registry.SPLIT_POLICIES)
-    before = eb.fingerprint(reg, eb.frozen(rs), eb.snapshot(rs, ev))
+    before = rc.solve_inputs(ev)
     assert c.post(url, json={"strategy": other, "seen": "stale"}, headers=h).status_code == 409 and rs.events[ev.key].split_strategy != other
     r = c.post(url, json={"strategy": other, "seen": b["fp"]}, headers=h)
     assert r.status_code == 200, r.text
     ev = rs.events[ev.key]
     assert rc.run_strategy(reg, ev) == other and c.get(f"/api/event/{ev.key}", headers=h).json()["parts"][0]["strategy"] == other
-    assert eb.fingerprint(reg, eb.frozen(rs), eb.snapshot(rs, ev)) != before, "the picture is placed again by the new strategy"
+    assert rc.solve_inputs(ev) != before, "Auto-fill groups and the lock read the new strategy"
     seen: list = []
     real = rc.solver.solve_rosters
 

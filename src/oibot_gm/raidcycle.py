@@ -187,13 +187,18 @@ class RaidEvent(BaseModel):
     pins: dict[str, str] = Field(default_factory=dict)  # discord_id -> "in" | "out": officer decisions the solver must honour
     layout: Optional[list[list[str]]] = None  # the officers' board before lock: groups (across rosters) of signup display names
     # before the lock, who placed a name by hand (a drag on the Events board): signup name → the officer's Discord id. A name
-    # in the layout, or pinned out by a drag to Not placed; pruned at every board write, cleared at the lock. "Undo my
-    # moves" drops exactly the viewer's names (RaidMixin.undo_moves)
+    # in the layout; pruned at every board write, cleared at the lock. "Undo my moves" drops exactly the viewer's names
+    # (RaidMixin.undo_moves)
     placed_by: dict[str, int] = Field(default_factory=dict)
-    # before the lock, the pins an officer's DRAG changed (a drop on Not placed pins "out"; a place lifts an "out" pin):
-    # member id → {by: the officer, was: the pin before (None = none), now: the pin the drag left}. Undo my moves puts
-    # `was` back only while the pin is still `now` — a pin set anywhere else is never touched. Cleared at the lock
+    # before the lock, the pins an officer's DRAG changed (a drag into a group lifts a kept-off "out" pin; a drop on Not
+    # placed writes none): member id → {by: the officer, was: the pin before (None = none), now: the pin the drag left}.
+    # Undo my moves puts `was` back only while the pin is still `now` — a pin set anywhere else is never touched. Cleared
+    # at the lock
     drag_pins: dict[str, dict] = Field(default_factory=dict)
+    # before the lock, the names Auto-fill groups placed (event_board.AutoFill → autofill): the next press replaces them
+    # and keeps every other placement (a hand one). A name moved by anyone leaves it; pruned at every board write, emptied
+    # by a whole-board write, cleared at the lock. Older code ignores the key (extra="ignore") and drops it at its next save
+    auto_placed: list[str] = Field(default_factory=list)
     split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
     cards: dict[str, int] = Field(default_factory=dict)  # officer cards in the roster channel: "health" | "lock:<i>" -> message id
     cards_channel_id: Optional[int] = None
@@ -3048,7 +3053,7 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     def role_of(cls: str, spec: str) -> str:
         return reg.profile.spec(cls, spec).role
 
-    off_ids = kept_off_ids(reg, rs, ev)  # an "out" pin, a drag onto Not placed, always_bench: never asked, never counted
+    off_ids = kept_off_ids(reg, rs, ev)  # an "out" pin, always_bench: never asked, never counted
 
     def ok(m: Member | None) -> bool:
         # DMs off is no reason to skip someone (D14): they are asked in the same order, the ask waits on their Me page
@@ -4244,8 +4249,8 @@ ALL_KEPT_OFF = "everyone who joined is kept off"  # the solver-side reason (no r
 
 def kept_off_ids(reg: Registry, rs, ev: RaidEvent) -> set[int]:
     """The members the lock keeps off this run (lock_forces' kept_off, as ids) plus anyone the comp policy's
-    always_bench names by a character or display name: the planner never asks them (a pin "out" or a drag onto Not
-    placed means "not this run")."""
+    always_bench names by a character or display name: the planner never asks them (a pin "out" means "not this
+    run")."""
     from .policy import PolicyStore
 
     f = lock_forces(reg, rs, ev)
@@ -4363,16 +4368,18 @@ SOLVER_WORDS = {  # what blocks a roster, in one or two sentences an officer can
     "time": "The bot couldn't build the roster in time. Lock again, or place fewer people by hand.",
     "other": "The bot couldn't build the roster. Lock again in a moment.",
     "changing": "The answers or pins kept changing while the roster was being built. Lock again in a moment.",
-    "all_off": "Everyone who joined is kept off the roster, so move someone back from Not placed before you lock.",
+    "all_off": "Everyone who joined is kept off the roster, so unpin someone before you lock.",
     "no_other": "There is no other split that fits the rules. Use one already shown.",
 }
 LOCK_AGAIN = ", then lock again."  # every conflict_sentence ends so (how a stored one is known when it is read again)
 # lock_error sentences stored before SOLVER_WORDS (still on old run files): shown as they are
 _OLD_LOCK_WORDS = ("no roster satisfies the rules", "the bot couldn't find a roster in time", "the answers or pins kept changing",
-                   "building the roster failed")
+                   "building the roster failed",
+                   # SOLVER_WORDS["all_off"] while a drop on Not placed kept a name off (before the owner's tweaks C)
+                   "Everyone who joined is kept off the roster, so move someone back from Not placed before you lock.")
 
 
-_OLD_LOCK_KINDS = dict(zip(_OLD_LOCK_WORDS, ("infeasible", "time", "changing", "other")))
+_OLD_LOCK_KINDS = dict(zip(_OLD_LOCK_WORDS, ("infeasible", "time", "changing", "other", "all_off")))
 
 
 def lock_failure_kind(text: str | None) -> str | None:
@@ -4540,6 +4547,7 @@ def record_moves(ev: RaidEvent, name: str, at_before: dict, groups: list[list[st
         else:
             records[u] = {"by": int(by_id), "was": was, "now": ev.pins.get(u)}
     ev.placed_by, ev.drag_pins = owners, records
+    ev.auto_placed = [n for n in ev.auto_placed if n not in changed]  # moved by a person: a hand placement now
 
 
 def own_pins(ev: RaidEvent, by_id: int | None) -> dict[str, dict]:
@@ -4659,25 +4667,22 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
     return out
 
 
-# ---------------------------------------------------------------- the board as the lock would place it (Events page)
+# ---------------------------------------------------------------- the lock's placement, without a lock (Auto-fill, Preview lock)
 
 def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None,
-                        memo=None, raid_key=None, counts: dict[int, int] | None = None) -> dict[str, "list[RosterResult] | str"]:
-    """Every OPEN raid of an event drawn as its lock would place people now — PURE: deep copies, nothing saved. Each
-    raid solves through the lock's own entry (_solve_run, the run's strategy, the lock's budget SOLVE_TIME_LIMIT_S, the
+                        counts: dict[int, int] | None = None) -> dict[str, "list[RosterResult] | str"]:
+    """Every OPEN raid of an event as its lock would place people now — PURE: deep copies, nothing saved. Each raid
+    solves through the lock's own entry (_solve_run, the run's strategy, the lock's budget SOLVE_TIME_LIMIT_S, the
     raid's minimums, pins and the officers' board as hard placements), so the solver's repeatable answer is the
     roster lock_run then builds. A later raid gets `earlier` from the raids before it: their locked rosters, or the
     previews of the ones still open (what their locks will roster). A raid nobody joined is never solved: its board is
     every expected roster's groups, empty. A raid whose solve fails maps to rc.solver_error_text's sentence, and the
-    raids after it still solve with what the others placed. `parts` = the event's parts already copied (the board
-    cache's snapshot), else read from `rs`. `stop` (solver.Stop): the board cache abandons the solve when a lock
-    starts — solver.Stopped is raised, never turned into a raid's sentence. `memo` + `raid_key(p, earlier)` (the
-    board cache's, per event): a raid whose own inputs — its key covers them and the `earlier` it is handed — were
-    solved before takes that answer instead of solving again (the solver is repeatable: the same answer); the picture
-    only, never the lock. `counts` (a dict): filled with how many of the raids solved rostered (or will roster) each
-    Discord id — the `earlier` a raid after them gets (earlier_counts). → {run key: [RosterResult]
-    (rosters[0].benched = the joiners not placed) | the sentence}; a locked or closed raid has no entry (its board is
-    its roster)."""
+    raids after it still solve with what the others placed. `parts` = the event's parts already copied, else read
+    from `rs`. `stop` (solver.Stop): Auto-fill's, abandoned when a lock starts — solver.Stopped is raised, never turned
+    into a raid's sentence. `counts` (a dict): filled with how many of the raids solved rostered (or will roster) each
+    Discord id — the `earlier` a raid after them gets (earlier_counts, which Auto-fill groups and Preview lock read on
+    a later raid). → {run key: [RosterResult] (rosters[0].benched = the joiners not placed) | the sentence}; a locked
+    or closed raid has no entry (its board is its roster)."""
     parts = [p.model_copy(deep=True) for p in (parts if parts is not None else event_parts(rs, first))]
     out: dict[str, list[RosterResult] | str] = {}
     times: dict[int, int] = counts if counts is not None else {}  # discord id → how many raids before this one rostered (or will roster) them
@@ -4695,12 +4700,6 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
             out[p.key] = board_rosters(reg, p, board_layout(reg, p), run_size(reg, p))
             continue
         earlier = dict(times) if is_follow(p) else None
-        mk = raid_key(p, earlier) if memo is not None and raid_key is not None else None
-        if mk is not None and mk in memo:
-            out[p.key] = memo[mk]
-            if isinstance(out[p.key], list):
-                count(p, out[p.key])
-            continue
         try:
             players, rosters, _ = _solve_run(reg, rs, p, time_limit=SOLVE_TIME_LIMIT_S, whatif=False, earlier=earlier, stop=stop)
         except solver.Stopped:
@@ -4712,55 +4711,24 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
             rosters[0].benched = [x for x in players if x.signup_name not in placed and x.status == "signed"]
             out[p.key] = rosters
             count(p, rosters)
-        if mk is not None:
-            memo[mk] = out[p.key]
     return out
 
 
-def earlier_counts(reg: Registry, rs: RaidStore, ev: RaidEvent) -> dict[int, int] | None:
-    """A later raid's `earlier` for a solve made while a raid before it is still OPEN (Preview lock on a later raid,
-    the final fix wave of §5.67 phase 4): who the raids before it will roster, as the board picture counts them — a
-    locked raid's roster, an open raid's own lock solve (event_board_preview over the raids before it). Without it the
-    preview solved as if nobody were rostered before it, while the lock (made only after those raids lock) reads their
+def earlier_counts(reg: Registry, rs: RaidStore, ev: RaidEvent, stop=None) -> dict[int, int] | None:
+    """A later raid's `earlier` for a solve made while a raid before it is still OPEN (Preview lock or Auto-fill groups on
+    a later raid, the final fix wave of §5.67 phase 4): who the raids before it will roster — a locked raid's roster,
+    an open raid's own lock solve (event_board_preview over the raids before it, their boards fixed). Without it the
+    solve ran as if nobody were rostered before it, while the lock (made only after those raids lock) reads their
     rosters. BLOCKING (it may solve): a thread. None for a first raid, or when no raid before it is open (the solve
-    reads their rosters itself, exactly as the lock does)."""
+    reads their rosters itself, exactly as the lock does). `stop`: Auto-fill's (solver.Stopped when a lock starts)."""
     if not is_follow(ev):
         return None
     before = [p for p in event_parts(rs, ev) if part_no(p) < part_no(ev)]
     if not any(p.state == "open" for p in before):
         return None
     times: dict[int, int] = {}
-    event_board_preview(reg, rs, first_part(rs, ev), parts=before, counts=times)
+    event_board_preview(reg, rs, first_part(rs, ev), parts=before, counts=times, stop=stop)
     return times
-
-
-def overlay_board(reg: Registry, ev: RaidEvent, rosters: list[RosterResult]) -> list[RosterResult]:
-    """The last picture of raid `ev` (an older solve's rosters) with the officers' CURRENT moves on top, for the while
-    a new picture is worked out — so a drag never snaps back. PURE. Each name in ev.layout is drawn at its group; a
-    name pinned out, or no longer joined, leaves the board; whoever a placed name displaces goes to the first group with
-    room, else to Not placed; anyone else keeps the old picture's place. → board_rosters of that layout."""
-    size = run_size(reg, ev)
-    k = groups_per_roster(reg, size)
-    gsize = int(reg.profile.comp_rules["group_size"])
-    joined = {s.display_name for s in ev.signups.values() if s.status == "in"}
-    out = {sg.display_name for u, v in ev.pins.items() if v == "out" and (sg := ev.signups.get(u)) is not None}
-    lay = [[x for x in g if x in joined and x not in out] for g in (ev.layout or [])]
-    hand = {x for g in lay for x in g}
-    pic = [list(g) for r in rosters for g in (list(r.groups) + [[] for _ in range(k - len(r.groups))])]
-    n = -(-max(len(pic), len(lay), 1) // k) * k
-    pic += [[] for _ in range(n - len(pic))]
-    lay += [[] for _ in range(n - len(lay))]
-    pic = [[x for x in g if x in joined and x not in out and x not in hand] for g in pic]
-    displaced: list[str] = []
-    for gi in range(n):
-        room = max(0, gsize - len(lay[gi]))
-        displaced += pic[gi][room:]
-        pic[gi] = lay[gi] + pic[gi][:room]
-    for x in displaced:
-        gi = next((i for i, g in enumerate(pic) if len(g) < gsize), None)
-        if gi is not None:
-            pic[gi].append(x)
-    return board_rosters(reg, ev, pic, size)
 
 
 def _slot_role(reg: Registry, slot: str) -> str:
@@ -4802,79 +4770,30 @@ def open_seat_roles(reg: Registry, ev: RaidEvent, rosters: list[RosterResult]) -
     return out
 
 
-def apply_move_shown(reg: Registry, ev: RaidEvent, shown: list[list[str]], name: str, to: tuple[int, int] | None) -> tuple[list[list[str]], dict[str, str], list[str]]:
-    """One drag on the board AS THE PAGE SHOWS IT before the lock (the lock's placement, `shown` = its flat groups as
-    the server holds them now), written as the officers' own placements: the same swap and full-group rules as
-    apply_move, read on `shown`, but only the mover (and a swapped partner) changes in the officers' layout — pinned
-    to the group they land in — and every other name stays where ev.layout had it, or unplaced (the lock places them).
-    A drop on Not placed keeps them out of the lock (removed from the layout, pin "out"); a place in a group lifts an
-    "out" pin. ValueError when the group is full (on the picture, or with the officers' placements) or `name` hasn't
-    joined. → (the new layout, the new pins, the names moved)."""
-    sg = signup_by_name(ev, name)
-    if sg is None or sg.status != "in":
-        raise ValueError(f"{name} hasn't joined this run")
-    k = groups_per_roster(reg, run_size(reg, ev))
-    gsize = int(reg.profile.comp_rules["group_size"])
-    pic = [list(g) for g in shown]
-    lay = board_layout(reg, ev)
-    pins = dict(ev.pins)
-    joined = {s.display_name for s in ev.signups.values() if s.status == "in"}
-
-    def fit(n: int) -> None:
-        for board in (pic, lay):
-            while len(board) < n:
-                board.append([])
-
-    def uid(x: str) -> str | None:
-        s = signup_by_name(ev, x)
-        return str(s.discord_id) if s is not None else None
-
-    def place(x: str, gi: int, pos: int | None = None) -> None:
-        for g in lay:
-            if x in g:
-                g.remove(x)
-        fit(gi + 1)
-        lay[gi].insert(len(lay[gi]) if pos is None else max(0, min(pos, len(lay[gi]))), x)
-        if pins.get(uid(x)) == "out":
-            pins.pop(uid(x))
-
-    def keep_out(x: str) -> None:
-        for g in lay:
-            if x in g:
-                g.remove(x)
-        if uid(x) is not None:
-            pins[uid(x)] = "out"
-
-    origin = next((gi for gi, g in enumerate(pic) if name in g), None)
-    if to is None:
-        keep_out(name)
-        return lay, pins, [name]
-    gi, pos = to
-    fit(max(gi + 1, -(-(gi + 1) // k) * k))
-    g = pic[gi]
-    other = g[pos] if 0 <= pos < len(g) else None
-    if other is not None and other != name and other in joined and origin != gi:  # dropped on someone in another group: swap
-        place(name, gi, pos)
-        if origin is not None:
-            place(other, origin)
-        else:
-            keep_out(other)
-        moved = [name, other]
-    else:
-        if len([x for x in g if x != name]) >= gsize:
-            raise ValueError(f"group {gi % k + 1} is full")
-        place(name, gi, pos)
-        moved = [name]
-    if any(len(x) > gsize for x in lay):
-        raise ValueError(f"group {gi % k + 1} is full")
-    return lay, pins, moved
-
-
-def autofill(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[list[str]]:
-    """Solver fills whatever the officers left empty (their placements are fixed) and returns the full layout."""
+def autofill(reg: Registry, rs: RaidStore, ev: RaidEvent, earlier: dict[int, int] | None = None,
+             stop=None) -> tuple[list[list[str]], list[str]]:
+    """Auto-fill groups (the owner's tweaks C): the LOCK's own solve once (_solve_run with the run's strategy and the
+    lock's budget SOLVE_TIME_LIMIT_S; `earlier` for a later raid — earlier_counts, as Preview lock reads it), on a copy
+    whose board keeps only the HAND placements: a previous Auto-fill's names (ev.auto_placed) are taken off first, so
+    a second press replaces them. Kept-off pins and the comp policy are honoured as the lock honours them. PURE
+    (BLOCKING: a thread). → (the whole board — each group's hand placements in their order, then the names the solve
+    put there —, the names the solve placed). Nothing about `ev` changes; the caller writes it under the board lock
+    (event_board.AutoFill). RuntimeError / solver.Conflict for a solve that fails (rc.solver_error_text says why),
+    solver.Stopped when `stop` is told to (a lock started)."""
     trial = ev.model_copy(deep=True)
-    propose(reg, rs, trial, save=False)
-    return [list(g) for r in trial.all_rosters for g in r.groups]
+    auto = set(ev.auto_placed)
+    hand = [[n for n in g if n not in auto] for g in (ev.layout or [])]
+    trial.layout = hand if any(hand) else None
+    _players, rosters, _ = _solve_run(reg, rs, trial, time_limit=SOLVE_TIME_LIMIT_S, whatif=False, earlier=earlier, stop=stop)
+    k = groups_per_roster(reg, run_size(reg, ev))
+    solved = [list(g) for r in rosters for g in (list(r.groups) + [[] for _ in range(k - len(r.groups))])[:max(k, len(r.groups))]]
+    hand = [list(g) for g in (trial.layout or [])]
+    n = max(len(solved), len(hand))
+    solved += [[] for _ in range(n - len(solved))]
+    hand += [[] for _ in range(n - len(hand))]
+    by_hand = {x for g in hand for x in g}
+    layout = [h + [x for x in g if x not in by_hand] for h, g in zip(hand, solved)]
+    return layout, sorted({x for g in layout for x in g} - by_hand)
 
 
 def apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]]) -> tuple[list[Signup], list[str]]:

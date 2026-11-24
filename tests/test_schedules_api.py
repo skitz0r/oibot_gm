@@ -20,13 +20,6 @@ ONY = "onyxias_lair"
 
 
 @pytest.fixture(autouse=True)
-def _no_board_solves(monkeypatch):
-    from oibot_gm import event_board
-
-    monkeypatch.setattr(event_board.BoardCache, "start", lambda self, *a, **k: None)
-
-
-@pytest.fixture(autouse=True)
 def _opened(reg):
     for rid in reg.profile.raids:
         reg.set_raid_overrides(rid, {"first_open": "2026-01-01T00:00"}, "t")

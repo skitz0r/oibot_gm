@@ -173,37 +173,21 @@ def _confirmed_words(reg: Registry, ev: "rc.RaidEvent") -> str:
 
 
 def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, viewer: int | None = None,
-               board: tuple[str, dict | None] | None = None) -> dict:
+               autofill: Callable | None = None) -> dict:
     """One raid of an event as the Board section draws it. `sheet(p, rosters=None, open_seats=True)` = ev_json for
-    BoardView's input. `board` = event_board's (state, previews) for the event. Before the lock the board is the
-    lock's placement: `board_state` ready (current), working (being placed again: the last picture with the officers'
-    current moves on top — rc.overlay_board —, else the officers' layout) or failed (the layout, `board_error` = the
-    sentence); a locked or finished raid's board is its roster as it stands (locked). Open seats are drawn only on a
-    ready or locked board. `mine` = the names the viewer placed by hand, `undo_box` their Undo my moves box,
-    `layout` the officers' own placements."""
+    BoardView's input. Before the lock the board is the OFFICERS' layout (the owner's tweaks C): who they placed, and
+    everyone else who joined in Not placed — nothing is solved here; `board_state` open, `autofill` = the Auto-fill
+    groups line for it (`autofill(p)` = event_board.AutoFill.state: {working, words, failed}). A locked or finished
+    raid's board is its roster as it stands (`board_state` locked, `autofill` None); open seats are drawn only there.
+    `mine` = the names the viewer placed by hand, `undo_box` their Undo my moves box, `layout` the officers'
+    placements."""
     name = reg.raid_def(p.instance).get("name", p.instance) if p.instance in reg.profile.raids else str(p.instance)
     locked = p.state != "open" and bool(p.all_rosters)
     joined = p.by_status("in")
     names = {s.display_name for s in joined}
-    rosters, state, error = None, "locked" if locked or p.state in CLOSED else "ready", None
-    if state == "ready" and board is not None:
-        st, previews = board
-        pv = (previews or {}).get(p.key)
-        if isinstance(pv, str):
-            state, error = "failed", pv
-        elif isinstance(pv, list) and st == "working":  # the last picture with the officers' moves now: a drag never snaps back
-            rosters, state = rc.overlay_board(reg, p, pv), "working"
-        elif isinstance(pv, list):
-            rosters = pv
-        else:
-            state = "working"
-    if locked:
-        placed = len(p.seated())
-    elif rosters is not None:
-        placed = sum(1 for r in rosters for x in r.selected if x.signup_name in names)
-    else:
-        placed = sum(1 for g in rc.board_layout(reg, p) for n in g if n in names)
-    n = len(p.all_rosters) if locked else len(rosters) if rosters is not None else rc.run_rosters(reg, p)
+    state = "locked" if locked or p.state in CLOSED else "open"
+    placed = len(p.seated()) if locked else sum(1 for g in rc.board_layout(reg, p) for n in g if n in names)
+    n = len(p.all_rosters) if locked else rc.run_rosters(reg, p)
     live = p.state == "open"
     mine = rc.own_moves(p, viewer) if live else []
     seated = state == "locked"  # the roster stands: count seats (the lock may seat someone from the Bench), not joiners
@@ -212,9 +196,10 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
             "placed_words": None if seated else PAGE_WORDS["placed_of"].format(n=placed, m=len(joined)),
             "rostered_words": PAGE_WORDS["seats_of"].format(n=len(p.seated()), size=n * rc.run_size(reg, p)) if seated else None,
             "short": dict(rc.needs(reg, p)["roles"]) if p.state not in CLOSED else {},
-            # open seats only on a current picture (or a locked roster): a picture being placed again counts none
-            "sheet": sheet(p, rosters, state in ("ready", "locked")) if sheet is not None else None,
-            "board_state": state, "board_error": error, "mine": mine,
+            # open seats only on a locked roster: an officers' half-made board's empty places are not seats the lock leaves open
+            "sheet": sheet(p, None, seated) if sheet is not None else None,
+            "board_state": state, "mine": mine,
+            "autofill": (autofill(p) if autofill is not None else {"working": False, "words": None, "failed": False}) if live else None,
             "undo_box": cq.undo_box_for(reg, p, viewer) if mine else None,
             "undo_why": PAGE_WORDS["no_moves"] if live and not mine else None,
             "layout": rc.board_layout(reg, p) if live else None,
@@ -274,7 +259,7 @@ def _discord_links(sheet: dict | None) -> list[dict]:
 
 
 def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: int, *, sheet: Callable | None = None,
-               board: tuple[str, dict | None] | None = None) -> dict:
+               autofill: Callable | None = None) -> dict:
     """EventView: {key (part 0's), title, state, chip, kind (one_off | scheduled), schedule {id, name} | null, details
     [Fact], signups {joined, bench, no_thanks, no_answer, rows {in, sub, out, none}}, parts [PartView], activity [{when,
     line}] (every part's log, newest first), boxes {lock, cancel, reschedule (the pick box)}, actions, lineup, start_iso, timing {setting: value}
@@ -282,8 +267,9 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     Answer for someone), switches (rc.event_switches: the Role switches section; empty `short` = not drawn), sheet_url,
     today (the guild's date: Reschedule's lower bound), locks (Reschedule's Locks choices, the event's own among them)}.
     Any part's key answers as its event. `viewer` = the officer looking (their own board
-    moves: each part's `mine` and Undo box). `board` = event_board.BoardCache.get's (state, previews): the open raids'
-    boards as the lock would place them (None: the officers' layout alone)."""
+    moves: each part's `mine` and Undo box). `autofill(part)` = event_board.AutoFill.state for an open raid (its
+    Auto-fill groups line); the board itself is the officers' layout — nothing is solved for a view. `boxes.clear` =
+    More › Clear the board (consequences.clear_board_box)."""
     first = rc.first_part(rs, ev)
     parts = rc.event_parts(rs, first)
     state = _state(parts)
@@ -293,7 +279,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     lineup = _lineup(reg, rs, first, parts)
     came = _fact("Comes from", sname, f"/schedules/{sid}" if exists else None) if sid else _fact("Comes from", PAGE_WORDS["one_off"])
     url = _sheet_url(reg, first)
-    part_views = [_part_view(reg, rs, p, sheet, viewer, board) for p in parts]
+    part_views = [_part_view(reg, rs, p, sheet, viewer, autofill) for p in parts]
     sheets = [pv["sheet"] for pv in part_views if pv.get("sheet")]  # each raid's ev_json: the raid-night facts below read it
     if live:
         from .raid_views import run_times
@@ -349,7 +335,9 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "boxes": {"lock": cq.lock_box(reg, first, rs) if state == "open" else None, "cancel": cq.cancel_box(reg, first, rs) if live else None,
                       "reschedule": cq.reschedule_pick_box(reg, rs, first) if can_move else None},
             "actions": {"reschedule": can_move, "edit": can_move, "edit_lineup": state == "open" and first.state == "open",
-                        "lock": state == "open" and first.state == "open", "cancel": live, "open_now": False},
+                        "lock": state == "open" and first.state == "open", "cancel": live, "open_now": False,
+                        # More › Clear the board: while a raid of the event is still open (its box from POST /api/event/{key}/clear)
+                        "clear": any(p.state == "open" for p in parts)},
             "switches": rc.event_switches(reg, rs, first, viewer=viewer) if live else {"short": [], "rows": [], "revs": {}},
             "lineup": lineup, "start_iso": first.start.isoformat(), "timing": timing, "people": people, "sheet_url": url,
             # Reschedule's picker: the Day's lower bound is the GUILD's date; Locks offers the event's own lock among the choices

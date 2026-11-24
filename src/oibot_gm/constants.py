@@ -77,7 +77,8 @@ PAGE_WORDS = {
     # the Board's Not placed / Not rostered list when it is empty (the Events page)
     "bank_empty": {"nobody": "Nobody has joined yet.", "placed": "Everyone who joined is placed.",
                    "rostered": "Everyone who joined is rostered."},
-    "board_footer": "Placed as the lock would place them now. Drag a name to move it.",
+    # under the Board before the lock (the owner's tweaks C): the board is what the officers placed, the lock places the rest
+    "board_footer": "The lock keeps these groups and places everyone still in Not placed, and Auto-fill groups shows where it would put them.",
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
     # Role switches: each row's button (rc.event_switches `button`), and why a short raid has no switch to show (`why`)
     "switch_button": "Switch", "answer_button": "Answer for them", "ask_button": "Ask",
@@ -87,15 +88,22 @@ PAGE_WORDS = {
     "short_nobody": "Nobody free to come can play this role. A member who adds a character that can will show here.",
     # the Signup sheet fact while the sheet is not in Discord: no signup channel to post to, or not posted yet
     "sheet_waits": "Posts once a signup channel is set on the Config page's Channels tab", "sheet_not_posted": "Not in Discord yet",
-    # the Board before the lock: an empty seat a minimum wants (beside its role icon), and the line over a picture that is
-    # being placed again after a change (event_board: board_state "working")
+    # a locked Board's empty seat a minimum wants (beside its role icon)
     "open_seat": "open seat",
-    # the Board's Not placed list before the lock: a name an officer drops there is kept off the roster (a pin), and a
-    # drag back into a group lifts it (raidcycle.apply_move_shown)
-    "not_placed_off": "A name dropped here stays off the roster when the sheet locks. Drag it into a group to put it back.",
-    "board_working": "Placing everyone again after the last change. This is the board from before it.",
-    # a board the bot could not work out at all (event_board: an unexpected failure, kept for those answers)
-    "board_failed": "The bot couldn't work out where the lock would place everyone. The board shows the officers' moves.",
+    # the Board's Not placed list before the lock (the owner's tweaks C): a name there is only not placed yet — the lock
+    # places them — and one kept off through the ⋮ menu (an "out" pin) carries the word `kept_off` on its line
+    "not_placed_note": "A name here isn't placed yet. The lock places them unless they are kept off.",
+    "kept_off": "kept off",
+    # Auto-fill groups (event_board.AutoFill): the button beside Not placed, its working line, what an MCP press that
+    # waited is told, and each outcome that writes nothing (shown beside the button while the board is unchanged)
+    "autofill_button": "Auto-fill groups",
+    "autofill_working": "Filling the groups the way the lock would. The board updates when it is done.",
+    "autofill_done": "The groups are filled the way the lock would fill them now.",
+    "autofill_changed": "The board changed while the groups were being filled, so it stays as the officers left it.",
+    "autofill_stopped": "A lock started while the groups were being filled, so the board stays as it was.",
+    "autofill_busy": "The bot is building a roster right now, so the groups can't be filled until it is done.",
+    "autofill_locked": "The roster is locked, so the board is the roster now.",
+    "autofill_nobody": "Nobody has joined yet, so there is nobody to place.",
     # Schedules (schedule_view): a pickup's Repeats, a schedule with no run times, no reminder, the regulars' words and
     # the next four weeks, and the empty Next events of a paused schedule
     "by_an_officer": "An officer opens each event with /raid open in Discord", "no_times": "No run times yet. Edit the schedule to add them.",

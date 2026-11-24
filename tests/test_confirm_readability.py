@@ -885,6 +885,19 @@ def box_cases(reg, rs, runs, ms, dump):
     for st in ("balanced", "first", "rotation"):
         add("strategy_box", f"to {st}", cq.strategy_box(reg, quiet, st))
     add("strategy_box", "locked", cq.strategy_box(reg, lk, "rotation"))
+    # More › Clear the board (the owner's tweaks C): what changes, nobody told, Auto-fill again; refused when nothing is placed or locked
+    add("clear_board_box", "nothing placed", cq.clear_board_box(reg, rs, quiet))
+    rc.set_signup(reg, rs, quiet, ms[4], None, "in", source="test")
+    rc.set_signup(reg, rs, quiet, ms[5], None, "in", source="test")
+    names = [s.display_name for s in quiet.by_status("in")]
+    for n in (1, 2):
+        quiet.layout = [names[:n]]
+        add("clear_board_box", f"{n} placed", cq.clear_board_box(reg, rs, quiet))
+    quiet.layout = None
+    for m_ in (ms[4], ms[5]):
+        quiet.signups.pop(str(m_.discord_id), None)
+    rs.save(quiet, "back to nobody joined")
+    add("clear_board_box", "locked", cq.clear_board_box(reg, rs, lk))
     final_review_boxes(reg, rs, lk, add)
     start = reg.now_local() + timedelta(days=6)
     for case, opens, kw in (("three days early", reg.now_local() + timedelta(days=3, minutes=5), {}),

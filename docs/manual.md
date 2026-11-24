@@ -61,14 +61,17 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   among the first asked.
 - **The board** — a run's groups on the Events page, the one name for them (never "builder" or "bank"): before the lock
   it is the layout the lock will use (officers drag names into groups; the lock places everyone else), after the lock it
-  *is* the roster. On the Events page it is drawn as the lock would place everyone now; officers shape it by dragging
-  names (or a name's **⋮ › Move to…**), take their own moves back with **Undo my moves**, and pick how a split is made
-  in **Edit event** (each raid's split). A test run's card on the Test bench keeps the older tools — **Place the rest**,
+  *is* the roster. On the Events page it shows what officers placed; they shape it by dragging names (or a name's
+  **⋮ › Move to…**), let the bot place the rest the way the lock would with **Auto-fill groups**, take their own moves
+  back with **Undo my moves**, empty it with **More › Clear the board**, and pick how a split is made in **Edit event**
+  (each raid's split). A test run's card on the Test bench keeps the older tools — **Place the rest**,
   **Propose roster / splits…**, **Clear** and its ⓘ legend; plain text and MCP keep them too.
 - **Not placed / Not rostered** — the board's list of joiners who hold no place: *Not placed* before the lock (still
-  joined — the lock seats them, or leaves them out), *Not rostered* after it (joined, but not on the roster; dragging one
-  into a group asks them to confirm). A pin icon on a name is an officer's pin: *pinned* (the lock keeps them where they
-  were put) or *kept off* (the lock leaves them off the roster).
+  joined — the lock seats them, or leaves them out; dropping a name there only takes it out of its group), *Not
+  rostered* after it (joined, but not on the roster; dragging one into a group asks them to confirm). A pin icon on a
+  name is an officer's pin: *pinned* (the lock keeps them where they were put) or *kept off* (the lock leaves them off
+  the roster — set from the name's **⋮ › Keep off the roster**, and on the Events page the word *kept off* is on their
+  line).
 - **Leftovers** — the joiners a full roster left out at the lock (more joined than there are places, or the roles
   didn't fit). They head the *Not rostered* list and the lock card, with what another run would be short.
 - **Follow-on** — a later raid the same night, from the same signup, that starts when the raid before it ends. A run
@@ -1058,14 +1061,28 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    shows the bot's sentences again, and **Record answer** writes. **Role switches** (only while a raid is short) and
    **Board** come next. The Board has a button per raid of the evening (*6:30 PM · Hyjal Summit*, *9:30 PM · Barrow
    Deeps*; none for a one-raid event), then *Rosters* (*1 of 20*), *Placed* (*18 of 18 joined*) and *Short* (the role
-   icon and how many), then the groups — *Roster 1*, *Roster 2* when the raid makes several — and under them *Placed as
-   the lock would place them now. Drag a name to move it.* with **Undo my moves** (greyed until you have moved
-   someone; its tooltip says so). Before the lock a drag (or a name's **⋮ › Move to…**, on a phone or a keyboard)
-   moves at once, with no box; into a full group Move to… offers *Swap with Nyx*, one entry per person there. *Not placed*
-   says *A name dropped here stays off the roster when the sheet locks. Drag it into a group to put it back.* — a name
-   dropped there, or pushed there by a swap, is kept off until it is dragged back into a group. While the bot places
-   everyone again the board is dimmed under its sentence; when it can't place them at all it says why above the
-   officers' moves (the lock would fail the same way). A locked event's board is the roster: no drag, and **⋮ ›
+   icon and how many — what the raid lacks whoever is placed), then *Not placed* beside the groups — *Roster 1*,
+   *Roster 2* when the raid makes several — and under them *The lock keeps these groups and places everyone still in
+   Not placed, and Auto-fill groups shows where it would put them.* with **Undo my moves** (greyed until you have moved
+   someone; its tooltip says so). Before the lock the board is what officers placed: nothing is worked out when the
+   page opens, when someone answers or when a name is dragged. A drag (or a name's **⋮ › Move to…**, on a phone or a
+   keyboard) moves at once, with no box; into a full group Move to… offers *Swap with Nyx*, one entry per person there.
+   *Not placed* says *A name here isn't placed yet. The lock places them unless they are kept off.* — dropping a name
+   there, or pushing it there by a swap, only takes it out of its group. Keeping someone off the roster is their **⋮ ›
+   Keep off the roster** (the word *kept off* then shows on their line; **Unpin** takes it back; dragging them into a
+   group takes it back too, and **Undo my moves** puts it back). **Auto-fill groups**, under the *Not placed* heading,
+   places everyone still there the way the lock would right now — the lock's own placement, with every name you placed
+   by hand kept where it is and every *kept off* honoured — and writes it into the groups; it asks nothing first (it
+   changes only the board). While it works the button shows *Filling the groups the way the lock would. The board
+   updates when it is done.* (about 12 seconds a raid; a lock being built goes first and stops it, *A lock started
+   while the groups were being filled, so the board stays as it was.*). Press it again after moving people and it
+   replaces only its own placements — yours stay. If someone moved a name while it worked it writes nothing (*The
+   board changed while the groups were being filled, so it stays as the officers left it.*), and when no roster fits it
+   says why under the button (the lock would fail the same way). With nothing changed afterwards, **Lock** rosters
+   exactly the board Auto-fill wrote; if you never press it, the lock places whoever is still in *Not placed*, as it
+   always has. **More › Clear the board…** empties every group of the event back to *Not placed* (your placements and
+   Auto-fill's alike; pins stay) after the bot's box (*14 placed people go back to Not placed.* · *Nobody is told.* ·
+   *Auto-fill groups can place everyone again.*). A locked event's board is the roster: no drag, and **⋮ ›
    Move to…** (a group, *Swap with …*, or back to *Not rostered*) shows the bot's box first — which move it is (*Move*,
    *Swap*, *Put on the roster*, *Put in the seat*, *Take off the roster*) and what it does for the person — and the press
    makes only that move; when the board changed while the box was open the new box comes back and waits again; *Placed* becomes *Rostered* (*10 of 10 seats*), who holds a
@@ -1094,9 +1111,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    sentence in red under the header. How each raid's rosters are split — *Balanced*, *Raid one first* or *Rotation* —
    is picked in **Edit event** (before the lock), with the event's other own settings; once locked it says *The roster
    is locked, so its split can't change.* Not here, by design: another layout (*Propose roster* /
-   *another split like this*), **Place the rest** and **Clear** of everyone's moves — the board is already drawn as the
-   lock would place everyone; plain text, MCP (`propose_split`, `set_layout`) and a test run's card on the Test bench
-   keep them.
+   *another split like this*) and **Place the rest** — **Auto-fill groups** is the lock's own placement, and **Clear the
+   board** is in the event's More menu; plain text, MCP (`propose_split`, `set_layout`, `autofill`) and a test run's card
+   on the Test bench keep the older tools.
    **Edit lineup** (until the roster locks) opens the lineup builder on the event, `/events/<event>/lineup`: its first
    raid is fixed, every later raid has **Move earlier** / **Move later** / **Remove**, the palette adds a raid, and each
    step's **Starts** and **Rosters** change as on New event — a raid that stays keeps its start unless the change moves
@@ -1186,20 +1203,17 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    you keep someone on the bench) makes the lock build it again from the sheet as it now is, so nobody is rostered
    from an answer they already took back; if the sheet keeps changing, the lock fails, the sheet stays open and
    you lock again in a moment.
-   **On the Events page** the board before the lock is drawn the way the lock would place everyone now — the same
-   placement the lock makes, worked out again after every change (a Join, a pin, a move, a raid's minimums or
-   priority, and for a later raid of the evening who the raids before it roster). While it is worked out again the
-   page keeps the last board, with every officer's moves already on it, under *Placing everyone again after the last
-   change. This is the board from before it.*;
-   with no board yet it shows the placements officers made. Working out a board can take a few seconds per raid, and
-   with several events open they are worked out one after another; a lock being built goes first. An evening with nobody joined shows its groups empty. A
-   seat a minimum still wants shows its role icon and *open seat*. A drag moves one name on the board as the bot holds
-   it at that moment — even when it was placed again while you dragged — and keeps that person where you put them
-   when the lock comes; dropping on someone swaps the two, and dropping on *Not placed* keeps them off the roster.
-   The lock places everyone else. **Undo my moves** takes back only your own moves; another officer's stay. Its
-   confirm counts them (*Your 2 moves on this board are dropped. Everyone goes back to where the lock would place
-   them.*), and if the board changed while it was open you see the new count first. Once the sheet locks the board
-   is the roster, and a finished event shows the board as it was locked.
+   **On the Events page** the board before the lock is the officers' own: who they placed, and everyone else who
+   joined in *Not placed* — nothing is worked out until someone presses **Auto-fill groups** (the lock's own placement
+   for that raid, written into its groups; on a later raid of the evening it reads who the raids before it will roster,
+   as the lock does). Each raid has its own board and its own button. A drag keeps that person where you put them when
+   the lock comes; dropping on someone swaps the two, and dropping on *Not placed* only takes them out of their group —
+   the lock still places them. The lock places everyone still in *Not placed*. **Undo my moves** takes back only your
+   own moves; another officer's and Auto-fill's stay. Its confirm counts them (*Your 2 moves on this board are dropped.
+   Those people go back to Not placed.*), and if the board changed while it was open you see the new count first. A
+   locked roster's seat a minimum still wants shows its role icon and *open seat*. Once the sheet locks the board is
+   the roster, and a finished event shows the board as it was locked. Names kept off by a drag onto *Not placed* before
+   this change stay kept off: they were pinned on purpose, and **⋮ › Unpin** takes one back.
    More Join answers than a raid needs → the board shows a second (third…) roster for the same
    slot while a full run with its tank/healer minimums is possible, and the button becomes **Propose
    splits**: pick a philosophy — **Balanced** (both runs equally strong in buffs, tanks, healers and seat quality),
@@ -1260,7 +1274,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    with the spec icon, then the leftovers (the first 15) — without saving anything; *Lock now* or *Back* from there.
    It can take up to half a minute: on a later raid whose first raid is still open, the bot places the first raid too,
    so the preview counts who that raid will roster, as the lock will.
-   On the Events page the board itself is the preview (drawn as the lock would place everyone now); a test run's
+   On the Events page **Auto-fill groups** writes that preview into the board; a test run's
    card on the Test bench has the same **Preview lock** button beside **Lock now**. If the bot stops half way through the confirmation DMs (a restart, a
    Discord outage), the lock card says *confirmations not yet sent* and within a minute the bot asks exactly the
    rostered who weren't asked — nobody twice. If a lock fails (the bot couldn't find a roster in time), the sheet's footer says
@@ -1600,8 +1614,8 @@ edits that new family and leaves the one it shared alone.
   have/need with who could cover it, buffs nobody brings, every minimum with its reason, what is short, and who could
   play by role (officers only; a member's request gets 403). The analytics card reads the same numbers,
   so the card, `/ask`, the API and MCP never disagree.
-- Every member's characters live on the Members page and **groups** are built on the Events page's board (drawn as
-  the lock would place everyone); the old bank, optimised-groups and comp images are gone.
+- Every member's characters live on the Members page and **groups** are built on the Events page's board (by hand,
+  or with **Auto-fill groups**, the lock's own placement); the old bank, optimised-groups and comp images are gone.
 - `/roster overview` (no arguments) shows the plan summary on demand, only to you (officers get **Post to the roster
   channel** under it for the officer version): every planned main by class, the role counts
   against each raid's size with who could flex in, buff coverage (nobody / only one), the alts, and the recruiting ask
@@ -2375,9 +2389,8 @@ is a callout. Puppets answer test runs only — naming a real run is refused on 
 
 **Try a comp.** `/gm test comp` (pick the raid, then **Try a comp**) or **Try a comp** on the site opens a *comp
 sandbox*: a test run two weeks out with every puppet joined, never posted in Discord; Discord answers with a link to
-its event page and the site takes you there, where the board is drawn as the lock would place them — the best comp
-from that mix (its card under the Test bench's *Test runs* keeps **Propose roster**, with Leftovers and "what a second
-run would need"). Change the mix and try again; the old sandbox goes with the next clear.
+its event page and the site takes you there, where **Auto-fill groups** shows the best comp from that mix (its card
+under the Test bench's *Test runs* keeps **Propose roster**, with Leftovers and "what a second run would need"). Change the mix and try again; the old sandbox goes with the next clear.
 
 **Clearing.** `/gm test clear` shows what it does — "Cancels 1 test run, deletes 12 puppets, analytics cards
 resume." — then *Clear the test bench* / *Back*; the site's **Clear the test bench** asks with the same words.

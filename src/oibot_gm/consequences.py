@@ -216,7 +216,7 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
 
 def lock_refusal(reg: Registry, ev: rc.RaidEvent) -> str | None:
     """Why the lock can't go ahead before it solves (None: it can): everyone who joined is kept off the roster (an out
-    pin, a drag onto Not placed, the comp policy) — the lock would roster nobody. A run nobody joined still locks."""
+    pin from the ⋮ menu, the comp policy) — the lock would roster nobody. A run nobody joined still locks."""
     joined = {s.display_name for s in ev.by_status("in")}
     if ev.state == "open" and joined and joined <= set(rc.lock_forces(reg, None, ev).kept_off):
         return rc.SOLVER_WORDS["all_off"]
@@ -867,7 +867,7 @@ STRATEGY_DOES = {"balanced": "The rosters of {raid} are made equally strong.",
 STRATEGY_PICK = "Pick how the rosters of {raid} are split."
 STRATEGY_SAME = "That is already how {raid} is split."
 STRATEGY_LOCKED = "The roster is locked, so its split can't change."
-STRATEGY_AFTER = ["The board is placed again this way, and the lock uses it.", "You can change it until the lock."]
+STRATEGY_AFTER = ["Auto-fill groups and the lock split it this way from now on.", "You can change it until the lock."]
 
 
 def strategy_name(strategy: str) -> str:
@@ -891,8 +891,8 @@ def strategy_refusal(reg: Registry, ev: rc.RaidEvent) -> str | None:
 
 def strategy_box(reg: Registry, ev: rc.RaidEvent, strategy: str | None) -> dict:
     """More › Split strategy… for one raid of an event: no pick yet (or the strategy it already has) → the pick box,
-    Back only; locked → the refusal; else 'Split {raid} by {name}?' with what the strategy does, that the board is
-    placed again and the lock uses it, and that it can change until the lock. Its fp carries the run's rev and the
+    Back only; locked → the refusal; else 'Split {raid} by {name}?' with what the strategy does, that Auto-fill groups
+    and the lock use it, and that it can change until the lock. Its fp carries the run's rev and the
     split it has NOW (rc.run_strategy): another officer's change while the box is open answers 409 with the fresh box."""
     raid = reg.raid_def(ev.instance).get("name", ev.instance)
     title = f"Split {raid} by {strategy_name(strategy)}?" if strategy in STRATEGY_DOES else f"Split {raid}?"
@@ -961,7 +961,8 @@ def board_move_box(reg: Registry, ev: rc.RaidEvent, name: str, to: tuple[int, in
 def undo_box(n: int, rev: str = "") -> dict:
     """Box 9: Undo my moves (`rev`: the board's fingerprint, rc.board_rev)."""
     head = "Your one move on this board is dropped." if n == 1 else f"Your {n} moves on this board are dropped."
-    return box("Undo your moves?", [head, "Everyone goes back to where the lock would place them."], "Undo moves", rev=rev)
+    return box("Undo your moves?", [head, "That person goes back to Not placed." if n == 1 else "Those people go back to Not placed."],
+               "Undo moves", rev=rev)
 
 
 def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | None:
@@ -969,6 +970,31 @@ def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | 
     (rc.own_moves), the fingerprint the board and those moves (rc.undo_rev). None when they have none."""
     n = len(rc.own_moves(ev, viewer))
     return undo_box(n, rev=rc.undo_rev(reg, ev, viewer)) if n else None
+
+
+CLEAR_LOCKED = "The roster is locked, so the board is the roster now and can't be cleared."
+CLEAR_EMPTY = "Nobody is placed on the board, so there is nothing to clear."
+
+
+def clear_board_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
+    """More › Clear the board (the owner's tweaks C): every open raid of the event's groups emptied back to Not placed
+    — hand and Auto-fill placements alike; pins stay. What changes (how many placed people), that nobody is told, and
+    the way back (Auto-fill groups). Not red: nothing is sent and the board can be filled again. Refused once nothing
+    is open (CLEAR_LOCKED) or nothing is placed (CLEAR_EMPTY). Its fp carries every open raid's board (rc.board_rev): a
+    drag while the box is open answers 409 with the fresh box."""
+    if (closed := _closed(ev)):
+        return refusal_box_for(closed[0])
+    title = f"Clear the board of {event_title(reg, ev)}?"
+    parts = [p for p in rc.event_parts(rs, rc.first_part(rs, ev)) if p.state == "open"]
+    if not parts:
+        return refusal_box(title, CLEAR_LOCKED)
+    joined = lambda p: {s.display_name for s in p.by_status("in")}  # noqa: E731
+    n = sum(len({x for g in rc.board_layout(reg, p) for x in g} & joined(p)) for p in parts)
+    if not n:
+        return refusal_box(title, CLEAR_EMPTY)
+    head = "The one placed person goes back to Not placed." if n == 1 else f"{n} placed people go back to Not placed."
+    return box(title, [head, "Nobody is told.", "Auto-fill groups can place everyone again."], "Clear the board",
+               rev=":".join(rc.board_rev(reg, p) for p in parts))
 
 
 def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: str, raids, *, locked: bool = False, swap: bool = True,

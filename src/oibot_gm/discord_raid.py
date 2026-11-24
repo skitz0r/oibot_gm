@@ -862,26 +862,20 @@ class RaidMixin:
     @contextlib.asynccontextmanager
     async def solving(self, reg, key: str):
         """Single flight for the solver per run, whoever asks (a lock from chat, MCP, the scheduler, the card or the
-        site; an auto-fill; a split preview): a second caller gets rc.SolverBusy instead of a second solve. Keyed
-        (guild, run key)."""
+        site; a split preview): a second caller gets rc.SolverBusy instead of a second solve. Keyed (guild, run key).
+        The lock comes first: once it holds the run, every Auto-fill groups still solving is abandoned (event_board's
+        stop_all: it writes nothing), and none starts while it runs."""
         lock = self.__dict__.setdefault("_solver_locks", {}).setdefault((reg.key, key), asyncio.Lock())
         if lock.locked():
             raise rc.SolverBusy()
-        from .event_board import cache_of
+        from .event_board import autofill_of
 
-        boards = cache_of(self)  # the Events board's pictures give way: a running one is abandoned, none starts meanwhile
-        try:
-            async with lock:
-                try:
-                    boards.pause()
-                except Exception:  # noqa: BLE001 — a board bug never touches the lock / fill it wraps
-                    log.exception("board cache pause failed (%s %s)", reg.key, key)
-                yield
-        finally:
+        async with lock:
             try:
-                boards.resume()  # starts the pictures that waited, once no solve holds a run
-            except Exception:  # noqa: BLE001 — never reaches the lock / fill it wraps
-                log.exception("board cache resume failed (%s %s)", reg.key, key)
+                autofill_of(self).stop_all()
+            except Exception:  # noqa: BLE001 — an auto-fill bug never touches the lock / fill it wraps
+                log.exception("auto-fill stop failed (%s %s)", reg.key, key)
+            yield
 
     async def lock_preview(self, reg, rs, ev, *, by: str, by_id: int | None = None) -> list:
         """The roster(s) the lock would build NOW (rc.split_preview with the run's strategy, honouring the board and the
@@ -954,7 +948,7 @@ class RaidMixin:
             ev.rosters = trial.rosters
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
-            ev.placed_by, ev.drag_pins = {}, {}  # the officers' own moves were the board before the lock; the roster is the board now
+            ev.placed_by, ev.drag_pins, ev.auto_placed = {}, {}, []  # who placed whom was the board before the lock; the roster is the board now
             ev.lock_seats = [uid for r in ev.all_rosters for g in r.groups for n in g if (uid := rc.uid_of_name(ev, n)) is not None]
             ev.log.append(f"locked by {by}")
             held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
@@ -1179,17 +1173,20 @@ class RaidMixin:
         Keyed (guild, run key)."""
         return self.__dict__.setdefault("_board_locks", {}).setdefault((reg.key, key), asyncio.Lock())
 
-    async def _write_board(self, reg, rs, ev, groups: list[list[str]], by: str, via: str = "web") -> str:
+    async def _write_board(self, reg, rs, ev, groups: list[list[str]], by: str, via: str = "web", auto: list[str] | None = None) -> str:
         """The one way a board is written (whole board, or the result of a single move); the caller holds board_lock.
         Before lock the groups are the layout the lock will use; after lock they ARE the roster (someone brought in
-        from the bench is asked to confirm, someone taken out is freed and the fill engine asked)."""
+        from the bench is asked to confirm, someone taken out is freed and the fill engine asked). `auto` (Auto-fill
+        groups' write, event_board.AutoFill): the names it placed, recorded as ev.auto_placed."""
         names = {s.display_name for s in ev.signups.values() if s.status == "in"}
         groups = [[n for n in g if n in names] for g in groups]
         if ev.state == "open":
             ev.layout = groups if any(groups) else None
+            placed = {n for g in groups for n in g}
             # an officer's own move stays theirs while it stands: a name still in the layout, a pin still as their drag left it
-            ev.placed_by = {n: u for n, u in ev.placed_by.items() if any(n in g for g in groups)}
+            ev.placed_by = {n: u for n, u in ev.placed_by.items() if n in placed}
             ev.drag_pins = {u: d for u, d in ev.drag_pins.items() if ev.pins.get(u) == d.get("now")}
+            ev.auto_placed = [n for n in (ev.auto_placed if auto is None else auto) if n in placed]
             await asyncio.to_thread(rs.save, ev, f"board ({by})")
             return f"{run_title(reg, ev)}: board " + ("saved" if ev.layout else "cleared") + " (the lock uses it)"
         # on the loop, not a worker thread (stage C L3): a Can't make it, a fill yes or the scheduler's expiry changes the
@@ -1211,10 +1208,11 @@ class RaidMixin:
                 raise rc.BoardChanged()
             if strategy:
                 ev.split_strategy = strategy
+            ev.auto_placed = []  # a whole board a person writes is theirs: the next Auto-fill keeps every name on it
             return await self._write_board(reg, rs, ev, groups, by, via=via)
 
     async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None, via: str = "web",
-                         expect_state: str | None = None, by_id: int | None = None, shown: bool = False) -> str:
+                         expect_state: str | None = None, by_id: int | None = None) -> str:
         """One move applied to the board as it is NOW (so two officers moving at once merge): `to` = (flat group
         index, position) — group index = roster × groups per roster + group — or None for the bank. Dropping on
         someone swaps (the displaced person stays a joiner). ValueError when the group is full or `name` hasn't joined.
@@ -1223,42 +1221,30 @@ class RaidMixin:
         the board was RENDERED in (the site sends it): a drag made on the open board and dropped after the scheduler
         locked it is refused (BoardChanged) instead of being applied as a post-lock roster edit (a confirmation DM, a
         freed seat) — design B6.
-        `shown` (the Events page, before the lock): the page draws the lock's placement (event_board), so the move is
-        read on THAT picture as the server holds it now (cache_of(self).shown_layout — never the page's copy, which may
-        be older) and written as the officers' own placements (rc.apply_move_shown: only the mover and a swapped partner
-        are pinned; a drop on Not placed keeps them out of the lock). Without a picture it is the move on the officers'
-        layout. `by_id`: the officer, recorded per name moved (ev.placed_by) so Undo my moves drops only theirs."""
+        Before the lock the board is the officers' own (the owner's tweaks C): a drop on Not placed only un-places the
+        name (no pin — the lock still places them; keeping someone off is the ⋮ pin), a swapped partner from there goes
+        back to Not placed, and a place in a group lifts a kept-off pin (recorded, so Undo my moves puts it back).
+        `by_id`: the officer, recorded per name moved (ev.placed_by) so Undo my moves drops only theirs; any moved
+        name stops being an Auto-fill placement (rc.record_moves)."""
         state = ev.state
         async with self.board_lock(reg, ev.key):
             if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state or (expect_state and ev.state != expect_state):
                 raise rc.BoardChanged("The run locked while you were dragging — the board is the roster now; check it and move again." if expect_state == "open" and ev.state != "open" else rc.BoardChanged().args[0])
             pins_before = dict(ev.pins)
             at_before = {n: gi for gi, g in enumerate(rc.board_layout(reg, ev)) for n in g}
-            if ev.state == "open" and shown:
-                from .event_board import cache_of
-
-                picture = cache_of(self).shown_layout(reg, ev)
-                if picture is not None:
-                    groups, pins, _moved = rc.apply_move_shown(reg, ev, picture, name, to)
-                    ev.pins = pins
-                else:
-                    groups = rc.apply_move(reg, ev, name, to)
-                    if (sg := rc.signup_by_name(ev, name)) is not None:
-                        if to is None:
-                            ev.pins[str(sg.discord_id)] = "out"  # Not placed on this board = kept out of the lock
-                        elif ev.pins.get(str(sg.discord_id)) == "out":
-                            ev.pins.pop(str(sg.discord_id))  # placed in a group again: no longer kept out
-            else:
-                groups = rc.apply_move(reg, ev, name, to)
+            groups = rc.apply_move(reg, ev, name, to)
             if ev.state == "open":
+                sg = rc.signup_by_name(ev, name)
+                if to is not None and sg is not None and ev.pins.get(str(sg.discord_id)) == "out":
+                    ev.pins.pop(str(sg.discord_id))  # placed in a group: no longer kept off
                 rc.record_moves(ev, name, at_before, groups, pins_before, by_id)
             return await self._write_board(reg, rs, ev, groups, by, via=via)
 
     async def undo_moves(self, reg, rs, ev, by_id: int, by: str, *, rev: str | None = None, via: str = "web") -> str:
         """Undo my moves (the Events board, before the lock): exactly what the officer `by_id`'s drags did and still
         stands is reversed — the names they placed leave the officers' layout, and each pin their drag changed goes back
-        to what it was (rc.own_pins: only while the pin is still as the drag left it; a pin set on a run card's board or in
-        plain text is never touched). Everyone else's moves stay, and the lock places those people again. `rev` =
+        to what it was (rc.own_pins: only while the pin is still as the drag left it; a pin set from the ⋮ menu or in
+        plain text is never touched). Everyone else's moves stay; the names undone go back to Not placed. `rev` =
         rc.undo_rev the officer saw (the board and their moves): a changed one raises rc.BoardChanged, nothing written."""
         async with self.board_lock(reg, ev.key):
             if ev.state != "open" or (rev and rev != rc.undo_rev(reg, ev, by_id)):

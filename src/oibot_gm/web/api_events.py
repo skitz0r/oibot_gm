@@ -5,9 +5,11 @@ existing topics `run:` (any run saved), `member` and `config` (a schedule edited
 - GET /api/event-list?history_offset=0 → event_view.event_list
 - GET /api/event-new → event_view.new_event_options (the New event page's raids, lineups to copy, lock choices, the
   guild's date)
-- GET /api/event/{key} → event_view.event_json (any part's key answers as its event; finished and cancelled too), its
-  open raids' boards from event_board's cache (the lock's placement; `board_state` working while it is solved, and the
-  page hears `run:<event key>` when it is ready)
+- GET /api/event/{key} → event_view.event_json (any part's key answers as its event; finished and cancelled too): each
+  open raid's board is the officers' layout — nothing is solved for a view — with its Auto-fill groups line
+  (event_board.AutoFill.state; the page hears `run:<raid key>` when an auto-fill starts or ends)
+- POST /api/event/{key}/clear → More › Clear the board: every open raid's groups back to Not placed (pins stay), through
+  consequences.clear_board_box (`preview` → {box}; `seen` → 409 with the fresh box; refused → 400 with the refusal box)
 - GET /api/event/{key}/lineup → event_view.lineup_edit_json (Edit lineup's start); POST it {lineup} →
   event_view.lineup_draft_json (its "What this makes" and Save box, nothing written — the Save is POST /api/run/{key}/lineup)
 - GET /api/event/coming/{sid}/{occurrence} → event_view.coming_json; 404 {error, key} when the night has an event now
@@ -37,6 +39,7 @@ SWITCH_OVER = "This event is over, so nobody can switch roles on it."
 PICK_A_ROW = "Pick someone from the list of role switches."
 SWITCH_GONE = "That switch is no longer on the list. The list now shows what is short."
 NOBODY_ASKED = "Nobody could be asked, so nothing was sent."
+CLEARED = "The board is clear. Everyone who joined is in Not placed."
 
 
 def _refused(why) -> JSONResponse:
@@ -75,10 +78,38 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         ev = rs.events.get(key)
         if ev is None or ev.dropped:  # a dropped raid answers as nothing: no event of its own and no part of one
             return JSONResponse({"error": NO_EVENT}, status_code=404)
-        # the board as the lock would place it (event_board): the current picture, else the last one while it is placed again
-        board = await event_board.cache_of(bot).get(v.reg, rs, ev)
+        af = event_board.autofill_of(bot)  # the board is the officers' layout: nothing solves here, Auto-fill groups' line only
         return await asyncio.to_thread(event_view.event_json, v.reg, rs, ev, v.uid,
-                                       sheet=lambda p, rosters=None, open_seats=True: ev_json(v.reg, rs, p, rosters=rosters, open_seats=open_seats), board=board)
+                                       sheet=lambda p, rosters=None, open_seats=True: ev_json(v.reg, rs, p, rosters=rosters, open_seats=open_seats),
+                                       autofill=lambda p: af.state(v.reg, p))
+
+    @app.post("/api/event/{key}/clear")
+    async def event_clear(request: Request, key: str):
+        """More › Clear the board: every OPEN raid of the event emptied back to Not placed — hand and Auto-fill
+        placements alike, pins untouched — one whole-board write per raid (RaidMixin.save_board with the board's rev).
+        `preview` → {box} (consequences.clear_board_box); `seen` = its fp (a board changed meanwhile → 409 with the
+        fresh box); a refusal (locked, nothing placed) → 400 with its box. Nobody is told."""
+        v, d = await body(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key)
+        if ev is None or ev.dropped:
+            return JSONResponse({"error": NO_EVENT}, status_code=404)
+        fresh = cq.clear_board_box(v.reg, rs, ev)
+        if d.get("preview"):
+            return {"box": fresh} if fresh["verb"] else JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+        if fresh["verb"] is None:
+            return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+        if d.get("seen") and str(d["seen"]) != fresh["fp"]:
+            return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
+        first = rc.first_part(rs, ev)
+        for p in [p for p in rc.event_parts(rs, first) if p.state == "open"]:
+            try:
+                await bot.save_board(v.reg, rs, p, [[] for _ in rc.board_layout(v.reg, p)], rev=rc.board_rev(v.reg, p), by=v.name, via=v.via)
+            except rc.BoardChanged:
+                again = cq.clear_board_box(v.reg, rs, ev)
+                return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": again}, status_code=409)
+        await ops_mod.audited(bot.ops, v.reg, v.name, f"cleared the board of {rv.run_title(v.reg, first)}", via=v.via, by_id=v.uid)
+        return {"message": CLEARED}
 
     @app.get("/api/event/{key}/lineup")
     async def event_lineup(request: Request, key: str):

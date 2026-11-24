@@ -1,14 +1,16 @@
-"""The Events board before the lock, solved for real (slow: CP-SAT). The board shows "where the lock would place them
-now": for a non-trivial event — an officer's board place, a pin out, a split later raid — the picture the board cache
-holds is exactly what lock_run then rosters (who, in which roster and group, in which role), on the first raid and on
-the later raid of the chain; and the later raid's picture prefers the people the first raid's picture rosters."""
+"""Auto-fill groups and the lock, solved for real (slow: CP-SAT). Auto-fill groups writes the lock's own solve into the
+board (the owner's tweaks C): for a non-trivial event — an officer's hand place, a kept-off pin, a split later raid —
+after Auto-fill with nothing changed, lock_run rosters exactly that board (who, in which roster and group, in which
+role), on the first raid and on the later raid, with the solver's kept answers and with them forgotten; Auto-fill on the
+later raid alone reads who the first raid's lock will roster; and the lock path's preview helpers still agree."""
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import timedelta
 
 import pytest
-from conftest import join
+from conftest import OWNER, join
 from test_raid_night import NightBot
 
 from oibot_gm import event_board as eb
@@ -29,6 +31,20 @@ def shape(rosters):
     return [([sorted(g) for g in r.groups], sorted((p.signup_name, p.role) for p in r.selected)) for r in rosters]
 
 
+def board_shape(reg, ev):
+    """The board as written (ev.layout), cut into rosters, in shape()'s form (roles from the run's players)."""
+    role = {p.signup_name: p.role for p in rc.players_for(reg, ev)}
+    k = rc.groups_per_roster(reg, rc.run_size(reg, ev))
+    lay = [list(g) for g in ev.layout or []]
+    out = []
+    for i in range(0, len(lay), k):
+        groups = lay[i:i + k]
+        names = [x for g in groups for x in g]
+        if names or not out:
+            out.append(([sorted(g) for g in groups], sorted((x, role[x]) for x in names)))
+    return [o for o in out if o[1]] or out
+
+
 def evening(reg, rs):
     reg.seed_test_members(24, "t")
     start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
@@ -37,48 +53,62 @@ def evening(reg, rs):
     return ev, rc.event_parts(rs, ev)[1]
 
 
-def settled(cache, reg, rs, ev):
+def fill(bot, reg, rs, ev):
     async def go():
-        await cache.get(reg, rs, ev)
-        while cache.tasks:
-            await asyncio.gather(*list(cache.tasks.values()))
-        return await cache.get(reg, rs, ev)
-    return asyncio.run(go())
+        return await eb.autofill_of(bot).start(reg, rs, ev, by="Jon", by_id=OWNER, via="web")
+    t0 = time.monotonic()
+    said = asyncio.run(go())
+    print(f"auto-fill {ev.instance}: {time.monotonic() - t0:.1f} s")
+    assert said is None, said
+    return rs.events[ev.key]
 
 
-def _board_then(reg, rs):
-    """The non-trivial evening (a board place and a pin out on the first raid, a board place on the later raid), its
-    board pictures settled. → (ev, bd, names, bot, first_pic, bd_pic)."""
+def _filled(reg, rs):
+    """The non-trivial evening (a hand place and a kept-off pin on the first raid, a hand place on the later raid), both
+    raids auto-filled. → (ev, bd, names, bot)."""
     ev, bd = evening(reg, rs)
     names = [s.display_name for s in ev.by_status("in")]
-    ev.layout = [[], [names[5]]]  # an officer's hand placement: group 2 of the first raid
-    ev.pins[next(k for k, s in ev.signups.items() if s.display_name == names[0])] = "out"  # an officer's pin out
-    rs.save(ev, "a board place and a pin")
-    bd = rs.events[bd.key]
-    bd.layout = [[], [], [names[7]]]  # roster 2, group 1 of the later raid
-    rs.save(bd, "a later raid's board place")
     bot = NightBot(reg, rs)
-    st, previews = settled(eb.cache_of(bot), reg, rs, ev)
-    assert st == "ready" and set(previews) == {ev.key, bd.key}
-    first_pic, bd_pic = previews[ev.key], previews[bd.key]
-    assert names[5] in first_pic[0].groups[1] and names[0] not in {p.signup_name for r in first_pic for p in r.selected}
-    assert len(bd_pic) == 2 and names[7] in bd_pic[1].groups[0]
-    return ev, bd, names, bot, first_pic, bd_pic
+    asyncio.run(bot.board_move(reg, rs, ev, names[5], (1, 0), "Jon", by_id=OWNER))  # an officer's hand placement: group 2
+    ev.pins[next(k for k, s in ev.signups.items() if s.display_name == names[0])] = "out"  # kept off through ⋮
+    rs.save(ev, "kept off")
+    bd = rs.events[bd.key]
+    asyncio.run(bot.board_move(reg, rs, bd, names[7], (2, 0), "Jon", by_id=OWNER))  # roster 2, group 1 of the later raid
+    ev, bd = fill(bot, reg, rs, ev), fill(bot, reg, rs, rs.events[bd.key])
+    assert names[5] in ev.layout[1] and names[0] not in {x for g in ev.layout for x in g}
+    assert names[7] in bd.layout[2] and len(board_shape(reg, bd)) == 2
+    return ev, bd, names, bot
 
 
 @pytest.mark.parametrize("forget", [False, True], ids=["kept answers", "searched again"])
-def test_the_board_is_what_the_lock_rosters_on_every_raid_of_the_event(reg, rs, forget):
-    """`searched again`: the kept answers forgotten between the picture and the lock, so the lock really searches at its
-    budget — the solver's own repeatability (what this test proved before the kept answer made the lock a cache hit)."""
+def test_after_autofill_the_lock_rosters_exactly_the_board_on_every_raid(reg, rs, forget):
+    """`searched again`: the solver's kept answers forgotten between Auto-fill and the lock, so the lock searches at its
+    budget for itself. Either way the lock rosters the board Auto-fill wrote (every placement is now a fixed one)."""
     from oibot_gm.roster import solver
 
-    ev, bd, names, bot, first_pic, bd_pic = _board_then(reg, rs)
+    ev, bd, names, bot = _filled(reg, rs)
+    first_board, bd_board = board_shape(reg, ev), board_shape(reg, bd)
     if forget:
         solver.forget_answers()
+    t0 = time.monotonic()
     line = asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
-    assert ev.state == "locked" and rs.events[bd.key].state == "locked", line
-    assert shape(first_pic) == shape(ev.all_rosters), "the first raid: the board was the lock"
-    assert shape(bd_pic) == shape(rs.events[bd.key].all_rosters), "the later raid: the board was the lock"
+    print(f"lock after auto-fill: {time.monotonic() - t0:.1f} s")
+    bd = rs.events[bd.key]
+    assert ev.state == "locked" and bd.state == "locked", line
+    assert shape(ev.all_rosters) == first_board, "the first raid: the board was the lock"
+    assert shape(bd.all_rosters) == bd_board, "the later raid: the board was the lock"
+
+
+def test_autofill_on_the_later_raid_alone_is_what_its_lock_rosters(reg, rs):
+    """The first raid's board left empty (the lock places it), Auto-fill pressed on the later raid only: it reads who the
+    first raid's lock will roster (rc.earlier_counts), so after the lock the later raid is the board it wrote."""
+    ev, bd = evening(reg, rs)
+    bot = NightBot(reg, rs)
+    bd = fill(bot, reg, rs, bd)
+    want = board_shape(reg, bd)
+    asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
+    assert ev.layout is None, "the first raid's board was never written"
+    assert shape(rs.events[bd.key].all_rosters) == want
 
 
 def test_a_later_part_prefers_the_earlier_previews_rostered(reg, rs):
@@ -125,8 +155,8 @@ def test_a_board_solve_stops_at_once_when_told(reg, rs):
 
 
 def test_a_raid_not_full_locks_with_one_name_kept_off(reg, rs):
-    """Six joined a 10, one kept off (a drag onto Not placed pins them out): the lock used to be INFEASIBLE (the seats
-    counted the kept-off name); now it locks with the other five and the picture showed the same."""
+    """Six joined a 10, one kept off (the ⋮ menu's pin out): the lock used to be INFEASIBLE (the seats counted the
+    kept-off name); now it locks with the other five and the lock's own preview showed the same."""
     reg.seed_test_members(24, "t")
     start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
     ev = rc.open_run(reg, rs, BD, start, by="t", schedule=rc.ADHOC_SCHEDULE)
@@ -171,29 +201,3 @@ def test_without_the_earlier_raids_the_later_preview_is_another_roster(reg, rs, 
     monkeypatch.setattr(rc, "earlier_counts", lambda *a, **k: None)
     shown, bd = _preview_later_then_lock(reg, rs)
     assert shape(shown) != shape(bd.all_rosters)
-
-
-def test_the_lock_after_a_settled_board_does_no_main_search(reg, rs, monkeypatch):
-    """The kept answer is what makes the picture the lock: after the board settled, lock_run's main solves (the lock
-    budget) take the kept answers and never search — only the bench what-ifs (their own, smaller budget) do. A change
-    that made the board's and the lock's models differ would search here and fail."""
-    from ortools.sat.python import cp_model
-
-    from oibot_gm.roster import solver
-
-    ev, bd, _names, bot, first_pic, bd_pic = _board_then(reg, rs)
-    lock_budget = rc.SOLVE_TIME_LIMIT_S * solver.DTIME_PER_SECOND
-    searched: list[float] = []
-    real = cp_model.CpSolver.Solve
-
-    def spy(self, model, *a, **k):
-        searched.append(self.parameters.max_deterministic_time)
-        return real(self, model, *a, **k)
-
-    monkeypatch.setattr(cp_model.CpSolver, "Solve", spy)
-    hits = solver.ceiling_hits
-    asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
-    assert ev.state == "locked" and rs.events[bd.key].state == "locked"
-    assert lock_budget not in searched, f"a main search at the lock budget ran: {searched}"
-    assert shape(first_pic) == shape(ev.all_rosters) and shape(bd_pic) == shape(rs.events[bd.key].all_rosters)
-    print(f"what-if searches: {len(searched)}, ceiling hits during the lock: {solver.ceiling_hits - hits}")

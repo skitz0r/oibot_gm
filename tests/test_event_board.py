@@ -1,12 +1,15 @@
-"""Phase 4, Task 3: the Events board before the lock is drawn the way the lock would place people NOW — the lock's own
-solve (rc.event_board_preview → rc._solve_run), computed once per fingerprint in the background (event_board), a drag
-applied to the picture as the server holds it, and Undo my moves counted and done by the server. The solver is a
-deterministic stub here (joiners in signup order) wherever the test is not about the solve itself; the real solve is
-tests/test_event_board_solver.py (slow)."""
+"""The Events board before the lock is the OFFICERS' board (the owner's tweaks C, 2026-11-24): who they placed in which
+group, everyone else who joined in Not placed. Nothing is solved on a page load, an answer or a drag; **Auto-fill
+groups** runs the lock's own solve once (event_board.AutoFill → rc.autofill → rc._solve_run, the lock's strategy and
+budget, `earlier` for a later raid) and writes its answer into the board as placements (ev.auto_placed), keeping every
+hand placement and kept-off pin. A drop on Not placed only un-places a name; keeping someone off is the ⋮ pin. The
+solver is a deterministic stub here (joiners in signup order) wherever the test is not about the solve itself; the real
+solve is tests/test_event_board_solver.py (slow)."""
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+import threading
+from datetime import timedelta
 
 import pytest
 from conftest import OWNER, join
@@ -16,6 +19,7 @@ from test_raid_night import H, NightBot, web_bot  # noqa: F401 — the routes' f
 from oibot_gm import event_board as eb
 from oibot_gm import raidcycle as rc
 from oibot_gm.constants import PAGE_WORDS
+from oibot_gm.roster import solver
 
 HYJAL, BD = "hyjal_summit_forever", "barrow_deeps"
 EVENING = [{"raid": BD, "rosters": 2}]
@@ -38,10 +42,10 @@ def one_off(reg, rs, lineup=EVENING, raid=HYJAL):
 
 def in_order(calls: list | None = None):
     """_solve_run without the solver: the joiners in signup order, each raid's pins and board places first, groups of
-    group_size, as many rosters as run_rosters (records `earlier` per call)."""
+    group_size, as many rosters as run_rosters (records key, budget, whatif, `earlier` and the board it read per call)."""
     def solve(reg, rs, ev, strategy=None, avoid=None, time_limit=rc.SOLVE_TIME_LIMIT_S, whatif=True, avoid_groups=None, earlier=None, stop=None):
         if calls is not None:
-            calls.append((ev.key, time_limit, whatif, dict(earlier) if earlier is not None else None))
+            calls.append((ev.key, time_limit, whatif, dict(earlier) if earlier is not None else None, [list(g) for g in ev.layout or []]))
         players = rc.players_for(reg, ev)
         size, g = rc.run_size(reg, ev), int(reg.profile.comp_rules["group_size"])
         k, n = rc.groups_per_roster(reg, size), rc.run_rosters(reg, ev)
@@ -61,44 +65,408 @@ def in_order(calls: list | None = None):
     return solve
 
 
-def flat(rosters) -> list[list[str]]:
-    return [list(g) for r in rosters for g in r.groups]
-
-
-def get(cache, reg, rs, ev):
-    return asyncio.run(cache.get(reg, rs, ev))
-
-
-def settle(cache, reg, rs, ev):
-    """Ask, let the background solve finish, ask again: what a page sees after the `run:` reload."""
+def fill(bot, reg, rs, ev, by="Jon", by_id=OWNER):
+    """Press Auto-fill groups and wait for it: → the outcome sentence (None when the board was filled)."""
     async def go():
-        first = await cache.get(reg, rs, ev)
-        while cache.tasks:
-            await asyncio.gather(*list(cache.tasks.values()))
-        return first, await cache.get(reg, rs, ev)
+        task = eb.autofill_of(bot).start(reg, rs, ev, by=by, by_id=by_id, via="web")
+        return await task
     return asyncio.run(go())
 
 
-# ---------------------------------------------------------------- Review Focus 1: nobody joined
+def placed(ev) -> set[str]:
+    return {x for g in ev.layout or [] for x in g}
 
-def test_an_event_with_nobody_joined_draws_open_seats_and_never_solves(reg, rs, monkeypatch, web_bot):
+
+# ---------------------------------------------------------------- the board is the officers' board: nothing solves
+
+def test_the_page_never_solves_and_draws_the_officers_board(reg, rs, monkeypatch, web_bot):
     calls = []
     monkeypatch.setattr(rc, "_solve_run", lambda *a, **k: calls.append(1))
     ev = one_off(reg, rs)
-    pv = rc.event_board_preview(reg, rs, ev)
-    assert calls == [] and set(pv) == {p.key for p in rc.event_parts(rs, ev)}
-    assert all(sum(len(g) for r in v for g in r.groups) == 0 for v in pv.values())
-    assert len(pv[rc.event_parts(rs, ev)[1].key]) == 2, "every expected roster is drawn, empty"
-    assert rc.open_seat_roles(reg, ev, pv[ev.key])[0][:2] == ["tank", "tank"]
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
     j = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()
-    assert calls == [] and eb.cache_of(web_bot.bot).solves == 0, "the route never starts a solve for nobody"
+    assert calls == [], "a page load never solves"
     for part in j["parts"]:
-        assert part["board_state"] == "ready" and part["placed_words"] == "0 of 0 joined"
-        rosters = part["sheet"]["board"]["rosters"]
-        assert all(not g for r in rosters for g in r["groups"])
-        assert all(r["open"][:2] == ["tank", "tank"] for r in rosters)
-        size = part["sheet"]["size"]
-        assert all(len(r["open"]) <= size for r in rosters)
+        assert part["board_state"] == "open" and part["placed_words"] == f"0 of {len(ms)} joined"
+        board = part["sheet"]["board"]
+        assert all(not g for r in board["rosters"] for g in r["groups"]), "nobody placed: every group empty"
+        assert len(board["bank"]) == len(ms), "everyone who joined is in Not placed"
+        assert all(r["open"] is None for r in board["rosters"]), "no open seat drawn on an officers' board"
+        assert part["autofill"] == {"working": False, "words": None, "failed": False}
+    asyncio.run(web_bot.bot.board_move(reg, rs, ev, ms[0].display_name, (0, 0), "Jon", by_id=OWNER))
+    rc.set_signup(reg, rs, ev, people(reg, 1)[0], None, "in", source="test")
+    web_bot.c.get(f"/api/event/{ev.key}", headers=H())
+    assert calls == [], "a drag and an answer never solve"
+    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
+    assert part["placed_words"] == f"1 of {len(ms) + 1} joined", "Placed counts the officers' board"
+    assert part["sheet"]["board"]["rosters"][0]["groups"][0][0]["display_name"] == ms[0].display_name
+
+
+def test_short_reads_the_needs_never_a_solve(reg, rs, monkeypatch, web_bot):
+    monkeypatch.setattr(rc, "_solve_run", lambda *a, **k: pytest.fail("no solve"))
+    ev = rc.open_run(reg, rs, BD, start_in(reg), by="t", schedule=rc.ADHOC_SCHEDULE)
+    join(reg, rs, ev, people(reg, 3))
+    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
+    assert part["short"] == dict(rc.needs(reg, ev)["roles"])
+
+
+def test_the_footer_and_the_bank_say_the_new_truth():
+    assert "lock" in PAGE_WORDS["board_footer"] and PAGE_WORDS["autofill_button"] in PAGE_WORDS["board_footer"]
+    assert "stays off" not in PAGE_WORDS["not_placed_note"] and "not_placed_off" not in PAGE_WORDS
+    for gone in ("board_working", "board_failed"):
+        assert gone not in PAGE_WORDS
+
+
+# ---------------------------------------------------------------- a drop on Not placed only un-places
+
+def test_a_drop_on_not_placed_only_unplaces(reg, rs):
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    bot = NightBot(reg, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, n[3], (0, 0), "Jon", by_id=OWNER))
+    asyncio.run(bot.board_move(reg, rs, ev, n[3], None, "Jon", by_id=OWNER))
+    assert not ev.pins and placed(ev) == set() and ev.placed_by == {} and ev.drag_pins == {}, "un-placed, never kept off"
+    assert rc.lock_forces(reg, rs, ev).kept_off == [], "the lock still places them"
+
+
+def test_a_swap_from_not_placed_unplaces_the_partner(reg, rs):
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    bot = NightBot(reg, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, n[0], (0, 0), "Jon", by_id=OWNER))
+    asyncio.run(bot.board_move(reg, rs, ev, n[5], (0, 0), "Jon", by_id=OWNER))  # from Not placed onto n0
+    assert ev.layout[0] == [n[5]] and n[0] not in placed(ev) and not ev.pins, "the partner goes back to Not placed, no pin"
+    with pytest.raises(ValueError, match="full"):
+        for x in n[6:12]:
+            asyncio.run(bot.board_move(reg, rs, ev, x, (0, 9), "Jon", by_id=OWNER))
+
+
+def test_a_drag_into_a_group_lifts_a_kept_off_pin_and_undo_puts_it_back(reg, rs):
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    u = {x: str(m.discord_id) for x, m in zip(n, ms)}
+    bot = NightBot(reg, rs)
+    ev.pins[u[n[1]]] = "out"  # kept off through the ⋮ menu
+    rs.save(ev, "a pin from the menu")
+    asyncio.run(bot.board_move(reg, rs, ev, n[1], (0, 0), "Jon", by_id=OWNER))
+    asyncio.run(bot.board_move(reg, rs, ev, n[2], (1, 0), "Jon", by_id=OWNER))
+    ev.pins[u[n[2]]] = "out"  # then plain text "keep n2 off"
+    rs.save(ev, "a pin from elsewhere")
+    assert ev.pins.get(u[n[1]]) is None and rc.own_moves(ev, OWNER) == sorted([n[1], n[2]])
+    asyncio.run(bot.undo_moves(reg, rs, ev, OWNER, "Jon"))
+    assert ev.pins[u[n[1]]] == "out", "the kept-off pin my drag lifted is back"
+    assert ev.pins[u[n[2]]] == "out", "a pin set elsewhere is never touched"
+    assert placed(ev) == set() and ev.placed_by == {} and ev.drag_pins == {}
+
+
+def test_moves_from_elsewhere_clear_whose_move_it_was(reg, rs):
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    bot = NightBot(reg, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, n[0], (0, 0), "Jon", by_id=OWNER))
+    asyncio.run(bot.board_move(reg, rs, ev, n[0], (1, 0), "plain text"))  # from Discord / plain text / MCP: nobody's
+    assert ev.placed_by == {} and rc.own_moves(ev, OWNER) == [], "my Undo never takes back someone else's later move"
+
+
+def test_the_move_route_carries_the_officer(reg, rs, web_bot):
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    r = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": n[12], "to": {"r": 0, "g": 1, "i": 0}, "state": "open"}, headers=H())
+    assert r.status_code == 200, r.text
+    assert ev.layout[1] == [n[12]] and ev.placed_by == {n[12]: OWNER} and not ev.pins
+
+
+# ---------------------------------------------------------------- Undo my moves
+
+def test_undo_drops_only_my_moves(reg, rs, web_bot):
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    bot = web_bot.bot
+    run = asyncio.run
+    run(bot.board_move(reg, rs, ev, n[0], (0, 0), "Jon", by_id=OWNER))
+    run(bot.board_move(reg, rs, ev, n[1], (0, 1), "Jon", by_id=OWNER))
+    run(bot.board_move(reg, rs, ev, n[2], (1, 0), "Bea", by_id=B_ID))
+    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
+    assert part["mine"] == sorted([n[0], n[1]])
+    assert part["undo_box"]["sentences"] == ["Your 2 moves on this board are dropped.", "Those people go back to Not placed."]
+    box = web_bot.c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "preview": True}, headers=H()).json()["box"]
+    assert box == part["undo_box"], "the route's box is the page's"
+    run(bot.board_move(reg, rs, ev, n[0], (2, 0), "Bea", by_id=B_ID))  # B moves one of mine meanwhile
+    r = web_bot.c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "seen": box["fp"]}, headers=H())
+    assert r.status_code == 409 and r.json()["box"]["sentences"][0] == "Your one move on this board is dropped."
+    r = web_bot.c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "seen": r.json()["box"]["fp"]}, headers=H())
+    assert r.status_code == 200, r.text
+    assert ev.placed_by == {n[0]: B_ID, n[2]: B_ID} and placed(ev) == {n[0], n[2]}
+
+
+def test_placed_by_and_auto_placed_are_pruned_with_the_board_and_cleared_at_the_lock(reg, rs, monkeypatch):
+    monkeypatch.setattr(rc, "propose", lambda reg_, rs_, ev_, save=True: setattr(ev_, "rosters", rc.board_rosters(
+        reg_, ev_, [[s.display_name for s in ev_.by_status("in")][:5]], rc.run_size(reg_, ev_))))
+    ev = rc.open_run(reg, rs, BD, start_in(reg), by="t", schedule=rc.ADHOC_SCHEDULE)
+    ms = reg.test_members()
+    join(reg, rs, ev, ms[:8])
+    n = [m.display_name for m in ms]
+    bot = NightBot(reg, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, n[0], (0, 0), "Jon", by_id=OWNER))
+    asyncio.run(bot.board_move(reg, rs, ev, n[1], (1, 0), "Jon", by_id=OWNER))
+    ev.auto_placed = [n[2]]
+    asyncio.run(bot.save_board(reg, rs, ev, [[n[1]], [n[2]]], by="Jon"))  # a whole-board write without n[0]
+    assert ev.placed_by == {n[1]: OWNER} and ev.auto_placed == [], "a whole board written by a person is theirs"
+    asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
+    assert ev.state == "locked" and ev.placed_by == {} and ev.drag_pins == {} and ev.auto_placed == []
+
+
+# ---------------------------------------------------------------- Auto-fill groups
+
+def test_autofill_writes_the_locks_solve_as_placements_and_keeps_hand_ones(reg, rs, monkeypatch):
+    calls = []
+    monkeypatch.setattr(rc, "_solve_run", in_order(calls))
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    bot = NightBot(reg, rs)
+    ev.pins[str(ms[4].discord_id)] = "out"  # kept off through ⋮
+    rs.save(ev, "kept off")
+    asyncio.run(bot.board_move(reg, rs, ev, n[9], (2, 0), "Jon", by_id=OWNER))  # a hand placement in group 3
+    assert fill(bot, reg, rs, ev) is None
+    assert calls[0][1:3] == (rc.SOLVE_TIME_LIMIT_S, False), "the lock's budget"
+    assert calls[0][4][2] == [n[9]], "the hand placement is fixed in the solve"
+    assert ev.layout[2][0] == n[9] and ev.placed_by == {n[9]: OWNER}, "the hand placement stays where it was, still mine"
+    assert n[4] not in placed(ev) and ev.pins == {str(ms[4].discord_id): "out"}, "the kept-off pin honoured, untouched"
+    assert set(ev.auto_placed) == placed(ev) - {n[9]}, "every other placement is the Auto-fill's"
+    assert any("auto-filled the board" in line for line in ev.log)
+    assert rc.own_moves(ev, OWNER) == [n[9]], "Undo my moves never takes back an Auto-fill"
+
+
+def test_autofill_again_replaces_its_own_placements_and_keeps_hand_ones(reg, rs, monkeypatch):
+    calls = []
+    monkeypatch.setattr(rc, "_solve_run", in_order(calls))
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    bot = NightBot(reg, rs)
+    fill(bot, reg, rs, ev)
+    first = set(ev.auto_placed)
+    asyncio.run(bot.board_move(reg, rs, ev, n[0], None, "Jon", by_id=OWNER))  # one back to Not placed: room in group 1
+    asyncio.run(bot.board_move(reg, rs, ev, n[7], (0, 9), "Jon", by_id=OWNER))  # an auto-placed name moved by hand
+    assert n[7] not in ev.auto_placed and n[0] not in ev.auto_placed, "a name moved by hand is a hand placement"
+    fill(bot, reg, rs, ev)
+    assert calls[-1][4] == [[n[7]], [], [], []], "the second solve reads only the hand placement: the old fill is replaced"
+    assert ev.layout[0][0] == n[7] and n[7] not in ev.auto_placed
+    assert n[0] in ev.auto_placed, "a name dragged to Not placed is placed again by the next Auto-fill"
+    assert set(ev.auto_placed) == placed(ev) - {n[7]} and first
+
+
+def test_autofill_on_a_later_raid_reads_the_earlier_raids_as_the_lock_would(reg, rs, monkeypatch):
+    calls = []
+    monkeypatch.setattr(rc, "_solve_run", in_order(calls))
+    ev = one_off(reg, rs)
+    join(reg, rs, ev, reg.test_members())
+    first, bd = rc.event_parts(rs, ev)
+    bot = NightBot(reg, rs)
+    assert fill(bot, reg, rs, bd) is None
+    assert [c[0] for c in calls] == [first.key, bd.key], "the earlier raid is solved first (its lock's answer), then this one"
+    on_first = {p.discord_id for r in rc.event_board_preview(reg, rs, first, parts=[first]).get(first.key) for p in r.selected}
+    assert set(calls[1][3]) == on_first, "`earlier` = who the first raid's lock rosters"
+    assert first.layout is None and bd.layout, "only the pressed raid's board is written"
+
+
+def test_a_board_changed_while_it_solved_is_never_overwritten(reg, rs, monkeypatch):
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    bot = NightBot(reg, rs)
+    real = in_order()
+
+    def solve(reg_, rs_, p, *a, **k):  # another officer drags while the solve runs
+        out = real(reg_, rs_, p, *a, **k)
+        live = rs.events[ev.key]
+        live.layout = [[ms[0].display_name]]
+        rs.save(live, "a drag meanwhile")
+        return out
+
+    monkeypatch.setattr(rc, "_solve_run", solve)
+    said = fill(bot, reg, rs, ev)
+    assert said == PAGE_WORDS["autofill_changed"] and ev.layout == [[ms[0].display_name]] and ev.auto_placed == []
+    st = eb.autofill_of(bot).state(reg, ev)
+    assert st == {"working": False, "words": PAGE_WORDS["autofill_changed"], "failed": True}
+
+
+def test_a_failure_says_the_solvers_sentence_and_writes_nothing(reg, rs, monkeypatch, web_bot):
+    monkeypatch.setattr(rc, "_solve_run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no roster found: INFEASIBLE")))
+    ev = one_off(reg, rs, lineup=[])
+    join(reg, rs, ev, reg.test_members())
+    assert fill(web_bot.bot, reg, rs, ev) == rc.SOLVER_WORDS["infeasible"] and ev.layout is None
+    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
+    assert part["autofill"] == {"working": False, "words": rc.SOLVER_WORDS["infeasible"], "failed": True}
+    asyncio.run(web_bot.bot.board_move(reg, rs, ev, ev.by_status("in")[0].display_name, (0, 0), "Jon", by_id=OWNER))
+    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
+    assert part["autofill"]["words"] is None, "the sentence was about the board before the drag"
+
+
+def test_a_lock_stops_an_autofill_and_it_writes_nothing(reg, rs, monkeypatch):
+    ev = one_off(reg, rs, lineup=[])
+    join(reg, rs, ev, reg.test_members())
+    bot = NightBot(reg, rs)
+    started, proceed = threading.Event(), threading.Event()
+
+    def slow(reg_, rs_, p, *a, stop=None, **k):
+        started.set()
+        proceed.wait(10)
+        if stop is not None and stop.stopped:
+            raise solver.Stopped()
+        return in_order()(reg_, rs_, p, *a, stop=stop, **k)
+
+    monkeypatch.setattr(rc, "_solve_run", slow)
+
+    async def go():
+        af = eb.autofill_of(bot)
+        task = af.start(reg, rs, ev, by="Jon", by_id=OWNER, via="web")
+        await asyncio.to_thread(started.wait, 10)
+        assert af.state(reg, ev)["working"] is True and af.state(reg, ev)["words"] == PAGE_WORDS["autofill_working"]
+        async with bot.solving(reg, ev.key):  # a lock begins: the auto-fill gives way at once
+            proceed.set()
+        return await task
+
+    assert asyncio.run(go()) == PAGE_WORDS["autofill_stopped"] and ev.layout is None
+
+
+def test_no_autofill_starts_while_a_lock_solves(reg, rs):
+    from oibot_gm.registry import RegistryError
+
+    ev = one_off(reg, rs, lineup=[])
+    join(reg, rs, ev, reg.test_members())
+    bot = NightBot(reg, rs)
+
+    async def go():
+        async with bot.solving(reg, ev.key):
+            with pytest.raises(RegistryError, match=PAGE_WORDS["autofill_busy"]):
+                eb.autofill_of(bot).start(reg, rs, ev, by="Jon", by_id=OWNER, via="web")
+
+    asyncio.run(go())
+
+
+def test_the_route_answers_at_once_and_refuses_a_locked_raid(reg, rs, monkeypatch, web_bot):
+    from conftest import lock_with_board
+
+    monkeypatch.setattr(rc, "_solve_run", in_order())
+    ev = one_off(reg, rs, lineup=[])
+    join(reg, rs, ev, reg.test_members())
+    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={"wait": True}, headers=H())
+    assert r.status_code == 200 and r.json()["message"] == PAGE_WORDS["autofill_done"] and ev.auto_placed, r.text
+    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={}, headers=H())
+    assert r.status_code == 200 and r.json()["message"] == PAGE_WORDS["autofill_working"], "answered at once: the page shows the working words"
+    lock_with_board(reg, rs, ev, [s.display_name for s in ev.by_status("in")][:10])
+    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={}, headers=H())
+    assert r.status_code == 400 and r.json()["error"] == PAGE_WORDS["autofill_locked"]
+
+
+def test_autofill_with_nobody_joined_is_refused(reg, rs, web_bot):
+    ev = one_off(reg, rs, lineup=[])
+    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={}, headers=H())
+    assert r.status_code == 400 and r.json()["error"] == PAGE_WORDS["autofill_nobody"]
+
+
+def test_auto_placed_survives_a_restart_and_older_files_read_without_it(reg, rs, monkeypatch, store):
+    monkeypatch.setattr(rc, "_solve_run", in_order())
+    ev = one_off(reg, rs, lineup=[])
+    join(reg, rs, ev, reg.test_members())
+    fill(NightBot(reg, rs), reg, rs, ev)
+    again = rc.RaidStore(store, reg.key)
+    assert again.events[ev.key].auto_placed == ev.auto_placed and ev.auto_placed
+    old = ev.model_dump()
+    old.pop("auto_placed")
+    assert rc.RaidEvent.model_validate(old).auto_placed == [], "a file from before reads as no auto placements"
+
+
+# ---------------------------------------------------------------- Clear the board (More)
+
+def test_clear_the_board_through_the_servers_box(reg, rs, monkeypatch, web_bot):
+    monkeypatch.setattr(rc, "_solve_run", in_order())
+    ev = one_off(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    first, bd = rc.event_parts(rs, ev)
+    bot = web_bot.bot
+    asyncio.run(bot.board_move(reg, rs, first, ms[0].display_name, (0, 0), "Jon", by_id=OWNER))
+    fill(bot, reg, rs, bd)
+    first.pins[str(ms[3].discord_id)] = "out"
+    rs.save(first, "kept off")
+    n = len(placed(first)) + len(placed(bd))
+    url = f"/api/event/{ev.key}/clear"
+    box = web_bot.c.post(url, json={"preview": True}, headers=H()).json()["box"]
+    assert box["title"].startswith("Clear the board") and box["verb"] == "Clear the board" and not box["danger"]
+    assert box["sentences"] == [f"{n} placed people go back to Not placed.", "Nobody is told.", "Auto-fill groups can place everyone again."]
+    asyncio.run(bot.board_move(reg, rs, first, ms[1].display_name, (0, 1), "Jon", by_id=OWNER))  # a drag while the box is open
+    r = web_bot.c.post(url, json={"seen": box["fp"]}, headers=H())
+    assert r.status_code == 409 and r.json()["box"]["sentences"][0] == f"{n + 1} placed people go back to Not placed."
+    r = web_bot.c.post(url, json={"seen": r.json()["box"]["fp"]}, headers=H())
+    assert r.status_code == 200, r.text
+    for p in (first, bd):
+        assert placed(p) == set() and p.auto_placed == [] and p.placed_by == {}
+    assert first.pins == {str(ms[3].discord_id): "out"}, "pins untouched"
+    r = web_bot.c.post(url, json={"preview": True}, headers=H())
+    assert r.status_code == 400 and r.json()["box"]["verb"] is None, "nothing placed: a refusal, only Back"
+
+
+def test_clear_is_refused_after_the_lock(reg, rs, web_bot):
+    from conftest import lock_with_board
+
+    ev = rc.open_run(reg, rs, BD, start_in(reg), by="t", schedule=rc.ADHOC_SCHEDULE)
+    join(reg, rs, ev, reg.test_members())
+    lock_with_board(reg, rs, ev, [s.display_name for s in ev.by_status("in")][:10])
+    r = web_bot.c.post(f"/api/event/{ev.key}/clear", json={"preview": True}, headers=H())
+    assert r.status_code == 400 and r.json()["box"]["verb"] is None
+
+
+# ---------------------------------------------------------------- what stays: a locked event, open seats, the preview helper
+
+def test_a_locked_event_draws_its_roster_and_never_solves(reg, rs, monkeypatch, web_bot):
+    from conftest import lock_with_board
+
+    calls = []
+    monkeypatch.setattr(rc, "_solve_run", lambda *a, **k: calls.append(1))
+    ev = rc.open_run(reg, rs, BD, start_in(reg), by="t", schedule=rc.ADHOC_SCHEDULE)
+    join(reg, rs, ev, reg.test_members())
+    names = [s.display_name for s in ev.by_status("in")][:10]
+    lock_with_board(reg, rs, ev, names)
+    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
+    assert part["board_state"] == "locked" and calls == [] and part["mine"] == [] and part["undo_box"] is None
+    assert part["autofill"] is None
+    assert sorted(n["display_name"] for r in part["sheet"]["board"]["rosters"] for g in r["groups"] for n in g) == sorted(names)
+
+
+def test_a_locked_raid_counts_seats_and_undo_says_why_it_is_greyed(reg, rs, web_bot):
+    from conftest import lock_with_board
+
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
+    assert part["undo_box"] is None and part["undo_why"] == PAGE_WORDS["no_moves"]
+    assert part["rostered_words"] is None and part["placed_words"] == f"0 of {len(ms)} joined"
+    bd = rc.open_run(reg, rs, BD, start_in(reg, 4), by="t", schedule=rc.ADHOC_SCHEDULE)
+    join(reg, rs, bd, ms[:9])
+    rc.set_signup(reg, rs, bd, ms[9], None, "sub", source="test")  # the lock seats someone from the Bench
+    lock_with_board(reg, rs, bd, [s.display_name for s in bd.by_status("in")] + [bd.signups[str(ms[9].discord_id)].display_name])
+    locked = web_bot.c.get(f"/api/event/{bd.key}", headers=H()).json()["parts"][0]
+    assert locked["placed_words"] is None and locked["undo_why"] is None
+    assert locked["rostered_words"] == PAGE_WORDS["seats_of"].format(n=10, size=10)
 
 
 def test_open_seats_count_each_minimum_once_and_never_past_the_empty_seats(reg, rs):
@@ -117,8 +485,6 @@ def test_open_seats_count_each_minimum_once_and_never_past_the_empty_seats(reg, 
     assert rc.open_seat_roles(reg, ev, full) == [[]], "a full roster has no open seat whatever it is short"
 
 
-# ---------------------------------------------------------------- the preview: the lock's own solve
-
 def test_the_preview_uses_the_lock_budget_and_hands_later_raids_the_earlier_preview(reg, rs, monkeypatch):
     calls = []
     monkeypatch.setattr(rc, "_solve_run", in_order(calls))
@@ -131,8 +497,6 @@ def test_the_preview_uses_the_lock_budget_and_hands_later_raids_the_earlier_prev
     on_first = {p.discord_id for r in pv[first.key] for p in r.selected}
     assert calls[0][3] is None and set(calls[1][3]) == on_first and set(calls[1][3].values()) == {1}
     assert rs.events[first.key].layout is None and not rs.events[first.key].rosters, "nothing written"
-    bench = pv[first.key][0].benched
-    assert {p.signup_name for p in bench} == {s.display_name for s in first.by_status("in")} - {p.signup_name for r in pv[first.key] for p in r.selected}
 
 
 def test_a_failed_part_keeps_the_others(reg, rs, monkeypatch):
@@ -155,227 +519,9 @@ def test_a_failed_part_keeps_the_others(reg, rs, monkeypatch):
     assert set(seen[2]) == {p.discord_id for r in pv[parts[0].key] for p in r.selected}, "the third raid prefers the first raid's preview"
 
 
-def test_the_route_draws_the_lock_placement_once_it_is_ready(reg, rs, monkeypatch, web_bot):
-    monkeypatch.setattr(rc, "_solve_run", in_order())
-    ev = one_off(reg, rs)
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    _, (st, previews) = settle(eb.cache_of(web_bot.bot), reg, rs, ev)  # the background solve, finished
-    assert st == "ready"
-    j = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()
-    hy, bd = j["parts"]
-    assert hy["board_state"] == bd["board_state"] == "ready" and hy["board_error"] is None
-    assert hy["placed_words"] == f"{len(ms)} of {len(ms)} joined", "Placed counts the lock's placement"
-    drawn = [[s["display_name"] for s in g] for r in hy["sheet"]["board"]["rosters"] for g in r["groups"]]
-    assert drawn == flat(previews[ev.key]) and len(bd["sheet"]["board"]["rosters"]) == 2
-    assert hy["layout"] == rc.board_layout(reg, ev) and hy["mine"] == [] and hy["undo_box"] is None
-    assert eb.cache_of(web_bot.bot).solves == 1, "the page view found the picture: no second solve"
-    rc.set_signup(reg, rs, ev, ms[0], None, "out", source="test")
-    monkeypatch.setattr(eb.BoardCache, "start", lambda self, *a, **k: None)
-    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
-    assert part["board_state"] == "working", "an answer changed: the last picture, marked as being placed again"
-    drawn = [s["display_name"] for r in part["sheet"]["board"]["rosters"] for g in r["groups"] for s in g]
-    assert ms[0].display_name not in drawn and ms[1].display_name in drawn, "the last picture, with today's answers on it"
-    assert all(r["open"] is None for r in part["sheet"]["board"]["rosters"]), "no open seat counted on a board being placed again"
-
-
-def test_a_failed_raid_draws_the_layout_and_says_why(reg, rs, monkeypatch, web_bot):
-    def fail(*a, **k):
-        raise RuntimeError("INFEASIBLE")
-
-    monkeypatch.setattr(rc, "_solve_run", fail)
-    ev = one_off(reg, rs, lineup=[])
-    join(reg, rs, ev, reg.test_members())
-    settle(eb.cache_of(web_bot.bot), reg, rs, ev)
-    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
-    assert part["board_state"] == "failed" and part["board_error"] == rc.SOLVER_WORDS["infeasible"]
-    assert part["placed_words"] == f"0 of {len(reg.test_members())} joined"
-
-
-def test_a_locked_event_draws_its_roster_and_never_solves(reg, rs, monkeypatch, web_bot):
-    from conftest import lock_with_board
-
-    calls = []
-    monkeypatch.setattr(rc, "_solve_run", lambda *a, **k: calls.append(1))
-    ev = rc.open_run(reg, rs, BD, start_in(reg), by="t", schedule=rc.ADHOC_SCHEDULE)
-    join(reg, rs, ev, reg.test_members())
-    names = [s.display_name for s in ev.by_status("in")][:10]
-    lock_with_board(reg, rs, ev, names)
-    assert get(eb.cache_of(web_bot.bot), reg, rs, ev) == ("locked", None)
-    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
-    assert part["board_state"] == "locked" and calls == [] and part["mine"] == [] and part["undo_box"] is None
-    assert sorted(n["display_name"] for r in part["sheet"]["board"]["rosters"] for g in r["groups"] for n in g) == sorted(names)
-
-
-# ---------------------------------------------------------------- the cache
-
-def test_the_cache_computes_once_per_fingerprint(reg, rs, monkeypatch):
-    calls = []
-    monkeypatch.setattr(rc, "_solve_run", in_order(calls))
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms[:6])
-    cache = eb.BoardCache()
-
-    async def two_at_once():
-        a, b = await asyncio.gather(cache.get(reg, rs, ev), cache.get(reg, rs, ev))
-        assert cache.solves == 1, "two pages at once: one solve"
-        while cache.tasks:
-            await asyncio.gather(*list(cache.tasks.values()))
-        return a, b, await cache.get(reg, rs, ev)
-
-    a, b, c = asyncio.run(two_at_once())
-    assert a == ("working", None) and b == ("working", None)
-    assert c[0] == "ready" and len(calls) == 1
-    assert get(cache, reg, rs, ev)[0] == "ready" and cache.solves == 1, "the same fingerprint: no second solve"
-    join(reg, rs, ev, ms[6:7])
-    st, previews = get(cache, reg, rs, ev)
-    assert st == "working" and previews == c[1], "a join: being placed again, the last picture meanwhile"
-
-
-def test_a_ready_picture_wakes_the_page_and_a_stale_one_is_solved_again(reg, rs, monkeypatch):
-    monkeypatch.setattr(rc, "_solve_run", in_order())
-    heard = []
-    monkeypatch.setattr(eb, "BOARD_LISTENERS", [lambda gk, key: heard.append((gk, key))])
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms[:6])
-    cache = eb.BoardCache()
-    _, (st, _pv) = settle(cache, reg, rs, ev)
-    assert st == "ready" and heard == [(reg.key, ev.key)]
-    import threading
-
-    real, started, proceed = rc.event_board_preview, threading.Event(), threading.Event()
-
-    def slow(*a, **k):  # the solve holds until the test has changed an answer under it
-        started.set()
-        proceed.wait(5)
-        return real(*a, **k)
-
-    monkeypatch.setattr(rc, "event_board_preview", slow)
-    join(reg, rs, ev, ms[7:8])
-
-    async def go():
-        assert (await cache.get(reg, rs, ev))[0] == "working"
-        await asyncio.to_thread(started.wait, 5)
-        rc.set_signup(reg, rs, ev, ms[6], None, "in", source="test")  # an answer changes while the board is being placed
-        assert (await cache.get(reg, rs, ev))[0] == "working", "a page asks for the new answers while it solves"
-        assert cache.solves == 2, "never two solves of one event at once"
-        proceed.set()
-        while cache.tasks:
-            await asyncio.gather(*list(cache.tasks.values()))
-        return await cache.get(reg, rs, ev)
-
-    st, pv = asyncio.run(go())
-    assert st == "ready" and cache.solves == 3, "the stale picture was solved again, once"
-    assert ms[6].display_name in {p.signup_name for r in pv[ev.key] for p in r.selected}
-    assert heard == [(reg.key, ev.key)] * 2, "only a current picture wakes the page"
-
-
-def test_an_entry_goes_when_its_event_locks(reg, rs, monkeypatch):
-    from conftest import lock_with_board
-
-    monkeypatch.setattr(rc, "_solve_run", in_order())
-    ev = one_off(reg, rs, lineup=[])
-    join(reg, rs, ev, reg.test_members())
-    cache = eb.BoardCache()
-    settle(cache, reg, rs, ev)
-    assert (reg.key, ev.key) in cache.entries
-    lock_with_board(reg, rs, ev, [s.display_name for s in ev.by_status("in")][:20])
-    other = one_off(reg, rs, lineup=[])
-    get(cache, reg, rs, other)
-    assert (reg.key, ev.key) not in cache.entries
-
-
-# ---------------------------------------------------------------- the fingerprint covers every input of the solve
-
-def _fp(reg, rs, ev):
-    return eb.fingerprint(reg, eb.frozen(rs), eb.snapshot(rs, ev))
-
-
-def test_the_fingerprint_moves_with_every_input_of_the_solve(reg, rs):
-    from conftest import weekly
-
-    sid = weekly(reg, HYJAL, "Tue 18:30", sid="tue")
-    reg.set_schedule(sid, {"lineup": [{"raid": HYJAL, "rosters": 1}, {"raid": BD, "rosters": 2}]}, "t")
-    now = reg.now_local()
-    t = next(t for s, t in rc.occurrences(reg, now, 24 * 21) if s["id"] == sid and t - now >= timedelta(hours=30))
-    ev = rc.open_run(reg, rs, HYJAL, t, by="t", schedule=sid)
-    ms = people(reg, 14)
-    join(reg, rs, ev, ms[:12])
-    bd = rc.event_parts(rs, ev)[1]
-    seen = [_fp(reg, rs, ev)]
-    assert _fp(reg, rs, ev) == seen[0], "nothing changed: the same fingerprint"
-
-    def changed(what: str) -> None:
-        fp = _fp(reg, rs, ev)
-        assert fp not in seen, f"{what} must change the fingerprint"
-        seen.append(fp)
-
-    rc.set_signup(reg, rs, ev, ms[12], None, "in", source="test")
-    changed("a join")
-    rc.set_signup(reg, rs, ev, ms[12], None, "out", source="test")
-    changed("a No thanks")
-    s3 = ev.signups[str(ms[3].discord_id)]
-    spec = next(x for x in reg.profile.classes[s3.cls] if x != s3.spec)
-    s3.spec, s3.role = spec, reg.profile.spec(s3.cls, spec).role
-    rs.save(ev, "a respec on the sheet")
-    changed("an answer's spec")
-    s0 = ev.signups[str(ms[0].discord_id)]
-    s0.joined_at = (datetime.fromisoformat(max(s.order_at for s in ev.signups.values())) + timedelta(minutes=1)).isoformat()  # now joined last
-    rs.save(ev, "who joined first")
-    changed("the order people joined in")
-    ev.pins[str(ms[2].discord_id)] = "out"
-    rs.save(ev, "a pin")
-    changed("a pin")
-    ev.layout = [[ms[4].display_name]]
-    rs.save(ev, "a board place")
-    changed("the officers' board")
-    bd = rs.events[bd.key]
-    bd.layout = [[], [], [ms[5].display_name]]
-    rs.save(bd, "a later raid's board place")
-    changed("a later raid's board")
-    reg.config.team(bd.team)["rosters"] = 1
-    reg.save_config("a roster count", notify=False)
-    changed("a raid's roster count")
-    reg.set_minimums(BD, {"healer": {"min": 3}}, "t")
-    changed("a raid's minimums")
-    rc.reschedule(reg, rs, ev, timing={"weights": {"rank": 0 if rc.run_weights(reg, ev)["rank"] else 6}}, by="t")
-    changed("the event's own priority (a schedule edit no longer reaches an open event: the owner's tweaks, B)")
-    was = rc.run_strategy(reg, ev)
-    reg.config.team(ev.team)["split_policy"] = "first" if was != "first" else "rotation"
-    reg.save_config("the run's split", notify=False)
-    assert rc.run_strategy(reg, ev) != was
-    changed("the run's split")
-    reg.set_rank(ms[6].discord_id, "core", "t", by_id=OWNER)
-    changed("a member's rank")
-    day = ev.start.astimezone(reg.tz).date().isoformat()
-    reg.add_absence(ms[7].discord_id, day, day, None, "t")
-    asyncio.run(NightBot(reg, rs).after_absence(reg, ms[7], day, day, "t"))
-    assert ev.signups[str(ms[7].discord_id)].status == "out"
-    changed("an absence that turns an answer into away")
-
-
-def test_the_later_raids_fingerprint_follows_the_earlier_raids_roster(reg, rs):
-    from conftest import lock_with_board
-
-    ev = one_off(reg, rs)
-    ms = people(reg, 22)
-    join(reg, rs, ev, ms)
-    names = [m.display_name for m in ms]
-    lock_with_board(reg, rs, ev, names[:20])
-    a = _fp(reg, rs, ev)
-    lock_with_board(reg, rs, ev, names[2:22])
-    assert _fp(reg, rs, ev) != a, "another roster on the first raid: the later raid prefers other people"
-
-
-# ---------------------------------------------------------------- the later raid's board pins (a fix found on the way)
-
 def test_a_later_raids_board_places_reach_the_solve_past_its_first_group(reg, rs, monkeypatch):
     """_solve_run used to reuse `k` (the groups per roster) for the part number on a later raid, cutting its board pins
     to `gi < part × rosters`: a place in group 2 of a later raid was dropped by the lock."""
-    from oibot_gm.roster import solver
-
     ev = one_off(reg, rs)
     ms = reg.test_members()
     join(reg, rs, ev, ms)
@@ -400,375 +546,73 @@ def test_a_later_raids_board_places_reach_the_solve_past_its_first_group(reg, rs
     assert seen["pins"] == {ms[0].display_name: 2}
 
 
-# ---------------------------------------------------------------- Review Focus 3: a drag on the board as it is NOW
+def test_the_autofill_reads_the_events_own_first_come_priority_and_split(reg, rs, monkeypatch):
+    """Part B's values are the run's own (Edit event): Auto-fill reads them through _solve_run (run_first_come,
+    seat_bonus, run_strategy) on the run itself — a change to any of them reaches the next press."""
+    seen = []
 
-def _shown(reg, rs, cache, ev, layout):
-    """Put a picture in the cache for `ev`'s event (as a finished solve would)."""
-    size = rc.run_size(reg, ev)
-    first = rc.first_part(rs, ev)
-    e = cache.entries.get((reg.key, first.key))
-    previews = dict(e.previews) if e else {}
-    previews[ev.key] = rc.board_rosters(reg, ev, layout, size)
-    cache._keep((reg.key, first.key), "fp", previews)
+    def capture(reg_, rs_, p, *a, **k):
+        seen.append((rc.run_first_come(reg_, p), rc.run_strategy(reg_, p), rc.run_team(reg_, p).get("weights")))
+        return in_order()(reg_, rs_, p, *a, **k)
 
-
-def test_a_move_lands_on_the_board_as_it_is_now_when_the_preview_changed(reg, rs):
+    monkeypatch.setattr(rc, "_solve_run", capture)
     ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    bot = NightBot(reg, rs)
-    cache = eb.cache_of(bot)
-    ava = n[0]
-    # the page drew Ava in group 2 …
-    _shown(reg, rs, cache, ev, [n[1:6], [ava] + n[6:10], n[10:15], []])
-    # … another officer's move re-placed everyone: Ava is in group 3 now and group 1 starts with someone else
-    ev.layout = [[n[9]]]
-    ev.placed_by = {n[9]: B_ID}
-    rs.save(ev, "officer B")
-    _shown(reg, rs, cache, ev, [[n[9], n[2], n[3], n[4], n[5]], n[6:9] + [n[1]], [ava] + n[10:14], [n[14]]])
-    # the drop of Ava on group 1, position 0, sent against the OLD picture
-    asyncio.run(bot.board_move(reg, rs, ev, ava, (0, 0), "Jon", by_id=OWNER, shown=True))
-    assert ev.layout[0] == [ava] and ev.layout[2] == [n[9]], "Ava pinned to group 1; who group 1 held at 0 NOW takes her group 3"
-    assert {x for g in ev.layout for x in g} == {ava, n[9]}, "nobody else enters the officers' layout"
-    assert ev.placed_by == {ava: OWNER, n[9]: B_ID}, "the move is the mover's; the swapped partner stays B's (B's Undo, not mine)"
-    assert not ev.pins
-
-
-def test_moves_on_the_picture_to_not_placed_and_from_it(reg, rs):
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    bot = NightBot(reg, rs)
-    cache = eb.cache_of(bot)
-    _shown(reg, rs, cache, ev, [n[0:5], n[5:10], n[10:15], []])
-    asyncio.run(bot.board_move(reg, rs, ev, n[3], None, "Jon", by_id=OWNER, shown=True))
-    assert ev.pins == {str(ms[3].discord_id): "out"} and not ev.layout and ev.placed_by == {}, "Not placed = kept out of the lock"
-    assert ev.drag_pins == {str(ms[3].discord_id): {"by": OWNER, "was": None, "now": "out"}} and rc.own_moves(ev, OWNER) == [n[3]]
-    _shown(reg, rs, cache, ev, [n[0:3] + [n[4], n[15]], n[5:10], n[10:15], []])
-    asyncio.run(bot.board_move(reg, rs, ev, n[3], (1, 0), "Jon", by_id=OWNER, shown=True))
-    assert ev.pins == {str(ms[5].discord_id): "out"} and ev.layout[1] == [n[3]], "from Not placed onto someone: they go to Not placed, kept out"
-    assert ev.placed_by == {n[3]: OWNER} and set(ev.drag_pins) == {str(ms[5].discord_id)}, "n3's own pin is back as it was: nothing to undo"
-    assert rc.own_moves(ev, OWNER) == sorted([n[3], n[5]])
-    with pytest.raises(ValueError, match="full"):
-        asyncio.run(bot.board_move(reg, rs, ev, n[15], (2, 9), "Jon", by_id=OWNER, shown=True))
-
-
-def test_without_shown_the_move_is_the_officers_layout_as_before(reg, rs):
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    bot = NightBot(reg, rs)
-    _shown(reg, rs, eb.cache_of(bot), ev, [n[0:5], n[5:10], n[10:15], []])
-    asyncio.run(bot.board_move(reg, rs, ev, n[0], (1, 0), "Jon"))  # the Rosters page, MCP, plain text: no picture
-    assert ev.layout[1] == [n[0]] and not ev.pins and ev.placed_by == {}
-
-
-def test_the_move_route_carries_the_officer_and_the_picture(reg, rs, web_bot):
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    _shown(reg, rs, eb.cache_of(web_bot.bot), ev, [n[0:5], n[5:10], n[10:15], []])
-    r = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": n[12], "to": {"r": 0, "g": 0, "i": 1}, "state": "open", "shown": True}, headers=H())
-    assert r.status_code == 200, r.text
-    assert ev.layout[0] == [n[12]] and ev.layout[2] == [n[1]] and ev.placed_by == {n[12]: OWNER, n[1]: OWNER}
-
-
-# ---------------------------------------------------------------- Undo my moves: the server knows whose moves they are
-
-def test_undo_drops_only_my_moves(reg, rs, web_bot, monkeypatch):
-    monkeypatch.setattr(eb.BoardCache, "start", lambda self, *a, **k: None)  # the layout board: the moves below are on it
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    bot = web_bot.bot
-    run = asyncio.run
-    run(bot.board_move(reg, rs, ev, n[0], (0, 0), "Jon", by_id=OWNER, shown=True))
-    run(bot.board_move(reg, rs, ev, n[1], None, "Jon", by_id=OWNER, shown=True))  # kept out
-    run(bot.board_move(reg, rs, ev, n[2], (1, 0), "Bea", by_id=B_ID, shown=True))
-    j = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()
-    part = j["parts"][0]
-    assert part["mine"] == sorted([n[0], n[1]])
-    assert part["undo_box"]["sentences"][0] == "Your 2 moves on this board are dropped." and part["undo_box"]["verb"] == "Undo moves"
-    assert part["layout"][0] == [n[0]] and part["layout"][1] == [n[2]]
-    box = web_bot.c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "preview": True}, headers=H()).json()["box"]
-    assert box == part["undo_box"], "the route's box is the page's"
-    run(bot.board_move(reg, rs, ev, n[0], (2, 0), "Bea", by_id=B_ID))  # B moves one of mine meanwhile
-    r = web_bot.c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "seen": box["fp"]}, headers=H())
-    assert r.status_code == 409 and r.json()["box"]["sentences"][0] == "Your one move on this board is dropped.", "the fresh box: my count now"
-    r = web_bot.c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "seen": r.json()["box"]["fp"]}, headers=H())
-    assert r.status_code == 200, r.text
-    assert ev.placed_by == {n[0]: B_ID, n[2]: B_ID} and ev.pins == {}, "my kept-out pin goes, B's two placements stay"
-    assert ev.drag_pins == {}
-    assert {x for g in ev.layout for x in g} == {n[0], n[2]}
-    r = web_bot.c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "preview": True}, headers=H())
-    assert r.status_code == 400 and r.json()["box"]["verb"] is None, "no moves of mine: a refusal, only Back"
-
-
-def test_placed_by_is_pruned_with_the_board_and_cleared_at_the_lock(reg, rs, monkeypatch):
-    monkeypatch.setattr(rc, "propose", lambda reg_, rs_, ev_, save=True: setattr(ev_, "rosters", rc.board_rosters(
-        reg_, ev_, [[s.display_name for s in ev_.by_status("in")][:5]], rc.run_size(reg_, ev_))))
-    ev = rc.open_run(reg, rs, BD, start_in(reg), by="t", schedule=rc.ADHOC_SCHEDULE)
-    ms = reg.test_members()
-    join(reg, rs, ev, ms[:8])
-    n = [m.display_name for m in ms]
-    bot = NightBot(reg, rs)
-    asyncio.run(bot.board_move(reg, rs, ev, n[0], (0, 0), "Jon", by_id=OWNER))
-    asyncio.run(bot.board_move(reg, rs, ev, n[1], (1, 0), "Jon", by_id=OWNER))
-    asyncio.run(bot.save_board(reg, rs, ev, [[n[1]]], by="Jon"))  # a whole-board write without n[0]
-    assert ev.placed_by == {n[1]: OWNER}
-    asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
-    assert ev.state == "locked" and ev.placed_by == {} and ev.drag_pins == {}
-
-
-# ---------------------------------------------------------------- fix round 1
-
-def test_an_unexpected_failure_is_kept_as_failed_and_never_solved_again(reg, rs, monkeypatch, web_bot, caplog):
-    def boom(*a, **k):
-        raise KeyError("something nobody expected")
-
-    monkeypatch.setattr(rc, "event_board_preview", boom)
-    heard = []
-    monkeypatch.setattr(eb, "BOARD_LISTENERS", [lambda gk, key: heard.append(key)])
-    ev = one_off(reg, rs)
     join(reg, rs, ev, reg.test_members())
-    cache = eb.cache_of(web_bot.bot)
-    for _ in range(3):  # the page reloads on `run:`: the same answers never solve again
-        settle(cache, reg, rs, ev)
-    assert cache.solves == 1 and len([r for r in caplog.records if "board preview failed twice" in r.getMessage()]) == 1
-    assert heard == [ev.key], "the page is woken once, to show the failure"
-    j = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()
+    bot = NightBot(reg, rs)
+    fill(bot, reg, rs, ev)
+    team = rc.run_team(reg, ev)
+    team["first_come"] = not rc.run_first_come(reg, ev)
+    team["weights"] = {**(team.get("weights") or {}), "rank": 6}
+    reg.save_config("t: the event's own", notify=False)
+    ev.split_strategy = "rotation"
+    rs.save(ev, "split")
+    fill(bot, reg, rs, ev)
+    assert seen[0] != seen[1] and seen[1][0] == team["first_come"] and seen[1][1] == "rotation" and seen[1][2]["rank"] == 6
+
+
+# ---------------------------------------------------------------- the live two-raid event as it is stored today
+
+def test_the_live_two_raid_event_shows_an_empty_board_and_writes_nothing(data_root, old_store_with, monkeypatch):
+    """big-guys-for's open evening (a one-off Hyjal lead with a Barrow Deeps follow-on, phase 2's file shape, no board
+    placements), with 18 joined: after the start's stamps its event page shows each raid's empty board with all 18 in
+    Not placed, solves nothing and writes nothing — the run files are byte for byte what they were, so the lock reads
+    exactly what it read before (tests/test_event_board_solver.py and the model-hash probe cover the lock itself)."""
+    from fastapi.testclient import TestClient
+    from test_event_identity import _big_guys_pair, _old_guild, _soon
+    from test_mcp import TOKEN
+
+    from oibot_gm.web import app as web
+
+    classes = [("Warrior", "Protection", "tank"), ("Priest", "Holy", "healer"), ("Mage", "Fire", "ranged"), ("Rogue", "Combat", "melee"),
+               ("Druid", "Restoration", "healer"), ("Hunter", "Marksmanship", "ranged")]
+    t = _soon(48).replace(hour=18, minute=30)
+    cfg, _dicts, files = _big_guys_pair(t)
+    signups = {str(900 + i): rc.Signup(discord_id=900 + i, display_name=f"P{i}", character=f"P{i}", cls=classes[i % 6][0], spec=classes[i % 6][1],
+                                       role=classes[i % 6][2], status="in", updated_at="2026-11-20T10:00:00+00:00",
+                                       joined_at=f"2026-11-20T10:{i:02d}:00+00:00").model_dump(mode="json") for i in range(18)}
+    for f in files:
+        f["signups"] = signups
+    reg, rs, store = _old_guild(data_root, old_store_with, cfg, files)
+    rc.migrate_at_start(reg, rs)
+    store.flush()
+    lk, fk = files[0]["key"], files[1]["key"]
+    raids = data_root / reg.key / "raids"
+    before = {k: (raids / f"{k}.json").read_bytes() for k in (lk, fk)}
+    inputs = {k: rc.solve_inputs(rs.events[k]) for k in (lk, fk)}
+    calls = []
+    monkeypatch.setattr(rc, "_solve_run", lambda *a, **k: calls.append(1))
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    c = TestClient(web.create_app(NightBot(reg, rs)))
+    j = c.get(f"/api/event/{lk}", headers=H()).json()
+    assert [p["key"] for p in j["parts"]] == [lk, fk]
     for part in j["parts"]:
-        assert part["board_state"] == "failed" and part["board_error"] == PAGE_WORDS["board_failed"]
-        assert all(r["open"] is None for r in part["sheet"]["board"]["rosters"])
-    assert cache.solves == 1
-    join(reg, rs, ev, [])  # nothing changed: still failed, still one solve
-    rc.set_signup(reg, rs, ev, reg.test_members()[0], None, "out", source="test")
-    get(cache, reg, rs, ev)
-    assert cache.solves == 2, "new answers are worth another try"
-
-
-def test_a_drag_stays_where_it_was_dropped_while_the_board_is_placed_again(reg, rs, monkeypatch, web_bot):
-    monkeypatch.setattr(rc, "_solve_run", in_order())
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    bot = web_bot.bot
-    settle(eb.cache_of(bot), reg, rs, ev)
-    monkeypatch.setattr(eb.BoardCache, "start", lambda self, *a, **k: None)  # the new picture never comes: "working" throughout
-    asyncio.run(bot.board_move(reg, rs, ev, n[0], (2, 0), "Jon", by_id=OWNER, shown=True))
-    asyncio.run(bot.board_move(reg, rs, ev, n[6], None, "Jon", by_id=OWNER, shown=True))
-
-    def drawn():
-        part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
-        assert part["board_state"] == "working"
-        return [[s["display_name"] for s in g] for r in part["sheet"]["board"]["rosters"] for g in r["groups"]], part
-
-    groups, part = drawn()
-    assert n[0] in groups[2] and n[0] not in groups[0], "the drag is drawn at its target, not snapped back"
-    assert n[6] not in {x for g in groups for x in g} and n[6] in [s["display_name"] for s in part["sheet"]["board"]["bank"]], \
-        "dragged to Not placed: off the board"
-    assert all(len(g) <= 5 for g in groups) and len({x for g in groups for x in g}) == sum(len(g) for g in groups)
-    # a drag on that drawn board lands on what the page drew (the overlaid picture)
-    shown = eb.cache_of(bot).shown_layout(reg, ev)
-    assert shown[2] == groups[2]
-
-
-def test_overlay_places_hand_moves_and_moves_the_displaced_to_room(reg, rs):
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    old = rc.board_rosters(reg, ev, [n[0:5], n[5:10], n[10:14], []], rc.run_size(reg, ev))
-    ev.layout = [[n[12], n[13], n[15]], [], [], []]  # three placed in a full group 1
-    ev.pins[str(ms[7].discord_id)] = "out"
-    pic = rc.overlay_board(reg, ev, old)
-    flat_ = [list(g) for r in pic for g in r.groups]
-    assert flat_[0][:3] == [n[12], n[13], n[15]] and len(flat_[0]) == 5
-    assert n[7] not in {x for g in flat_ for x in g}
-    assert {n[3], n[4]} <= set(flat_[2]) | set(flat_[3]), "whoever group 1 can't keep goes where there is room"
-    assert sorted(x for g in flat_ for x in g) == sorted(set(n[:14]) - {n[7]} | {n[15]}), "n14 was in no picture: Not placed"
-
-
-def test_no_board_solve_starts_while_a_lock_solves_and_one_in_flight_gives_way(reg, rs, monkeypatch):
-    import threading
-
-    monkeypatch.setattr(rc, "_solve_run", in_order())
-    real = rc.event_board_preview
-    started, release, calls = threading.Event(), threading.Event(), []
-
-    def preview(reg_, view, first, parts, stop=None, **kw):
-        calls.append(stop)
-        if len(calls) == 1:  # the first picture is still solving when the lock begins
-            started.set()
-            release.wait(5)
-            if stop is not None and stop.stopped:
-                raise eb.solver.Stopped()
-        return real(reg_, view, first, parts, stop, **kw)
-
-    monkeypatch.setattr(rc, "event_board_preview", preview)
-    ev = one_off(reg, rs, lineup=[])
-    other = rc.open_run(reg, rs, BD, start_in(reg, 4), by="t", schedule=rc.ADHOC_SCHEDULE)
-    join(reg, rs, ev, reg.test_members())
-    join(reg, rs, other, reg.test_members()[:4])
-    bot = NightBot(reg, rs)
-    cache = eb.cache_of(bot)
-    key = (reg.key, ev.key)
-
-    async def go():
-        assert (await cache.get(reg, rs, ev))[0] == "working"
-        await asyncio.to_thread(started.wait, 5)
-        async with bot.solving(reg, other.key):  # a lock begins elsewhere: it never waits on the picture
-            assert calls[0].stopped, "the picture in flight is told to stop at once"
-            release.set()
-            while cache.tasks:
-                await asyncio.gather(*list(cache.tasks.values()))
-            assert key in cache.waiting and key not in cache.entries, "abandoned: nothing kept, it waits"
-            assert (await cache.get(reg, rs, other))[0] == "working" and cache.solves == 1, "no picture starts while the lock solves"
-            assert (reg.key, other.key) in cache.waiting
-        while cache.tasks:  # the lock is over: the pictures that waited start again
-            await asyncio.gather(*list(cache.tasks.values()))
-        return await cache.get(reg, rs, ev), await cache.get(reg, rs, other)
-
-    (st, pv), (st2, _) = asyncio.run(go())
-    assert st == st2 == "ready" and cache.solves == 3 and not cache.waiting
-
-
-def test_moves_from_elsewhere_clear_whose_move_it_was(reg, rs):
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    bot = NightBot(reg, rs)
-    asyncio.run(bot.board_move(reg, rs, ev, n[0], (0, 0), "Jon", by_id=OWNER))
-    asyncio.run(bot.board_move(reg, rs, ev, n[0], (1, 0), "plain text"))  # from Discord / plain text / MCP: nobody's
-    assert ev.placed_by == {} and rc.own_moves(ev, OWNER) == [], "my Undo never takes back someone else's later move"
-
-
-def test_undo_reverses_only_what_my_drags_did_to_pins(reg, rs):
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    u = {x: str(m.discord_id) for x, m in zip(n, ms)}
-    bot = NightBot(reg, rs)
-    ev.pins[u[n[1]]] = "out"  # kept off on the Rosters page
-    rs.save(ev, "a pin from elsewhere")
-    asyncio.run(bot.board_move(reg, rs, ev, n[1], (0, 0), "Jon", by_id=OWNER, shown=True))  # my drag lifts it
-    asyncio.run(bot.board_move(reg, rs, ev, n[2], (1, 0), "Jon", by_id=OWNER, shown=True))
-    ev.pins[u[n[2]]] = "out"  # then plain text "keep n2 off"
-    rs.save(ev, "a pin from elsewhere")
-    assert ev.pins.get(u[n[1]]) is None and rc.own_moves(ev, OWNER) == sorted([n[1], n[2]])
-    asyncio.run(bot.undo_moves(reg, rs, ev, OWNER, "Jon"))
-    assert ev.pins[u[n[1]]] == "out", "the out pin my drag lifted is back"
-    assert ev.pins[u[n[2]]] == "out", "a pin set elsewhere is never touched"
-    assert {x for g in ev.layout or [] for x in g} == set() and ev.placed_by == {} and ev.drag_pins == {}
-
-
-def test_the_fingerprint_ignores_what_the_solve_never_reads(reg, rs):
-    ev = one_off(reg, rs)
-    ms = people(reg, 8)
-    join(reg, rs, ev, ms[:6])
-    a = _fp(reg, rs, ev)
-    c = next(c for c in ms[0].characters if c.is_main)
-    rc.set_signup(reg, rs, ev, ms[0], c.label, "in", source="test")  # a re-press with the same answer
-    assert _fp(reg, rs, ev) == a, "a re-press moves updated_at only"
-    reg.config.team(ev.team)["health_message_id"] = 123  # a card id written to the run dict
-    ev.cards["health"] = 456
-    reg.save_config("a card", notify=False)
-    rs.save(ev, "a card")
-    assert _fp(reg, rs, ev) == a, "a card id is no input of the solve"
-
-
-def test_two_drags_in_a_row_without_a_reload_read_the_first(reg, rs, monkeypatch, web_bot):
-    """The page drew a current picture, then two drags land before any reload (the new picture never comes): the second
-    is read on the picture WITH the first on top — never on the stale one, which would undo it."""
-    monkeypatch.setattr(rc, "_solve_run", in_order())
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    n = [m.display_name for m in ms]
-    bot = web_bot.bot
-    cache = eb.cache_of(bot)
-    settle(cache, reg, rs, ev)
-    assert web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]["board_state"] == "ready"
-    monkeypatch.setattr(eb.BoardCache, "start", lambda self, *a, **k: None)  # no reload, no new picture
-    asyncio.run(bot.board_move(reg, rs, ev, n[0], None, "Jon", by_id=OWNER, shown=True))  # group 1's first to Not placed
-    asyncio.run(bot.board_move(reg, rs, ev, n[5], (0, 0), "Jon", by_id=OWNER, shown=True))  # then a drop at group 1's top
-    assert ev.pins.get(str(ms[0].discord_id)) == "out" and n[0] not in {x for g in ev.layout for x in g}, \
-        "the first drag stands: the second never swapped with who the stale picture showed there"
-    assert n[5] in ev.layout[0]
-
-
-def test_a_board_bug_never_reaches_the_solve(reg, rs, monkeypatch, caplog):
-    bot = NightBot(reg, rs)
-    ev = one_off(reg, rs, lineup=[])
-
-    def boom(self):
-        raise RuntimeError("board bug")
-
-    async def solve_twice():
-        out = []
-        async with bot.solving(reg, ev.key):
-            out.append("solved")
-        with pytest.raises(ValueError):  # the wrapped block's own failure stays its own
-            async with bot.solving(reg, ev.key):
-                raise ValueError("the lock's")
-        return out
-
-    monkeypatch.setattr(eb.BoardCache, "pause", boom)
-    assert asyncio.run(solve_twice()) == ["solved"], "pause raising: the solve still runs and returns"
-    monkeypatch.undo()
-    monkeypatch.setattr(eb.BoardCache, "resume", boom)
-    assert asyncio.run(solve_twice()) == ["solved"], "resume raising: the result is unaffected"
-    assert len([r for r in caplog.records if "board cache" in r.getMessage()]) == 4
-
-
-def test_a_locked_raid_counts_seats_and_undo_says_why_it_is_greyed(reg, rs, monkeypatch, web_bot):
-    """Fix round 1: a locked (or finished) raid's board counts who holds a seat — "15 of 14 joined" came from the lock
-    seating someone from the Bench — as `rostered_words` from PAGE_WORDS, never `placed_words`. An open raid where the
-    officer moved nobody sends the reason Undo my moves is greyed (`undo_why`, the route's own refusal sentence)."""
-    from conftest import lock_with_board
-
-    monkeypatch.setattr(rc, "_solve_run", in_order())
-    ev = one_off(reg, rs, lineup=[])
-    ms = reg.test_members()
-    join(reg, rs, ev, ms)
-    settle(eb.cache_of(web_bot.bot), reg, rs, ev)
-    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
-    assert part["undo_box"] is None and part["undo_why"] == PAGE_WORDS["no_moves"]
-    assert part["rostered_words"] is None and part["placed_words"] == f"{len(ms)} of {len(ms)} joined"
-    bd = rc.open_run(reg, rs, BD, start_in(reg, 4), by="t", schedule=rc.ADHOC_SCHEDULE)
-    join(reg, rs, bd, ms[:9])
-    rc.set_signup(reg, rs, bd, ms[9], None, "sub", source="test")  # the lock seats someone from the Bench
-    lock_with_board(reg, rs, bd, [s.display_name for s in bd.by_status("in")] + [bd.signups[str(ms[9].discord_id)].display_name])
-    locked = web_bot.c.get(f"/api/event/{bd.key}", headers=H()).json()["parts"][0]
-    assert locked["placed_words"] is None and locked["undo_why"] is None
-    assert locked["rostered_words"] == PAGE_WORDS["seats_of"].format(n=10, size=10)
-
-
-def test_a_failure_once_is_solved_again_before_it_is_kept_as_failed(reg, rs, monkeypatch, web_bot):
-    """The final review: the solve thread reads members and other runs the loop writes meanwhile, so a transient read
-    error (a dict that changed size mid-read) was kept as "failed" until an input changed. It is solved once more first."""
-    real, tries = rc.event_board_preview, []
-
-    def flaky(*a, **k):
-        tries.append(1)
-        if len(tries) == 1:
-            raise RuntimeError("dictionary changed size during iteration")
-        return real(*a, **k)
-
-    monkeypatch.setattr(rc, "event_board_preview", flaky)
-    monkeypatch.setattr(rc, "_solve_run", in_order())  # no CP-SAT: the retry is what is measured
-    ev = one_off(reg, rs)
-    join(reg, rs, ev, reg.test_members())
-    cache = eb.cache_of(web_bot.bot)
-    settle(cache, reg, rs, ev)
-    st, previews = get(cache, reg, rs, ev)
-    assert len(tries) == 2 and st == "ready" and cache.solves == 1
-    assert all(isinstance(v, list) for v in previews.values()), "a picture, never the failed sentence"
+        board = part["sheet"]["board"]
+        assert part["board_state"] == "open" and part["placed_words"] == "0 of 18 joined"
+        assert all(not g for r in board["rosters"] for g in r["groups"]) and len(board["bank"]) == 18
+        assert part["autofill"] == {"working": False, "words": None, "failed": False}
+    store.flush()
+    assert calls == [], "nothing solved"
+    assert {k: (raids / f"{k}.json").read_bytes() for k in (lk, fk)} == before, "nothing written: the lock reads what it read"
+    assert {k: rc.solve_inputs(rs.events[k]) for k in (lk, fk)} == inputs
+    assert all(rs.events[k].layout is None and not rs.events[k].pins and rs.events[k].auto_placed == [] for k in (lk, fk))

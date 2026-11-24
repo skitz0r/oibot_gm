@@ -2721,7 +2721,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         if kind == "comp":
             if arg not in reg.profile.raids:
                 raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
-            return f"test bench: a {reg.raid_def(arg).get('name', arg)} comp sandbox two weeks out with all {n} test members joined (not posted); its event page draws the board as the lock would place them"
+            return f"test bench: a {reg.raid_def(arg).get('name', arg)} comp sandbox two weeks out with all {n} test members joined (not posted); Auto-fill groups on its event page shows the best comp from them"
         if kind == "run":
             from .presets import TEMPOS
 
@@ -2907,7 +2907,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         why = strategy_refusal(reg, ev)  # the site's and MCP's refusal: a locked roster's split never changes
         if why:
             raise RegistryError(why)
-        return f"{label}: split strategy {ev.split_strategy or reg.raid_def(ev.instance).get('split_policy', 'balanced')} → {v} (the board is placed again this way and the lock uses it)"
+        return f"{label}: split strategy {ev.split_strategy or reg.raid_def(ev.instance).get('split_policy', 'balanced')} → {v} (Auto-fill groups and the lock split it this way)"
     if op.op == "run_autofill":
         if ev.state != "open":
             raise RegistryError("already locked — move people on the board instead")
@@ -3134,11 +3134,11 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         rs, ev = _live_event(reg, op.target, raids)
         if ev.state != "open":
             raise RegistryError("already locked — move people on the board instead")
-        try:
-            layout = rc.autofill(reg, rs, ev)
-        except RuntimeError as e:
+        try:  # the lock's own solve (a later raid reads who the raids before it will roster, as its lock does)
+            layout, auto = rc.autofill(reg, rs, ev, earlier=rc.earlier_counts(reg, rs, ev))
+        except Exception as e:  # noqa: BLE001 — infeasible, a conflict, timed out: the solver's sentence
             raise RegistryError(rc.solver_error_text(e))
-        ev.layout = layout
+        ev.layout, ev.auto_placed = layout, auto
         ev.log.append(f"{by}: auto-filled the board")
         rs.save(ev, "board auto-filled")
         return f"{run_words(reg, ev)}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
@@ -3566,7 +3566,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             if arg not in reg.profile.raids:
                 raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
             ev = await bot.test_comp(reg, rs, arg, by, by_id, via=via)
-            return f"comp sandbox {run_words(reg, ev)}: {len(reg.test_members())} test members joined; its event page draws the board as the lock would place them"
+            return f"comp sandbox {run_words(reg, ev)}: {len(reg.test_members())} test members joined; Auto-fill groups on its event page shows the best comp from them"
         from .presets import TEMPOS
 
         raid, tempo, dm = _test_run_args(reg, arg)  # the /gm test run recipe: a real sheet with minute-level cadence, the pool = puppets + the tester
@@ -3668,21 +3668,15 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         was_open = ev.state == "open"
         line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via)
         return line if was_open else f"{run_words(reg, ev)}: {line}"  # before lock the line names the run itself
-    if op.op == "run_autofill":
-        if ev.state != "open":
-            raise RegistryError("already locked — move people on the board instead")
-        async with bot.solving(reg, ev.key):  # the run's solver single-flight (RaidMixin.solving), as the site's Auto-fill
-            rev = rev or rc.board_rev(reg, ev)  # a drag during the solve wins: the fill is refused, never overwrites it
-            try:
-                layout = await asyncio.to_thread(rc.autofill, reg, rs, ev)
-            except RuntimeError as e:
-                raise RegistryError(rc.solver_error_text(e))
-            ev.log.append(f"{by}: auto-filled the board")
-            try:
-                await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via)
-            except RegistryError:
-                ev.log.pop()
-                raise
+    if op.op == "run_autofill":  # the site's Auto-fill groups (event_board.AutoFill), waited for
+        from .event_board import autofill_of
+
+        if rev and rev != rc.board_rev(reg, ev):  # worded against another board: refused, nothing solved
+            raise rc.BoardChanged()
+        said = await autofill_of(bot).start(reg, rs, ev, by=by, by_id=by_id, via=via)
+        if said is not None:  # a drag during the solve wins (the fill writes nothing), a lock stops it, a failure says why
+            raise RegistryError(said)
+        layout = [g for g in (ev.layout or []) if g]
         return f"{run_words(reg, ev)}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
     # run_strategy, run_fill preview: registry/store only
     if op.op == "run_fill":

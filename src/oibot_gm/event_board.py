@@ -1,145 +1,62 @@
-"""The Events page's board before the lock: every open raid of an event drawn as its lock would place people NOW
-(phase 4, design §7a). The placement is the lock's own solve (rc.event_board_preview → rc._solve_run with the lock's
-strategy and budget), so it is the roster lock_run then builds; this module only decides WHEN to solve and keeps the
-answer.
+"""Auto-fill groups (the owner's tweaks C, 2026-11-24): the Events board before the lock is the OFFICERS' board, and
+nothing is solved until an officer presses the button. One press = ONE run of the lock's own solve for one raid
+(rc.autofill → rc._solve_run: the run's strategy, the lock's budget, `earlier` from rc.earlier_counts for a later
+raid), written into that raid's board as placements (ev.auto_placed) — hand placements and kept-off pins kept. This
+module only decides WHEN it runs and what the page is told meanwhile.
 
-- `fingerprint(reg, view, parts)` = only what the solve reads, computed the way the solve computes it (players_for —
-  answers, characters, ranks, attendance, the order people joined in —, seat_bonus — the weights, regulars, sat out —,
-  the pins, the officers' board, the strategy, size, rosters, minimums, the comp policy) for each open raid, and each
-  locked raid's roster for the raids after it. A change to any of them is a new fingerprint: a picture is never shown as
-  current for inputs it wasn't solved from; a change to none of them (a re-press with the same answer, a card id written
-  to the run) is the same fingerprint and no new solve. It reads the SNAPSHOT taken on the loop (`snapshot` +
-  `frozen`), never the live store from its thread.
-- `BoardCache` (one per bot: `cache_of(bot)`), keyed (guild key, event key = the first raid's run key), holding ONE
-  entry per event: (fingerprint, previews, time). `get` answers at once: "ready" with the previews when the fingerprint
-  matches; else it starts ONE background solve for the event (never two at once for an event, never twice for one
-  fingerprint) and answers "working" with the previous picture (or None). The solves run on a dedicated
-  PREVIEW_WORKERS-thread executor — never on the event loop, never in the request threads' pool — so six events opened
-  in six tabs queue there one after another. An event nobody joined is answered inline (nothing to solve). A finished
-  solve is kept; when the fingerprint still holds, BOARD_LISTENERS hear (guild key, event key) and the web publishes
-  `run:<event key>` so the page reloads. A solve that went stale meanwhile is kept as the previous picture and solved
-  again for the new fingerprint when a page asked for it meanwhile. A solve that fails unexpectedly is solved once
-  more at once (the thread reads members and other runs the loop writes meanwhile: a transient read is not the input
-  failing); failing again, it is kept as every open raid's BOARD_FAILED sentence under that fingerprint: logged once,
-  never solved again for it. An entry
-  goes when its event has no open raid any more (looked at every `get` of the guild) and past MAX_BOARDS (least
-  recently used).
-- The lock comes first: the pictures share the CPU with the lock's own CP-SAT solve, and a lock slowed to the solver's
-  wall-clock net (solver.WALL_CEILING) is no longer repeatable. So while any solve holds a run (RaidMixin.solving: a
-  lock, Preview lock, an auto-fill, a split preview) no picture starts — it waits — and a picture solving when one
-  begins is abandoned at once (solver.Stop → CpSolver.stop_search; the lock never waits on it) and solved again when
-  the last such solve ends (`pause` / `resume`, called by RaidMixin.solving).
-- `shown_layout(reg, ev)` = the flat groups of the picture the server holds for that raid: what a drag on the page is
-  applied to (rc.apply_move_shown, RaidMixin.board_move)."""
+- `AutoFill` (one per bot: `autofill_of(bot)`), keyed (guild key, raid key). `start` refuses in one sentence (the raid
+  is locked, nobody joined, a lock-side solve is running) or starts ONE background task for the raid (a second press
+  while it works gets the same task) and answers at once; the page shows `state`'s working words until the board
+  updates (the write publishes `run:<raid key>`; AUTOFILL_LISTENERS hear every end that writes nothing).
+- The solve runs on a dedicated PREVIEW_WORKERS executor, never on the event loop, over a SNAPSHOT of the event's raids
+  taken on the loop (`snapshot` + `frozen`): the thread never reads a run the loop is writing.
+- The write: under the raid's board lock, only when the board is still the one it solved from (rc.board_rev) and the
+  raid is still open — else nothing is written and the sentence says so (AUTOFILL_CHANGED). A failure keeps the
+  solver's own sentence (rc.solver_error_text); both stay on the page while the board is unchanged.
+- The lock comes first: RaidMixin.solving (every lock, Preview lock and split preview) calls `stop_all` once it holds
+  the run, which abandons every running auto-fill (solver.Stop → CpSolver.stop_search): it writes nothing and says so
+  (AUTOFILL_STOPPED). While such a solve runs no auto-fill starts (AUTOFILL_BUSY)."""
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
-import time
-from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from types import SimpleNamespace
 
 from . import raidcycle as rc
 from .constants import PAGE_WORDS
-from .registry import Registry
+from .registry import Registry, RegistryError
 from .roster import solver
 
 log = logging.getLogger(__name__)
 
-PREVIEW_WORKERS = 1  # board solves at once in the process: each is a lock-sized CP-SAT solve (8 search workers)
-MAX_BOARDS = 32  # events whose picture is kept (least recently used goes first)
-MEMO_PER_EVENT = 8  # raid answers kept per event (least recently used goes first): a move on one raid re-solves only it
-BOARD_LISTENERS: list = []  # fn(guild key, event key): a new current picture (the web publishes `run:<event key>`)
+PREVIEW_WORKERS = 1  # auto-fill solves at once in the process: each is a lock-sized CP-SAT solve (8 search workers)
+AUTOFILL_LISTENERS: list = []  # fn(guild key, raid key): an auto-fill started or ended (the web publishes `run:<raid key>`)
 
 
-def snapshot(rs: "rc.RaidStore", first: "rc.RaidEvent") -> list["rc.RaidEvent"]:
-    """The event's raids, deep-copied ON THE LOOP (where run writes happen), in order: what one solve and its
-    fingerprint read, consistent with each other."""
-    return [p.model_copy(deep=True) for p in rc.event_parts(rs, rc.first_part(rs, first))]
+def snapshot(rs: "rc.RaidStore", ev: "rc.RaidEvent") -> list["rc.RaidEvent"]:
+    """The event's raids, deep-copied ON THE LOOP (where run writes happen), in order: what one solve reads."""
+    return [p.model_copy(deep=True) for p in rc.event_parts(rs, rc.first_part(rs, ev))]
 
 
-def frozen(rs: "rc.RaidStore") -> SimpleNamespace:
+def frozen(rs: "rc.RaidStore", parts: list["rc.RaidEvent"]) -> SimpleNamespace:
     """The run store as the solve reads it (seat_bonus's sat-out looks at the other runs; the comp policy is a file),
-    taken on the loop: a copy of the run index, so a thread never iterates the live one while a run is added."""
-    return SimpleNamespace(events=dict(rs.events), store=rs.store, key=rs.key)
+    taken on the loop: a copy of the run index with the event's own raids replaced by `parts` (the snapshot)."""
+    return SimpleNamespace(events={**rs.events, **{p.key: p for p in parts}}, store=rs.store, key=rs.key)
 
 
-def needs_solve(parts: list["rc.RaidEvent"]) -> bool:
-    return any(p.state == "open" and p.by_status("in") for p in parts)
-
-
-def _comp(view) -> dict:
-    from .policy import PolicyStore
-
-    return PolicyStore(view.store, view.key).comp_constraints()
-
-
-def _raid_row(reg: Registry, view, p: "rc.RaidEvent") -> list:
-    """One raid's own solve inputs, as the solve computes them (see the module doc)."""
-    if p.state != "open":  # a locked raid's roster is what the raids after it prefer
-        return [p.key, p.state, [[list(g) for g in r.groups] for r in p.all_rosters],
-                sorted(str(rc.player_uid(p, x)) for x in p.seated())]
-    players = rc.players_for(reg, p)
-    size = rc.run_size(reg, p)
-    strategy = rc.run_strategy(reg, p)
-    raid_id = p.instance if p.instance in reg.profile.raids else next(iter(reg.profile.raids))
-    return [p.key, p.state, p.part, p.follows, p.starts_at,
-            # the answers as the solve reads them: status, character, class, spec, offspec, role; the pins, the
-            # officers' board, the run's own split — never the time of a re-press
-            [(k, s.display_name, s.character, s.cls, s.spec, s.offspec, s.role, s.status, s.source)
-             for k, s in sorted(p.signups.items())],
-            sorted(p.pins.items()), p.layout, p.split_strategy,
-            [x.model_dump() for x in players],  # the join order (pos), rank, attendance, tank alts
-            rc.seat_bonus(reg, view, p, players), strategy, size, rc.run_rosters(reg, p), rc.run_kind(reg, p),
-            reg.minimums(raid_id, size), reg.role_bounds(raid_id, size),
-            (int(reg.raid_def(raid_id)["weights"].get("sat_out", 2)),
-             sorted(rc.sat_out_last_window(reg, view, p, first_only=True))) if strategy == "rotation" else None]
-
-
-def _hash(rows) -> str:
-    return hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:16]
-
-
-def fingerprint(reg: Registry, view, parts: list["rc.RaidEvent"]) -> str:
-    """What the board's solves read (see the module doc), hashed. BLOCKING (players_for reads attendance): a thread.
-    `view` = frozen(rs), `parts` = snapshot()."""
-    return _hash([_comp(view)] + [_raid_row(reg, view, p) for p in parts])
-
-
-def raid_key(reg: Registry, view, comp: dict, p: "rc.RaidEvent", earlier: dict | None) -> str:
-    """One raid's solve, keyed by everything it reads: its own inputs (_raid_row), the comp policy, the `earlier` map
-    it is handed (the raids before it, as their pictures roster them) and the budget. The per-raid memo's key."""
-    return _hash([comp, _raid_row(reg, view, p), sorted((earlier or {}).items()) if earlier is not None else None,
-                  rc.SOLVE_TIME_LIMIT_S])
-
-
-@dataclass
-class Entry:
-    fp: str
-    previews: dict
-    at: float
-
-
-class BoardCache:
+class AutoFill:
     def __init__(self, bot=None) -> None:
-        self.bot = bot  # whose RaidMixin.solving marks a lock-side solve (bot._solver_locks)
-        self.entries: OrderedDict[tuple[str, str], Entry] = OrderedDict()
-        self.running: dict[tuple[str, str], str] = {}  # event → the fingerprint being solved now
-        self.asked: set[tuple[str, str]] = set()  # events a page asked for another fingerprint while one was solving
-        self.waiting: dict[tuple[str, str], tuple] = {}  # events whose picture waits for a lock-side solve to end
-        self.stops: dict[tuple[str, str], solver.Stop] = {}
+        self.bot = bot  # whose RaidMixin.solving marks a lock-side solve (bot._solver_locks), and whose board lock the write takes
         self.tasks: dict[tuple[str, str], asyncio.Task] = {}
-        self.solves = 0  # solves started (tests, the Host's curiosity)
-        self.memo: dict[tuple[str, str], "OrderedDict[str, object]"] = {}  # event → {raid_key: that raid's answer}
+        self.stops: dict[tuple[str, str], solver.Stop] = {}
+        self.said: dict[tuple[str, str], tuple[str, str]] = {}  # raid → (the outcome sentence, the board it was about)
+        self.solves = 0  # solves started (tests)
         self._pool: ThreadPoolExecutor | None = None
 
     def pool(self) -> ThreadPoolExecutor:
         if self._pool is None:
-            self._pool = ThreadPoolExecutor(max_workers=PREVIEW_WORKERS, thread_name_prefix="board-preview")
+            self._pool = ThreadPoolExecutor(max_workers=PREVIEW_WORKERS, thread_name_prefix="autofill")
         return self._pool
 
     def busy(self) -> bool:
@@ -147,199 +64,114 @@ class BoardCache:
         locks = (self.bot.__dict__.get("_solver_locks") or {}) if self.bot is not None else {}
         return any(lk.locked() for lk in list(locks.values()))
 
-    def pause(self) -> None:
-        """A lock-side solve begins: every picture solving now is abandoned (it is solved again at `resume`)."""
+    def stop_all(self) -> None:
+        """A lock-side solve begins: every running auto-fill is abandoned (it writes nothing)."""
         for st in list(self.stops.values()):
             st.stop()
 
-    def resume(self) -> None:
-        """A lock-side solve ended: once none holds a run, the pictures that waited start again (each re-reads its
-        event: the fingerprint may have moved meanwhile)."""
-        if self.busy() or not self.waiting:
-            return
-        waiting, self.waiting = self.waiting, {}
-        loop = asyncio.get_running_loop()
-        for key, (reg, rs) in waiting.items():
-            if key not in self.tasks:  # a task already working on the event re-reads it itself
-                self.tasks[key] = loop.create_task(self._again(reg, rs, key[1]))
+    def state(self, reg: Registry, ev: "rc.RaidEvent") -> dict:
+        """What the page shows beside the button for raid `ev`: {working, words, failed} — the working words while it
+        runs; afterwards the sentence of an auto-fill that wrote nothing, while the board is still the one it was about."""
+        key = (reg.key, ev.key)
+        if key in self.tasks:
+            return {"working": True, "words": PAGE_WORDS["autofill_working"], "failed": False}
+        said = self.said.get(key)
+        if said is not None and said[1] == rc.board_rev(reg, ev):
+            return {"working": False, "words": said[0], "failed": True}
+        return {"working": False, "words": None, "failed": False}
 
-    async def _again(self, reg: Registry, rs: "rc.RaidStore", fkey: str) -> None:
-        key = (reg.key, fkey)
-        try:
-            first = rs.events.get(fkey)
-            if first is None:
-                return
-            parts, view = snapshot(rs, first), frozen(rs)
-            if not needs_solve(parts):
-                return
-            fp = await asyncio.to_thread(fingerprint, reg, view, parts)
-            have = self.entries.get(key)
-            if have is None or have.fp != fp:
-                self.tasks.pop(key, None)  # this task hands over to the solve it starts
-                self.start(reg, rs, fkey, fp, parts, view)
-        finally:
-            if self.tasks.get(key) is asyncio.current_task():
-                self.tasks.pop(key, None)
-
-    def _keep(self, key: tuple[str, str], fp: str, previews: dict) -> None:
-        self.entries[key] = Entry(fp, previews, time.time())
-        self.entries.move_to_end(key)
-        while len(self.entries) > MAX_BOARDS:
-            gone, _ = self.entries.popitem(last=False)
-            self.memo.pop(gone, None)
-
-    def _drop(self, key: tuple[str, str]) -> None:
-        self.entries.pop(key, None)
-        self.memo.pop(key, None)
-
-    def _preview(self, reg: Registry, view, parts: list["rc.RaidEvent"], stop, key: tuple[str, str]) -> dict:
-        """rc.event_board_preview with the event's per-raid memo (BLOCKING: the executor thread). The memo is an LRU
-        of MEMO_PER_EVENT answers; only this thread writes it."""
-        memo = self.memo.setdefault(key, _Lru(MEMO_PER_EVENT))
-        comp = _comp(view)
-        return rc.event_board_preview(reg, view, parts[0], parts, stop, memo=memo,
-                                      raid_key=lambda p, earlier: raid_key(reg, view, comp, p, earlier))
-
-    def prune(self, reg: Registry, rs: "rc.RaidStore") -> None:
-        """Drop the guild's entries whose event has no open raid any more (locked, finished, cancelled or gone)."""
-        for gk, fkey in [k for k in self.entries if k[0] == reg.key]:
-            first = rs.events.get(fkey)
-            if first is None or not any(p.state == "open" for p in rc.event_parts(rs, first)):
-                self._drop((gk, fkey))
-
-    async def get(self, reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent") -> tuple[str, dict | None]:
-        """The event's board pictures: ("ready", previews) for the current fingerprint; ("working", the previous
-        previews | None) while a solve runs or waits (one is started when none is); ("locked", None) when no raid is
-        open."""
-        first = rc.first_part(rs, ev)
-        key = (reg.key, first.key)
-        self.prune(reg, rs)
-        parts, view = snapshot(rs, first), frozen(rs)
-        if not any(p.state == "open" for p in parts):
-            return "locked", None
-        fp = await asyncio.to_thread(fingerprint, reg, view, parts)
-        have = self.entries.get(key)
-        if have is not None and have.fp == fp:
-            self.entries.move_to_end(key)
-            return "ready", have.previews
-        if not needs_solve(parts):  # nobody joined: empty groups, no solve, nothing to wait for
-            previews = await asyncio.to_thread(rc.event_board_preview, reg, view, first, parts)  # board_rosters reads attendance
-            self._keep(key, fp, previews)
-            return "ready", previews
-        self.start(reg, rs, first.key, fp, parts, view)
-        return "working", (have.previews if have is not None else None)
-
-    def start(self, reg: Registry, rs: "rc.RaidStore", fkey: str, fp: str, parts: list["rc.RaidEvent"], view=None) -> None:
-        """One background solve for the event; while one runs, a page asking for another fingerprint is noted and the
-        running one solves again when it ends (never two at once, never twice for one fingerprint). While a lock-side
-        solve holds a run, nothing starts: the event waits for `resume`."""
-        key = (reg.key, fkey)
-        if key in self.running:
-            if self.running[key] != fp:
-                self.asked.add(key)
-            return
+    def refusal(self, reg: Registry, ev: "rc.RaidEvent") -> str | None:
+        if ev.state != "open":
+            return PAGE_WORDS["autofill_locked"]
+        if not ev.by_status("in"):
+            return PAGE_WORDS["autofill_nobody"]
         if self.busy():
-            self.waiting[key] = (reg, rs)
-            return
-        self.running[key] = fp
-        self.stops[key] = solver.Stop()
+            return PAGE_WORDS["autofill_busy"]
+        return None
+
+    def start(self, reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", *, by: str, by_id: int | None, via: str) -> asyncio.Task:
+        """Press Auto-fill groups on raid `ev` (on the loop): RegistryError with the refusal's sentence, else the task
+        (already running → that task). The task's result is the outcome sentence, None when the board was filled."""
+        key = (reg.key, ev.key)
+        if key in self.tasks:
+            return self.tasks[key]
+        if (why := self.refusal(reg, ev)):
+            raise RegistryError(why)
+        self.said.pop(key, None)
+        self.stops[key] = stop = solver.Stop()
         self.solves += 1
-        self.tasks[key] = asyncio.get_running_loop().create_task(self._solve(reg, rs, fkey, fp, parts, view or frozen(rs)))
+        task = asyncio.get_running_loop().create_task(self._run(reg, rs, ev.key, stop, by, by_id, via))
+        self.tasks[key] = task
+        self._tell(reg.key, ev.key)
+        return task
 
-    async def _solve(self, reg: Registry, rs: "rc.RaidStore", fkey: str, fp: str, parts: list["rc.RaidEvent"], view) -> None:
-        key = (reg.key, fkey)
-        previews, stop = None, self.stops[key]
+    def _solve(self, reg: Registry, view, part: "rc.RaidEvent", stop: solver.Stop) -> tuple[list[list[str]], list[str]]:
+        """BLOCKING (the executor): who the raids before it will roster, then this raid's own lock solve."""
+        earlier = rc.earlier_counts(reg, view, part, stop=stop)
+        return rc.autofill(reg, view, part, earlier=earlier, stop=stop)
+
+    async def _run(self, reg: Registry, rs: "rc.RaidStore", key: str, stop: solver.Stop, by: str, by_id: int | None, via: str) -> str | None:
+        k = (reg.key, key)
+        said: str | None = None
+        answer = None
         try:
-            for attempt in (1, 2):
-                try:
-                    previews = await asyncio.get_running_loop().run_in_executor(self.pool(), self._preview, reg, view, parts, stop, key)
-                    break
-                except solver.Stopped:
-                    raise
-                except Exception:  # noqa: BLE001 — the unexpected kind (a raid's own failure is its sentence)
-                    if attempt == 2:
-                        raise
-                    # once more on the run store as it is now: the thread reads members and other runs that the loop
-                    # writes meanwhile (a dict that changed size mid-read), which is not the input failing
-                    log.warning("board preview failed once (%s %s); solving again", reg.key, fkey, exc_info=True)
-                    view = frozen(rs)
-        except solver.Stopped:  # a lock-side solve began: this picture waits for it and is solved again after
-            self.waiting[key] = (reg, rs)
-        except Exception:  # noqa: BLE001 — a raid's own failure is its sentence; this is the unexpected kind
-            log.exception("board preview failed twice (%s %s); kept as failed for this fingerprint", reg.key, fkey)
-            previews = {p.key: PAGE_WORDS["board_failed"] for p in parts if p.state == "open"}
+            live = rs.events[key]
+            rev = rc.board_rev(reg, live)
+            parts = snapshot(rs, live)
+            part = next(p for p in parts if p.key == key)
+            try:
+                answer = await asyncio.get_running_loop().run_in_executor(self.pool(), self._solve, reg, frozen(rs, parts), part, stop)
+            except solver.Stopped:
+                said = PAGE_WORDS["autofill_stopped"]
+            except Exception as e:  # noqa: BLE001 — the solver's own failure is its sentence; anything else is logged too
+                if not isinstance(e, (RuntimeError, solver.Conflict)):
+                    log.exception("auto-fill failed (%s %s)", reg.key, key)
+                said = rc.solver_error_text(e)
         finally:
-            self.running.pop(key, None)
-            self.stops.pop(key, None)
-            self.tasks.pop(key, None)
-        if previews is None:
-            self.resume()  # the lock that stopped it may already be over
-            return
-        first = rs.events.get(fkey)
-        if first is None:
-            return
-        now = snapshot(rs, first)
-        if not any(p.state == "open" for p in now):
-            self._drop(key)
-            return
-        self._keep(key, fp, previews)
-        fresh = await asyncio.to_thread(fingerprint, reg, frozen(rs), now)
-        if fresh == fp:
-            self.asked.discard(key)
-            for fn in list(BOARD_LISTENERS):
-                try:
-                    fn(reg.key, fkey)
-                except Exception:  # noqa: BLE001
-                    log.exception("board listener failed")
-        elif key in self.asked:  # changed while solving and a page is waiting on it: solve the board as it is now
-            self.asked.discard(key)
-            self.start(reg, rs, fkey, fresh, now)
+            self.tasks.pop(k, None)
+            self.stops.pop(k, None)
+        if answer is not None:
+            layout, auto = answer
+            said = await self.write(reg, rs, key, rev, layout, auto, stop, by, by_id, via)
+        live = rs.events.get(key)
+        if said is not None and live is not None:
+            self.said[k] = (said, rc.board_rev(reg, live))
+        self._tell(reg.key, key)
+        return said
 
-    def shown_layout(self, reg: Registry, ev: "rc.RaidEvent") -> list[list[str]] | None:
-        """The flat groups (padded to whole rosters) of the picture the server holds for raid `ev` — the latest one,
-        current or being placed again, always with the officers' current moves on top (rc.overlay_board, as the page drew it):
-        what a drag is applied to. None when there is none (the page drew the officers' layout) or that raid's solve
-        failed. `ev` = the live raid."""
-        key = (reg.key, rc.event_id(ev) or ev.key)
-        e = self.entries.get(key)
-        rosters = e.previews.get(ev.key) if e is not None else None
-        if not isinstance(rosters, list):
-            return None
-        k = rc.groups_per_roster(reg, rc.run_size(reg, ev))
+    async def write(self, reg: Registry, rs: "rc.RaidStore", key: str, rev: str, layout: list[list[str]], auto: list[str],
+                    stop: solver.Stop, by: str, by_id: int | None, via: str) -> str | None:
+        """The answer written as the raid's board, under its board lock — only on the board it was solved from, while
+        the raid is open and no lock stopped it. → None when written, else the sentence."""
+        from . import ops as ops_mod
+        from .raid_views import run_title
 
-        def flat(rr: list) -> list[list[str]]:
-            return [list(g) for r in rr for g in (list(r.groups) + [[] for _ in range(k - len(r.groups))])]
+        bot = self.bot
+        async with bot.board_lock(reg, key):
+            live = rs.events.get(key)
+            if stop.stopped:
+                return PAGE_WORDS["autofill_stopped"]
+            if live is None or live.state != "open" or rc.board_rev(reg, live) != rev:
+                return PAGE_WORDS["autofill_changed"]
+            live.log.append(f"{by}: auto-filled the board")
+            await bot._write_board(reg, rs, live, layout, by, via=via, auto=auto)
+        try:
+            await ops_mod.audited(bot.ops, reg, by, f"auto-filled the board of {run_title(reg, live)}", via=via, by_id=by_id)
+        except Exception:  # noqa: BLE001 — the board is written; an audit line that fails never undoes it
+            log.exception("auto-fill audit line failed (%s %s)", reg.key, key)
+        return None
 
-        raw, over = flat(rosters), flat(rc.overlay_board(reg, ev, rosters))
-        # always overlaid (the picture may predate the last drag); on a current picture the overlay moves nobody — the
-        # officers' placements are hard pins there — so the picture is returned in its own order, as the page drew it
-        if len(raw) == len(over) and all(set(a) == set(b) for a, b in zip(raw, over)):
-            return raw
-        return over
+    def _tell(self, gk: str, key: str) -> None:
+        for fn in list(AUTOFILL_LISTENERS):
+            try:
+                fn(gk, key)
+            except Exception:  # noqa: BLE001
+                log.exception("auto-fill listener failed")
 
 
-class _Lru(OrderedDict):
-    """A small LRU mapping: a hit moves to the end, past `cap` the oldest goes."""
-
-    def __init__(self, cap: int) -> None:
-        super().__init__()
-        self.cap = cap
-
-    def __getitem__(self, k):
-        v = super().__getitem__(k)
-        self.move_to_end(k)
-        return v
-
-    def __setitem__(self, k, v) -> None:
-        super().__setitem__(k, v)
-        self.move_to_end(k)
-        while len(self) > self.cap:
-            self.popitem(last=False)
-
-
-def cache_of(bot) -> BoardCache:
-    """The bot's one board cache (made on first use; test bots get theirs the same way)."""
-    c = bot.__dict__.get("event_boards")
+def autofill_of(bot) -> AutoFill:
+    """The bot's one AutoFill (made on first use; test bots get theirs the same way)."""
+    c = bot.__dict__.get("event_autofill")
     if c is None:
-        c = bot.__dict__["event_boards"] = BoardCache(bot)
+        c = bot.__dict__["event_autofill"] = AutoFill(bot)
     return c

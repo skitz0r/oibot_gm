@@ -102,7 +102,7 @@ def test_board_ops_refuse_a_board_changed_since_the_preview(reg, rs):
 def test_run_autofill_saves_through_save_board(reg, rs, monkeypatch):
     bot = Bot(reg, rs)
     ev, names = board_run(reg, rs)
-    monkeypatch.setattr(rc, "autofill", lambda reg_, rs_, ev_: [names[:3], names[3:]])
+    monkeypatch.setattr(rc, "autofill", lambda reg_, rs_, ev_, earlier=None, stop=None: ([names[:3], names[3:]], names[:6]))
     stale = rc.board_rev(reg, ev)
     run(bot.board_move(reg, rs, ev, names[0], (0, 0), by="someone else"))
     with pytest.raises(RegistryError, match="changed since you looked"):
@@ -110,6 +110,7 @@ def test_run_autofill_saves_through_save_board(reg, rs, monkeypatch):
     assert not any("auto-filled" in line for line in ev.log)
     out = apply(reg, bot, ConfigOp(op="run_autofill", target=ev.key), rev=rc.board_rev(reg, ev))
     assert out == f"{configops.run_words(reg, ev)}: board auto-filled (6 rostered in 2 groups)" and ev.layout == [names[:3], names[3:]]
+    assert ev.auto_placed == sorted(names[:6]), "plain text's Auto-fill is the site's: its names are Auto-fill placements"
 
 
 # ---------------------------------------------------------------- Apply: the preview's fingerprint, updated by the request's own writes

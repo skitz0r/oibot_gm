@@ -70,7 +70,8 @@ def test_the_box_shape_and_its_fingerprint():
 
 
 def test_undo_and_leave_words():
-    assert cq.undo_box(4)["sentences"] == ["Your 4 moves on this board are dropped.", "Everyone goes back to where the lock would place them."]
+    assert cq.undo_box(4)["sentences"] == ["Your 4 moves on this board are dropped.", "Those people go back to Not placed."]
+    assert cq.undo_box(1)["sentences"] == ["Your one move on this board is dropped.", "That person goes back to Not placed."]
     assert cq.undo_box(1)["sentences"][0] == "Your one move on this board is dropped."
     assert (cq.undo_box(4)["title"], cq.undo_box(4)["verb"]) == ("Undo your moves?", "Undo moves")
     assert cq.leave_unsaved_sentence(2, "Hyjal Summit") == "Your 2 edits to Hyjal Summit are not saved yet."

@@ -922,7 +922,7 @@ class SetupMixin:
 
     async def test_comp(self, reg: Registry, rs, raid: str, by: str, by_id: int | None, *, via: str = "discord"):
         """The comp sandbox: a test run two weeks out with every puppet joined, never posted (rc.open_comp_sandbox);
-        its event page draws the board as the lock would place them. Returns the run. rc.open_comp_sandbox opens a run and
+        Auto-fill groups on its event page shows the best comp from them. Returns the run. rc.open_comp_sandbox opens a run and
         joins every puppet: on the loop, never a worker thread (L3)."""
         from . import raidcycle as rc
 

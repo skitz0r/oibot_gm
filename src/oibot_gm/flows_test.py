@@ -184,7 +184,7 @@ class TestCompWizard(Wizard):
             items.append(self.select("Which raid", wizard_opts.raids(self.reg, current=rid), self.raid_picked))
         items += [self.button("Try a comp", self.go, discord.ButtonStyle.success, disabled=not rid), self.button("Cancel", self.cancel)]
         await self.show(interaction, f"**{name}** — all {n} test members join a sandbox run two weeks out. It is never posted in Discord; "
-                                     "Its event page draws the board as the lock would place them: the best comp from them.", *items)
+                                     "On its event page, Auto-fill groups shows the best comp from them.", *items)
 
     async def raid_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         self.draft["raid"] = values[0]

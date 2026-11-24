@@ -940,8 +940,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         team = reg.config.team(ev.team) or {}
         size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
         boards = []
-        # each roster's empty seats a minimum wants, as roles: the page draws role icon + "open seat"; None while the board
-        # is being placed again (the Events page): a partial picture's empty seats are not what the lock leaves open
+        # each roster's empty seats a minimum wants, as roles: the page draws role icon + "open seat"; None on the Events
+        # page's board before the lock (the officers' half-made board: its empty places are not what the lock leaves open)
         opens = rc.open_seat_roles(reg, ev, rosters) if open_seats else [None] * len(rosters)
         for i, r in enumerate(rosters):
             by = {p.signup_name: p for p in r.selected}
@@ -1017,7 +1017,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         soft, hard, confirm = run_times(reg, ev, t)
         conf_rows = rc.confirmations(reg, ev) if ev.all_rosters else []
-        # `rosters`: the board as the lock would place it (the Events page's event_board preview); else the roster or the layout
+        # `rosters`: given by a caller that drew its own; else the roster (locked) or the officers' layout (open)
         board_rosters = (rosters if rosters is not None else ev.all_rosters if ev.state != "open" and ev.all_rosters
                          else rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev)))
         absences = [{"display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "signed": str(m.discord_id) in ev.signups}
@@ -1406,8 +1406,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         dragging at once merge; nothing is overwritten. Same effects as a whole-board write after lock (confirm DM / seat
         freed). `state` = the state the board was rendered in (open | locked): when the run's state differs (the
         scheduler locked it mid-drag) the move is refused with 409 + the current board, never applied as a post-lock
-        roster edit (design B6). `shown: true` (the Events page): the board drawn is the lock's placement, so the move is
-        read on the picture the server holds NOW and pins only the mover (and a swapped partner) — RaidMixin.board_move.
+        roster edit (design B6). Before the lock a drop on the bank only un-places the name (RaidMixin.board_move: no pin).
         The officer is recorded per name moved, for Undo my moves. A LOCKED event's moves ask first (§7b): `preview` →
         {box} (consequences.board_move_box: move, roster, swap, substitute or release, nothing written); `seen` = that
         box's fp → 409 {error, box (the fresh one), board…} when the board changed while it was open, 400 with the
@@ -1432,7 +1431,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh, **board_reply(v.reg, ev)}, status_code=409)
         was_open = ev.state == "open"
         try:
-            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name, via=v.via, expect_state=seen, by_id=v.uid, shown=bool(d.get("shown")))
+            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name, via=v.via, expect_state=seen, by_id=v.uid)
         except rc.BoardChanged as e:
             return JSONResponse({"error": str(e), "state": ev.state, **board_reply(v.reg, ev)}, status_code=409)
         except ValueError as e:
@@ -1486,10 +1485,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def memory_changed(guild_key: str) -> None:
         publish("memory", guild_key)  # a memory kept or forgotten (§5.61): the Ops page's Memory tab and the Me page reload (rows filtered server-side)
 
-    def board_ready(guild_key: str, event_key: str) -> None:
-        publish(f"run:{event_key}", guild_key)  # the Events board's lock placement is ready (event_board.BoardCache)
+    def autofill_heard(guild_key: str, run_key: str) -> None:
+        publish(f"run:{run_key}", guild_key)  # an Auto-fill groups started or ended (event_board.AutoFill): the Events page reloads
 
-    for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (event_board_mod.BOARD_LISTENERS, board_ready), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
+    for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (event_board_mod.AUTOFILL_LISTENERS, autofill_heard), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
                       (loot_session_mod.LOOT_LISTENERS, loot_saved), (testfeed.LISTENERS, test_event), (discord_bot_mod.MEMBERSHIP_LISTENERS, membership_changed),
                       (discord_bot_mod.LISTEN_LISTENERS, listen_verdict), (mem.MEMORY_LISTENERS, memory_changed)):
         hooks[:] = [f for f in hooks if getattr(f, "__name__", "") != fn.__name__] + [fn]  # one per process, the newest app wins
@@ -1584,30 +1583,25 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/autofill")
     async def run_autofill(request: Request, key: str):
-        """Place the rest: the solver places every joiner the officers left unplaced around their placements (fixed).
-        `rev` = the board the officer pressed it on (the site sends it, as a whole-board write does): a board that changed
-        since is a 409 with the current board and nothing is solved; a drag made DURING the solve wins the same way."""
+        """Auto-fill groups (the owner's tweaks C; event_board.AutoFill): ONE run of the lock's own solve for this raid,
+        written into its board as placements (hand placements and kept-off pins kept; a previous Auto-fill's replaced).
+        Answers at once with the working words: the page shows them until the board updates (`run:<key>`). A refusal
+        (locked, nobody joined, a lock solving now) → 400 with its sentence. `wait: true` (MCP) waits for the end and
+        answers with what happened: AUTOFILL_DONE and the board, or the sentence of an auto-fill that wrote nothing (409)."""
+        from .. import event_board
+
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        if ev.state != "open":
-            return JSONResponse({"error": "already locked — move people on the board instead"}, status_code=400)
-        if d.get("rev") and str(d["rev"]) != rc.board_rev(v.reg, ev):
-            return stale(v, ev)
-        async with solving(v.reg, ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
-            rev = rc.board_rev(v.reg, ev)  # the board the solve fills around: a drag during the solve wins (409), never lost
-            try:
-                layout = await asyncio.to_thread(rc.autofill, v.reg, rs, ev)
-            except RuntimeError as e:
-                return JSONResponse({"error": solver_text(e)}, status_code=409)
-            except Exception as e:  # noqa: BLE001
-                return JSONResponse({"error": f"solver: {e}"}, status_code=400)
-            ev.log.append(f"{v.name}: auto-filled the board")
-            try:  # the one board write (RaidMixin.save_board), as plain text's run_autofill
-                await bot.save_board(v.reg, rs, ev, layout, rev=rev, by=v.name, via=v.via)
-            except rc.BoardChanged:
-                ev.log.pop()
-                return stale(v, ev)
-        return board_reply(v.reg, ev)
+        try:
+            task = event_board.autofill_of(bot).start(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        if not d.get("wait"):
+            return {"message": PAGE_WORDS["autofill_working"]}
+        said = await task
+        if said is not None:
+            return JSONResponse({"error": said, **board_reply(v.reg, ev)}, status_code=409)
+        return {"message": PAGE_WORDS["autofill_done"], **board_reply(v.reg, ev)}
 
     @app.post("/api/run/{key}/pin")
     async def run_pin(request: Request, key: str):
@@ -2236,7 +2230,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             ev = await bot.test_comp(reg, rs, str(d.get("raid") or ""), v.name, v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"Comp sandbox {dr.run_title(reg, ev)}: {len(reg.test_members())} test members joined; its event page draws the board as the lock would place them", "key": ev.key}
+        return {"message": f"Comp sandbox {dr.run_title(reg, ev)}: {len(reg.test_members())} test members joined; Auto-fill groups on its event page shows the best comp from them", "key": ev.key}
 
     TEST_ACTIONS = {"seed": test_seed_do, "run": test_run_do, "answer": test_answer_do, "clear": test_clear_do, "compose": test_compose_do, "comp": test_comp_do}
 

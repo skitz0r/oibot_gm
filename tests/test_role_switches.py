@@ -10,7 +10,7 @@ import pytest
 from conftest import OWNER, lock_with_board, weekly
 from test_raid_night import H, web_bot  # noqa: F401 — the routes' fixture
 
-from oibot_gm import event_board, event_view, inbox
+from oibot_gm import event_view, inbox
 from oibot_gm import raidcycle as rc
 from oibot_gm.constants import CONFIRM_WORDS, PAGE_WORDS
 from oibot_gm.registry import RegistryError
@@ -18,11 +18,6 @@ from oibot_gm.registry import RegistryError
 HYJAL, RID = "hyjal_summit_forever", "barrow_deeps"
 EVENING = [{"raid": RID, "rosters": 2}]
 REAL = 473_000_000_000_000_000
-
-
-@pytest.fixture(autouse=True)
-def _no_board_solves(monkeypatch):
-    monkeypatch.setattr(event_board.BoardCache, "start", lambda self, *a, **k: None)
 
 
 @pytest.fixture(autouse=True)
@@ -137,11 +132,11 @@ def test_a_spec_the_character_cannot_play_is_refused(web_bot, reg, rs):
 
 def test_switch_before_the_lock_changes_the_answer_and_nothing_is_sent(web_bot, reg, rs):
     """POST /switch for Nyx Shadow → Holy: part 0's signup spec Holy, role healer; nothing DMed; Nyx has a notice. The
-    later raid's answer follows (one answer for the whole evening), and the board picture made before it is stale."""
+    later raid's answer follows (one answer for the whole evening), and the lock's inputs change."""
     ev = evening(reg, rs)
     nyx = add(reg, 0, "Nyx", "Priest", "Shadow", "Holy")
     join(reg, rs, ev, nyx)
-    before = event_board.fingerprint(reg, rs, event_board.snapshot(rs, ev))
+    before = rc.solve_inputs(ev)
     row = next(r for r in rc.event_switches(reg, rs, ev)["rows"] if r["uid"] == str(nyx.discord_id) and r["spec"] == "Holy")
     body = {k: row[k] for k in ("uid", "character", "spec", "part", "seat", "option")} | {"rev": rc.event_switches(reg, rs, ev)["revs"][row["part"]]}
     pv = post(web_bot, ev.key, body | {"preview": True})
@@ -154,7 +149,7 @@ def test_switch_before_the_lock_changes_the_answer_and_nothing_is_sent(web_bot, 
     assert later.signups[str(nyx.discord_id)].spec == "Holy", "the later raid's answer is the first raid's"
     assert not any(web_bot.bot.dms.values()) and not ev.fill_asks
     assert any("Holy" in n["text"] for n in inbox.notices_of(reg, nyx.discord_id))
-    assert event_board.fingerprint(reg, rs, event_board.snapshot(rs, ev)) != before, "a switch changes what the lock would place"
+    assert rc.solve_inputs(ev) != before, "a switch changes what the lock (and Auto-fill groups) reads"
     assert "switches" in r.json()
 
 

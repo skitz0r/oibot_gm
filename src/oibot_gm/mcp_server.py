@@ -585,17 +585,19 @@ def propose_split(run: str, strategy: str | None = None, avoid: list[list[list[s
 
 @mcp.tool()
 def set_strategy(run: str, strategy: str, guild: Guild = None) -> str:
-    """Set how an OPEN raid's rosters are split (balanced | first | rotation): the board's picture is placed again
-    that way and the lock uses it. Refused once the roster is locked: a locked roster's split never changes."""
+    """Set how an OPEN raid's rosters are split (balanced | first | rotation): Auto-fill groups and the lock split it
+    that way. Refused once the roster is locked: a locked roster's split never changes."""
     return msg(api(guild).post(f"/api/run/{run}/strategy", {"strategy": strategy}))
 
 
 @mcp.tool()
 def autofill(run: str, guild: Guild = None) -> dict:
-    """Let the solver shape the board of an open run (the roster's split strategy, pins, role minimums). Saves the layout;
-    the lock will use it. Returns the board and what the roster still needs."""
-    data = api(guild).post(f"/api/run/{run}/autofill")
-    return {"message": "board auto-filled", "needs": data.get("needs"), "board": data.get("board")}
+    """Auto-fill groups on an open raid: the lock's own solve once (its split strategy, pins, minimums, the earlier
+    raids' rosters for a later raid), written into the board as placements — the officers' hand placements and kept-off
+    pins stay, a previous Auto-fill's placements are replaced. The lock then rosters exactly that board unless something
+    changes. Waits for the solve (up to half a minute). Returns the server's line, the board and what the roster still needs."""
+    data = api(guild).post(f"/api/run/{run}/autofill", {"wait": True})
+    return {"message": msg(data), "needs": data.get("needs"), "board": data.get("board")}
 
 
 @mcp.tool()

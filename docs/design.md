@@ -5832,32 +5832,18 @@ reads too) / `lineup_draft_json` (What this makes, nothing written; the Save is 
 `timing.lock_hours_before` and `rosters` (`one_off_args` → `open_run(lock_hours=, first_rosters=)`; a schedule's night
 keeps its own). The page listens to `run:`, `member` and `config`.
 
-*The board picture.* `event_board.py`. Before the lock an open raid's board is where its LOCK would place everyone now:
-`rc.event_board_preview` solves each open raid through `_solve_run` with the run's strategy and the lock's budget
-(`SOLVE_TIME_LIMIT_S`), a later raid given the earlier raids' locked or previewed rosters (`earlier`), so the repeatable
-solver's answer is the roster `lock_run` then builds; a raid nobody joined is drawn empty without a solve. `BoardCache`
-(`cache_of(bot)`), keyed (guild key, first raid's key), ONE entry per event: `get` answers "ready" when the
-`fingerprint` matches, else starts one background solve and answers "working" with the previous picture under
-`rc.overlay_board` (the officers' current moves drawn on it, so a drag never snaps back; open seats only on a ready or
-locked board). The fingerprint is built only from what the solve reads, computed as the solve computes it (answers,
-characters, ranks, attendance, join order, weights, regulars, sat out, pins, the board, strategy, size, rosters,
-minimums, the comp policy, an earlier raid's locked roster), from a `snapshot` / `frozen` view taken on the loop: a
-card id or a re-press changes nothing. Solves run one at a time on a dedicated `PREVIEW_WORKERS` (1) executor, never on
-the loop; `MAX_BOARDS` (32) events kept, least recently used dropped, and an event with no open raid is pruned; each
-event keeps a per-raid memo (`MEMO_PER_EVENT` 8, `raid_key`), so a move on one raid re-solves only it — the lock never
-reads it. A finished solve whose fingerprint still holds calls `BOARD_LISTENERS` → `publish('run:<event key>')`; a stale
-one is kept as the previous picture and solved again; an unexpected failure is kept as `PAGE_WORDS['board_failed']` for
-that fingerprint (logged once, never re-solved), drawn over the officers' layout. The lock comes first: `solver.Stop`
-abandons a running picture (`CpSolver.stop_search`; `solver.Stopped`, never an answer), and `RaidMixin.solving` (every
-lock, Preview lock, auto-fill and split preview) calls `pause()` once it holds the run and `resume()` when it lets go,
-both wrapped so a board fault never touches the lock; no picture starts while any lock-side solve runs. A drag on the
-Events page sends `shown`: `RaidMixin.board_move` applies it to `shown_layout` (the picture the SERVER holds) with
-`rc.apply_move_shown`, which pins only the mover and a swapped partner (`RaidEvent.drag_pins` {by, was, now}) and records
-who placed whom (`RaidEvent.placed_by`, `rc.record_moves`; a move from another surface clears it); a drop on Not placed
-pins them out — the lock keeps that name off (`PAGE_WORDS['not_placed_off']`). Undo my moves = `RaidMixin.undo_moves`
-(the officer's own placements leave the layout, each pin their drag changed goes back while it is still as the drag left
-it — `rc.own_pins`; `rc.undo_rev` checked); everyone else's moves stay. `placed_by` and `drag_pins` are cleared at the
-lock.
+*The board picture.* (As built in phase 4 — replaced by the owner's tweaks C below: the board before the lock is the
+officers' own, and the solve runs on a button.) Phase 4 drew an open raid's board where its LOCK would place everyone
+now — `rc.event_board_preview` per open raid through `_solve_run` with the run's strategy and the lock's budget,
+`earlier` for a later raid —, kept by a `BoardCache` keyed by a fingerprint of every solve input and solved again in the
+background on every change, with the working picture drawn under `rc.overlay_board`; a drag on that picture
+(`rc.apply_move_shown`) pinned the mover, and a drop on Not placed pinned them out. Kept from it: `event_board_preview`
+(now behind `rc.earlier_counts`, which Preview lock and Auto-fill groups read on a later raid), `solver.Stop` /
+`solver.Stopped`, the one-solve-at-a-time executor, who placed whom (`RaidEvent.placed_by`, `rc.record_moves`; a move
+from another surface clears it) and the pins an officer's drag changed (`RaidEvent.drag_pins` {by, was, now}). Undo my
+moves = `RaidMixin.undo_moves` (the officer's own placements leave the layout, each pin their drag changed goes back
+while it is still as the drag left it — `rc.own_pins`; `rc.undo_rev` checked); everyone else's moves stay. `placed_by`,
+`drag_pins` and `auto_placed` are cleared at the lock.
 
 *The real lock, changed where it failed (safe by construction).* `roster/solver.py` counts seats from SEATABLE players
 (`_Model.seatable` = the pool minus `force_out`): with nobody kept off the model is byte-for-byte the old one, and with a
@@ -5945,9 +5931,9 @@ default can reach the live bot) and uses the suite's token for the scratch addre
 *Calls made* (the plan's and the review rounds'; each with its cost if wrong). The list and one event are
 `/api/event-list` / `/api/event/{key}` (a rename of two routes). The Open group holds open and locked events. Box titles
 are built on the server. A stale box is caught by a fingerprint of its words (`seen`), not a data rev: a change nobody
-would read slips through. Undo my moves is per officer; a whole-board clear stays for MCP and plain text. A drag before
-the lock pins only what moved and the rest follow the lock's solve; `Move to…` before the lock moves at once. The
-picture solves in the background and the page reloads on `run:<key>` (a blocking 2–5 s request otherwise). The split
+would read slips through. Undo my moves is per officer; a whole-board clear is More › Clear the board (tweaks C). A drag
+before the lock pins only what moved and the lock places the rest; `Move to…` before the lock moves at once. (Phase 4
+solved the picture in the background on every change; tweaks C solves only on Auto-fill groups.) The split
 strategy leaves the board for More › Split strategy…; the `/strategy` route refuses after the lock on every surface, MCP
 `set_strategy` included. A switch before the lock writes the spec on the answer for the whole evening; after it sends
 only that ask. Coming-up nights have no Reschedule. New event at a schedule's occurrence opens that schedule's event
@@ -6008,16 +5994,17 @@ On Fri 27 Nov the sweep found a product breach: an absence over four events on o
 past three, always naming a released seat. Tests: `tests/test_solver_kept_answer.py`, `tests/test_schedule_night_open.py`.
 
 *Limits an operator should know.* Not on the site any more, still in Discord, plain text or MCP: a cancel's reason and
-its Tell the channel line (the site's Cancel event is the box alone); another layout, Propose, Place the rest and Clear
-of everyone's moves (Undo my moves is yours only; the Test bench card keeps Propose); opening a pickup template (Copy a
+its Tell the channel line (the site's Cancel event is the box alone); another layout, Propose and Place the rest
+(Undo my moves is yours only; Clear the board is in More; the Test bench card keeps Propose); opening a pickup template (Copy a
 lineup leaves templates out); one timing value back to the game's suggestion (`inherit`); start times off the 15-minute
 steps; why-notes, raid notes and the split policy on the Raids page; the regulars' level chip with its could-cover and
 recruit lines (`/roster overview`, the analytics card, MCP `list_regulars`); a new schedule made paused (the site creates
 it active). The Signups row menu's callouts and pins keep the older page-worded confirm until the confirms phase. A one-off's
-Lock box names nobody, so a join does not make it stale (a scheduled event's does). A board recompute costs about the
-lock's budget per raid it re-solves (the memo spares the others), and several events queue one after another. Never run
+Lock box names nobody, so a join does not make it stale (a scheduled event's does). An Auto-fill costs about the
+lock's budget per raid (a later raid's also solves the open raids before it), and several presses queue one after
+another. Never run
 the test suite or a rehearsal on the bot's host at a lock minute: since the final fix wave it only slows the lock, it no
-longer changes the roster. Kept answers live in the process: a restart between the picture and the lock solves again
+longer changes the roster. Kept answers live in the process: a restart between Preview lock and the lock solves again
 (the same answer on a quiet host). Browser
 Back is not guarded (the rail, the list and in-page Back are). The new verbs' Discord screens (lineup, reschedule,
 switch) are phase 5; the rename of "run" to "event" in existing strings, the activity log's code nouns and the older
@@ -6060,6 +6047,46 @@ priority and split too; after the lock the undo line reads "until the event star
 schedule Save's map; fp over `rc.event_rev`. `event_json` carries `actions.edit` and `edit` (`edit_options`: the fields
 editable NOW, the values, each raid's split, the schedule editor's hour choices with the event's own among them); Details
 read the event's own values and add *Open seats after the lock* while open. Tests: `tests/test_edit_event.py`.
+
+*The officers' board and Auto-fill groups (C).* The owner: "each time I make a change to the board, it seems to
+auto-retrigger the solver. I'd prefer a button for 'auto-fill groups' next to the character bank instead of this."
+Before the lock the Events board is the OFFICERS' layout (`ev.layout`): who they placed, every other joiner in Not
+placed. Nothing solves on a page load (`GET /api/event/{key}` reads; `event_view._part_view` takes no picture —
+`board_state` open | locked), an answer or a drag. Placed = names on the board; Short = `rc.needs`; open seats only on a
+locked roster. **Auto-fill groups** (beside Not placed, `PAGE_WORDS['autofill_button']`) = `event_board.AutoFill`
+(`autofill_of(bot)`), keyed (guild key, raid key): `start` refuses in one sentence (`autofill_locked`, `autofill_nobody`,
+`autofill_busy` while any lock-side solve runs) or starts ONE background task (a second press gets the same task) and
+the route `POST /api/run/{key}/autofill` answers at once with `autofill_working` (MCP sends `wait: true` and gets
+`autofill_done` and the board, or the sentence with a 409). The task snapshots the event's raids on the loop, solves on
+the one-worker executor `rc.earlier_counts` (a later raid: who the open raids before it will roster, their boards
+fixed) then `rc.autofill` — the lock's own `_solve_run` (strategy `rc.run_strategy`, budget `SOLVE_TIME_LIMIT_S`,
+`whatif=False`, the run's own first-come, priority and split from part B, kept-off pins, the comp policy) on a copy
+whose board keeps only the HAND placements (`ev.auto_placed` taken off, so a second press replaces only Auto-fill's) —
+and writes under the raid's board lock with `RaidMixin._write_board(auto=)` only while `rc.board_rev` is the one it
+solved from (else `autofill_changed`, nothing written) and no lock stopped it (`RaidMixin.solving` → `stop_all` →
+`solver.Stop`: `autofill_stopped`, nothing written); a failure keeps `rc.solver_error_text`'s sentence. Outcomes that
+write nothing show under the button (`part.autofill` {working, words, failed}) while the board is the one they were
+about; `AUTOFILL_LISTENERS` → `publish('run:<raid key>')` at the start and the end. `RaidEvent.auto_placed` (names;
+older code ignores the key and drops it at its next save) is pruned at every board write, emptied by a whole-board
+write (`save_board`: a person's board is theirs), left by a name anyone moves (`rc.record_moves`), cleared at the lock;
+plain text's `run_autofill` waits for the same task (or, without the bot, writes `rc.autofill`'s answer itself). The
+bank is not "kept off": a drop on Not placed only un-places (`RaidMixin.board_move` = `rc.apply_move` before and after
+the lock; no pin; a swap's partner from Not placed goes back there), a place in a group lifts a kept-off pin (recorded
+in `drag_pins`, so Undo my moves puts it back); keeping someone off is the ⋮ menu's *Keep off the roster* (the "out"
+pin), drawn in the bank with `PAGE_WORDS['kept_off']`. "Out" pins written by drags under the old rule stay pins (made on
+purpose then; nothing migrates). `rc.apply_move_shown`, `rc.overlay_board`, the `BoardCache` (fingerprint, memo,
+pause / resume), `shown`, `board_failed` / `board_working` / `not_placed_off` are gone; `SOLVER_WORDS['all_off']` says
+"unpin someone" (the old sentence is in `_OLD_LOCK_WORDS` as the same failure). **Clear the board** (More): every open
+raid's groups back to Not placed, pins untouched, through `consequences.clear_board_box` (what changes, "Nobody is
+told.", Auto-fill again; fp over every open raid's board) at `POST /api/event/{key}/clear` (`preview` / `seen`), one
+`save_board` per raid. The Undo box's second sentence is "Those people go back to Not placed."; the strategy box says
+Auto-fill groups and the lock split it this way. **The lock is unchanged**: `_solve_run`, `lock_forces`, `propose` and
+`lock_run`'s solve are untouched (the CP-SAT model proto of an untouched 18-for-20 first-come one-off and of a two-raid
+night's later 2 × 10 hash the same before and after); after Auto-fill every placement is a fixed one, so the lock
+rosters exactly the board (its model differs from Auto-fill's, so it searches — about 12 s — and lands on the board;
+tested with and without the kept answers). The live two-raid event (phase 2's stored shape, no placements) shows an
+empty board with everyone in Not placed and writes nothing. Tests: `tests/test_event_board.py`,
+`tests/test_event_board_solver.py` (slow).
 
 **Later phases** (spec §9): the Discord wizards (phase 5, closing the two `PARITY_PENDING` rows and the role switch's
 `RUN_SWITCH_DISCORD_PENDING`) and the words (phase 6). Phases 1 and 2's tests:

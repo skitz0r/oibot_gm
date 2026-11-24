@@ -618,12 +618,13 @@ src/oibot_gm/
                        priority_words / confirmation_words / lineup_words / lineup_roster_words / event_lineup; gone_sentence; series_forecast(if_resumed=);
                        ensure_run / open_run(lock_hours=, first_rosters=) (the New event page's one-off choices, never a test run); site_words = a verb's
                        Discord line as the site prints it (no <t:…> stamp); open_seat_count / open_seats_words (a locked run's idle open seats said truly).
-                       The board picture: event_board_preview(reg, rs, first, parts=, stop=, memo=, raid_key=) = every OPEN raid through _solve_run with
-                       the lock's strategy and budget, `earlier` = the earlier raids' locked or previewed rosters (PURE; a raid nobody joined drawn
-                       empty); overlay_board (the last picture with the officers' current moves on it); apply_move_shown (a move read on the shown
-                       picture: only the mover and a swapped partner pinned, a drop on Not placed pinned out); RaidEvent.placed_by {name: officer} and
-                       drag_pins {uid: {by, was, now}} (cleared at the lock) via record_moves (a move from another surface clears it), own_moves /
-                       own_pins / undo_rev; open_seat_roles. The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
+                       The lock's placement without a lock: event_board_preview(reg, rs, first, parts=, stop=, counts=) = every OPEN raid through
+                       _solve_run with the lock's strategy and budget, `earlier` = the earlier raids' locked or previewed rosters (PURE; a raid nobody
+                       joined drawn empty) — behind earlier_counts(reg, rs, ev, stop=) (Preview lock and Auto-fill on a later raid); autofill(reg, rs,
+                       ev, earlier=, stop=) → (layout, auto names) = Auto-fill groups' solve (the lock's _solve_run, whatif off, on a copy whose board
+                       keeps only the HAND placements: ev.auto_placed taken off first; PURE); RaidEvent.placed_by {name: officer}, drag_pins {uid:
+                       {by, was, now}} and auto_placed [names Auto-fill placed] (all cleared at the lock) via record_moves (a move from another surface
+                       clears whose it was; any moved name leaves auto_placed), own_moves / own_pins / undo_rev; open_seat_roles (a locked roster's). The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
                        off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
                        ALL_KEPT_OFF raised before solving when every joiner is kept off; _solve_run's later-raid branch no longer reuses the groups per
                        roster as the part number (a hand place past a later raid's first groups reaches the solve); SOLVER_WORDS + conflict_sentence →
@@ -665,9 +666,10 @@ src/oibot_gm/
                        (LINEUP_OFFICER_ONLY; plan_lineup + apply_lineup under the board locks; a removed raid's pending asks closed under its plan_lock
                        and their cards edited "… was taken out of the … run, so this ask is closed."; the `moved` notice when a kept raid's start
                        changes; NO DM). cleanup_ephemeral drops a first part's dict with no run file after rc.DICT_WITHOUT_RUN_HOURS
-                       Phase 4 (§5.67): solving(reg, key) = the solver's single flight per run AND the Events board's pause() / resume() (a running
-                       picture abandoned, none started while it holds; both wrapped so a board fault never touches the lock); board_move(…, by_id=,
-                       shown=) (shown: the move read on event_board's shown_layout through rc.apply_move_shown, recorded per officer); undo_moves(reg,
+                       Phase 4 (§5.67): solving(reg, key) = the solver's single flight per run AND the lock first: every running Auto-fill groups
+                       stopped (event_board stop_all, wrapped so an auto-fill fault never touches the lock); board_move(…, by_id=) (before the lock
+                       rc.apply_move on the officers' layout: a drop on Not placed only un-places — no pin —, a place in a group lifts a kept-off pin;
+                       recorded per officer); _write_board(…, auto=) (Auto-fill's write: ev.auto_placed; save_board empties it); undo_moves(reg,
                        rs, ev, by_id, by, rev=) = Undo my moves (only that officer's placements and the pins their drags changed, rc.undo_rev checked);
                        set_answer(…, spec=, via=) (a role switch: the spec on the answer for the whole evening, a notice, one audited line);
                        send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);
@@ -677,12 +679,13 @@ src/oibot_gm/
                        soonest first), coming (coming_nights: each active schedule's next COMING_PER_SCHEDULE 3 nights with no event, through
                        rc.next_runs_of), history (HISTORY_PAGE 20, newest first), history_more, tz_words}, a row {key, title, subtitle, state, chip}; test
                        runs (rc.rehearsal_run) and dropped parts never listed; one rc.occurrence_index per request. event_json(reg, rs, ev, viewer,
-                       sheet=, board=) — any part's key answers as its event: details (Lineup, Comes from, Priority, Confirmation, Sheet opened, Locks,
+                       sheet=, autofill=) — any part's key answers as its event: details (Lineup, Comes from, Priority, Confirmation, Sheet opened, Locks,
                        Signup sheet; locked: Confirmed, Open seats; _night_facts / _discord_links = the raid-night facts read from each raid's ev_json:
                        Reminder, Confirm by, Confirmations pending, Open seats per raid, Reminded, Automatic asks paused by, Also on another event, Away
                        that day, the officer card / updates thread / loot thread links), signups (counts + rows; none = rc.pool_unanswered), parts
-                       (_part_view: label, rosters_of, placed_of, short, sheet = ev_json, board_state ready | working | failed | locked, board_error,
-                       mine, undo_box, layout, strategy), activity, boxes {lock, cancel, reschedule}, actions, switches (rc.event_switches), lineup,
+                       (_part_view: label, rosters_of, placed_of (names on the officers' board), short (rc.needs), sheet = ev_json (open seats only
+                       when locked), board_state open | locked, autofill {working, words, failed} | None, mine, undo_box, layout, strategy — nothing
+                       solves), activity, boxes {lock, cancel, reschedule}, actions (+ clear: More › Clear the board), switches (rc.event_switches), lineup,
                        timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks, edit (edit_options: Edit
                        event's fields NOW — every one before the lock, EDIT_AFTER_LOCK after —, values, splits per raid, hours, max_weight; Details
                        read the event's own: Priority, Confirmation, Open seats after the lock, Reminder, Confirm by); coming_json (Details: Sheet
@@ -690,16 +693,14 @@ src/oibot_gm/
                        COMING_GONE); new_event_options (raids, lineups to copy — no pickup templates —, NEW_EVENT_LOCKS (2, 24), lock_choices, the
                        guild's date), new_event_view (What this makes; SCHEDULED_NIGHT), lineup_edit_json (refused through rc.lineup_fixed) /
                        lineup_draft_json (nothing written), seats_words, tz_words, character_rows. The routes run these in a thread
-  event_board.py       the Events board before the lock (§5.67 phase 4): BoardCache (cache_of(bot)), keyed (guild key, first raid's key), ONE entry per
-                       event; get → "ready" when fingerprint(reg, view, parts) matches, else ONE background solve (rc.event_board_preview: the lock's
-                       own solve and budget, so the picture IS the roster lock_run builds) and "working" with the previous picture; the fingerprint =
-                       only what the solve reads, computed as it computes it, from snapshot / frozen views taken on the loop (a card id or a re-press
-                       changes nothing); PREVIEW_WORKERS 1 dedicated executor (never the loop, never the request pool); MAX_BOARDS 32 (least recently
-                       used dropped; an event with no open raid pruned at every get); a per-raid memo (MEMO_PER_EVENT 8, raid_key) so a move re-solves
-                       only its raid — the lock never reads it; a fresh picture → BOARD_LISTENERS → publish('run:<event key>'); a stale one kept and
-                       solved again; an unexpected failure kept as PAGE_WORDS board_failed for that fingerprint (logged once, never re-solved);
-                       pause() / resume() (RaidMixin.solving: the lock comes first — a picture is stopped through solver.Stop, none starts while any
-                       lock-side solve holds a run); shown_layout(reg, ev) = the picture a drag is applied to
+  event_board.py       Auto-fill groups (§5.67, the owner's tweaks C): the Events board before the lock is the OFFICERS' layout and nothing
+                       solves until the button. AutoFill (autofill_of(bot)), keyed (guild key, raid key): start(reg, rs, ev, by=, by_id=, via=) refuses
+                       in one sentence (PAGE_WORDS autofill_locked / autofill_nobody / autofill_busy while a lock-side solve runs) or starts ONE task
+                       (a second press gets it) → result None (written) | the sentence; solves on a PREVIEW_WORKERS 1 executor over snapshot / frozen
+                       views taken on the loop (rc.earlier_counts then rc.autofill); writes under the raid's board lock only on the board it solved
+                       from (rc.board_rev; else autofill_changed) and when no lock stopped it (stop_all ← RaidMixin.solving: autofill_stopped); a
+                       failure = rc.solver_error_text; state(reg, ev) = the page's {working, words, failed} (an outcome shown while the board is
+                       unchanged); AUTOFILL_LISTENERS → publish('run:<raid key>') at start and end; one ops.audited line per write
   schedule_view.py     the Schedules page's read model (§5.67 phase 4), PURE: schedule_list(reg) → {active, paused (each {id, name, repeats}),
                        reserved_ids (RESERVED_SCHEDULE_IDS: the editor holds no copy), orphans (a removed schedule's leftover regulars with box 18),
                        editor (editor_options: the palette with lockout_days / weights / timing_suggestion, pickup defaults, lineups, hour choices in
@@ -1098,7 +1099,9 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        consequences.answer_box (fp over rc.member_state_rev), `seen` → 409 with the fresh box, a refusal → 400 {error, box}); sheet_row_extras
   web/api_events.py    install_events_api (called from api.py; §5.67 phase 4) = thin callers of event_view, officers, each in a thread (GET
                        /api/events stays the live stream): GET /api/event-list?history_offset=, GET /api/event-new, GET /api/event/{key} (any part's
-                       key; its open raids' boards from event_board's cache; NO_EVENT 404 for a gone or dropped key), GET /api/event/{key}/lineup +
+                       key; the officers' boards, each open raid's Auto-fill line from event_board.AutoFill.state — nothing solves; NO_EVENT 404
+                       for a gone or dropped key), POST /api/event/{key}/clear (More › Clear the board: consequences.clear_board_box, preview / seen,
+                       one save_board per open raid, pins untouched), GET /api/event/{key}/lineup +
                        POST it {lineup} (What this makes, nothing written — the Save is /api/run/{key}/lineup), GET /api/event/coming/{sid}/{occurrence}
                        (404 {error, key}), POST /api/run/{key}/switch {uid, character, spec, part, seat, option, rev, preview?, seen?} → one Role
                        switches row: before the lock RaidMixin.set_answer(spec=) on the first raid, after it send_plan(seats=[seat]) on its raid; a row
@@ -1139,7 +1142,9 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        /api/admin/raid/regulars takes preview / seen on a removal (box 18); /api/run/{key}/move `shown` (+ by_id); /api/run/{key}/set
                        `spec` and its line through rc.site_words; /api/raid/{rid}/open/preview adds event_view.new_event_view when a lineup is sent,
                        open takes one_off_args (timing.lock_hours_before ∈ NEW_EVENT_LOCKS, rosters 1–4); /api/raids `page` (raid_page.raid_row),
-                       /api/readiness `view` (raid_page.readiness_view); event_board.BOARD_LISTENERS → board_ready → publish('run:<event key>');
+                       /api/readiness `view` (raid_page.readiness_view); POST /api/run/{key}/autofill = Auto-fill groups (event_board.AutoFill; answers
+                       at once with autofill_working, `wait: true` — MCP — answers when done); event_board.AUTOFILL_LISTENERS → autofill_heard →
+                       publish('run:<raid key>');
                        install_events_api / install_schedules_api; the final fix wave: /api/run/{key}/remind (remind_box), /api/loot/{run}/end
                        (api_loot: end_box) and /api/run/{key}/move on a locked board (board_move_box) take preview → {box} and seen → 409 with the
                        fresh box (move: + the board) / 400 refusal box; EVERY route that returns a raid verb's line answers in rc.site_words;
