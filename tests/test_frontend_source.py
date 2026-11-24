@@ -1401,3 +1401,25 @@ def test_a_refusal_without_a_server_box_never_carries_the_question_title():
     fallback = fallback[:fallback.index("\n")]
     assert "title: boxWords().refused" in fallback and "title: title" not in fallback and "title ||" not in fallback
     assert "refused: string" in (SRC / "api.ts").read_text()
+
+
+def test_the_final_look_fixes():
+    """Task 12's final look, each a difference from the mockups or the phone rules found on the scratch server:
+    the phone header's menu button is thumb-sized and the brand in the headings' font (a bare "Manrope" fell back to a
+    serif); Tell the bot… and Refresh are buttons, so the keyboard reaches them; the rail's links, a select's options,
+    a Back to … link and a switch's row are 44 px on a phone; Reschedule's box is wide enough for New day · Starts ·
+    Locks on one row, as the mockup; Open this run early is a plain button (red is for what cannot be undone)."""
+    app = _code_only((SRC / "App.tsx").read_text())
+    assert 'aria-label="Pages" style={{ width: 44, height: 44 }}' in app and 'ff="heading"' in app and 'ff="Manrope"' not in app
+    assert '<NavLink component="button" mt="md" label="Tell the bot…"' in app and '<NavLink component="button" mt="auto" label="Refresh"' in app
+    assert app.count("minHeight: mobile ? 44 : undefined") >= 3
+    css = (SRC / "pages" / "listpage.module.css").read_text()
+    for rule in ("[data-combobox-option][data-combobox-option]) { min-height: 44px", ".touch :global(.mantine-Anchor-root) { display: inline-flex; align-items: center; min-height: 44px",
+                 ".touch :global(.mantine-Switch-body) { min-height: 44px"):
+        assert rule in css, rule
+    box = _code_only((SRC / "components" / "ConfirmBox.tsx").read_text())
+    assert 'size={open?.wide ? 600 : "md"}' in box and "wide?: boolean" in box
+    assert "wide: true" in _code_only((SRC / "components" / "events" / "RescheduleBox.tsx").read_text())
+    regs = _code_only((SRC / "components" / "schedules" / "RegularsSection.tsx").read_text())
+    early = regs[regs.index("openEarly(f)}>") - 200:regs.index("openEarly(f)}>")]
+    assert 'color="red"' not in early

@@ -46,5 +46,10 @@
   .touch :global(.mantine-SegmentedControl-label) { min-height: 44px; display: flex; align-items: center; justify-content: center; }
   .touch :global(.mantine-Tabs-tab),
   .touch :global(.mantine-Input-input) { min-height: 44px; }
+  /* a text link that is a control (Back to …) and a switch's whole label row: thumb-sized too */
+  .touch :global(.mantine-Anchor-root) { display: inline-flex; align-items: center; min-height: 44px; }
+  .touch :global(.mantine-Switch-body) { min-height: 44px; align-items: center; }
   .menuItem { min-height: 44px; }
+  /* a select's options open in a portal, outside .touch: thumb-sized on every page */
+  :global([data-combobox-option][data-combobox-option]) { min-height: 44px; display: flex; align-items: center; }
 }

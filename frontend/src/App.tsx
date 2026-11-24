@@ -172,12 +172,12 @@ export default function App() {
   const pricesTab = !!meta.prices?.market;  // absent on a version without auction houses (tbc)
   const nav = pricesTab ? [...NAV.slice(0, 3), PRICES, ...NAV.slice(3)] : NAV;
   const link = (n: { to: string; label: string; icon: React.ElementType }) => (
-    <NavLink key={n.to} component={Link} to={n.to} onClick={guardClick(n.to)} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7 }} />
+    <NavLink key={n.to} component={Link} to={n.to} onClick={guardClick(n.to)} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7, minHeight: mobile ? 44 : undefined }} />
   );
   return (
     <AppShell navbar={{ width: 212, breakpoint: "sm", collapsed: { mobile: !opened } }} header={{ height: 52, collapsed: !mobile }} padding="lg">
       <AppShell.Header hiddenFrom="sm">
-        <Group h="100%" px="md"><Burger opened={opened} onClick={toggle} size="sm" /><Text fw={700} ff="Manrope">oibot_GM</Text>{several && <Text size="sm" c="dimmed" truncate style={{ minWidth: 0 }}>{meta.guild}</Text>}</Group>
+        <Group h="100%" px="md"><Burger opened={opened} onClick={toggle} size="sm" aria-label="Pages" style={{ width: 44, height: 44 }} /><Text fw={700} ff="heading">oibot_GM</Text>{several && <Text size="sm" c="dimmed" truncate style={{ minWidth: 0 }}>{meta.guild}</Text>}</Group>
       </AppShell.Header>
       <AppShell.Navbar p="sm" style={{ background: "var(--mantine-color-slate-7)" }}>
         <Group gap="sm" px="xs" pb="md" visibleFrom="sm">
@@ -193,9 +193,9 @@ export default function App() {
           </Stack>
         )}
         {officerPage && (
-          <NavLink mt="md" label="Tell the bot…" leftSection={<IconMessageCircle size={18} stroke={1.8} />} onClick={() => setTellOpen(true)} variant="light" color="teal" style={{ borderRadius: 7 }} />
+          <NavLink component="button" mt="md" label="Tell the bot…" leftSection={<IconMessageCircle size={18} stroke={1.8} />} onClick={() => setTellOpen(true)} variant="light" color="teal" style={{ borderRadius: 7, minHeight: mobile ? 44 : undefined }} />
         )}
-        <NavLink mt="auto" label="Refresh" leftSection={<IconRefresh size={18} stroke={1.8} />} onClick={() => window.dispatchEvent(new Event(REFRESH_EVENT))} style={{ borderRadius: 7, color: "var(--mantine-color-dimmed)" }} />
+        <NavLink component="button" mt="auto" label="Refresh" leftSection={<IconRefresh size={18} stroke={1.8} />} onClick={() => window.dispatchEvent(new Event(REFRESH_EVENT))} style={{ borderRadius: 7, minHeight: mobile ? 44 : undefined, color: "var(--mantine-color-dimmed)" }} />
         <Group gap="sm" px="xs" pt="md" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
           <Box style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, #C79C6E, #6F4E2A)" }} />
           <Box style={{ minWidth: 0 }}><Text size="sm" truncate>{meta.viewer.name}</Text><Text size="xs" c="dimmed">{meta.viewer.owner ? "owner" : meta.viewer.officer ? "officer" : "member"} · <a href="/auth/logout" style={{ color: "inherit" }}>log out</a></Text></Box>

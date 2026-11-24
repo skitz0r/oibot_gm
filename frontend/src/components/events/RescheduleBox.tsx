@@ -55,7 +55,7 @@ export function useRescheduleBox(event: EventView, onDone: () => void): [() => v
     let seq = 0;
     let said = "";
     const done = await ask({
-      box: ev.boxes.reschedule,
+      box: ev.boxes.reschedule, wide: true,
       fields: <RescheduleFields ev={ev} first={own} onPick={(w) => { Object.assign(now, w); const n = ++seq; preview().then((b) => { if (n === seq) replace(b); }).catch(fail); }} />,
       refresh: preview,
       act: async (fp) => {

@@ -52,6 +52,8 @@ export type AskBox = {
   refresh?: () => Promise<Box>;
   /** a label in place of Back (the leave guard's Keep editing) */
   back?: string;
+  /** a wider box, so a row of fields stays one row (Reschedule's New day · Starts · Locks, as the mockup) */
+  wide?: boolean;
 };
 type Open = AskBox & { resolve: (done: boolean) => void };
 
@@ -121,7 +123,7 @@ export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<bo
   };
 
   const dialog = (
-    <Modal opened={open !== null && box !== null} onClose={() => { if (!busy) close(false); }} title={box?.title} centered classNames={{ content: touch.touch }}>
+    <Modal opened={open !== null && box !== null} onClose={() => { if (!busy) close(false); }} title={box?.title} centered size={open?.wide ? 600 : "md"} classNames={{ content: touch.touch }}>
       {box && (
         <Stack gap="md">
           <BoxBody box={box} fields={open?.fields} changed={changed} />
