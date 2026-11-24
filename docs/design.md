@@ -699,7 +699,7 @@ bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,men
 
 **Surfaces.** Discord: `/gm config raid` → *Schedules* (section key `times`; a raid with only its run times opens straight on them, so the old flow is unchanged; list / add by kind / change name, rosters, cadence, behaviour, pause, remove; all in the draft, `sched_checked` refuses on the spot with the registry's own rules; Save lists per-schedule changes and each schedule's next three runs). `/raid open` offers *Next run* · *Another upcoming run…* (every recurring schedule's upcoming runs labelled by schedule name) · *Ad hoc run…* (a pickup template, or *One-off — pick a day and time*: `ADHOC_SCHEDULE`). Web: `/api/raids` carries `schedules` (`schedule_json`: machine forms for the editors plus `label`, `slot_labels`, `time_label`, `next` in words), `POST /api/admin/raid/schedule {instance, id, fields}` and `/api/admin/raid/schedule/remove`; `/api/raid/{rid}/open` takes `schedule` (`adhoc` = a one-off; a `when` with no schedule opens the upcoming run at exactly that time, else a one-off — `rc.open_schedule`, shared with plain text's `run_open`); the Raids page has a Schedules block per raid (`components/ScheduleCard.tsx`: class badge, regulars count, fields per class, each inherited value's source, confirmations, seat order), the Rosters page *Open next run* and *Start ad hoc run*. Plain text: `schedule_set` (field `<id>.<setting>`, `<id>.lockout` = "days at time") and `schedule_remove`; `run_open` takes a schedule id in `field`. MCP: `schedule_set`, `schedule_remove`, `open_run(schedule=)`; schedules come back in `list_raids` / `get_raid`. Help: the static *Raid schedule* guide lists each schedule's next three runs; `/ask` gets every schedule in words. Out of scope: two different instances under one signup.
 
-**Stored at guild level since 2026-11-22** (§5.67): the entries live in `guild.yaml: schedules:` with a lineup; `raid_def` still hands them back as `raids.<id>.schedules` / `slots`. **Since 2026-11-23** (§5.67 phase 2) the cadence fields above are each schedule's own: a raid holds no sheet timing, every stored schedule carries the nine values written out, and "inherit" means the game's suggestion.
+**Stored at guild level since 2026-11-22** (§5.67): the entries live in `guild.yaml: schedules:` with a lineup; `raid_def` still hands them back as `raids.<id>.schedules` / `slots`. **Since 2026-11-23** (§5.67 phase 2) the cadence fields above are each schedule's own: a raid holds no sheet timing, every stored schedule carries the nine values written out, and "inherit" means the game's suggestion. **Since phase 3** (§5.67) a schedule has an id unique across the guild and is addressed by it alone; there is no `default` schedule (an older one became `<raid-id-with-dashes>` named "Raid nights"), the profile's raid `slots` are no longer read, `raid_def` hands back `schedules` only, and a run's key carries no schedule, date or time (`run_key` / `event_key` / `slot_starts` are gone): a schedule's run is found by its `schedule` and `occurrence` stamps.
 
 ### 5.28 Applications in Discord (built 2026-09-27)
 
@@ -806,6 +806,9 @@ configops `run_open` through `apply_async`, the confirmations switch, coverage, 
 **Migration:** none for Phase 1 (no schedules or regulars are stored yet; the default series' run behaves as before
 until an officer adds regulars; legacy runs read their class from their schedule). D11's `scripts/migrate_rosters.py`
 (Phase 0) still applies.
+**Since §5.67 phase 3** a series is a schedule's id: `RegisteredCharacter.rosters`, `Applicant.schedules` and a run's
+`series` hold schedule ids, an older `"<raid>:<schedule>"` key is translated at load through `schedule_aliases` (never
+split), and the default series is the lifted schedule named *Raid nights*.
 
 ### 5.31 Suggestions: covering short tank/healer seats (roster redesign Phase 2, built 2026-10-06)
 
@@ -4601,7 +4604,7 @@ leaving only); a follow-on of a follow-on; a per-member "first raid only" answer
 lead's groups onto the follow-on's board (a 20's groups say nothing about two 10s); a follow-on added to a run already open;
 the follow-on's shortfall line doesn't change the health card's colour.
 
-**Stored as a lineup since 2026-11-22** (§5.67): a schedule's `follow` is its lineup's second entry in `guild.yaml: schedules:`; every reader still sees `follow`.
+**Stored as a lineup since 2026-11-22** (§5.67): a schedule's `follow` is its lineup's second entry in `guild.yaml: schedules:`; every reader still sees `follow`. **Since phase 3** (§5.67) the follow-on is part 1 of a chain of up to four raids (`LINEUP_MAX` 4): every later part's `follows` is the FIRST part's key, `followed_by` the next part's, each part stamped `event` / `part` / `starts`; the follow-on's dict has its own random key (no `after` key space), two runs at one minute each keep their own lineup, a cancel on any part cancels the whole run, and an open run's lineup can be edited before its lock.
 
 ### 5.63 Guide library: the guild's own leveling guides, issued per member (built 2026-11-09)
 
@@ -5360,7 +5363,7 @@ officer, owner or tool view of who watches what; a chart image in Discord; histo
 history of anything but the lowest price and quantity listed; sale prices. The history file's real size after a week is
 still to be measured and recorded in the operator notes.
 
-### 5.67 Raids, events and schedules: schedules stored at guild level (phase 1 built 2026-11-22; phase 2 2026-11-23)
+### 5.67 Raids, events and schedules: schedules stored at guild level (phase 1 built 2026-11-22; phase 2 2026-11-23; phase 3 2026-11-23)
 
 **Why.** The owner's direction (2026-11-22): raids and schedules are distinct things. A schedule says WHEN one or more
 raids run; a raid says what the instance is. Until now a schedule lived under the raid it ran (`raids.<id>.schedules`,
@@ -5374,7 +5377,8 @@ cannot stop the load) holds every schedule of the guild, each `{id, lineup: [{ra
 active, slots | days + time, <cadence overrides>, weights?, confirm?}`. The lineup is the lead first and at most
 `LINEUP_MAX` (2) raids: the old row's `rosters` is `lineup[0].rosters`, its `follow` is `lineup[1]`. `starts` (minutes
 after the lead) is kept by `parse_lineup` / `parse_follow` and read by nothing yet. A schedule is still addressed by
-(its first lineup raid, its id); a raid's `default` entry holds the raid's own run times as `slots`. `to_stored_schedule`
+(its first lineup raid, its id); a raid's `default` entry holds the raid's own run times as `slots`. (Phase 3, below,
+changed all three: up to 4 raids with their starts read, one guild-unique id, no `default` entry.) `to_stored_schedule`
 (row → entry) and `from_stored_schedule` (entry → (raid, row)) are exact inverses. A raid's override in `raids:` no
 longer carries `schedules` or `slots`.
 
@@ -5507,7 +5511,209 @@ back: a raid-level timing value that had no schedule (named in the start's line)
 healer aim. Going back past phase 1: the script without the flag (minimums first, then
 schedules, as above).
 
-**Later phases** (spec §9) change what people see: guild-unique schedule ids with regulars keyed by them and no
-`default` schedule, events with their own identity and reschedule, lineups of up to four raids with a start each, then
-the pages, the Discord wizards and the words. Tests: `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`,
-`tests/test_minimums.py`, `tests/test_minimums_solver.py`, `tests/test_officer_raids.py`.
+**Phase 3 built (2026-11-23): schedules and runs with their own identity.** Spec §9 item 3 (D3, D5, D6, D7, D10, C2,
+C4, C8–C13, C16–C18); plan `docs/superpowers/plans/2026-11-23-events-with-identity.md`. A schedule is addressed by a
+guild-unique id and holds its regulars; a run has an identity that is not its time, can be moved and given its own sheet
+timing, plays a lineup of up to four raids, and can have that lineup edited before its lock.
+
+*Schedule ids.* Every schedule has an id unique across the guild (`^[a-z0-9][a-z0-9_-]{0,15}$`); `default`, `adhoc`,
+`test` and `after` are reserved (`RESERVED_SCHEDULE_IDS`: older files and run dicts carry them). There is no `default`
+schedule, no `DEFAULT_SCHEDULE`, `series_key` or `parse_series`, and the profile's raid `slots` are no longer read (every
+profile has none): a raid's own run times are an ordinary schedule. A schedule is shown by its name (`schedule_name`: an
+unnamed one by its kind), never by its id. Readers: `Registry.all_schedules()`, `schedule_entry(sid)`, `first_raid(sid)`;
+`schedules(raid)` / `schedule_def` / `raid_override` still rebuild a raid's view (`raid_override` = `config.raids[raid]`
+plus its rows as `schedules`; no `slots`). Writers: `set_schedule(sid, fields, by, raid=)` and `remove_schedule(sid)`, both
+through `_write_schedules`, THE whole-list write of a raid's schedules (also `set_raid_overrides`' `schedules`), which
+refuses an id another raid holds (`ID_TAKEN`). Naming a raid (or a lineup) means CREATE: `Registry.schedule_raid` refuses
+an existing id with `ID_TAKEN`, or with `SCHEDULE_EXISTS` ("The schedule called {sid} already exists. To change it, name
+the schedule without a raid.") when the raid named is the schedule's own; a new id without its raid is `NO_SCHEDULE`. A
+raid's `slots` or `schedules` are refused with `RUN_TIMES_ON_SCHEDULE`. Plain text and MCP name a schedule by its id alone
+(`SCHEDULE_ID_ALONE` refuses '<raid>:<id>', `SETTING_ALONE` an older '<id>.<setting>' field). Revs: `schedule:<id>` covers
+one schedule (absent = the id is free) and is what every schedule op checks; `raids:<id>` covers the raid's own changes
+only, so a raid-rules Save never 409s on a schedule edit; `raid_all:<id>` covers the raid and every schedule whose lineup
+starts with it and is checked by the reset alone (`clear_raid_override`, `configops.config_section(raid_reset)`), so a
+reset never removes a schedule added after its preview (the Raids page's `reset_rev`, the Discord reset screen and
+MCP's `raid_reset(revs=)` carry it). `schedule_aliases` is outside the settings rev.
+
+*Regulars belong to the schedule.* `RegisteredCharacter.rosters`, `Applicant.schedules` and a run's `series` hold
+schedule ids. An older `"<raid>:<schedule>"` key is translated only through `GuildConfig.schedule_aliases`, never split;
+`old_key_raid(key)` is the one reader of an old key's raid (the migration's words, the trust check, `series_label`).
+`series_label` of a key no schedule answers to reads "A removed Barrow Deeps schedule".
+
+*The ids lift.* At every load, after phase 2's lifts and on a copy, `lift_schedule_ids(cfg, raids)` walks the readable
+entries in stored order: an old `default` entry becomes `lifted_schedule_id(raid)` (the raid id with dashes, at most 16
+characters, `-2` … while taken: `barrow-deeps`), named `DEFAULT_SCHEDULE_NAME` "Raid nights" unless it has a name, kind
+weekly; an id an earlier entry holds becomes `<id>-2`; an id an alias already gives another raid's schedule stays with
+that schedule, wherever the other entry sits. An alias `"<raid>:<old id>"` → id is written for every ENTRY no alias
+answers for yet, so an entry that was unreadable at an earlier start and fixed by hand since gets its own at the next
+start; `_write_schedules` gives a schedule made now its alias in the same write; an alias is never overwritten. Run dicts'
+`series` / `schedule_id` are translated with it. `Registry.remap_regulars` (end of `reload`, in memory) translates every
+member's regular keys and every applicant's schedules: an aliased key becomes the id; an unaliased old key is KEPT as it is
+when its raid isn't fully answered for by the aliases (`_aliased_raids`: a raid phase 1 refused, an unreadable entry, a
+failed lift); otherwise it is dropped and named ("…: dropped a regular spot on a removed Barrow Deeps schedule"); a stray
+bare key that never named a schedule is dropped at the guild's first lift only. An unreadable entry is named by its raid
+and name (`unread_entry_name`), never by an id. `migrate_schedules` saves it in phase 1's one commit (guild.yaml plus each
+changed member and applicant file); its lines go to `ids_saved`, posted at start as one info line (`schedule_ids_line`:
+"Schedules now have ids of their own: Barrow Deeps · Raid nights is now barrow-deeps."). Phase 2's timing line names a
+schedule by its name ("Barrow Deeps · Raid nights: …"), never "default".
+
+*Run keys and stamps.* A new run's key is `new_run_key(reg, rs, raid)` = `<abbr>-<6 characters>` drawn with `secrets`
+from `KEY_ALPHABET` (30 letters and digits, no 0/1/i/l/o/r), unique against every run dict and run file; the run dict's
+key and the run file's key are the same string. Older keys are opaque ids. Nothing reads a raid, a date, a time or a
+schedule out of a key or builds a key from a time (`run_key`, `event_key`, `schedule_kw`, `RunKeyClash` and
+`TEST_SCHEDULE` are gone; `tests/test_event_identity.py::test_nothing_builds_or_parses_a_run_key` pins it; loot council
+ids `<run>-r<N>` and companion import ids still read their own suffix and nothing else). Every run file and run dict
+carries `schedule` (`schedule_stamp`: the schedule id; None for a one-off, a rehearsal or a later raid), `occurrence`
+(`occurrence_stamp`: the start the schedule gave it in guild WALL time, naive `"2026-12-15T18:30"`, so a timezone change
+never makes a second run), `event` (the first part's key), `part`, `starts` (minutes after part 0), and since the fix
+rounds `stands_for` and `dropped` (below). `ensure_run` always creates (finding is `find_run`'s) and stamps `created_at`;
+a first part's dict whose run file never got written is dropped by `cleanup_ephemeral` after `DICT_WITHOUT_RUN_HOURS` (1).
+
+*Finding a run.* `occurrences(reg, now, horizon, lead=)` = every active non-pickup schedule's starts across the guild
+(`upcoming` is its filter by first raid); a schedule whose lineup names a raid the profile lacks (`gone_raids`) gives none,
+and the scheduler warns once an hour per schedule (`_warn_gone_raids`: "<schedule> opens no runs: <raid> is no longer a
+raid of this game. Change its raids on the Schedules page, or remove it there."). `event_of_occurrence(rs, sid, occ,
+reg=)` is THE finder of a schedule's run, in any state: the first part stamped with that occurrence or standing for it;
+with `reg` also an unstamped older file whose start and `run_schedule_id` give the same pair, and a live run of the
+schedule moved to exactly that start. `live_at(rs, raid, start, test=)` finds a one-off or a rehearsal (a live first part
+at that minute: an open at the same minute and first raid is that run; a cancelled one-off no longer blocks its minute).
+`find_run` = what an open at a start meets (`open_run`, `open_preview`, the open wizard, the plain-text describe);
+`which_run`, `open_preview` and `upcoming_rows` carry `occurrence`, never a key; the site's open route compares the
+preview's `occurrence` (and schedule) and answers 409 with a fresh preview when it changed. `open_run` hands a live run
+back (completing its parts), refuses a closed one with `closed_run_refusal`'s sentence (a schedule's closed occurrence is
+never reopened by an open), else creates. `run_schedule_id(reg, ev)` = the run dict's `schedule_id`, else a stamped file's
+`schedule` as it is, else an older stamp read through the aliases; `run_series` and `run_kind` read it.
+
+*Lineups as a chain of parts (C12, D3).* `LINEUP_MAX` = 4: one raid per step, 1–4 rosters each, no raid twice
+(`parse_lineup`: `LINEUP_MAX_WORDS` "A run holds at most 4 raids.", `LINEUP_ORDER`). A schedule row carries `follow` =
+lineup[1] and `then` = lineup[2:] (`row_lineup`, `parse_then`); `to_stored_schedule` / `from_stored_schedule` stay exact
+inverses with four raids. A later raid's default start is the previous raid's start plus the PREVIOUS raid's length
+(`Registry.lineup_offsets`), and every later start is counted in real time (`rc.after_minutes`, in UTC, so a clocks-change
+night starts each raid on time). A run is one run file and one run dict per raid: part 0 owns the sheet, the answers and
+the timing and its dict holds the whole `lineup`; every later part's `follows` is part 0's key and `followed_by` the next
+part's. `event_parts` / `first_part` / `later_parts` / `same_event` read the chain. `complete_parts` opens a later part
+whose dict exists and whose file doesn't (an open cut off by a restart), once, from `open_run` and the scheduler's minute;
+it never posts a sheet or makes a dict. `sync_parts` (alias `sync_follow`) copies part 0's answers onto every live later
+part at each save. The solve prefers anyone rostered on an earlier raid: `LEAD_SEAT_BONUS` once per earlier raid they
+were rostered on (the plan said flat; ruled: someone rostered on more earlier raids wins a tie, and the bonus never
+outweighs a minimum). `lock_run` on a later raid while one before it is open is refused (`LATER_PART_LOCK`);
+`lock_parts` = part 0's lock builds every later raid in order, a short role never stopping one; a part whose solve fails
+stays open with its `lock_error` and every part after it waits for the scheduler's retry. `free_seat` on part 0 frees the
+seat on every locked later part; `held_later` + `consequences.later_places_sentence` say which places a Can't frees (the
+Me page and `/raid out`). A cancel on any part cancels every live raid of the run (a later part redirects to part 0 while
+part 0 is live; once part 0 has finished it takes the raids still to play and posts nothing — `cancel_tells_channel`).
+`schedule_starts` drops a start whose later raid would begin before its first opening (C8); the open confirm says when a
+later raid first opens (C9, `before_first_open_sentence`).
+
+*Reschedule and a run's own timing (C11, C18).* `RaidMixin.reschedule_event(reg, rs, ev, start=, timing=, …)` over
+`rc.reschedule`: officers, decided live (PRIV_LIVE; `MOVE_OFFICER_ONLY`). Refusals in order (`reschedule_refusal`):
+`MOVE_CLOSED`, `MOVE_STARTED`, `MOVE_PAST`, `MOVE_SAME` / `TIMING_SAME`, `MOVE_CLASH` (its first raid already has a live run
+at that minute), `TIMING_LOCKED`, `TIMING_ORDER`, `TIMING_UNKNOWN`; a wall time the clocks skip or repeat is refused
+(`MOVE_GAP`, `MOVE_TWICE`, `rc.move_start`). Every part moves by the same amount and keeps its offset; `occurrence` and
+`schedule` NEVER change, so a moved run still answers for the night it was opened for. `EVENT_TIMING` = the six settings a
+run may take as its own (reminder time and switch, lock, confirm-by, fill-ask wait, automatic asks), written on part 0's
+dict, later parts' cut-offs following; after the lock only the start moves. `confirm_by` moves by the delta, or to the
+earlier of the new start and an hour from now when that is already past (`MOVE_CONFIRM_GRACE`); fill asks keep their
+expiry. Under every part's board lock: one commit, the sheet edited in place under its message id, the officer cards
+refreshed, every open confirmation and fill-ask card re-rendered (`edit_live_card`), a `moved` notice ("Barrow Deeps now
+starts Tue 15 Dec 7:30 PM.") to everyone with a row on part 0 but an away row (`rc.answered_ids`) when the start moves —
+a timing-only change tells nobody —, one run-thread line naming the raid, one audit line. No DM. The confirm is
+`consequences.reschedule_consequence` (what changes, built from the keys that change; who is told; then the first of:
+locks now · a conflict · away answers · "That night's <schedule> run is this one." when the move lands on an unopened
+night of its own schedule, which the run then stands for · the undo). Stale protection: `rc.event_rev` (start, state,
+lineup, own timing) handed out by every preview and checked under the locks (`RUN_CHANGED`).
+
+*A schedule's run times edited while its run is open (C10).* "The open run keeps its old times." is true end to end
+because the decision is made ONCE, at the schedule write: `Registry._write_schedules` calls `rc.plan_stands_for(reg, raid,
+before, after)` before the new rows are installed, and stamps `stands_for: <occurrence>` on each LIVE first part (never a
+test run) whose current night the new run times no longer give, in the same commit. The run times taken away and added
+are paired by time (`_slot_pairs`) inside the run's anchor window (`_anchor_window`: the raid's lockout window when it
+has a first opening, Monday-to-Sunday weeks only without one); the run stands for its pair's occurrence when the schedule
+gives it and no run holds it, else for nothing. `run_times_changed` returns early for a timing-only edit; a refused write
+restores the stamps. Readers only read (`stands_for_of`: the dict's, else the file's); a CANCELLED run holds no
+`stands_for` (its night opens again), a done one keeps it; `sync_stands_for` copies the dict's value onto the run file
+each scheduler minute and before `cleanup_ephemeral` drops the dict.
+
+*Edit lineup (before the lock).* `RaidMixin.edit_lineup(reg, rs, ev, lineup, …)` over `rc.plan_lineup` /
+`rc.apply_lineup`: officers live (`LINEUP_OFFICER_ONLY`). Refusals (`lineup_refusal`): `LINEUP_CLOSED`, `LINEUP_LOCKED`,
+`parse_lineup`'s, `LINEUP_FIRST`, `LINEUP_GONE`, `LINEUP_ORDER`, `LINEUP_SAME`. Run keys never change: a kept raid keeps its
+key, file, board, pins and leaving answers and takes its new place and start; a new raid is a new part; a removed raid's
+file is cancelled with `RaidEvent.dropped` (it leaves the chain and answers as itself: a cancel, move or edit on it
+answers as that cancelled raid), its dict dropped, no notice, no card; its pending asks are closed under its plan lock and
+their cards edited ("… was taken out of the … run, so this ask is closed."). A kept raid whose start changes sends the
+`moved` notice. `consequences.lineup_consequence` always counts what a removed raid takes with it (board places, pins,
+plans to leave early, open asks — an assert), lets the new start times fall back to the clock alone or "see their new
+start times", then C9 and the schedule note when there is room; `lineup_words` is shared with the done and thread
+lines. A schedule's lineup is unchanged by a run's edit.
+
+*Surfaces.* Plain text: `run_reschedule` (field `start` as 'YYYY-MM-DD HH:MM' guild time, or an `EVENT_TIMING` setting;
+several on one run coalesce into one call) and `run_lineup` (the later raids as text, `parse_lineup_text`; "none" = the
+first raid alone), both in group `runs`, `WARN_OPS` (always reviewed), carrying the `event:<key>` rev from preview to
+Apply; `run_open`'s text takes the same later-raid list. Site: `POST /api/run/{key}/reschedule` and `/lineup` (preview →
+`{sentences, rev}`; 400 refusal, 409 stale), the run card's Reschedule… (a date-time picker in guild time, the server's
+sentences, Move), the schedule editor's "Then, the same night" rows (up to three later raids with rosters and a start),
+`ev_json` `part` / `event` / `occurrence` / `lineup` / `start_local` / `cancel_tells_channel`, `schedule_json` `lineup` and
+every lineup raid in `raids`; a structured `lineup` naming no raid and no kind on an existing schedule is an edit. MCP:
+`reschedule_run`, `edit_lineup`, `open_run(lineup=)` (an optional `rev` from the preview). Discord has no new wizard: both
+ops are in `PARITY_PENDING` (phase 5), reachable through `/gm change` and @mentions. Person-facing plain-text lines and
+refusals name a run (`configops.run_words`: raid and 12-hour start), never its random key; ops lines and MCP fields keep it.
+
+*The migration at start.* `rc.migrate_at_start(reg, rs)` = `migrate_schedules` (phases 1–3's lifts, the regulars) and
+`rc.stamp_runs` (every LIVE run file without `event` gets the five stamps, written from its own JSON so nothing else
+changes, and its run dict the same; finished and cancelled runs are never touched) in ONE `store.batch`: one commit per
+guild that owes one, none on a second start. `discord_bot._schedules_save` runs it first in `setup_hook`; on ready the
+ids line is posted with phase 2's lines. An older one-off pair keeps its keys, sheet and answers and reads as a two-raid
+run (its files' old `schedule: adhoc` / `after` stamps become None).
+
+*Going back to phase 2's code.* Stop the bot, run `uv run python scripts/lower_schedules.py --ids-only --dry-run`, then
+without `--dry-run`, then start the phase-2 code. `lower_schedule_ids(cfg, members, applicants)` gives each schedule back
+the id its alias came from (`lowered_id`: an alias counts only for the schedule's own first raid; a raid's lifted run times
+back to `default`; a schedule made since keeps its id as '<raid>:<id>' keys), every regular key, applicant schedule and run
+dict `series` / `schedule_id` back to "<raid>:<old id>", and empties the aliases; one commit per guild, member and
+applicant files in it. It refuses, writing nothing for that guild: a schedule of 3–4 raids; two schedules of one raid
+that would lower to one id; a stored entry that can't be read; and any LIVE run whose key differs from the one phase 2's
+code builds from its raid, start and lowered schedule (`_run_refusal`: every run opened by this phase's code, and one
+moved by a timezone change) — the older scheduler would open a second sheet for it, so end or cancel it first.
+`--minimums-only` (back to phase 1) and no flag (before guild-level schedules) lower the ids first. The phase-2 code
+ignores the new run fields (`RaidEvent` ignores unknown keys).
+
+*Calls made* (the plan's, standing unless noted; each with its cost if wrong). Occurrence is guild wall time, naive (a
+second edit at the same wall time reads as "already open"). `default` becomes `lifted_schedule_id(raid)` named "Raid
+nights" (one rename later). Old keys go through aliases, never split; an orphan is dropped and named (an officer re-adds a
+regular). A one-off at the same minute and first raid as a live one is that run; a cancelled one-off no longer blocks its
+minute. `follows` = the first part's key on every later part. `LEAD_SEAT_BONUS` per earlier raid rostered (ruled above).
+C12's "that raid's length" is the PREVIOUS raid's. Cancel on any part cancels the whole run. After the lock only the start
+moves (`TIMING_LOCKED`). A move into a past lock time is allowed (the confirm says it locks within a minute). The `moved`
+notice goes to everyone who answered part 0, not to away rows, and only when a start moves. `stands_for` is decided once at
+the schedule write (an edit made by older code or by hand in the file gets none, and a second sheet could open); a
+cancelled run gives its night back (a second sheet if an officer cancels expecting no run that week); the anchor is the
+lockout window (a move across a reset opens in the new lockout). A removed lineup raid's file is kept as cancelled with
+`dropped`. `LINEUP_LOCKED` keeps the plan's sentence. The site's Reschedule uses a date-time picker, not a typed field (the
+Clock rule's lint). A structured `lineup` on an existing id without a raid or kind is an edit (the site's editor needs it);
+`SCHEDULE_EXISTS` names the id, not the name (an unnamed schedule's name is its kind). MCP's new tools take an optional
+`rev`.
+
+*Limits an operator should know.* On a raid whose lockout is shorter than a week (Barrow Deeps: 3 days), a weekly run
+time moved outside the open run's lockout window has no replacement, so the new night opens too (the lockout rule). A
+schedule whose raids have no first opening is anchored on Monday weeks: a Sunday run time moved to Monday stands for that
+week's (past) Monday, so the next Monday opens a day after the Sunday run. MCP or a raw HTTP reset sent without the
+preview's revs is unchecked, like every setup tool. A one-off's cancelled minute can be opened again. Two runs at one minute
+each keep their own lineup (`rc.conflicts` flags people on both). A plain-text lineup edit sets no starts, so a kept raid's
+own start goes back to the default (the confirm shows the new times). Test-bench answer lines and the non-strict
+plain-text describe fallback still print a run key. Discord's raid wizard shows one follow-on and keeps later entries
+untouched; the site's Edit lineup waits for phase 4's builder (the route exists for MCP and the matrix), and so does a
+Schedules page that lists a schedule whose first raid left the game. Tests: `tests/test_schedule_ids.py`,
+`tests/test_schedule_surfaces.py`, `tests/test_event_identity.py`, `tests/test_lineups.py`, `tests/test_lineup_solver.py`,
+`tests/test_reschedule.py`, `tests/test_edit_lineup.py`, `tests/test_event_surfaces.py`.
+
+*Also on this branch (phase 2's final review).* The solver is repeatable per budget: interleaved search with a fixed
+seed (`RANDOM_SEED`) and a deterministic-time limit (`time_limit_s` × `DTIME_PER_SECOND`), the wall clock only a safety net
+at `WALL_CEILING` × the budget, so Preview lock and Lock land on the same roster even when the search stops early
+(`tests/test_solver_repeatable.py`; `interleave_search` is experimental in OR-tools — re-check on every upgrade).
+`rc.run_strategy` is THE split-strategy chain (run → roster → raid → balanced) the lock and Preview lock share, and Preview
+lock solves with the lock's own budget. `consequences.raid_reset_consequence` is the raid wizard's Reset confirm.
+
+**Later phases** (spec §9): the Events, Schedules and Raids pages (phase 4, which also builds the site's lineup editor),
+the Discord wizards (phase 5, closing the two `PARITY_PENDING` rows) and the words (phase 6). Phases 1 and 2's tests:
+`tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`, `tests/test_minimums.py`, `tests/test_minimums_solver.py`,
+`tests/test_officer_raids.py`.
