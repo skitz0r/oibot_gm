@@ -4005,6 +4005,15 @@ def _schedule_ops(reg: Registry, target: str | None, fields: dict, revs: dict | 
     except RegistryError:
         exists = False
     edit_rev = bool((revs or {}).get(f"{CONFIG_REV}schedule:{sid}"))  # the site's edit Save carries the schedule's own rev
+    if exists and edit_rev and not raid:
+        # the editor sends the schedule's `stored` form back whole (schedule_view.stored_entry): what equals the schedule
+        # now is no edit, so an unchanged Save writes nothing and an unchanged kind never reads as a create
+        from .schedule_view import unchanged
+
+        row = reg.schedule_entry(sid)
+        fields = {f: v for f, v in fields.items() if not unchanged(row, str(f).strip().lower(), v)}
+        if lineup is not None and unchanged(row, "lineup", lineup):
+            lineup = None
     if lineup is not None and exists and not raid and "kind" not in fields and (edit_rev or not any(f in fields for f in CREATE_SHAPED)):
         # an EDIT of an existing schedule's lineup (the site's editor, MCP): the whole lineup in one field, no raid named —
         # Registry.set_schedule keeps its first raid the schedule's own. A create names its kind (the site) or its raid;
@@ -4242,6 +4251,14 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
 
                 raise RegistryError(NO_UPPER_LIMIT)
             entry = {"min": t.get("min") if t.get("min") not in (None, "") else 0, "note": str(t.get("note") or "").strip() or None}
+            try:
+                zero = int(entry["min"]) == 0
+            except (TypeError, ValueError):
+                zero = False  # not a number: the verb refuses it in its own words
+            if zero:  # a minimum of 0 is never saved (carried, phase 2 review): it clears the guild's own
+                if slot in cur:
+                    ops.append(ConfigOp(op="comp_target_clear", target=key, field=slot))
+                continue
             have = cur.get(slot) or {}
             if have and {"min": have.get("min", 0), "note": have.get("note")} == entry:
                 continue  # unchanged: no write
@@ -4522,7 +4539,7 @@ def _box_group(op: ConfigOp) -> tuple[str, str] | None:
             return ("schedule", _schedule_sid(op))
     except RegistryError:
         return None
-    if op.op in ("raid_set", "comp_target", "comp_target_clear") and (op.target or "").strip():
+    if op.op in ("raid_set", "comp_target", "comp_target_clear", "raid_reset") and (op.target or "").strip():
         return ("raid", op.target.strip())
     return None
 
@@ -4544,7 +4561,8 @@ def _raid_changed(op: ConfigOp) -> set[str]:
 def op_box(reg: Registry, ops, diff=(), rs=None) -> dict | None:
     """The box for one write (or several on the same schedule or raid): a NEW schedule → create (13), only `active`
     changing → Pause (15) / Resume (16), any other schedule edit → Save (14), schedule_remove → Remove (17), raid_set /
-    comp_target → the raid's Save (19). None for anything else, or a batch spanning several schedules or raids."""
+    comp_target → the raid's Save (19), raid_reset alone → the raid's Reset (raid_reset_box). None for anything else, or
+    a batch spanning several schedules or raids."""
     from . import consequences as cq
     from .registry import parse_bool
 
@@ -4557,6 +4575,8 @@ def op_box(reg: Registry, ops, diff=(), rs=None) -> dict | None:
         if kind == "raid":
             if ref not in reg.profile.raids:
                 return None
+            if any(o.op == "raid_reset" for o in ops):  # carried: the Reset box names the minimums that go (raid_all rev)
+                return cq.raid_reset_box(reg, ref) if len(ops) == 1 else None
             changed = set().union(*(_raid_changed(o) for o in ops))
             return cq.raid_save_box(reg, rs, ref, changed, diff)
         if any(o.op == "schedule_remove" for o in ops):
@@ -4728,6 +4748,12 @@ class Described(BaseModel):
         """The site's box asks first on every surface that shows it; the TIERED Save (useOpsSave, the admin translators,
         MCP) still reviews only what it reviewed before: a warn op or a consequence beyond a routine box's sentences."""
         return self.warn or any(c not in self.quiet for c in self.consequences)
+
+    @property
+    def asks_first(self) -> bool:
+        """The batch is one schedule's or one raid's write with a box to press (design §7b): the site's Save over POST
+        /api/ops/change always previews it first (phase 4). The translators and MCP keep `review`."""
+        return bool(self.box and self.box.get("verb"))
 
     @property
     def fingerprint(self) -> str:

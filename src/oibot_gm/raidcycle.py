@@ -964,6 +964,20 @@ def gone_raids(reg: Registry, instance: str, sched: dict) -> list[str]:
     return [e["raid"] for e in lineup if e.get("raid") not in reg.profile.raids]
 
 
+def gone_name(reg: Registry, rid: str) -> str:
+    """A raid's name even after it left the game's profile: the base profile's or the guild override's, else its id in
+    words."""
+    return (getattr(reg, "base_profile", reg.profile).raids.get(rid) or reg.config.raids.get(rid) or {}).get("name") or str(rid).replace("_", " ").title()
+
+
+def gone_sentence(reg: Registry, gone: list[str], tail: str = "") -> str:
+    """'Barrow Deeps is no longer a raid of this game.' — the raids gone_raids found (gone_name), with `tail` before the
+    period (', so this schedule opens no events'): the ops warning and the Schedules page say it."""
+    names = [gone_name(reg, r) for r in gone]
+    words = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return f"{words} {'is' if len(names) == 1 else 'are'} no longer a raid of this game{tail}."
+
+
 def _after_first_opens(reg: Registry, instance: str, sched: dict, starts: list[datetime]) -> list[datetime]:
     """C8: a start is dropped when a later raid of the schedule's lineup would begin before that raid first opens."""
     lineup = schedule_lineup(instance, sched)

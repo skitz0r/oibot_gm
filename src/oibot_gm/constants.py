@@ -82,4 +82,13 @@ PAGE_WORDS = {
     "open_seat": "open seat", "board_working": "Placing everyone again after the last change. This is the board from before it.",
     # a board the bot could not work out at all (event_board: an unexpected failure, kept for those answers)
     "board_failed": "The bot couldn't work out where the lock would place everyone. The board shows the officers' moves.",
+    # Schedules (schedule_view): a pickup's Repeats, a schedule with no run times, no reminder, the regulars' words and
+    # the next four weeks, and the empty Next events of a paused schedule
+    "by_an_officer": "Opened by an officer from the Events page", "no_times": "No run times yet. Edit the schedule to add them.",
+    "no_reminder": "No reminder", "for_seats": "{n} for {seats} seats", "short_every_week": "Short every week",
+    "ready_every_week": "Ready every week", "short_weeks": "Short {n} of the next four weeks",
+    "paused_next": "Paused, so no event opens. Resume it to open events again.",
+    # Raids (raid_page): the First opens value once the raid is open, its make-up with no minimum, a raid no schedule plays
+    "open_now": "Open now", "no_minimums": "No minimums set. Edit the raid to add one.",
+    "played_nowhere": "No schedule plays this raid yet. Add one on the Schedules page.",
 }

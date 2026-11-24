@@ -137,6 +137,8 @@ export interface Meta {
   page_words?: PageWords;
   confirm_words?: { back: string; keep: string; discard: string; leave_title: string; changed: string };
   leave?: { one: string; many: string };
+  /** registry.RESERVED_SCHEDULE_IDS: the ids no new schedule takes (a schedule editor never holds its own copy) */
+  reserved_schedule_ids?: string[];
 }
 /** constants.PAGE_WORDS: `{…}` are filled by whoever prints them. */
 export interface PageWords {
@@ -145,12 +147,49 @@ export interface PageWords {
   used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
   rosters_of: string; placed_of: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string;
   sheet_waits: string; sheet_not_posted: string; open_seat: string; board_working: string; board_failed: string;
+  by_an_officer: string; no_times: string; no_reminder: string; for_seats: string; short_every_week: string;
+  ready_every_week: string; short_weeks: string; paused_next: string; open_now: string; no_minimums: string; played_nowhere: string;
 }
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */
 export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string }
-/** A Details line (event_view): the label, its value in words, and where it links (a site path or a Discord jump link). */
-export interface Fact { label: string; value: string; href?: string }
+/** A Details line (event_view): the label, its value in words, and where it links (a site path or a Discord jump link).
+ *  `links` = several places at once (the Raids page's Played in: each schedule with its href); `level` = a chip's level. */
+export interface Fact { label: string; value: string; href?: string; links?: { name: string; href: string }[]; level?: string }
+/** A row of the Schedules list (GET /api/schedules): `repeats` = when its events start, in words. */
+export interface ScheduleRow { id: string; name: string; repeats: string }
+export interface ScheduleList { active: ScheduleRow[]; paused: ScheduleRow[]; reserved_ids: string[] }
+/** GET /api/schedules/{id} (schedule_view.schedule_json). `next` is empty while paused or gone (`next_empty` says why);
+ *  `regulars` null for a pickup (first come); `stored` = the schedule in machine form — the editor sends it back whole as
+ *  a `schedule` change (an unchanged one is no edit) with `rev` as revs["config:schedule:<id>"] (a stale one → 409). */
+export interface ScheduleView {
+  id: string; name: string; active: boolean; chip: string; kind: string; gone: string | null;
+  details: Fact[];
+  lineup: { raid: string; name: string; rosters: number; starts: number; time_words: string; seats: number }[];
+  timing: Fact[];
+  next: { starts: string; opens: string; locks: string; start_iso: string; key: string | null }[]; next_empty: string | null;
+  regulars: {
+    count: number; words: string; expected?: string; short: Record<string, number> | null; outlook?: string;
+    /** `box` = Remove's box (POST /api/admin/raid/regulars {schedule, uid, on: false, rev, seen: box.fp}) */
+    rows: { uid: string; display_name: string; character: string; cls: string; spec: string; box: Box; rev: string }[];
+  } | null;
+  people: { uid: string; display_name: string; characters: { label: string; cls: string; spec: string; main: boolean }[] }[];
+  boxes: { pause?: Box; resume?: Box; remove: Box };
+  stored: Record<string, unknown> & { lineup: { raid: string; rosters: number; starts?: number }[] };
+  rev: string;
+}
+/** /api/raids rows' `page` (raid_page.raid_row): Rules, Priority and the Reset box in words. `make_up` = Registry.minimums
+ *  alone (one answer with Readiness). */
+export interface RaidPage {
+  details: Fact[]; make_up: { slot: string; label: string; min: number; note: string | null }[]; make_up_empty: string | null;
+  priority: { key: string; label: string; value: number }[]; used_when: string; one_off_rule: string; open_events: number;
+  boxes: { reset: Box };
+}
+/** /api/readiness rows' `view` (raid_page.readiness_view): the Raids page's Readiness — the same make-up rows as the Rules
+ *  view with how many mains the guild has for each. */
+export interface ReadinessView {
+  who_could_play: Fact[]; make_up: { slot: string; label: string; have: number; min: number }[]; make_up_empty: string | null;
+}
 /** A row of the Events list (GET /api/event-list): `key` = the event's first raid, `title` its start in words. */
 export interface EventRow { key: string; title: string; subtitle: string; state: "open" | "locked" | "done" | "cancelled"; chip: string }
 /** A schedule's night with no event yet: found again by (schedule, occurrence). */
@@ -504,6 +543,8 @@ export interface RaidRule {
   rev?: string;
   /** what a Reset sends back as revs["config:raid_all:<id>"]: the raid's changes AND the schedules the reset removes */
   reset_rev?: string;
+  /** the Raids page (phase 4) */
+  page?: RaidPage;
 }
 export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[]; schedule_kinds: string[]; schedule_cadence: string[]; max_rosters: number }
 export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number; balance?: string | null; reason?: SplitReason | null; reason_text?: string | null }
@@ -723,6 +764,8 @@ export interface ReadinessRaid {
   roles: ReadinessRole[]; missing_buffs: { id: string; name: string; abbr: string; colour: string; art: string | null }[];
   comp: CompLine[]; short: { key: string; have: number; want: number; why: string }[]; notes: string[];
   series: Series[]; minimums: Record<string, MinimumEntry>; minimum: Record<string, number>; rev: string; comp_groups: string[];
+  /** the Raids page's Readiness view (phase 4) */
+  view?: ReadinessView;
 }
 /** A target slot: a role, a class or Class:Spec, with its words (`label`) for selects and tooltips. */
 export interface CompSlot { value: string; label: string; kind: "role" | "class" | "spec" }

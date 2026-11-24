@@ -145,10 +145,7 @@ class RaidSchedulerMixin:
             if not gone or (key in warned and now - warned[key] < timedelta(hours=1)):
                 continue
             warned[key] = now
-            names = [(getattr(reg, "base_profile", reg.profile).raids.get(r) or reg.config.raids.get(r) or {}).get("name") or r.replace("_", " ").title() for r in gone]
-            words = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-            await self.ops.emit(reg.config, "warn", f"{schedule_name(s)} opens no runs: {words} "
-                                                    f"{'is' if len(names) == 1 else 'are'} no longer a raid of this game. "
+            await self.ops.emit(reg.config, "warn", f"{schedule_name(s)} opens no runs: {rc.gone_sentence(reg, gone)} "
                                                     "Change its raids on the Schedules page, or remove it there.")
 
     async def _close_run(self, reg, rs, ev, now, exhausted_posted: set) -> None:

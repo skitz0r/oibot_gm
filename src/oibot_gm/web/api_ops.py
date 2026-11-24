@@ -162,13 +162,15 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         described = await asyncio.to_thread(configops.describe_ops, reg, allowed, refused)
         chans = channels_of(reg)
         revs = {**configops.board_revs(reg, allowed, raids), **crevs}
-        pv = {"kind": "change", "described": described.json_for(reg, surface(v), chans), "describe": [ln.text for ln in described.lines],
-              "ops": [op.model_dump(exclude_none=True) for op in allowed], "refused": list(refused), "review": described.review, "warn": described.warn,
+        # a schedule's or a raid's Save always shows its box first (phase 4: the Schedules and Raids pages) — `confirmed` applies it
+        review = described.review or described.asks_first
+        pv = {"kind": "change", "described": {**described.json_for(reg, surface(v), chans), "review": review}, "describe": [ln.text for ln in described.lines],
+              "ops": [op.model_dump(exclude_none=True) for op in allowed], "refused": list(refused), "review": review, "warn": described.warn,
               "fingerprint": described.fingerprint}
         if not allowed:
             return {**pv, "applied": [], "results": [], "summary": configops.result_summary({"refused": refused})}
         silent = reason == "expired" and want_apply and d.get("seen") == described.fingerprint
-        if want_apply and (silent or (reason is None and (d.get("confirmed") or not described.review))):
+        if want_apply and (silent or (reason is None and (d.get("confirmed") or not review))):
             return finish(pv, await apply_now(v, allowed, [], revs))
         token = mint()
         previews[token] = {"kind": "structured", "uid": v.uid, "guild": reg.key, "ops": pv["ops"], "revs": revs, "fingerprint": described.fingerprint,

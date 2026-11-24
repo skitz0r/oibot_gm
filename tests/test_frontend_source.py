@@ -847,7 +847,7 @@ def test_the_schedule_editor_names_a_schedule_by_its_id():
     assert "target: `${r.id}:" not in src and 'target: s.id' in src and "target: id" in src
     assert "config:schedule:${s.id}" in src and "...raidRevs(r)" not in src
     assert "f.lineup = [{ raid: r.id, rosters: Number(x.rosters) }" in src and "is_default" not in src
-    assert "slug(d.name, d.kind, taken)" in src
+    assert "slug(d.name, d.kind, taken, meta?.reserved_schedule_ids || [])" in src  # phase 4: the reserved ids are the server's
     rosters = (SRC / "pages" / "Rosters.tsx").read_text()
     assert 'split(":")' not in rosters and '|| "default"' not in rosters
     assert "schedule: s.key" in rosters and "schedule: o.key" in rosters

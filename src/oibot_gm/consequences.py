@@ -832,16 +832,18 @@ def _day(reg: Registry, t) -> str:
 _DAY_NAMES = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday", "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday"}
 
 
-def repeat_words(reg: Registry, entry: dict) -> str | None:
+def repeat_words(reg: Registry, entry: dict, *, lockout_length: bool = True) -> str | None:
     """When a schedule's events start, as the create box says it: 'every Tuesday at 6:30 PM', 'every Tuesday and
-    Thursday at 7:30 PM', 'on day 1 of each 7-day lockout at 8:00 PM'; None for a pickup or a schedule with no times."""
+    Thursday at 7:30 PM', 'on day 1 of each 7-day lockout at 8:00 PM' ('of each lockout' without `lockout_length`: the
+    Schedules list's short line); None for a pickup or a schedule with no times."""
     kind = entry.get("kind") or "weekly"
     if kind == "lockout":
         days = list(entry.get("days") or [])
         if not days:
             return None
         lockout = int(reg.raid_def(entry.get("raid")).get("lockout_days") or 7)
-        return f"on day{'s' if len(days) > 1 else ''} {rc.join_words([str(d) for d in days])} of each {lockout}-day lockout at {reg.time_label(entry.get('time'))}"
+        each = f"each {lockout}-day lockout" if lockout_length else "each lockout"
+        return f"on day{'s' if len(days) > 1 else ''} {rc.join_words([str(d) for d in days])} of {each} at {reg.time_label(entry.get('time'))}"
     if kind != "weekly":
         return None
     order = list(_DAY_NAMES)

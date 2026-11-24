@@ -23,6 +23,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from .. import consequences as cq
+from .. import raid_page
 from .. import armory as armory_mod
 from .api_prices import prices_meta
 from .api_armory import char_extras as armory_extras
@@ -43,7 +44,7 @@ APP_DIR = HERE / "static" / "app"
 STARTED = time.time()  # fallback when the bot has no start stamp
 from ..constants import CONFIRM_WORDS, LEVEL_WORDS, MARK, MARK_WORDS, PAGE_WORDS, ROLES  # noqa: E402 — the order role counts are shown in; the run vocabulary (meta)
 from ..raid_buttons import RUN_WORDS  # noqa: E402 — the run verbs' labels, the Discord buttons' own
-from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE, SCHEDULE_TIMING, row_lineup  # noqa: E402
+from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE, RESERVED_SCHEDULE_IDS, SCHEDULE_TIMING, row_lineup  # noqa: E402
 
 ASK_MAX = 1500  # help.answer reads this much of a question
 ASK_DOWN = "The bot can't read sentences right now — use the controls on this page."  # dual interfaces §2.7, LLM down
@@ -501,6 +502,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             # box's fixed words (Back, Keep editing, Discard edits, the "changed" line) and the leave guard's sentence
             # templates ({name}, {n}: the page fills them) — a page file never holds its own copy
             "page_words": PAGE_WORDS, "confirm_words": dict(CONFIRM_WORDS), "leave": dict(cq.LEAVE_TEMPLATE),
+            # the ids no new schedule takes (registry.RESERVED_SCHEDULE_IDS): a schedule editor never holds its own copy
+            "reserved_schedule_ids": list(RESERVED_SCHEDULE_IDS),
             # the vocabulary the pages used to hard-code (C3): answer statuses in order, split philosophies, role order,
             # per-group role caps from the profile, class colours from render.py (tuned for dark surfaces)
             "statuses": list(rc.STATUSES), "split_policies": list(SPLIT_POLICIES), "roles": list(ROLES),
@@ -784,34 +787,58 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return f"stepped down from {v.reg.series_label(key)}"
         return await run(request, go)
 
+    def regular_target(reg, d) -> str:
+        """The schedule a regulars write is on: `schedule` = its id (the Schedules page — no raid needed; an older
+        "<raid>:<schedule>" from a page not reloaded reads through the aliases), else `raid`'s only recurring schedule."""
+        sid = str(d.get("schedule") or "").strip().lower()
+        sid = reg.config.schedule_aliases.get(sid, sid)
+        if sid:
+            return sid
+        rid = str(d.get("raid") or "").strip()
+        if rid not in reg.profile.raids:
+            n = rid.lower()
+            hits = [r for r in reg.profile.raids if reg.raid_def(r).get("name", r).lower() == n]
+            if len(hits) != 1:
+                raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
+            rid = hits[0]
+        mine = [s["id"] for s in reg.schedules(rid) if schedule_class(s["kind"]) == "recurring"]
+        if len(mine) != 1:
+            raise RegistryError(f"name the schedule: {', '.join(mine)}" if mine else f"{reg.raid_def(rid).get('name', rid)} has no recurring schedule")
+        return mine[0]
+
+    def is_removal(d) -> bool:
+        return d.get("on", True) in (False, "false", "off", "remove", 0)
+
     @app.post("/api/admin/raid/regulars")
     async def admin_regulars(request: Request):
-        """Officers add or remove a regular of a recurring schedule: {raid, schedule (none = the raid's only recurring one), member | uid,
-        character (default their main), on (true = add, false = remove), rev?}. The one path for the Rosters page, Discord's
-        /roster add|remove wizards (same verbs), plain text's op=regular and MCP set_regular. `rev` = the member record's
-        characters_rev the page drew (the regulars' rows carry it): when their record changed since, nothing is written
-        and the answer is 409 (the page reloads and asks again)."""
+        """Officers add or remove a regular of a recurring schedule: {schedule (its id; none = the raid's only recurring
+        one), raid (only without `schedule`), member | uid, character (default their main), on (true = add, false =
+        remove), rev?, preview?, seen?}. The one path for the Schedules and Rosters pages, Discord's /roster add|remove
+        wizards (same verbs), plain text's op=regular and MCP set_regular. `rev` = the member record's characters_rev the
+        page drew (the regulars' rows carry it): when their record changed since, nothing is written and the answer is
+        409 (the page reloads and asks again). A removal's box (consequences.regular_remove_box, Task 1 #18): `preview` →
+        {box}; `seen` = the box's fp → 409 with the fresh box when it changed, nothing written."""
+        v, d = await body(request, officer=True)
+        if is_removal(d) and (d.get("preview") or d.get("seen")):
+            def fresh():
+                reg = v.reg
+                return cq.regular_remove_box(reg, resolve_member(reg, member_ref(d)), regular_target(reg, d), rs=bot.raids.store(reg))
+            try:
+                box = await asyncio.to_thread(fresh)
+            except RegistryError as e:
+                return JSONResponse({"error": str(e), "box": cq.refusal_box_for(str(e))}, status_code=400)
+            if d.get("preview"):
+                return {"box": box}
+            if str(d["seen"]) != box["fp"]:
+                return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": box}, status_code=409)
+
         def go(v, d):
             reg = v.reg
-            rid = str(d.get("raid") or "").strip()
-            if rid not in reg.profile.raids:
-                n = rid.lower()
-                hits = [r for r in reg.profile.raids if reg.raid_def(r).get("name", r).lower() == n]
-                if len(hits) != 1:
-                    raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
-                rid = hits[0]
-            sid = str(d.get("schedule") or "").strip().lower()
-            sid = reg.config.schedule_aliases.get(sid, sid)  # an older "<raid>:<schedule>" from a page not reloaded
-            if not sid:  # none named: the raid's only recurring schedule
-                mine = [s["id"] for s in reg.schedules(rid) if schedule_class(s["kind"]) == "recurring"]
-                if len(mine) != 1:
-                    raise RegistryError(f"name the schedule: {', '.join(mine)}" if mine else f"{reg.raid_def(rid).get('name', rid)} has no recurring schedule")
-                sid = mine[0]
-            key = sid
+            key = regular_target(reg, d)
             m = resolve_member(reg, member_ref(d))
             if d.get("rev") and str(d["rev"]) != reg.characters_rev(m):
                 raise CharactersChanged(m)
-            if d.get("on", True) in (False, "false", "off", "remove", 0):
+            if is_removal(d):
                 reg.regular_remove(m.discord_id, key, v.name)
                 return f"{m.display_name} is no longer a regular of {reg.series_label(key)}"
             mm, c, warn = reg.regular_add(m.discord_id, key, v.name, str(d.get("character") or "").strip() or None)
@@ -1217,9 +1244,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             buffs = {b.id: b for b in reg.profile.buffs}  # the page draws missing buffs as icon-only chips (name in the tooltip)
             r["missing_buffs"] = [{**x, "abbr": getattr(buffs.get(x["id"]), "abbr", x["name"][:3]), "colour": getattr(buffs.get(x["id"]), "colour", "#888"),
                                    "art": getattr(buffs.get(x["id"]), "art", None)} for x in r["missing_buffs"]]
-            return {**r, "minimums": dict((reg.config.raids.get(rid) or {}).get("minimums") or {}),
+            # the Raids page's Readiness view (phase 4): who could play, and the make-up's minimums (Registry.minimums alone)
+            # with how many the guild has — never a buff-derived want under "Minimum"
+            return {**r, "view": raid_page.readiness_view(reg, rid, r, players),
+                    "minimums": dict((reg.config.raids.get(rid) or {}).get("minimums") or {}),
                     "minimum": reg.minimums(rid, size), "rev": reg.config_rev(f"raids:{rid}"),
                     "comp_groups": list((reg.config.raids.get(rid) or {}).get("comp_groups") or [])}
+        players = await asyncio.to_thread(comp_mod.pool_players, reg)
         rows = await asyncio.to_thread(lambda: [one(rid) for rid in ids])
         slots = [{"value": r, "label": reg.comp_slot_words(r), "kind": "role"} for r in ROLES]
         for cls, specs in reg.profile.classes.items():
@@ -2273,7 +2304,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rs, rid),
                         "schedules": [schedule_json(reg, rid, s) for s in reg.schedules(rid)], "rev": reg.config_rev(f"raids:{rid}"),
                         # what a reset carries back (revs["config:raid_all:<id>"]): the raid AND the schedules it removes
-                        "reset_rev": reg.config_rev(f"raid_all:{rid}")})
+                        "reset_rev": reg.config_rev(f"raid_all:{rid}"),
+                        # the Raids page (phase 4): Rules, Priority and the Reset box, in words (raid_page.raid_row)
+                        "page": raid_page.raid_row(reg, rs, rid)})
         return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES),
                 "schedule_kinds": list(SCHEDULE_KINDS), "schedule_cadence": list(SCHEDULE_CADENCE), "max_rosters": MAX_SCHEDULE_ROSTERS}
 
@@ -2844,6 +2877,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_events import install_events_api  # the Events page's read model (phase 4: the list, one event, a coming-up night)
 
     install_events_api(app, bot, who=who, body=body, ev_json=ev_json)
+
+    from .api_schedules import install_schedules_api  # the Schedules page's read model (phase 4: the list, one schedule)
+
+    install_schedules_api(app, bot, who=who)
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")

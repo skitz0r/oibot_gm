@@ -391,8 +391,9 @@ def test_readiness_route_carries_minimums_and_slots(owner_client, reg):
     assert "targets" not in r and "bounds" not in r and r["rev"] == reg.config_rev("raids:barrow_deeps")
     assert {"value": "Paladin:Holy", "label": "Holy Paladins", "kind": "spec"} in d["slots"] and d["note_max"] == 200
     # the Readiness page's Save: typed comp changes on the structured path, the raid rev as shown
+    # (phase 4: a raid's Save always shows its box first, so the page's second press carries confirmed)
     body = {"changes": [{"kind": "comp", "target": "barrow_deeps", "fields": {"Mage": None, "healer": {"min": 3}}}], "apply": True,
-            "revs": {"config:raids:barrow_deeps": r["rev"]}}
+            "confirmed": True, "revs": {"config:raids:barrow_deeps": r["rev"]}}
     res = owner_client.post(CHANGE, json=body, headers=bearer()).json()
     assert res["applied"] and reg.config.raids["barrow_deeps"]["minimums"] == {"healer": {"min": 3}}
     body["changes"][0]["fields"] = {"healer": {"min": 2}}

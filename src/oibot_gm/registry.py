@@ -5637,7 +5637,8 @@ class Registry:
     @_config_verb(_raid_section)
     def set_minimums(self, raid: str, values: dict, by: str) -> list[str]:
         """A raid's minimums (design D16): {slot: {min, note?} | None} — a slot is a role (tank, healer, melee, ranged),
-        a class or Class:Spec; None takes the guild's own away so the game's minimum applies again. One number per slot
+        a class or Class:Spec; None — or a minimum of 0, never saved — takes the guild's own away so the game's minimum
+        applies again. One number per slot
         and no upper limit: a `max` is refused (NO_UPPER_LIMIT), a run key too (MINIMUM_ON_RAID — a run reads its raid's),
         a minimum past the raid's size and a reason past COMP_NOTE_MAX. Every slot is checked before anything changes;
         one save_config, one commit. → "<Raid> · Healers: at least 3" per slot that changed."""
@@ -5653,6 +5654,8 @@ class Registry:
         for raw, t in (values or {}).items():
             slot = self.comp_slot(raw)
             words = slot_words(slot)
+            if isinstance(t, dict) and "max" not in t and str(t.get("min") or "0").strip() in ("0", ""):
+                t = None  # a minimum of 0 is never saved: it clears the guild's own (carried, phase 2 review)
             if t is None:
                 if slot in cur:
                     cur.pop(slot)

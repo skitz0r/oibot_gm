@@ -150,14 +150,12 @@ function toDraft(s: Schedule | null): Draft {
 const ADHOC_WEIGHT: Record<string, number> = { rank: 0, main: 1, sat_out: 0, signup_order: 6, regular: 0 };
 const PRESET_KEYS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before"] as const;
 
-/** Ids no new schedule takes (registry.RESERVED_SCHEDULE_IDS: older run dicts and files carry them). */
-const RESERVED_IDS = ["adhoc", "test", "after", "default"];
-
-/** A new schedule's id from its name: unique across the GUILD (`taken` = every raid's schedule ids), never a reserved one. */
-function slug(name: string, kind: string, taken: string[]): string {
+/** A new schedule's id from its name: unique across the GUILD (`taken` = every raid's schedule ids), never a reserved one
+ *  (`reserved` = /api/meta.reserved_schedule_ids, registry.RESERVED_SCHEDULE_IDS: older run dicts and files carry them). */
+function slug(name: string, kind: string, taken: string[], reserved: string[]): string {
   const base = (name || kind).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 12) || kind;
   let id = base, n = 2;
-  while (taken.includes(id) || RESERVED_IDS.includes(id)) id = `${base}-${n++}`;
+  while (taken.includes(id) || reserved.includes(id)) id = `${base}-${n++}`;
   return id;
 }
 
@@ -189,7 +187,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, taken, onClo
   const startWhy = adhoc ? "a pickup template opens nothing by itself" : d.kind === "lockout" ? `day 1 is the day the ${r.lockout_days}-day lockout resets` : d.slots.map(slotLabel).join(" · ") || "one sheet per run time per week";
   const presetOn = (p: Record<string, unknown>) => PRESET_KEYS.every((k) => effNum(k) === Number(p[k]));
 
-  const id = s ? s.id : slug(d.name, d.kind, taken);
+  const id = s ? s.id : slug(d.name, d.kind, taken, meta?.reserved_schedule_ids || []);
   /** The draft as schedule fields — for an existing schedule ONLY the fields that differ from what was loaded (design RD-10:
    *  a Save never re-sends `active: true` over a pause made elsewhere a moment ago, nor any setting nobody touched). */
   function fieldsOf(dd: Draft): Record<string, unknown> {
