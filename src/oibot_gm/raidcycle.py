@@ -2492,7 +2492,10 @@ def open_schedule(reg: Registry, instance: str, start: datetime, sid: str | None
     ADHOC_SCHEDULE. The /raid open wizard asks instead (Next run · Another upcoming run · Ad hoc run…)."""
     if sid:
         return sid
-    hit = next((s["id"] for s, t in upcoming(reg, instance, reg.now_local(), 24 * OPEN_HORIZON_DAYS) if t == start), None)
+    now = reg.now_local()  # whatever the distance (the final fix wave of §5.67 phase 4): a schedule's night beyond the
+    # open horizon is still that schedule's night — open_refusal refuses opening it early, it never becomes a one-off
+    hours = max(24 * OPEN_HORIZON_DAYS, (start - now).total_seconds() / 3600 + 1)
+    hit = next((s["id"] for s, t in upcoming(reg, instance, now, hours) if t == start), None)
     return hit if hit is not None else ADHOC_SCHEDULE
 
 
@@ -5143,7 +5146,7 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     w = which_run(reg, instance, start, sid)
     ev = find_run(reg, rs, instance, start, w["schedule"])
     live = ev if ev is not None and ev.state not in ("done", "cancelled") else None
-    refusal = closed_run_refusal(rs, ev)
+    refusal = closed_run_refusal(rs, ev) or (None if live is not None else open_refusal(reg, rs, instance, start, w["schedule"]))
     rules = " ".join(open_rules(reg, instance, w["schedule"], w["kind"]))
     asked = lineup if lineup is not None else ([follow] if follow else None)
     if asked is None:
@@ -5167,7 +5170,7 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     before = None if live is not None else before_first_open_sentence(reg, [{"raid": instance, "rosters": 1}, *asked], start)
     return {**w, "later": ljson, "follow": ljson[0] if ljson else None, "follow_line": follow_line, "before_open": before,
             "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
-            "closed": ev.state if refusal else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
+            "closed": ev.state if ev is not None and closed_run_refusal(rs, ev) else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
 
 UPCOMING_PER_SCHEDULE = 3  # the Events page's Coming up lists each active schedule's next three nights, whatever the horizon
@@ -5186,6 +5189,45 @@ def open_row_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datet
         return (f"This run is too far ahead to open now. Open works from {reg.local12(early)}, three weeks before the run."
                 + (f" Its sheet opens on its own {reg.local12(opens)}." if opens > early else ""))
     return None
+
+
+SCHEDULE_NIGHT = ("{when} is a night of {name}, so a one-off can't start then. Open that night from its schedule instead, "
+                  "or pick another time.")
+NIGHT_TAKEN = ("{title} already starts then, so {name} can't open that night beside it. Keep that event for the night, "
+               "or cancel it first.")
+
+
+def open_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datetime, schedule: str | None = None,
+                 now: datetime | None = None) -> str | None:
+    """Why an on-demand open of `instance` at `start` is refused before anything is written (every open surface goes
+    through RaidMixin.open_run_and_post; open_preview's `refusal` says it first), or None. A live run at that minute is
+    never refused: Open points at it. A night of a recurring schedule, at any distance (open_schedule), opens only as
+    that schedule's run: asked as a one-off or from a pickup template it is refused (SCHEDULE_NIGHT); as the schedule's
+    run it is refused while it is too far ahead to open (open_row_refusal, the Events page's Coming up sentence) — never
+    silently a one-off beside the run the schedule then opens — and while a live ONE-OFF already holds that minute (one
+    made there before this check; NIGHT_TAKEN — the scheduler skips that night the same way). Its sheet already due
+    and nothing in the way (the scheduler's case): None."""
+    now = now or reg.now_local()
+    have = find_run(reg, rs, instance, start, schedule)
+    if have is not None and have.state not in ("done", "cancelled"):
+        return None
+    night = open_schedule(reg, instance, start, None)
+    if night == ADHOC_SCHEDULE:
+        return None
+    asked = schedule or night
+    tpl = next((s for s in reg.schedules(instance) if s["id"] == asked), None)
+    if asked == ADHOC_SCHEDULE or (tpl is not None and schedule_class(tpl.get("kind") or "weekly") == "adhoc"):
+        s = next((x for x in reg.schedules(instance) if x["id"] == night), None) or {}
+        return SCHEDULE_NIGHT.format(when=reg.local12(start), name=s.get("name") or night)
+    if asked != night:
+        return None  # another recurring schedule named: open_run's own rules
+    other = live_at(rs, instance, start)
+    if other is not None and schedule_stamp(other.schedule) is None:  # a one-off on the night: never a second run beside it
+        from .raid_views import run_title
+
+        return NIGHT_TAKEN.format(title=run_title(reg, other), name=(tpl or {}).get("name") or night)
+    opens = start - timedelta(hours=float(reg.schedule_def(instance, night)["signup_lead_hours"]))
+    return None if opens <= now else open_row_refusal(reg, rs, instance, start, night, opens, now)
 
 
 def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime | None = None, n: int = UPCOMING_PER_SCHEDULE) -> list[dict]:

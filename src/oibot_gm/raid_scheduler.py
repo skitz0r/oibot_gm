@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 
 from . import raidcycle as rc
-from .raid_views import ask_line, gaps_text, run_times, sheet_state
+from .raid_views import ask_line, gaps_text, run_times, run_title, sheet_state
 from .registry import RegistryError
 
 log = logging.getLogger(__name__)
@@ -129,6 +129,21 @@ class RaidSchedulerMixin:
         inst = sched["raid"]
         await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: {err}")
 
+    async def _warn_night_taken(self, reg, sched: dict, start, other) -> None:
+        """A schedule's night whose minute a live run of the same raid already holds (a one-off made on that night before
+        open_schedule looked past the open horizon): the schedule opens nothing — never a second sheet at that minute —
+        and ONE ops warn per (guild, schedule id, occurrence) names both, so an officer can keep the one-off or cancel it."""
+        from .registry import schedule_name
+
+        warned: set = self.__dict__.setdefault("_night_taken_warned", set())
+        key = (reg.key, sched["id"], rc.occurrence_stamp(reg, start))
+        if key in warned:
+            return
+        warned.add(key)
+        await self.ops.emit(reg.config, "warn", f"{schedule_name(sched)} did not open its night of {reg.local12(start)}: "
+                            f"{run_title(reg, other)} already starts then. That run stands for the night. Cancel it if the "
+                            "schedule's own sheet should open instead.")
+
     async def _warn_gone_raids(self, reg, now) -> None:
         """An active schedule whose lineup names a raid the game profile no longer has opens nothing (rc.gone_raids: the
         whole occurrence, never a chain without that raid). ONE ops warn per (guild, schedule id) per hour, naming the
@@ -188,6 +203,9 @@ class RaidSchedulerMixin:
         if channel:
             for sched, start in rc.occurrences(reg, now, lead=True):
                 if rc.event_of_occurrence(rs, sched["id"], rc.occurrence_stamp(reg, start), reg=reg) is not None:
+                    continue
+                if (other := rc.live_at(rs, sched["raid"], start)) is not None:  # a one-off already holds that minute
+                    await self._warn_night_taken(reg, sched, start, other)
                     continue
                 try:
                     await self.open_run_and_post(reg, rs, sched["raid"], start, by="scheduler", schedule=sched["id"])

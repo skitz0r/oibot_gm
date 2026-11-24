@@ -1131,8 +1131,13 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    you to the event on the Events page. A time that already has an open event of that first raid says *That time is
    taken* and Open waits — the facts and the steps' times stay hidden until you pick another time; a time in the past
    says so too. A time that **is** one of a schedule's nights shows that
-   schedule's lineup (*Comes from* names it), opens that schedule's event — not the builder's lineup, rosters or lock —
-   and asks first with the *Open the sheet for …?* box. **Back** and *Back to Events* (and a rail link) ask *Leave
+   schedule's lineup (*Comes from* names it) and opens that schedule's event — not the builder's lineup, rosters or lock —
+   asking first with the *Open the sheet for …?* box, however far ahead the night is. A night more than three weeks
+   out is refused with the same sentence as its row under *Coming up* (when Open works, and when its sheet opens on
+   its own), so it never becomes a one-off beside the event the schedule opens later. Asked for as a one-off or from a
+   pickup template — in Discord, in plain text or through MCP — a schedule's night is refused too: *… is a night of
+   Raid nights, so a one-off can't start then.* A one-off made on such a night before this check keeps the night: the
+   schedule opens nothing at that minute and the ops feed says so once, naming both. **Back** and *Back to Events* (and a rail link) ask *Leave
    without saving?* with how many edits you made. With **no signup channel set** the scheduler opens nothing: each run that was due
    gets one warning on the ops feed ("Barrow Deeps Tue 7:30 PM did not open: no signup channel is set") and its
    row in *When it runs* says *needs a signup channel* in red. A raid with no run times offers *Set this raid's run times →*. A run opened closer

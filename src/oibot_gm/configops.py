@@ -2682,6 +2682,9 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
             return f"{head}: already {have.state} — nothing new is posted"
         if have is not None:  # that time's run is closed: open_run refuses it
             raise RegistryError(rc.closed_run_refusal(rs, have) or "That time's run can't be opened again. Pick another time.")
+        why = rc.open_refusal(reg, rs, rid, start, sid)  # a schedule's night: refused here as the open itself refuses it
+        if why is not None:
+            raise RegistryError(why)
         return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then} now: sheet posted in {where}, absences pre-filled"
     if op.op == "test":
         kind, arg = _test_op(op.value)

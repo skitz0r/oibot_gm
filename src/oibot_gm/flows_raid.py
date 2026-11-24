@@ -328,8 +328,9 @@ class OpenWizard(Wizard):
         ev = self.existing(start)
         if ev:
             lines.append(f"-# A run for that time already exists and is {sheet_state(ev)}. Open points you at it instead of making a second.")
-        closed = rc.closed_run_refusal(self.rs, rc.find_run(self.reg, self.rs, self.rid, start, self.draft.get("schedule")))
-        if closed:  # open_run refuses it: the screen says so instead of offering an Open that would fail
+        closed = (rc.closed_run_refusal(self.rs, rc.find_run(self.reg, self.rs, self.rid, start, self.draft.get("schedule")))
+                  or rc.open_refusal(self.reg, self.rs, self.rid, start, sid))  # a schedule's night from a template, or too far ahead
+        if closed:  # open_run_and_post refuses it: the screen says so instead of offering an Open that would fail
             lines.append(f"-# {closed}")
             await self.show(interaction, "\n".join(lines), self.button("Change", self.shortlist), self.button("Cancel", self.cancel))
             return

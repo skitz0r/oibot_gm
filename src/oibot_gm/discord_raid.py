@@ -1469,9 +1469,12 @@ class RaidMixin:
         that start, else a one-off — rc.open_run), post its
         sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
         place it), and say so on the ops feed. A start more than a few minutes in the past is refused
-        (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts.
+        (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts. A
+        schedule's night asked as a one-off, or too far ahead to open yet, is refused (rc.open_refusal).
         `lock_hours` / `first_rosters`: the New event page's Locks choice and first raid's rosters for a one-off."""
         rc.refuse_past_start(reg, start)
+        if (why := rc.open_refusal(reg, rs, instance, start, schedule)) is not None:  # a schedule's night: never a one-off beside it
+            raise RegistryError(why)
         ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters)
         channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel and not ev.message_id:
