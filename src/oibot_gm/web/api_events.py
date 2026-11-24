@@ -20,12 +20,19 @@ from fastapi.responses import JSONResponse
 
 from .. import consequences as cq
 from .. import event_board, event_view
+from .. import ops as ops_mod
+from .. import raid_views as rv
 from .. import raidcycle as rc
 from ..constants import CONFIRM_WORDS
 from ..registry import RegistryError
 
 # a link to an event that isn't one any more: its record is gone, or (a raid taken out of a lineup) it is no event of its own
 NO_EVENT = "This event is no longer on the Events list."
+# the Role switches route's refusals (each a refusal box)
+SWITCH_OVER = "This event is over, so nobody can switch roles on it."
+PICK_A_ROW = "Pick someone from the list of role switches."
+SWITCH_GONE = "That switch is no longer on the list. The list now shows what is short."
+NOBODY_ASKED = "Nobody could be asked, so nothing was sent."
 
 
 def _refused(why) -> JSONResponse:
@@ -64,12 +71,13 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
 
     @app.post("/api/run/{key}/switch")
     async def event_switch(request: Request, key: str):
-        """Switch / Answer for them on one Role switches row: {uid, character, spec, part, seat, option, rev, seen?,
-        preview?}. Before the lock → set_answer(Join, character, spec) on the first raid (the answer is one for the whole
+        """Switch / Answer for them / Ask on one Role switches row: {uid, character, spec, part, seat, option, rev, seen?,
+        preview?}. The row must still be on the list (rc.event_switches), else 409 with the fresh `switches` and nothing
+        written. Before the lock → set_answer(Join, character, spec) on the first raid (the answer is one for the
         evening; the member gets a notice, nobody a DM). After the lock → send_plan(rev, picks {seat: option}, seats
         [seat]) on `part`: that one ask, a DM with Yes and No (or the Me page with DMs off). `preview` → {box}; `seen` =
-        the box's fp → 409 with the fresh box when it changed; a plan that changed (`rev`) → 409 with the fresh
-        `switches`. Answers {message, switches}."""
+        the box's fp → 409 with the fresh box when it changed. The switch is written to the run's log and the ops feed
+        with who made it (ops.audited, `via`). Answers {message, switches}."""
         v, d = await body(request, officer=True)
         reg, rs = v.reg, bot.raids.store(v.reg)
         ev = rs.events.get(key)
@@ -80,7 +88,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         if not rc.same_event(part, first) or part.dropped:
             return JSONResponse({"error": NO_EVENT}, status_code=404)
         if first.state not in ("open", "locked") or part.state not in ("open", "locked"):
-            return _refused("This event is over, so nobody can switch roles on it.")
+            return _refused(SWITCH_OVER)
         try:
             m = reg.members.get(int(d.get("uid")))
         except (TypeError, ValueError):
@@ -88,7 +96,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         character, spec = str(d.get("character") or "").strip(), str(d.get("spec") or "").strip()
         c = next((c for c in m.active() if c.label == character), None) if m else None
         if m is None or c is None or not spec:
-            return JSONResponse({"error": "Pick someone from the list of role switches."}, status_code=400)
+            return _refused(PICK_A_ROW)
         try:
             rc.spec_role(reg, c, spec)
         except RegistryError as e:
@@ -97,27 +105,36 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         async def fresh_switches():
             return await asyncio.to_thread(rc.event_switches, reg, rs, first, viewer=v.uid)
 
+        def gone(switches, error: str = SWITCH_GONE):
+            return JSONResponse({"error": error, "switches": switches}, status_code=409)
+
         if first.state == "open":
-            fresh = rc.switch_box_for(reg, rs, first, m, character, spec, viewer=v.uid)
+            now = await fresh_switches()
+            row = next((r for r in now["rows"] if (r["uid"], r["character"], r["spec"]) == (str(m.discord_id), character, spec)), None)
+            if row is None:  # the raid stopped being short, or someone else covers it now
+                return gone(now)
+            fresh = row["box"]
             if d.get("preview"):
                 return {"box": fresh}
             if d.get("seen") and str(d["seen"]) != fresh["fp"]:
                 return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
             try:
-                line = await bot.set_answer(reg, rs, first, m, "in", character, v.name, by_id=v.uid, spec=spec)
+                line = await bot.set_answer(reg, rs, first, m, "in", character, v.name, by_id=v.uid, spec=spec, via=v.via)
             except (RegistryError, ValueError) as e:
                 return _refused(e)
             return {"message": str(line).replace("**", "").removeprefix("✅ "), "switches": await fresh_switches()}
         try:
             seat, option = int(d.get("seat")), int(d.get("option"))
         except (TypeError, ValueError):
-            return JSONResponse({"error": "Pick someone from the list of role switches."}, status_code=400)
+            return _refused(PICK_A_ROW)
+        if m.discord_id == v.uid:  # after the lock a switch is an ask: never one to the officer pressing it
+            return _refused(PICK_A_ROW)
         plan = await asyncio.to_thread(rc.role_plan, reg, rs, part)
         opt = plan.seats[seat].options[option] if 0 <= seat < len(plan.seats) and 0 <= option < len(plan.seats[seat].options) else None
         same = opt is not None and len(opt) == 1 and (opt[0].discord_id, opt[0].character, opt[0].spec) == (m.discord_id, character, spec)
         if str(d.get("rev") or "") != plan.rev or not same:
-            return JSONResponse({"error": str(rc.PlanChanged(plan)), "switches": await fresh_switches()}, status_code=409)
-        fresh = rc.switch_box_for(reg, rs, part, m, character, spec, plan_rev=plan.rev, viewer=v.uid, swap=opt[0].swap)
+            return gone(await fresh_switches(), str(rc.PlanChanged(plan)))
+        fresh, _button = rc.switch_box_for(reg, rs, part, m, character, spec, plan_rev=plan.rev, viewer=v.uid, swap=opt[0].swap)
         if d.get("preview"):
             return {"box": fresh}
         if d.get("seen") and str(d["seen"]) != fresh["fp"]:
@@ -125,8 +142,12 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         try:
             sent, plan = await bot.send_plan(reg, rs, part, rev=plan.rev, by=v.name, picks={seat: option}, seats=[seat])
         except rc.PlanChanged as e:
-            return JSONResponse({"error": str(e), "switches": await fresh_switches()}, status_code=409)
+            return gone(await fresh_switches(), str(e))
         except (RegistryError, ValueError) as e:
             return _refused(e)
+        if sent:
+            part.log.append(f"switch: {v.name} asked {m.display_name} to play {spec}")
+            rs.save(part, f"switch ask to {m.display_name} by {v.name}")
+            await ops_mod.audited(bot.ops, reg, v.name, f"asked {m.display_name} to play {spec} on {rv.run_title(reg, part)}", via=v.via, by_id=v.uid)
         names = ", ".join(a.display_name for a in sent)
-        return {"message": f"Asked {names}." if sent else "Nobody could be asked.", "switches": await fresh_switches()}
+        return {"message": f"Asked {names}." if sent else NOBODY_ASKED, "switches": await fresh_switches()}

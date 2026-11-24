@@ -1587,7 +1587,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             else:
                 spec = str(d.get("spec") or "").strip() if status != "out" else ""  # a role switch (MCP set_answer's spec)
                 line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name, by_id=v.uid,
-                                                        **({"spec": spec} if spec else {})))
+                                                        **({"spec": spec, "via": v.via} if spec else {})))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line.replace("**", "").removeprefix("✅ ")}

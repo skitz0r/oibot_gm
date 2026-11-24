@@ -2481,11 +2481,17 @@ def spec_role(reg: Registry, c: RegisteredCharacter, spec: str) -> str:
     return reg.profile.spec(c.cls, spec).role
 
 
+# a role switch for someone rostered on a locked run is an ask they answer (Switch on the event's Role switches,
+# RaidMixin.send_plan), never a write over their seat: set_signup refuses `spec` there on every surface
+SPEC_SEATED = "{name} holds a seat on the locked roster, so use Switch under the event's Role switches to ask them to play {spec}."
+
+
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None,
-               *, spec: str | None = None) -> Signup:
+               *, spec: str | None = None, by: str | None = None) -> Signup:
     """THE answer write on a first part. `spec` (an officer's role switch): the spec the character plays tonight — its
     own, its offspec or a flex role's (spec_role, refused otherwise); the signup's spec and role follow, its own spec
-    becomes the offspec (as a yes to a switch ask leaves it)."""
+    becomes the offspec (as a yes to a switch ask leaves it). Refused (SPEC_SEATED) once the run is locked and they hold
+    a seat whose spec it would change: that switch is an ask. `by`: who switched them, for the run's log."""
     if ev.follows:  # D1: one Join for the night — the follow-on is never answered on its own
         lead = rs.events.get(ev.follows)
         raise RegistryError(FOLLOW_ANSWER_REFUSAL.format(lead=reg.raid_def(lead.instance if lead else None).get("name", "first raid")))
@@ -2498,11 +2504,14 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     # no curated-roster demotion here (roster redesign Phase 0): it keyed on the run key, which lock used to fill with
     # the seated, so a member's own Join after lock was stored as Bench and then seated anyway
     role = spec_role(reg, c, spec) if spec else None
+    seat = ev.seat_of(m) if spec and ev.state != "open" else None
+    if seat is not None and seat[1].spec != spec:
+        raise RegistryError(SPEC_SEATED.format(name=m.display_name, spec=spec))
     s = carry_joined(ev.signups.get(str(m.discord_id)), _signup(reg, m, c, status, source, note))
     if spec and spec != c.spec:
         s.spec, s.offspec, s.role = spec, c.spec, role
     ev.signups[str(m.discord_id)] = s
-    ev.log.append(f"{m.display_name} {status} as {c.label}" + (f", {s.spec}" if spec else "") + f" ({source})")
+    ev.log.append(f"{m.display_name} {status} as {c.label}" + (f", {s.spec}" if spec else "") + f" ({source}" + (f", switched by {by})" if by else ")"))
     rs.save(ev, f"{m.display_name} {status}")
     return s
 
@@ -3177,24 +3186,34 @@ def send_batch(plan: Plan, picks: dict | None = None, limit: int | None = None, 
 
 # ---------------------------------------------------------------- role switches for the whole event (phase 4, §7a)
 
+def switch_raids(rs: "RaidStore", first: RaidEvent, m: Member) -> list[RaidEvent]:
+    """The raids a role switch before the lock changes for `m`: every open raid of the event (the answer is one for the
+    evening, sync_parts copies it on) but the later ones they leave before (`leaving`: out there whatever they answer)."""
+    return [p for p in event_parts(rs, first) if p.state == "open" and m.discord_id not in p.leaving]
+
+
 def switch_box_for(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, character: str, spec: str, *, plan_rev: str = "",
-                   viewer: int | None = None, swap: bool = True) -> dict:
-    """The box one Role switches row opens (and the /switch route re-builds for `seen`). Before the lock the answer is
-    one for the whole evening (sync_parts copies the first raid's to every later one), so the box names every open raid
-    of the event: someone who joined → Switch (consequences.switch_box, a notice); anyone else, and the officer's own
-    row → Record answer (answer_box: Join as that spec). After the lock it is an ask on `part` alone (switch_box with
-    locked, its rev the part's plan rev)."""
+                   viewer: int | None = None, swap: bool = True) -> tuple[dict, str]:
+    """(box, button word) for one Role switches row — the /switch route re-builds the box for `seen`. Before the lock
+    the answer is one for the evening, so the box names the raids the write changes for THAT member (switch_raids):
+    someone who joined → Switch (consequences.switch_box, a notice); the officer's own row → Switch said to them
+    (switch_box own: nobody told); anyone else → Answer for them (answer_box: Join as that spec). After the lock it is
+    an ask on `part` alone → Ask (switch_box locked, its rev the part's plan rev). Button words: PAGE_WORDS."""
     from . import consequences as cq
+    from .constants import PAGE_WORDS
 
     first = first_part(rs, part)
     if first.state == "open":
         rev = event_rev(reg, rs, first) + member_state_rev(first, m)
         sg = first.signups.get(str(m.discord_id))
-        raids = [p.instance for p in event_parts(rs, first) if p.state == "open"]
-        if sg is None or sg.status != "in" or (viewer is not None and int(viewer) == m.discord_id):
-            return cq.answer_box(reg, first, m, "join", character, spec, by_id=viewer, rev=rev)
-        return cq.switch_box(reg, first, m, character, spec, raids, rev=rev)
-    return cq.switch_box(reg, part, m, character, spec, [part.instance], locked=True, swap=swap, rev=plan_rev + member_state_rev(part, m))
+        raids = [p.instance for p in switch_raids(rs, first, m)]
+        if viewer is not None and int(viewer) == m.discord_id:
+            return cq.switch_box(reg, first, m, character, spec, raids, own=True, rev=rev), PAGE_WORDS["switch_button"]
+        if sg is None or sg.status != "in":
+            return cq.answer_box(reg, first, m, "join", character, spec, by_id=viewer, rev=rev), PAGE_WORDS["answer_button"]
+        return cq.switch_box(reg, first, m, character, spec, raids, rev=rev), PAGE_WORDS["switch_button"]
+    box = cq.switch_box(reg, part, m, character, spec, [part.instance], locked=True, swap=swap, rev=plan_rev + member_state_rev(part, m))
+    return box, PAGE_WORDS["ask_button"]
 
 
 def _plays_words(character: str, spec: str, base: str | None) -> str:
@@ -3202,17 +3221,37 @@ def _plays_words(character: str, spec: str, base: str | None) -> str:
     return spec if character == base else f"{character}, {spec}"
 
 
+def _short_why(plan: "Plan", short: dict, prelock: bool) -> str:
+    """Why a short raid has no switch to show, and what to do (PAGE_WORDS): its only moves need a cover (the Suggest… /
+    Fill seats… screen has them), the asks already out cover it, the regulars who haven't answered are counted as
+    coming (before the lock), or nobody free can play the role."""
+    from .constants import PAGE_WORDS
+    from .raid_buttons import RUN_WORDS
+
+    if any(st.role and st.options and all(len(o) != 1 for o in st.options) for st in plan.seats):
+        return PAGE_WORDS["short_cover"].format(screen=RUN_WORDS["suggest" if prelock else "fill"])
+    covered = not plan.short["roles"]  # every short seat is covered by the asks out or the regulars counted as coming
+    if covered and plan.waiting:
+        return PAGE_WORDS["short_asked"]
+    if covered and prelock and plan.expected:
+        return PAGE_WORDS["short_counted"]
+    return PAGE_WORDS["short_nobody"]
+
+
 def event_switches(reg: Registry, rs: "RaidStore", first: RaidEvent, *, viewer: int | None = None) -> dict:
-    """The Events page's Role switches: {short [{raid, roles {role: n}}] (each live raid short of a tank / healer
-    minimum, rc.needs — the Board's own numbers), rows [Switch], revs {part key: plan rev}}. Composed from each live
-    raid's planner (role_plan: suggestions before the lock, the fill plan after it) — no second ranking. A row is one
-    option of a role seat (a plain seat after the lock is the fill engine's, not a role switch; a swap tied to a
-    backfill is two asks and is left to the Fill screen): {uid, display_name, role, from, to, answered, raids, part,
-    seat, option, character, spec, box}. Before the lock one answer serves the whole evening, so a person's same move
-    on several raids is ONE row (`raids` = every raid it helps; part/seat/option = the first); after the lock each ask is
-    a raid's own (sent on that raid alone), so a row is per raid. Ordered by role, then suggestions before alternates.
-    `from` / `to`: 'Shadow', 'Nyx, Shadow' when the character changes, PAGE_WORDS no_answer_yet (or Bench) without a
-    Join; `answered` = they joined (Switch); otherwise Answer for them."""
+    """The Events page's Role switches: {short [{raid, roles {role: n}, why}] (each live raid short of a tank / healer
+    minimum, rc.needs — the Board's own numbers; `why` = the sentence when that raid has no row, else None), rows
+    [Switch], revs {part key: plan rev}}. Composed from each live raid's planner (role_plan: suggestions before the
+    lock, the fill plan after it) — no second ranking. A row is one option of a role seat (a plain seat after the lock
+    is the fill engine's, not a role switch; a swap tied to a backfill is two asks and is left to Suggest… / Fill
+    seats…): {uid, display_name, role, from, to, answered, button, raids, part, seat, option, character, spec, box}.
+    Before the lock one answer serves the whole evening, so a person's same move on several raids is ONE row (`raids` =
+    every raid it helps; part/seat/option = the first); after the lock each ask is a raid's own (sent on that raid
+    alone), so a row is per raid, and the officer's own row is left out (it would ask themselves). Ordered by role, then
+    suggestions before alternates. `from` / `to`: 'Shadow', 'Nyx, Shadow' when the character changes, PAGE_WORDS
+    no_answer_yet (or Bench) without a Join. `answered` = they joined; `button` = the press's word from the server:
+    Switch (a joined member's answer, or the officer's own, before the lock) · Answer for them (anyone else before the
+    lock) · Ask (after the lock)."""
     from .constants import PAGE_WORDS
 
     first = first_part(rs, first)
@@ -3225,19 +3264,21 @@ def event_switches(reg: Registry, rs: "RaidStore", first: RaidEvent, *, viewer: 
     for pi, p in enumerate(parts):
         name = _raid_name(reg, p.instance)
         short = dict(needs(reg, p)["roles"])
-        if short:
-            out["short"].append({"raid": name, "roles": short})
         plan = role_plan(reg, rs, p)
         out["revs"][p.key] = plan.rev
+        has_row = False
         for si, st in enumerate(plan.seats):
             if not st.role:
                 continue
             for oi, opt in enumerate(st.options):
-                if len(opt) != 1:  # a swap tied to its backfill: two people asked together — the Fill screen's
+                if len(opt) != 1:  # a swap tied to its backfill: two people asked together — Suggest… / Fill seats…
                     continue
                 a = opt[0]
+                if not prelock and viewer is not None and a.discord_id == int(viewer):
+                    continue  # after the lock a switch is an ask: never one to the officer pressing it
                 k = (a.discord_id, a.character, a.spec) + (() if prelock else (p.key,))
                 if k in rows:
+                    has_row = True
                     if name not in rows[k]["raids"]:
                         rows[k]["raids"].append(name)
                     continue
@@ -3256,11 +3297,14 @@ def event_switches(reg: Registry, rs: "RaidStore", first: RaidEvent, *, viewer: 
                 else:
                     base = m.main.label if m.main else a.character
                     frm = LABELS["sub"] if sg is not None and sg.status == "sub" else PAGE_WORDS["no_answer_yet"]
+                box, button = switch_box_for(reg, rs, p, m, a.character, a.spec, plan_rev=plan.rev, viewer=viewer, swap=a.swap)
+                has_row = True
                 rows[k] = {"uid": str(m.discord_id), "display_name": m.display_name, "role": a.role, "from": frm,
-                           "to": _plays_words(a.character, a.spec, base), "answered": joined, "raids": [name], "part": p.key,
-                           "seat": si, "option": oi, "character": a.character, "spec": a.spec,
-                           "box": switch_box_for(reg, rs, p, m, a.character, a.spec, plan_rev=plan.rev, viewer=viewer, swap=a.swap),
+                           "to": _plays_words(a.character, a.spec, base), "answered": joined, "button": button, "raids": [name],
+                           "part": p.key, "seat": si, "option": oi, "character": a.character, "spec": a.spec, "box": box,
                            "_rank": (ROLES.index(a.role) if a.role in ROLES else len(ROLES), oi, pi, si)}
+        if short:
+            out["short"].append({"raid": name, "roles": short, "why": None if has_row else _short_why(plan, short, prelock)})
     out["rows"] = sorted(rows.values(), key=lambda r: r["_rank"])
     for r in out["rows"]:
         del r["_rank"]

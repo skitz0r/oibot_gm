@@ -236,7 +236,7 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
         raise RegistryError(f"That no longer applies to {m.display_name} on {rc.run_words(reg, ev)} any more.")
     if key in ("join", "bench", "no_thanks"):
         status = {"join": "in", "bench": "sub", "no_thanks": "out"}[key]
-        line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id, **({"spec": spec} if spec and status != "out" else {}))
+        line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id, **({"spec": spec, "via": via} if spec and status != "out" else {}))
     elif key == "callout":
         line = await bot.call_out(reg, rs, ev, m, (note or "").strip()[:300] or None, by, by_id=by_id)
     elif key in ("confirm_yes", "confirm_no"):

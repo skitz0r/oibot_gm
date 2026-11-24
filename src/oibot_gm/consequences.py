@@ -760,10 +760,11 @@ def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | 
 
 
 def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: str, raids, *, locked: bool = False, swap: bool = True,
-               rev: str = "") -> dict:
+               own: bool = False, rev: str = "") -> dict:
     """Boxes 6 and 7: a role switch. Before the lock it changes the answer (a notice); after it, it sends an ask (a DM
     with Yes and No, or on the Me page with DMs off) and the seat changes only on a yes. `swap=False` (after the lock):
-    the ask is for someone without a seat on the roster, who takes one only on a yes."""
+    the ask is for someone without a seat on the roster, who takes one only on a yes. `own` (before the lock): the
+    officer's own answer — said to them, nobody told."""
     name = m.display_name
     where = rc.join_words([_raid(reg, r) for r in raids]) or _raid(reg, ev.instance)
     if locked:
@@ -774,6 +775,16 @@ def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: 
     sg = ev.signups.get(str(m.discord_id))
     old_char = sg.character if sg else (m.main.label if m.main else None)
     old_spec = sg.spec if sg else (m.main.spec if m.main else None)
+    if own:
+        joined = sg is not None and sg.status == "in"
+        plays = f"{character}, {spec}" if character and old_char and character != old_char else spec
+        if not joined:
+            head = f"You join as {plays} for {where}."
+        elif plays == spec and old_spec and old_spec != spec:
+            head = f"You play {spec} for {where}, not {old_spec}."
+        else:
+            head = f"You play {plays} for {where}."
+        return box(f"Switch to {spec}?", [head, "You can switch back until the lock."], "Switch", rev=rev)
     if character and old_char and character != old_char:
         head = f"{name} plays {character}, {spec} for {where}."
     else:

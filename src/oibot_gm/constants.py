@@ -69,6 +69,12 @@ PAGE_WORDS = {
     "rosters_of": "{n} of {size}", "placed_of": "{n} of {m} joined",
     "board_footer": "Placed as the lock would place them now. Drag a name to move it.",
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
+    # Role switches: each row's button (rc.event_switches `button`), and why a short raid has no switch to show (`why`)
+    "switch_button": "Switch", "answer_button": "Answer for them", "ask_button": "Ask",
+    "short_cover": "The only switches here need someone to cover the role they leave, so {screen} shows them.",
+    "short_asked": "The asks already out cover it until they are answered.",
+    "short_counted": "Regulars who haven't answered are counted as coming, so nothing is suggested until they answer.",
+    "short_nobody": "Nobody free to come can play this role. A member who adds a character that can will show here.",
     # the Signup sheet fact while the sheet is not in Discord: no signup channel to post to, or not posted yet
     "sheet_waits": "Posts once a signup channel is set on the Config page's Channels tab", "sheet_not_posted": "Not in Discord yet",
     # the Board before the lock: an empty seat a minimum wants (beside its role icon), and the line over a picture that is

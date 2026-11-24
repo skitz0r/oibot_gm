@@ -3578,7 +3578,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             return await bot.call_out(reg, rs, ev, m, note or None, by, by_id=by_id)
         try:
             spec = (op.field or "").strip() if want != "out" else ""
-            line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id, **({"spec": spec} if spec else {}))
+            line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id, **({"spec": spec, "via": via or "discord"} if spec else {}))
         except ValueError as e:
             raise RegistryError(str(e))
         return str(line).replace("**", "").removeprefix("✅ ")

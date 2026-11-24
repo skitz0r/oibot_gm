@@ -1319,17 +1319,25 @@ confirmations (an ad hoc run with confirmations off just says *in*).
 section when one of its raids is short of a tank or healer minimum: *Hyjal Summit is short* with the role icon and how
 many, then **Show N possible switches** — one line per person: *Nyx: Shadow → Holy*, *Nyx: Nyx, Shadow → Nyxbear,
 Guardian* when it is another character, *Tavi: no answer yet → Holy* for someone who hasn't joined, and the raids it
-helps beside it. The lines are the bot's own suggestions for those seats (the same ones **Suggest…** and **Fill
-seats…** show), the suggestion first and then the alternates. Before the lock, **Switch** changes their answer: they
-are Join as that spec, for the whole event — the answer is one for the evening, so every raid of it plays them as
-that spec. They get a notice, nobody gets a DM, and you can switch them back until the lock (*"Nyx plays Holy for Hyjal
-Summit and Barrow Deeps, not Shadow."*). For someone who hasn't joined the button is **Answer for them**: it records
-their Join as that spec, as **Answer for someone…** does. After the lock a switch needs the member to act, so **Switch**
-sends that one ask for that raid — a DM with Yes and No, or a card on their Me page with DMs off — and their seat
-changes only when they say yes. A swap that needs someone else to cover the role it leaves is not on this list; it
-stays on **Fill seats…**. The spec must be one the character plays (its spec, its offspec or an extra role's);
-anything else is refused (*"Nyx doesn't play Fire."*). Plain text ("set Nyx to Join as Holy") and MCP `set_answer`
-with `spec` do the same before the lock, and `fill_seats` with `seats` sends one seat's ask after it.
+helps beside it. The lines are the bot's own suggestions for those seats (the same ones **Suggest…** shows before the
+lock and **Fill seats…** after it), the suggestion first and then the alternates. Before the lock, **Switch** changes
+their answer: they are Join as that spec for the whole event — the answer is one for the evening, so every raid of it
+they stay for plays them as that spec (a raid they leave before is not changed). They get a notice, nobody gets a DM,
+and you can switch them back until the lock (*"Nyx plays Holy for Hyjal Summit and Barrow Deeps, not Shadow."*). On
+your own line the box speaks to you (*"You play Holy for Hyjal Summit, not Shadow."*). For someone who hasn't joined
+the button is **Answer for them**: it records their Join as that spec, as **Answer for someone…** does. After the lock
+a switch needs the member to act, so the button is **Ask**: it sends that one ask for that raid — a DM with Yes and No,
+or a card on their Me page with DMs off — and their seat changes only when they say yes (your own line is left out
+then). A swap that needs someone else to cover the role it leaves is not on this list; it stays on **Suggest…** before
+the lock and **Fill seats…** after it. When a raid is short but no line can help, the section says why in one
+sentence: the regulars who haven't answered are counted as coming, the asks already out cover it, the only switches
+need a cover (**Suggest…** / **Fill seats…** shows them), or nobody free can play the role. If the list changed since
+you opened it, the press is refused and the fresh list shows. The spec must be one the character plays (its spec, its
+offspec or an extra role's); anything else is refused (*"Nyx doesn't play Fire."*). Plain text ("set Nyx to Join as
+Holy"), **Answer for someone…** and MCP `set_answer` with `spec` do the same before the lock; once the run is locked,
+someone who holds a seat is never switched that way (*"Nyx holds a seat on the locked roster, so use Switch under the
+event's Role switches to ask them to play Holy."*) — `fill_seats` with `seats` sends one seat's ask instead. Every
+switch is in the run's log and the ops feed with who made it.
 
 **Your inbox (Me page, `/me view`).** Asks — what you must act on — come first, one card each: what it is (*Confirm
 your seat*, *A seat is open*, *Could you switch?*, *Could you come?*), the run, the spec icon you'd play (its tooltip
