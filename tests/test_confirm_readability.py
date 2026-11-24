@@ -897,6 +897,10 @@ def box_cases(reg, rs, runs, ms, dump):
     reg.set_minimums(ony, {"healer": {"min": 3}, "Paladin:Holy": {"min": 1}}, "t")
     add("raid_reset_box", "only minimums", cq.raid_reset_box(reg, ony))
     add("raid_reset_box", "already the game's", cq.raid_reset_box(reg, hy))
+    from oibot_gm import configops as _co  # a comp clear of a minimum the guild never set: the game's, or none at all
+
+    add("minimum_unchanged_box", "the game's minimum", _co.minimum_unchanged_box(reg, hy, "tank"))
+    add("minimum_unchanged_box", "no game minimum", _co.minimum_unchanged_box(reg, hy, "Druid"))
     for n in (1, 2):
         add("leave_box", f"{n} edits", cq.leave_box(n, "Hyjal Summit"))
     for kind, title in cq.REFUSAL_TITLES.items():

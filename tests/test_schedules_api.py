@@ -270,8 +270,10 @@ def test_a_zero_minimum_is_cleared_never_saved(web_bot, reg):
     r = change(web_bot, [{"kind": "comp", "target": HYJAL, "fields": {"Paladin": {"min": 0}}}], apply=True, confirmed=True, revs={f"config:raids:{HYJAL}": rev})
     assert r.status_code == 200 and r.json()["applied"], r.text
     assert "Paladin" not in (reg.config.raids.get(HYJAL) or {}).get("minimums", {}) and "Paladin" not in reg.minimums(HYJAL)
+    before = reg.store.root.joinpath(reg.key, "guild.yaml").read_text()
     r = change(web_bot, [{"kind": "comp", "target": HYJAL, "fields": {"Druid": {"min": 0}}}], apply=True, confirmed=True)
-    assert r.json()["summary"] == "nothing to change", "a 0 for a slot with none of the guild's is no write"
+    assert r.json()["applied"] == ["Druids already have no minimum of their own."], r.text
+    assert reg.store.root.joinpath(reg.key, "guild.yaml").read_text() == before, "a 0 for a slot with none of the guild's is no write"
     reg.set_minimums(HYJAL, {"Druid": {"min": 0}}, "t")
     assert "Druid" not in (reg.config.raids.get(HYJAL) or {}).get("minimums", {}), "the verb never stores 0 either"
 
@@ -401,3 +403,58 @@ def test_could_switch_role_counts_people_not_names(web_bot, reg):
     ids = {u for ro in row["roles"] for k in ("offspec", "flex") for u in ro["cover_ids"].get(k, [])}
     assert {str(base), str(base + 1)} <= ids
     assert next(f for f in row["view"]["who_could_play"] if f["label"] == "Could switch role")["value"] == str(len(ids))
+
+
+# ---------------------------------------------------------------- fix round 2
+
+def _view(web_bot, rid):
+    return next(r for r in web_bot.c.get("/api/readiness", headers=H()).json()["raids"] if r["raid"] == rid)
+
+
+def test_standing_reads_only_what_the_page_prints(web_bot, reg):
+    """The seed's Barrow Deeps: enough mains, tanks and healers met, every minimum row met — comp.readiness is red only
+    from the buff matrix's class wants (no minimums), and Standing reads ready."""
+    row = _view(web_bot, RID)
+    assert row["level"] == "red" and any(c["level"] == "red" and c["source"] == "derived" and c["key"] not in ("tank", "healer") for c in row["comp"])
+    v = row["view"]
+    assert v["level"] == "green" and v["standing_why"] is None and v["who_could_play"][0]["value"] == "ready"
+    assert all(x["level"] == "green" and x["have"] >= x["min"] for x in v["make_up"])
+
+
+def test_a_healer_minimum_unmet_reads_short_and_says_so(web_bot, reg):
+    reg.set_minimums(RID, {"healer": {"min": 10}}, "t")
+    v = _view(web_bot, RID)["view"]
+    assert v["who_could_play"][0]["value"] == "short" and v["standing_why"] == "Healers are under the minimum."
+    healers = next(x for x in v["make_up"] if x["slot"] == "healer")
+    assert healers["own"] is True and healers["level"] == "red"
+    assert next(x for x in v["make_up"] if x["slot"] == "tank")["own"] is False
+
+
+def test_too_few_mains_reads_short_and_says_so(web_bot, reg):
+    v = _view(web_bot, HYJAL)["view"]  # 16 mains for 20 seats, tanks and healers met
+    assert v["who_could_play"][0]["value"] == "short" and v["standing_why"] == PAGE_WORDS["standing_mains"]
+
+
+def test_make_up_rows_say_whose_minimum_it_is(officer_client, reg):
+    reg.set_minimums(HYJAL, {"Paladin": {"min": 3}}, "t")
+    page = next(r for r in officer_client.get("/api/raids").json()["raids"] if r["id"] == HYJAL)["page"]
+    assert {x["slot"]: x["own"] for x in page["make_up"]} == {"tank": False, "healer": False, "Paladin": True}
+
+
+def test_clearing_a_minimum_the_guild_never_set_says_nothing_changes(web_bot, reg):
+    from oibot_gm import configops
+
+    r = change(web_bot, [{"kind": "comp", "target": HYJAL, "fields": {"tank": None}}], apply=True).json()
+    box = r["described"]["box"]
+    assert box["verb"] is None and box["sentences"] == ["Tanks are already at the game's minimum, 2."] and box["title"] == "Nothing to save"
+    assert configops.minimum_unchanged_sentence(reg, HYJAL, "Druid") == "Druids already have no minimum of their own."
+    assert not (reg.config.raids.get(HYJAL) or {}).get("minimums")
+
+
+def test_help_links_readiness_on_the_raids_page(reg, monkeypatch):
+    from oibot_gm import help as help_mod
+
+    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
+    assert help_mod.PAGES["readiness"][:2] == ("/app/raids?view=readiness", "Raids")
+    assert help_mod.site_url(reg, help_mod.PAGES["readiness"][0]) == f"https://gm.example/app/raids?view=readiness&g={reg.key}"
+    assert help_mod.site_url(reg, "/app/me") == f"https://gm.example/app/me?g={reg.key}"

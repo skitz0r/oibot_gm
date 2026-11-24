@@ -3029,7 +3029,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op in ("comp_target", "comp_target_clear"):  # THE verb: Registry.set_minimums (one write)
         key = _minimum_raid(reg, _key(reg, op))
         slot = reg.comp_slot(op.field or op.path or "")
-        lines = reg.set_minimums(key, {slot: _comp_entry(reg, op)}, by, rev=rev)
+        entry = _comp_entry(reg, op)
+        lines = reg.set_minimums(key, {slot: entry}, by, rev=rev)
+        if not lines and entry is None:  # a clear of a minimum the guild never set: the box's own sentence
+            return minimum_unchanged_sentence(reg, key, slot)
         return "; ".join(lines) or f"{reg.comp_slot_words(slot)} is already {_target_words(reg, key, slot, _comp_current(reg, key).get(slot))}, so nothing changed."
     if op.op in ("policy_append", "policy"):
         from . import policy as policy_mod
@@ -4243,11 +4246,14 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
     if k == "comp":  # a raid's minimums: target = a raid id; fields = {slot: {min, note} | null} (Registry.set_minimums)
         key = _minimum_raid(reg, target or "")
         cur = _comp_current(reg, key)
+        idle: list[ConfigOp] = []  # clears of minimums the guild never set: no write
+
+        def clear(slot: str) -> None:
+            (ops if slot in cur else idle).append(ConfigOp(op="comp_target_clear", target=key, field=slot))
         for slot, t in fields.items():
             slot = reg.comp_slot(slot)
             if t is None:
-                if slot in cur:
-                    ops.append(ConfigOp(op="comp_target_clear", target=key, field=slot))
+                clear(slot)
                 continue
             if not isinstance(t, dict):
                 raise RegistryError(f"{reg.comp_slot_words(slot)}: a minimum is {{min, note}}, and null removes it.")
@@ -4261,14 +4267,15 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
             except (TypeError, ValueError):
                 zero = False  # not a number: the verb refuses it in its own words
             if zero:  # a minimum of 0 is never saved (carried, phase 2 review): it clears the guild's own
-                if slot in cur:
-                    ops.append(ConfigOp(op="comp_target_clear", target=key, field=slot))
+                clear(slot)
                 continue
             have = cur.get(slot) or {}
             if have and {"min": have.get("min", 0), "note": have.get("note")} == entry:
                 continue  # unchanged: no write
             ops.append(ConfigOp(op="comp_target", target=key, field=slot, value=_json(entry), reason=entry["note"]))
-        return ops
+        # a change made ONLY of such clears still reaches the preview, so its box says it changes nothing
+        # (minimum_unchanged_box; applied, Registry.set_minimums writes nothing); beside real changes they are dropped
+        return ops or idle
     if k == "loot_weights":  # Config › Loot scoring (owner): fields = {weight path: number | null (back to the default)}
         defaults, cur, own = reg.loot_weight_defaults(), reg.loot_weights(), reg.loot_overridden()
         for path, v in fields.items():
@@ -4582,6 +4589,11 @@ def op_box(reg: Registry, ops, diff=(), rs=None) -> dict | None:
                 return None
             if any(o.op == "raid_reset" for o in ops):  # carried: the Reset box names the minimums that go (raid_all rev)
                 return cq.raid_reset_box(reg, ref) if len(ops) == 1 else None
+            parts = [p for o in ops for p in (o.parts if isinstance(o, MergedOp) else [o])]
+            own = _comp_current(reg, ref)
+            idle = [p for p in parts if p.op == "comp_target_clear" and reg.comp_slot(p.field or p.path or "") not in own]
+            if idle and len(idle) == len(parts):  # clears of minimums the guild never set: nothing changes, said so
+                return minimum_unchanged_box(reg, ref, reg.comp_slot(idle[0].field or idle[0].path or ""))
             changed = set().union(*(_raid_changed(o) for o in ops))
             return cq.raid_save_box(reg, rs, ref, changed, diff)
         if any(o.op == "schedule_remove" for o in ops):
@@ -4601,6 +4613,21 @@ def op_box(reg: Registry, ops, diff=(), rs=None) -> dict | None:
         return cq.schedule_save_box(reg, rs, ref, fields, diff)
     except (RegistryError, ValueError):
         return None  # the line's own refusal says what is wrong
+
+
+def minimum_unchanged_sentence(reg: Registry, raid: str, slot: str) -> str:
+    """A clear of a minimum the guild never set: 'Tanks are already at the game's minimum, 2.' / 'Druids already have
+    no minimum of their own.' (the game gives none)."""
+    words = reg.comp_slot_words(slot)
+    g = reg.game_minimum(raid, slot)
+    return f"{words} are already at the game's minimum, {g}." if g is not None else f"{words} already have no minimum of their own."
+
+
+def minimum_unchanged_box(reg: Registry, raid: str, slot: str) -> dict:
+    """The refusal box of a `comp` change that clears only minimums the guild never set (only Back)."""
+    from . import consequences as cq
+
+    return cq.refusal_box("Nothing to save", minimum_unchanged_sentence(reg, raid, slot))
 
 
 def aura_reset_one_sentence(reg: Registry, target: str) -> str:

@@ -91,4 +91,6 @@ PAGE_WORDS = {
     # Raids (raid_page): the First opens value once the raid is open, its make-up with no minimum, a raid no schedule plays
     "open_now": "Open now", "no_minimums": "No minimums set. Edit the raid to add one.",
     "played_nowhere": "No schedule plays this raid yet. Add one on the Schedules page.",
+    # Readiness' Standing when it is not "ready": the printed row that makes it so (raid_page.readiness_view)
+    "standing_mains": "Fewer mains than seats.", "standing_under": "{slot} are under the minimum.",
 }

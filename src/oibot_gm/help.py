@@ -32,7 +32,7 @@ MANUAL = ROOT / "docs" / "manual.md"
 # key → (path, the page's name in the rail, officers only). page_link is the one renderer.
 PAGES = {"me": ("/app/me", "Me", False), "professions": ("/app/professions", "Professions", False), "prices": ("/app/prices", "Prices", False),
          "loot_log": ("/app/loot-log", "Loot log", False), "help": ("/app/help", "Help", False),
-         "rosters": ("/app/rosters", "Rosters", True), "raids": ("/app/raids", "Raids", True), "readiness": ("/app/readiness", "Readiness", True),
+         "rosters": ("/app/rosters", "Rosters", True), "raids": ("/app/raids", "Raids", True), "readiness": ("/app/raids?view=readiness", "Raids", True),  # the Raids page's Readiness view
          "members": ("/app/members", "Members", True), "applications": ("/app/applications", "Applications", True),
          "loot": ("/app/loot", "Loot", True), "policy": ("/app/policy", "Policy", True), "ops": ("/app/ops", "Ops", True),
          "config": ("/app/config", "Config", True)}
@@ -344,7 +344,7 @@ def site_url(reg, path: str, anchor: str | None = None) -> str | None:
     web = (os.environ.get("OIBOT_WEB_URL") or "").rstrip("/")
     if not web.startswith("http"):
         return None
-    return f"{web}{path}?g={reg.key}" + (f"#{anchor}" if anchor else "")
+    return f"{web}{path}{'&' if '?' in path else '?'}g={reg.key}" + (f"#{anchor}" if anchor else "")
 
 
 def system_prompt(tree) -> str:
