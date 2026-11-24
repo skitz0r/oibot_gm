@@ -35,7 +35,11 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   of a 20-player raid) scales the guild's own minimums too, to the nearest whole number with a half rounded up, and a
   minimum of 1 or more never scales below 1. A class or spec short is shown on the run (*short 1 Paladin*) and nobody is
   asked to fill it; only a short tank or healer gets fill asks. Set minimums with **Edit** in the Raids page's Rules view, with `/roster comp`, in `/gm config raid` › *Minimums* or in plain text ("at least 3 healers in Barrow Deeps"). They belong to the raid,
-  never to one run.
+  never to one run. A minimum is never 0: picking 0 takes away the guild's own minimum for that role, class or spec.
+  Where the game gives one, the game's minimum applies again; where it gives none, the raid has no minimum of its own
+  for it. Every preview says which before you press — *the game's minimum* or *no minimum of its own*, never *at least
+  0*. A 0 an older version of the bot wrote is read the same way and stays in the file until the raid's minimums are
+  next saved.
 - **A run's week** — when a run's sheet **opens** (a few days before the run; it differs per raid), when those who
   haven't answered get a **reminder** (by default halfway between the opening and the lock), when it **locks** (a day
   before; the roster is decided then) and when the rostered must **confirm by** (6 hours before). Officers set them per
@@ -285,6 +289,21 @@ Discard, Edit and Add a rule — §7) and **Agents** (the news review and apply 
 whole manual, section by section (sections for officers or the owner are marked, not hidden), and the commands you may
 run; `/help` in Discord links to it. Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
+
+**The officers' rail** reads, in order: **Events**, **Schedules**, **Raids**, then **Members**, **Applications**,
+**Loot**, **Auras**, **Ops**, **Policy**, **Agents** and **Config**. The old Rosters and Readiness addresses open the
+Events page and the Raids page's Readiness view. On a phone the rail is behind the menu button at the top left.
+
+**What the raid pages leave to Discord, plain text and MCP.** A few things the older raid pages did are not on Events,
+Schedules or Raids; each still works elsewhere. A cancel's reason and its line in the signup channel: the card's
+*Cancel run…* or `/raid cancel`, plain text, MCP `cancel_run`. Another layout for a run (*Propose roster*, *another
+split like this*) and **Clear** of every officer's moves on a board: plain text, MCP `propose_split` / `set_layout`, a
+test run's card on the Test bench (on the Events page **Undo my moves** takes back your own). Opening a pickup
+template's event: `/raid open` › *Ad hoc run…*, plain text, MCP `open_run` (New event opens one-offs and schedules'
+nights). Setting one timing value of a schedule back to the game's suggestion: `/gm config raid`, plain text, MCP
+`schedule_set`. A start at a minute that isn't a quarter hour (the site's pickers step by 15 minutes): plain text or
+MCP. On the Raids page, a minimum's reason (*why*), a raid's notes and its split policy: `/roster comp` or
+`/gm config raid`, plain text, MCP `raid_set`.
 Me, Events, Schedules, Members, Loot, the Loot log, Ops, Agents, Raids, Auras and Config update live the moment something changes (a press on a sheet, a drag by another
 officer, a change in Discord); a 45-second refresh is only the fallback when the live connection drops. A page in edit mode is never
 reloaded under you: the Config page's Settings say *Someone changed the settings since you opened them* with **Reload (keeps your
@@ -1026,8 +1045,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    confirm) and the signup sheet (*Open in Discord*), with *In Discord* beside it: the officer card, the updates thread
    and the loot thread, those that exist. A locked event adds the confirmations (*Not sent yet. The bot sends them
    within a minute.* while they go out), each raid's open seats (*Open seats · Barrow Deeps* on an evening of several)
-   and *Reminded* (when, and by whom). Any time it says *Automatic asks: Paused by Jon* for a raid whose asks are
-   paused, *Also on another event* (who joined another event that night) and *Away that day* (each with the reason
+   and *Reminded* (when, and by whom). Before the lock it says *Automatic asks: Paused by Jon* for a raid whose asks
+   are paused; once locked, that raid's *Open seats* sentence says it (*Automatic asks paused by Jon. 3 seats are
+   open.*), once. Any time it shows *Also on another event* (who joined another event that night) and *Away that day* (each with the reason
    recorded). The list says once which time zone every time on the page is in (*Times in Berlin.*), and a test run's
    page carries a *test run* chip beside its state. **Signups** has four counts — *Joined*, *Bench*, *No thanks*, *No answer yet*
    — and each count unfolds its names, one per line, each with its spec icon and the row **⋮** (the same on-behalf
