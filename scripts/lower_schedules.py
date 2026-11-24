@@ -191,11 +191,13 @@ def _plan(gdir: Path, store: GitStore, dry_run: bool, minimums_only: bool, ids_o
             if "rosters" in doc:
                 doc["rosters"] = cfg.rosters
             with store.batch(f"{gdir.name}: {what} (by scripts/lower_schedules.py)"[:400]):
-                store.write_text(Path(gdir.name) / "guild.yaml", HEADER + yaml.safe_dump(doc, sort_keys=False))
                 for m in changed_m:
                     store.write_text(Path(gdir.name) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
                 for a in changed_a:
                     store.write_text(Path(gdir.name) / "applicants" / f"{a.discord_id}.json", a.model_dump_json(indent=1))
+                # guild.yaml LAST: it drops schedule_aliases, the map a re-run needs to lower member files a crash left
+                # behind — written first, an interrupted run would leave members no later run can map back
+                store.write_text(Path(gdir.name) / "guild.yaml", HEADER + yaml.safe_dump(doc, sort_keys=False))
                 store.commit(f"{gdir.name}: {what} (by scripts/lower_schedules.py)"[:400])
         return None if dry_run else write
 
@@ -222,6 +224,7 @@ def _plan(gdir: Path, store: GitStore, dry_run: bool, minimums_only: bool, ids_o
 
 
 NOT_WRITTEN = "{name}: checked, and not written because another guild was refused."
+UNKNOWN_GUILD = "No guild folder named {names} here, so nothing was checked or written."
 
 
 def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, ids_only: bool = False,
@@ -234,7 +237,11 @@ def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, i
     are lowered first (and only, with `ids_only`), then the minimums, then the schedules unless `minimums_only`."""
     store = GitStore(data_root, push=False)
     planned: list[tuple[str, str, object, bool]] = []  # (guild, line, write, refused)
-    for gdir in sorted(p for p in data_root.iterdir() if (p / "guild.yaml").exists()):
+    dirs = sorted(p for p in data_root.iterdir() if (p / "guild.yaml").exists())
+    unknown = sorted(set(guilds or ()) - {p.name for p in dirs})
+    if unknown:  # a mistyped --guild: refused in one sentence, never "nothing printed, exit 0"
+        return [f"refused: {UNKNOWN_GUILD.format(names=', '.join(unknown))}"]
+    for gdir in dirs:
         if guilds and gdir.name not in guilds:
             continue
         try:
@@ -272,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     said = lower(data, a.dry_run, a.minimums_only, a.ids_only, a.guild)
     for line in said:
         print(line)
-    return 1 if any(": refused, nothing changed." in line for line in said) else 0
+    return 1 if any(": refused, nothing changed." in line or line.startswith("refused: ") for line in said) else 0
 
 
 if __name__ == "__main__":

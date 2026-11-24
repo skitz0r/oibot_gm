@@ -700,3 +700,29 @@ def test_the_script_turns_an_unexpected_failure_into_that_guilds_refusal(old_sto
     said = _lower_script().lower(data_root)
     assert said == [f"{GUILD}: refused, nothing changed. Its files couldn't be read, so fix them or leave this guild out with --guild."]
     assert commit_count(old_store) == n0 and "JSONDecodeError" in capsys.readouterr().err
+
+
+def test_the_script_refuses_a_guild_key_it_does_not_have(old_store, data_root):
+    n0 = commit_count(old_store)
+    script = _lower_script()
+    said = script.lower(data_root, guilds=["no-such-guild"])
+    assert said == ["refused: No guild folder named no-such-guild here, so nothing was checked or written."]
+    assert script.main([str(data_root), "--guild", "no-such-guild"]) == 1 and commit_count(old_store) == n0
+
+
+@pytest.mark.parametrize("first", ["all", "minimums", "ids"])
+def test_a_guild_lowered_by_an_interrupted_run_reads_as_nothing_to_lower_again(old_store, open_registry, data_root, first):
+    """The re-review's open question: a run lowered this guild, then stopped before the others. Run again in any mode,
+    the lowered guild is nothing to lower — no refusal, no commit, no change to its files."""
+    open_registry(old_store).migrate_schedules()
+    script = _lower_script()
+    flags = {"all": {}, "minimums": {"minimums_only": True}, "ids": {"ids_only": True}}
+    said = script.lower(data_root, **flags[first])
+    assert len(said) == 1 and "refused" not in said[0], said
+    files = {p: p.read_text() for p in (data_root / GUILD).rglob("*") if p.is_file()}
+    n = commit_count(old_store)
+    order = ["ids", "minimums", "all"]
+    for mode in order[:order.index(first) + 1]:  # what that run lowered is nothing to lower now
+        again = script.lower(data_root, **flags[mode])
+        assert len(again) == 1 and "nothing to lower" in again[0], (mode, again)
+    assert commit_count(old_store) == n and {p: p.read_text() for p in files} == files

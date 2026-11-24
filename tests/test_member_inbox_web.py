@@ -345,32 +345,52 @@ def _strings(x):
 
 def test_no_route_answer_carries_a_discord_time_stamp(w):
     """The final review: Answer for someone's toast showed a raw Discord stamp (<t:…:F>) from set_answer's run_label.
-    Every site route that returns a raid verb's line answers in the guild's 12-hour words (rc.site_words). Walked:
-    POST /api/me/run/{key}/answer and /out, /api/admin/action (join, callout, confirm_yes), /api/run/{key}/set,
-    /api/run/{key}/pin, /api/run/{key}/pause, /api/run/{key}/remind, /api/admin/placement, /api/me/placement,
-    /api/run/{key}/cancel."""
+    Every site route that returns a raid verb's line answers in the guild's 12-hour words (rc.site_words). Each walked
+    route SUCCEEDS (200) — a refusal would prove nothing — and no string of any answer holds `<t:`. Walked: POST
+    /api/me/run/{key}/answer and /out, /api/admin/action (join, callout, confirm_yes), /api/run/{key}/set, /pin, /lock,
+    /pause, /remind, /withdraw, /sheet, /reopen, /cancel, /api/admin/placement, /api/admin/fill-answer, /api/me/placement."""
+    from test_raid_night import short_one
+
     said: dict[str, object] = {}
-    ev = open_test_run(w.reg, w.rs)
-    a, b, c, d = w.reg.test_members()[:4]
-    h = as_user(w.c, a.discord_id)
-    said["me answer"] = w.c.post(f"/api/me/run/{ev.key}/answer", json={"status": "in"}, headers=h)
-    said["me out"] = w.c.post(f"/api/me/run/{ev.key}/out", json={"note": ""}, headers=h)
-    h = as_user(w.c, OFFICER)
-    said["admin action join"] = w.c.post("/api/admin/action", json={"run": ev.key, "member": str(b.discord_id), "action": "join"}, headers=h)
-    said["admin action callout"] = w.c.post("/api/admin/action", json={"run": ev.key, "member": str(b.discord_id), "action": "callout", "note": "x"},
-                                            headers=h)
-    said["run set"] = w.c.post(f"/api/run/{ev.key}/set", json={"member": str(c.discord_id), "status": "in"}, headers=h)
-    said["run pin"] = w.c.post(f"/api/run/{ev.key}/pin", json={"member": d.display_name, "pin": "in"}, headers=h)
-    locked, pool = locked_with_asks(w.reg, w.rs)
-    said["run pause"] = w.c.post(f"/api/run/{locked.key}/pause", json={"paused": True}, headers=h)
-    said["run remind"] = w.c.post(f"/api/run/{locked.key}/remind", json={}, headers=h)
-    said["admin action confirm"] = w.c.post("/api/admin/action", json={"run": locked.key, "member": str(pool[1].discord_id), "action": "confirm_yes"},
-                                            headers=h)
-    said["admin placement"] = w.c.post("/api/admin/placement", json={"run": locked.key, "member": str(pool[2].discord_id), "answer": "yes"}, headers=h)
-    said["me placement"] = w.c.post("/api/me/placement", json={"run": locked.key, "answer": "yes"}, headers=as_user(w.c, pool[3].discord_id))
-    said["run cancel"] = w.c.post(f"/api/run/{ev.key}/cancel", json={"reason": "x"}, headers=as_user(w.c, OFFICER))
-    answered = {k for k, r in said.items() if r.status_code == 200}
-    assert {"me answer", "me out", "admin action join", "admin action callout", "run set", "admin action confirm"} <= answered, \
-        {k: (r.status_code, r.text[:160]) for k, r in said.items()}
-    leaks = {k: s for k, r in said.items() for s in _strings(r.json()) if "<t:" in s}
+    reg, rs, c = w.reg, w.rs, w.c
+    reg.config.signup_channel_id = w.bot.signup.id
+    ev = open_test_run(reg, rs)
+    a, b, p, d = reg.test_members()[:4]
+    h = as_user(c, a.discord_id)
+    said["me answer"] = c.post(f"/api/me/run/{ev.key}/answer", json={"status": "in"}, headers=h)
+    said["me out"] = c.post(f"/api/me/run/{ev.key}/out", json={"note": ""}, headers=h)
+    h = as_user(c, OFFICER)
+    said["admin action join"] = c.post("/api/admin/action", json={"run": ev.key, "member": str(b.discord_id), "action": "join"}, headers=h)
+    said["admin action callout"] = c.post("/api/admin/action", json={"run": ev.key, "member": str(b.discord_id), "action": "callout", "note": "x"},
+                                          headers=h)
+    said["run set"] = c.post(f"/api/run/{ev.key}/set", json={"member": str(p.discord_id), "status": "in"}, headers=h)
+    said["run pin"] = c.post(f"/api/run/{ev.key}/pin", json={"member": p.display_name, "pin": "in"}, headers=h)
+    said["run sheet"] = c.post(f"/api/run/{ev.key}/sheet", json={}, headers=h)
+    said["run cancel"] = c.post(f"/api/run/{ev.key}/cancel", json={"reason": "x"}, headers=h)
+    to_lock = open_test_run(reg, rs, days=4)
+    join(reg, rs, to_lock, reg.test_members()[:10])
+    said["run lock"] = c.post(f"/api/run/{to_lock.key}/lock", json={}, headers=h)
+    s, seated = short_one(reg, rs)  # locked, one seat freed, the bench joined
+    for m in seated[:-1]:
+        reg.add_placement_ask(m.discord_id, s.team, m.main.label, "lock")
+    said["run pause"] = c.post(f"/api/run/{s.key}/pause", json={"paused": True}, headers=h)
+    said["run remind"] = c.post(f"/api/run/{s.key}/remind", json={}, headers=h)
+    said["admin action confirm"] = c.post("/api/admin/action", json={"run": s.key, "member": str(seated[1].discord_id), "action": "confirm_yes"},
+                                          headers=h)
+    said["admin placement"] = c.post("/api/admin/placement", json={"run": s.key, "member": str(seated[2].discord_id), "answer": "yes"}, headers=h)
+    said["me placement"] = c.post("/api/me/placement", json={"roster": s.team, "answer": "yes"}, headers=as_user(c, seated[3].discord_id))
+    h = as_user(c, OFFICER)
+    plan = rc.role_plan(reg, rs, s)
+    asyncio.run(w.bot.send_plan(reg, rs, s, rev=plan.rev, by="Jon"))  # an officer's send goes while paused
+    out = [x for x in s.fill_asks if x.pending]
+    assert out, "the premise: an ask is out"
+    said["admin fill-answer"] = c.post("/api/admin/fill-answer", json={"run": s.key, "member": str(out[0].discord_id), "yes": False}, headers=h)
+    asyncio.run(w.bot.send_plan(reg, rs, s, rev=rc.role_plan(reg, rs, s).rev, by="Jon"))  # the next one asked
+    nxt = next(x for x in s.fill_asks if x.pending)
+    said["run withdraw"] = c.post(f"/api/run/{s.key}/withdraw", json={"member": str(nxt.discord_id)}, headers=h)
+    rc.end_run(reg, rs, s, "Jon")
+    said["run reopen"] = c.post(f"/api/run/{s.key}/reopen", json={}, headers=h)
+    failed = {k: (r.status_code, r.text[:200]) for k, r in said.items() if r.status_code != 200}
+    assert not failed, failed
+    leaks = {k: x for k, r in said.items() for x in _strings(r.json()) if "<t:" in x}
     assert not leaks, leaks
