@@ -1070,7 +1070,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    seat now. A finished event shows **Board, as it was locked**. The
    page updates by itself when someone answers or another officer moves a name, never under a drag in progress, and
    the Role switches list stays folded or unfolded as you left it. **Activity · N lines** is the event's log, folded
-   until **Show the lines**, with the quiet **Cancel event** at its right. Lock now, Cancel event (red: it cannot be
+   until **View event history**, with the quiet **Cancel event** at its right. Lock now, Cancel event (red: it cannot be
    undone) and Reschedule each show the bot's box first, and the press writes only what that box said: when what the
    box says changed while it was open — another officer moved the event, or someone joined while a box that counts
    them is open (Cancel event's *The 18 who joined…*, a scheduled event's Lock naming who is asked to confirm) —

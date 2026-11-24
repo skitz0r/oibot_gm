@@ -13,7 +13,7 @@ export function ActivitySection({ activity, action }: { activity: { when: string
       <Group gap="xs">
         {n > 0 && (
           <Button variant="subtle" color="gray" size="xs" aria-expanded={open} aria-controls="event-activity" onClick={() => setOpen((o) => !o)}>
-            {open ? "Hide the lines" : "Show the lines"}
+            {open ? "Hide event history" : "View event history"}
           </Button>
         )}
         {action}
