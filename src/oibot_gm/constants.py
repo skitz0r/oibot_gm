@@ -74,4 +74,6 @@ PAGE_WORDS = {
     # the Board before the lock: an empty seat a minimum wants (beside its role icon), and the line over a picture that is
     # being placed again after a change (event_board: board_state "working")
     "open_seat": "open seat", "board_working": "Placing everyone again after the last change. This is the board from before it.",
+    # a board the bot could not work out at all (event_board: an unexpected failure, kept for those answers)
+    "board_failed": "The bot couldn't work out where the lock would place everyone. The board shows the officers' moves.",
 }

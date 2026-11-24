@@ -190,6 +190,10 @@ class RaidEvent(BaseModel):
     # in the layout, or pinned out by a drag to Not placed; pruned at every board write, cleared at the lock. "Undo my
     # moves" drops exactly the viewer's names (RaidMixin.undo_moves)
     placed_by: dict[str, int] = Field(default_factory=dict)
+    # before the lock, the pins an officer's DRAG changed (a drop on Not placed pins "out"; a place lifts an "out" pin):
+    # member id → {by: the officer, was: the pin before (None = none), now: the pin the drag left}. Undo my moves puts
+    # `was` back only while the pin is still `now` — a pin set anywhere else is never touched. Cleared at the lock
+    drag_pins: dict[str, dict] = Field(default_factory=dict)
     split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
     cards: dict[str, int] = Field(default_factory=dict)  # officer cards in the roster channel: "health" | "lock:<i>" -> message id
     cards_channel_id: Optional[int] = None
@@ -3929,7 +3933,7 @@ def run_strategy(reg: Registry, ev: RaidEvent) -> str:
 
 
 def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None,
-               earlier: dict[int, int] | None = None) -> tuple[list[Player], list[RosterResult], int]:
+               earlier: dict[int, int] | None = None, stop=None) -> tuple[list[Player], list[RosterResult], int]:
     """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
     the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective.
     `earlier` (a later raid only): Discord id → how many raids before it rostered them, given instead of read from the
@@ -3997,6 +4001,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         minimums=minimums or None,
         lead_rostered=lead_rostered,
         bonus=bonus,
+        stop=stop,  # the board's picture only (solver.Stop): a lock that starts abandons it; never set by the lock itself
     )
     # "another one": for a split the rosters must differ, for a single run the groups must
     rosters = solver.solve_rosters(reg.profile, players, raid_id, opts, rosters=n_rosters, strategy=strategy, roster_bonus=roster_bonus, avoid=avoid if n_rosters > 1 else None, avoid_groups=avoid_groups if n_rosters == 1 else None)
@@ -4092,9 +4097,59 @@ def board_rev(reg: Registry, ev: RaidEvent) -> str:
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
+def record_moves(ev: RaidEvent, name: str, at_before: dict, groups: list[list[str]], pins_before: dict, by_id: int | None) -> None:
+    """Whose moves the board holds after one drag (Undo my moves reads it): every name whose group changed and every
+    pin the drag changed. With `by_id` the mover's name is theirs; a swapped partner keeps whoever placed them (a
+    partner nobody placed becomes the mover's); a pin the drag changed records what it was. Without `by_id` (a move
+    from Discord, plain text or MCP) the moved names and changed pins belong to nobody. A name moved by someone
+    supersedes another officer's pin record on it."""
+    at_after = {n: gi for gi, g in enumerate(groups) for n in g}
+    changed = {n for n in set(at_before) | set(at_after) if at_before.get(n) != at_after.get(n)} | {name}
+    uid_of = {n: str(sg.discord_id) for n in changed if (sg := signup_by_name(ev, n)) is not None}
+    owners, records = dict(ev.placed_by), dict(ev.drag_pins)
+    for n in changed:
+        u = uid_of.get(n)
+        if by_id is None:
+            owners.pop(n, None)
+            records.pop(u, None)
+            continue
+        if n == name:
+            owners[n] = int(by_id)
+        else:
+            owners.setdefault(n, int(by_id))
+        if u in records and int(records[u].get("by") or 0) != int(by_id):
+            records.pop(u)
+    for u in set(pins_before) | set(ev.pins):
+        if pins_before.get(u) == ev.pins.get(u):
+            continue
+        if by_id is None:
+            records.pop(u, None)
+            continue
+        rec = records.get(u)
+        was = rec["was"] if rec and int(rec.get("by") or 0) == int(by_id) and rec.get("now") == pins_before.get(u) else pins_before.get(u)
+        if was == ev.pins.get(u):
+            records.pop(u, None)  # back as it was: nothing of this officer's left to undo
+        else:
+            records[u] = {"by": int(by_id), "was": was, "now": ev.pins.get(u)}
+    ev.placed_by, ev.drag_pins = owners, records
+
+
+def own_pins(ev: RaidEvent, by_id: int | None) -> dict[str, dict]:
+    """The pin changes officer `by_id`'s drags made that still stand (ev.drag_pins whose pin is still what the drag
+    left): member id → the record."""
+    if by_id is None:
+        return {}
+    return {u: d for u, d in ev.drag_pins.items() if int(d.get("by") or 0) == int(by_id) and ev.pins.get(u) == d.get("now")}
+
+
 def own_moves(ev: RaidEvent, by_id: int | None) -> list[str]:
-    """The names officer `by_id` placed by hand on the board before the lock (ev.placed_by), sorted."""
-    return sorted(n for n, u in ev.placed_by.items() if by_id is not None and int(u) == int(by_id))
+    """The names officer `by_id` moved by hand on the board before the lock and that still stand: placed in a group
+    (ev.placed_by) or pinned / unpinned by their drag (own_pins), sorted."""
+    if by_id is None:
+        return []
+    names = {n for n, u in ev.placed_by.items() if int(u) == int(by_id)}
+    names |= {sg.display_name for u in own_pins(ev, by_id) if (sg := ev.signups.get(u)) is not None}
+    return sorted(names)
 
 
 def undo_rev(reg: Registry, ev: RaidEvent, by_id: int | None) -> str:
@@ -4169,7 +4224,7 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
 
 # ---------------------------------------------------------------- the board as the lock would place it (Events page)
 
-def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None) -> dict[str, "list[RosterResult] | str"]:
+def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None) -> dict[str, "list[RosterResult] | str"]:
     """Every OPEN raid of an event drawn as its lock would place people now — PURE: deep copies, nothing saved. Each
     raid solves through the lock's own entry (_solve_run, the run's strategy, the lock's budget SOLVE_TIME_LIMIT_S, the
     raid's minimums, pins and the officers' board as hard placements), so the solver's repeatable answer is the
@@ -4177,8 +4232,10 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
     previews of the ones still open (what their locks will roster). A raid nobody joined is never solved: its board is
     every expected roster's groups, empty. A raid whose solve fails maps to rc.solver_error_text's sentence, and the
     raids after it still solve with what the others placed. `parts` = the event's parts already copied (the board
-    cache's snapshot), else read from `rs`. → {run key: [RosterResult] (rosters[0].benched = the joiners not placed) |
-    the sentence}; a locked or closed raid has no entry (its board is its roster)."""
+    cache's snapshot), else read from `rs`. `stop` (solver.Stop): the board cache abandons the solve when a lock
+    starts — solver.Stopped is raised, never turned into a raid's sentence. → {run key: [RosterResult]
+    (rosters[0].benched = the joiners not placed) | the sentence}; a locked or closed raid has no entry (its board is
+    its roster)."""
     parts = [p.model_copy(deep=True) for p in (parts if parts is not None else event_parts(rs, first))]
     out: dict[str, list[RosterResult] | str] = {}
     times: dict[int, int] = {}  # discord id → how many raids before this one rostered (or will roster) them
@@ -4197,7 +4254,9 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
             continue
         try:
             players, rosters, _ = _solve_run(reg, rs, p, time_limit=SOLVE_TIME_LIMIT_S, whatif=False,
-                                             earlier=dict(times) if is_follow(p) else None)
+                                             earlier=dict(times) if is_follow(p) else None, stop=stop)
+        except solver.Stopped:
+            raise
         except Exception as e:  # noqa: BLE001 — infeasible / timed out: this raid says why, the others still solve
             why = solver_error_text(e)
             out[p.key] = why[:1].upper() + why[1:] + ("" if why.endswith(".") else ".")
@@ -4207,6 +4266,35 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
         out[p.key] = rosters
         count(p, rosters)
     return out
+
+
+def overlay_board(reg: Registry, ev: RaidEvent, rosters: list[RosterResult]) -> list[RosterResult]:
+    """The last picture of raid `ev` (an older solve's rosters) with the officers' CURRENT moves on top, for the while
+    a new picture is worked out — so a drag never snaps back. PURE. Each name in ev.layout is drawn at its group; a
+    name pinned out, or no longer joined, leaves the board; whoever a placed name displaces goes to the first group with
+    room, else to Not placed; anyone else keeps the old picture's place. → board_rosters of that layout."""
+    size = run_size(reg, ev)
+    k = groups_per_roster(reg, size)
+    gsize = int(reg.profile.comp_rules["group_size"])
+    joined = {s.display_name for s in ev.signups.values() if s.status == "in"}
+    out = {sg.display_name for u, v in ev.pins.items() if v == "out" and (sg := ev.signups.get(u)) is not None}
+    lay = [[x for x in g if x in joined and x not in out] for g in (ev.layout or [])]
+    hand = {x for g in lay for x in g}
+    pic = [list(g) for r in rosters for g in (list(r.groups) + [[] for _ in range(k - len(r.groups))])]
+    n = -(-max(len(pic), len(lay), 1) // k) * k
+    pic += [[] for _ in range(n - len(pic))]
+    lay += [[] for _ in range(n - len(lay))]
+    pic = [[x for x in g if x in joined and x not in out and x not in hand] for g in pic]
+    displaced: list[str] = []
+    for gi in range(n):
+        room = max(0, gsize - len(lay[gi]))
+        displaced += pic[gi][room:]
+        pic[gi] = lay[gi] + pic[gi][:room]
+    for x in displaced:
+        gi = next((i for i, g in enumerate(pic) if len(g) < gsize), None)
+        if gi is not None:
+            pic[gi].append(x)
+    return board_rosters(reg, ev, pic, size)
 
 
 def _slot_role(reg: Registry, slot: str) -> str:

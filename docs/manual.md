@@ -1063,8 +1063,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    **On the Events page** the board before the lock is drawn the way the lock would place everyone now — the same
    placement the lock makes, worked out again after every change (a Join, a pin, a move, a raid's minimums or
    priority, and for a later raid of the evening who the raids before it roster). While it is worked out again the
-   page keeps the last board with *Placing everyone again after the last change. This is the board from before it.*;
-   with no board yet it shows the placements officers made. An evening with nobody joined shows its groups empty. A
+   page keeps the last board, with every officer's moves already on it, under *Placing everyone again after the last
+   change. This is the board from before it.*;
+   with no board yet it shows the placements officers made. Working out a board can take a few seconds per raid, and
+   with several events open they are worked out one after another; a lock being built goes first. An evening with nobody joined shows its groups empty. A
    seat a minimum still wants shows its role icon and *open seat*. A drag moves one name on the board as the bot holds
    it at that moment — even when it was placed again while you dragged — and keeps that person where you put them
    when the lock comes; dropping on someone swaps the two, and dropping on *Not placed* keeps them off the roster.

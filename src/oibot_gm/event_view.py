@@ -146,11 +146,12 @@ def _confirmed_words(reg: Registry, ev: "rc.RaidEvent") -> str:
 
 def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, viewer: int | None = None,
                board: tuple[str, dict | None] | None = None) -> dict:
-    """One raid of an event as the Board section draws it. `sheet(p, rosters=None)` = ev_json (the route's) for
+    """One raid of an event as the Board section draws it. `sheet(p, rosters=None, open_seats=True)` = ev_json for
     BoardView's input. `board` = event_board's (state, previews) for the event. Before the lock the board is the
-    lock's placement: `board_state` ready (current), working (being placed again: the last picture, else the officers'
-    layout) or failed (the layout, `board_error` = the solver's sentence); a locked or finished raid's board is its
-    roster as it stands (locked). `mine` = the names the viewer placed by hand, `undo_box` their Undo my moves box,
+    lock's placement: `board_state` ready (current), working (being placed again: the last picture with the officers'
+    current moves on top — rc.overlay_board —, else the officers' layout) or failed (the layout, `board_error` = the
+    sentence); a locked or finished raid's board is its roster as it stands (locked). Open seats are drawn only on a
+    ready or locked board. `mine` = the names the viewer placed by hand, `undo_box` their Undo my moves box,
     `layout` the officers' own placements."""
     name = reg.raid_def(p.instance).get("name", p.instance) if p.instance in reg.profile.raids else str(p.instance)
     locked = p.state != "open" and bool(p.all_rosters)
@@ -162,8 +163,10 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
         pv = (previews or {}).get(p.key)
         if isinstance(pv, str):
             state, error = "failed", pv
+        elif isinstance(pv, list) and st == "working":  # the last picture with the officers' moves now: a drag never snaps back
+            rosters, state = rc.overlay_board(reg, p, pv), "working"
         elif isinstance(pv, list):
-            rosters, state = pv, ("working" if st == "working" else "ready")
+            rosters = pv
         else:
             state = "working"
     if locked:
@@ -179,7 +182,8 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
             "rosters_words": PAGE_WORDS["rosters_of"].format(n=n, size=rc.run_size(reg, p)),
             "placed_words": PAGE_WORDS["placed_of"].format(n=placed, m=len(joined)),
             "short": dict(rc.needs(reg, p)["roles"]) if p.state not in CLOSED else {},
-            "sheet": sheet(p, rosters) if sheet is not None else None,
+            # open seats only on a current picture (or a locked roster): a picture being placed again counts none
+            "sheet": sheet(p, rosters, state in ("ready", "locked")) if sheet is not None else None,
             "board_state": state, "board_error": error, "mine": mine,
             "undo_box": cq.undo_box_for(reg, p, viewer) if mine else None,
             "layout": rc.board_layout(reg, p) if live else None}

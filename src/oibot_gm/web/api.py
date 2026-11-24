@@ -905,7 +905,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         c = conf.get(p.signup_name) or {}
         return {"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role, "uid": c.get("uid") or uids.get(p.signup_name), "answer": c.get("answer"), "signed_at": (signed or {}).get(p.signup_name)}
 
-    def board_json(reg, ev, rosters, conf_rows) -> dict:
+    def board_json(reg, ev, rosters, conf_rows, open_seats: bool = True) -> dict:
         """The bank + groups the officers drag on: one entry per roster, groups of seats, aura summary per roster."""
         conf = {c["display_name"]: c for c in conf_rows}
         uids = {s.display_name: str(s.discord_id) for s in ev.signups.values()}
@@ -913,7 +913,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         team = reg.config.team(ev.team) or {}
         size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
         boards = []
-        opens = rc.open_seat_roles(reg, ev, rosters)  # each roster's empty seats a minimum wants, as roles: the page draws role icon + "open seat"
+        # each roster's empty seats a minimum wants, as roles: the page draws role icon + "open seat"; None while the board
+        # is being placed again (the Events page): a partial picture's empty seats are not what the lock leaves open
+        opens = rc.open_seat_roles(reg, ev, rosters) if open_seats else [None] * len(rosters)
         for i, r in enumerate(rosters):
             by = {p.signup_name: p for p in r.selected}
             boards.append({"n": i + 1, "rostered": len(r.selected), "synergy": r.synergy_value or None, "advisories": list(r.advisories[:6]),
@@ -954,7 +956,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "short_after": plan.short_after, "still_short": rc.still_short_words(plan), "rev": plan.rev, "lines": rc.plan_lines(reg, plan),
                 "room": plan.room if plan.phase == "fill" else None, "batch_lines": rc.batch_preview(plan)}
 
-    def ev_json(reg, rs, ev, full: bool = True, rosters=None) -> dict:
+    def ev_json(reg, rs, ev, full: bool = True, rosters=None, open_seats: bool = True) -> dict:
         t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
         live = ev.state not in ("done", "cancelled")
         rd = reg.raid_def(ev.instance)
@@ -1008,7 +1010,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "regulars": rc.regular_answers(reg, ev),  # each regular and what they answered (status None = no answer)
                 "absences": absences, "double_booked": [reg.members[u].display_name for u in busy if u in reg.members],
                 "needs": rc.needs(reg, ev, t) if live else None,
-                "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout), "rev": rc.board_rev(reg, ev),
+                "board": board_json(reg, ev, board_rosters, conf_rows, open_seats), "has_layout": bool(ev.layout), "rev": rc.board_rev(reg, ev),
                 "split": split_json(reg, ev) if live else {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"), "runs": 1, "reason": None, "reason_text": None},
                 "confirmations": conf_rows,
                 "fill_asks": [{"uid": str(a.discord_id), "display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "why": a.why, "answer": a.answer,

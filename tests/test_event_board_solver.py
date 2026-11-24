@@ -82,3 +82,29 @@ def test_a_later_part_prefers_the_earlier_previews_rostered(reg, rs):
     short = {r: 2 * int(rb[r].get("min") or 0) - have[r] for r in rb if 2 * int(rb[r].get("min") or 0) > have[r]}
     extra = on_bd - on_first
     assert all(slot(role[x]) in short for x in extra) and len(extra) <= sum(short.values())
+
+
+def test_a_board_solve_stops_at_once_when_told(reg, rs):
+    """solver.Stop on a real CP-SAT search: stop() from another thread ends the solve with Stopped (CpSolver.stop_search,
+    OR-tools 9.15), long before its budget; a Stop already stopped never searches."""
+    import threading
+    import time
+
+    from oibot_gm.roster import solver
+
+    ev, _bd = evening(reg, rs)
+    attached = threading.Event()
+
+    class Seen(solver.Stop):
+        def attach(self, s):
+            super().attach(s)
+            attached.set()
+
+    stop = Seen()
+    threading.Thread(target=lambda: (attached.wait(30), stop.stop()), daemon=True).start()
+    t0 = time.monotonic()
+    with pytest.raises(solver.Stopped):
+        rc._solve_run(reg, rs, ev, time_limit=60.0, whatif=False, stop=stop)
+    assert time.monotonic() - t0 < 30, "stopped long before the 60 s budget"
+    with pytest.raises(solver.Stopped):
+        rc._solve_run(reg, rs, ev, time_limit=60.0, whatif=False, stop=stop)

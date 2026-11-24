@@ -43,6 +43,7 @@ class SolveOptions:
     offspec_penalty: int = 8  # objective cost per switch
     time_limit_s: float = 20.0  # the solve's budget, spent as deterministic time (DTIME_PER_SECOND): the same input, the same roster
     workers: int = 8
+    stop: "Stop | None" = None  # a solve that may be abandoned (the Events board's picture): Stop.stop() ends it, raising Stopped
 
 
 # Repeatable solves (the final review of §5.67 phase 2): Preview lock and Lock solve the same input and must land on the
@@ -573,6 +574,42 @@ def _balance_terms(s: _Model) -> None:
 
 # ---------------------------------------------------------------- solve + read back
 
+class Stopped(Exception):
+    """The solve was abandoned through its Stop (never a roster: the caller drops the answer and solves again later)."""
+
+
+class Stop:
+    """A handle that abandons a running solve from another thread: CpSolver.stop_search (OR-tools 9.15: "Stops the
+    current search asynchronously") on every solver attached to it, and every solve that starts after stop() raises
+    Stopped without searching. A solve that ends while stop() races it raises Stopped too, so no answer from a stopped
+    handle is ever used. Only the Events board's pictures pass one; the lock never does."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self._solvers: set = set()
+        self.stopped = False
+
+    def attach(self, solver) -> None:
+        with self._lock:
+            if self.stopped:
+                raise Stopped()
+            self._solvers.add(solver)
+
+    def detach(self, solver) -> None:
+        with self._lock:
+            self._solvers.discard(solver)
+            if self.stopped:
+                raise Stopped()
+
+    def stop(self) -> None:
+        with self._lock:
+            self.stopped = True
+            for solver in list(self._solvers):
+                solver.stop_search()
+
+
 
 def _run(s: _Model) -> tuple[cp_model.CpSolver, int]:
     """Maximise seat quality + synergy + balance within the deterministic budget (the same input, the same answer);
@@ -584,7 +621,14 @@ def _run(s: _Model) -> tuple[cp_model.CpSolver, int]:
     solver.parameters.max_deterministic_time = s.opts.time_limit_s * DTIME_PER_SECOND
     solver.parameters.max_time_in_seconds = s.opts.time_limit_s * WALL_CEILING
     solver.parameters.num_workers = s.opts.workers
-    status = solver.Solve(s.m)
+    if s.opts.stop is None:
+        status = solver.Solve(s.m)
+    else:
+        s.opts.stop.attach(solver)  # Stopped before searching when already stopped
+        try:
+            status = solver.Solve(s.m)
+        finally:
+            s.opts.stop.detach(solver)  # Stopped when stopped meanwhile: the answer is never used
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise RuntimeError(f"no roster found: {solver.StatusName(status)}")
     return solver, status

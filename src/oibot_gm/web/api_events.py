@@ -60,7 +60,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         # the board as the lock would place it (event_board): the current picture, else the last one while it is placed again
         board = await event_board.cache_of(bot).get(v.reg, rs, ev)
         return await asyncio.to_thread(event_view.event_json, v.reg, rs, ev, v.uid,
-                                       sheet=lambda p, rosters=None: ev_json(v.reg, rs, p, rosters=rosters), board=board)
+                                       sheet=lambda p, rosters=None, open_seats=True: ev_json(v.reg, rs, p, rosters=rosters, open_seats=open_seats), board=board)
 
     @app.post("/api/run/{key}/switch")
     async def event_switch(request: Request, key: str):
