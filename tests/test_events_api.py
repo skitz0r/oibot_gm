@@ -150,19 +150,21 @@ def test_the_list_never_solves_and_finds_nights_with_one_index(reg, rs, monkeypa
     assert len(out["open"]) == 1 and len(out["coming"]) == 3
 
 
-def test_the_index_agrees_with_the_finder(reg, rs):
-    """event_view's one index per request answers as rc.event_of_occurrence for every schedule night."""
+def test_the_night_index_answers_every_tier(reg, rs):
+    """rc.occurrence_index (what event_of_occurrence answers through): a night by its stamp, by the night a run stands
+    for, a finished night, a run moved onto a night, and none."""
     sid = tuesday(reg)
-    nights = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][:4]
+    nights = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][:5]
     ev = rc.open_run(reg, rs, HYJAL, nights[0], by="t", schedule=sid)
     reg.config.team(ev.team)["stands_for"] = rc.occurrence_stamp(reg, nights[1])
     done = rc.open_run(reg, rs, HYJAL, nights[2], by="t", schedule=sid)
     rc.end_run(reg, rs, done, "t")
-    find = event_view.night_index(reg, rs)
-    for t in nights:
-        occ = rc.occurrence_stamp(reg, t)
-        assert find(sid, occ) is rc.event_of_occurrence(rs, sid, occ, reg=reg), occ
-    assert find(sid, rc.occurrence_stamp(reg, nights[3])) is None and find(sid, rc.occurrence_stamp(reg, nights[2])) is done
+    moved = rc.open_run(reg, rs, HYJAL, nights[4] - timedelta(days=1), by="t", schedule=sid)
+    moved.starts_at = nights[4].isoformat()  # rescheduled onto the next night (its stamp still says its own)
+    find = rc.occurrence_index(reg, rs)
+    got = [find(sid, rc.occurrence_stamp(reg, t)) for t in nights]
+    assert got == [ev, ev, done, None, moved]
+    assert [rc.event_of_occurrence(rs, sid, rc.occurrence_stamp(reg, t), reg=reg) for t in nights] == got
 
 
 # ---------------------------------------------------------------- one event
@@ -236,6 +238,68 @@ def test_a_finished_event_reads_as_history(officer_client, reg, rs):
     assert not any(v for k, v in j["actions"].items())
 
 
+def mains_unanswered(reg, ev) -> set[str]:
+    return {str(m.discord_id) for m in reg.members.values() if m.main and not m.test and str(m.discord_id) not in ev.signups}
+
+
+def test_a_one_offs_no_answer_is_every_main_who_hasnt_answered(officer_client, reg, rs):
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    join(reg, rs, ev, people(reg)[:18])
+    assert rc.not_answered(reg, ev) == [], "the nudge's gate expects nobody on a one-off"
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    assert {x["uid"] for x in j["signups"]["rows"]["none"]} == mains_unanswered(reg, ev) and j["signups"]["no_answer"] == 6
+    assert [x["display_name"] for x in j["signups"]["rows"]["none"]] == sorted((x["display_name"] for x in j["signups"]["rows"]["none"]), key=str.lower)
+
+
+def test_a_scheduled_runs_no_answer_is_what_it_was(officer_client, reg, rs):
+    sid = tuesday(reg)
+    night = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
+    ev = rc.open_run(reg, rs, HYJAL, night, by="t", schedule=sid)
+    join(reg, rs, ev, people(reg)[:10])
+    assert rc.pool_unanswered(reg, ev) == rc.not_answered(reg, ev) != []
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    assert [x["uid"] for x in j["signups"]["rows"]["none"]] == [str(m.discord_id) for m, _c in rc.not_answered(reg, ev)]
+
+
+def test_an_event_with_nobody_joined(officer_client, reg, rs):
+    people(reg, 6)
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    s = j["signups"]
+    assert (s["joined"], s["bench"], s["no_thanks"]) == (0, 0, 0) and s["rows"]["in"] == s["rows"]["sub"] == s["rows"]["out"] == []
+    assert s["no_answer"] == len(s["rows"]["none"]) == len(mains_unanswered(reg, ev)) == len(j["people"])
+    for p in j["parts"]:
+        assert p["placed_words"] == "0 of 0 joined" and p["board_state"] == "ready" and p["sheet"]["board"]["rosters"]
+        assert p["short"] == rc.needs(reg, rs.events[p["key"]])["roles"]
+    assert [f["label"] for f in j["details"]][0] == "Lineup" and j["boxes"]["lock"]["verb"] == "Lock"
+    assert isinstance(j["activity"], list) and j["actions"]["lock"] is True
+
+
+def test_history_counts_a_person_once_and_carries_each_raids_start(officer_client, reg, rs):
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 1), by="t", lineup=[{"raid": RID, "rosters": 1}])
+    ms = people(reg, 10)
+    join(reg, rs, ev, ms)
+    first, later = rc.event_parts(rs, ev)
+    lock_with_board(reg, rs, first, [m.display_name for m in ms])
+    lock_with_board(reg, rs, later, [m.display_name for m in ms])
+    later.all_rosters[0].selected[0].signup_name = "Someone Else"  # the same person on another character there
+    for p in (first, later):
+        rc.end_run(reg, rs, p, "t")
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    assert {f["label"]: f["value"] for f in j["details"]}["Rostered"] == "10"
+    assert j["lineup"] == [{"raid": HYJAL, "rosters": 1, "starts": 0}, {"raid": RID, "rosters": 1, "starts": later.starts}] and later.starts > 0
+
+
+def test_an_old_finished_rehearsal_stays_out_of_history(officer_client, reg, rs):
+    ev = open_test_run(reg, rs)
+    rc.end_run(reg, rs, ev, "t")
+    reg.config.rosters = [t for t in reg.config.rosters if t.get("key") != ev.team]  # its run dict is gone
+    ev.test, ev.event, ev.part, ev.schedule = False, None, 0, "test"  # a file from before the flag and the stamps
+    rs.save(ev, "t: an old rehearsal")
+    assert not rc.is_test_run(reg, ev) and rc.rehearsal_run(reg, ev)
+    assert ev.key not in [x["key"] for x in officer_client.get("/api/event-list").json()["history"]]
+
+
 def test_an_unknown_event_is_a_sentence_without_the_key(officer_client):
     r = officer_client.get("/api/event/bd-zz9k2m")
     assert r.status_code == 404 and "bd-zz9k2m" not in r.text
@@ -245,8 +309,17 @@ def test_an_unknown_event_is_a_sentence_without_the_key(officer_client):
 
 def test_a_coming_up_event_says_when_it_opens_by_hand(officer_client, reg, rs):
     sid = tuesday(reg)
-    nights = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid]
-    far = next(t for t in nights if t > reg.now_local() + timedelta(days=rc.OPEN_HORIZON_DAYS))
+    near = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
+    j = officer_client.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, near)}").json()
+    assert j["can_open"] is True and j["why"] is None and j["box"]["verb"] == "Open the sheet"
+    # Hyjal first opens ten weeks out: past any fixed horizon, its first nights are still coming up — and too far to open
+    reg.set_raid_overrides(HYJAL, {"first_open": (reg.now_local() + timedelta(days=70)).strftime("%Y-%m-%dT%H:%M")}, "t")
+    coming = officer_client.get("/api/event-list").json()["coming"]
+    assert len(coming) == 3 and {x["schedule"] for x in coming} == {sid}
+    nights = rc.next_runs_of(reg, HYJAL, reg.schedule_entry(sid), 3, reg.now_local())
+    assert [x["occurrence"] for x in coming] == [rc.occurrence_stamp(reg, t) for t in nights]
+    far = nights[0]
+    assert far > reg.now_local() + timedelta(days=56), "more than eight weeks out"
     r = officer_client.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, far)}")
     assert r.status_code == 200, r.text
     j = r.json()
@@ -261,9 +334,8 @@ def test_a_coming_up_event_says_when_it_opens_by_hand(officer_client, reg, rs):
     assert j["box"] is None and (j["title"], j["chip"]) == (reg.local12(far), PAGE_WORDS["no_sheet_yet"])
     assert j["open"] == {"start_iso": far.isoformat(), "schedule": sid, "occurrence": rc.occurrence_stamp(reg, far)}
     assert j["schedule"] == {"id": sid, "name": "Tuesday raid night"}
-    near = nights[0]
-    j = officer_client.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, near)}").json()
-    assert j["can_open"] is True and j["why"] is None and j["box"]["verb"] == "Open the sheet"
+    for x in coming:  # every listed night opens its coming-up view
+        assert officer_client.get(f"/api/event/coming/{sid}/{x['occurrence']}").status_code == 200
 
 
 def test_a_coming_up_night_no_longer_on_the_schedule_is_404(officer_client, reg, rs):

@@ -70,5 +70,5 @@ PAGE_WORDS = {
     "board_footer": "Placed as the lock would place them now. Drag a name to move it.",
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
     # the Signup sheet fact while the sheet is not in Discord: no signup channel to post to, or not posted yet
-    "sheet_waits": "Posts when a signup channel is set", "sheet_not_posted": "Not in Discord yet",
+    "sheet_waits": "Posts once a signup channel is set on the Config page's Channels tab", "sheet_not_posted": "Not in Discord yet",
 }

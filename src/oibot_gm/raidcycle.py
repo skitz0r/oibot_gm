@@ -614,7 +614,8 @@ def schedule_stamp(sid: str | None) -> str | None:
 
 
 def _first_part(ev: "RaidEvent") -> bool:
-    return not ev.follows and not ev.part
+    """A run's first raid (the one an event list lists and a schedule night is found by): not a later part."""
+    return not is_follow(ev)
 
 
 def _newest(evs: list) -> "RaidEvent | None":
@@ -629,15 +630,41 @@ def event_of_occurrence(rs: "RaidStore", sid: str, occurrence: str, *, reg: Regi
     the same pair: a finished or cancelled run the start-up stamping never touches, or a live one opened before it; and
     a LIVE run of the schedule moved to exactly that start (reschedule), so nothing else opens there. Nothing is
     guessed: a run stands for what its stamps say."""
+    if reg is not None:
+        return occurrence_index(reg, rs)(sid, occurrence)
     hits = [e for e in rs.events.values() if e.event and _first_part(e) and not e.test and e.schedule == sid
             and (e.occurrence == occurrence or stands_for_of(reg, e) == occurrence)]
-    if reg is not None:
-        hits += [e for e in rs.events.values() if not e.event and _first_part(e) and not is_test_run(reg, e)
-                 and occurrence_stamp(reg, e.start) == occurrence and run_schedule_id(reg, e) == sid]
-        if not hits:
-            hits = [e for e in rs.live() if e.event and _first_part(e) and not e.test and e.schedule == sid
-                    and occurrence_stamp(reg, e.start) == occurrence]
     return _newest(hits)
+
+
+def occurrence_index(reg: Registry, rs: "RaidStore"):
+    """event_of_occurrence (with `reg`) for many nights at once: ONE pass over the run store, then find(sid, occurrence)
+    → the run or None, by the same three tiers — a stamped first part (never a test run) by its occurrence or the night
+    it stands for, plus a run file from before the stamps by its start and schedule; only when neither gives one, a LIVE
+    stamped first part of the schedule moved onto that minute. The newest created when several. The Events list builds
+    one per request; event_of_occurrence answers through it."""
+    from collections import defaultdict
+
+    found: dict[tuple, list] = defaultdict(list)
+    moved: dict[tuple, list] = defaultdict(list)
+    for e in rs.events.values():
+        if not _first_part(e):
+            continue
+        if e.event:
+            if e.test:
+                continue
+            found[(e.schedule, e.occurrence)].append(e)
+            sf = stands_for_of(reg, e)
+            if sf and sf != e.occurrence:
+                found[(e.schedule, sf)].append(e)
+            if e.state not in ("done", "cancelled"):
+                moved[(e.schedule, occurrence_stamp(reg, e.start))].append(e)
+        elif not is_test_run(reg, e):
+            found[(run_schedule_id(reg, e), occurrence_stamp(reg, e.start))].append(e)
+
+    def find(sid: str, occurrence: str) -> "RaidEvent | None":
+        return _newest(found.get((sid, occurrence)) or moved.get((sid, occurrence)) or [])
+    return find
 
 
 def stands_for_of(reg: Registry | None, ev: "RaidEvent") -> str | None:
@@ -1487,6 +1514,16 @@ class Moved(BaseModel):
     conflicts: dict[int, str] = Field(default_factory=dict)
 
 
+def run_timing(reg: Registry, first: "RaidEvent") -> dict:
+    """A run's own sheet timing as {setting: value} (EVENT_TIMING's keys, _timing_values' inverse): hours as numbers,
+    `nudge` and `autofill` as switches — what a surface shows and sends back to the reschedule verb unchanged."""
+    team = run_team(reg, first)
+    out = {k: team_setting(team, v) for k, v in EVENT_TIMING.items()}
+    out["nudge"] = out["nudge"] not in (None, OFF, False)
+    out["autofill"] = bool(out["autofill"])
+    return out
+
+
 def _timing_values(timing: dict | None) -> dict:
     """`timing` {setting: value} (EVENT_TIMING's keys) → {run dict key: value}; RegistryError(TIMING_UNKNOWN) for any other
     setting or a value that isn't one."""
@@ -2298,6 +2335,13 @@ def is_test_run(reg: Registry, ev: RaidEvent) -> bool:
     return ev.test or bool((reg.config.team(ev.team) or {}).get("test"))
 
 
+def rehearsal_run(reg: Registry, ev: RaidEvent) -> bool:
+    """is_test_run, and also a CLOSED rehearsal from before the `test` flag whose run dict is gone: its own schedule
+    stamp is the rehearsal's (_REHEARSAL) or its roster key carries it ('…-test'). Lists of past runs read this."""
+    return (is_test_run(reg, ev) or ev.schedule == _REHEARSAL or run_schedule_id(reg, ev) == _REHEARSAL
+            or str(ev.team or "").endswith(f"-{_REHEARSAL}"))
+
+
 def _test_pool(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
     tester = (reg.config.team(ev.team) or {}).get("test_by")
     return [(m, m.main) for m in reg.members.values() if m.main and (m.test or m.discord_id == tester)]
@@ -2343,6 +2387,13 @@ def expected_from(reg: Registry, ev: RaidEvent) -> str:
 def not_answered(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
     """The expected people with no answer on the sheet (an absence-marked No thanks counts as an answer), by name."""
     return sorted([(m, c) for m, c in expected(reg, ev) if c and str(m.discord_id) not in ev.signups], key=lambda mc: mc[0].display_name.lower())
+
+
+def pool_unanswered(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
+    """Who the run is FOR (run_pool) with no row on its sheet, by name — the Events page's "No answer yet" and the
+    Answer-for-them rows, health's "no answer on the sheet" hint. Not gated by `expected` (that gate is the nudge's): a
+    one-off lists every main that hasn't answered; a recurring run lists exactly what not_answered does."""
+    return sorted([(m, c) for m, c in run_pool(reg, ev) if c and str(m.discord_id) not in ev.signups], key=lambda mc: mc[0].display_name.lower())
 
 
 def regular_answers(reg: Registry, ev: RaidEvent) -> list[dict]:
@@ -3406,7 +3457,7 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
             if coverable:
                 hint = could_line([r], [([x.split(" (")[0] for x in v[:3]], ASK_HOW.get(k, k)) for k, v in cover.items() if v])
             else:
-                off = [m.display_name for m, _c in run_pool(reg, ev) if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())][:3]
+                off = [m.display_name for m, _c in pool_unanswered(reg, ev) if any(profile.spec(c.cls, c.spec).role == r for c in m.active())][:3]
                 hint = could_line([r], [(off, ASK_HOW["unanswered"])]) if off else f"Nobody registered could {COULD.get(r, r)}. Recruit one."
         roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "off": off, "cover": cover})
     buffs = []

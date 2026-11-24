@@ -15,7 +15,8 @@ from fastapi.responses import JSONResponse
 
 from .. import event_view
 
-NO_EVENT = "There is no event by that name."
+# a link to an event that isn't one any more: its record is gone, or (a raid taken out of a lineup) it is no event of its own
+NO_EVENT = "This event is no longer on the Events list."
 
 
 def install_events_api(app: FastAPI, bot, *, who, ev_json) -> None:
@@ -39,6 +40,6 @@ def install_events_api(app: FastAPI, bot, *, who, ev_json) -> None:
         v = await who(request, officer=True)
         rs = bot.raids.store(v.reg)
         ev = rs.events.get(key)
-        if ev is None:
+        if ev is None or ev.dropped:  # a dropped raid answers as nothing: no event of its own and no part of one
             return JSONResponse({"error": NO_EVENT}, status_code=404)
         return await asyncio.to_thread(event_view.event_json, v.reg, rs, ev, v.uid, sheet=lambda p: ev_json(v.reg, rs, p))

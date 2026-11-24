@@ -6,7 +6,6 @@ part and its chain; a later part is never a row of its own and a dropped part is
 run key travels only as an id (`key`), never inside a word. The routes (web/api_events.py) run these in a thread."""
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -18,40 +17,39 @@ from .registry import Registry, RegistryError
 CLOSED = ("done", "cancelled")
 HISTORY_PAGE = 20  # history rows per page, newest first
 COMING_PER_SCHEDULE = 3  # each active schedule's next three nights with no event yet
-COMING_HOURS = 24 * 7 * 8  # how far ahead Coming up looks for them (eight weeks: three nights of any weekly or lockout schedule)
-# a coming-up night that is not on its schedule any more (the schedule was edited or removed), and one opened since
-COMING_GONE = "That night is no longer on the schedule."
-COMING_OPENED = "That night has a signup sheet now."
+# a coming-up night that is not one any more: off its schedule (edited, paused or removed), or opened since
+COMING_GONE = "The schedule no longer has an event on that night."
+COMING_OPENED = "That night has its own event now."
 
 
 # ---------------------------------------------------------------- shared pieces
 
-def night_index(reg: Registry, rs: "rc.RaidStore") -> Callable[[str, str], "rc.RaidEvent | None"]:
-    """rc.event_of_occurrence for many nights at once: ONE pass over the run store, then a lookup per (schedule id,
-    occurrence) answering exactly as the finder does — a stamped first part by its occurrence or the night it stands for,
-    a run file from before the stamps by its start and schedule, else a live run of the schedule moved onto that minute;
-    the newest created when several. tests/test_events_api.py pins that both answer alike."""
-    stamped: dict[tuple, list] = defaultdict(list)
-    moved: dict[tuple, list] = defaultdict(list)
-    for e in rs.events.values():
-        if not rc._first_part(e):
-            continue
-        if e.event:
-            if e.test:
-                continue
-            stamped[(e.schedule, e.occurrence)].append(e)
-            sf = rc.stands_for_of(reg, e)
-            if sf and sf != e.occurrence:
-                stamped[(e.schedule, sf)].append(e)
-            if e.state not in CLOSED:
-                moved[(e.schedule, rc.occurrence_stamp(reg, e.start))].append(e)
-        elif not rc.is_test_run(reg, e):
-            stamped[(rc.run_schedule_id(reg, e), rc.occurrence_stamp(reg, e.start))].append(e)
+def listed(reg: Registry, e: "rc.RaidEvent") -> bool:
+    """Does `e` head an event the page lists: a first raid (rc._first_part, the predicate the night finder uses too),
+    not taken out of a lineup, never a rehearsal (rc.rehearsal_run: an old finished one without its flag too)."""
+    return rc._first_part(e) and not e.dropped and not rc.rehearsal_run(reg, e)
 
-    def find(sid: str, occurrence: str):
-        hits = stamped.get((sid, occurrence)) or moved.get((sid, occurrence)) or []
-        return max(hits, key=lambda e: e.created_at) if hits else None
-    return find
+
+def coming_nights(reg: Registry, rs: "rc.RaidStore", now: datetime, find=None, sid: str | None = None) -> list[tuple[dict, datetime, str]]:
+    """(schedule, start, occurrence) of each active schedule's next COMING_PER_SCHEDULE nights with no event (no run at
+    all, nor one standing for it), soonest first, read through rc.next_runs_of, so a schedule whose raid first opens
+    months ahead shows its first nights. Asks for three plus the nights already taken, until three are free. The list
+    and a coming-up event both read it, so a listed night always opens. `find` = an rc.occurrence_index; `sid` = one
+    schedule only."""
+    find = find or rc.occurrence_index(reg, rs)
+    out = []
+    for s in reg.all_schedules():
+        if (sid and s["id"] != sid) or not s.get("active", True) or s["kind"] == "pickup" or rc.gone_raids(reg, s["raid"], s):
+            continue
+        n, free = COMING_PER_SCHEDULE, []
+        for _ in range(12):  # each round asks for as many more as it found taken; a schedule has few taken nights
+            starts = rc.next_runs_of(reg, s["raid"], s, n, now)
+            free = [(t, occ) for t in starts if find(s["id"], occ := rc.occurrence_stamp(reg, t)) is None]
+            if len(free) >= COMING_PER_SCHEDULE or len(starts) < n:
+                break
+            n = COMING_PER_SCHEDULE + len(starts) - len(free)
+        out += [(s, t, occ) for t, occ in free[:COMING_PER_SCHEDULE]]
+    return sorted(out, key=lambda x: (x[1], x[0]["id"]))
 
 
 def _state(parts: list) -> str:
@@ -80,7 +78,8 @@ def _lineup(reg: Registry, rs, first, parts: list) -> list[dict]:
     had (a closed event's run dicts are gone, so each part's rosters are the ones it locked)."""
     if _state(parts) not in CLOSED:
         return rc.run_lineup(reg, rs, first)
-    return [{"raid": p.instance, "rosters": len(p.all_rosters) or rc.run_rosters(reg, p)} for p in parts]
+    return [{"raid": p.instance, "rosters": len(p.all_rosters) or rc.run_rosters(reg, p),
+             "starts": 0 if p is first else (p.starts or round((p.start - first.start).total_seconds() / 60))} for p in parts]
 
 
 def _raids_words(reg: Registry, lineup: list[dict]) -> str:
@@ -116,25 +115,17 @@ def event_list(reg: Registry, rs: "rc.RaidStore", now: datetime, offset: int = 0
     """{open: [Row], coming: [ComingRow], history: [Row], history_more}. Row = {key (part 0's), title (its start),
     subtitle, state, chip}; open = live events (open and locked) soonest first; history = HISTORY_PAGE finished or
     cancelled events from `offset`, newest first. ComingRow = {schedule, occurrence, title, subtitle} = each active
-    schedule's next COMING_PER_SCHEDULE nights (rc.occurrences) with no event — no event at all, nor one standing for it.
-    Never solves; the run store is read once (night_index, one event_id pass)."""
+    schedule's next COMING_PER_SCHEDULE nights with no event (coming_nights). Never solves; the run store is read once
+    (rc.occurrence_index, one event_id pass)."""
     events = [e for e in rs.events.values() if not e.dropped]
     live_ids = {rc.event_id(e) for e in events if e.state not in CLOSED}
-    firsts = [e for e in events if not rc.is_follow(e) and not rc.is_test_run(reg, e)]
+    firsts = [e for e in events if listed(reg, e)]
     live = sorted((e for e in firsts if rc.event_id(e) in live_ids), key=lambda e: e.start)
     closed = sorted((e for e in firsts if rc.event_id(e) not in live_ids), key=lambda e: e.start, reverse=True)
     offset = max(0, int(offset or 0))
     page = closed[offset:offset + HISTORY_PAGE]
-    find = night_index(reg, rs)
-    coming, seen = [], defaultdict(int)
-    for s, t in rc.occurrences(reg, now, COMING_HOURS):
-        if seen[s["id"]] >= COMING_PER_SCHEDULE:
-            continue
-        occ = rc.occurrence_stamp(reg, t)
-        if find(s["id"], occ) is not None:
-            continue
-        seen[s["id"]] += 1
-        coming.append({"schedule": s["id"], "occurrence": occ, "title": reg.local12(t), "subtitle": s.get("name") or reg.series_label(s["id"])})
+    coming = [{"schedule": s["id"], "occurrence": occ, "title": reg.local12(t), "subtitle": s.get("name") or reg.series_label(s["id"])}
+              for s, t, occ in coming_nights(reg, rs, now, rc.occurrence_index(reg, rs))]
     return {"open": [_row(reg, rs, e, history=False) for e in live], "coming": coming,
             "history": [_row(reg, rs, e, history=True) for e in page], "history_more": offset + HISTORY_PAGE < len(closed)}
 
@@ -206,12 +197,12 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
         else:
             details.append(_fact("Signup sheet", PAGE_WORDS["sheet_not_posted"] if reg.config.signup_channel_id else PAGE_WORDS["sheet_waits"]))
     else:
-        rostered = {p.signup_name for part in parts for p in part.seated()}
+        rostered = {rc.player_uid(part, p) or p.signup_name for part in parts for p in part.seated()}  # a person once, whatever they played
         details = [_fact("Lineup", rc.lineup_words(reg, lineup)), came, _fact("Rostered", str(len(rostered)))]
         if first.closed_at:
             details.append(_fact("Ended", reg.local12(first.closed_at)))
     rows = {st: [_who(s) for s in sorted(first.by_status(st), key=lambda s: s.updated_at)] for st in ("in", "sub", "out")}
-    waiting = rc.not_answered(reg, first) if live else []
+    waiting = rc.pool_unanswered(reg, first) if live else []
     rows["none"] = [{"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec} for m, c in waiting]
     activity = []
     for p in parts:
@@ -223,9 +214,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
               for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower())
               if not m.test and m.active() and str(m.discord_id) not in first.signups] if live else []
     started = first.start <= reg.now_local()
-    timing = {k: (team.get(v) if v in team else rc.team_setting(team, v)) for k, v in rc.EVENT_TIMING.items()}
-    timing["nudge"] = timing["nudge"] not in (None, rc.OFF, False)
-    timing["autofill"] = bool(timing["autofill"])
+    timing = rc.run_timing(reg, first)
     return {"key": first.key, "title": reg.local12(first.start), "state": state, "chip": rc.RUN_STATE_WORDS[state],
             "kind": "scheduled" if sid else "one_off", "schedule": {"id": sid, "name": sname} if sid else None,
             "details": details,
@@ -252,11 +241,12 @@ def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, no
     """ComingView: {title, chip, schedule {id, name}, details [Lineup, Comes from, Priority, Confirmation, Sheet opens,
     Opening by hand, Locks], can_open, why (rc.open_row_refusal's sentence | None), open {start_iso, schedule,
     occurrence} (what POST /api/raid/{rid}/open carries back), box (consequences.open_now_box | None)}. ComingGone when
-    the night has an event now (its key) or is no longer one of the schedule's nights within COMING_HOURS."""
-    hit = night_index(reg, rs)(sid, occurrence)
+    the night has an event now (its key) or is not one of coming_nights any more."""
+    find = rc.occurrence_index(reg, rs)
+    hit = find(sid, occurrence)
     if hit is not None:
         raise ComingGone(COMING_OPENED, rc.first_part(rs, hit).key)
-    t = next((t for s, t in rc.occurrences(reg, now, COMING_HOURS) if s["id"] == sid and rc.occurrence_stamp(reg, t) == occurrence), None)
+    t = next((t for _s, t, occ in coming_nights(reg, rs, now, find, sid) if occ == occurrence), None)
     if t is None:
         raise ComingGone(COMING_GONE)
     entry = reg.schedule_entry(sid)
