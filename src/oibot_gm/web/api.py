@@ -1365,7 +1365,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """The board after a write; after lock the line says who was asked / freed (before lock the drag speaks for itself)."""
         return board_reply(v.reg, ev) if was_open else {**board_reply(v.reg, ev), "message": line}
 
-    NO_MOVES = "You have no moves of your own on this board, so there is nothing to undo."
+    NO_MOVES = PAGE_WORDS["no_moves"]  # the page's greyed Undo my moves says the same (event_view `undo_why`)
     NO_UNDO_LOCKED = "The roster is locked, so the board is the roster now and your moves are part of it."
 
     @app.post("/api/run/{key}/layout")

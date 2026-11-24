@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Box, Button, Group, Loader, Text } from "@mantine/core";
+import { Alert, Box, Button, Group, Loader, Text, Tooltip } from "@mantine/core";
 import { api, type Box as ConfirmBoxShape, type EventView, type Meta } from "../../api";
 import { ok } from "../Page";
 import { useConfirmBox } from "../ConfirmBox";
@@ -73,7 +73,8 @@ export function EventBoard({ meta, view, onReload }: { meta: Meta; view: EventVi
     <ViewSection title={finished ? "Board, as it was locked" : "Board"} action={raidSwitch}>
       <dl className={css.facts} style={{ marginBottom: 12 }}>
         <div><dt>Rosters</dt><dd>{part.rosters_words}</dd></div>
-        <div><dt>Placed</dt><dd>{part.placed_words}</dd></div>
+        {part.placed_words && <div><dt>Placed</dt><dd>{part.placed_words}</dd></div>}
+        {part.rostered_words && <div><dt>{"Rostered"}</dt><dd>{part.rostered_words}</dd></div>}
         {short && <div><dt>Short</dt><dd><ShortRoles meta={meta} roles={part.short} /></dd></div>}
       </dl>
       {part.board_state === "working" && (
@@ -86,7 +87,11 @@ export function EventBoard({ meta, view, onReload }: { meta: Meta; view: EventVi
       {open && !finished && (
         <Group justify="space-between" wrap="wrap" gap="sm" mt="md">
           <Text size="sm" c="dimmed">{words.board_footer}</Text>
-          {part.undo_box && <Button variant="default" size="sm" onClick={undo}>Undo my moves</Button>}
+          {part.undo_box ? <Button variant="default" size="sm" onClick={undo}>Undo my moves</Button> : part.undo_why && (
+            <Tooltip label={part.undo_why} multiline w={260}>
+              <span tabIndex={0} aria-label={part.undo_why}><Button variant="default" size="sm" disabled style={{ pointerEvents: "none" }}>Undo my moves</Button></span>
+            </Tooltip>
+          )}
         </Group>
       )}
       {dialog}

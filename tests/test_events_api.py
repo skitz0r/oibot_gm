@@ -230,7 +230,7 @@ def test_a_locked_event_adds_its_confirmations_and_open_seats(officer_client, re
     j = officer_client.get(f"/api/event/{ev.key}").json()
     facts = {f["label"]: f["value"] for f in j["details"]}
     assert facts["Open seats"] == rc.fill_state_text(reg, ev)
-    assert j["state"] == "locked" and j["parts"][0]["board_state"] == "locked" and j["parts"][0]["placed_words"] == "10 of 10 joined"
+    assert j["state"] == "locked" and j["parts"][0]["board_state"] == "locked" and j["parts"][0]["placed_words"] is None and j["parts"][0]["rostered_words"] == "10 of 20 seats"
     assert j["actions"]["lock"] is False and j["actions"]["edit_lineup"] is False and j["boxes"]["lock"] is None
     assert facts["Confirmed"] == "10 waiting" and [f["label"] for f in j["details"]][-3:] == ["Confirmed", "Open seats", "Signup sheet"]
 

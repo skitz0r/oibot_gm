@@ -1029,13 +1029,15 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    **Board** come next. The Board has a button per raid of the evening (*6:30 PM · Hyjal Summit*, *9:30 PM · Barrow
    Deeps*; none for a one-raid event), then *Rosters* (*1 of 20*), *Placed* (*18 of 18 joined*) and *Short* (the role
    icon and how many), then the groups — *Roster 1*, *Roster 2* when the raid makes several — and under them *Placed as
-   the lock would place them now. Drag a name to move it.* with **Undo my moves** once you have moved someone. Before
-   the lock a drag (or a name's **⋮ › Move to…**, on a phone or a keyboard) moves at once, with no box. *Not placed*
+   the lock would place them now. Drag a name to move it.* with **Undo my moves** (greyed until you have moved
+   someone; its tooltip says so). Before the lock a drag (or a name's **⋮ › Move to…**, on a phone or a keyboard)
+   moves at once, with no box; into a full group Move to… offers *Swap with Nyx*, one entry per person there. *Not placed*
    says *A name dropped here stays off the roster when the sheet locks. Drag it into a group to put it back.* — a name
    dropped there, or pushed there by a swap, is kept off until it is dragged back into a group. While the bot places
    everyone again the board is dimmed under its sentence; when it can't place them at all it says why above the
    officers' moves (the lock would fail the same way). A locked event's board is the roster: no drag, and **⋮ ›
-   Move to…** shows the move's sentence before it is made. A finished event shows **Board, as it was locked**. The
+   Move to…** shows the move's sentence before it is made; *Placed* becomes *Rostered* (*10 of 10 seats*), who holds a
+   seat now. A finished event shows **Board, as it was locked**. The
    page updates by itself when someone answers or another officer moves a name, never under a drag in progress, and
    the Role switches list stays folded or unfolded as you left it. **Activity · N lines** is the event's log, folded
    until **Show the lines**, with the quiet **Cancel event** at its right. Lock now, Cancel event (red: it cannot be

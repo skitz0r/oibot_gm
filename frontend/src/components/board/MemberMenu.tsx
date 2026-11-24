@@ -47,7 +47,7 @@ function useRecord(run: string, onDone: () => Promise<void> | void) {
 
 /** One "Move to…" destination in a board chip's menu (BoardView): a group, or Not placed / Not rostered. `onPick` is the
  *  board's own move — the same POST /api/run/{key}/move a drag sends, after the server's confirm sentence. */
-export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?: string; onPick: () => void };
+export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?: string; aria?: string; onPick: () => void };
 
 /** The row ⋮ menu on a sheet (joined, Bench, No thanks chips and the not-answered rows) and on a board chip: fetched when
  *  opened, so it is always the member's state now. `moves` (the board's chips): "Move to…" first — every group with room
@@ -72,7 +72,7 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer }: {
             <>
               <Menu.Label>Move {name} to…</Menu.Label>
               {moves.map((m) => (
-                <Menu.Item key={m.key} leftSection={<IconArrowsMove size={14} />} disabled={m.disabled} rightSection={m.hint ? <Text size="xs" c="dimmed">{m.hint}</Text> : undefined} onClick={m.onPick}>{m.label}</Menu.Item>
+                <Menu.Item key={m.key} leftSection={<IconArrowsMove size={14} />} disabled={m.disabled} aria-label={m.aria} rightSection={m.hint ? <Text size="xs" c="dimmed">{m.hint}</Text> : undefined} onClick={m.onPick}>{m.label}</Menu.Item>
               ))}
               {uid && <Menu.Divider />}
             </>

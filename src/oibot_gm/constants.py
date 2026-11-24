@@ -67,6 +67,13 @@ PAGE_WORDS = {
     "priority": {"regular": "Regular", "rank": "Rank", "main": "Main character", "sat_out": "Sat out last time",
                  "signup_order": "Signed up early"},
     "rosters_of": "{n} of {size}", "placed_of": "{n} of {m} joined",
+    # a locked or finished raid's board counts who holds a seat, not who joined (the lock may seat someone from the Bench)
+    "seats_of": "{n} of {size} seats",
+    # Undo my moves greyed out: the officer has moved nobody on this board (also the route's refusal)
+    "no_moves": "You have no moves of your own on this board, so there is nothing to undo.",
+    # the Board's Not placed / Not rostered list when it is empty (the Events page)
+    "bank_empty": {"nobody": "Nobody has joined yet.", "placed": "Everyone who joined is placed.",
+                   "rostered": "Everyone who joined is rostered."},
     "board_footer": "Placed as the lock would place them now. Drag a name to move it.",
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
     # Role switches: each row's button (rc.event_switches `button`), and why a short raid has no switch to show (`why`)

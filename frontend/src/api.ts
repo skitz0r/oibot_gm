@@ -146,7 +146,8 @@ export interface PageWords {
   open_in_discord: string; no_answer_yet: string; answers_one: string; bot_asks: string; officer_asks: string; every_main: string;
   used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
   rosters_of: string; placed_of: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string;
-  sheet_waits: string; sheet_not_posted: string; open_seat: string; not_placed_off: string; board_working: string; board_failed: string;
+  sheet_waits: string; sheet_not_posted: string; open_seat: string; not_placed_off: string; seats_of: string; no_moves: string;
+  bank_empty: Record<"nobody" | "placed" | "rostered", string>; board_working: string; board_failed: string;
   by_an_officer: string; no_times: string; no_reminder: string; for_seats: string; short_every_week: string;
   ready_every_week: string; short_weeks: string; paused_next: string; open_now: string; no_minimums: string; played_nowhere: string;
 }
@@ -199,7 +200,11 @@ export interface ComingRow { schedule: string; occurrence: string; title: string
 export interface EventList { open: EventRow[]; coming: ComingRow[]; history: EventRow[]; history_more: boolean }
 /** One raid of an event on the Board (event_view._part_view); `sheet` = the run's full JSON, BoardView's input. */
 export interface PartView {
-  key: string; raid: string; raid_name: string; label: string; rosters_words: string; placed_words: string;
+  key: string; raid: string; raid_name: string; label: string; rosters_words: string;
+  /** Placed before the lock ("18 of 18 joined"); a locked or finished raid sends `rostered_words` ("15 of 20 seats") instead */
+  placed_words: string | null; rostered_words: string | null;
+  /** why Undo my moves is greyed (the officer moved nobody here), the server's sentence; null with an undo box or once locked */
+  undo_why: string | null;
   short: Record<string, number>; sheet: Sheet | null; board_state: "ready" | "working" | "failed" | "locked";
   board_error: string | null; mine: string[]; undo_box: Box | null;
   /** the officers' own placements (open raids; null once locked). Undo my moves is POST /api/run/{key}/layout {undo, seen}. */

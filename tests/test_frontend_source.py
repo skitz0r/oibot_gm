@@ -1128,3 +1128,25 @@ def test_the_events_page_fix_round_one():
     assert "setChanged(fresh.verb !== null)" in confirm and "setChanged(true); } else close(true)" not in confirm
     assert '<Text fw={700} px={6}>{n}</Text>' in sign, "a 0 is plain text, never a greyed button"
     assert "const first = await preview(now);\n      setBusy(false);" in menu, "the button behind an open box is not busy"
+
+
+def test_the_event_board_fix_round_one():
+    """Phase 4, Task 9 fix round 1: the event board prints no advisory line ("🔴 Tanks 0/2 · …": a text count beside
+    icons, duplicating Short) and no ⓘ legend (not on the mockup; its words were page copy); its empty Not placed and
+    Undo's greyed reason are the server's words; a finished board shows no confirmation marks; Move to… offers a swap
+    with a named person in a full group (a phone can't drag); a locked raid reads Rostered; one name when the character
+    is the member's name; reloads held by a drag share ONE pending slot and one watcher, cleared on unmount."""
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    board = _code_only((SRC / "components" / "events" / "EventBoard.tsx").read_text())
+    shared = _code_only((SRC / "components" / "board" / "shared.tsx").read_text())
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
+    assert "!event && r.advisories.length > 0" in view and "!event && !readOnly && <Legend" in view
+    assert "meta.page_words.bank_empty" in view and '"Everyone who joined is placed."' not in view
+    assert "locked && !readOnly" in view, "a finished board's names carry no confirmation mark"
+    assert "swapWith" in view and "aria-label={m.aria" in menu
+    assert "part.undo_why" in board and "disabled" in board and "rostered_words" in board and '"Rostered"' in board
+    assert "s.character !== s.display_name" in shared
+    assert "export function useAfterDrag" in shared and "clearInterval" in shared and "pending.current = fn" in shared
+    assert "function afterDrag" not in shared, "no per-call interval left"
+    assert "const afterDrag = useAfterDrag()" in page

@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef } from "react";
 import { Box, Group, Text, Tooltip } from "@mantine/core";
 import { IconPin, IconPinnedOff } from "@tabler/icons-react";
 import type { Board, BoardRoster, Meta, Seat, Sheet, Signup, SplitReason } from "../../api";
@@ -8,11 +9,25 @@ export type Act = (k: string, p: string, b?: unknown) => Promise<void>;
 export type OnBoard = (key: string, board: Board, needs?: Sheet["needs"], rev?: string) => void;
 /** Shared between the board and the page: a refresh must not re-render the board under a drag in progress. */
 export const live = { dragging: false };
-/** Runs `fn` now, or once the drag in progress ends: a page's reload answered mid-drag is drawn after the drop, never
- *  under the cursor (the Events page's board is redrawn from the server's answer, so the latest answer wins). */
-export function afterDrag(fn: () => void) {
-  if (!live.dragging) { fn(); return; }
-  const t = setInterval(() => { if (!live.dragging) { clearInterval(t); fn(); } }, 150);
+/** `const afterDrag = useAfterDrag(); afterDrag(() => draw(answer))`: runs now, or once the drag in progress ends (a drop
+ *  or a drag let go anywhere — window dragend). ONE pending slot per component: a later call replaces the one waiting,
+ *  so the newest answer is the one drawn after the drop, never an older one that happened to finish last; ONE watcher,
+ *  cleared on unmount (nothing runs for a page that is gone). */
+export function useAfterDrag(): (fn: () => void) => void {
+  const pending = useRef<(() => void) | null>(null);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => () => { if (timer.current) clearInterval(timer.current); timer.current = null; pending.current = null; }, []);
+  return useCallback((fn: () => void) => {
+    if (!live.dragging && !timer.current) { fn(); return; }
+    pending.current = fn;  // the latest wins
+    if (timer.current) return;
+    timer.current = setInterval(() => {
+      if (live.dragging) return;
+      clearInterval(timer.current!); timer.current = null;
+      const run = pending.current; pending.current = null;
+      run?.();
+    }, 150);
+  }, []);
 }
 
 /** How one night's several rosters are made (the split strategies), in the board's words (moved here from the old Raids page). */
@@ -39,7 +54,7 @@ export function SeatLine({ meta, s, right, mark }: { meta: Meta; s: Seat | Signu
       {m && <Tooltip label={m.words}><Text span size="xs" style={{ width: 18, textAlign: "center" }} aria-label={m.words}>{m.mark}</Text></Tooltip>}
       <GameIcon meta={meta} kind="spec" id={`${s.cls}:${s.spec}`} size={18} title={`${s.cls} ${s.spec} · ${s.role}`} />
       <Text size="sm" fw={600} c={classColour(meta, s.cls)} truncate>{s.character}</Text>
-      <Text size="xs" c="dimmed" truncate>{s.display_name}</Text>
+      {s.character !== s.display_name && <Text size="xs" c="dimmed" truncate>{s.display_name}</Text>}
       {right}
     </Group>
   );

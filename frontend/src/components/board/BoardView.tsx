@@ -142,10 +142,17 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
       if (locked && g.length === 0 && r.groups.findIndex((x) => x.length === 0) !== gi) return;  // as drawn: one empty group to move into
       const full = g.length >= board.group_size;
       out.push({ key: `${ri}:${gi}`, label: groupName(ri, gi), disabled: full, hint: `${g.length}/${board.group_size}`, onPick: () => place(name, from, { r: ri, g: gi, i: g.length }, "menu") });
+      if (event && full) g.forEach((o, oi) => out.push(swapWith(name, from, o.display_name, ri, gi, oi)));  // a phone can't drag onto someone
     }));
     if (from) out.push({ key: "bank", label: bankWord, onPick: () => place(name, from, null, "menu") });
     return out;
   };
+  /** The Events page's Move to… into a full group: one entry per person there — the same drop onto that person a drag
+   *  makes (a swap, or from Not placed a substitute), named for both in its words and its aria-label. */
+  const swapWith = (name: string, from: From, other: string, ri: number, gi: number, oi: number): MoveTarget => ({
+    key: `${ri}:${gi}:${oi}`, label: `Swap with ${other}`, hint: groupName(ri, gi), aria: `Swap ${name} with ${other} in ${groupName(ri, gi)}`,
+    onPick: () => place(name, from, { r: ri, g: gi, i: oi }, "menu"),
+  });
   const onDragStart = (name: string, from: Drag["from"]) => (ev: React.DragEvent) => { drag.current = { name, from }; ev.dataTransfer.effectAllowed = "move"; live.dragging = true; };
   /** Each roster's open seats as the server sends them (`open`: a role per empty seat a minimum still wants; null while the
    *  board is placed again = none drawn), put in that roster's drawn empty slots in order — the Events page only. */
@@ -167,7 +174,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
   });
   const chip = (s: Seat, from: Drag["from"], mark?: string | null) => (
     <Box key={s.display_name} draggable={drags && !readOnly} onDragStart={drags && !readOnly ? onDragStart(s.display_name, from) : undefined} style={{ cursor: drags && !readOnly ? "grab" : undefined, padding: "2px 6px", borderRadius: 6, background: from ? "transparent" : "var(--mantine-color-slate-6)", border: from ? "1px solid transparent" : "1px solid var(--mantine-color-slate-5)" }}>
-      <SeatLine meta={meta} s={s} mark={locked && (!event || e.confirms !== false) ? (mark ?? null) : undefined} right={<><PinMark meta={meta} pin={pins[s.display_name]} />{!readOnly && <Box ml="auto" onClick={(ev) => ev.stopPropagation()}><MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload || (() => undefined)} moves={movesFor(s.display_name, from)} /></Box>}</>} />
+      <SeatLine meta={meta} s={s} mark={locked && !readOnly && (!event || e.confirms !== false) ? (mark ?? null) : undefined} right={<><PinMark meta={meta} pin={pins[s.display_name]} />{!readOnly && <Box ml="auto" onClick={(ev) => ev.stopPropagation()}><MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload || (() => undefined)} moves={movesFor(s.display_name, from)} /></Box>}</>} />
     </Box>
   );
   const groupSummary = (sm: GroupSummary, gi: number) => sm.groups[gi];
@@ -177,7 +184,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
       <Group justify="space-between" wrap="wrap" mb="xs">
         <Group gap="sm" wrap="wrap">
           {!event && <Text fw={700}>Board</Text>}
-          {!readOnly && <Legend meta={meta} locked={locked} event={event} />}
+          {!event && !readOnly && <Legend meta={meta} locked={locked} />}
           {canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}{board.balance ? ` · ${board.balance}` : ""}</Text>}
           {canSplit && reason && <SplitReasonLine meta={meta} r={reason} />}
           {placing ? <Text size="xs" c="dimmed">placing the rest…</Text> : saving && <Text size="xs" c="dimmed">saving…</Text>}
@@ -199,8 +206,8 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
           </Group>
           {event && !locked && <Text size="xs" c="dimmed" mt={4}>{meta.page_words.not_placed_off}</Text>}
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
-            {board.bank.length === 0 && !(event && placed) && <Text size="xs" c="dimmed">{!placed ? (event ? "Nobody has joined yet." : "Nobody has joined yet — the sheet is in Discord.") : locked ? "Everyone who joined is rostered. A name dragged here frees their seat." : "Everyone who joined is placed. A name dragged here goes back to not placed — still joined, the lock seats them."}</Text>}
-            {board.bank.length === 0 && event && placed > 0 && <Text size="xs" c="dimmed">{locked ? "Everyone who joined is rostered." : "Everyone who joined is placed."}</Text>}
+            {board.bank.length === 0 && !event && <Text size="xs" c="dimmed">{!placed ? "Nobody has joined yet — the sheet is in Discord." : locked ? "Everyone who joined is rostered. A name dragged here frees their seat." : "Everyone who joined is placed. A name dragged here goes back to not placed — still joined, the lock seats them."}</Text>}
+            {board.bank.length === 0 && event && <Text size="xs" c="dimmed">{meta.page_words.bank_empty[!placed ? "nobody" : locked ? "rostered" : "placed"]}</Text>}
             {left.length > 0 && <Text size="xs" fw={700}>{words.leftovers} ({left.length})</Text>}
             {left.map((s) => chip(s, null))}
             {left.length > 0 && locked && reason && <SplitReasonLine meta={meta} r={reason} />}
@@ -255,7 +262,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
                 })}
               </Box>
               <RaidWide sm={r.summary} />
-              {r.advisories.length > 0 && <Text size="xs" c="dimmed" mt={4}>{r.advisories.join(" · ")}</Text>}
+              {!event && r.advisories.length > 0 && <Text size="xs" c="dimmed" mt={4}>{r.advisories.join(" · ")}</Text>}
             </Box>
           ); })}
         </Stack>
@@ -268,7 +275,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
 }
 
 /** The board's one legend (ⓘ): what its marks mean and how a drag works — said once, not under every card. */
-function Legend({ meta, locked, event }: { meta: Meta; locked: boolean; event?: boolean }) {
+function Legend({ meta, locked }: { meta: Meta; locked: boolean }) {
   const row = (mark: React.ReactNode, words: string) => <Group gap={8} wrap="nowrap" align="center"><Box style={{ width: 34, flex: "none", display: "flex", justifyContent: "center" }}>{mark}</Box><Text size="xs">{words}</Text></Group>;
   const sq = (style: React.CSSProperties) => <Box style={{ width: 20, height: 20, borderRadius: 5, ...style }} />;
   return (
@@ -289,12 +296,7 @@ function Legend({ meta, locked, event }: { meta: Meta; locked: boolean; event?: 
           {locked && row(<Group gap={4} wrap="nowrap">{["yes", "waiting", "no"].map((k) => <Text key={k} span size="xs">{markOf(meta, k === "waiting" ? null : k).mark}</Text>)}</Group>,
             ["yes", "waiting", "no", "expired"].map((k) => `${meta.marks[k].mark} ${meta.marks[k].words}`).join(" · ") + " — the Discord card's marks")}
           <Text size="xs" c="dimmed">Totems count one per element.</Text>
-          {event && !locked && <Text size="xs" c="dimmed">{meta.page_words.not_placed_off}</Text>}
-          <Text size="xs" c="dimmed">{event && locked
-            ? "The board is the roster. Use a name's ⋮ menu's Move to… — the confirm says what it does for the person."
-            : event
-            ? "Drag a name into a group, or use its ⋮ menu's Move to…; dropping on someone swaps the two."
-            : locked
+          <Text size="xs" c="dimmed">{locked
             ? "The board is the roster. Drag a name, or use its ⋮ menu's Move to… — the same move either way, and the confirm says what it does for the person."
             : "Drag a name into a group, or use its ⋮ menu's Move to…; back to not placed takes it out again, and dropping on someone swaps the two."}</Text>
         </Stack>

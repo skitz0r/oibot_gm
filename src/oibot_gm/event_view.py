@@ -198,14 +198,17 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
     n = len(p.all_rosters) if locked else len(rosters) if rosters is not None else rc.run_rosters(reg, p)
     live = p.state == "open"
     mine = rc.own_moves(p, viewer) if live else []
+    seated = state == "locked"  # the roster stands: count seats (the lock may seat someone from the Bench), not joiners
     return {"key": p.key, "raid": p.instance, "raid_name": name, "label": f"{reg.local12(p.start, '%I:%M %p')} · {name}",
             "rosters_words": PAGE_WORDS["rosters_of"].format(n=n, size=rc.run_size(reg, p)),
-            "placed_words": PAGE_WORDS["placed_of"].format(n=placed, m=len(joined)),
+            "placed_words": None if seated else PAGE_WORDS["placed_of"].format(n=placed, m=len(joined)),
+            "rostered_words": PAGE_WORDS["seats_of"].format(n=len(p.seated()), size=n * rc.run_size(reg, p)) if seated else None,
             "short": dict(rc.needs(reg, p)["roles"]) if p.state not in CLOSED else {},
             # open seats only on a current picture (or a locked roster): a picture being placed again counts none
             "sheet": sheet(p, rosters, state in ("ready", "locked")) if sheet is not None else None,
             "board_state": state, "board_error": error, "mine": mine,
             "undo_box": cq.undo_box_for(reg, p, viewer) if mine else None,
+            "undo_why": PAGE_WORDS["no_moves"] if live and not mine else None,
             "layout": rc.board_layout(reg, p) if live else None}
 
 

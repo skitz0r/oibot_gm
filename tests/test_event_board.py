@@ -727,3 +727,26 @@ def test_a_board_bug_never_reaches_the_solve(reg, rs, monkeypatch, caplog):
     monkeypatch.setattr(eb.BoardCache, "resume", boom)
     assert asyncio.run(solve_twice()) == ["solved"], "resume raising: the result is unaffected"
     assert len([r for r in caplog.records if "board cache" in r.getMessage()]) == 4
+
+
+def test_a_locked_raid_counts_seats_and_undo_says_why_it_is_greyed(reg, rs, monkeypatch, web_bot):
+    """Fix round 1: a locked (or finished) raid's board counts who holds a seat — "15 of 14 joined" came from the lock
+    seating someone from the Bench — as `rostered_words` from PAGE_WORDS, never `placed_words`. An open raid where the
+    officer moved nobody sends the reason Undo my moves is greyed (`undo_why`, the route's own refusal sentence)."""
+    from conftest import lock_with_board
+
+    monkeypatch.setattr(rc, "_solve_run", in_order())
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    settle(eb.cache_of(web_bot.bot), reg, rs, ev)
+    part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
+    assert part["undo_box"] is None and part["undo_why"] == PAGE_WORDS["no_moves"]
+    assert part["rostered_words"] is None and part["placed_words"] == f"{len(ms)} of {len(ms)} joined"
+    bd = rc.open_run(reg, rs, BD, start_in(reg, 4), by="t", schedule=rc.ADHOC_SCHEDULE)
+    join(reg, rs, bd, ms[:9])
+    rc.set_signup(reg, rs, bd, ms[9], None, "sub", source="test")  # the lock seats someone from the Bench
+    lock_with_board(reg, rs, bd, [s.display_name for s in bd.by_status("in")] + [bd.signups[str(ms[9].discord_id)].display_name])
+    locked = web_bot.c.get(f"/api/event/{bd.key}", headers=H()).json()["parts"][0]
+    assert locked["placed_words"] is None and locked["undo_why"] is None
+    assert locked["rostered_words"] == PAGE_WORDS["seats_of"].format(n=10, size=10)

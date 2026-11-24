@@ -13,7 +13,7 @@ import { ComingUpView } from "../components/events/ComingUpView";
 import { HistoryView } from "../components/events/HistoryView";
 import { RoleSwitches } from "../components/events/RoleSwitches";
 import { EventBoard } from "../components/events/EventBoard";
-import { afterDrag } from "../components/board/shared";
+import { useAfterDrag } from "../components/board/shared";
 import { useRescheduleBox } from "../components/events/RescheduleBox";
 import { boxOf, EventHead } from "../components/events/shared";
 import { useLive } from "../hooks/useLive";
@@ -81,6 +81,7 @@ function EventPane({ evKey, meta, tick, onChanged }: { evKey: string; meta: Meta
   const seq = useRef(0);
   const lastLive = useRef<EventView | null>(null);
   const held = useAnyBoxOpen();
+  const afterDrag = useAfterDrag();  // one pending answer while a drag is on: the newest is drawn after the drop
   useEffect(() => {
     const n = ++seq.current;
     api.get<EventView>(`/api/event/${encodeURIComponent(evKey)}`).then((v) => afterDrag(() => {  // never redrawn under a drag
