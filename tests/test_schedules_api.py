@@ -200,6 +200,10 @@ def test_a_schedule_whose_raid_left_the_game_is_listed_and_removed(web_bot, reg,
     name = "Barrow Deeps" if gone == RID else "Hyjal Summit Forever"  # a raid no profile names: its id in words
     assert one["gone"] == f"{name} is no longer a raid of this game, so this schedule opens no events."
     assert one["next"] == [] and one["next_empty"] == one["gone"]
+    # fix round 1: a raid the game no longer has has no seat count (the picture leaves the line out), and without the
+    # first raid's seats the regulars are counted alone
+    assert [s["seats"] for s in one["lineup"] if s["raid"] == gone] == [None]
+    assert one["regulars"]["words"] == ("0 regulars" if gone == HYJAL else "0 for 20 seats")
     box = one["boxes"]["remove"]
     assert box["verb"] == "Remove schedule"
     r = change(web_bot, [{"kind": "schedule_remove", "target": sid}], apply=True, confirmed=True, revs={f"config:schedule:{sid}": one["rev"]})
@@ -539,3 +543,46 @@ def test_a_press_previews_the_very_box_the_page_shows_then_applies_its_token(web
         assert reg.schedule_entry(sid).get("active", True) is (verb == "resume")
         stale = change(web_bot, [{"kind": "schedule_remove", "target": sid}], revs=revs)
         assert stale.status_code == 409 and sid in {x["id"] for x in reg.all_schedules()}, "the rev the page held is stale now"
+
+
+def test_a_token_whose_box_changed_meanwhile_is_shown_again_not_applied(web_bot, reg, rs):
+    """Task 11 fix round: an event opening while the Save box is open changes what the box says ("…is already open and
+    keeps its timing") without touching the schedule's rev. The token's apply describes the write again: different
+    words → needs_review with the fresh box and a new token, nothing written; the new token then saves."""
+    from pathlib import Path
+
+    sid = tuesday(reg)
+    revs = {f"config:schedule:{sid}": reg.config_rev(f"schedule:{sid}")}
+    changes = [{"kind": "schedule", "target": sid, "fields": {"lock_hours_before": 30}}]
+    pv = change(web_bot, changes, revs=revs).json()
+    assert not any("keeps its timing" in x for x in pv["described"]["box"]["sentences"])
+    t = rc.next_runs_of(reg, HYJAL, reg.schedule_entry(sid), 1)[0]
+    rc.open_run(reg, rs, HYJAL, t, by="t", schedule=sid)
+    again = post(web_bot, "/api/ops/change", {"token": pv["token"], "apply": True, "changes": changes, "revs": revs}).json()
+    assert again.get("needs_review") and again.get("updated") and not again.get("applied"), again
+    assert any("keeps its timing" in x for x in again["described"]["box"]["sentences"])
+    assert float(reg.schedule_def(HYJAL, sid)["lock_hours_before"]) == 24, "nothing written on the changed box"
+    done = post(web_bot, "/api/ops/change", {"token": again["token"], "apply": True, "changes": changes, "revs": revs}).json()
+    assert done.get("applied") and float(reg.schedule_def(HYJAL, sid)["lock_hours_before"]) == 30, done
+    # the page's side: the verb box shows the fresh box under the "changed" line; the Schedules page's presses return it
+    front = Path(__file__).resolve().parents[1] / "frontend" / "src"
+    assert "changed={!!preview?.updated}" in (front / "components" / "ReviewModal.tsx").read_text()
+    assert "r.needs_review && r.described?.box" in (front / "pages" / "Schedules.tsx").read_text()
+
+
+def test_a_stale_raid_save_names_the_raid_and_a_night_says_who_is_away(web_bot, reg):
+    """Fix round 1: the Raids page's stale Save names the raid, never its id; the regulars' four weeks carry each
+    night's absences in words ("1 away") for a covered night too."""
+    rev = reg.config_rev(f"raids:{RID}")
+    reg.set_raid_overrides(RID, {"lockout_days": 6}, "someone else")
+    r = change(web_bot, [{"kind": "raid", "target": RID, "fields": {"lockout_days": 5}}], apply=True, confirmed=True, revs={f"config:raids:{RID}": rev})
+    assert r.status_code == 409 and r.json()["error"] == "The Barrow Deeps raid settings changed since you looked — check them and try again."
+    sid = tuesday(reg)
+    m = people(reg, 1)[0]
+    reg.regular_add(m.discord_id, sid, "t")
+    rows = web_bot.c.get(f"/api/schedules/{sid}", headers=H()).json()["regulars"]["forecast"]
+    assert all(f["away_words"] is None for f in rows)
+    day = rows[0]["start_iso"][:10]
+    reg.add_absence(m.discord_id, day, day, "trip", "t")
+    rows = web_bot.c.get(f"/api/schedules/{sid}", headers=H()).json()["regulars"]["forecast"]
+    assert rows[0]["away_words"] == "1 away" and rows[0]["away"] == [m.display_name]

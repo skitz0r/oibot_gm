@@ -33,12 +33,12 @@ function afterWords(min: number): string {
 }
 
 /** The nodes of one step: one per roster — '{Raid}' + '{n} seats', or '{Raid} · roster {k}' when there are several. */
-export function StepNodes({ name, rosters, seats, pad }: { name: string; rosters: number; seats: number; pad: number }) {
+export function StepNodes({ name, rosters, seats, pad }: { name: string; rosters: number; seats: number | null; pad: number }) {
   return (
     <div className={css.nodes} style={{ paddingTop: pad }}>
       {Array.from({ length: rosters }, (_, k) => (
         <div key={k} className={css.node}>
-          <b>{name}</b>{rosters > 1 ? ` · roster ${k + 1}` : ""}<br /><span className={css.seats}>{seats} seats</span>
+          <b>{name}</b>{rosters > 1 ? ` · roster ${k + 1}` : ""}{seats !== null && <><br /><span className={css.seats}>{seats} seats</span></>}
         </div>
       ))}
     </div>

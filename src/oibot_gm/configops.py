@@ -14,7 +14,7 @@ import yaml
 from pydantic import BaseModel, Field, PrivateAttr
 
 from .llm.provider import Provider
-from .constants import ROLES
+from .constants import PAGE_WORDS, ROLES
 from .loot_ops import SCHEMA as LOOT_SCHEMA
 from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError, join_words, readable_config, schedule_class
 
@@ -4792,7 +4792,9 @@ class Described(BaseModel):
         import hashlib
         import json
 
-        blob = json.dumps([[ln.text, ln.error, ln.consequences] for ln in self.lines] + [self.refused], sort_keys=True, default=str)
+        # the box too (design §7b): an event opening meanwhile changes what the box says ("…keeps its timing") but no line
+        box = [(self.box or {}).get("title"), (self.box or {}).get("sentences"), (self.box or {}).get("diff")] if self.box else None
+        blob = json.dumps([[ln.text, ln.error, ln.consequences] for ln in self.lines] + [self.refused, box], sort_keys=True, default=str)
         return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
     def summary(self) -> str:
@@ -4856,6 +4858,79 @@ def render(text: str | None, reg: Registry, surface: str, channels: list[dict] |
 
 def _cap(s: str) -> str:
     return s[:1].upper() + s[1:]
+
+
+def _raid_field_words(field: str) -> str:
+    """A raid setting as the Raids page names it (PAGE_WORDS raid_fields / priority): 'Lockout', 'Length', 'Rank'."""
+    if field.startswith("weight_") or field.startswith("weights."):
+        k = field.split("_", 1)[1] if field.startswith("weight_") else field.split(".", 1)[1]
+        return PAGE_WORDS["priority"].get(k) or _cap(k.replace("_", " "))
+    return PAGE_WORDS["raid_fields"].get(field) or _cap(field.replace("_", " "))
+
+
+def _amount(v, unit: str) -> str:
+    """'7' → '7 days', '2.5' → '2.5 hours' (a raid's lockout and length in the Raids page's words); words stay words."""
+    try:
+        n = float(str(v).strip())
+    except (TypeError, ValueError):
+        return v
+    return f"{n:g} {unit}{'' if n == 1 else 's'}"
+
+
+_HOUR_FIELDS = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours")
+_SWITCH_FIELDS = ("nudge", "autofill", "open_dm", "confirm")
+
+
+def _schedule_value_words(reg: Registry, rid: str, setting: str, value, s: dict | None):
+    """A schedule setting's value in the Schedules page's words ('5 days before', 'on', 'Raid one first', 'Rank 5'):
+    (before, after) for an existing schedule `s`, the after alone for a new one (s None); None for a setting described
+    elsewhere (run times, lineup)."""
+    from .constants import hours_words
+    from .registry import schedule_value
+
+    def one(v):
+        if setting in _HOUR_FIELDS:
+            if v is None:
+                return PAGE_WORDS["suggested"]
+            return hours_words(v) if setting == "fill_ask_hours" else f"{hours_words(v)} before"
+        if setting in _SWITCH_FIELDS or setting == "active":
+            return PAGE_WORDS["suggested"] if v is None else PAGE_WORDS["on" if v else "off"]
+        if setting == "split_policy":
+            return PAGE_WORDS["split"].get(str(v), str(v)) if v else PAGE_WORDS["raids_own"]
+        if setting == "name":
+            return v or ""
+        return None
+
+    if setting == "weights":  # a map (JSON from a typed draft): every key named, one set to None goes back to the raid's
+        import json
+
+        try:
+            raw = json.loads(value) if isinstance(value, str) and value.strip().startswith("{") else (schedule_value("weights", value) or {})
+        except (RegistryError, TypeError, ValueError):
+            return None
+        new = {str(k).removeprefix("weight_"): (None if v in (None, "") else v) for k, v in dict(raw).items()}
+        own = dict((s or {}).get("weights") or {})
+        side = lambda m: ", ".join(f"{PAGE_WORDS['priority'].get(k, k)} {_num_words(m.get(k))}" for k in new)  # noqa: E731
+        return side(new) if s is None else (side(own), side(new))
+    try:
+        new = schedule_value(setting, value)
+    except (RegistryError, TypeError, ValueError):
+        return None
+    if one(None) is None and setting != "name":
+        return None
+    if s is None:
+        return one(new)
+    cur = s.get(setting)
+    if setting in _HOUR_FIELDS + _SWITCH_FIELDS and cur is None:
+        cur = reg.schedule_def(rid, s["id"]).get(setting)
+    return one(cur), one(new)
+
+
+def _num_words(v) -> str:
+    """A priority weight: its number ('5'), or the raid's when the schedule sets none."""
+    if v is None:
+        return PAGE_WORDS["raids_own"]
+    return f"{float(v):g}"
 
 
 def _split_line(text: str) -> tuple[str, str | None, str | None, list[str]]:
@@ -4955,11 +5030,16 @@ def _part(reg: Registry, op: ConfigOp, by_id: int | None = None, *, raid: str | 
             label = f"{name} · {s['name'] if s else sid}" if name else sid
             if setting == "raid":  # a new schedule's first raid
                 return label, DescribedPart(label="Raid", before=None if s is None else name, after=reg.raid_def(op.value or "").get("name", op.value) if (op.value or "") in reg.profile.raids else op.value), []
+            words = PAGE_WORDS["schedule_fields"].get(setting) or _cap(setting.replace("_", " "))
             if s is None:  # a new schedule: what it will be
-                return label, DescribedPart(label=_cap(setting.replace("_", " ")), before="new", after=_schedule_words(reg, rid, _schedule_fields(setting, op.value))), []
+                own = _schedule_value_words(reg, rid, setting, op.value, None)
+                return label, DescribedPart(label=words, before="new", after=own if own is not None else _schedule_words(reg, rid, _schedule_fields(setting, op.value))), []
             text = describe(reg, op, PLAIN_WEB)
             _l, before, after, notes = _split_line(text.split(": ", 1)[1] if ": " in text else text)
-            return label, DescribedPart(label=_cap(setting.replace("_", " ")), before=before, after=after), notes
+            mine = _schedule_value_words(reg, rid, setting, op.value, s)
+            if mine is not None:  # a setting the page names: its words, never the field's (the box prints "Locks: 24 hours before → 12 hours before")
+                before, after = mine
+            return label, DescribedPart(label=words, before=before, after=after), notes
         if op.op in ("raid_set", "raid_reset"):
             rid = op.target or ""
             name = reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else rid
@@ -4969,7 +5049,11 @@ def _part(reg: Registry, op: ConfigOp, by_id: int | None = None, *, raid: str | 
                 return name, DescribedPart(label="The guild's changes", before=_overrides_words(reg, rid, over) if over else "none", after="the game's defaults"), []
             f = (op.field or "").strip()
             _l, before, after, notes = _split_line(text)
-            return name, DescribedPart(label=_cap(f.replace("_", " ")), before=before, after=after if after is not None else text), notes
+            words = _raid_field_words(f)
+            if f in ("lockout_days", "duration_hours") and after is not None:
+                unit = "day" if f == "lockout_days" else "hour"
+                before, after = (_amount(v, unit) for v in (before, after))
+            return name, DescribedPart(label=words, before=before, after=after if after is not None else text), notes
         if op.op in ("comp_target", "comp_target_clear"):
             key = _key(reg, op)
             run = reg.config.roster(key)

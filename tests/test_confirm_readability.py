@@ -1334,3 +1334,42 @@ def test_the_lint_catches_the_two_blobs():
     assert not lint(["The board becomes the roster. On an ad hoc run Join is the commitment, so nobody is asked to confirm."], names)
     assert not lint(["cbottoms goes to No thanks for Barrow Deeps on Wed 4 Nov. The bot records a callout and how late it came.",
                      "They see it on their Me page."], names)
+
+
+def _box_line(reg, sid, field, value):
+    from oibot_gm import configops
+
+    ops = configops.ops_from_changes(reg, [{"kind": "schedule", "target": sid, "fields": {field: value}}], revs={f"config:schedule:{sid}": reg.config_rev(f"schedule:{sid}")})
+    box = configops.describe_ops(reg, ops).box
+    assert box and len(box["diff"]) == 1, (field, box)
+    return box["diff"][0]
+
+
+def test_a_save_boxs_diff_lines_are_the_pages_words(reg):
+    """Phase 4, Task 11 fix round: a schedule's Save box and a raid's Save box print each change as "label: old → new" in
+    the Schedules and Raids pages' own words (PAGE_WORDS schedule_fields / raid_fields / priority / split) — "Locks:
+    24 hours before → 12 hours before", never the field's name, never the label twice, never true / false."""
+    from oibot_gm import configops
+    from oibot_gm.constants import PAGE_WORDS
+
+    hy = "hyjal_summit_forever"
+    sid = _weekly(reg, hy, "Tue 18:30", sid="tue")
+    changes = {"signup_lead_hours": 72, "nudge_hours_before": 12, "lock_hours_before": 12, "confirm_hours_before": 3, "fill_ask_hours": 2,
+               "nudge": False, "autofill": False, "open_dm": True, "confirm": False, "split_policy": "first", "weights": {"rank": 5, "main": None},
+               "name": "Tuesdays", "slots": ["Wed 19:00"], "lineup": [{"raid": hy, "rosters": 2}]}
+    code = re.compile(r"_|\b(true|false|None|inherit|hours before:|weights|nudge|autofill|open dm|split policy|signup lead)\b", re.I)
+    for field, value in changes.items():
+        line = _box_line(reg, sid, field, value)
+        label = PAGE_WORDS["schedule_fields"][field]
+        assert line.startswith(f"{label}: ") and line.count(label) == 1, (field, line)
+        assert not code.search(line), (field, line)
+    assert _box_line(reg, sid, "lock_hours_before", 12) == "Locks: 24 hours before → 12 hours before"
+    assert _box_line(reg, sid, "open_dm", True) == "DM the regulars when the sheet opens: off → on"
+    assert _box_line(reg, sid, "split_policy", "first") == "When one night fills two rosters: the raid's → Raid one first"
+    for field, value, want in (("lockout_days", 5, "Lockout: 7 days → 5 days"), ("duration_hours", 2.5, "Length: 3 hours → 2.5 hours"),
+                               ("weights", {"rank": 5}, "Rank: 3 → 5")):
+        ops = configops.ops_from_changes(reg, [{"kind": "raid", "target": hy, "fields": {field: value}}])
+        assert configops.describe_ops(reg, ops).box["diff"] == [want], field
+    ops = configops.ops_from_changes(reg, [{"kind": "raid", "target": hy, "fields": {"first_open": "2026-12-20T19:00"}}])
+    line = configops.describe_ops(reg, ops).box["diff"][0]
+    assert line.startswith("First opens: ") and not code.search(line), line

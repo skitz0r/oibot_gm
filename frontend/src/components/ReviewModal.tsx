@@ -84,8 +84,10 @@ export function ReviewModal({ opened, title, preview, result, busy, notice, onAp
     return (
       <Modal opened={opened} onClose={onClose} title={box.title} centered classNames={{ content: touch.touch }}>
         <Stack gap="md">
-          {notice && <Alert color="blue" variant="light" p="xs"><Text size="sm">{notice}</Text></Alert>}
-          <BoxBody box={box} />
+          {notice && !preview?.updated && <Alert color="blue" variant="light" p="xs"><Text size="sm">{notice}</Text></Alert>}
+          {/* the server described the write again at the press and the box's words moved (an event opened meanwhile):
+              the fresh box under the "changed" line, waiting for another press with its new token */}
+          <BoxBody box={box} changed={!!preview?.updated} />
           {errors.map((x, i) => <Text key={i} size="sm" c="red">{x}</Text>)}
           <BoxButtons box={go} busy={busy} onBack={onClose} onGo={onApply} />
         </Stack>
@@ -127,7 +129,9 @@ type Waiter = (r: OpsReply | null) => void;
 /** `verb` (the phase 4 pages): the server's box (described.box) is printed with this verb and Back in place of the lines,
  *  Apply N changes and Back to edits; a write that went through closes the box with a toast (no result sheet).
  *  `always`: the box shows even where the server would apply at once (a Save is a preview first). */
-export type OpsSaveOpts = { revs?: Record<string, string>; title?: string; verb?: string; always?: boolean };
+export type OpsSaveOpts = { revs?: Record<string, string>; title?: string; verb?: string; always?: boolean;
+  /** the page says a 409 itself (the schedule editor's alert beside its Save): no toast on top of it */
+  staleOnPage?: boolean };
 
 export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Promise<OpsReply | null>, React.ReactNode] {
   const [preview, setPreview] = useState<OpsReply | null>(null);
@@ -136,7 +140,7 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState<string | undefined>();
   const [verb, setVerb] = useState<string | undefined>();
-  const ctx = useRef<{ changes: OpsChange[]; revs?: Record<string, string>; done: Waiter; verb?: string } | null>(null);
+  const ctx = useRef<{ changes: OpsChange[]; revs?: Record<string, string>; done: Waiter; verb?: string; staleOnPage?: boolean } | null>(null);
 
   const close = () => {
     const c = ctx.current;
@@ -172,7 +176,8 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
       } else if (e instanceof ApiError && e.status === 409) {
         const body = e.body as OpsReply;
         ctx.current = null; setPreview(null); setResult(null); setNotice(null);
-        fail(e); c.done({ ...body, changed: body.changed || [] });
+        if (!c.staleOnPage) fail(e);
+        c.done({ ...body, changed: body.changed || [] });
       } else fail(e);
     } finally { setBusy(false); }
   };
@@ -183,7 +188,10 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
     try {
       r = await (opts?.always ? opsApi.preview(changes, opts?.revs) : opsApi.save(changes, opts?.revs));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) { fail(e); return { ...(e.body as OpsReply), changed: (e.body as OpsReply).changed || [] }; }
+      if (e instanceof ApiError && e.status === 409) {
+        if (!opts?.staleOnPage) fail(e);
+        return { ...(e.body as OpsReply), changed: (e.body as OpsReply).changed || [] };
+      }
       throw e;
     }
     // nothing differs from what is stored and the server has nothing to say about it: a toast; a box it answered with
@@ -199,7 +207,7 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
       return r;
     }
     return new Promise<OpsReply | null>((resolve) => {
-      ctx.current = { changes, revs: opts?.revs, done: resolve, verb: opts?.verb };
+      ctx.current = { changes, revs: opts?.revs, done: resolve, verb: opts?.verb, staleOnPage: opts?.staleOnPage };
       setTitle(opts?.title); setVerb(opts?.verb);
       if (review) { setResult(null); setPreview(r); } else showResult(r);
     });

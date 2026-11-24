@@ -1050,6 +1050,12 @@ def test_the_schedules_page_keeps_every_old_lever():
                    "Add a member", "search members", "/api/admin/raid/regulars", "r.outlook", "r.expected"):
         assert needle in regs, needle
     assert "<LevelChip" not in regs, "the mockup's Regulars: facts, no chip (spec §7)"
+    # fix round 1: never a code word in a toast; each night's why on its own row; a covered night with people away too;
+    # the regulars' buttons 44 px on a phone
+    for f, code in (("Schedules", page), ("RegularsSection", regs)):
+        assert '"gone"' not in code, f
+    assert "goneWords.current" in page and "shown.changes = p.changes" in page and "preview: true" in regs
+    assert "css.night" in regs and "f.away_words" in regs and "f.away.length > 0" in regs and regs.count("className={css.touch}") == 2
 
 
 def test_the_schedule_editor_keeps_every_setting():
@@ -1060,11 +1066,14 @@ def test_the_schedule_editor_keeps_every_setting():
     path (never `confirmed`), create-shaped for a new one; a 409 keeps the draft and offers Reload through the guard."""
     page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
     editor = page[page.index("function ScheduleEditor("):]
-    for needle in ("fixedFirst={!!sid}", "opts.hours", "opts.presets", "opts.split_policies", "opts.max_weight", "Use the raid's",
-                   '"Reminder"', '"The bot asks people for open seats"', '"DM the regulars when the sheet opens"', '"Ask the rostered to confirm"',
-                   "kind: d.kind", "QUARTER_HOURS", "guardNav(", "Reload", 'useDirty(`schedule:${sid ?? "new"}`', 'verb: sid ? "Save" : "Create schedule"'):
+    for needle in ("fixedFirst={!!sid}", "opts.hours", "opts.presets", "opts.split_policies", "opts.max_weight", "W.raids_own",
+                   "F = W.schedule_fields", "label={F[k]}", 'toggle("nudge")', 'toggle("autofill")', 'toggle("open_dm")', 'toggle("confirm")',
+                   "W.split[p]", "kind: d.kind", "QUARTER_HOURS", "guardNav(", "Reload", 'useDirty(`schedule:${sid ?? "new"}`', 'verb: sid ? "Save" : "Create schedule"'):
         assert needle in editor, needle
-    assert "confirmed" not in editor and "opsApi.confirm(" not in editor
+    assert "confirmed" not in editor and "opsApi.confirm(" not in editor and "staleOnPage: true" in editor
+    # fix round 1: the labels are the server's words (the Save box's diff lines say the same), none written here
+    for literal in ('"Sheet opens"', '"Locks"', '"Reminder"', '"Confirm by"', '"An ask waits"', '"The bot asks people for open seats"', "SPLIT_LABEL"):
+        assert literal not in editor, literal
     assert "<NameFields" in editor and "TimePicker" not in editor and "<NumberInput" not in editor, "a time is picked, a number is a select"
     names = _code_only((SRC / "components" / "schedules" / "NameFields.tsx").read_text())
     assert names.count("<TextInput") == 2 and 'label="Name"' in names and 'label="Id"' in names, "prose is typed: the name and a new id"

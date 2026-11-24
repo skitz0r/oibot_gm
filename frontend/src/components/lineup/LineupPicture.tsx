@@ -3,8 +3,9 @@ import { useMediaQuery } from "@mantine/hooks";
 import { Link, StepNodes, nodesHeight, nodesPad } from "./LineupBuilder";
 import css from "./lineup.module.css";
 
-/** One step as the server describes it: the raid's name, its rosters, its start in words ('9:30 PM'), one roster's seats. */
-export type PictureStep = { name: string; rosters: number; time_words: string; seats: number };
+/** One step as the server describes it: the raid's name, its rosters, its start in words ('9:30 PM'), one roster's seats
+ *  (null for a raid the game no longer has: no seat line). */
+export type PictureStep = { name: string; rosters: number; time_words: string; seats: number | null };
 
 const HEAD = 48;  // the picture's head: Step n and its start, no controls
 

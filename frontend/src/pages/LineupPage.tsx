@@ -10,7 +10,6 @@ import { guardNav } from "../components/LeaveGuard";
 import { QUARTER_HOURS, WhenPicker, wallTime } from "../components/WhenPicker";
 import { SlotEditor } from "../components/SlotEditor";
 import { useOpsSave } from "../components/ReviewModal";
-import { SPLIT_LABEL } from "../components/board/shared";
 import { NameFields } from "../components/schedules/NameFields";
 import { LineupBuilder, type LineupEntry, type PaletteRaid } from "../components/lineup/LineupBuilder";
 import { LineupPicture, type PictureStep } from "../components/lineup/LineupPicture";
@@ -347,6 +346,7 @@ type SchedDraft = {
 };
 const TIMING_HOURS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"] as const;
 const TIMING_SWITCHES = ["nudge", "autofill", "open_dm", "confirm"] as const;
+type TimingKey = (typeof TIMING_HOURS)[number] | (typeof TIMING_SWITCHES)[number];
 /** a pickup template opens when an officer opens it and reminds nobody: these mean nothing there */
 const PICKUP_HIDDEN = new Set<string>(["signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"]);
 const KINDS = [{ value: "weekly", label: "Weekly" }, { value: "lockout", label: "Day N of each lockout" }, { value: "pickup", label: "Opened by an officer" }];
@@ -486,17 +486,20 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
   const startClock = d.kind === "weekly" ? (d.slots[0] ? d.slots[0].split(" ")[1] : null) : d.kind === "lockout" ? d.time : null;
   const pickup = d.kind === "pickup";
   const shown = (k: string) => !(pickup && PICKUP_HIDDEN.has(k));
-  const hourSelect = (k: string, label: string) => (
-    <Select key={k} label={label} w={200} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }} placeholder="Pick one"
+  /** every label is the server's word for the setting (PAGE_WORDS schedule_fields): the Save box's diff lines say the same */
+  const W = meta.page_words, F = W.schedule_fields;
+  const useRaids = `Use ${W.raids_own}`;
+  const hourSelect = (k: TimingKey) => (
+    <Select key={k} label={F[k]} w={200} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }} placeholder="Pick one"
       value={d.timing[k] !== undefined ? String(d.timing[k]) : null} data={(opts.hours[k] || []).map((c) => ({ value: String(c.value), label: c.words }))}
       onChange={(v) => v && setTiming(k, Number(v))} />
   );
-  const toggle = (k: string, label: string) => (
-    <Switch key={k} label={label} checked={d.timing[k] === true} onChange={(e) => setTiming(k, e.currentTarget.checked)} />
+  const toggle = (k: TimingKey) => (
+    <Switch key={k} label={F[k]} checked={d.timing[k] === true} onChange={(e) => setTiming(k, e.currentTarget.checked)} />
   );
   const preset = opts.presets.find((p) => Object.entries(p.values).every(([k, v]) => Number(d.timing[k]) === v));
   const raidWeights = pickup ? opts.adhoc.weights : firstRaid?.weights || {};
-  const weightData = (k: string) => [{ value: SAME, label: `Use the raid's (${raidWeights[k] ?? 0})` },
+  const weightData = (k: string) => [{ value: SAME, label: `${useRaids} (${raidWeights[k] ?? 0})` },
     ...Array.from({ length: opts.max_weight + 1 }, (_, i) => ({ value: String(i), label: String(i) }))];
 
   async function saveSchedule() {
@@ -505,7 +508,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
     try {
       const x = await save([{ kind: "schedule", target: id, fields }], {
         always: true, verb: sid ? "Save" : "Create schedule", title: sid ? `Save ${name}?` : `Create ${name}?`,
-        revs: sid && view ? { [`config:schedule:${sid}`]: view.rev } : undefined,
+        revs: sid && view ? { [`config:schedule:${sid}`]: view.rev } : undefined, staleOnPage: true,
       });
       if (x?.changed?.length) setStale(x.error || "");  // someone changed it meanwhile: the draft stays, the server's words say so
       else if (x?.applied?.length) { clearDirty(); setMade(0); navigate(`${SCHEDULES}/${encodeURIComponent(id)}`); }
@@ -552,10 +555,10 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
               <SegmentedControl aria-label="Repeats" value={d.kind} data={KINDS} orientation={phone ? "vertical" : "horizontal"} fullWidth={!!phone}
                 onChange={(v) => set({ kind: v, ...(timingTyped ? {} : { timing: suggested(opts, v, d.lineup[0]?.raid) }) })} />
             )}
-            {d.kind === "weekly" && <SlotEditor label="Run times" value={d.slots} onChange={(slots) => set({ slots })} />}
+            {d.kind === "weekly" && <SlotEditor label={F.slots} value={d.slots} onChange={(slots) => set({ slots })} />}
             {d.kind === "lockout" && (
               <Group gap="md" align="flex-end" wrap="wrap">
-                <MultiSelect label="Days of each lockout" w={260} maw="100%" data={days} value={d.days} comboboxProps={{ withinPortal: true }}
+                <MultiSelect label={F.days} w={260} maw="100%" data={days} value={d.days} comboboxProps={{ withinPortal: true }}
                   onChange={(v) => set({ days: [...v].sort((a, b) => Number(a) - Number(b)) })} />
                 <Select label="Starts" w={140} allowDeselect={false} value={d.time} data={QUARTER_HOURS} maxDropdownHeight={260} comboboxProps={{ withinPortal: true }}
                   onChange={(v) => v && set({ time: v })} />
@@ -574,34 +577,34 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
                 }} />
             )}
             <Group gap="md" align="flex-end" wrap="wrap">
-              {shown("signup_lead_hours") && hourSelect("signup_lead_hours", "Sheet opens")}
-              {hourSelect("lock_hours_before", "Locks")}
+              {shown("signup_lead_hours") && hourSelect("signup_lead_hours")}
+              {hourSelect("lock_hours_before")}
             </Group>
             {shown("nudge") && (
               <Group gap="md" align="flex-end" wrap="wrap">
-                {toggle("nudge", "Reminder")}
-                {d.timing.nudge === true && hourSelect("nudge_hours_before", "Reminder")}
+                {toggle("nudge")}
+                {d.timing.nudge === true && hourSelect("nudge_hours_before")}
               </Group>
             )}
             <Group gap="md" align="flex-end" wrap="wrap">
-              {toggle("confirm", "Ask the rostered to confirm")}
-              {d.timing.confirm === true && hourSelect("confirm_hours_before", "Confirm by")}
+              {toggle("confirm")}
+              {d.timing.confirm === true && hourSelect("confirm_hours_before")}
             </Group>
             <Group gap="md" align="flex-end" wrap="wrap">
-              {toggle("autofill", "The bot asks people for open seats")}
-              {hourSelect("fill_ask_hours", "An ask waits")}
+              {toggle("autofill")}
+              {hourSelect("fill_ask_hours")}
             </Group>
-            {shown("open_dm") && toggle("open_dm", "DM the regulars when the sheet opens")}
+            {shown("open_dm") && toggle("open_dm")}
           </Stack>
         </ViewSection>
-        <ViewSection title="Priority" action={<Button variant="subtle" size="sm" onClick={() => set({ weights: Object.fromEntries(Object.keys(d.weights).map((k) => [k, ""])), split: "" })}>Use the raid's</Button>}>
+        <ViewSection title={F.weights} action={<Button variant="subtle" size="sm" onClick={() => set({ weights: Object.fromEntries(Object.keys(d.weights).map((k) => [k, ""])), split: "" })}>{useRaids}</Button>}>
           <Group gap="md" align="flex-end" wrap="wrap">
             {(Object.keys(PRIORITY_KEYS) as (keyof typeof PRIORITY_KEYS)[]).map((k) => (
               <Select key={k} label={meta.page_words.priority[k]} w={190} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }}
                 value={d.weights[k] || SAME} data={weightData(k)} onChange={(v) => set({ weights: { ...d.weights, [k]: !v || v === SAME ? "" : v } })} />
             ))}
-            <Select label="When one night fills two rosters" w={240} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }} value={d.split || SAME}
-              data={[{ value: SAME, label: "Use the raid's" }, ...opts.split_policies.map((p) => ({ value: p, label: SPLIT_LABEL[p] || p }))]}
+            <Select label={F.split_policy} w={240} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }} value={d.split || SAME}
+              data={[{ value: SAME, label: useRaids }, ...opts.split_policies.map((p) => ({ value: p, label: W.split[p] || p }))]}
               onChange={(v) => set({ split: !v || v === SAME ? "" : v })} />
           </Group>
         </ViewSection>

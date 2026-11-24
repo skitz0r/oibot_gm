@@ -150,6 +150,12 @@ export interface PageWords {
   bank_empty: Record<"nobody" | "placed" | "rostered", string>; board_working: string; board_failed: string;
   by_an_officer: string; no_times: string; no_reminder: string; for_seats: string; short_every_week: string;
   ready_every_week: string; short_weeks: string; paused_next: string; open_now: string; no_minimums: string; played_nowhere: string;
+  /** a setting's name: the schedule editor's labels and the Save box's lines (configops) say the same */
+  schedule_fields: Record<"name" | "kind" | "slots" | "days" | "time" | "lineup" | "rosters" | "active" | "signup_lead_hours" | "nudge"
+    | "nudge_hours_before" | "lock_hours_before" | "confirm" | "confirm_hours_before" | "autofill" | "fill_ask_hours" | "open_dm"
+    | "split_policy" | "weights", string>;
+  raid_fields: Record<string, string>; split: Record<string, string>; on: string; off: string; raids_own: string; suggested: string;
+  regulars_one: string; regulars_n: string; away_n: string;
 }
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */
@@ -181,13 +187,13 @@ export interface ScheduleList { active: ScheduleRow[]; paused: ScheduleRow[]; re
 export interface ScheduleView {
   id: string; name: string; active: boolean; chip: string; kind: string; gone: string | null;
   details: Fact[];
-  lineup: { raid: string; name: string; rosters: number; starts: number; time_words: string; seats: number }[];
+  lineup: { raid: string; name: string; rosters: number; starts: number; time_words: string; seats: number | null }[];
   timing: Fact[];
   next: { starts: string; opens: string; locks: string; start_iso: string; occurrence: string; key: string | null }[]; next_empty: string | null;
   regulars: {
     count: number; words: string; expected?: string; short: Record<string, number> | null; outlook?: string;
     /** the next four weeks, a row per night (`can_open`: Open this run early works now; `why` the server's sentence when not) */
-    forecast?: { day: string; when: string; short: Record<string, number>; away: string[]; expected: number; start_iso: string; occurrence: string;
+    forecast?: { day: string; when: string; short: Record<string, number>; away: string[]; away_words: string | null; expected: number; start_iso: string; occurrence: string;
       key: string | null; can_open: boolean; why: string | null }[];
     /** `box` = Remove's box (POST /api/admin/raid/regulars {schedule, uid, on: false, rev, seen: box.fp}) */
     rows: { uid: string; display_name: string; character: string; cls: string; spec: string; box: Box; rev: string }[];

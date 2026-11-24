@@ -107,4 +107,20 @@ PAGE_WORDS = {
     "played_nowhere": "No schedule plays this raid yet. Add one on the Schedules page.",
     # Readiness' Standing when it is not "ready": the printed row that makes it so (raid_page.readiness_view)
     "standing_mains": "Fewer mains than seats.", "standing_under": "{slot} are under the minimum.",
+    # a schedule's settings by name: the Schedules page's editor labels AND the Save box's "label: old → new" lines
+    # (configops._schedule_part) — one word per setting, so the two never drift
+    "schedule_fields": {"name": "Name", "kind": "Repeats", "slots": "Run times", "days": "Days of each lockout", "time": "Starts",
+                        "lineup": "Lineup", "rosters": "Rosters", "active": "Active", "signup_lead_hours": "Sheet opens",
+                        "nudge": "Reminder", "nudge_hours_before": "Reminder", "lock_hours_before": "Locks",
+                        "confirm": "Ask the rostered to confirm", "confirm_hours_before": "Confirm by",
+                        "autofill": "The bot asks people for open seats", "fill_ask_hours": "An ask waits",
+                        "open_dm": "DM the regulars when the sheet opens", "split_policy": "When one night fills two rosters",
+                        "weights": "Priority"},
+    # a raid's settings by name: the Raids page's Details labels and its Save box's lines
+    "raid_fields": {"lockout_days": "Lockout", "duration_hours": "Length", "first_open": "First opens"},
+    # how one night's joiners are split into two rosters (registry.SPLIT_POLICIES)
+    "split": {"balanced": "Balanced", "first": "Raid one first", "rotation": "Rotation"},
+    "on": "on", "off": "off", "raids_own": "the raid's", "suggested": "the game's suggestion",
+    # a schedule's Regulars when its raid left the game (no seats to count against), and a night's absences
+    "regulars_one": "1 regular", "regulars_n": "{n} regulars", "away_n": "{n} away",
 }

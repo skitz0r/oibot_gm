@@ -25,9 +25,19 @@ function useRemove(onDone: () => void) {
     const shown = { rev: first.rev };
     const again = async (): Promise<Box> => {
       const x = await fresh();
-      if (!x) throw new Error("gone");
-      shown.rev = x.rev;
-      return x.box;
+      if (x) {
+        shown.rev = x.rev;
+        return x.box;
+      }
+      // no longer on the regulars (someone took them off meanwhile): the route's own refusal, in its box (Back only)
+      try {
+        await api.post("/api/admin/raid/regulars", { ...body, on: false, preview: true });
+      } catch (e) {
+        const b = boxOf(e);
+        if (b) return b;
+        throw e;
+      }
+      return first.box;
     };
     const done = await ask({
       box: first.box,
@@ -106,7 +116,7 @@ export function RegularsSection({ view, meta, onReload }: { view: ScheduleView; 
     let message = "";
     const done = await ask({
       box: night.box,
-      refresh: async (): Promise<Box> => { const v = await api.get<ComingView>(url); if (v.box) return v.box; throw new Error("gone"); },
+      refresh: async (): Promise<Box> => { const v = await api.get<ComingView>(url); return v.box || night.box!; },
       act: async (fp) => {
         try {
           const x = await api.post<{ message: string; key: string }>(`/api/raid/${encodeURIComponent(night.open.raid)}/open`,
@@ -125,7 +135,7 @@ export function RegularsSection({ view, meta, onReload }: { view: ScheduleView; 
     ...(r.short ? [{ label: "Regulars are short", value: "" }] : []),
     ...(r.outlook ? [{ label: "Next four weeks", value: r.outlook }] : []),
   ];
-  const weeks = (r.forecast || []).filter((f) => Object.keys(f.short).length > 0);
+  const weeks = (r.forecast || []).filter((f) => Object.keys(f.short).length > 0 || f.away.length > 0);
   const addRow = (
     <Group gap="xs" align="flex-end" wrap="wrap">
       <Select label="Add a member" placeholder="search members" searchable clearable w={220} maw="100%" value={who} comboboxProps={{ withinPortal: true }}
@@ -139,6 +149,7 @@ export function RegularsSection({ view, meta, onReload }: { view: ScheduleView; 
   );
   return (
     <ViewSection title="Regulars">
+      <div className={css.touch}>
       <Stack gap="md">
         <Group justify="space-between" align="flex-end" wrap="wrap" gap="md">
           <MBox style={{ flex: "1 1 320px", minWidth: 0 }}>
@@ -147,21 +158,24 @@ export function RegularsSection({ view, meta, onReload }: { view: ScheduleView; 
           {!view.gone && addRow}
         </Group>
         {weeks.length > 0 && (
-          <Stack gap={6} aria-label="Next four weeks">
+          <div className={css.nights} aria-label="Next four weeks">
             {weeks.map((f) => (
-              <Group key={f.occurrence} gap="sm" wrap="wrap" align="center">
+              <div key={f.occurrence} className={css.night}>
+              <Group gap="sm" wrap="wrap" align="center">
                 <Tooltip label={f.away.join(", ")} disabled={!f.away.length}>
                   {f.key
                     ? <Anchor component={Link} to={`/events/${encodeURIComponent(f.key)}`} onClick={guardClick(`/events/${encodeURIComponent(f.key)}`)} size="sm" fw={600}>{f.when}</Anchor>
                     : <Text size="sm" fw={600}>{f.when}</Text>}
                 </Tooltip>
                 <ShortIcons meta={meta} short={f.short} />
-                {!f.key && f.can_open && <Button size="compact-sm" variant="light" color="red" loading={opening === f.occurrence} onClick={() => openEarly(f)}>Open this run early</Button>}
-                {!f.key && !f.can_open && f.why && <Text size="xs" c="dimmed">{f.why}</Text>}
-                {said[f.occurrence] && <Text size="xs" c="dimmed">{said[f.occurrence]}</Text>}
+                {f.away_words && <Tooltip label={f.away.join(", ")}><Text span size="sm" c="dimmed">{f.away_words}</Text></Tooltip>}
+                {!f.key && f.can_open && Object.keys(f.short).length > 0 && <Button size="compact-sm" variant="light" color="red" loading={opening === f.occurrence} onClick={() => openEarly(f)}>Open this run early</Button>}
               </Group>
+              {!f.key && !f.can_open && f.why && Object.keys(f.short).length > 0 && <Text size="xs" c="dimmed">{f.why}</Text>}
+              {said[f.occurrence] && <Text size="xs" c="dimmed">{said[f.occurrence]}</Text>}
+              </div>
             ))}
-          </Stack>
+          </div>
         )}
         {r.rows.length > 0 && (
           <div className={css.people}>
@@ -175,6 +189,7 @@ export function RegularsSection({ view, meta, onReload }: { view: ScheduleView; 
           </div>
         )}
       </Stack>
+      </div>
       {removeDialog}
       {openDialog}
     </ViewSection>
@@ -204,7 +219,7 @@ export function RemovedRegulars({ orphans, meta, onReload }: { orphans: OrphanRe
     return x ? { box: x.box, rev: x.rev } : null;
   });
   return (
-    <Stack gap={4} mt="md" aria-label="Regulars of a removed schedule">
+    <Stack gap={4} mt="md" aria-label="Regulars of a removed schedule" className={css.touch}>
       <Text size="xs" fw={700} c="dimmed" tt="uppercase" style={{ letterSpacing: ".08em" }} px={12}>Regulars of a removed schedule</Text>
       {orphans.map((o) => (
         <Group key={o.key + o.uid} gap={6} wrap="nowrap" px={12}>

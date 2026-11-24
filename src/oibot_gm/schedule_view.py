@@ -170,7 +170,7 @@ def _lineup(reg: Registry, s: dict, first: datetime | None) -> list[dict]:
     out = []
     for e, off in zip(lineup, offsets):
         rid = e.get("raid")
-        size = int(reg.raid_def(rid).get("size") or 0) if rid in reg.profile.raids else 0
+        size = int(reg.raid_def(rid).get("size") or 0) if rid in reg.profile.raids else None  # a raid gone from the game: no seat count
         out.append({"raid": rid, "name": _raid_name(reg, rid), "rosters": int(e.get("rosters") or 1), "starts": int(off),
                     "time_words": reg.local12(rc.after_minutes(first, off), "%I:%M %p") if first is not None else "", "seats": size})
     return out
@@ -188,7 +188,11 @@ def _regulars(reg: Registry, rs, s: dict, sd: dict) -> dict | None:
     row = next((r for r in (reg.series_coverage(s["raid"]) if s["raid"] in reg.profile.raids else []) if r["id"] == sid), None)
     # the seats the coverage counts against (series_coverage); a schedule whose first raid left the game has no row
     seats = row["seats"] if row is not None else int(sd.get("size") or 0) * int(s.get("rosters") or 1)
-    out: dict = {"count": len(regs), "words": PAGE_WORDS["for_seats"].format(n=len(regs), seats=seats), "short": None}
+    if seats:
+        words = PAGE_WORDS["for_seats"].format(n=len(regs), seats=seats)
+    else:  # its first raid left the game: no seats to count against, the regulars alone
+        words = PAGE_WORDS["regulars_one"] if len(regs) == 1 else PAGE_WORDS["regulars_n"].format(n=len(regs))
+    out: dict = {"count": len(regs), "words": words, "short": None}
     if not regs:
         out["expected"] = PAGE_WORDS["every_main"]
     if row is not None and regs:
@@ -226,6 +230,7 @@ def _forecast_rows(reg: Registry, rs, s: dict, sd: dict, forecast: list[dict]) -
             opens, _locks = rc.sheet_times(t, sd)
             why = rc.open_row_refusal(reg, rs, s["raid"], t, s["id"], opens, now)
         out.append({"day": f["day"], "when": f["when"], "short": f["short"], "away": f["away"], "expected": f["expected"],
+                    "away_words": PAGE_WORDS["away_n"].format(n=len(f["away"])) if f["away"] else None,
                     "start_iso": f["start"], "occurrence": occ, "key": key, "can_open": key is None and active and why is None,
                     "why": why})
     return out

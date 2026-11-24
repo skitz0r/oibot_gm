@@ -842,10 +842,10 @@ one before it ends (that raid's length: a 6:30 PM Hyjal Summit of 3 hours is fol
 follow-ons, in order (a fifth is refused: *"A run holds at most 4 raids."*). Each is another raid, never one twice in a
 run, and each starts after the one before it (*"Each raid starts after the one before it."*). A schedule of three or four raids is made on the
 site's Schedules page (its editor is the lineup builder) or over MCP (`schedule_set` with `fields = {lineup: [{raid,
-rosters}, …]}`, the first raid first); Discord and plain text set the second raid only. The site's **New event** page takes the whole lineup, up to four raids, and
-at four it says *"A run holds at most 4 raids."* in place of the empty step. Editing a schedule there changes
-the lead and the second raid; the raids after them stay as they are, and clearing the second raid moves the third up
-into its place. Two runs at the same time each keep their
+rosters}, …]}`, the first raid first); Discord and plain text set the second raid only. The site's **New event** page and the Schedules page's editor take the
+whole lineup, up to four raids, and at four they say *"A run holds at most 4 raids."* in place of the empty step; a
+schedule's Save there writes the whole lineup. Editing a schedule in Discord or plain text changes only the lead and
+the second raid; the raids after them stay as they are, and clearing the second raid moves the third up into its place. Two runs at the same time each keep their
 own follow-ons. A schedule never opens a night on which a follow-on would start before that raid first opens: the
 schedule's next runs skip it. An ad hoc Open on such a night says so before you press (*"Barrow Deeps first opens Wed 9
 Dec 3:00 PM, after this run starts."*) and still opens. The lead's sheet is the night's sheet (*Hyjal Summit, then

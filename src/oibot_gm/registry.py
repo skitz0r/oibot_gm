@@ -546,9 +546,9 @@ class ConfigChanged(RegistryError):
     """A config write made against a section that changed since its author looked (its `rev` is stale) — the sibling of
     rc.BoardChanged for guild settings (design §2.4). Nothing was written; the caller re-reads and shows the current state."""
 
-    def __init__(self, section: str, msg: str | None = None):
+    def __init__(self, section: str, msg: str | None = None, reg: "Registry | None" = None):
         self.section = section
-        super().__init__(msg or f"The {section_words(section)} changed since you looked — check them and try again.")
+        super().__init__(msg or f"The {section_words(section, reg)} changed since you looked — check them and try again.")
 
 
 class CharactersChanged(RegistryError):
@@ -589,9 +589,12 @@ def readable_config(cfg: "GuildConfig") -> dict:
     return out
 
 
-def section_words(section: str) -> str:
+def section_words(section: str, reg: "Registry | None" = None) -> str:
+    """A config section as a person reads it: never an id ('Hyjal Summit raid settings' with `reg`, else 'raid settings')."""
     if section.startswith("raids:"):
-        return f"{section[6:]} raid settings"
+        rid = section[6:]
+        name = reg.raid_def(rid).get("name") if reg is not None and rid in reg.profile.raids else None
+        return f"{name} raid settings" if name else "raid settings"
     if section.startswith("schedule:"):  # a person reads it (the Schedules page's stale Save): never the schedule's id
         return "schedule's settings"
     if section.startswith("raid_all:"):
@@ -3072,7 +3075,7 @@ class Registry:
     def check_rev(self, section: str, rev: str | None) -> None:
         """Raise ConfigChanged when `rev` (what the author saw) isn't the section's rev now; None checks nothing."""
         if rev and rev != self.config_rev(section):
-            raise ConfigChanged(section)
+            raise ConfigChanged(section, reg=self)
 
     def characters_rev(self, m: Member) -> str:
         """A fingerprint of a member's character list (what a table save edits) — not `updated_at`, which every DM

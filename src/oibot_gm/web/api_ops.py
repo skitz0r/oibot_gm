@@ -108,7 +108,7 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         return {str(k): str(x) for k, x in (d.get("revs") or {}).items() if str(k).startswith(configops.CONFIG_REV)} if isinstance(d.get("revs"), dict) else {}
 
     def changed_response(reg, sections: list[str]) -> JSONResponse:
-        return JSONResponse({"error": str(ConfigChanged(sections[0])), "changed": sections,
+        return JSONResponse({"error": str(ConfigChanged(sections[0], reg=reg)), "changed": sections,
                              "revs": {configops.CONFIG_REV + s: reg.config_rev(s) for s in sections}}, status_code=409)
 
     def finish(pv: dict, res: dict) -> JSONResponse | dict:
@@ -217,6 +217,14 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
                 ops = [ConfigOp(**o) for o in held["ops"]]
                 allowed, refused = configops.authorize_ops(reg, ops, v.uid, role=await live_role(v), raids=raids)
                 allowed, refused = mcp_actor_rule(v, allowed, refused)
+                # what the box said must still be true: described again now (an event opened meanwhile changes "keeps its
+                # timing" without touching the schedule's rev) — different words are a fresh preview and a new token,
+                # nothing written; the page shows the fresh box under the "changed" line and waits again
+                now_said = await asyncio.to_thread(configops.describe_ops, reg, allowed, refused)
+                if held.get("fingerprint") and now_said.fingerprint != held["fingerprint"]:
+                    again = {k: x for k, x in d.items() if k not in ("token", "changes", "seen", "confirmed")}
+                    again.update(ops=held["ops"], revs={k: x for k, x in held["revs"].items() if k.startswith(configops.CONFIG_REV)})
+                    return await structured(v, again, reason="expired")
                 pv = {"kind": "change", "ops": [op.model_dump(exclude_none=True) for op in allowed]}
                 return finish(pv, await apply_now(v, allowed, refused, dict(held["revs"])))
             return await text_apply(v, held, raids)

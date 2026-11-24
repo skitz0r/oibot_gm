@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Group, Text } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
@@ -56,10 +56,13 @@ function ScheduleDetail({ sid, meta, onChanged }: { sid: string; meta: Meta; onC
   const navigate = useNavigate();
   const [view, setView] = useState<ScheduleView | null>(null);
   const [gone, setGone] = useState<string | null>(null);
+  const goneWords = useRef("");  // the route's 404 sentence when the schedule went while a box was open
   const [ask, dialog] = useConfirmBox(["config", "member", "run:"]);
   const load = () => api.get<ScheduleView>(`/api/schedules/${encodeURIComponent(sid)}`).then((v) => { setView(v); setGone(null); return v; }).catch((e) => {
-    if (e instanceof ApiError && e.status === 404) setGone((e.body as { error?: string } | undefined)?.error || e.message);
-    else fail(e);
+    if (e instanceof ApiError && e.status === 404) {
+      goneWords.current = (e.body as { error?: string } | undefined)?.error || e.message;
+      setGone(goneWords.current);
+    } else fail(e);
     return null;
   });
   useEffect(() => { load(); }, [sid]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -67,21 +70,27 @@ function ScheduleDetail({ sid, meta, onChanged }: { sid: string; meta: Meta; onC
   if (gone) return <Text c="dimmed">{gone}</Text>;
   if (!view) return <Text c="dimmed">Loading…</Text>;
 
-  /** a press on one of the read model's boxes: `pick` reads that box from a fresh read model */
-  const press = async (box: Box, changes: OpsChange[], pick: (v: ScheduleView) => Box | undefined, after?: () => void) => {
-    const shown = { rev: view.rev };
+  /** a press on one of the read model's boxes: `pick` reads the box AND the change it sends from a read model — the one
+   *  on screen first, then a fresh one (another officer paused it meanwhile: the Resume box, and Resume is what goes).
+   *  The schedule removed meanwhile: the route's own sentence, and the list is read again. */
+  const press = async (pick: (v: ScheduleView) => { box: Box; changes: OpsChange[] }, after?: () => void) => {
+    const first = pick(view);
+    const shown = { rev: view.rev, changes: first.changes };
     const fresh = async (): Promise<Box> => {
       const v = await load();
-      if (!v) throw new Error("gone");
+      if (!v) { onChanged(); throw new Error(goneWords.current); }
+      const p = pick(v);
       shown.rev = v.rev;
-      return pick(v) || box;
+      shown.changes = p.changes;
+      return p.box;
     };
     const done = await ask({
-      box,
+      box: first.box,
       refresh: fresh,
       act: async (fp) => {
         const revs = { [`config:schedule:${view.id}`]: shown.rev };
         try {
+          const changes = shown.changes;
           const pv = await opsApi.preview(changes, revs);
           const b = pv.described?.box;
           if (b && b.fp !== fp) return b;  // it changed while the box was open: the fresh box, said so, waits again
@@ -90,6 +99,7 @@ function ScheduleDetail({ sid, meta, onChanged }: { sid: string; meta: Meta; onC
             return null;
           }
           const r = await opsApi.apply(pv.token, changes, pv.fingerprint, revs);
+          if (r.needs_review && r.described?.box) return r.described.box;  // its words moved at the press: the fresh box
           if (r.refused?.length) fail(new Error(r.refused.join("\n"))); else ok(r.summary || "");
           return null;
         } catch (e) {
@@ -100,9 +110,9 @@ function ScheduleDetail({ sid, meta, onChanged }: { sid: string; meta: Meta; onC
     });
     if (done) { onChanged(); after?.(); }
   };
-  const pause = () => press(view.active ? view.boxes.pause! : view.boxes.resume!,
-    [{ kind: "schedule", target: view.id, fields: { active: !view.active } }], (v) => (view.active ? v.boxes.pause : v.boxes.resume));
-  const remove = () => press(view.boxes.remove, [{ kind: "schedule_remove", target: view.id }], (v) => v.boxes.remove,
+  const pause = () => press((v) => ({ box: (v.active ? v.boxes.pause : v.boxes.resume)!,
+    changes: [{ kind: "schedule", target: v.id, fields: { active: !v.active } }] }));
+  const remove = () => press((v) => ({ box: v.boxes.remove, changes: [{ kind: "schedule_remove", target: v.id }] }),
     () => navigate("/schedules", { replace: true }));
   const edit = `/schedules/${encodeURIComponent(view.id)}/edit`;
 
