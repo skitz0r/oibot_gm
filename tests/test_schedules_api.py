@@ -482,7 +482,7 @@ def test_the_regulars_four_weeks_carry_open_this_run_early(web_bot, reg):
     assert len(rows) >= 4 and all(set(r) >= {"day", "when", "short", "away", "occurrence", "key", "can_open", "why"} for r in rows)
     assert rows[0]["short"] and rows[0]["key"] is None and rows[0]["can_open"] is True and rows[0]["why"] is None
     later = rows[-1]
-    assert later["can_open"] is False and later["why"], "past the opening horizon: the server's sentence why"
+    assert later["can_open"] is True and later["why"] is None, "no horizon: four weeks out still opens early"
     t = rc.next_runs_of(reg, HYJAL, reg.schedule_entry(sid), 1)[0]
     res = post(web_bot, f"/api/raid/{HYJAL}/open", {"start": t.isoformat(), "schedule": sid, "occurrence": rows[0]["occurrence"]})
     assert res.status_code == 200, res.text

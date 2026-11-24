@@ -67,7 +67,7 @@ FILL_MAX_OPEN = 3  # never more than this many unanswered asks per event
 FILL_ASK_HOURS_DEFAULT = RAID_DEFAULTS["fill_ask_hours"]
 SWAP_KINDS = ("flex", "offspec", "alt")  # asks that change what someone already coming plays (a role swap: D3)
 CONFLICT_WINDOW_HOURS = 4.0  # two runs closer than this count as the same night
-OPEN_HORIZON_DAYS = 21  # how far ahead "upcoming runs" lists look
+OPEN_HORIZON_DAYS = 21  # how far ahead "upcoming runs" lists look (a list's length only: opening has no horizon)
 CLOSE_AFTER_HOURS = 3  # a run is closed this long after its scheduled end (start + duration)
 SOLVE_TIME_LIMIT_S = 12.0  # the lock solve
 PREVIEW_TIME_LIMIT_S = 8.0  # split previews in the modal
@@ -2505,7 +2505,7 @@ def open_schedule(reg: Registry, instance: str, start: datetime, sid: str | None
     if sid:
         return sid
     now = reg.now_local()  # whatever the distance (the final fix wave of §5.67 phase 4): a schedule's night beyond the
-    # open horizon is still that schedule's night — open_refusal refuses opening it early, it never becomes a one-off
+    # listed horizon is still that schedule's night — it opens as that schedule's run, never as a one-off
     hours = max(24 * OPEN_HORIZON_DAYS, (start - now).total_seconds() / 3600 + 1)
     hit = next((s["id"] for s, t in upcoming(reg, instance, now, hours) if t == start), None)
     return hit if hit is not None else ADHOC_SCHEDULE
@@ -5233,19 +5233,13 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
 UPCOMING_PER_SCHEDULE = 3  # the Events page's Coming up lists each active schedule's next three nights, whatever the horizon
 
 
-def open_row_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datetime, sid: str, opens: datetime, now: datetime | None = None) -> str | None:
-    """Why an upcoming run's row can't be opened by hand yet, in words (the Events page's Coming up prints it under Open the sheet now), or None.
-    A closed run at that time is never opened again (closed_run_refusal); a run more than OPEN_HORIZON_DAYS out isn't
-    "the next run" the open paths reach (open_when), so the row says when Open works and when the sheet opens on its own."""
-    why = closed_run_refusal(rs, event_of_occurrence(rs, sid, occurrence_stamp(reg, start), reg=reg))
-    if why:
-        return why
-    now = now or reg.now_local()
-    if start > now + timedelta(days=OPEN_HORIZON_DAYS):
-        early = start - timedelta(days=OPEN_HORIZON_DAYS)
-        return (f"This run is too far ahead to open now. Open works from {reg.local12(early)}, three weeks before the run."
-                + (f" Its sheet opens on its own {reg.local12(opens)}." if opens > early else ""))
-    return None
+def open_row_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datetime, sid: str, opens: datetime | None = None,
+                     now: datetime | None = None) -> str | None:
+    """Why an upcoming run's row can't be opened by hand, in words (the Events page's Coming up prints it under Open the
+    sheet now), or None. Only a closed run at that time refuses (closed_run_refusal: it is never opened again). There is
+    no horizon (the owner, 2026-11-24): a night weeks ahead opens now as its schedule's run, and the schedule never opens
+    it again (event_of_occurrence). `opens` / `now` are kept for the callers; nothing here reads them."""
+    return closed_run_refusal(rs, event_of_occurrence(rs, sid, occurrence_stamp(reg, start), reg=reg))
 
 
 SCHEDULE_NIGHT = ("{when} is a night of {name}, so a one-off can't start then. Open that night from its schedule instead, "
@@ -5259,12 +5253,10 @@ def open_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datetime,
     """Why an on-demand open of `instance` at `start` is refused before anything is written (every open surface goes
     through RaidMixin.open_run_and_post; open_preview's `refusal` says it first), or None. A live run at that minute is
     never refused: Open points at it. A night of a recurring schedule, at any distance (open_schedule), opens only as
-    that schedule's run: asked as a one-off or from a pickup template it is refused (SCHEDULE_NIGHT); as the schedule's
-    run it is refused while it is too far ahead to open (open_row_refusal, the Events page's Coming up sentence) — never
-    silently a one-off beside the run the schedule then opens — and while a live ONE-OFF already holds that minute (one
-    made there before this check; NIGHT_TAKEN — the scheduler skips that night the same way). Its sheet already due
-    and nothing in the way (the scheduler's case): None."""
-    now = now or reg.now_local()
+    that schedule's run: asked as a one-off or from a pickup template it is refused (SCHEDULE_NIGHT) — never silently a
+    one-off beside the run the schedule then opens —, and as the schedule's run while a live ONE-OFF already holds that
+    minute (one made there before this check; NIGHT_TAKEN — the scheduler skips that night the same way). However far
+    ahead the night is, it opens (no horizon since the owner's tweaks, 2026-11-24); a closed one says so (open_row_refusal)."""
     have = find_run(reg, rs, instance, start, schedule)
     if have is not None and have.state not in ("done", "cancelled"):
         return None
@@ -5286,8 +5278,7 @@ def open_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datetime,
         from .registry import schedule_name
 
         return NIGHT_TAKEN.format(title=run_title(reg, other), name=schedule_name(tpl or {"id": night}))
-    opens = start - timedelta(hours=float(reg.schedule_def(instance, asked)["signup_lead_hours"]))
-    return None if opens <= now else open_row_refusal(reg, rs, instance, start, asked, opens, now)
+    return open_row_refusal(reg, rs, instance, start, asked)
 
 
 def is_night_of(reg: Registry, instance: str, start: datetime, sid: str) -> bool:

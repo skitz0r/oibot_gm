@@ -1,9 +1,10 @@
 """Two events on one night (the final fix wave of §5.67 phase 4). open_schedule only looked OPEN_HORIZON_DAYS ahead, so
 a schedule's night further out opened as a one-off with no schedule stamp, and when the schedule's own sheet came due
 the scheduler opened a SECOND run at the same minute and posted a second sheet. Now: a schedule's night is that
-schedule's whatever the distance; opening it too early is refused with the Coming up row's sentence; asking for it as a
-one-off (or from a pickup template) is refused on every surface; and a one-off already on such a night (made before
-this fix) keeps it — the scheduler opens nothing there and warns ops once."""
+schedule's whatever the distance; since the owner's tweaks (2026-11-24, A) it opens by hand however far ahead it is, as
+that schedule's run, and the schedule never opens it again; asking for it as a one-off (or from a pickup template) is
+refused on every surface; and a one-off already on such a night (made before this fix) keeps it — the scheduler opens
+nothing there and warns ops once."""
 from __future__ import annotations
 
 import asyncio
@@ -46,16 +47,17 @@ def test_a_schedule_night_past_the_horizon_is_still_that_schedules(reg):
     assert rc.open_schedule(reg, RID, far + timedelta(hours=1), None) == rc.ADHOC_SCHEDULE, "any other time is a one-off"
 
 
-def test_the_site_refuses_a_night_too_far_ahead_and_an_ad_hoc_on_a_schedule_night(reg, rs, web_bot):
+def test_the_site_opens_a_far_night_as_the_schedules_and_refuses_an_ad_hoc_on_a_schedule_night(reg, rs, web_bot):
     sid, far, near = nights(reg)
     c = web_bot.c
     p = c.post(f"/api/raid/{RID}/open/preview", json={"start": far.isoformat()}, headers=H()).json()
-    assert p["schedule"] == sid and "too far ahead to open now" in (p["refusal"] or "")
-    r = c.post(f"/api/raid/{RID}/open", json={"start": far.isoformat()}, headers=H())
-    assert r.status_code == 400 and "too far ahead to open now" in r.json()["error"] and not rs.events
-    r = c.post(f"/api/raid/{RID}/open", json={"start": near.isoformat(), "schedule": "adhoc"}, headers=H())
+    assert p["schedule"] == sid and p["refusal"] is None, "no horizon: a night weeks ahead opens"
+    r = c.post(f"/api/raid/{RID}/open", json={"start": (near).isoformat(), "schedule": "adhoc"}, headers=H())
     assert r.status_code == 400 and r.json()["error"] == rc.SCHEDULE_NIGHT.format(when=reg.local12(near), name="Raid nights")
     assert not rs.events, "nothing written"
+    ok = c.post(f"/api/raid/{RID}/open", json={"start": far.isoformat()}, headers=H())
+    assert ok.status_code == 200, ok.text
+    assert rs.events[ok.json()["key"]].occurrence == rc.occurrence_stamp(reg, far) and rs.events[ok.json()["key"]].schedule == sid
     ok = c.post(f"/api/raid/{RID}/open", json={"start": (near + timedelta(hours=1)).isoformat(), "schedule": "adhoc"}, headers=H())
     assert ok.status_code == 200, ok.text
     assert rs.events[ok.json()["key"]].schedule in (None, rc.ADHOC_SCHEDULE), "a time that is not a schedule's night still opens"
@@ -63,22 +65,23 @@ def test_the_site_refuses_a_night_too_far_ahead_and_an_ad_hoc_on_a_schedule_nigh
     assert ok.status_code == 200 and rs.events[ok.json()["key"]].occurrence == rc.occurrence_stamp(reg, near), "its own night opens"
 
 
-def test_plain_text_shows_both_refusals_before_apply_and_apply_writes_nothing(reg, rs):
+def test_plain_text_opens_a_far_night_and_refuses_an_ad_hoc_on_a_schedule_night(reg, rs):
     _sid, far, near = nights(reg)
     far_op = ConfigOp(op="run_open", target=RID, value=far.strftime("%Y-%m-%d %H:%M"))
     adhoc_op = ConfigOp(op="run_open", target=RID, field="adhoc", value=near.strftime("%Y-%m-%d %H:%M"))
-    assert "This run is too far ahead to open now." in configops.describe(reg, far_op)
+    assert "too far ahead" not in configops.describe(reg, far_op)
     assert rc.SCHEDULE_NIGHT.format(when=reg.local12(near), name="Raid nights") in configops.describe(reg, adhoc_op)
     from test_raid_night import NightBot
 
     bot = NightBot(reg, rs)
-    for op in (far_op, adhoc_op):
-        with pytest.raises(RegistryError):
-            run(configops.apply_async(reg, op, "Jon", True, bot=bot))
+    with pytest.raises(RegistryError):
+        run(configops.apply_async(reg, adhoc_op, "Jon", True, bot=bot))
     assert not rs.events
+    run(configops.apply_async(reg, far_op, "Jon", True, bot=bot))
+    assert [e.occurrence for e in rs.events.values()] == [rc.occurrence_stamp(reg, far)]
 
 
-def test_discord_refuses_a_pickup_template_on_a_schedule_night_and_a_far_night(reg, rs, officer, channel):  # noqa: F811
+def test_discord_refuses_a_pickup_template_on_a_schedule_night_and_offers_a_far_one(reg, rs, officer, channel):  # noqa: F811
     _sid, far, near = nights(reg)
     reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=RID)
     h, bot = harness(reg, rs)
@@ -97,9 +100,9 @@ def test_discord_refuses_a_pickup_template_on_a_schedule_night_and_a_far_night(r
         assert far.date().isoformat() in [o.value for o in h.modal._items["day"].options]
         await h.submit(h.modal, day=far.date().isoformat(), hour=str(far.hour), minute=str(far.minute))
         assert "That time is the Raid nights run" in h.text, "a one-off at a schedule's night is that schedule's run"
-        assert "too far ahead to open now" in h.text and "Open" not in h.buttons()
+        assert "too far ahead" not in h.text and "Open" in h.buttons(), "no horizon: the far night offers Open"
     run(go())
-    assert not [c for c in bot.calls if c[0] == "open_run_and_post"] and not rs.events
+    assert not rs.events
 
 
 def test_a_one_off_already_on_the_night_keeps_it_and_the_scheduler_opens_no_second(reg, rs, monkeypatch):
@@ -184,3 +187,25 @@ def test_a_refusal_names_a_schedule_by_its_name_never_its_id(reg, rs):
     rc.open_run(reg, rs, RID, near, by="t", schedule=rc.ADHOC_SCHEDULE)
     said = rc.open_refusal(reg, rs, RID, near, None)
     assert said and "zq7" not in said and "can't open that night beside it" in said, said
+
+
+def test_a_night_opened_six_weeks_early_is_never_opened_again_by_the_schedule(reg, rs, monkeypatch):
+    """The owner's tweak A: Open the sheet now works however far ahead the night is. The occurrence lookup keeps the
+    schedule from opening that night a second time when its own sheet time comes; the run's timing is its own start's."""
+    reg.set_raid_overrides(RID, OPENED, "t")
+    far = (reg.now_local() + timedelta(days=42)).replace(hour=19, minute=30, second=0, microsecond=0)
+    sid = weekly(reg, RID, far.strftime("%a %H:%M"))
+    assert rc.open_refusal(reg, rs, RID, far, sid) is None and rc.open_row_refusal(reg, rs, RID, far, sid, far) is None
+    bot, opened = _scheduler(reg, rs)
+    ev = run(bot.open_run_and_post(reg, rs, RID, far, by="t", schedule=sid))
+    assert ev.occurrence == rc.occurrence_stamp(reg, far) and ev.schedule == sid
+    team = rc.run_team(reg, ev)
+    sd = reg.schedule_def(RID, sid)
+    assert team["cutoff_hard_hours"] == float(sd["lock_hours_before"]), "the lock is counted from the event's own start"
+    sheets = len(bot.signup.sent)
+    lead = float(sd["signup_lead_hours"])
+    for at in (far - timedelta(hours=lead) + timedelta(minutes=1), far - timedelta(hours=lead) + timedelta(minutes=30)):
+        monkeypatch.setattr(reg, "now_local", lambda at=at: at)
+        run(bot.scheduler_tick_guild(reg))
+    assert [k for k in opened if k != ev.key] == [] and [e.key for e in rs.live() if e.start == far] == [ev.key], "one run that night"
+    assert len(bot.signup.sent) == sheets, "no second sheet"

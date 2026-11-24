@@ -350,8 +350,7 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     dump.add("cancel_effects via consequence(cancel)", "three raids, third, with the run store", cq.consequence("cancel", reg, runs["three raids, third"], rs=rs))
     reg.set_raid_overrides("onyxias_lair", {"first_open": None}, "t")
     far = reg.now_local() + timedelta(days=40)
-    dump.add("open_row_refusal", "too far ahead", rc.open_row_refusal(reg, rs, RID, far, "barrow-deeps", far - timedelta(days=2)) or "")
-    dump.add("open_row_refusal", "too far ahead, the sheet opens before Open works", rc.open_row_refusal(reg, rs, RID, far, "barrow-deeps", far - timedelta(days=30)) or "")
+    assert rc.open_row_refusal(reg, rs, RID, far, "barrow-deeps", far - timedelta(days=2)) is None, "no horizon"
     ended = recurring_run(reg, rs, 7)  # a schedule's occurrence whose run is finished: found by its stamps
     ended.state = "done"
     rs.save(ended, "harness")

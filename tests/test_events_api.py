@@ -381,12 +381,12 @@ def test_an_unknown_event_is_a_sentence_without_the_key(officer_client):
 
 # ---------------------------------------------------------------- a coming-up event
 
-def test_a_coming_up_event_says_when_it_opens_by_hand(officer_client, reg, rs):
+def test_a_coming_up_event_opens_by_hand_however_far_ahead(officer_client, reg, rs):
     sid = tuesday(reg)
     near = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
     j = officer_client.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, near)}").json()
     assert j["can_open"] is True and j["why"] is None and j["box"]["verb"] == "Open the sheet"
-    # Hyjal first opens ten weeks out: past any fixed horizon, its first nights are still coming up — and too far to open
+    # Hyjal first opens ten weeks out: past any fixed horizon, its first nights are still coming up — and open by hand
     reg.set_raid_overrides(HYJAL, {"first_open": (reg.now_local() + timedelta(days=70)).strftime("%Y-%m-%dT%H:%M")}, "t")
     coming = officer_client.get("/api/event-list").json()["coming"]
     assert len(coming) == 3 and {x["schedule"] for x in coming} == {sid}
@@ -397,15 +397,16 @@ def test_a_coming_up_event_says_when_it_opens_by_hand(officer_client, reg, rs):
     r = officer_client.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, far)}")
     assert r.status_code == 200, r.text
     j = r.json()
-    assert [f["label"] for f in j["details"]] == ["Lineup", "Comes from", "Priority", "Confirmation", "Sheet opens", "Opening by hand", "Locks"]
+    assert [f["label"] for f in j["details"]] == ["Lineup", "Comes from", "Priority", "Confirmation", "Sheet opens", "Locks"]
     facts = {f["label"]: f["value"] for f in j["details"]}
-    assert facts["Opening by hand"] == f"From {reg.local12(far - timedelta(days=rc.OPEN_HORIZON_DAYS))}"
     assert facts["Lineup"] == "Hyjal Summit, then Barrow Deeps × 2" and facts["Priority"] == "Regulars first, then rank"
     sd = reg.schedule_def(HYJAL, sid)
     assert facts["Sheet opens"] == reg.local12(far - timedelta(hours=float(sd["signup_lead_hours"])))
     assert facts["Locks"] == reg.local12(far - timedelta(hours=float(sd["lock_hours_before"])))
-    assert j["can_open"] is False and j["why"] == rc.open_row_refusal(reg, rs, HYJAL, far, sid, far - timedelta(hours=float(sd["signup_lead_hours"])))
-    assert j["box"] is None and (j["title"], j["chip"]) == (reg.local12(far), PAGE_WORDS["no_sheet_yet"])
+    assert j["can_open"] is True and j["why"] is None, "no horizon (the owner's tweak A)"
+    assert j["box"]["verb"] == "Open the sheet" and (j["title"], j["chip"]) == (reg.local12(far), PAGE_WORDS["no_sheet_yet"])
+    said = " ".join(j["box"]["sentences"])
+    assert "early" in said and "won't open that night again" in said, "the box says what opening early means"
     assert j["open"] == {"start_iso": far.isoformat(), "schedule": sid, "occurrence": rc.occurrence_stamp(reg, far), "raid": HYJAL}
     assert j["schedule"] == {"id": sid, "name": "Tuesday raid night"}
     for x in coming:  # every listed night opens its coming-up view

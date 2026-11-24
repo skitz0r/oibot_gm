@@ -200,8 +200,14 @@ def test_open_the_sheet_now(reg, rs):
     lock_at = start - timedelta(hours=24)
     b = cq.open_now_box(reg, start, opens, lock_at)
     assert (b["title"], b["verb"]) == (f"Open the sheet for {reg.local12(start, '%a %d %b')}?", "Open the sheet")
-    assert b["sentences"] == ["The sheet opens now, three days early.", "It posts in the signup channel.", f"It still locks {reg.local12(lock_at)}."]
-    assert cq.open_now_box(reg, start, reg.now_local() + timedelta(hours=5), lock_at)["sentences"][0] == "The sheet opens now, five hours early."
+    assert b["sentences"] == ["The sheet opens now, three days early, and stays up until the event.", "It posts in the signup channel.",
+                              f"It locks {reg.local12(lock_at)}, and the schedule won't open that night again."]
+    assert cq.open_now_box(reg, start, reg.now_local() + timedelta(hours=5), lock_at)["sentences"][0] == \
+        "The sheet opens now, five hours early, and stays up until the event."
+    far = start_in(reg, 42)  # no horizon (the owner's tweaks): six weeks out says the same, in days
+    b = cq.open_now_box(reg, far, far - timedelta(days=5), far - timedelta(hours=24))
+    assert b["sentences"][0] == "The sheet opens now, 37 days early, and stays up until the event."
+    assert cq.open_now_box(reg, start, reg.now_local(), lock_at)["sentences"][2] == f"It still locks {reg.local12(lock_at)}."
 
 
 # ---------------------------------------------------------------- a stale box (Review Focus 5)

@@ -243,22 +243,21 @@ def test_open_no_slots_says_why_and_offers_run_times(reg, rs, officer, channel, 
     assert not bot.calls
 
 
-def test_open_slots_before_first_open_say_so_and_jump_to_run_times(reg, rs, officer, channel, monkeypatch):
+def test_open_offers_a_raids_first_nights_however_far_its_first_opening_is(reg, rs, officer, channel):
+    """No horizon (the owner's tweaks, 2026-11-24): a raid that first opens in two months offers its first nights to open
+    now, as the Events page's Coming up does (each schedule's next three nights)."""
     with_slots(reg, first_open=(reg.now_local() + timedelta(days=60)).replace(microsecond=0).isoformat())
-    seen = {}
-
-    async def raid_config(interaction, reg_, **seed):
-        seen.update(seed)
-    monkeypatch.setitem(FLOWS, "raid_config", raid_config)
+    first = min(t for s in reg.schedules("barrow_deeps") for t in rc.next_runs_of(reg, "barrow_deeps", s, 3))
     h, bot = harness(reg, rs)
 
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        assert "before its first lockout opens" in h.text
-        await h.press("Set this raid's run times →")
+        assert f"Next run — {reg.local12(first)}" in h.buttons()[0]
+        await h.press(h.buttons()[0])
+        assert "too far ahead" not in h.text and "Open" in h.buttons()
     asyncio.run(go())
-    assert seen == {"raid": "barrow_deeps", "section": "times"} and not bot.calls
+    assert not bot.calls
 
 
 def test_open_refuses_the_past_and_cancel_writes_nothing(reg, rs, officer, channel):
@@ -819,7 +818,6 @@ def test_handing_off_to_run_times_leaves_no_open_screen(reg, rs, officer, channe
     monkeypatch.setattr(pending_views, "_live", {})
     monkeypatch.setattr(pending_views, "track_interaction",
                         lambda key, interaction, title="": pending_views.track(key, app_id=1, token="t", title=title))
-    with_slots(reg, first_open=(reg.now_local() + timedelta(days=60)).replace(microsecond=0).isoformat())
 
     async def raid_config(interaction, reg_, **seed):
         pass

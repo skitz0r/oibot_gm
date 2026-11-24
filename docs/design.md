@@ -6026,6 +6026,18 @@ pages' Apply N changes are phase 6. Tests: `tests/test_confirm_boxes.py`, `tests
 `tests/test_board_page_server.py`, `tests/test_role_switches.py`, `tests/test_schedules_api.py`,
 `tests/test_solver_kept_off.py`, `tests/test_kept_off_round2.py`, `tests/test_serve_scratch.py`.
 
+**After the first look (2026-11-24, the owner's tweaks).** *No horizon on opening a schedule's night (A).* The
+21-day limit is gone: `rc.open_row_refusal` refuses only a closed night (a cancelled or finished occurrence is never
+reopened) and `rc.open_refusal` keeps `SCHEDULE_NIGHT` (a one-off or a pickup template asked at a schedule's night) and
+`NIGHT_TAKEN` (a live one-off holds the night); nights before a raid's first opening are no schedule nights at all
+(`schedule_starts`, C8), and a missing signup channel still only makes the sheet wait. Every listed coming-up night opens
+from the Events page, the Schedules page's Open this run early, `/raid open` (its list adds each schedule's next three
+nights however far ahead), plain text and MCP. A night opened early is found by its occurrence, so the scheduler never
+opens it again when its own sheet time comes, and its lock, reminder and confirm-by are counted from the event's start
+as for any run. Box 11 says the sheet stays up until the event and that the schedule won't open that night again; the
+coming-up Details lose *Opening by hand*. `OPEN_HORIZON_DAYS` stays only as the length of the "next three weeks" lists.
+Tests: `tests/test_schedule_night_open.py` (six weeks early, the scheduler opens no second run).
+
 **Later phases** (spec §9): the Discord wizards (phase 5, closing the two `PARITY_PENDING` rows and the role switch's
 `RUN_SWITCH_DISCORD_PENDING`) and the words (phase 6). Phases 1 and 2's tests:
 `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`, `tests/test_minimums.py`, `tests/test_minimums_solver.py`,

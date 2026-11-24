@@ -43,16 +43,15 @@ def test_upcoming_lists_three_runs_per_active_schedule_whatever_the_horizon(reg,
     assert sorted(u["schedule"] for u in rows) == ["alt"] * 3 + ["barrow-deeps"] * 3
     assert [u["start_iso"] for u in rows] == sorted(u["start_iso"] for u in rows)  # soonest first across schedules
     assert all("PM" in u["start"] and "19:30" not in u["start"] and u["opens"] for u in rows)  # words, 12-hour
-    assert all(u["can_open"] and u["why"] is None for u in rows)  # all within three weeks
+    assert all(u["can_open"] and u["why"] is None for u in rows)  # no horizon: every listed night opens
 
 
-def test_a_raid_that_opens_later_lists_its_first_runs_and_says_why_they_cant_open_yet(reg, c):
+def test_a_raid_that_opens_later_lists_its_first_runs_and_each_opens_by_hand(reg, c):
     weekly(reg, (reg.now_local() + timedelta(days=40)).strftime("%Y-%m-%dT15:00"))
     r = raid(c)
     rows = r["upcoming"]
     assert len(rows) == 3, "no 'No upcoming runs before the raid opens': the first runs are listed"
-    assert not any(u["can_open"] for u in rows)
-    assert all(u["why"].startswith("This run is too far ahead to open now. Open works from ") and "three weeks before the run" in u["why"] for u in rows)
+    assert all(u["can_open"] and u["why"] is None for u in rows), "no horizon (the owner, 2026-11-24): weeks ahead still opens"
     assert r["next_run"] == {"when": rows[0]["start"], "schedule": rows[0]["schedule_name"], "opens": rows[0]["opens"]}
     assert r["live_runs"] == [] and r["opened"] is False and r["first_open_words"]
     # the row's reason matches what Open next run says on every surface

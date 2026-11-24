@@ -923,21 +923,22 @@ def answer_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: str | No
 
 
 def open_now_box(reg: Registry, start, opens, lock_at, *, lineup: list[dict] | None = None, channel: bool = True, rev: str = "") -> dict:
-    """Box 11: Open the sheet now, on a coming-up event: how early, where it posts (or C9's line when a raid of the
-    `lineup` first opens after it starts), and when it still locks."""
+    """Box 11: Open the sheet now, on a coming-up event, however far ahead (no horizon since the owner's tweaks,
+    2026-11-24): how early and that the sheet stays up until the event, where it posts (or C9's line when a raid of the
+    `lineup` first opens after it starts), and when it still locks — with the schedule not opening that night again."""
     hours = (opens - reg.now_local()).total_seconds() / 3600
     if hours >= 24:
         d = round(hours / 24)
-        head = f"The sheet opens now, {count_words(d)} day{'' if d == 1 else 's'} early."
+        head = f"The sheet opens now, {count_words(d)} day{'' if d == 1 else 's'} early, and stays up until the event."
     elif round(hours) >= 1:
         h = round(hours)
-        head = f"The sheet opens now, {count_words(h)} hour{'' if h == 1 else 's'} early."
+        head = f"The sheet opens now, {count_words(h)} hour{'' if h == 1 else 's'} early, and stays up until the event."
     else:
         head = "The sheet opens now."
     where = (before_first_open_sentence(reg, lineup, start) if lineup else None) or (
         "It posts in the signup channel." if channel else "No signup channel is set, so the sheet waits until one is.")
-    return box(f"Open the sheet for {reg.local12(start, '%a %d %b')}?", [head, where, f"It still locks {reg.local12(lock_at)}."],
-               "Open the sheet", rev=rev)
+    last = f"It locks {reg.local12(lock_at)}, and the schedule won't open that night again." if hours >= 1 else f"It still locks {reg.local12(lock_at)}."
+    return box(f"Open the sheet for {reg.local12(start, '%a %d %b')}?", [head, where, last], "Open the sheet", rev=rev)
 
 
 def already_open_sentence(reg: Registry, ev) -> "rc.Refusal":

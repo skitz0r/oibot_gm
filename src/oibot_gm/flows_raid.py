@@ -109,8 +109,16 @@ class OpenWizard(Wizard):
         return self.reg.raid_def(self.rid).get("name", self.rid)
 
     def upcoming(self) -> list[tuple[dict, datetime]]:
-        """(schedule, start) for every active schedule, soonest first."""
-        return rc.upcoming(self.reg, self.rid, self.reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)
+        """(schedule, start) for every active schedule, soonest first: the next OPEN_HORIZON_DAYS, and each schedule's next
+        UPCOMING_PER_SCHEDULE nights however far ahead (the Events page's Coming up), since any of them opens now."""
+        now = self.reg.now_local()
+        out = list(rc.upcoming(self.reg, self.rid, now, 24 * rc.OPEN_HORIZON_DAYS))
+        have = {(s["id"], t) for s, t in out}
+        for s in self.reg.schedules(self.rid):
+            if s.get("kind") == "pickup" or not s.get("active", True):
+                continue
+            out += [(s, t) for t in rc.next_runs_of(self.reg, self.rid, s, rc.UPCOMING_PER_SCHEDULE, now) if (s["id"], t) not in have]
+        return sorted(out, key=lambda x: (x[1], x[0]["id"]))
 
     def starts(self) -> list[datetime]:
         return [t for _s, t in self.upcoming()]
@@ -329,7 +337,7 @@ class OpenWizard(Wizard):
         if ev:
             lines.append(f"-# A run for that time already exists and is {sheet_state(ev)}. Open points you at it instead of making a second.")
         closed = (rc.closed_run_refusal(self.rs, rc.find_run(self.reg, self.rs, self.rid, start, self.draft.get("schedule")))
-                  or rc.open_refusal(self.reg, self.rs, self.rid, start, sid))  # a schedule's night from a template, or too far ahead
+                  or rc.open_refusal(self.reg, self.rs, self.rid, start, sid))  # a schedule's night from a template, or a one-off holds it
         if closed:  # open_run_and_post refuses it: the screen says so instead of offering an Open that would fail
             lines.append(f"-# {closed}")
             await self.show(interaction, "\n".join(lines), self.button("Change", self.shortlist), self.button("Cancel", self.cancel))

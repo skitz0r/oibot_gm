@@ -626,8 +626,8 @@ src/oibot_gm/
                        The final fix wave (§5.67 phase 4): earlier_counts(reg, rs, ev) = a later raid's `earlier` while a raid before it is OPEN
                        (Preview lock on a later raid solves the earlier raids through event_board_preview; BLOCKING); open_schedule matches a
                        schedule's night at ANY distance (never a one-off beside the run the schedule opens later); open_refusal(reg, rs, instance,
-                       start, schedule) = THE on-demand open refusal (open_run_and_post, open_preview, plain text, /raid open): too far ahead =
-                       open_row_refusal's sentence, a one-off / pickup template on a schedule's night = SCHEDULE_NIGHT, a live one-off already on
+                       start, schedule) = THE on-demand open refusal (open_run_and_post, open_preview, plain text, /raid open): NO horizon (the
+                       owner, 2026-11-24 — a night weeks ahead opens as its schedule's run; open_row_refusal = a closed night only), a one-off / pickup template on a schedule's night = SCHEDULE_NIGHT, a live one-off already on
                        it = NIGHT_TAKEN (named by registry.schedule_name, never an id); one_off_at = a live one-off at the minute among EVERY live
                        first part (live_at answers only the newest); is_night_of(reg, instance, start, sid); board_move_kind (move | roster | swap |
                        substitute | release on the board as it stands); lock_failure_kind (a stored lock_error in old words = the same failure,
@@ -674,8 +674,8 @@ src/oibot_gm/
                        that day, the officer card / updates thread / loot thread links), signups (counts + rows; none = rc.pool_unanswered), parts
                        (_part_view: label, rosters_of, placed_of, short, sheet = ev_json, board_state ready | working | failed | locked, board_error,
                        mine, undo_box, layout, strategy), activity, boxes {lock, cancel, reschedule}, actions, switches (rc.event_switches), lineup,
-                       timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks; coming_json (Details with
-                       "Opening by hand: From <start − OPEN_HORIZON_DAYS>", can_open / why, open, box 11; ComingGone COMING_OPENED (with the key) |
+                       timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks; coming_json (Details: Sheet
+                       opens, Locks — no horizon, so can_open unless the night closed —, why, open, box 11 (says the sheet stays up and the schedule won't open it again); ComingGone COMING_OPENED (with the key) |
                        COMING_GONE); new_event_options (raids, lineups to copy — no pickup templates —, NEW_EVENT_LOCKS (2, 24), lock_choices, the
                        guild's date), new_event_view (What this makes; SCHEDULED_NIGHT), lineup_edit_json (refused through rc.lineup_fixed) /
                        lineup_draft_json (nothing written), seats_words, tz_words, character_rows. The routes run these in a thread

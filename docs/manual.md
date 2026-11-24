@@ -1016,10 +1016,11 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    regulars, if the regulars minus anyone away can't cover a tank or healer minimum, the officer channel gets the
    health card with its *Suggested* block right away (an early warning; see *Suggestions* above). With `open_dm` on [off] everyone
    the sheet is for (the schedule's regulars, or every main while it has none) is also DMed when it opens. Officers can
-   open a sheet early from the Events page: each night under *Coming up* has **Open the sheet now** (greyed, with why,
-   while it can't open yet), and **New event** (the page is `/events/new`) makes a one-off — see *New event and the lineup
+   open a sheet early from the Events page, however far ahead the night is: each night under *Coming up* has **Open the
+   sheet now** (greyed, with why, only when that night's event was cancelled or has ended), and **New event** (the page is `/events/new`) makes a one-off — see *New event and the lineup
    builder* below. `/raid open` does the same in Discord: pick the raid,
-   then **Next run — <time>**, **Another upcoming run…** (each labelled with its schedule's name when there are several)
+   then **Next run — <time>**, **Another upcoming run…** (the next three weeks, and each schedule's next three nights
+   however far ahead) (each labelled with its schedule's name when there are several)
    or **Ad hoc run…** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes from lists; nothing
    typed; ad hoc defaults; more than three pickup templates come as one *Pick a template* select). **Another upcoming
    run…** pages by week (*← Earlier week* / *Later week →*) when the raid has more upcoming runs than one list holds.
@@ -1027,9 +1028,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    regulars and confirmations, and the confirm screen says so. The confirm screen shows
    the time in guild time and in your own, and on a daylight-saving night says which time it used (2:30 AM on the
    spring-forward night becomes 3:30 AM; on the fall-back night the first 1:30 AM is taken). On the Events page
-   *Coming up* lists each active schedule's next three nights however far ahead; a night that can open has **Open the
-   sheet now** (one press, then its box) and one that can't yet says why in the bot's words (more than three weeks out:
-   when it can open and when its sheet opens on its own).
+   *Coming up* lists each active schedule's next three nights however far ahead, and every one of them opens with **Open
+   the sheet now** (one press, then its box). The sheet goes up at once and stays until the event; its lock, reminder
+   and confirm-by are counted from the event's start as usual, and the schedule never opens that night a second time.
    **The Events page** replaced the Rosters page: officers reach it from the rail (**Events**), from New event's *Back
    to Events*, from Open the sheet, and from every Discord card's link to a run (the run's event; a later raid's card
    opens its evening). An old Rosters address opens the Events page, and an old link to a run opens that run's event —
@@ -1110,9 +1111,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    hours before* or the event's own) while it is open — a locked event's timing is fixed. Each pick asks the bot
    again: *The event moves to Fri 27 Nov 7:00 PM. All 18 answers stand, and each person gets a notice.* with
    **Move**, or a refusal with only **Back** (*That time has passed*). A night **coming up** shows *no sheet yet*,
-   its details (with *Sheet opens* and *Opening by hand: From …*, three weeks before) and **Open the sheet now**,
-   greyed with the reason under it until it can open; its box says how early it opens, where it posts and when it
-   still locks, and the event's page follows. A coming-up night has no Reschedule: it is the schedule's (edit the
+   its details (with *Sheet opens* and *Locks*) and **Open the sheet now**, however far ahead; its box says how early
+   it opens and that the sheet stays up until the event, where it posts, when it locks and that the schedule won't
+   open that night again, and the event's page follows. A coming-up night has no Reschedule: it is the schedule's (edit the
    schedule). A **History** event shows its details (*Rostered*, *Ended*) and its activity. The page updates itself
    when anyone answers or a setting changes, and an open box keeps what you picked.
    **New event and the lineup builder.** The page has four sections. *Start from* › *Copy a lineup* fills the builder
@@ -1135,9 +1136,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    taken* and Open waits — the facts and the steps' times stay hidden until you pick another time; a time in the past
    says so too. A time that **is** one of a schedule's nights shows that
    schedule's lineup (*Comes from* names it) and opens that schedule's event — not the builder's lineup, rosters or lock —
-   asking first with the *Open the sheet for …?* box, however far ahead the night is. A night more than three weeks
-   out is refused with the same sentence as its row under *Coming up* (when Open works, and when its sheet opens on
-   its own), so it never becomes a one-off beside the event the schedule opens later. Asked for as a one-off or from a
+   asking first with the *Open the sheet for …?* box, however far ahead the night is, so it never becomes a one-off
+   beside the event the schedule would open later. Asked for as a one-off or from a
    pickup template — in Discord, in plain text or through MCP — a schedule's night is refused too: *… is a night of
    Raid nights, so a one-off can't start then.* A one-off made on such a night before this check keeps the night: the
    schedule opens nothing at that minute and the ops feed says so once, naming both. **Back** and *Back to Events* (and a rail link) ask *Leave

@@ -214,7 +214,7 @@ def _forecast_rows(reg: Registry, rs, s: dict, sd: dict, forecast: list[dict]) -
     """The regulars' next four weeks, a row per night (rc.series_forecast): {day, when, short {role: n}, away [names],
     expected, occurrence, key (the event open at that night | null), can_open, why} — Open this run early opens a short
     night's sheet by hand (POST /api/raid/{first raid}/open with the occurrence) while `can_open`; `why` is
-    rc.open_row_refusal's sentence otherwise (past the opening horizon, a closed night). A paused schedule's rows (as if
+    rc.open_row_refusal's sentence otherwise (a closed night; there is no horizon). A paused schedule's rows (as if
     resumed) never open."""
     find = rc.occurrence_index(reg, rs)
     now = reg.now_local()
