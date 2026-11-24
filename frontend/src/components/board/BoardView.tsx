@@ -91,7 +91,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
    *  rev (a board that changed meanwhile is refused with the current one) and shows its progress while it solves. */
   async function placeRest() {
     setPlacing(true);
-    try { await send("autofill", { rev: e.rev }); } finally { setPlacing(false); }
+    try { await send("autofill", { rev: e.rev, wait: true }); } finally { setPlacing(false); }
   }
 
   const groupName = (r: number, g: number) => (board.rosters.length > 1 ? `Roster ${r + 1} · Group ${g + 1}` : `Group ${g + 1}`);

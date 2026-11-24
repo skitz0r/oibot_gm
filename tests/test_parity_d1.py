@@ -612,18 +612,18 @@ def test_web_autofill_saves_through_save_board_with_its_rev(reg, rs, monkeypatch
     names = [m.display_name for m in ms]
     drag = {"on": True}
 
-    def autofill(reg_, rs_, ev_):
+    def autofill(reg_, rs_, ev_, earlier=None, stop=None):
         if drag["on"]:
             ev.layout = [[], [names[9]]]  # officer B's drag lands while the solver runs
-        return [names[:5], names[5:9]]
+        return [names[:5], names[5:9]], names[:9]
 
     monkeypatch.setattr(rc, "autofill", autofill)
-    r = c.post(f"/api/run/{ev.key}/autofill", json={}, headers=bearer())
+    r = c.post(f"/api/run/{ev.key}/autofill", json={"wait": True}, headers=bearer())  # Auto-fill groups, waited for (MCP / the Test bench card)
     assert r.status_code == 409, r.text
     assert ev.layout == [[], [names[9]]], "officer B's drag survives"
     assert not any("auto-filled" in line for line in ev.log)
     drag["on"] = False
-    r = c.post(f"/api/run/{ev.key}/autofill", json={}, headers=bearer())
+    r = c.post(f"/api/run/{ev.key}/autofill", json={"wait": True}, headers=bearer())
     assert r.status_code == 200, r.text
     assert ev.layout[:2] == [names[:5], names[5:9]] and any("auto-filled" in line for line in ev.log)
 

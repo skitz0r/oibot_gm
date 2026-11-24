@@ -328,7 +328,7 @@ def test_move_to_posts_the_same_move_a_drag_does():
     assert 'place(d.name, d.from, target === "bank" ? null : target, "drag")' in board
     assert 'place(name, from, { r: ri, g: gi, i: g.length }, "menu")' in board and 'place(name, from, null, "menu")' in board
     assert "moves={movesFor(s.display_name, from)}" in board and "moves?: MoveTarget[]" in menu and "onClick={m.onPick}" in menu
-    assert 'send("autofill", { rev: e.rev })' in board, "Place the rest carries the board's rev"
+    assert 'send("autofill", { rev: e.rev, wait: true })' in board, "Place the rest carries the board's rev and waits for the board (the route answers it)"
 
 
 def test_event_controls_are_44px_on_a_phone():

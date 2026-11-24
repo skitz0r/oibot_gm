@@ -741,13 +741,21 @@ class SetupMixin:
         m = reg.members.get(int(uid)) if reg is not None else None
         if m is None or m.test or bool(m.left_at) != present:  # nothing to change: already as Discord says
             return
+        raids = getattr(self, "raids", None)
+
+        def mark() -> None:
+            from . import raidcycle as rc
+
+            reg.member_left(m.discord_id, not present)
+            if not present and raids is not None:  # left: off every open board (the owner's tweaks C), their answer as it was
+                rc.unplace_member(raids.store(reg), m.discord_id, "left the server")
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            reg.member_left(m.discord_id, not present)
+            mark()
             return
         tasks: set = self.__dict__.setdefault("_left_tasks", set())
-        t = loop.create_task(asyncio.to_thread(reg.member_left, m.discord_id, not present))
+        t = loop.create_task(asyncio.to_thread(mark))
         tasks.add(t)
         t.add_done_callback(tasks.discard)
 

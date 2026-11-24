@@ -626,7 +626,10 @@ src/oibot_gm/
                        ev, earlier=, stop=) → (layout, auto names) = Auto-fill groups' solve (the lock's _solve_run, whatif off, on a copy whose board
                        keeps only the HAND placements: ev.auto_placed taken off first; PURE); RaidEvent.placed_by {name: officer}, drag_pins {uid:
                        {by, was, now}} and auto_placed [names Auto-fill placed] (all cleared at the lock) via record_moves (a move from another surface
-                       clears whose it was; any moved name leaves auto_placed), own_moves / own_pins / undo_rev; open_seat_roles (a locked roster's). The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
+                       clears whose it was; any moved name leaves auto_placed), own_moves / own_pins / undo_rev; open_seat_roles (a locked roster's).
+                       prune_board(ev) = in EVERY RaidStore.save of an open run: a placed name no longer Join, pinned out, or whose character|spec
+                       changed since placed (RaidEvent.placed_as) leaves the board in that save; unplace_member(rs, uid, why) (left the server);
+                       board_complete(reg, rs, p) → a later raid's Auto-fill counts that board (event_board_preview(complete_boards=)). The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
                        off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
                        ALL_KEPT_OFF raised before solving when every joiner is kept off; _solve_run's later-raid branch no longer reuses the groups per
                        roster as the part number (a hand place past a later raid's first groups reaches the solve); SOLVER_WORDS + conflict_sentence →
@@ -668,8 +671,8 @@ src/oibot_gm/
                        (LINEUP_OFFICER_ONLY; plan_lineup + apply_lineup under the board locks; a removed raid's pending asks closed under its plan_lock
                        and their cards edited "… was taken out of the … run, so this ask is closed."; the `moved` notice when a kept raid's start
                        changes; NO DM). cleanup_ephemeral drops a first part's dict with no run file after rc.DICT_WITHOUT_RUN_HOURS
-                       Phase 4 (§5.67): solving(reg, key) = the solver's single flight per run AND the lock first: every running Auto-fill groups
-                       stopped (event_board stop_all, wrapped so an auto-fill fault never touches the lock); board_move(…, by_id=) (before the lock
+                       Phase 4 (§5.67): solving(reg, key, lock=) = the solver's single flight per run AND the lock first: lock=True (lock_run) stops
+                       every running Auto-fill (stop_all), a preview only its event's (stop_event) — wrapped so an auto-fill fault never touches the lock; board_move(…, by_id=) (before the lock
                        rc.apply_move on the officers' layout: a drop on Not placed only un-places — no pin —, a place in a group lifts a kept-off pin;
                        recorded per officer); _write_board(…, auto=) (Auto-fill's write: ev.auto_placed; save_board empties it); undo_moves(reg,
                        rs, ev, by_id, by, rev=) = Undo my moves (only that officer's placements and the pins their drags changed, rc.undo_rev checked);
@@ -700,7 +703,8 @@ src/oibot_gm/
                        in one sentence (PAGE_WORDS autofill_locked / autofill_nobody / autofill_busy while a lock-side solve runs) or starts ONE task
                        (a second press gets it) → result None (written) | the sentence; solves on a PREVIEW_WORKERS 1 executor over snapshot / frozen
                        views taken on the loop (rc.earlier_counts then rc.autofill); writes under the raid's board lock only on the board it solved
-                       from (rc.board_rev; else autofill_changed) and when no lock stopped it (stop_all ← RaidMixin.solving: autofill_stopped); a
+                       from (inputs(): every raid's rc.solve_inputs up to it + auto_placed; else autofill_changed), when no lock or preview
+                       stopped it (autofill_stopped / autofill_stopped_preview) and when it differs from the board (else autofill_same); a
                        failure = rc.solver_error_text; state(reg, ev) = the page's {working, words, failed} (an outcome shown while the board is
                        unchanged); AUTOFILL_LISTENERS → publish('run:<raid key>') at start and end; one ops.audited line per write
   schedule_view.py     the Schedules page's read model (§5.67 phase 4), PURE: schedule_list(reg) → {active, paused (each {id, name, repeats}),

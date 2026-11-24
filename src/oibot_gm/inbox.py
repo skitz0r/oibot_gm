@@ -211,7 +211,8 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
     if key == "pin_in":
         return [f"{name} is pinned in for {run}, so the lock keeps them on the roster.", "Only officers see pins."]
     if key == "pin_out":
-        return [f"{name} is kept off the roster when {run} locks.", "Only officers see pins."]
+        placed = ev.state == "open" and any(sg.display_name in g for g in (ev.layout or []) for sg in [ev.signups.get(str(m.discord_id))] if sg)
+        return [f"{name} is kept off the roster when {run} locks.", *(["They come off the board now."] if placed else []), "Only officers see pins."]
     if key == "unpin":
         return [f"{name}'s pin comes off, so the lock places them like anyone else.", "Only officers see pins."]
     raise RegistryError(f"unknown action {key}")

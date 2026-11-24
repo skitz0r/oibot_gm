@@ -201,3 +201,55 @@ def test_without_the_earlier_raids_the_later_preview_is_another_roster(reg, rs, 
     monkeypatch.setattr(rc, "earlier_counts", lambda *a, **k: None)
     shown, bd = _preview_later_then_lock(reg, rs)
     assert shape(shown) != shape(bd.all_rosters)
+
+
+@pytest.mark.parametrize("how", ["keep off", "bench"])
+def test_after_autofill_a_kept_off_or_benched_name_is_not_rostered(reg, rs, how):
+    """The fix round's probe: Auto-fill places everyone it seats, then one placed name is kept off (⋮ pin out) or
+    answers Bench — they leave the board in the same save (rc.prune_board), so nothing keeps them on at the lock: the
+    lock leaves them off and fills their seat from Not placed (22 joined a 20: the first-come joiner next in line)."""
+    from oibot_gm import inbox
+
+    reg.seed_test_members(24, "t")
+    start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    ev = rc.open_run(reg, rs, HYJAL, start, by="t", schedule=rc.ADHOC_SCHEDULE)
+    ms = reg.test_members()
+    join(reg, rs, ev, ms[:22])
+    bot = NightBot(reg, rs)
+    ev = fill(bot, reg, rs, ev)
+    who = next(m for m in ms if m.display_name in {x for g in ev.layout for x in g})
+    if how == "keep off":
+        inbox.pin_write(reg, rs, ev, who, "out", "Jon")
+    else:
+        asyncio.run(bot.set_answer(reg, rs, ev, who, "sub", None, "Jon", by_id=OWNER))
+    assert who.display_name not in {x for g in ev.layout or [] for x in g}, "off the board in the same save"
+    assert who.display_name not in rc.lock_forces(reg, rs, ev).kept_on
+    if how == "keep off":
+        line = asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
+        on = {p.signup_name for p in ev.seated()}
+        assert ev.state == "locked" and who.display_name not in on and len(on) == 20, line
+        return
+    # Bench: nothing on the board keeps them on any more; the lock treats them as it treats every Bench answer (a
+    # candidate with the solver's bench penalty) — exactly as if they had never been placed
+    shown = asyncio.run(bot.lock_preview(reg, rs, ev, by="Jon"))
+    line = asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
+    assert ev.state == "locked" and shape(shown) == shape(ev.all_rosters), line
+
+
+def test_a_second_unchanged_press_answers_at_once(reg, rs):
+    """The first press's own placements are taken off before it solves again, so an unchanged second press builds the
+    first press's model: the solver's kept answer, no search, and nothing written (autofill_same)."""
+    from oibot_gm.constants import PAGE_WORDS
+
+    ev, bd = evening(reg, rs)
+    bot = NightBot(reg, rs)
+    fill(bot, reg, rs, ev)
+    log = len(rs.events[ev.key].log)
+
+    async def again():
+        return await eb.autofill_of(bot).start(reg, rs, rs.events[ev.key], by="Jon", by_id=OWNER, via="web")
+    t0 = time.monotonic()
+    said = asyncio.run(again())
+    took = time.monotonic() - t0
+    print(f"second unchanged press: {took:.2f} s")
+    assert said == PAGE_WORDS["autofill_same"] and len(rs.events[ev.key].log) == log and took < 3

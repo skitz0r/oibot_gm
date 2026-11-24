@@ -52,7 +52,7 @@ def test_compose_endpoint_adds_removes_and_clears_open_sheets(client, reg, rs): 
     r = client.post("/api/admin/test", json={"action": "compose", "add": [{"cls": "Druid", "spec": "Restoration", "count": 2}], "remove": [str(made[0].discord_id)]}, headers=bearer())
     assert r.status_code == 200, r.text and "2 added, 1 removed" in r.json()["message"]
     ev = rs.events[ev.key]
-    assert str(made[0].discord_id) not in ev.signups and made[0].display_name not in ev.layout[0]
+    assert str(made[0].discord_id) not in ev.signups and made[0].display_name not in (ev.layout or [[]])[0]  # the board keeps no name that left (prune_board)
     assert mains(reg)[("Druid", "Restoration")] >= 2
 
 

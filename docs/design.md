@@ -6100,6 +6100,27 @@ rosters exactly the board (its model differs from Auto-fill's, so it searches �
 tested with and without the kept answers). The live two-raid event (phase 2's stored shape, no placements) shows an
 empty board with everyone in Not placed and writes nothing. Tests: `tests/test_event_board.py`,
 `tests/test_event_board_solver.py` (slow).
+*Fix round (C).* A placed name used to outrank a later ⋮ pin out or an answer that left Join (lock_forces keeps a
+placed name on). Now `rc.prune_board` runs in every `RaidStore.save` of an OPEN run (the write side; `_solve_run`,
+`lock_forces` and the lock untouched): a placed name whose answer is no longer Join (Bench, No thanks, Can't make it,
+an absence, a retired or deleted character), who is pinned out, or whose character or spec changed since it was placed
+(`RaidEvent.placed_as` {name: "character|spec"}, recorded at the save that placed it) leaves the layout, auto_placed,
+placed_by and placed_as in that same save — on each raid of the event, a later raid through `sync_parts`' own save.
+Someone who left the server (`discord_pool.note_membership`) is taken off every open board by `rc.unplace_member`;
+their answer stays. After the lock nothing prunes. The ⋮ Keep off the roster box adds "They come off the board now."
+for a placed person. The Test bench card's Place the rest sends `{rev, wait: true}`: a stale rev is the old 409 with
+the board, the answer carries the board, needs and rev again (the at-once answer carries the board too).
+`RaidMixin.solving(lock=True)` (lock_run) stops every running Auto-fill (`autofill_stopped`); a Preview lock or split
+preview stops only that event's (`stop_event`, `autofill_stopped_preview`). The write checks `event_board.inputs` —
+every raid's `rc.solve_inputs` up to this one plus its auto_placed — instead of the board's rev, so a spec switch or an
+answer during the solve writes nothing; an answer equal to the board already there writes nothing (`autofill_same`,
+shown un-red). A second unchanged press solves the first press's model (its own placements are taken off first), so it
+is the solver's kept answer: 0.01 s in the slow test. A later raid's Auto-fill counts an earlier OPEN raid whose board
+is complete (`rc.board_complete`: everyone who joined and is not kept off is placed — its lock rosters exactly that
+board) instead of solving it (`event_board_preview(complete_boards=True)`, Auto-fill only; Preview lock still solves).
+`clear_board_box` counts people, not places. The footer is "The lock keeps these groups and fills any open seat from
+Not placed. Auto-fill groups places them now the way the lock would." and Not placed says "Nobody here is placed yet.
+The lock seats them where a seat is open, unless they are kept off."
 
 **Later phases** (spec §9): the Discord wizards (phase 5, closing the two `PARITY_PENDING` rows and the role switch's
 `RUN_SWITCH_DISCORD_PENDING`) and the words (phase 6). Phases 1 and 2's tests:

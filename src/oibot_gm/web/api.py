@@ -1585,19 +1585,23 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def run_autofill(request: Request, key: str):
         """Auto-fill groups (the owner's tweaks C; event_board.AutoFill): ONE run of the lock's own solve for this raid,
         written into its board as placements (hand placements and kept-off pins kept; a previous Auto-fill's replaced).
-        Answers at once with the working words: the page shows them until the board updates (`run:<key>`). A refusal
-        (locked, nobody joined, a lock solving now) → 400 with its sentence. `wait: true` (MCP) waits for the end and
-        answers with what happened: AUTOFILL_DONE and the board, or the sentence of an auto-fill that wrote nothing (409)."""
+        Answers at once with the working words and the board as it is now: the page shows them until the board updates
+        (`run:<key>`). A refusal (locked, nobody joined, a lock solving now) → 400 with its sentence. `rev` (the Test
+        bench card's Place the rest, as before): the board the officer pressed it on — a board changed since is a 409
+        with the current board, nothing solved. `wait: true` (MCP, the Test bench card) waits for the end and answers
+        with what happened: autofill_done and the board, or the sentence of an auto-fill that wrote nothing (409, the board)."""
         from .. import event_board
 
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
+        if d.get("rev") and str(d["rev"]) != rc.board_rev(v.reg, ev):
+            return stale(v, ev)
         try:
             task = event_board.autofill_of(bot).start(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+            return JSONResponse({"error": str(e), **board_reply(v.reg, ev)}, status_code=400)
         if not d.get("wait"):
-            return {"message": PAGE_WORDS["autofill_working"]}
+            return {"message": PAGE_WORDS["autofill_working"], **board_reply(v.reg, ev)}
         said = await task
         if said is not None:
             return JSONResponse({"error": said, **board_reply(v.reg, ev)}, status_code=409)

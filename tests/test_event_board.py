@@ -157,9 +157,9 @@ def test_a_drag_into_a_group_lifts_a_kept_off_pin_and_undo_puts_it_back(reg, rs)
     rs.save(ev, "a pin from the menu")
     asyncio.run(bot.board_move(reg, rs, ev, n[1], (0, 0), "Jon", by_id=OWNER))
     asyncio.run(bot.board_move(reg, rs, ev, n[2], (1, 0), "Jon", by_id=OWNER))
-    ev.pins[u[n[2]]] = "out"  # then plain text "keep n2 off"
+    ev.pins[u[n[2]]] = "out"  # then plain text "keep n2 off": a placed name kept off leaves the board (prune_board)
     rs.save(ev, "a pin from elsewhere")
-    assert ev.pins.get(u[n[1]]) is None and rc.own_moves(ev, OWNER) == sorted([n[1], n[2]])
+    assert ev.pins.get(u[n[1]]) is None and rc.own_moves(ev, OWNER) == [n[1]] and n[2] not in placed(ev)
     asyncio.run(bot.undo_moves(reg, rs, ev, OWNER, "Jon"))
     assert ev.pins[u[n[1]]] == "out", "the kept-off pin my drag lifted is back"
     assert ev.pins[u[n[2]]] == "out", "a pin set elsewhere is never touched"
@@ -339,7 +339,7 @@ def test_a_lock_stops_an_autofill_and_it_writes_nothing(reg, rs, monkeypatch):
         task = af.start(reg, rs, ev, by="Jon", by_id=OWNER, via="web")
         await asyncio.to_thread(started.wait, 10)
         assert af.state(reg, ev)["working"] is True and af.state(reg, ev)["words"] == PAGE_WORDS["autofill_working"]
-        async with bot.solving(reg, ev.key):  # a lock begins: the auto-fill gives way at once
+        async with bot.solving(reg, ev.key, lock=True):  # a lock begins: the auto-fill gives way at once
             proceed.set()
         return await task
 
@@ -407,14 +407,15 @@ def test_clear_the_board_through_the_servers_box(reg, rs, monkeypatch, web_bot):
     fill(bot, reg, rs, bd)
     first.pins[str(ms[3].discord_id)] = "out"
     rs.save(first, "kept off")
-    n = len(placed(first)) + len(placed(bd))
+    n = len(placed(first) | placed(rs.events[bd.key]))  # people, not places: one placed on both raids counts once
     url = f"/api/event/{ev.key}/clear"
     box = web_bot.c.post(url, json={"preview": True}, headers=H()).json()["box"]
     assert box["title"].startswith("Clear the board") and box["verb"] == "Clear the board" and not box["danger"]
     assert box["sentences"] == [f"{n} placed people go back to Not placed.", "Nobody is told.", "Auto-fill groups can place everyone again."]
     asyncio.run(bot.board_move(reg, rs, first, ms[1].display_name, (0, 1), "Jon", by_id=OWNER))  # a drag while the box is open
+    n2 = len(placed(first) | placed(rs.events[bd.key]))
     r = web_bot.c.post(url, json={"seen": box["fp"]}, headers=H())
-    assert r.status_code == 409 and r.json()["box"]["sentences"][0] == f"{n + 1} placed people go back to Not placed."
+    assert r.status_code == 409 and r.json()["box"]["sentences"][0] == f"{n2} placed people go back to Not placed."
     r = web_bot.c.post(url, json={"seen": r.json()["box"]["fp"]}, headers=H())
     assert r.status_code == 200, r.text
     for p in (first, bd):
@@ -616,3 +617,190 @@ def test_the_live_two_raid_event_shows_an_empty_board_and_writes_nothing(data_ro
     assert {k: (raids / f"{k}.json").read_bytes() for k in (lk, fk)} == before, "nothing written: the lock reads what it read"
     assert {k: rc.solve_inputs(rs.events[k]) for k in (lk, fk)} == inputs
     assert all(rs.events[k].layout is None and not rs.events[k].pins and rs.events[k].auto_placed == [] for k in (lk, fk))
+
+
+# ---------------------------------------------------------------- fix round: the board follows the answers and the pins
+
+def filled(reg, rs, monkeypatch, lineup=(), n=10):
+    """A real-member event (people()) with `n` joined, auto-filled through the in-order stub: everyone placed."""
+    monkeypatch.setattr(rc, "_solve_run", in_order())
+    ev = one_off(reg, rs, lineup=list(lineup))
+    ms = people(reg, n)
+    join(reg, rs, ev, ms)
+    bot = NightBot(reg, rs)
+    assert fill(bot, reg, rs, ev) is None and placed(ev) == {m.display_name for m in ms}
+    return ev, ms, bot
+
+
+def gone(ev, m) -> bool:
+    n = m.display_name
+    return n not in placed(ev) and n not in ev.auto_placed and n not in ev.placed_by and n not in ev.placed_as
+
+
+def test_keep_off_takes_a_placed_name_off_the_board(reg, rs, monkeypatch):
+    from oibot_gm import inbox
+
+    ev, ms, bot = filled(reg, rs, monkeypatch)
+    sentences = inbox.action_consequence(reg, ev, ms[2], "pin_out") if hasattr(inbox, "action_consequence") else None
+    inbox.pin_write(reg, rs, ev, ms[2], "out", "Jon")
+    assert gone(ev, ms[2]) and ms[2].display_name in rc.lock_forces(reg, rs, ev).kept_off, "kept off wins: the lock leaves them out"
+    if sentences is not None:
+        assert "They come off the board now." in sentences
+
+
+def test_leaving_join_takes_a_placed_name_off_every_raid_of_the_event(reg, rs, monkeypatch):
+    ev, ms, bot = filled(reg, rs, monkeypatch, lineup=[{"raid": BD, "rosters": 1}])
+    bd = rc.event_parts(rs, ev)[1]
+    assert fill(bot, reg, rs, bd) is None and ms[1].display_name in placed(bd)
+    asyncio.run(bot.set_answer(reg, rs, ev, ms[1], "sub", None, "Jon", by_id=OWNER))  # an officer answers Bench for them
+    assert gone(ev, ms[1]) and gone(rs.events[bd.key], ms[1]), "the answer is the evening's: both boards"
+    assert ms[1].display_name not in rc.lock_forces(reg, rs, ev).placed
+    asyncio.run(bot.set_answer(reg, rs, ev, ms[3], "out", None, ms[3].display_name, by_id=ms[3].discord_id))  # their own No thanks
+    assert gone(ev, ms[3])
+    asyncio.run(bot.call_out(reg, rs, ev, ms[4], "sick", "Jon", by_id=OWNER))  # Can't make it
+    assert gone(ev, ms[4])
+
+
+def test_an_absence_and_a_retired_character_take_a_placed_name_off(reg, rs, monkeypatch):
+    ev, ms, bot = filled(reg, rs, monkeypatch)
+    day = ev.start.astimezone(reg.tz).date().isoformat()
+    asyncio.run(bot.record_absence(reg, ms[5].discord_id, day, day, None, "Jon", by_id=OWNER))
+    assert gone(rs.events[ev.key], ms[5])
+    asyncio.run(bot.save_characters(reg, ms[6].discord_id, [{"label": ms[6].main.label, "retire": True}], ms[6].display_name, by_id=ms[6].discord_id))
+    assert gone(rs.events[ev.key], ms[6])
+
+
+def test_a_changed_character_or_spec_takes_a_placed_name_off(reg, rs, monkeypatch):
+    ev, ms, bot = filled(reg, rs, monkeypatch)
+    nyx = ms[0]  # Warrior Protection; add an alt and answer with it
+    reg.add_character(nyx.discord_id, nyx.display_name, "Nyxalt", "Mage", "Fire", None, False)
+    rc.set_signup(reg, rs, ev, reg.members[nyx.discord_id], "Nyxalt", "in", source="test")
+    assert gone(ev, nyx), "another character for the night: back to Not placed"
+    asyncio.run(bot.board_move(reg, rs, ev, nyx.display_name, (3, 0), "Jon", by_id=OWNER))
+    assert nyx.display_name in placed(ev) and ev.placed_as[nyx.display_name] == "Nyxalt|Fire"
+    rc.set_signup(reg, rs, ev, reg.members[nyx.discord_id], "Nyxalt", "in", source="test")  # the same answer again
+    assert nyx.display_name in placed(ev), "the same character and spec pressed again stays placed"
+
+
+def test_leaving_the_server_takes_a_placed_name_off(reg, rs, monkeypatch):
+    ev, ms, bot = filled(reg, rs, monkeypatch)
+    from oibot_gm.discord_pool import SetupMixin
+
+    SetupMixin.note_membership(bot, reg.config.discord_guild_id, ms[7].discord_id, False)  # Discord's own 404: they left
+    assert reg.members[ms[7].discord_id].left_at and gone(rs.events[ev.key], ms[7])
+    assert ev.signups[str(ms[7].discord_id)].status == "in", "their answer stays as they gave it"
+
+
+def test_after_the_lock_the_board_never_prunes(reg, rs, monkeypatch):
+    from conftest import lock_with_board
+
+    ev, ms, bot = filled(reg, rs, monkeypatch)
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms])
+    ev.layout = [[ms[0].display_name]]  # (a locked run's layout is never read; prune leaves a locked run alone)
+    rc.set_signup(reg, rs, ev, ms[0], None, "sub", source="test")
+    assert ev.layout == [[ms[0].display_name]]
+
+
+def test_a_second_press_with_nothing_changed_writes_nothing(reg, rs, monkeypatch):
+    ev, ms, bot = filled(reg, rs, monkeypatch)
+    log = len(ev.log)
+    assert fill(bot, reg, rs, ev) == PAGE_WORDS["autofill_same"] and len(ev.log) == log
+    st = eb.autofill_of(bot).state(reg, ev)
+    assert st == {"working": False, "words": PAGE_WORDS["autofill_same"], "failed": False}
+
+
+def test_an_answer_changed_while_it_solves_is_never_written_over(reg, rs, monkeypatch):
+    ev = one_off(reg, rs, lineup=[])
+    ms = people(reg, 10)
+    join(reg, rs, ev, ms)
+    bot = NightBot(reg, rs)
+    real = in_order()
+
+    def solve(reg_, rs_, p, *a, **k):  # a spec switch lands while the solve runs: the board is unchanged, the answers aren't
+        out = real(reg_, rs_, p, *a, **k)
+        rc.set_signup(reg, rs, rs.events[ev.key], ms[1], None, "sub", source="test")
+        return out
+
+    monkeypatch.setattr(rc, "_solve_run", solve)
+    assert fill(bot, reg, rs, ev) == PAGE_WORDS["autofill_changed"] and ev.layout is None
+
+
+def test_a_preview_stops_only_its_own_events_autofill(reg, rs):
+    bot = NightBot(reg, rs)
+    a, b = one_off(reg, rs, lineup=[]), rc.open_run(reg, rs, BD, start_in(reg, 5), by="t", schedule=rc.ADHOC_SCHEDULE)
+    af = eb.autofill_of(bot)
+    sa, sb = solver.Stop(), solver.Stop()
+    af.stops = {(reg.key, a.key): sa, (reg.key, b.key): sb}
+    af.events = {(reg.key, a.key): rc.event_id(a), (reg.key, b.key): rc.event_id(b)}
+
+    async def preview_then_lock():
+        async with bot.solving(reg, a.key):  # a Preview lock on event a
+            pass
+        assert sa.stopped and sa.why == PAGE_WORDS["autofill_stopped_preview"] and not sb.stopped, "only its own event's"
+        async with bot.solving(reg, a.key, lock=True):  # a real lock: every auto-fill gives way
+            pass
+        assert sb.stopped and sb.why == PAGE_WORDS["autofill_stopped"]
+
+    asyncio.run(preview_then_lock())
+
+
+def test_a_later_raid_counts_a_complete_earlier_board_instead_of_solving_it(reg, rs, monkeypatch):
+    calls = []
+    monkeypatch.setattr(rc, "_solve_run", in_order(calls))
+    ev = one_off(reg, rs, lineup=[{"raid": BD, "rosters": 1}])
+    ms = people(reg, 8)
+    join(reg, rs, ev, ms)
+    first, bd = rc.event_parts(rs, ev)
+    bot = NightBot(reg, rs)
+    fill(bot, reg, rs, first)  # everyone who joined is placed on the first raid: its lock has nothing to decide
+    calls.clear()
+    fill(bot, reg, rs, bd)
+    assert [c[0] for c in calls] == [bd.key], "the complete first board is counted, never solved"
+    assert set(calls[0][3]) == {m.discord_id for m in ms}
+    asyncio.run(bot.board_move(reg, rs, first, ms[0].display_name, None, "Jon", by_id=OWNER))  # incomplete again
+    calls.clear()
+    fill(bot, reg, rs, rs.events[bd.key])
+    assert [c[0] for c in calls] == [first.key, bd.key], "an incomplete board is solved, as its lock would"
+
+
+def test_clear_counts_people_once_across_raids(reg, rs, monkeypatch):
+    from oibot_gm import consequences as cq
+
+    ev, ms, bot = filled(reg, rs, monkeypatch, lineup=[{"raid": BD, "rosters": 1}])
+    bd = rc.event_parts(rs, ev)[1]
+    fill(bot, reg, rs, bd)
+    n = len({m.display_name for m in ms} & (placed(ev) | placed(rs.events[bd.key])))
+    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == f"{n} placed people go back to Not placed."
+
+
+def test_the_test_bench_place_the_rest_gets_its_board_and_its_rev_is_honoured(reg, rs, monkeypatch, web_bot):
+    monkeypatch.setattr(rc, "_solve_run", in_order())
+    ev = one_off(reg, rs, lineup=[])
+    join(reg, rs, ev, reg.test_members())
+    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={"rev": "stale", "wait": True}, headers=H())
+    assert r.status_code == 409 and r.json()["board"] and ev.layout is None, "a board changed since: nothing solved"
+    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={"rev": rc.board_rev(reg, ev), "wait": True}, headers=H())
+    j = r.json()
+    assert r.status_code == 200 and j["board"]["rosters"] and j["rev"] == rc.board_rev(reg, ev) and j["needs"] is not None, r.text
+    assert sum(len(g) for ro in j["board"]["rosters"] for g in ro["groups"]) == len(placed(ev)) > 0
+    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={}, headers=H())
+    assert r.json()["board"], "the at-once answer carries the board as it is"
+
+
+def test_a_bench_answer_the_solve_seats_is_never_written_to_the_board(reg, rs, monkeypatch):
+    """The solver may seat a Bench answer (with its penalty); the board holds joiners only — otherwise prune_board takes
+    it straight off and every press writes the same board again (found on the scratch server)."""
+    ev = one_off(reg, rs, lineup=[])
+    ms = people(reg, 6)
+    join(reg, rs, ev, ms[:5])
+    rc.set_signup(reg, rs, ev, ms[5], None, "sub", source="test")
+
+    def solve(reg_, rs_, p, *a, **k):  # seats everyone, the Bench answer too
+        players = rc.players_for(reg_, p)
+        rosters = rc.board_rosters(reg_, p, [[x.signup_name for x in players]], rc.run_size(reg_, p))
+        return players, rosters, 1
+
+    monkeypatch.setattr(rc, "_solve_run", solve)
+    bot = NightBot(reg, rs)
+    assert fill(bot, reg, rs, ev) is None and placed(ev) == {m.display_name for m in ms[:5]}
+    assert fill(bot, reg, rs, ev) == PAGE_WORDS["autofill_same"], "an unchanged press writes nothing"

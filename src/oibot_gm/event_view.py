@@ -268,8 +268,8 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     today (the guild's date: Reschedule's lower bound), locks (Reschedule's Locks choices, the event's own among them)}.
     Any part's key answers as its event. `viewer` = the officer looking (their own board
     moves: each part's `mine` and Undo box). `autofill(part)` = event_board.AutoFill.state for an open raid (its
-    Auto-fill groups line); the board itself is the officers' layout — nothing is solved for a view. `boxes.clear` =
-    More › Clear the board (consequences.clear_board_box)."""
+    Auto-fill groups line); the board itself is the officers' layout — nothing is solved for a view. `actions.clear` =
+    More › Clear the board is offered (its box: consequences.clear_board_box through POST /api/event/{key}/clear)."""
     first = rc.first_part(rs, ev)
     parts = rc.event_parts(rs, first)
     state = _state(parts)

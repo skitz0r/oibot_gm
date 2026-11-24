@@ -860,19 +860,26 @@ class RaidMixin:
         return (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or (self.get_channel(cfg.ops_channel_id) if cfg.ops_channel_id else None)
 
     @contextlib.asynccontextmanager
-    async def solving(self, reg, key: str):
+    async def solving(self, reg, key: str, *, lock: bool = False):
         """Single flight for the solver per run, whoever asks (a lock from chat, MCP, the scheduler, the card or the
         site; a split preview): a second caller gets rc.SolverBusy instead of a second solve. Keyed (guild, run key).
-        The lock comes first: once it holds the run, every Auto-fill groups still solving is abandoned (event_board's
-        stop_all: it writes nothing), and none starts while it runs."""
-        lock = self.__dict__.setdefault("_solver_locks", {}).setdefault((reg.key, key), asyncio.Lock())
-        if lock.locked():
+        The lock comes first: once it holds the run, `lock=True` (lock_run: it needs the CPU) abandons every Auto-fill
+        groups still solving in the process (event_board stop_all); a Preview lock or split preview only that event's
+        (stop_event). A stopped auto-fill writes nothing, and none starts while either runs."""
+        is_lock = lock
+        flight = self.__dict__.setdefault("_solver_locks", {}).setdefault((reg.key, key), asyncio.Lock())
+        if flight.locked():
             raise rc.SolverBusy()
         from .event_board import autofill_of
 
-        async with lock:
+        async with flight:
             try:
-                autofill_of(self).stop_all()
+                af = autofill_of(self)
+                if is_lock:
+                    af.stop_all()
+                else:
+                    run = self.raids.store(reg).events.get(key) if getattr(self, "raids", None) is not None else None
+                    af.stop_event(reg.key, rc.event_id(run) if run is not None else None)
             except Exception:  # noqa: BLE001 — an auto-fill bug never touches the lock / fill it wraps
                 log.exception("auto-fill stop failed (%s %s)", reg.key, key)
             yield
@@ -909,7 +916,7 @@ class RaidMixin:
         if rc.is_follow(ev) and any(p.state == "open" for p in rc.event_parts(rs, ev) if rc.part_no(p) < rc.part_no(ev)):
             raise RegistryError(rc.LATER_PART_LOCK.format(first=run_title(reg, rc.first_part(rs, ev))))
         team = rc.run_team(reg, ev)
-        async with self.solving(reg, ev.key), self.board_lock(reg, ev.key):
+        async with self.solving(reg, ev.key, lock=True), self.board_lock(reg, ev.key):
             if ev.state != "open":
                 raise RegistryError(f"{run_title(reg, ev)} is already {ev.state}.")
             # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
@@ -948,7 +955,7 @@ class RaidMixin:
             ev.rosters = trial.rosters
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
-            ev.placed_by, ev.drag_pins, ev.auto_placed = {}, {}, []  # who placed whom was the board before the lock; the roster is the board now
+            ev.placed_by, ev.drag_pins, ev.auto_placed, ev.placed_as = {}, {}, [], {}  # who placed whom was the board before the lock; the roster is the board now
             ev.lock_seats = [uid for r in ev.all_rosters for g in r.groups for n in g if (uid := rc.uid_of_name(ev, n)) is not None]
             ev.log.append(f"locked by {by}")
             held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]

@@ -151,7 +151,7 @@ export interface PageWords {
   bank_empty: Record<"nobody" | "placed" | "rostered", string>;
   /** Auto-fill groups (event_board.AutoFill): the button, its working line and its outcomes */
   autofill_button: string; autofill_working: string; autofill_done: string; autofill_changed: string; autofill_stopped: string;
-  autofill_busy: string; autofill_locked: string; autofill_nobody: string;
+  autofill_busy: string; autofill_locked: string; autofill_nobody: string; autofill_stopped_preview: string; autofill_same: string;
   by_an_officer: string; no_times: string; no_reminder: string; for_seats: string; short_every_week: string;
   ready_every_week: string; short_weeks: string; paused_next: string; open_now: string; no_minimums: string; played_nowhere: string;
   /** a setting's name: the schedule editor's labels and the Save box's lines (configops) say the same */

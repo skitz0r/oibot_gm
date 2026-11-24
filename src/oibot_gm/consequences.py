@@ -1004,8 +1004,9 @@ def clear_board_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
     parts = [p for p in rc.event_parts(rs, rc.first_part(rs, ev)) if p.state == "open"]
     if not parts:
         return refusal_box(title, CLEAR_LOCKED)
-    joined = lambda p: {s.display_name for s in p.by_status("in")}  # noqa: E731
-    n = sum(len({x for g in rc.board_layout(reg, p) for x in g} & joined(p)) for p in parts)
+    # people, not places: someone placed on two raids of the evening is one person going back
+    n = len({s.discord_id for p in parts for g in rc.board_layout(reg, p) for x in g
+             if (s := rc.signup_by_name(p, x)) is not None and s.status == "in"})
     if not n:
         return refusal_box(title, CLEAR_EMPTY)
     head = "The one placed person goes back to Not placed." if n == 1 else f"{n} placed people go back to Not placed."

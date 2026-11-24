@@ -1062,24 +1062,32 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    **Board** come next. The Board has a button per raid of the evening (*6:30 PM · Hyjal Summit*, *9:30 PM · Barrow
    Deeps*; none for a one-raid event), then *Rosters* (*1 of 20*), *Placed* (*18 of 18 joined*) and *Short* (the role
    icon and how many — what the raid lacks whoever is placed), then *Not placed* beside the groups — *Roster 1*,
-   *Roster 2* when the raid makes several — and under them *The lock keeps these groups and places everyone still in
-   Not placed, and Auto-fill groups shows where it would put them.* with **Undo my moves** (greyed until you have moved
+   *Roster 2* when the raid makes several — and under them *The lock keeps these groups and fills any open seat from Not
+   placed. Auto-fill groups places them now the way the lock would.* with **Undo my moves** (greyed until you have moved
    someone; its tooltip says so). Before the lock the board is what officers placed: nothing is worked out when the
    page opens, when someone answers or when a name is dragged. A drag (or a name's **⋮ › Move to…**, on a phone or a
    keyboard) moves at once, with no box; into a full group Move to… offers *Swap with Nyx*, one entry per person there.
-   *Not placed* says *A name here isn't placed yet. The lock places them unless they are kept off.* — dropping a name
+   *Not placed* says *Nobody here is placed yet. The lock seats them where a seat is open, unless they are kept off.* —
+   with more joiners than seats (or late joiners on a first-to-join event) some stay out at the lock. Dropping a name
    there, or pushing it there by a swap, only takes it out of its group. Keeping someone off the roster is their **⋮ ›
-   Keep off the roster** (the word *kept off* then shows on their line; **Unpin** takes it back; dragging them into a
-   group takes it back too, and **Undo my moves** puts it back). **Auto-fill groups**, under the *Not placed* heading,
+   Keep off the roster** (a placed person comes off the board at once; the word *kept off* then shows on their line;
+   **Unpin** takes it back; dragging them into a group takes it back too, and **Undo my moves** puts it back). A placed
+   person whose answer leaves Join (Bench, No thanks, Can't make it, an absence, leaving the server, a retired
+   character) or who changes the character or spec they come as goes back to *Not placed* at once too — Auto-fill or the
+   lock places them again if they still play. **Auto-fill groups**, under the *Not placed* heading,
    places everyone still there the way the lock would right now — the lock's own placement, with every name you placed
    by hand kept where it is and every *kept off* honoured — and writes it into the groups; it asks nothing first (it
    changes only the board). While it works the button shows *Filling the groups the way the lock would. The board
    updates when it is done.* (about 12 seconds a raid; a lock being built goes first and stops it, *A lock started
    while the groups were being filled, so the board stays as it was.*). Press it again after moving people and it
-   replaces only its own placements — yours stay. If someone moved a name while it worked it writes nothing (*The
-   board changed while the groups were being filled, so it stays as the officers left it.*), and when no roster fits it
+   replaces only its own placements — yours stay; with nothing changed it writes nothing and says *The groups are
+   already filled the way the lock would fill them, so nothing changed.* Auto-fill's placements are a change to the
+   board: **Undo my moves** doesn't take them back, **Clear the board** does. If someone moved a name or an answer
+   changed while it worked it writes nothing (*The board or the answers changed while the groups were being filled, so
+   the board stays as it was.*); a Preview lock on the same event stops it too (*A lock preview started on this event
+   while the groups were being filled, so the board stays as it was.*), and when no roster fits it
    says why under the button (the lock would fail the same way). With nothing changed afterwards, **Lock** rosters
-   exactly the board Auto-fill wrote; if you never press it, the lock places whoever is still in *Not placed*, as it
+   exactly the board Auto-fill wrote; if you never press it, the lock fills the open seats from *Not placed*, as it
    always has. **More › Clear the board…** empties every group of the event back to *Not placed* (your placements and
    Auto-fill's alike; pins stay) after the bot's box (*14 placed people go back to Not placed.* · *Nobody is told.* ·
    *Auto-fill groups can place everyone again.*). A locked event's board is the roster: no drag, and **⋮ ›
@@ -1208,7 +1216,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    for that raid, written into its groups; on a later raid of the evening it reads who the raids before it will roster,
    as the lock does). Each raid has its own board and its own button. A drag keeps that person where you put them when
    the lock comes; dropping on someone swaps the two, and dropping on *Not placed* only takes them out of their group —
-   the lock still places them. The lock places everyone still in *Not placed*. **Undo my moves** takes back only your
+   the lock can still seat them. The lock fills the open seats from *Not placed*. **Undo my moves** takes back only your
    own moves; another officer's and Auto-fill's stay. Its confirm counts them (*Your 2 moves on this board are dropped.
    Those people go back to Not placed.*), and if the board changed while it was open you see the new count first. A
    locked roster's seat a minimum still wants shows its role icon and *open seat*. Once the sheet locks the board is

@@ -78,7 +78,7 @@ PAGE_WORDS = {
     "bank_empty": {"nobody": "Nobody has joined yet.", "placed": "Everyone who joined is placed.",
                    "rostered": "Everyone who joined is rostered."},
     # under the Board before the lock (the owner's tweaks C): the board is what the officers placed, the lock places the rest
-    "board_footer": "The lock keeps these groups and places everyone still in Not placed, and Auto-fill groups shows where it would put them.",
+    "board_footer": "The lock keeps these groups and fills any open seat from Not placed. Auto-fill groups places them now the way the lock would.",
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
     # Role switches: each row's button (rc.event_switches `button`), and why a short raid has no switch to show (`why`)
     "switch_button": "Switch", "answer_button": "Answer for them", "ask_button": "Ask",
@@ -92,15 +92,17 @@ PAGE_WORDS = {
     "open_seat": "open seat",
     # the Board's Not placed list before the lock (the owner's tweaks C): a name there is only not placed yet — the lock
     # places them — and one kept off through the ⋮ menu (an "out" pin) carries the word `kept_off` on its line
-    "not_placed_note": "A name here isn't placed yet. The lock places them unless they are kept off.",
+    "not_placed_note": "Nobody here is placed yet. The lock seats them where a seat is open, unless they are kept off.",
     "kept_off": "kept off",
     # Auto-fill groups (event_board.AutoFill): the button beside Not placed, its working line, what an MCP press that
     # waited is told, and each outcome that writes nothing (shown beside the button while the board is unchanged)
     "autofill_button": "Auto-fill groups",
     "autofill_working": "Filling the groups the way the lock would. The board updates when it is done.",
     "autofill_done": "The groups are filled the way the lock would fill them now.",
-    "autofill_changed": "The board changed while the groups were being filled, so it stays as the officers left it.",
+    "autofill_changed": "The board or the answers changed while the groups were being filled, so the board stays as it was.",
     "autofill_stopped": "A lock started while the groups were being filled, so the board stays as it was.",
+    "autofill_stopped_preview": "A lock preview started on this event while the groups were being filled, so the board stays as it was.",
+    "autofill_same": "The groups are already filled the way the lock would fill them, so nothing changed.",
     "autofill_busy": "The bot is building a roster right now, so the groups can't be filled until it is done.",
     "autofill_locked": "The roster is locked, so the board is the roster now.",
     "autofill_nobody": "Nobody has joined yet, so there is nobody to place.",

@@ -199,6 +199,9 @@ class RaidEvent(BaseModel):
     # and keeps every other placement (a hand one). A name moved by anyone leaves it; pruned at every board write, emptied
     # by a whole-board write, cleared at the lock. Older code ignores the key (extra="ignore") and drops it at its next save
     auto_placed: list[str] = Field(default_factory=list)
+    # before the lock, what each placed name answered with when it was placed: name → "character|spec" (prune_board). A
+    # placed person whose character or spec for the night changes goes back to Not placed. Older code ignores the key
+    placed_as: dict[str, str] = Field(default_factory=dict)
     split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
     cards: dict[str, int] = Field(default_factory=dict)  # officer cards in the roster channel: "health" | "lock:<i>" -> message id
     cards_channel_id: Optional[int] = None
@@ -2216,6 +2219,7 @@ class RaidStore:
                 self.events[ev.key] = ev
 
     def save(self, ev: RaidEvent, message: str) -> None:
+        prune_board(ev)  # before the lock: a placed name that left Join, was kept off or changed what it plays leaves the board
         stamp_log(ev)
         self.store.write_text(ev.rel_path(self.key), ev.model_dump_json(indent=1))
         self.events[ev.key] = ev
@@ -4596,6 +4600,61 @@ def record_moves(ev: RaidEvent, name: str, at_before: dict, groups: list[list[st
     ev.auto_placed = [n for n in ev.auto_placed if n not in changed]  # moved by a person: a hand placement now
 
 
+def prune_board(ev: RaidEvent) -> list[str]:
+    """The officers' board stays true to the answers and pins (the owner's tweaks C, fix round): BEFORE the lock, a
+    placed name whose answer is no longer Join (Bench, No thanks, Can't make it, an absence, a left member, a retired
+    character), who is pinned out (⋮ Keep off the roster), or whose character or spec for the night changed since it was
+    placed (`placed_as`) leaves the layout, auto_placed, placed_by and placed_as — as a drag to Not placed does — so the
+    lock's placement never outranks it (lock_forces: a placed name is kept on). Run by every RaidStore.save of an open
+    run (each raid of an event on its own: a later raid follows the first raid's answers through sync_parts' save).
+    Records `placed_as` for a name placed without one. → the names taken off (nothing changes after the lock)."""
+    if ev.state != "open" or not (ev.layout or ev.placed_as):
+        return []
+    out = {u for u, v in ev.pins.items() if v == "out"}
+    gone: list[str] = []
+    keep: dict[str, str] = {}
+    lay = []
+    for g in ev.layout or []:
+        row = []
+        for n in g:
+            sg = signup_by_name(ev, n)
+            what = f"{sg.character}|{sg.spec}" if sg is not None else ""
+            if sg is None or sg.status != "in" or str(sg.discord_id) in out or ev.placed_as.get(n, what) != what:
+                gone.append(n)
+                continue
+            keep[n] = what
+            row.append(n)
+        lay.append(row)
+    if gone:
+        ev.layout = lay if any(lay) else None
+        ev.placed_by = {n: u for n, u in ev.placed_by.items() if n not in gone}
+        ev.auto_placed = [n for n in ev.auto_placed if n not in gone]
+        ev.log.append("off the board: " + ", ".join(gone))
+    ev.placed_as = keep
+    return gone
+
+
+def unplace_member(rs: "RaidStore", uid: int, why: str) -> list[str]:
+    """Take member `uid` off every OPEN run's board (layout, auto_placed, placed_by, placed_as), one save per run —
+    someone who left the Discord server (discord_pool.note_membership): their answer stays as they gave it, and the lock
+    decides about them like anyone in Not placed. → the run keys written."""
+    done = []
+    for ev in rs.live():
+        sg = ev.signups.get(str(uid))
+        if ev.state != "open" or sg is None or not any(sg.display_name in g for g in ev.layout or []):
+            continue
+        n = sg.display_name
+        lay = [[x for x in g if x != n] for g in ev.layout or []]
+        ev.layout = lay if any(lay) else None
+        ev.placed_by.pop(n, None)
+        ev.placed_as.pop(n, None)
+        ev.auto_placed = [x for x in ev.auto_placed if x != n]
+        ev.log.append(f"off the board: {n}")
+        rs.save(ev, f"{n} off the board ({why})")
+        done.append(ev.key)
+    return done
+
+
 def own_pins(ev: RaidEvent, by_id: int | None) -> dict[str, dict]:
     """The pin changes officer `by_id`'s drags made that still stand (ev.drag_pins whose pin is still what the drag
     left): member id → the record."""
@@ -4715,8 +4774,19 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
 
 # ---------------------------------------------------------------- the lock's placement, without a lock (Auto-fill, Preview lock)
 
+def board_complete(reg: Registry, rs, p: RaidEvent) -> bool:
+    """An open raid whose board leaves its lock nothing to decide: everyone who joined and is not kept off
+    (lock_forces) is placed. Its lock then rosters exactly the board (every placed name is fixed), so a later raid's
+    Auto-fill counts the board instead of solving it (event_board_preview's `complete_boards`)."""
+    joined = {s.display_name for s in p.by_status("in")}
+    if p.state != "open" or not joined:
+        return False
+    placed = {n for g in (p.layout or []) for n in g}
+    return joined - set(lock_forces(reg, rs, p).kept_off) <= placed
+
+
 def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None,
-                        counts: dict[int, int] | None = None) -> dict[str, "list[RosterResult] | str"]:
+                        counts: dict[int, int] | None = None, complete_boards: bool = False) -> dict[str, "list[RosterResult] | str"]:
     """Every OPEN raid of an event as its lock would place people now — PURE: deep copies, nothing saved. Each raid
     solves through the lock's own entry (_solve_run, the run's strategy, the lock's budget SOLVE_TIME_LIMIT_S, the
     raid's minimums, pins and the officers' board as hard placements), so the solver's repeatable answer is the
@@ -4746,6 +4816,11 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
             out[p.key] = board_rosters(reg, p, board_layout(reg, p), run_size(reg, p))
             continue
         earlier = dict(times) if is_follow(p) else None
+        if complete_boards and board_complete(reg, rs, p):  # Auto-fill only: the board IS what its lock rosters
+            rosters = board_rosters(reg, p, board_layout(reg, p), run_size(reg, p))
+            out[p.key] = rosters
+            count(p, rosters)
+            continue
         try:
             players, rosters, _ = _solve_run(reg, rs, p, time_limit=SOLVE_TIME_LIMIT_S, whatif=False, earlier=earlier, stop=stop)
         except solver.Stopped:
@@ -4760,20 +4835,22 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
     return out
 
 
-def earlier_counts(reg: Registry, rs: RaidStore, ev: RaidEvent, stop=None) -> dict[int, int] | None:
+def earlier_counts(reg: Registry, rs: RaidStore, ev: RaidEvent, stop=None, complete_boards: bool = False) -> dict[int, int] | None:
     """A later raid's `earlier` for a solve made while a raid before it is still OPEN (Preview lock or Auto-fill groups on
     a later raid, the final fix wave of §5.67 phase 4): who the raids before it will roster — a locked raid's roster,
     an open raid's own lock solve (event_board_preview over the raids before it, their boards fixed). Without it the
     solve ran as if nobody were rostered before it, while the lock (made only after those raids lock) reads their
     rosters. BLOCKING (it may solve): a thread. None for a first raid, or when no raid before it is open (the solve
-    reads their rosters itself, exactly as the lock does). `stop`: Auto-fill's (solver.Stopped when a lock starts)."""
+    reads their rosters itself, exactly as the lock does). `stop`: Auto-fill's (solver.Stopped when a lock starts).
+    `complete_boards` (Auto-fill only; Preview lock solves every open raid): an open raid whose board is complete
+    (board_complete) is counted from its board."""
     if not is_follow(ev):
         return None
     before = [p for p in event_parts(rs, ev) if part_no(p) < part_no(ev)]
     if not any(p.state == "open" for p in before):
         return None
     times: dict[int, int] = {}
-    event_board_preview(reg, rs, first_part(rs, ev), parts=before, counts=times, stop=stop)
+    event_board_preview(reg, rs, first_part(rs, ev), parts=before, counts=times, stop=stop, complete_boards=complete_boards)
     return times
 
 
@@ -4838,7 +4915,10 @@ def autofill(reg: Registry, rs: RaidStore, ev: RaidEvent, earlier: dict[int, int
     solved += [[] for _ in range(n - len(solved))]
     hand += [[] for _ in range(n - len(hand))]
     by_hand = {x for g in hand for x in g}
-    layout = [h + [x for x in g if x not in by_hand] for h, g in zip(hand, solved)]
+    # the board holds joiners only: a Bench answer the solve seats is the lock's to decide (prune_board would take it
+    # straight off again, and every press would write the same board anew)
+    joined = {s.display_name for s in ev.by_status("in")}
+    layout = [h + [x for x in g if x not in by_hand and x in joined] for h, g in zip(hand, solved)]
     return layout, sorted({x for g in layout for x in g} - by_hand)
 
 
