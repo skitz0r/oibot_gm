@@ -50,6 +50,7 @@ log = logging.getLogger(__name__)
 
 PREVIEW_WORKERS = 1  # board solves at once in the process: each is a lock-sized CP-SAT solve (8 search workers)
 MAX_BOARDS = 32  # events whose picture is kept (least recently used goes first)
+MEMO_PER_EVENT = 8  # raid answers kept per event (least recently used goes first): a move on one raid re-solves only it
 BOARD_LISTENERS: list = []  # fn(guild key, event key): a new current picture (the web publishes `run:<event key>`)
 
 
@@ -69,33 +70,49 @@ def needs_solve(parts: list["rc.RaidEvent"]) -> bool:
     return any(p.state == "open" and p.by_status("in") for p in parts)
 
 
+def _comp(view) -> dict:
+    from .policy import PolicyStore
+
+    return PolicyStore(view.store, view.key).comp_constraints()
+
+
+def _raid_row(reg: Registry, view, p: "rc.RaidEvent") -> list:
+    """One raid's own solve inputs, as the solve computes them (see the module doc)."""
+    if p.state != "open":  # a locked raid's roster is what the raids after it prefer
+        return [p.key, p.state, [[list(g) for g in r.groups] for r in p.all_rosters],
+                sorted(str(rc.player_uid(p, x)) for x in p.seated())]
+    players = rc.players_for(reg, p)
+    size = rc.run_size(reg, p)
+    strategy = rc.run_strategy(reg, p)
+    raid_id = p.instance if p.instance in reg.profile.raids else next(iter(reg.profile.raids))
+    return [p.key, p.state, p.part, p.follows, p.starts_at,
+            # the answers as the solve reads them: status, character, class, spec, offspec, role; the pins, the
+            # officers' board, the run's own split — never the time of a re-press
+            [(k, s.display_name, s.character, s.cls, s.spec, s.offspec, s.role, s.status, s.source)
+             for k, s in sorted(p.signups.items())],
+            sorted(p.pins.items()), p.layout, p.split_strategy,
+            [x.model_dump() for x in players],  # the join order (pos), rank, attendance, tank alts
+            rc.seat_bonus(reg, view, p, players), strategy, size, rc.run_rosters(reg, p), rc.run_kind(reg, p),
+            reg.minimums(raid_id, size), reg.role_bounds(raid_id, size),
+            (int(reg.raid_def(raid_id)["weights"].get("sat_out", 2)),
+             sorted(rc.sat_out_last_window(reg, view, p, first_only=True))) if strategy == "rotation" else None]
+
+
+def _hash(rows) -> str:
+    return hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
 def fingerprint(reg: Registry, view, parts: list["rc.RaidEvent"]) -> str:
     """What the board's solves read (see the module doc), hashed. BLOCKING (players_for reads attendance): a thread.
     `view` = frozen(rs), `parts` = snapshot()."""
-    from .policy import PolicyStore
+    return _hash([_comp(view)] + [_raid_row(reg, view, p) for p in parts])
 
-    rows: list = [PolicyStore(view.store, view.key).comp_constraints()]
-    for p in parts:
-        if p.state != "open":  # a locked raid's roster is what the raids after it prefer
-            rows.append([p.key, p.state, [[list(g) for g in r.groups] for r in p.all_rosters],
-                         sorted(str(rc.player_uid(p, x)) for x in p.seated())])
-            continue
-        players = rc.players_for(reg, p)
-        size = rc.run_size(reg, p)
-        strategy = rc.run_strategy(reg, p)
-        raid_id = p.instance if p.instance in reg.profile.raids else next(iter(reg.profile.raids))
-        rows.append([p.key, p.state, p.part, p.follows, p.starts_at,
-                     # the answers as the solve reads them: status, character, class, spec, offspec, role; the pins, the
-                     # officers' board, the run's own split — never the time of a re-press
-                     [(k, s.display_name, s.character, s.cls, s.spec, s.offspec, s.role, s.status, s.source)
-                      for k, s in sorted(p.signups.items())],
-                     sorted(p.pins.items()), p.layout, p.split_strategy,
-                     [x.model_dump() for x in players],  # the join order (pos), rank, attendance, tank alts
-                     rc.seat_bonus(reg, view, p, players), strategy, size, rc.run_rosters(reg, p), rc.run_kind(reg, p),
-                     reg.minimums(raid_id, size), reg.role_bounds(raid_id, size),
-                     (int(reg.raid_def(raid_id)["weights"].get("sat_out", 2)),
-                      sorted(rc.sat_out_last_window(reg, view, p, first_only=True))) if strategy == "rotation" else None])
-    return hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+def raid_key(reg: Registry, view, comp: dict, p: "rc.RaidEvent", earlier: dict | None) -> str:
+    """One raid's solve, keyed by everything it reads: its own inputs (_raid_row), the comp policy, the `earlier` map
+    it is handed (the raids before it, as their pictures roster them) and the budget. The per-raid memo's key."""
+    return _hash([comp, _raid_row(reg, view, p), sorted((earlier or {}).items()) if earlier is not None else None,
+                  rc.SOLVE_TIME_LIMIT_S])
 
 
 @dataclass
@@ -115,6 +132,7 @@ class BoardCache:
         self.stops: dict[tuple[str, str], solver.Stop] = {}
         self.tasks: dict[tuple[str, str], asyncio.Task] = {}
         self.solves = 0  # solves started (tests, the Host's curiosity)
+        self.memo: dict[tuple[str, str], "OrderedDict[str, object]"] = {}  # event → {raid_key: that raid's answer}
         self._pool: ThreadPoolExecutor | None = None
 
     def pool(self) -> ThreadPoolExecutor:
@@ -165,14 +183,27 @@ class BoardCache:
         self.entries[key] = Entry(fp, previews, time.time())
         self.entries.move_to_end(key)
         while len(self.entries) > MAX_BOARDS:
-            self.entries.popitem(last=False)
+            gone, _ = self.entries.popitem(last=False)
+            self.memo.pop(gone, None)
+
+    def _drop(self, key: tuple[str, str]) -> None:
+        self.entries.pop(key, None)
+        self.memo.pop(key, None)
+
+    def _preview(self, reg: Registry, view, parts: list["rc.RaidEvent"], stop, key: tuple[str, str]) -> dict:
+        """rc.event_board_preview with the event's per-raid memo (BLOCKING: the executor thread). The memo is an LRU
+        of MEMO_PER_EVENT answers; only this thread writes it."""
+        memo = self.memo.setdefault(key, _Lru(MEMO_PER_EVENT))
+        comp = _comp(view)
+        return rc.event_board_preview(reg, view, parts[0], parts, stop, memo=memo,
+                                      raid_key=lambda p, earlier: raid_key(reg, view, comp, p, earlier))
 
     def prune(self, reg: Registry, rs: "rc.RaidStore") -> None:
         """Drop the guild's entries whose event has no open raid any more (locked, finished, cancelled or gone)."""
         for gk, fkey in [k for k in self.entries if k[0] == reg.key]:
             first = rs.events.get(fkey)
             if first is None or not any(p.state == "open" for p in rc.event_parts(rs, first)):
-                self.entries.pop((gk, fkey), None)
+                self._drop((gk, fkey))
 
     async def get(self, reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent") -> tuple[str, dict | None]:
         """The event's board pictures: ("ready", previews) for the current fingerprint; ("working", the previous
@@ -217,7 +248,7 @@ class BoardCache:
         key = (reg.key, fkey)
         previews, stop = None, self.stops[key]
         try:
-            previews = await asyncio.get_running_loop().run_in_executor(self.pool(), rc.event_board_preview, reg, view, parts[0], parts, stop)
+            previews = await asyncio.get_running_loop().run_in_executor(self.pool(), self._preview, reg, view, parts, stop, key)
         except solver.Stopped:  # a lock-side solve began: this picture waits for it and is solved again after
             self.waiting[key] = (reg, rs)
         except Exception:  # noqa: BLE001 — a raid's own failure is its sentence; this is the unexpected kind
@@ -235,7 +266,7 @@ class BoardCache:
             return
         now = snapshot(rs, first)
         if not any(p.state == "open" for p in now):
-            self.entries.pop(key, None)
+            self._drop(key)
             return
         self._keep(key, fp, previews)
         fresh = await asyncio.to_thread(fingerprint, reg, frozen(rs), now)
@@ -271,6 +302,25 @@ class BoardCache:
         if len(raw) == len(over) and all(set(a) == set(b) for a, b in zip(raw, over)):
             return raw
         return over
+
+
+class _Lru(OrderedDict):
+    """A small LRU mapping: a hit moves to the end, past `cap` the oldest goes."""
+
+    def __init__(self, cap: int) -> None:
+        super().__init__()
+        self.cap = cap
+
+    def __getitem__(self, k):
+        v = super().__getitem__(k)
+        self.move_to_end(k)
+        return v
+
+    def __setitem__(self, k, v) -> None:
+        super().__setitem__(k, v)
+        self.move_to_end(k)
+        while len(self) > self.cap:
+            self.popitem(last=False)
 
 
 def cache_of(bot) -> BoardCache:

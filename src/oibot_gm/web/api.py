@@ -1625,7 +1625,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                                                         **({"spec": spec, "via": v.via} if spec else {})))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": line.replace("**", "").removeprefix("✅ ")}
+        return {"message": rc.site_words(v.reg, line)}  # the guild's 12-hour words, never a Discord time stamp
 
     @app.post("/api/run/{key}/lock")
     async def run_lock(request: Request, key: str):

@@ -896,7 +896,7 @@ class RaidMixin:
             try:
                 layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy, None, rc.SOLVE_TIME_LIMIT_S)
             except RuntimeError as e:
-                raise RegistryError(rc.solver_error_text(e)[:1].upper() + rc.solver_error_text(e)[1:]) from e
+                raise RegistryError(rc.solver_error_text(e)) from e
         ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(reg, ev), "by": by, "by_id": by_id, "at": rc.now(), "kind": "lock preview"}
         await asyncio.to_thread(rs.save, ev, f"lock preview by {by}")
         return rosters
@@ -931,14 +931,14 @@ class RaidMixin:
                     break
                 ev.log.append(f"lock ({by}): answers or pins changed while the groups were being built — building again")
             else:
-                why = "the answers or pins kept changing while the roster was being built; lock again in a moment"
+                why = "The answers or pins kept changing while the roster was being built. Lock again in a moment."
             if why is not None:
                 first = ev.lock_error != why
                 ev.lock_error = why
                 ev.log.append(f"lock ({by}) failed: {why}")
                 rs.save(ev, "lock failed")
                 if first:
-                    await self.post_run_update(reg, ev, f"⚠️ lock by {by} failed — {why}. The sheet stays open; fix the board or the raid rules and lock again.")
+                    await self.post_run_update(reg, ev, f"⚠️ The lock by {by} failed. {why} The sheet stays open.")
                     await self.refresh_sheet(reg, ev)  # the sheet's footer says so too: the signup channel's truth matches the thread's
                 await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: lock failed — {why}")
                 return f"{run_title(reg, ev)}: lock failed — {why}"

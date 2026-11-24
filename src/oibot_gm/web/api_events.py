@@ -131,7 +131,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
                 line = await bot.set_answer(reg, rs, first, m, "in", character, v.name, by_id=v.uid, spec=spec, via=v.via)
             except (RegistryError, ValueError) as e:
                 return _refused(e)
-            return {"message": str(line).replace("**", "").removeprefix("✅ "), "switches": await fresh_switches()}
+            return {"message": rc.site_words(reg, line), "switches": await fresh_switches()}  # local12 words, never a Discord stamp
         try:
             seat, option = int(d.get("seat")), int(d.get("option"))
         except (TypeError, ValueError):

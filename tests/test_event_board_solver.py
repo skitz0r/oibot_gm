@@ -108,3 +108,22 @@ def test_a_board_solve_stops_at_once_when_told(reg, rs):
     assert time.monotonic() - t0 < 30, "stopped long before the 60 s budget"
     with pytest.raises(solver.Stopped):
         rc._solve_run(reg, rs, ev, time_limit=60.0, whatif=False, stop=stop)
+
+
+def test_a_raid_not_full_locks_with_one_name_kept_off(reg, rs):
+    """Six joined a 10, one kept off (a drag onto Not placed pins them out): the lock used to be INFEASIBLE (the seats
+    counted the kept-off name); now it locks with the other five and the picture showed the same."""
+    reg.seed_test_members(24, "t")
+    start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    ev = rc.open_run(reg, rs, BD, start, by="t", schedule=rc.ADHOC_SCHEDULE)
+    ms = reg.test_members()[:6]
+    join(reg, rs, ev, ms)
+    ev.pins[str(ms[2].discord_id)] = "out"
+    rs.save(ev, "kept off")
+    pic = rc.event_board_preview(reg, rs, ev)[ev.key]
+    assert isinstance(pic, list), pic
+    line = asyncio.run(NightBot(reg, rs).lock_run(reg, rs, ev, by="Jon"))
+    assert ev.state == "locked" and not ev.lock_error, line
+    on = {p.signup_name for p in ev.seated()}
+    assert on == {m.display_name for m in ms} - {ms[2].display_name}
+    assert shape(pic) == shape(ev.all_rosters)

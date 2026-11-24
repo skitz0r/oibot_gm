@@ -91,6 +91,7 @@ def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opt
     must differ from by at least `min_changes` people; `avoid_groups` the same at group level (name → group index) for
     a single-roster "another layout". Pinned players can't move, so they never count towards the difference."""
     s = _setup(profile, players, raid_id, opts, rosters, strategy)
+    _refuse_conflicts(s)
     _build_vars(s)
     _add_seat_and_group_constraints(s)
     _add_forces_pairs_and_pins(s)
@@ -127,6 +128,7 @@ class _Model:
     k: int  # groups per roster
     n_groups: int  # groups over all rosters
     seats_total: int  # seats the pool can fill over all rosters
+    seatable: int  # players the solve may seat: the pool minus force_out (a kept-off name never fills a seat)
     minimums: dict[str, int]  # slot (role, class or Class:Spec) -> minimum, per roster
     specs: dict[str, SpecInfo]  # signup_name -> signed spec (offspec switches are applied after the solve)
     m: cp_model.CpModel = field(default_factory=cp_model.CpModel)
@@ -160,9 +162,14 @@ def _setup(profile: GameProfile, players: list[Player], raid_id: str, opts: Solv
     game = scaled_role_minimums(rules, target)
     minimums = {r: game[r] for r in ("tank", "healer") if game.get(r)}
     minimums.update({slot: int(n) for slot, n in (opts.minimums or {}).items()})
+    # the seats are filled from the players the solve MAY seat: counting a kept-off name (force_out — an "out" pin, an
+    # always_bench line, a drag onto Not placed) asked for one seat more than anyone could fill, so a raid that wasn't
+    # over-full was infeasible with one name kept off
+    out = set(opts.force_out)
+    seatable = sum(1 for p in players if p.signup_name not in out)
     s = _Model(
         profile=profile, players=players, opts=opts, rosters=rosters, strategy=strategy, rules=rules,
-        gsize=gsize, target=target, k=k, n_groups=k * rosters, seats_total=min(target * rosters, len(players)),
+        gsize=gsize, target=target, k=k, n_groups=k * rosters, seats_total=min(target * rosters, seatable), seatable=seatable,
         minimums=minimums, specs={p.signup_name: profile.spec(p.cls, p.spec) for p in players},
     )
     s.quality = {r: [] for r in range(rosters)}
@@ -264,21 +271,46 @@ def _slot_expr(s: _Model, slot: str, r: int | None = None) -> list:
 
 
 def _add_seat_and_group_constraints(s: _Model) -> None:
-    """Exactly `seats_total` players raid; a seated player sits in exactly one group; a roster holds at most `target`
-    (exactly `target` when the pool can fill every roster); a group holds at most `gsize` and respects the per-group
-    healer/tank caps from the comp rules."""
+    """Exactly `seats_total` players raid (the seats, or every player the solve may seat when they are fewer); a seated
+    player sits in exactly one group; a roster holds at most `target` (exactly `target` when the players it may seat
+    can fill every roster); a group holds at most `gsize` and respects the per-group healer/tank caps from the comp
+    rules."""
     m = s.m
     m.Add(sum(s.x.values()) == s.seats_total)
     for p in s.players:
         m.Add(sum(s.y[p.signup_name, g] for g in range(s.n_groups)) == s.x[p.signup_name])
     for r in range(s.rosters):
         m.Add(sum(s.xr[p.signup_name, r] for p in s.players) <= s.target)
-        if len(s.players) >= s.target * s.rosters:
+        if s.seatable >= s.target * s.rosters:
             m.Add(sum(s.xr[p.signup_name, r] for p in s.players) == s.target)
     for g in range(s.n_groups):
         m.Add(sum(s.y[p.signup_name, g] for p in s.players) <= s.gsize)
         m.Add(sum(_group_role_expr(s, "healer", g)) <= s.rules["grouping"]["healer_max_per_group"])
         m.Add(sum(_group_role_expr(s, "tank", g)) <= s.rules["grouping"]["tank_max_per_group"])
+
+
+# what blocks a roster before any search, named so the officers' sentence can say it (raidcycle.solver_error_text)
+KEPT_ON, GROUP_FULL, GROUP_ROLES, KEPT_BOTH = "more kept on than seats", "a group over full", "a group over its role cap", "kept on and off"
+
+
+def _refuse_conflicts(s: _Model) -> None:
+    """RuntimeError("no roster found: <reason>") for the conflicts the board and the pins can make on their own,
+    before searching: more players kept on (force_in, board places) than every roster's seats; a name both kept on and
+    kept off; a group given more board places than it holds, or more healers / tanks than one group may have."""
+    opts, names = s.opts, {p.signup_name: p for p in s.players}
+    pins = {n: g for n, g in (opts.pins or {}).items() if n in names and 0 <= g < s.n_groups}
+    on = {n for n in opts.force_in if n in names} | set(pins)
+    if on & set(opts.force_out):
+        raise RuntimeError(f"no roster found: {KEPT_BOTH}")
+    if len(on) > s.target * s.rosters:
+        raise RuntimeError(f"no roster found: {KEPT_ON}")
+    for g in set(pins.values()):
+        held = [names[n] for n, gg in pins.items() if gg == g]
+        if len(held) > s.gsize:
+            raise RuntimeError(f"no roster found: {GROUP_FULL}")
+        for role in ("healer", "tank"):
+            if sum(1 for p in held if p.role == role) > s.rules["grouping"][f"{role}_max_per_group"]:
+                raise RuntimeError(f"no roster found: {GROUP_ROLES}")
 
 
 def _add_forces_pairs_and_pins(s: _Model) -> None:

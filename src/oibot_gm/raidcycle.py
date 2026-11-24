@@ -4102,14 +4102,33 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
     return players, rosters[0]
 
 
+SOLVER_WORDS = {  # what blocks a roster, in one or two sentences an officer can act on (minimums are preferences: never one)
+    solver.KEPT_ON: "More people are kept on the roster than it has seats. Take a pin off or move someone to Not placed, then lock again.",
+    solver.KEPT_BOTH: "Someone is both placed on the board and kept off the roster. Move them or clear their pin, then lock again.",
+    solver.GROUP_FULL: "A group on the board holds more people than it has room for. Move someone to another group, then lock again.",
+    solver.GROUP_ROLES: "A group on the board holds more healers or tanks than one group may have. Move one to another group, then lock again.",
+    "infeasible": "No roster fits the board, the pins and the comp rules together. Move some names off the board or clear a pin, then lock again.",
+    "time": "The bot couldn't build the roster in time. Lock again, or place fewer people by hand.",
+    "other": "The bot couldn't build the roster. Lock again in a moment.",
+}
+
+
 def solver_error_text(e: Exception) -> str:
-    """A sentence an officer can act on instead of the solver's status word."""
+    """What blocked a roster, as SOLVER_WORDS says it (the lock's run-update line, its ops warn, the lock_error the site
+    and plain text show, the board's failed state): the conflict the solver named before searching when it did, else
+    an infeasible model, a timeout or anything else. Already one of these sentences → itself (a stored lock_error passed
+    through again)."""
     msg = str(e)
+    if msg in SOLVER_WORDS.values():
+        return msg
+    for reason in (solver.KEPT_ON, solver.KEPT_BOTH, solver.GROUP_FULL, solver.GROUP_ROLES):
+        if reason in msg:
+            return SOLVER_WORDS[reason]
     if "INFEASIBLE" in msg or "no roster found" in msg:
-        return "no roster satisfies the rules: check the raid's tank/healer minimums against who joined, pins that overfill a group, and keep-apart pairs"
+        return SOLVER_WORDS["infeasible"]
     if "UNKNOWN" in msg or "time" in msg.lower():
-        return "the bot couldn't find a roster in time — try again or pin fewer people"
-    return f"building the roster failed: {msg}"
+        return SOLVER_WORDS["time"]
+    return SOLVER_WORDS["other"]
 
 
 def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None,
@@ -4298,7 +4317,8 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
 
 # ---------------------------------------------------------------- the board as the lock would place it (Events page)
 
-def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None) -> dict[str, "list[RosterResult] | str"]:
+def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None,
+                        memo=None, raid_key=None) -> dict[str, "list[RosterResult] | str"]:
     """Every OPEN raid of an event drawn as its lock would place people now — PURE: deep copies, nothing saved. Each
     raid solves through the lock's own entry (_solve_run, the run's strategy, the lock's budget SOLVE_TIME_LIMIT_S, the
     raid's minimums, pins and the officers' board as hard placements), so the solver's repeatable answer is the
@@ -4307,7 +4327,10 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
     every expected roster's groups, empty. A raid whose solve fails maps to rc.solver_error_text's sentence, and the
     raids after it still solve with what the others placed. `parts` = the event's parts already copied (the board
     cache's snapshot), else read from `rs`. `stop` (solver.Stop): the board cache abandons the solve when a lock
-    starts — solver.Stopped is raised, never turned into a raid's sentence. → {run key: [RosterResult]
+    starts — solver.Stopped is raised, never turned into a raid's sentence. `memo` + `raid_key(p, earlier)` (the
+    board cache's, per event): a raid whose own inputs — its key covers them and the `earlier` it is handed — were
+    solved before takes that answer instead of solving again (the solver is repeatable: the same answer); the picture
+    only, never the lock. → {run key: [RosterResult]
     (rosters[0].benched = the joiners not placed) | the sentence}; a locked or closed raid has no entry (its board is
     its roster)."""
     parts = [p.model_copy(deep=True) for p in (parts if parts is not None else event_parts(rs, first))]
@@ -4326,19 +4349,26 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
         if not p.by_status("in"):  # nobody joined: nothing to place, no solve
             out[p.key] = board_rosters(reg, p, board_layout(reg, p), run_size(reg, p))
             continue
+        earlier = dict(times) if is_follow(p) else None
+        mk = raid_key(p, earlier) if memo is not None and raid_key is not None else None
+        if mk is not None and mk in memo:
+            out[p.key] = memo[mk]
+            if isinstance(out[p.key], list):
+                count(p, out[p.key])
+            continue
         try:
-            players, rosters, _ = _solve_run(reg, rs, p, time_limit=SOLVE_TIME_LIMIT_S, whatif=False,
-                                             earlier=dict(times) if is_follow(p) else None, stop=stop)
+            players, rosters, _ = _solve_run(reg, rs, p, time_limit=SOLVE_TIME_LIMIT_S, whatif=False, earlier=earlier, stop=stop)
         except solver.Stopped:
             raise
         except Exception as e:  # noqa: BLE001 — infeasible / timed out: this raid says why, the others still solve
-            why = solver_error_text(e)
-            out[p.key] = why[:1].upper() + why[1:] + ("" if why.endswith(".") else ".")
-            continue
-        placed = {x.signup_name for r in rosters for x in r.selected}
-        rosters[0].benched = [x for x in players if x.signup_name not in placed and x.status == "signed"]
-        out[p.key] = rosters
-        count(p, rosters)
+            out[p.key] = solver_error_text(e)
+        else:
+            placed = {x.signup_name for r in rosters for x in r.selected}
+            rosters[0].benched = [x for x in players if x.signup_name not in placed and x.status == "signed"]
+            out[p.key] = rosters
+            count(p, rosters)
+        if mk is not None:
+            memo[mk] = out[p.key]
     return out
 
 
@@ -5143,6 +5173,25 @@ FILL_STATE_WORDS = {"idle": "No seat to fill yet.", "asking": "Asking for open s
 AUTO_ASKS_PAUSED = "Automatic asks paused"
 
 
+def open_seat_count(reg: Registry, ev: RaidEvent) -> int:
+    """Empty seats on a locked run's roster(s): each roster's size minus who holds a seat."""
+    if ev.state != "locked" or not ev.all_rosters:
+        return 0
+    size = run_size(reg, ev)
+    return sum(max(0, size - len(r.selected)) for r in ev.all_rosters)
+
+
+def open_seats_words(reg: Registry, ev: RaidEvent, n: int) -> str:
+    """A locked run with `n` open seats and no ask out yet, in the glossary's words: how many, and whether automatic
+    asks will ask for them (on), wait while paused (fill_state_text says paused first), or an officer fills them (off)."""
+    head = f"{n} seat is open." if n == 1 else f"{n} seats are open."
+    if ev.autofill_paused:
+        return head
+    if team_setting(run_team(reg, ev), "autofill"):
+        return head + (" Automatic asks will ask for it." if n == 1 else " Automatic asks will ask for them.")
+    return head + f" Automatic asks are off, so an officer fills {'it' if n == 1 else 'them'} with {fill_button_words()}."
+
+
 def fill_state_text(reg: Registry, ev: RaidEvent) -> str:
     """How open seats are being filled, in sentences (the lock card, the SheetCard, MCP get_run) — never the bare code
     and never "engine": 'Waiting for an officer: a role swap would cover a seat.', 'Asking for open seats — waiting for
@@ -5152,6 +5201,8 @@ def fill_state_text(reg: Registry, ev: RaidEvent) -> str:
     if ev.state in ("done", "cancelled"):
         return f"The run is {RUN_STATE_WORDS[ev.state]}."
     words = FILL_STATE_WORDS.get(ev.fill_state, ev.fill_state)
+    if ev.fill_state == "idle" and (n := open_seat_count(reg, ev)):
+        words = open_seats_words(reg, ev, n)  # "No seat to fill yet." is false while seats are open
     site = sum(1 for a in ev.fill_asks if a.pending and a.channel == "web")
     if site:
         words = words[:-1] + f" ({site} on the site)."
@@ -5401,6 +5452,19 @@ RELEASE_NOTICE = {"no-confirm": "no confirmation came in time", "absence": "you'
 def run_words(reg: Registry, ev: RaidEvent) -> str:
     """A run as a notice reads it: raid name + 12-hour guild time ('Barrow Deeps Tue 9 Dec 7:30 PM'), never the key."""
     return f"{reg.raid_def(ev.instance).get('name', ev.instance or ev.team)} {reg.local12(ev.start)}"
+
+
+def site_words(reg: Registry, text: str) -> str:
+    """A verb's Discord-flavoured line as the site prints it (the Clock rule): every native time stamp `<t:unix:X>`
+    (raid_views.run_label's — Discord renders it in the reader's locale, the site can't) becomes the guild's 12-hour
+    words (Registry.local12), the bold marks go and a leading ✅ goes. RaidMixin.set_answer / call_out's line on
+    POST /api/run/{key}/set (Answer for someone) and the Events page's switch."""
+    import re
+
+    def stamp(mt: "re.Match") -> str:
+        return reg.local12(datetime.fromtimestamp(int(mt.group(1)), tz=reg.tz))
+
+    return re.sub(r"<t:(\d+)(?::[a-zA-Z])?>", stamp, str(text)).replace("**", "").removeprefix("✅ ")
 
 
 def run_on(reg: Registry, ev: RaidEvent) -> str:

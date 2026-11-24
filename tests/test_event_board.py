@@ -151,7 +151,7 @@ def test_a_failed_part_keeps_the_others(reg, rs, monkeypatch):
     monkeypatch.setattr(rc, "_solve_run", solve)
     pv = rc.event_board_preview(reg, rs, ev)
     assert isinstance(pv[parts[0].key], list) and isinstance(pv[parts[2].key], list)
-    assert pv[parts[1].key].startswith("No roster satisfies the rules") and pv[parts[1].key].endswith(".")
+    assert pv[parts[1].key] == rc.SOLVER_WORDS["infeasible"]
     assert set(seen[2]) == {p.discord_id for r in pv[parts[0].key] for p in r.selected}, "the third raid prefers the first raid's preview"
 
 
@@ -188,7 +188,7 @@ def test_a_failed_raid_draws_the_layout_and_says_why(reg, rs, monkeypatch, web_b
     join(reg, rs, ev, reg.test_members())
     settle(eb.cache_of(web_bot.bot), reg, rs, ev)
     part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
-    assert part["board_state"] == "failed" and part["board_error"].startswith("No roster satisfies the rules")
+    assert part["board_state"] == "failed" and part["board_error"] == rc.SOLVER_WORDS["infeasible"]
     assert part["placed_words"] == f"0 of {len(reg.test_members())} joined"
 
 
@@ -602,14 +602,14 @@ def test_no_board_solve_starts_while_a_lock_solves_and_one_in_flight_gives_way(r
     real = rc.event_board_preview
     started, release, calls = threading.Event(), threading.Event(), []
 
-    def preview(reg_, view, first, parts, stop=None):
+    def preview(reg_, view, first, parts, stop=None, **kw):
         calls.append(stop)
         if len(calls) == 1:  # the first picture is still solving when the lock begins
             started.set()
             release.wait(5)
             if stop is not None and stop.stopped:
                 raise eb.solver.Stopped()
-        return real(reg_, view, first, parts, stop)
+        return real(reg_, view, first, parts, stop, **kw)
 
     monkeypatch.setattr(rc, "event_board_preview", preview)
     ev = one_off(reg, rs, lineup=[])

@@ -5,11 +5,11 @@ from oibot_gm import raidcycle as rc
 
 
 def test_solver_error_text():
-    assert rc.solver_error_text(RuntimeError("solver status INFEASIBLE")).startswith("no roster satisfies the rules")
-    assert rc.solver_error_text(RuntimeError("no roster found")).startswith("no roster satisfies the rules")
-    assert rc.solver_error_text(RuntimeError("status UNKNOWN")).startswith("the bot couldn't find a roster in time")
-    assert rc.solver_error_text(RuntimeError("time limit hit")).startswith("the bot couldn't find a roster in time")
-    assert rc.solver_error_text(ValueError("boom")) == "building the roster failed: boom"
+    assert rc.solver_error_text(RuntimeError("solver status INFEASIBLE")) == rc.SOLVER_WORDS["infeasible"]
+    assert rc.solver_error_text(RuntimeError("no roster found")) == rc.SOLVER_WORDS["infeasible"]
+    assert rc.solver_error_text(RuntimeError("status UNKNOWN")) == rc.SOLVER_WORDS["time"]
+    assert rc.solver_error_text(RuntimeError("time limit hit")) == rc.SOLVER_WORDS["time"]
+    assert rc.solver_error_text(ValueError("boom")) == rc.SOLVER_WORDS["other"], "never an exception's own words"
 
 
 def test_parse_schedule_and_the_raid_abbreviation():
