@@ -144,10 +144,10 @@ function LiveEvent({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChang
       <EventHead title={ev.title} chip={ev.chip} open={ev.state === "open"} tag={ev.test_chip}>
         <Group gap="xs" wrap="wrap">
           {ev.actions.reschedule && ev.boxes.reschedule && <Button variant="default" onClick={reschedule}>Reschedule</Button>}
-          {/* Edit event: every setting of this event alone (components/events/EditEvent); after the lock only what still applies */}
-          {ev.actions.edit && <Button variant="default" onClick={() => guardNav(`/events/${encodeURIComponent(ev.key)}/edit`)}>Edit event</Button>}
           {/* Edit lineup: the builder with the first raid fixed (LineupPage mode="edit-lineup"); gone once the roster locks */}
           {ev.actions.edit_lineup && <Button variant="default" onClick={() => guardNav(`/events/${encodeURIComponent(ev.key)}/lineup`)}>Edit lineup</Button>}
+          {/* Edit event (the third action): every setting of this event alone (components/events/EditEvent); after the lock only what still applies */}
+          {ev.actions.edit && <Button variant="default" onClick={() => guardNav(`/events/${encodeURIComponent(ev.key)}/edit`)}>Edit event</Button>}
           {ev.actions.lock && ev.boxes.lock && <Button onClick={lock}>Lock now</Button>}
           <EventMore ev={ev} meta={meta} onChanged={onChanged} />
         </Group>

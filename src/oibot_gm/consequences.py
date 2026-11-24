@@ -357,11 +357,11 @@ def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: b
             return head + "."
         full = f"{head} with its own {_and(names)}."
         return full if _words(full) <= 20 else f"{head} with its own {whole}."
-    detail = "For this run, " + _and(_timing_phrases(reg, first.start, changed, rc.run_team(reg, first))) + "."
+    detail = "For this event, " + _and(_timing_phrases(reg, first.start, changed, rc.run_team(reg, first))) + "."
     if _words(detail) <= 20:
         return detail
-    listed = f"This run takes its own {_and(names)}."
-    return listed if _words(listed) <= 20 else f"This run takes its own {whole}."
+    listed = f"This event takes its own {_and(names)}."
+    return listed if _words(listed) <= 20 else f"This event takes its own {whole}."
 
 
 def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None) -> list[str]:
@@ -392,6 +392,8 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     absorbed = rc.absorbed_schedule_run(reg, rs, first, start) if moves else None
     if mv.locks_now:
         out.append("It locks within a minute, because its lock time has passed.")
+    elif mv.seating is not None:  # the seating switched: what decides a seat now, in its own sentence (SEATING_WORDS)
+        out.append(SEATING_WORDS[mv.seating])
     elif absorbed:
         out.append(f"That night's {absorbed} run is this one.")
     elif not moves and first.state == "locked":  # only the automatic asks and an ask's wait change after the lock
@@ -411,6 +413,11 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     else:
         out.append("The sheet in Discord shows the new time.")
     return out
+
+
+# the seating switched by an Edit event: what decides who gets a seat from now on
+SEATING_WORDS = {True: "The first to join now get the seats, whatever the priority.",
+                 False: "Join order no longer decides who gets a seat."}
 
 
 def reschedule_pick_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
@@ -474,10 +481,19 @@ def event_edit_lines(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | 
     for key, v in values.items():
         setting = back.get(key)
         if setting == "weights":
+            # what happens on each raid: the weights picked change there, each raid keeping its own others (rc.reschedule)
             P = PAGE_WORDS["priority"]
-            diff = [k for k in P if now["weights"].get(k) != v.get(k)]
-            out[setting] = (f"{F['weights']}: " + ", ".join(f"{P[k]} {now['weights'].get(k)}" for k in diff) + " → "
-                            + ", ".join(f"{P[k]} {v.get(k)}" for k in diff))
+            picked = {k: v[k] for k in P if now["weights"].get(k) != v.get(k)}
+            live = [p for p in rc.event_parts(rs, first) if p.state not in ("done", "cancelled")]
+            lines = []
+            for p in live:
+                was = rc.run_weights(reg, p)
+                diff = [k for k in picked if was.get(k) != picked[k]]
+                if diff:
+                    head = (f"{_raid(reg, p.instance)} · " if len(live) > 1 else "") + F["weights"]
+                    lines.append(f"{head}: " + ", ".join(f"{P[k]} {was.get(k)}" for k in diff) + " → "
+                                 + ", ".join(f"{P[k]} {picked[k]}" for k in diff))
+            out[setting] = lines
         elif setting == "nudge":
             out[setting] = f"{F['nudge']}: {event_value_words('nudge', now['nudge'])} → {event_value_words('nudge', v != rc.OFF)}"
         elif setting:

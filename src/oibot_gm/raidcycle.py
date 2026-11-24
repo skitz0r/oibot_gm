@@ -555,7 +555,7 @@ def priority_words(reg: Registry, ev_or_schedule_def) -> str:
     x = ev_or_schedule_def
     first = PAGE_WORDS["first_to_join"]
     if isinstance(x, RaidEvent):
-        if run_first_come(reg, x) or (is_follow(x) and run_kind(reg, x) == "adhoc"):
+        if first_come_shown(reg, x):
             return first
         weights = run_weights(reg, x)
     else:
@@ -1167,6 +1167,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     # the run carries its schedule's settings
     t.update({"rosters": first_n, "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced"})
     t["weights"] = {k: int(v) for k, v in dict(rd["weights"]).items()}  # its own priority (the owner's tweaks): never read live
+    t["rotation_sat_out"] = raid_sat_out(reg, instance)  # what the rotation split read live: the raid's sat_out weight
     occ = (occurrence or occurrence_stamp(reg, start)) if schedule_stamp(sched["id"]) else None
     t.update({"occurrence": occ, "event": key, "part": 0, "starts": 0})
     if not test and (sched.get("virtual") or len(reg.schedules(instance)) > 1):  # the raid's only schedule needs no name on the run
@@ -1211,7 +1212,8 @@ def _part_dict(reg: Registry, first: dict, entry: dict, k: int, offset: int, *, 
           "cutoff_soft_hours": first["cutoff_soft_hours"] + hours, "cutoff_hard_hours": first["cutoff_hard_hours"] + hours,
           "confirm_hours": first.get("confirm_hours", first["cutoff_hard_hours"]) + hours, "part": k, "starts": offset,
           # its own priority: what a later raid always read (no schedule of its own: by class), carried from now on
-          "weights": fallback_weights(reg, entry["raid"], str(first.get("kind") or "recurring"))}
+          "weights": fallback_weights(reg, entry["raid"], str(first.get("kind") or "recurring")),
+          "rotation_sat_out": raid_sat_out(reg, entry["raid"])}
     for f in ("lineup", "follow", "followed_by", "message_id", "channel_id", "thread_id", "first_come"):  # never part 0's sheet nor its chain
         pt.pop(f, None)
     return pt
@@ -1496,7 +1498,8 @@ TIMING_SAME = "The run already has that timing."
 MOVE_CLASH = "{raid} already has a run at {when}. Pick another time."
 MOVE_SAME = "The run already starts then."
 TIMING_LOCKED = "The sheet timing is fixed once the roster locks. Move the start instead."
-CONFIRM_LOCKED = "Whether the rostered confirm is fixed once the roster locks."
+CONFIRM_LOCKED = "Asking the rostered to confirm is fixed once the roster locks."
+SWITCH_EMPTY = "Say on or off for that setting."
 PRIORITY_LOCKED = "The priority is fixed once the roster locks, because the roster is already chosen."
 TIMING_ORDER = "The reminder has to come before the lock, and confirm-by after it."
 TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, confirm-by, asks, confirmation, priority and split.")
@@ -1583,6 +1586,7 @@ class Moved(BaseModel):
     conflicts: dict[int, str] = Field(default_factory=dict)
     splits: dict[str, str] = Field(default_factory=dict)  # raid key → its new split (EVENT_TIMING's split_policy)
     lock_moved: bool = False  # the lock time changes while the start stays: who answered gets a notice of the new lock
+    seating: Optional[bool] = None  # the seating switched now: True = first to join, False = by priority
 
 
 def run_timing(reg: Registry, first: "RaidEvent") -> dict:
@@ -1664,6 +1668,8 @@ def _timing_values(timing: dict | None) -> dict:
         key = EVENT_TIMING.get(k)
         if key is None:
             raise RegistryError(TIMING_UNKNOWN)
+        if k in ("nudge", "autofill", "confirm", "first_come") and (v is None or (isinstance(v, str) and not v.strip())):
+            raise RegistryError(SWITCH_EMPTY)  # never on by default: an empty value is no answer
         if k == "nudge":
             out[key] = OFF if not _switch(v) else "dm"
         elif k in ("autofill", "confirm", "first_come"):
@@ -1747,7 +1753,7 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
         # a reminder that is off, or a confirm-by nobody is asked for, sets no order (Edit event turns either off)
         reminds = values.get("reminders", team_setting(team, "reminders")) not in (None, OFF, False)
         confirms = bool(values.get("confirm", run_confirms(reg, first)))
-        if (reminds and soft < hard) or (confirms and confirm > hard):
+        if (reminds and soft < hard) or (confirms and confirm > hard):  # a reminder that is off moves with the lock (reschedule)
             return TIMING_ORDER
     return None
 
@@ -1833,8 +1839,16 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     values = timing_changes(reg, first, timing)
     splits = split_changes(reg, rs, ev, timing)
     t0 = teams.get(first.key)
+    old_w = {p.key: run_weights(reg, p) for p in parts}  # each raid's own weights before (a weight edit changes only those picked)
+    w_delta = {k: v for k, v in values.get("weights", {}).items() if old_w[first.key].get(k) != v}
     if t0 is not None and values:
         t0.update(values)
+        # the officers' health card goes out at the reminder time whatever the reminder switch says: a lock moved before
+        # a reminder that is off takes that time with it (never later than the lock), so the card still posts
+        if t0.get("reminders") == OFF and float(team_setting(t0, "cutoff_soft_hours")) < float(team_setting(t0, "cutoff_hard_hours")):
+            t0["cutoff_soft_hours"] = t0["cutoff_hard_hours"]
+        if "sat_out" in w_delta:
+            t0["rotation_sat_out"] = w_delta["sat_out"]
     for p in parts:
         if p.key in splits:
             p.split_strategy = splits[p.key]
@@ -1850,9 +1864,13 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
                 for k in ("cutoff_soft_hours", "cutoff_hard_hours", "confirm_hours"):
                     if k in t0:
                         t[k] = t0[k] + hours
-                for k in ("fill_ask_hours", "autofill", "weights"):
+                for k in ("fill_ask_hours", "autofill"):
                     if k in values:
                         t[k] = values[k]
+                if w_delta:  # only the weights the officer changed: each later raid keeps its own others
+                    t["weights"] = {**old_w[p.key], **w_delta}
+                    if "sat_out" in w_delta:
+                        t["rotation_sat_out"] = w_delta["sat_out"]
         if p.confirm_by and at != was:
             cb = datetime.fromisoformat(p.confirm_by) + (at - was)
             if cb <= now_:
@@ -1860,6 +1878,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
             p.confirm_by = cb.isoformat()
     cleared, written = recompute_absences(reg, first) if delta else ([], [])
     lock_moved = not delta and "cutoff_hard_hours" in values  # the night stays, the lock moves: who answered is told too
+    first_come_now = values.get("first_come")
     told = answered_ids(first) if delta or lock_moved else []
     team = t0 or run_team(reg, first)
     hard = first.start - timedelta(hours=float(team_setting(team, "cutoff_hard_hours")))
@@ -1867,7 +1886,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     clash = {uid: key for uid, key in conflicts(rs, first).items() if uid in ins}
     moved = Moved(parts=[p.key for p in parts], old=old.isoformat(), new=new.isoformat(), timing=values, told=told,
                   absence_cleared=cleared, absence_written=written, locks_now=first.state == "open" and hard <= now_, conflicts=clash,
-                  splits=splits, lock_moved=lock_moved)
+                  splits=splits, lock_moved=lock_moved, seating=first_come_now)
     if not save:
         return moved
     what = [f"moved from {reg.local12(old)} to {reg.local12(new)} by {by}"] if delta else []
@@ -2430,9 +2449,15 @@ def stamp_weights(reg: Registry, rs: "RaidStore") -> list[str]:
     done = []
     for ev in rs.live():
         team = reg.config.roster(ev.team)
-        if team is not None and not isinstance(team.get("weights"), dict):
+        if team is None:
+            continue
+        if not isinstance(team.get("weights"), dict):
             team["weights"] = live_weights(reg, ev)
             done.append(ev.key)
+        if team.get("rotation_sat_out") is None:  # the rotation's sat-out weight it reads today (the raid's)
+            team["rotation_sat_out"] = rotation_weight(reg, ev)
+            if ev.key not in done:
+                done.append(ev.key)
     return done
 
 
@@ -3986,6 +4011,27 @@ def fallback_weights(reg: Registry, instance: str, kind: str) -> dict[str, int]:
     return {**RAID_WEIGHT_DEFAULTS, **base}
 
 
+def first_come_shown(reg: Registry, ev: RaidEvent) -> bool:
+    """Do this run's WORDS say first come, first rostered (the sheet's footer, the member's status line, the Me page's
+    queue note, the help snapshot, priority_words)? The event's own seating (run_first_come) on its first raid; a
+    later raid of a first-come one-off as before (its kind). One predicate, so an edit's seating reaches every word."""
+    return run_first_come(reg, ev) or (is_follow(ev) and run_kind(reg, ev) == "adhoc")
+
+
+def rotation_weight(reg: Registry, ev: RaidEvent) -> int:
+    """The `sat_out` weight the rotation split's roster bonus reads: the run's own `rotation_sat_out` (stamped at open and
+    by the start's migration as its RAID's sat_out weight at that moment — what the rotation always read live — so an
+    event nobody edits builds the same model; an Edit event change of the sat-out weight sets it), else the raid's live."""
+    team = reg.config.team(ev.team) or {}
+    if team.get("rotation_sat_out") is not None:
+        return int(team["rotation_sat_out"])
+    return int(reg.raid_def(ev.instance)["weights"].get("sat_out", 2))
+
+
+def raid_sat_out(reg: Registry, instance: str) -> int:
+    return int(reg.raid_def(instance)["weights"].get("sat_out", 2))
+
+
 def run_first_come(reg: Registry, ev: RaidEvent) -> bool:
     """Are this run's seats first come, first rostered (D4) rather than by priority? Its first raid's dict `first_come`
     when an Edit event set it, else as its kind says (ad hoc = first come). A later raid of a run is never first come:
@@ -4309,7 +4355,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         bonus = {**bonus, **{n: int(bonus.get(n, 0)) + LEAD_SEAT_BONUS * c for n, c in on_earlier.items()}}
     roster_bonus = None
     if strategy == "rotation":
-        w = int(rd["weights"].get("sat_out", 2))
+        w = rotation_weight(reg, ev)
         missed_first = sat_out_last_window(reg, rs, ev, first_only=True)
         roster_bonus = {0: {p.signup_name: 3 * w for p in players if player_uid(ev, p) in missed_first}}
     pool = {p.signup_name for p in players}
@@ -5996,7 +6042,7 @@ def _answer_state(reg: Registry, ev: RaidEvent, m: Member) -> str:
             ins = ev.by_status("in")
             n = run_rosters(reg, ev)
             seats = n * run_size(reg, ev)
-            if run_kind(reg, ev) == "adhoc":
+            if first_come_shown(reg, ev):  # the event's own seating (Edit event), not its kind
                 pos = next((i for i, x in enumerate(ins, 1) if x.discord_id == s.discord_id), len(ins))
                 if pos <= seats:
                     return f"You're **joined** as {as_} for {run} — {_ordinal(pos)} of {seats} seats, in if nothing changes ({FIRST_COME})."

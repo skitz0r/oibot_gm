@@ -1,6 +1,8 @@
 """Going back to older code: one commit per guild, nothing written on a dry run or a refusal.
 
-Three ways back, in this order of how far back they go:
+Three ways back, in this order of how far back they go. None of the older codes understands an event's own priority or
+seating set by Edit event (a run dict's `weights`, `first_come`, `rotation_sat_out`, 2026-11-24): they read the
+schedule's weights live again and seat a one-off first come by its kind, whatever the event was switched to.
 
 1. To the phase-2 code (schedules at guild level with their sheet timing and minimums, but addressed by (raid, id),
    a raid's own run times as its `default` schedule, regulars keyed "<raid>:<schedule>"): `--ids-only`. Each schedule

@@ -5694,7 +5694,9 @@ runs stamped). A live run the start's stamping missed is stamped at its first mo
 (`rc.stamp_before_change`, from its own night, written in that change's batch), so the unstamped fallback never finds it
 by its new start.
 
-*Going back to phase 2's code.* Stop the bot, run `uv run python scripts/lower_schedules.py --ids-only --dry-run`, then
+*Going back to phase 2's code.* (No older code understands an event's own priority or seating set by Edit event — a run
+dict's `weights`, `first_come`, `rotation_sat_out` from the owner's tweaks of 2026-11-24: it reads the schedule's weights
+live again and seats a one-off first come by its kind.) Stop the bot, run `uv run python scripts/lower_schedules.py --ids-only --dry-run`, then
 without `--dry-run`, then start the phase-2 code: commit 8b3bc81 (= 1821e4d's code). Never a55a112 — it already holds
 this phase's first task and would lift the ids again at its start. Phase 1 stays 53b9153 through `--minimums-only`. `lower_schedule_ids(cfg, members, applicants)` gives each schedule back
 the id its alias came from (`lowered_id`: an alias counts only for the schedule's own first raid; a raid's lifted run times
@@ -6047,6 +6049,17 @@ priority and split too; after the lock the undo line reads "until the event star
 schedule Save's map; fp over `rc.event_rev`. `event_json` carries `actions.edit` and `edit` (`edit_options`: the fields
 editable NOW, the values, each raid's split, the schedule editor's hour choices with the event's own among them); Details
 read the event's own values and add *Open seats after the lock* while open. Tests: `tests/test_edit_event.py`.
+*The review's fix round.* Every word that says first come — the sheet footer, the member's status line, the Me page's
+queue note, the help snapshot, `priority_words` — reads ONE predicate, `rc.first_come_shown` (the event's own seating;
+a later raid of a first-come one-off as before); the readers of `run_kind == "adhoc"` that mean a one-off (no regulars, a
+confirm on an ad hoc run, the attendance's regulars, open rules) stay on the kind. The rotation split's roster bonus
+reads `rc.rotation_weight` = the run's `rotation_sat_out`, stamped at open and by the start's migration as the RAID's sat-out
+weight at that moment (what it read live — equal, so an unedited event's model is unchanged) and set by an Edit event
+change of the sat-out weight. A weight edit changes only the weights picked, on each raid (each later raid keeps its own
+others), and the box's diff names each raid it changes. The officers' health card posts at the reminder time whatever
+the reminder switch: an ON reminder must still come before the lock (`TIMING_ORDER`), and a lock moved before a reminder
+that is OFF takes its time with it (never later than the lock; nothing said). An empty switch value is `SWITCH_EMPTY`.
+Switching the seating says what decides a seat now (`consequences.SEATING_WORDS`); the box says "event", never "run".
 
 *The officers' board and Auto-fill groups (C).* The owner: "each time I make a change to the board, it seems to
 auto-retrigger the solver. I'd prefer a button for 'auto-fill groups' next to the character bank instead of this."

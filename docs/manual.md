@@ -1042,8 +1042,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    sheet yet) and **History** (finished and cancelled events, newest first, 20 at a time; **Show older** adds the next
    20). On a desktop the first open event is shown (else the first night coming up); on a phone the list comes first
    and an event opens under *Back to Events*. An event reads in sections. The header has its start, its state
-   (*open for signup*, *locked — the roster stands*), **Reschedule**, **Edit event** (the event's own settings, see *Moving
-   a run, and its own sheet timing* below), **Edit lineup** and **Lock now** (open only) and **More** (below). **Details** has
+   (*open for signup*, *locked — the roster stands*), **Reschedule**, **Edit lineup**, **Edit event** (the event's own settings, see
+   *Moving a run, and its own sheet timing* below) and **Lock now** (open only) and **More** (below). **Details** has
    the lineup, where it comes from (*One-off, no schedule* or the schedule, a link), the event's own priority and
    confirmation, when the sheet opened, the *Reminder* (before the lock), when it locks, *Open seats after the lock*
    (before the lock: *The bot asks people* or *An officer asks*), *Confirm by* (when the rostered are asked to
@@ -1376,13 +1376,17 @@ rostered are **asked to confirm**, the **priority** (first to join, or the five 
 Sat out last time, Signed up early — a one-off can switch to priority and back) and each raid's **split**. An event
 carries its own priority from the moment it opens, so a later change to its schedule or its raid no longer changes it
 (an event already open when this came in keeps the priority it had). Once the roster locks only the start, the
-automatic asks and how long an ask waits can change; the rest is refused in one sentence each (*"Whether the rostered
+automatic asks and how long an ask waits can change; the rest is refused in one sentence each (*"Asking the rostered to
 confirm is fixed once the roster locks."*, *"The priority is fixed once the roster locks, because the roster is already
-chosen."*). A new lock time is told to everyone who answered, as a new start is; a change to the confirmation, the
+chosen."*). Switching who gets a seat says what decides it now (*"Join order no longer decides who gets a seat."* or
+*"The first to join now get the seats, whatever the priority."*), and the sheet, the member's own line, the Me page and
+the bot's answers follow the event's own choice. A weight changed applies to every raid of the event, each keeping its
+other weights. A reminder that is off moves with a lock set earlier than it, so the officers' check still comes before
+the lock. A new lock time is told to everyone who answered, as a new start is; a change to the confirmation, the
 priority or the split tells nobody. The confirm
 reads, for example, *"The event moves to Wed 2 Dec 8:00 PM. All 7 answers stand, and each person gets a notice. The
 sheet in Discord shows the new time."*; it names people also on another run that night when there are any. The first
-sentence says only what really changes: the move, this run's own settings (*"For this run, automatic asks are off."*),
+sentence says only what really changes: the move, this run's own settings (*"For this event, automatic asks are off."*),
 or both (*"… moves to Wed 2 Dec 8:00 PM with its own lock time."*). A run is refused in one sentence when it is finished
 or cancelled, when it has already started (*"This run has started, so it can't move."* — its timing doesn't change
 either), when the start is in the past (*"Fri 20 Nov 7:00 PM is in the past, so the event stays at Thu 10 Dec 6:30
@@ -1518,7 +1522,7 @@ the next person a DM can reach, at the same time: the first yes takes the seat a
 — someone else took the seat first"*).
 
 **Where the buttons are (site and Discord).** One label per verb, the same on the site and on the Discord cards. On
-the Events page an event's header holds **Reschedule** · **Edit event** · **Edit lineup** · **Lock now** · **More** (the rest of the verbs
+the Events page an event's header holds **Reschedule** · **Edit lineup** · **Edit event** · **Lock now** · **More** (the rest of the verbs
 below, §4 *The Events page*), with **Cancel event** at Activity's right. A test run's card on the Test bench keeps the
 older layout: its actions sit in one bar under its board and never move: *Cancel run…* far left (and, once locked, *End the run*),
 then on the right — before the lock **Suggest…** · **Preview lock** · **Lock now**; after it **Remind the unanswered** ·

@@ -179,7 +179,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         if not by_cls:
             e.add_field(name="\u200b", value="-# Nobody has joined yet.", inline=False)
         rows_field()
-        adhoc = rc.run_kind(reg, ev) == "adhoc"  # first come, first rostered; Join is the commitment when confirmations are off
+        adhoc = rc.first_come_shown(reg, ev)  # the event's own seating (Edit event): first come, first rostered
         failed = (f"Lock failed {reg.local12(ev.lock_tried_at, '%a %I:%M %p')} — the sheet stays open, retrying · " if ev.lock_error and ev.lock_tried_at
                   else "Lock failed — the sheet stays open, retrying · " if ev.lock_error else "")
         pins = rc.pin_counts(ev)  # numbers only (who is officer data): 'Pinned: 2 · Kept off: 1'

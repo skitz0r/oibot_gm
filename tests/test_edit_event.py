@@ -209,3 +209,113 @@ def test_plain_text_reaches_the_new_fields(reg, rs):
         run(configops.apply_async(reg, op, "Jon", True, bot=bot))
     assert rc.run_confirms(reg, ev) is False and rc.run_weights(reg, ev)["rank"] == 1
     assert rc.run_strategy(reg, ev) == "rotation" and rc.run_first_come(reg, ev) is True
+
+
+# ---------------------------------------------------------------- the fix round (review of 2026-11-24)
+
+def _footer(reg, ev):
+    from oibot_gm import raid_views
+
+    e, _v = raid_views.sheet_message(reg, ev, rc.run_team(reg, ev), lambda *a, **k: "")
+    return e.footer.text, e.to_dict()
+
+
+def test_the_first_come_words_follow_the_events_own_seating(reg, rs):
+    """The sheet footer, the member's status line, the Me page's queue note and the help snapshot read the event's own
+    seating (rc.first_come_shown), so switching it either way changes what every surface says."""
+    from oibot_gm.help import run_lines
+    from oibot_gm.web.api_me import sheet_row_extras
+
+    one = open_one_off(reg, rs)
+    m = real_people(reg, 1)[0]
+    join(reg, rs, one, [m])
+    first_words = rc.FIRST_COME.capitalize()
+    assert first_words in _footer(reg, one)[0] and rc.FIRST_COME in rc.answer_receipt(reg, one, m)
+    assert sheet_row_extras(reg, one, m, rs)["queue_note"] and "first come" in " ".join(run_lines(reg, rs, one, True, True))
+    rc.reschedule(reg, rs, one, timing={"first_come": False}, by="o")
+    assert first_words not in _footer(reg, one)[0] and rc.FIRST_COME not in rc.answer_receipt(reg, one, m)
+    assert sheet_row_extras(reg, one, m, rs)["queue_note"] is None
+    assert "by priority, no regulars" in " ".join(run_lines(reg, rs, one, True, True))
+    sid, ev = scheduled(reg, rs)
+    join(reg, rs, ev, [m])
+    assert first_words not in _footer(reg, ev)[0]
+    rc.reschedule(reg, rs, ev, timing={"first_come": True}, by="o")
+    assert first_words in _footer(reg, ev)[0] and rc.FIRST_COME in rc.answer_receipt(reg, ev, m)
+    assert sheet_row_extras(reg, ev, m, rs)["queue_note"] and "· first come" in " ".join(run_lines(reg, rs, ev, True, True))
+
+
+def test_the_live_two_raid_events_sheet_is_byte_identical_across_the_upgrade(data_root, old_store_with):
+    t = _soon(48).replace(hour=18, minute=30)
+    cfg, _dicts, files = _big_guys_pair(t)
+    reg, rs, _store = _old_guild(data_root, old_store_with, cfg, files)
+    lead = rs.events[files[0]["key"]]
+    before = json.dumps(_footer(reg, lead)[1], sort_keys=True)
+    rotation = {e.key: rc.rotation_weight(reg, e) for e in (lead, rs.events[files[1]["key"]])}
+    rc.migrate_at_start(reg, rs)
+    assert json.dumps(_footer(reg, lead)[1], sort_keys=True) == before, "nobody edited it: the sheet renders as before"
+    for e in (lead, rs.events[files[1]["key"]]):
+        team = reg.config.roster(e.team)
+        assert team["rotation_sat_out"] == rotation[e.key] == int(reg.raid_def(e.instance)["weights"]["sat_out"]), \
+            "the stamped rotation weight equals the raid's at stamping time: the rotation's model is unchanged"
+
+
+def test_a_new_run_stamps_the_raids_rotation_weight_and_an_edit_of_sat_out_sets_it(reg, rs):
+    sid, ev = scheduled(reg, rs)
+    assert reg.config.roster(ev.team)["rotation_sat_out"] == int(reg.raid_def(RID)["weights"]["sat_out"]) == rc.rotation_weight(reg, ev)
+    rc.reschedule(reg, rs, ev, timing={"weights": {"sat_out": 5}}, by="o")
+    assert rc.rotation_weight(reg, ev) == 5
+
+
+def test_a_weight_edit_changes_only_the_picked_weights_on_each_raid(reg, rs):
+    for r in (RID, HYJAL):
+        reg.set_raid_overrides(r, OPENED, "t")
+    first = open_one_off(reg, rs, days=4, raid=HYJAL, follow={"raid": RID, "rosters": 1})
+    later = rc.later_parts(rs, first)[0]
+    reg.config.roster(later.team)["weights"] = {**rc.run_weights(reg, later), "main": 4}  # the later raid's own
+    b = cq.reschedule_box(reg, rs, first, None, {"weights": {"rank": 5}}, edit=True)
+    P, F = PAGE_WORDS["priority"], PAGE_WORDS["schedule_fields"]
+    assert f"Hyjal Summit · {F['weights']}: {P['rank']} 0 → {P['rank']} 5" in b["diff"], b["diff"]
+    assert f"Barrow Deeps · {F['weights']}: {P['rank']} 0 → {P['rank']} 5" in b["diff"], b["diff"]
+    rc.reschedule(reg, rs, first, timing={"weights": {"rank": 5}}, by="o")
+    assert rc.run_weights(reg, later)["rank"] == 5 and rc.run_weights(reg, later)["main"] == 4, "its own other weights stay"
+
+
+def test_a_lock_moved_before_a_reminder_that_is_off_keeps_the_health_card_posting(reg, rs, monkeypatch):
+    """The officers' health card goes out at the reminder time whatever the reminder switch: a lock moved past a reminder
+    that is off takes the reminder time with it (never later than the lock), so the card still posts."""
+    from test_event_identity import _scheduler
+
+    sid, ev = scheduled(reg, rs, days=4)
+    rc.reschedule(reg, rs, ev, timing={"nudge": False}, by="o")
+    team = rc.run_team(reg, ev)
+    assert float(team["cutoff_soft_hours"]) < 72
+    assert rc.reschedule_refusal(reg, rs, ev, None, {"lock_hours_before": 72}) is None
+    said = cq.reschedule_consequence(reg, rs, ev, None, {"lock_hours_before": 72})
+    assert "reminder" not in " ".join(said), "nothing about a reminder that is off"
+    rc.reschedule(reg, rs, ev, timing={"lock_hours_before": 72}, by="o")
+    assert float(team["cutoff_soft_hours"]) == float(team["cutoff_hard_hours"]) == 72
+    assert rc.reschedule_refusal(reg, rs, ev, None, {"nudge": True, "nudge_hours_before": 24}) == rc.TIMING_ORDER, "an ON reminder after the lock is refused"
+    bot, _opened = _scheduler(reg, rs)
+    posted = []
+
+    async def health(*a, **k):
+        posted.append(a[2].key)
+
+    async def nothing(*a, **k):
+        return None
+    monkeypatch.setattr(bot, "post_health", health)
+    monkeypatch.setattr(bot, "lock_run", nothing)
+    monkeypatch.setattr(reg, "now_local", lambda: ev.start - timedelta(hours=72) + timedelta(minutes=1))
+    run(bot.scheduler_tick_guild(reg))
+    assert posted == [ev.key], "the health card posts at the (moved) reminder time"
+
+
+def test_an_empty_switch_is_refused_and_the_new_refusals_read_aloud(reg, rs):
+    sid, ev = scheduled(reg, rs)
+    for k in ("confirm", "first_come", "nudge", "autofill"):
+        assert rc.reschedule_refusal(reg, rs, ev, None, {k: ""}) == rc.SWITCH_EMPTY
+    assert rc.CONFIRM_LOCKED == "Asking the rostered to confirm is fixed once the roster locks."
+    said = cq.reschedule_consequence(reg, rs, ev, None, {"first_come": True})
+    assert said[0].startswith("For this event,") and said[2] == cq.SEATING_WORDS[True]
+    one = open_one_off(reg, rs, days=6)
+    assert cq.reschedule_consequence(reg, rs, one, None, {"first_come": False})[2] == "Join order no longer decides who gets a seat."

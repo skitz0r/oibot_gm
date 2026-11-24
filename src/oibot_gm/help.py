@@ -665,7 +665,10 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     runs_now = rc.how_many_rosters(reg, players, size, rb, want=n_rosters) if live else len(ev.all_rosters)
     kind = rc.run_kind(reg, ev)
     series = rc.run_series(reg, ev)
-    head += (f" · schedule {rc.run_schedule_id(reg, ev) or 'none'} · {kind}" + (f" ({reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
+    fc = rc.first_come_shown(reg, ev)  # the event's own seating (Edit event), not its kind
+    head += (f" · schedule {rc.run_schedule_id(reg, ev) or 'none'} · {kind}"
+             + ((f" ({reg.series_label(series)})" + (" · first come" if fc else "")) if series
+                else f" ({'first come' if fc else 'by priority'}, no regulars, no reminder)")
              + ("" if rc.run_confirms(reg, ev) else " · nobody is asked to confirm")
              + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else "")
              + (f" · then {then}" if (then := rc.follow_words_of(reg, ev)) else "")

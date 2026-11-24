@@ -49,7 +49,7 @@ def sheet_row_extras(reg, ev, m, rs=None) -> dict:
     s = ev.signups.get(str(m.discord_id)) if m else None
     locked = ev.state == "locked"
     seated = bool(m and locked and ev.seat_of(m))
-    adhoc = rc.run_kind(reg, ev) == "adhoc"
+    adhoc = rc.first_come_shown(reg, ev)  # the queue note follows the event's own seating (Edit event), not its kind
     lead = rc.lead_of(rs, ev) if rs is not None and ev.follows else None
     lead_seated = bool(m and lead is not None and lead.seat_of(m))  # a follow-on's Can't: are they rostered on the lead?
     held = rc.held_later(rs, ev, m) if rs is not None and m else []  # a first raid's Can't frees every later seat too

@@ -597,7 +597,9 @@ src/oibot_gm/
                        AFTER_LOCK (fill_ask_hours, autofill) still change once locked, the rest is refused: TIMING_LOCKED, CONFIRM_LOCKED,
                        PRIORITY_LOCKED, consequences.STRATEGY_LOCKED; a lock-time change tells who answered (Moved.lock_moved, "<raid> now locks …");
                        run_weights = the run dict's own `weights` (stamped at open by ensure_run / _part_dict: fallback_weights; live_weights only
-                       for a dict without them), run_first_come = the first raid's `first_come`, else its kind (a later raid never); place_run (shared with
+                       for a dict without them), run_first_come = the first raid's `first_come`, else its kind (a later raid never); first_come_shown = THE predicate
+                       every first-come WORD reads (sheet footer, status line, Me queue note, help, priority_words); rotation_weight =
+                       the run's `rotation_sat_out` (the raid's sat-out weight stamped at open / migration); place_run (shared with
                        move_runs_with_clock); timing_changes; answered_ids(first) = who a `moved` notice reaches (every row but away);
                        absorbed_schedule_run; move_start (an ISO instant, or guild wall time — MOVE_GAP / MOVE_TWICE / MOVE_WHEN); event_rev = the
                        fingerprint a preview hands out (RUN_CHANGED when stale). plan_stands_for(reg, raid, before, after) = THE decision, made once at
