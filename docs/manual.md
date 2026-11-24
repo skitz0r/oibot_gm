@@ -636,7 +636,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   with an optional reason (up to 200 characters) only you and the officers see. A confirm
   screen shows the days in words and which live sheets it touches before anything is saved; on the site that is the
   **Record an absence** window, where the bot's sentences sit above **Add the absence** (*"Your absence on Tue 9 Dec
-  is recorded. The sheet for Barrow Deeps on Tue 9 Dec is answered No thanks. Press I'm back if your plans change."*). Days that overlap an absence already on file are refused with that absence named ("already away
+  is recorded. The sheet for Barrow Deeps on Tue 9 Dec is answered No thanks. Press I'm back if your plans change."*). Each event is named once — an evening of several raids by its raids, or *the Hyjal Summit event* when that is long — and with more than three events in those days the bot counts them (*"The sheets for four other events that day are answered No thanks."*), always naming a seat that is released. *I'm back* previews the same way. Days that overlap an absence already on file are refused with that absence named ("already away
   Tue 9 Dec → Thu 11 Dec (recorded by Kessa) — clear that one first (I'm back), or pick days outside it"). Sheets on those days
   get *No thanks* for you, and if you were already rostered the seat is released (your confirmation card in your DMs is
   edited to say so — no new DM) and the bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
@@ -1258,6 +1258,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    card marks them *(site)*. **Preview lock**: the lock's confirm screen (the card's *Lock now* and `/raid lock`) has a
    *Preview lock* button that draws the roster(s) the lock would build right now — every group, one member per line
    with the spec icon, then the leftovers (the first 15) — without saving anything; *Lock now* or *Back* from there.
+   It can take up to half a minute: on a later raid whose first raid is still open, the bot places the first raid too,
+   so the preview counts who that raid will roster, as the lock will.
    On the Events page the board itself is the preview (drawn as the lock would place everyone now); a test run's
    card on the Test bench has the same **Preview lock** button beside **Lock now**. If the bot stops half way through the confirmation DMs (a restart, a
    Discord outage), the lock card says *confirmations not yet sent* and within a minute the bot asks exactly the

@@ -5873,8 +5873,8 @@ who is kept on and off (`_solve_run`'s `force_in` / `force_out`, the lock box's 
 raises `ALL_KEPT_OFF` before solving when every joiner is kept off. In `_solve_run`'s later-raid branch the groups per
 roster are no longer overwritten by the part number, so a hand place on a later raid's board past its first groups
 reaches the solve (a lock change only for such a board; an untouched later board locks as before). The lineup edit trims
-a roster that goes (above). Re-check Preview lock == Lock under load in the pre-deploy rehearsal (the model hashes were
-compared at the review).
+a roster that goes (above). The board picture, Preview lock and the lock build the same model; under load they now give
+the same answer too (the final fix wave, below).
 
 *Role switches.* `rc.event_switches(reg, rs, first, viewer=)` → `{short, rows, revs}` composed from each live raid's
 `role_plan` (suggestions before the lock, the fill plan after — no second ranking): `short` per raid short of a tank or
@@ -5958,6 +5958,55 @@ minimum gets it back). A lock with every joiner kept off is refused; one nobody 
 removal's second sentence says the open event keeps its sheet and answers (the mockup's "stays as a one-off" is not
 what happens).
 
+*The final fix wave (2026-11-24, after the pre-deploy rehearsal and the full check).* **One answer per model.** The
+board picture and the lock built the same CP-SAT model, yet on a loaded host they came out different (a later raid's
+two rosters swapped): the old wall-clock ceiling, 2 × the budget, cut a solve short of its deterministic budget at a
+point that depended on the load. Measured on the bot's host: one 12 s solve alone ends on its work budget at 12.6 s,
+two at once take 19 s, three at once were cut at the 24 s ceiling. `roster/solver.py` now keeps each model's answer
+(`_answers`, LRU `ANSWERS_MAX` 64, keyed by the model proto — every variable, constraint and objective term — and the
+search parameters); a model answered before takes it without searching, the lock included, so the picture, Preview lock
+and the lock agree whatever the load. A first solve of a model searches exactly as before. Nothing is kept for a stopped
+(`Stopped`) or infeasible solve, nor for one the ceiling cut: `WALL_CEILING` is 10 (120 s at the lock's 12 s), a hang guard
+only that changes no answer ending on its work budget; a cut solve is logged (`ceiling_hits`), used once and never kept,
+so a later quiet solve gives the repeatable answer. `forget_answers()` is for tests that measure the search
+(`tests/test_solver_kept_answer.py`: a cut solve is searched again; `lock_run` after a settled board does no main search;
+with the kept answers forgotten, the board equals the lock and Preview lock equals the lock on both raids). **Preview lock
+on a later raid** whose first raid is still open reads the earlier raids: `rc.earlier_counts` solves them through
+`rc.event_board_preview`, as the board and the lock read them (about 25 s for two raids; Discord's working line says up to
+half a minute). **A schedule's night is its own at any distance.** `rc.open_schedule` matches a schedule's starts however
+far ahead (it looked 21 days ahead, so a night further out opened as an unstamped one-off and the scheduler later opened
+a second run and sheet at that minute). `rc.open_refusal`, read by every on-demand open (`RaidMixin.open_run_and_post`,
+`open_preview`'s refusal, plain text's diff, the /raid open confirm screen), refuses in one of three sentences: a schedule
+night too far ahead to open says its Coming up row's sentence (`open_row_refusal`); asked as a one-off or from a pickup
+template it is `SCHEDULE_NIGHT`; a live one-off already on the night refuses the schedule's run beside it (`NIGHT_TAKEN`).
+`rc.one_off_at` reads every live first part at the minute (`live_at` answers only the newest, which may be a schedule's
+run over it); `rc.is_night_of` answers for the schedule named when two share a minute; the sentences name a schedule
+(`registry.schedule_name`), never its id. The scheduler skips an occurrence a live one-off holds and warns ops once,
+naming both (`RaidSchedulerMixin._warn_night_taken`); another schedule's run at the same minute never blocks it.
+**The way back.** `scripts/lower_schedules.py` is all or nothing: every guild is checked and lowered in memory first,
+nothing is written unless every guild passes (exit 1 otherwise), `guild.yaml` is written last, `--guild KEY` lowers chosen
+guilds and refuses an unknown key; a finished run file that names no raid (old history) is skipped, a live one refuses its
+guild in one sentence; a guild lowered by an interrupted run reads as nothing to lower again. **Server boxes.** Remind
+(`consequences.remind_box`, `POST /api/run/{key}/remind`), End the run (`LootMixin.end_box` over `end_sentences`,
+`POST /api/loot/{run}/end`, its fingerprint covering the councils' summaries) and a locked board's moves
+(`consequences.board_move_box` over `rc.board_move_kind`: move, roster, swap, substitute, release on the board as it
+stands; `POST /api/run/{key}/move`) take `preview` → `{box}` and `seen` → 409 with the fresh box (and board) or a 400
+refusal box, like the twenty boxes. **Smaller closes.** Every site route that returns a raid verb's line answers in
+`rc.site_words` (no `<t:…>` stamp; one test walks them all and asserts success on each). The split strategy is refused
+after the lock on every surface (`consequences.strategy_refusal`; plain text's `run_strategy` in the diff and at apply),
+and the strategy box's fingerprint carries the split the raid has now. A token's apply re-describes its box under
+`config_lock` in the same step as the write (`apply_ops(expect=)`), and `rc.open_run` holds that lock for the whole open:
+an event opening in the gap is a fresh box, nothing written. A board solve that fails unexpectedly is solved once more on
+the run store as it is now before it is kept as failed. `rc.lock_failure_kind` reads a stored lock error in the old words
+as the same failure as its new sentence, so an upgrade posts no second run-update line. The pages print the server's
+boxes for Remind, End and a locked board's moves, pick First opens from a calendar and a 15-minute select (the clock lint
+refuses every typed-time picker), and the leave guard counts edits that differ from the seed. **Calendar-proof tests.**
+Tests that hard-coded a date or assumed today's weekday were fixed after running the fast suite under faked dates
+(Wed 25, Thu 26, Fri 27, Sat 28, Sun 29 and Mon 30 Nov, Tue 8, Wed 9 and Thu 10 Dec, Thu 31 Dec 2026, Fri 1 Jan 2027).
+On Fri 27 Nov the sweep found a product breach: an absence over four events on one day printed one sentence per run;
+`discord_people.absence_lines` / `absence_clear_lines` now write one sentence per event (`LINEUP_NAME_WORDS`) and sum
+past three, always naming a released seat. Tests: `tests/test_solver_kept_answer.py`, `tests/test_schedule_night_open.py`.
+
 *Limits an operator should know.* Not on the site any more, still in Discord, plain text or MCP: a cancel's reason and
 its Tell the channel line (the site's Cancel event is the box alone); another layout, Propose, Place the rest and Clear
 of everyone's moves (Undo my moves is yours only; the Test bench card keeps Propose); opening a pickup template (Copy a
@@ -5966,7 +6015,10 @@ steps; why-notes, raid notes and the split policy on the Raids page; the regular
 recruit lines (`/roster overview`, the analytics card, MCP `list_regulars`); a new schedule made paused (the site creates
 it active). The Signups row menu's callouts and pins keep the older page-worded confirm until the confirms phase. A one-off's
 Lock box names nobody, so a join does not make it stale (a scheduled event's does). A board recompute costs about the
-lock's budget per raid it re-solves (the memo spares the others), and several events queue one after another. Browser
+lock's budget per raid it re-solves (the memo spares the others), and several events queue one after another. Never run
+the test suite or a rehearsal on the bot's host at a lock minute: since the final fix wave it only slows the lock, it no
+longer changes the roster. Kept answers live in the process: a restart between the picture and the lock solves again
+(the same answer on a quiet host). Browser
 Back is not guarded (the rail, the list and in-page Back are). The new verbs' Discord screens (lineup, reschedule,
 switch) are phase 5; the rename of "run" to "event" in existing strings, the activity log's code nouns and the older
 pages' Apply N changes are phase 6. Tests: `tests/test_confirm_boxes.py`, `tests/test_events_api.py`,
