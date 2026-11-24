@@ -184,7 +184,8 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
 
     if ev.state != "open":
         return _closed(ev) or ["This run is already locked."]
-    joined = ev.by_status("in")
+    off = set(rc.lock_forces(reg, None, ev).kept_off)  # THE solve's kept-off list: the count never promises them a DM
+    joined = [s for s in ev.by_status("in") if s.display_name not in off]
     seats = rc.run_size(reg, ev) * max(1, rc.run_rosters(reg, ev))
     n = min(len(joined), seats)
     lineup = rc.event_lineup(reg, ev)
@@ -213,11 +214,22 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     return lines
 
 
+def lock_refusal(reg: Registry, ev: rc.RaidEvent) -> str | None:
+    """Why the lock can't go ahead before it solves (None: it can): everyone who joined is kept off the roster (an out
+    pin, a drag onto Not placed, the comp policy) — the lock would roster nobody. A run nobody joined still locks."""
+    joined = {s.display_name for s in ev.by_status("in")}
+    if ev.state == "open" and joined and joined <= set(rc.lock_forces(reg, None, ev).kept_off):
+        return rc.SOLVER_WORDS["all_off"]
+    return None
+
+
 def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
     """Boxes 1 and 2: Lock an event (`rs` adds the event's fingerprint, so a box whose run changed is refused). An event
-    already locked, finished or cancelled answers with a refusal box."""
+    already locked, finished or cancelled answers with a refusal box; so does one whose every joiner is kept off."""
     if ev.state != "open":
         return refusal_box_for(_lock(reg, ev)[0])
+    if (why := lock_refusal(reg, ev)) is not None:
+        return refusal_box_for(why)
     return box(f"Lock {event_title(reg, ev)}?", _lock(reg, ev), "Lock", rev=rc.event_rev(reg, rs, ev) if rs is not None else "")
 
 

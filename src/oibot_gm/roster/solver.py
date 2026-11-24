@@ -43,6 +43,7 @@ class SolveOptions:
     offspec_penalty: int = 8  # objective cost per switch
     time_limit_s: float = 20.0  # the solve's budget, spent as deterministic time (DTIME_PER_SECOND): the same input, the same roster
     workers: int = 8
+    kept_off: tuple[str, ...] = ()  # who officers or the comp policy keep off (inside force_out; never in the model): explain never ranks them
     stop: "Stop | None" = None  # a solve that may be abandoned (the Events board's picture): Stop.stop() ends it, raising Stopped
 
 
@@ -293,6 +294,18 @@ def _add_seat_and_group_constraints(s: _Model) -> None:
 KEPT_ON, GROUP_FULL, GROUP_ROLES, KEPT_BOTH = "more kept on than seats", "a group over full", "a group over its role cap", "kept on and off"
 
 
+class Conflict(RuntimeError):
+    """A roster refused before searching: `reason` (one of the names above) and the facts its sentence names —
+    `names` (the people), `group` (1-based, within its roster), `have` / `seats` (counts). str() keeps the solver's
+    "no roster found: <reason>" form."""
+
+    def __init__(self, reason: str, *, names: tuple[str, ...] = (), group: int | None = None, roster: int | None = None,
+                 role: str | None = None, have: int = 0, seats: int = 0):
+        super().__init__(f"no roster found: {reason}")
+        self.reason, self.names, self.group, self.roster, self.role = reason, tuple(names), group, roster, role
+        self.have, self.seats = have, seats
+
+
 def _refuse_conflicts(s: _Model) -> None:
     """RuntimeError("no roster found: <reason>") for the conflicts the board and the pins can make on their own,
     before searching: more players kept on (force_in, board places) than every roster's seats; a name both kept on and
@@ -300,17 +313,21 @@ def _refuse_conflicts(s: _Model) -> None:
     opts, names = s.opts, {p.signup_name: p for p in s.players}
     pins = {n: g for n, g in (opts.pins or {}).items() if n in names and 0 <= g < s.n_groups}
     on = {n for n in opts.force_in if n in names} | set(pins)
-    if on & set(opts.force_out):
-        raise RuntimeError(f"no roster found: {KEPT_BOTH}")
+    both = sorted(on & set(opts.force_out))
+    if both:
+        raise Conflict(KEPT_BOTH, names=tuple(both))
     if len(on) > s.target * s.rosters:
-        raise RuntimeError(f"no roster found: {KEPT_ON}")
-    for g in set(pins.values()):
+        raise Conflict(KEPT_ON, have=len(on), seats=s.target * s.rosters)
+    for g in sorted(set(pins.values())):
         held = [names[n] for n, gg in pins.items() if gg == g]
         if len(held) > s.gsize:
-            raise RuntimeError(f"no roster found: {GROUP_FULL}")
+            raise Conflict(GROUP_FULL, names=tuple(p.signup_name for p in held), group=g % s.k + 1,
+                           roster=g // s.k + 1 if s.rosters > 1 else None, have=len(held), seats=s.gsize)
         for role in ("healer", "tank"):
-            if sum(1 for p in held if p.role == role) > s.rules["grouping"][f"{role}_max_per_group"]:
-                raise RuntimeError(f"no roster found: {GROUP_ROLES}")
+            cap = s.rules["grouping"][f"{role}_max_per_group"]
+            if sum(1 for p in held if p.role == role) > cap:
+                raise Conflict(GROUP_ROLES, names=tuple(p.signup_name for p in held if p.role == role), group=g % s.k + 1,
+                               roster=g // s.k + 1 if s.rosters > 1 else None, role=role, seats=cap)
 
 
 def _add_forces_pairs_and_pins(s: _Model) -> None:

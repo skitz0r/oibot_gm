@@ -66,7 +66,8 @@ def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: 
                        "penalty so they're only used when needed.")
 
     whatif_map: dict[str, int] = {}
-    candidates = (sorted(result.benched, key=lambda p: (RANK_ORDER.get(p.rank, 9), p.pos))[:max(0, whatif_limit)]
+    kept_off = set(opts.kept_off if opts is not None else ())  # kept off by a pin, a drag or the policy: never "closest"
+    candidates = (sorted((p for p in result.benched if p.signup_name not in kept_off), key=lambda p: (RANK_ORDER.get(p.rank, 9), p.pos))[:max(0, whatif_limit)]
                   if whatif else [])
     for p in candidates:
         try:

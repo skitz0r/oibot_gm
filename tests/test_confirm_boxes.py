@@ -502,3 +502,19 @@ def test_open_refuses_when_its_times_cant_be_read(reg, rs, web_bot, monkeypatch,
     assert r.status_code == 400 and not rs.events, r.json()
     box = r.json()["box"]
     assert box["verb"] is None and box["sentences"] == [r.json()["error"]] and "nothing was opened" in r.json()["error"]
+
+
+def test_the_lock_box_never_counts_a_joiner_kept_off(reg, rs):
+    """The count is the solve's own kept-off list (rc.lock_forces): one joiner pinned out is not "rostered", and with
+    everyone who joined kept off the box is a refusal (the lock would roster nobody)."""
+    sid = tuesday(reg)
+    ev = rc.open_run(reg, rs, HYJAL, next_tuesday(reg, sid), schedule=sid)
+    ms = people(reg, 7)
+    join(reg, rs, ev, ms)
+    assert cq.lock_box(reg, ev)["sentences"][1].startswith("The 7 rostered get")
+    ev.pins[str(ms[0].discord_id)] = "out"
+    assert cq.lock_box(reg, ev)["sentences"][1].startswith("The 6 rostered get")
+    for m in ms:
+        ev.pins[str(m.discord_id)] = "out"
+    b = cq.lock_box(reg, ev)
+    assert b["verb"] is None and b["sentences"] == [rc.SOLVER_WORDS["all_off"]]

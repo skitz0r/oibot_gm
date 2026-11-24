@@ -58,27 +58,42 @@ def test_every_joiner_kept_off_solves_to_an_empty_roster():
     assert seated(solve(ps, force_out=tuple(p.signup_name for p in ps))) == set()
 
 
-@pytest.mark.parametrize("opts, reason", [
-    (dict(force_in=tuple(f"p{i}" for i in range(11))), solver.KEPT_ON),
-    (dict(pins={"p0": 0}, force_out=("p0",)), solver.KEPT_BOTH),
-    (dict(pins={f"p{i}": 0 for i in range(6)}), solver.GROUP_FULL),
-    (dict(pins={f"p{i}": 0 for i in range(4)}), solver.GROUP_ROLES),
+@pytest.mark.parametrize("opts, reason, words", [
+    (dict(force_in=tuple(f"p{i}" for i in range(11))), solver.KEPT_ON, "11 people are kept on the roster, and it has 10 seats."),
+    (dict(force_in=("p0",), force_out=("p0",)), solver.KEPT_BOTH, "p0 is kept on the roster by a pin or the comp policy"),
+    (dict(pins={f"p{i}": 0 for i in range(6)}), solver.GROUP_FULL, "Group 1 on the board holds 6 people and has room for 5."),
+    (None, solver.GROUP_ROLES, "Group 1 on the board holds more healers than one group may have: 3."),
 ])
-def test_conflicts_the_board_can_make_are_named_before_searching(opts, reason):
+def test_conflicts_the_board_can_make_are_named_before_searching(opts, reason, words):
     ps = pool(8, 4) if reason == solver.GROUP_ROLES else pool(12)
     if reason == solver.GROUP_ROLES:  # four healers pinned into one group (three may share one)
         opts = dict(pins={p.signup_name: 0 for p in ps if p.role == "healer"})
-    with pytest.raises(RuntimeError) as e:
+    with pytest.raises(solver.Conflict) as e:
         solve(ps, **opts)
-    assert reason in str(e.value)
+    assert e.value.reason == reason and reason in str(e.value)
     said = rc.solver_error_text(e.value)
-    assert said == rc.SOLVER_WORDS[reason] and "minimum" not in said
+    assert said.startswith(words) and "minimum" not in said, said
+    if reason in (solver.GROUP_FULL, solver.GROUP_ROLES):
+        assert all(n in said for n in e.value.names), "the people are named"
     assert rc.solver_error_text(RuntimeError(said)) == said, "a stored lock_error read again is itself"
+
+
+def test_a_real_timeout_says_time_never_infeasible():
+    """The solver's own string on a timeout is "no roster found: UNKNOWN" (no solution inside the limit): the time
+    sentence, never "no roster fits"."""
+    assert rc.solver_error_text(RuntimeError("no roster found: UNKNOWN")) == rc.SOLVER_WORDS["time"]
+    ps = pool(30, 6, 4)
+    with pytest.raises(RuntimeError) as e:  # a budget too small to find anything: the solver's real exception text
+        solve_rosters(FOREVER, ps, "hyjal_summit_forever", SolveOptions(raid_size=20, time_limit_s=1e-6), rosters=1)
+    assert str(e.value) == "no roster found: UNKNOWN" and rc.solver_error_text(e.value) == rc.SOLVER_WORDS["time"]
 
 
 def test_the_failure_sentences_are_true_and_whole():
     assert rc.solver_error_text(RuntimeError("no roster found: INFEASIBLE")) == rc.SOLVER_WORDS["infeasible"]
-    assert rc.solver_error_text(RuntimeError("status UNKNOWN")) == rc.SOLVER_WORDS["time"]
     assert rc.solver_error_text(KeyError("p9")) == rc.SOLVER_WORDS["other"]
+    assert rc.solver_error_text(RuntimeError(f"no roster found: {rc.ALL_KEPT_OFF}")) == rc.SOLVER_WORDS["all_off"]
+    assert rc.solver_error_text(RuntimeError(rc.SOLVER_WORDS["changing"])) == rc.SOLVER_WORDS["changing"], "web/api.py re-reads lock_error"
+    old = "the answers or pins kept changing while the roster was being built; lock again in a moment"
+    assert rc.solver_error_text(RuntimeError(old)) == old, "a lock_error stored before shows as it was"
     for s in rc.SOLVER_WORDS.values():
         assert "minimum" not in s and s[0].isupper() and s.endswith(".") and 1 <= s.count(". ") + 1 <= 2

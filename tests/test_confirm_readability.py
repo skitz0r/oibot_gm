@@ -793,6 +793,21 @@ def box_cases(reg, rs, runs, ms, dump):
         add("cancel_box", case, cq.cancel_box(reg, ev, rs))
     four = next(e for e in rs.events.values() if e.state == "open" and not rc.is_follow(e) and len(rc.event_parts(rs, e)) == 4)
     add("lock_box", "four raids", cq.lock_box(reg, four, rs))  # lineup_cases' four-raid event
+    ev = runs["open recurring"]  # kept-off joiners (an out pin, a drag onto Not placed): never counted as rostered
+    joined, pins, layout = ev.by_status("in"), dict(ev.pins), ev.layout
+    ev.layout = None  # a board place wins over a pin out: off the board for these cases
+    if joined:
+        whole = cq.lock_box(reg, ev, rs)
+        ev.pins[str(joined[0].discord_id)] = "out"
+        b = cq.lock_box(reg, ev, rs)
+        assert b["verb"] == "Lock" and (b["sentences"] != whole["sentences"] or len(joined) > rc.run_size(reg, ev)), b
+        add("lock_box", "open recurring, one joiner kept off", b)
+        for sg in joined:
+            ev.pins[str(sg.discord_id)] = "out"
+        b = cq.lock_box(reg, ev, rs)
+        assert b["verb"] is None and b["sentences"] == [rc.SOLVER_WORDS["all_off"]], b
+        add("lock_box", "everyone who joined kept off", b)
+    ev.pins, ev.layout = pins, layout
     b = cq.cancel_box(reg, four, rs)
     assert b["sentences"][0] == "All 4 raids of this event are cancelled.", b
     add("cancel_box", "four raids", b)

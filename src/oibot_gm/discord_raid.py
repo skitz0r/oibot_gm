@@ -931,16 +931,18 @@ class RaidMixin:
                     break
                 ev.log.append(f"lock ({by}): answers or pins changed while the groups were being built — building again")
             else:
-                why = "The answers or pins kept changing while the roster was being built. Lock again in a moment."
+                why = rc.SOLVER_WORDS["changing"]
             if why is not None:
                 first = ev.lock_error != why
                 ev.lock_error = why
                 ev.log.append(f"lock ({by}) failed: {why}")
                 rs.save(ev, "lock failed")
+                # names in the sentence (a conflict names people) and `by` are member text: escaped on the Discord lines
+                esc = lambda t: discord.utils.escape_mentions(discord.utils.escape_markdown(str(t)))  # noqa: E731
                 if first:
-                    await self.post_run_update(reg, ev, f"⚠️ The lock by {by} failed. {why} The sheet stays open.")
+                    await self.post_run_update(reg, ev, f"⚠️ The lock by {esc(by)} failed. {esc(why)} The sheet stays open.")
                     await self.refresh_sheet(reg, ev)  # the sheet's footer says so too: the signup channel's truth matches the thread's
-                await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: lock failed — {why}")
+                await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: lock failed — {esc(why)}")
                 return f"{run_title(reg, ev)}: lock failed — {why}"
             if ev.state != "open":  # cancelled while the roster was being built
                 raise RegistryError(f"{run_title(reg, ev)} was {ev.state} before the roster was ready, so it was not locked.")

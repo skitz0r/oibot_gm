@@ -2886,10 +2886,12 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     def role_of(cls: str, spec: str) -> str:
         return reg.profile.spec(cls, spec).role
 
+    off_ids = kept_off_ids(reg, rs, ev)  # an "out" pin, a drag onto Not placed, always_bench: never asked, never counted
+
     def ok(m: Member | None) -> bool:
         # DMs off is no reason to skip someone (D14): they are asked in the same order, the ask waits on their Me page
         # (channel "web", same deadline); fill_batch adds a reachable twin when the hours before start run short
-        return bool(m) and m.discord_id not in asked and not m.absent_on(day) and m.discord_id not in busy
+        return bool(m) and m.discord_id not in asked and not m.absent_on(day) and m.discord_id not in busy and m.discord_id not in off_ids
 
     # ---- who counts now
     cur: list[dict] = []
@@ -2902,6 +2904,8 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
                         "cls": p.cls, "spec": p.spec, "offspec": sg.offspec if sg else p.offspec, "role": p.role, "signed": True})
     else:
         for sg in ev.by_status("in"):
+            if sg.discord_id in off_ids:  # kept off: not coming as far as the lock is concerned
+                continue
             cur.append({"uid": sg.discord_id, "m": reg.members.get(sg.discord_id), "name": sg.display_name, "character": sg.character,
                         "cls": sg.cls, "spec": sg.spec, "offspec": sg.offspec, "role": sg.role, "signed": True})
     projecting = not locked and exp_from == "regulars"
@@ -4006,6 +4010,64 @@ def run_strategy(reg: Registry, ev: RaidEvent) -> str:
             or "balanced")
 
 
+class LockForces(BaseModel):
+    """Who the lock keeps on and off the roster, as _solve_run hands them to the solver (THE reader: the lock box's
+    count, the planner's candidates and the all-kept-off refusal read the same lists, so they never drift).
+    `kept_off` = an "out" pin or the comp policy's always_bench, never a name placed on the board (the board place
+    wins); `kept_on` = an "in" pin, a board place or the policy's never_bench, never an "out" pin. Signup names, in the
+    order the solve adds them (pins first, then policy lines), duplicates as the solve sees them."""
+
+    pool: list[str]
+    placed: dict[str, int]
+    kept_off: list[str]
+    kept_on: list[str]
+    never_bench: list[str]
+    always_bench: list[str]
+
+
+def lock_forces(reg: Registry, rs, ev: RaidEvent, players: list[Player] | None = None) -> LockForces:
+    """See LockForces. `rs` = the run store (or the board's frozen view; None: the guild's own files)."""
+    from .policy import PolicyStore
+
+    players = players if players is not None else players_for(reg, ev)
+    cc = PolicyStore(rs.store if rs is not None else reg.store, rs.key if rs is not None else reg.key).comp_constraints()
+    names = {p.character: p.signup_name for p in players} | {p.signup_name: p.signup_name for p in players}
+    resolve = lambda n: names.get(n) or next((v for k, v in names.items() if k.lower() == n.lower()), None)  # noqa: E731
+    by_uid = {str(sg.discord_id): sg.display_name for sg in ev.signups.values()}
+    pin_in = [by_uid[u] for u, v in ev.pins.items() if v == "in" and u in by_uid]
+    pin_out = [by_uid[u] for u, v in ev.pins.items() if v == "out" and u in by_uid]
+    layout = [[n for n in g if n in names] for g in (ev.layout or [])]
+    placed = {n: gi for gi, g in enumerate(layout) for n in g}
+    pool = [p.signup_name for p in players]
+    inpool = set(pool)
+    always = [x for x in (resolve(n) for n in cc["always_bench"]) if x and x in inpool]
+    never = [x for x in (resolve(n) for n in cc["never_bench"]) if x and x in inpool]
+    return LockForces(pool=pool, placed=placed,
+                      kept_off=[x for x in pin_out + always if x in inpool and x not in placed],
+                      kept_on=[x for x in pin_in + list(placed) + never if x in inpool and x not in pin_out],
+                      never_bench=never, always_bench=always)
+
+
+ALL_KEPT_OFF = "everyone who joined is kept off"  # the solver-side reason (no roster: nobody who joined may play)
+
+
+def kept_off_ids(reg: Registry, rs, ev: RaidEvent) -> set[int]:
+    """The members the lock keeps off this run (lock_forces' kept_off, as ids) plus anyone the comp policy's
+    always_bench names by a character or display name: the planner never asks them (a pin "out" or a drag onto Not
+    placed means "not this run")."""
+    from .policy import PolicyStore
+
+    f = lock_forces(reg, rs, ev)
+    out = {sg.discord_id for sg in ev.signups.values() if sg.display_name in set(f.kept_off)}
+    always = {str(n).lower() for n in PolicyStore(rs.store if rs is not None else reg.store, rs.key if rs is not None else reg.key).comp_constraints()["always_bench"]}
+    if always:
+        placed = set(f.placed)
+        out |= {m.discord_id for m in reg.members.values()
+                if (m.display_name.lower() in always or any(c.label.lower() in always for c in m.characters))
+                and not (str(m.discord_id) in ev.signups and ev.signups[str(m.discord_id)].display_name in placed)}
+    return out
+
+
 def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None,
                earlier: dict[int, int] | None = None, stop=None) -> tuple[list[Player], list[RosterResult], int]:
     """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
@@ -4023,12 +4085,13 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     cc = PolicyStore(rs.store, rs.key).comp_constraints()
     names = {p.character: p.signup_name for p in players} | {p.signup_name: p.signup_name for p in players}
     resolve = lambda n: names.get(n) or next((v for k, v in names.items() if k.lower() == n.lower()), None)  # noqa: E731
-    by_uid = {str(sg.discord_id): sg.display_name for sg in ev.signups.values()}
-    pin_in = [by_uid[u] for u, v in ev.pins.items() if v == "in" and u in by_uid]
-    pin_out = [by_uid[u] for u, v in ev.pins.items() if v == "out" and u in by_uid]
+    forces = lock_forces(reg, rs, ev, players)  # THE kept on / kept off lists (the lock box and the planner read them too)
+    joined = {p.signup_name for p in players if p.status == "signed"}
+    if joined and joined <= set(forces.kept_off):  # nobody who joined may play: never an empty roster
+        raise RuntimeError(f"no roster found: {ALL_KEPT_OFF}")
     k = groups_per_roster(reg, size)
     layout = [[n for n in g if n in names] for g in (ev.layout or [])]
-    placed = {n: gi for gi, g in enumerate(layout) for n in g}
+    placed = forces.placed
     used = max((gi for gi, g in enumerate(layout) if g), default=-1) + 1  # groups up to the last one holding someone: empty rosters drawn on the board force nothing
     n_rosters = max(how_many_rosters(reg, players, size, rb, want=run_rosters(reg, ev)), -(-used // k) if used else 1)
     strategy = strategy or run_strategy(reg, ev)
@@ -4057,8 +4120,8 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     role_min = merged_role_min(rb, cc["role_min"])
     minimums = {**reg.minimums(raid_id, size), **role_min}  # every class, spec, melee or ranged minimum too (D16)
     late: set[str] = set()
-    benched = {x for x in pin_out + [resolve(n) for n in cc["always_bench"]] if x and x in pool and x not in placed}
-    kept = {x for x in pin_in + list(placed) + [resolve(n) for n in cc["never_bench"]] if x and x in pool and x not in pin_out}
+    benched = set(forces.kept_off)
+    kept = set(forces.kept_on)
     if run_kind(reg, ev) == "adhoc" and not is_follow(ev):  # first come, first rostered (a follow-on: the lead's roster comes first instead): the late joiners are benched before the solve
         # a joiner benched by a pin / always_bench takes no first-come seat, and a never_bench joiner keeps one —
         # otherwise the same name lands in force_in and force_out, or a seat goes unfilled (INFEASIBLE)
@@ -4068,13 +4131,14 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         time_limit_s=time_limit, raid_size=size,
         keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),
         keep_apart=tuple((resolve(a), resolve(b)) for a, b in cc["keep_apart"] if resolve(a) and resolve(b)),
-        force_in=tuple(x for x in pin_in + list(placed) + [resolve(n) for n in cc["never_bench"]] if x and x in pool and x not in pin_out),
-        force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] + sorted(late - kept) if x and x in pool and x not in placed),
+        force_in=tuple(forces.kept_on),
+        force_out=tuple(forces.kept_off + [x for x in sorted(late - kept) if x in pool and x not in placed]),
         pins={n: gi for n, gi in placed.items() if gi < k * n_rosters} or None,
         prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
         minimums=minimums or None,
         lead_rostered=lead_rostered,
         bonus=bonus,
+        kept_off=tuple(forces.kept_off),
         stop=stop,  # the board's picture only (solver.Stop): a lock that starts abandons it; never set by the lock itself
     )
     # "another one": for a split the rosters must differ, for a single run the groups must
@@ -4103,32 +4167,66 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
 
 
 SOLVER_WORDS = {  # what blocks a roster, in one or two sentences an officer can act on (minimums are preferences: never one)
-    solver.KEPT_ON: "More people are kept on the roster than it has seats. Take a pin off or move someone to Not placed, then lock again.",
-    solver.KEPT_BOTH: "Someone is both placed on the board and kept off the roster. Move them or clear their pin, then lock again.",
-    solver.GROUP_FULL: "A group on the board holds more people than it has room for. Move someone to another group, then lock again.",
-    solver.GROUP_ROLES: "A group on the board holds more healers or tanks than one group may have. Move one to another group, then lock again.",
-    "infeasible": "No roster fits the board, the pins and the comp rules together. Move some names off the board or clear a pin, then lock again.",
+    "infeasible": "No roster fits the board, the pins and the comp rules together. Move names off the board, clear a pin or "
+                  "loosen a comp rule, then lock again.",
     "time": "The bot couldn't build the roster in time. Lock again, or place fewer people by hand.",
     "other": "The bot couldn't build the roster. Lock again in a moment.",
+    "changing": "The answers or pins kept changing while the roster was being built. Lock again in a moment.",
+    "all_off": "Everyone who joined is kept off the roster, so move someone back from Not placed before you lock.",
+    "no_other": "There is no other split that fits the rules. Use one already shown.",
 }
+LOCK_AGAIN = ", then lock again."  # every conflict_sentence ends so (how a stored one is known when it is read again)
+# lock_error sentences stored before SOLVER_WORDS (still on old run files): shown as they are
+_OLD_LOCK_WORDS = ("no roster satisfies the rules", "the bot couldn't find a roster in time", "the answers or pins kept changing",
+                   "building the roster failed")
+
+
+def conflict_sentence(e: "solver.Conflict") -> str:
+    """A conflict the solver refused before searching, naming who and where (member names are data: the Discord lines
+    that carry it escape it)."""
+    who = join_words(list(e.names))
+    where = f"Group {e.group}" + (f" of roster {e.roster}" if e.roster else "")
+    if e.reason == solver.KEPT_ON:
+        return (f"{e.have} people are kept on the roster, and it has {e.seats} seats. Clear a pin, a board place or a comp "
+                "policy line that keeps someone on, then lock again.")
+    if e.reason == solver.KEPT_BOTH:
+        one = len(e.names) == 1
+        return (f"{who} {'is' if one else 'are'} kept on the roster by a pin or the comp policy, and kept off it by the comp "
+                f"policy. Clear one of the two, then lock again.")
+    if e.reason == solver.GROUP_FULL:
+        return f"{where} on the board holds {e.have} people and has room for {e.seats}. Move one of {who} to another group, then lock again."
+    if e.reason == solver.GROUP_ROLES:
+        role = {"healer": "healers", "tank": "tanks"}.get(e.role or "", "people of one role")
+        return f"{where} on the board holds more {role} than one group may have: {e.seats}. Move one of {who} to another group, then lock again."
+    return SOLVER_WORDS["infeasible"]
 
 
 def solver_error_text(e: Exception) -> str:
-    """What blocked a roster, as SOLVER_WORDS says it (the lock's run-update line, its ops warn, the lock_error the site
-    and plain text show, the board's failed state): the conflict the solver named before searching when it did, else
-    an infeasible model, a timeout or anything else. Already one of these sentences → itself (a stored lock_error passed
-    through again)."""
+    """What blocked a roster, in sentences an officer can act on (the lock's run-update line, its ops warn, the
+    lock_error the site and plain text show, Preview lock, the board's failed state): a conflict the solver named
+    before searching (conflict_sentence, with the people), everyone who joined kept off, no other split, a TIMEOUT (the
+    solver's "no roster found: UNKNOWN" — matched before the infeasible case), an infeasible model, anything else.
+    A sentence already made here (a stored lock_error passed through again, also one stored before SOLVER_WORDS)
+    reads as itself; an exception's own words never reach a person."""
+    if isinstance(e, solver.Conflict):
+        return conflict_sentence(e)
     msg = str(e)
-    if msg in SOLVER_WORDS.values():
+    if msg in SOLVER_WORDS.values() or msg.startswith(_OLD_LOCK_WORDS):
         return msg
-    for reason in (solver.KEPT_ON, solver.KEPT_BOTH, solver.GROUP_FULL, solver.GROUP_ROLES):
-        if reason in msg:
-            return SOLVER_WORDS[reason]
+    if type(e) is RuntimeError and msg.endswith(LOCK_AGAIN) and not msg.startswith("no roster found"):
+        return msg  # a sentence of ours (a stored conflict_sentence, which names people) read again
+    if ALL_KEPT_OFF in msg:
+        return SOLVER_WORDS["all_off"]
+    if NO_OTHER in msg:
+        return SOLVER_WORDS["no_other"]
+    if "UNKNOWN" in msg or "time limit" in msg.lower() or "timed out" in msg.lower():
+        return SOLVER_WORDS["time"]
     if "INFEASIBLE" in msg or "no roster found" in msg:
         return SOLVER_WORDS["infeasible"]
-    if "UNKNOWN" in msg or "time" in msg.lower():
-        return SOLVER_WORDS["time"]
     return SOLVER_WORDS["other"]
+
+
+NO_OTHER = "no other split"  # "another one" asked for a roster the earlier ones exclude, and none is left
 
 
 def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None,
@@ -4140,7 +4238,15 @@ def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, av
     prev = [{n: gi // k for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     prev_g = [{n: gi for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     trial = ev.model_copy(deep=True)
-    players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=time_limit, whatif=False, avoid_groups=prev_g)
+    try:
+        players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=time_limit, whatif=False, avoid_groups=prev_g)
+    except RuntimeError as e:
+        if not (prev and "INFEASIBLE" in str(e)):
+            raise
+        # "another one" found none: is it the earlier answers that leave nothing, or the board and the rules? (a model
+        # without the avoid lines is proven quickly either way)
+        _solve_run(reg, rs, ev.model_copy(deep=True), strategy=strategy, time_limit=time_limit, whatif=False)
+        raise RuntimeError(f"no roster found: {NO_OTHER}") from e
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
     return [list(g) for r in rosters for g in r.groups], rosters
