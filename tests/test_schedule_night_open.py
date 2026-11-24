@@ -127,3 +127,22 @@ def test_a_one_off_already_on_the_night_keeps_it_and_the_scheduler_opens_no_seco
     assert "Raid nights" in night[0] and one_off.key not in night[0] and "already starts then" in night[0]
     # an open by hand at that minute is refused in the same words, never a second run beside it
     assert rc.open_refusal(reg, rs, RID, far, None) == rc.NIGHT_TAKEN.format(title=run_title(reg, one_off), name="Raid nights")
+
+
+def test_two_schedules_at_one_minute_both_open_through_the_scheduler(reg, rs, monkeypatch):
+    """The belt only skips a night a ONE-OFF holds: two schedules of one raid at the same minute are two runs by design,
+    and the scheduler opens both with no warning."""
+    sid, far, _near = nights(reg)
+    weekly(reg, RID, far.strftime("%a %H:%M"), sid="alt")
+    bot, opened = _scheduler(reg, rs)
+    warns: list[str] = []
+
+    async def emit(cfg, level, text, *a, **k):
+        if level == "warn":
+            warns.append(text)
+    monkeypatch.setattr(bot.ops, "emit", emit)
+    lead = float(reg.schedule_def(RID, sid)["signup_lead_hours"])
+    monkeypatch.setattr(reg, "now_local", lambda: far - timedelta(hours=lead) + timedelta(minutes=5))
+    run(bot.scheduler_tick_guild(reg))
+    at = [rs.events[k] for k in opened if rs.events[k].start == far]
+    assert sorted(e.schedule for e in at) == sorted([sid, "alt"]) and not [w for w in warns if "did not open its night" in w]
