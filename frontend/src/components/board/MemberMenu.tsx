@@ -4,7 +4,7 @@ import { IconArrowsMove, IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, 
 import { api, type Box, type MemberAction, type MemberActions, type Person } from "../../api";
 import { fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
-import { useConfirmBox } from "../ConfirmBox";
+import { pageWords, useConfirmBox } from "../ConfirmBox";
 import { boxOf } from "../events/shared";
 import css from "./board.module.css";
 
@@ -79,7 +79,7 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer }: {
           )}
           {uid && <Menu.Label>{name}{list ? ` · ${list.now}` : ""}</Menu.Label>}
           {uid && !list && <Group justify="center" p="xs"><Loader size="xs" /></Group>}
-          {uid && list && list.actions.length === 0 && <Menu.Item disabled>Nothing applies on this run</Menu.Item>}
+          {uid && list && list.actions.length === 0 && <Menu.Item disabled>{pageWords().nothing_applies}</Menu.Item>}
           {uid && list && items(list.actions).map((it) => (
             <Menu.Item key={`${it.a.key}:${it.character || ""}`} leftSection={ICON[it.a.key]} color={DANGER.has(it.a.key) ? "red" : undefined}
               onClick={() => (onAnswer && ANSWERS.has(it.a.key) ? onAnswer(it.a.key, it.character) : record(uid, name, list, it))}>{it.label}</Menu.Item>
@@ -236,7 +236,7 @@ export function RepostSheetModal({ run, opened, onClose, onDone }: { run: string
   return (
     <Modal opened={opened} onClose={onClose} title="Re-post the sheet" centered>
       <Stack gap="sm">
-        <Text size="sm">The live sheet moves to this channel: its buttons and later updates follow it, and the old message says where it went.</Text>
+        <Text size="sm">{pageWords().repost_sheet}</Text>
         <Select label="Channel" placeholder={chans ? "Pick a channel" : "Loading…"} searchable data={chans || []} value={cid} onChange={setCid} />
         <Group justify="flex-end"><Button variant="default" size="sm" onClick={onClose}>Back</Button><Button size="sm" disabled={!cid} loading={busy} onClick={go}>Re-post here</Button></Group>
       </Stack>

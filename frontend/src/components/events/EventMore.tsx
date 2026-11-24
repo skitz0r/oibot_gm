@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ActionIcon, Menu, Modal, Select, Text, Tooltip } from "@mantine/core";
 import { IconArrowsSplit, IconBell, IconDiamond, IconDots, IconFlagCheck, IconListCheck, IconPlayerPause, IconPlayerPlay, IconRotate, IconSend, IconUsersPlus } from "@tabler/icons-react";
@@ -18,11 +18,12 @@ import css from "../board/board.module.css";
  *  Pause / Resume automatic asks, Re-post the sheet… (the first raid's: it holds the sheet), the loot council, End the
  *  run, the asks out (each with Withdraw) and, on a finished event, Reopen an end made by mistake. Each verb is named as
  *  on Discord (meta.run_labels); what can't be pressed is greyed with the server's reason under it; Remind and End ask
- *  first with the server's sentence (consequences "remind", End's preview), as the old run card did; the fill and
+ *  first with the server's box (remind_box, end_box); the fill and
  *  re-post screens are the board's own. Nothing here composes a sentence. */
 export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChanged: () => void }) {
-  const [ask, dialog] = useConfirmBox();
+  const [ask, dialog] = useConfirmBox(["run:", "loot"]);
   const [askSplit, splitDialog, replaceSplit] = useConfirmBox(["run:"]);
+  const splitSeq = useRef(0);  // the newest pick's preview wins: an older answer never replaces a newer pick's box
   const [fill, setFill] = useState<NightSheet | null>(null);
   const [repost, setRepost] = useState<string | null>(null);
   const [asks, setAsks] = useState<NightSheet | null>(null);
@@ -36,22 +37,26 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
     setBusy(what);
     try { const r = await api.post<{ message: string }>(path, payload); if (r.message) ok(r.message); onChanged(); } catch (e) { fail(e); } finally { setBusy(null); }
   }
-  // Remind and End print ONLY the server's sentence (consequences.py "remind"; End = LootMixin.end_consequence: the
-  // council's part + "end" with Reopen's window from code) — the Discord decide screens show the same words — in the
-  // event page's box (Back, then the verb named as on Discord); neither has a server box of its own yet
-  const boxOf = (title: string, text: string | undefined, verb: string, danger = false): Box =>
-    ({ title, sentences: (text || "").split("\n").filter(Boolean), verb, danger, diff: [], fp: "" });
-  // the run named once, as Discord names it (ev_json `run_title`: 'Hyjal Summit Tue 15 Dec 6:30 PM')
-  async function remind(s: NightSheet) {
-    if (!(await ask({ box: boxOf(`${L.remind} for ${s.run_title}?`, s.consequences?.remind, L.remind) }))) return;
-    await post(`/api/run/${s.key}/remind`);
+  /** Remind and End the run print the SERVER's box (§7b; consequences.remind_box, LootMixin.end_box — the run named as
+   *  Discord names it): the preview asks the route, the press sends the box's fp as `seen`, a run or council that changed
+   *  while the box was open comes back as the fresh box (409) and waits again; a refusal is its box, Back alone. */
+  async function boxed(url: string) {
+    const preview = async (): Promise<Box> => {
+      try { return (await api.post<{ box: Box }>(url, { preview: true })).box; } catch (e) { const b = boxOf_(e); if (b) return b; throw e; }
+    };
+    let first: Box;
+    try { first = await preview(); } catch (e) { fail(e); return; }
+    const said = { text: "" };
+    const done = await ask({
+      box: first, refresh: preview,
+      act: async (fp) => {
+        try { said.text = (await api.post<{ message: string }>(url, { seen: fp })).message; return null; } catch (e) { const b = boxOf_(e); if (b) return b; throw e; }
+      },
+    });
+    if (done) { if (said.text) ok(said.text); onChanged(); }
   }
-  async function end(s: NightSheet) {
-    let preview = "";
-    try { preview = (await api.post<{ preview: string }>(`/api/loot/${s.key}/end`, { preview: true })).preview; } catch (err) { fail(err); return; }
-    if (!(await ask({ box: boxOf(`End ${s.run_title}?`, preview, L.end, true) }))) return;
-    await post(`/api/loot/${s.key}/end`);
-  }
+  const remind = (s: NightSheet) => boxed(`/api/run/${encodeURIComponent(s.key)}/remind`);
+  const end = (s: NightSheet) => boxed(`/api/loot/${encodeURIComponent(s.key)}/end`);
   /** Split strategy… for one raid before the lock (the existing POST /api/run/{key}/strategy): the server's pick box
    *  first, every pick asks the server again (consequences.strategy_box: what the strategy does, that the board is
    *  placed again and the lock uses it), the verb presses with the fp on screen. The board then redraws by it. */
@@ -64,7 +69,10 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
     let first: Box;
     try { first = await preview(null); } catch (e) { fail(e); return; }
     const said = { text: "" };
-    const pick = (v: string | null) => { picked = v; preview(v).then(replaceSplit).catch(fail); };
+    const pick = (v: string | null) => {
+      picked = v; const n = ++splitSeq.current;
+      preview(v).then((b) => { if (n === splitSeq.current) replaceSplit(b); }).catch((e) => { if (n === splitSeq.current) fail(e); });
+    };
     const done = await askSplit({
       box: first, refresh: () => preview(picked),
       fields: <SplitPick choices={ev.strategies} now={p.strategy} onPick={pick} />,
@@ -85,12 +93,12 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
       if (locked) {
         out.push(<Menu.Item key={`${p.key}:remind`} leftSection={<IconBell size={14} />} disabled={!s.may_remind} onClick={() => remind(s)}>{L.remind}{why(s.may_remind ? null : s.remind_note)}</Menu.Item>);
         out.push(s.autofill_paused
-          ? <Menu.Item key={`${p.key}:pause`} leftSection={<IconPlayerPlay size={14} />} onClick={() => post(`/api/run/${s.key}/pause`, { paused: false })}>{L.resume}</Menu.Item>
-          : <Menu.Item key={`${p.key}:pause`} leftSection={<IconPlayerPause size={14} />} onClick={() => post(`/api/run/${s.key}/pause`, { paused: true })}>{L.pause}</Menu.Item>);
+          ? <Menu.Item key={`${p.key}:pause`} leftSection={<IconPlayerPlay size={14} />} onClick={() => post(`/api/run/${encodeURIComponent(s.key)}/pause`, { paused: false })}>{L.resume}</Menu.Item>
+          : <Menu.Item key={`${p.key}:pause`} leftSection={<IconPlayerPause size={14} />} onClick={() => post(`/api/run/${encodeURIComponent(s.key)}/pause`, { paused: true })}>{L.pause}</Menu.Item>);
       }
       if (s.state === "open" && p.strategy) out.push(<Menu.Item key={`${p.key}:split`} leftSection={<IconArrowsSplit size={14} />} onClick={() => split(p)}>Split strategy…</Menu.Item>);
       if (i === 0) out.push(<Menu.Item key={`${p.key}:repost`} leftSection={<IconSend size={14} />} onClick={() => setRepost(s.key)}>Re-post the sheet…</Menu.Item>);
-      if (s.loot?.may_open) out.push(<Menu.Item key={`${p.key}:loot`} leftSection={<IconDiamond size={14} />} onClick={() => post(`/api/loot/${s.key}/open`)}>{L.loot}</Menu.Item>);
+      if (s.loot?.may_open) out.push(<Menu.Item key={`${p.key}:loot`} leftSection={<IconDiamond size={14} />} onClick={() => post(`/api/loot/${encodeURIComponent(s.key)}/open`)}>{L.loot}</Menu.Item>);
       else if (s.loot?.open) out.push(<Menu.Item key={`${p.key}:loot`} leftSection={<IconDiamond size={14} />} component={Link} to="/loot">{L.loot}</Menu.Item>);
       if ((s.fill_asks || []).length + (s.callouts || []).length > 0) {
         out.push(<Menu.Item key={`${p.key}:asks`} leftSection={<IconListCheck size={14} />} onClick={() => setAsks(s)}>Asks and callouts…</Menu.Item>);
@@ -98,7 +106,7 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
       if (locked) out.push(<Menu.Item key={`${p.key}:end`} color="red" leftSection={<IconFlagCheck size={14} />} disabled={!s.may_end} onClick={() => end(s)}>{L.end}{why(s.may_end ? null : s.end_note)}</Menu.Item>);
     } else if (s.state === "done" && (s.may_reopen || s.reopen_note)) {
       // an END by mistake goes back to locked within the hour (rc.reopen_refusal); a cancelled event never reopens
-      out.push(<Menu.Item key={`${p.key}:reopen`} leftSection={<IconRotate size={14} />} disabled={!s.may_reopen} onClick={() => post(`/api/run/${s.key}/reopen`)}>{L.reopen}{why(s.may_reopen ? null : s.reopen_note)}</Menu.Item>);
+      out.push(<Menu.Item key={`${p.key}:reopen`} leftSection={<IconRotate size={14} />} disabled={!s.may_reopen} onClick={() => post(`/api/run/${encodeURIComponent(s.key)}/reopen`)}>{L.reopen}{why(s.may_reopen ? null : s.reopen_note)}</Menu.Item>);
     }
     if (!out.length) return [];
     return [...(several ? [<Menu.Label key={`${p.key}:label`}>{p.raid_name}</Menu.Label>] : []), ...out];

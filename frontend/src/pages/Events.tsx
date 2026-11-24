@@ -65,7 +65,7 @@ export function EventsPage({ meta }: { meta: Meta }) {
   return (
     <ListPage title="Events" selected={selected} back="/events" groups={groups} more={more} intro={list.tz_words}
       action={<Button component={Link} to="/events/new">New event</Button>}
-      empty={<Text size="sm" c="dimmed">No event yet. Make one with New event, or add a schedule on the Schedules page.</Text>}>
+      empty={<Text size="sm" c="dimmed">{meta.page_words.events_empty}</Text>}>
       {pick && "key" in pick && <EventPane key={pick.key} evKey={pick.key!} meta={meta} tick={tick} onChanged={load} />}
       {pick && "sid" in pick && <ComingUpView key={selected!} sid={pick.sid!} occurrence={pick.occurrence!} tick={tick} />}
     </ListPage>

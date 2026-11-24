@@ -28,26 +28,28 @@ export function RaidsPage({ meta }: { meta: Meta }) {
   const phone = useMediaQuery("(max-width: 48em)");
   const [data, setData] = useState<Raids | null>(null);
   const editing = useRef(false);  // the open raid's edit mode: a change made elsewhere never reloads under the draft
-  const load = () => api.get<Raids>("/api/raids").then((d) => { setData(d); return d; });
+  const seq = useRef(0);  // the latest GET wins: an older answer never overwrites a newer one
+  const load = () => { const n = ++seq.current; return api.get<Raids>("/api/raids").then((d) => { if (n === seq.current) setData(d); return d; }); };
   const reload = () => load().catch(fail);
   useEffect(() => { reload(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
   useRefresh(reload);
   useLive(() => { if (!editing.current) reload(); }, ["config", "run"]);
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const view: View = VIEWS.includes(params.get("view") as View) ? (params.get("view") as View) : "rules";
-  const at = (rid: string) => `/raids/${rid}${view === "rules" ? "" : `?view=${view}`}`;
+  const at = (rid: string) => `/raids/${encodeURIComponent(rid)}${view === "rules" ? "" : `?view=${view}`}`;
   const selected = id ?? (phone ? null : data.raids[0]?.id ?? null);
   const raid = data.raids.find((r) => r.id === selected) || null;
   const size = (r: RaidRule) => r.page?.details.find((f) => f.label === "Size")?.value;
   return (
     <ListPage title="Raids" selected={raid ? raid.id : null} back="/raids"
-      groups={[{ label: "Raids", items: data.raids.map((r) => ({ id: r.id, title: r.name, subtitle: size(r), to: at(r.id) })) }]}>
+      groups={[{ label: "Raids", items: data.raids.map((r) => ({ id: r.id, title: r.name, subtitle: size(r), to: at(r.id) })) }]}
+      empty={<Text size="sm" c="dimmed" px={12}>{meta.page_words.raids_empty}</Text>}>
       {raid && raid.page && (
         <RaidDetail key={raid.id} r={raid} meta={meta} view={view} setView={(v) => setParams(v === "rules" ? {} : { view: v }, { replace: true })}
           onEditing={(on) => { editing.current = on; }} onSaved={reload}
           fetchRaid={async () => (await load()).raids.find((r) => r.id === raid.id)!} />
       )}
-      {id && !raid && <Text c="dimmed">That raid isn't in this game. Pick one from the list.</Text>}
+      {id && !raid && <Text c="dimmed">{meta.page_words.raid_missing}</Text>}
     </ListPage>
   );
 }
@@ -110,7 +112,7 @@ function RaidDetail({ r, meta, view, setView, onEditing, onSaved, fetchRaid }: {
     if (!changes.length) { setDraft(null); return; }
     setBusy(true);
     try {
-      const x = await save(changes, { revs: r.rev ? { [`config:raids:${r.id}`]: r.rev } : undefined, always: true, verb: "Save", title: `Save ${r.name}?` });
+      const x = await save(changes, { revs: r.rev ? { [`config:raids:${r.id}`]: r.rev } : undefined, always: true, box: true, onShown: () => setBusy(false) });
       if (x?.changed?.length) onSaved();  // someone changed this raid meanwhile: the toast said so; the draft stays over the fresh raid
       else if (x?.applied?.length) { setDraft(null); onSaved(); }
     } catch (e) { fail(e); } finally { setBusy(false); }

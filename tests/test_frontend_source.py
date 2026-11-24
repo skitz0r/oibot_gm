@@ -291,7 +291,9 @@ def test_the_event_confirms_print_only_the_servers_sentence():
         assert not re.search(r"consequences?\??\.\w+\s*\|\|\s*[`\"']", code), f"{name}: a browser sentence standing in for the server's"
         assert not re.search(r"sentences:\s*\[\s*[`\"']", code), f"{name}: a box sentence written in the browser"
     assert "e.consequences?.remind" in files["SheetCard"] and "message: preview," in files["SheetCard"]
-    assert "s.consequences?.remind" in files["EventMore"] and "boxOf(`End ${s.run_title}?`, preview, L.end, true)" in files["EventMore"]
+    # the final review: Remind and End print the SERVER's box (remind_box, end_box) and press with its fp
+    assert "boxed(`/api/run/${encodeURIComponent(s.key)}/remind`)" in files["EventMore"] and "boxed(`/api/loot/${encodeURIComponent(s.key)}/end`)" in files["EventMore"]
+    assert "{ seen: fp }" in files["EventMore"] and "{ preview: true }" in files["EventMore"] and "title:" not in files["EventMore"]
     assert "useConfirm(" not in files["EventMore"], "the event page's box, never the older modal"
     assert "Reopen works for an hour" not in files["SheetCard"] + files["EventMore"] and "gets a confirmation DM" not in files["BoardView"]
     # the regulars (phase 4, Task 11): each row's and each leftover's Remove prints its server box and sends the record's rev
@@ -904,9 +906,10 @@ def test_the_run_card_reschedules_and_the_schedule_editor_sends_a_lineup():
     """Phase 3, Task 7: the run card's Reschedule… picks the new start in a datetime-local input (the Clock rule's machine
     input), POSTs a preview to /reschedule and prints ONLY the server's `sentences` before Move, which sends the preview's
     rev back; the schedule editor sends `lineup` (up to three later raids, 30-minute start steps) and no `follow_raid`.
-    The picker is the site's DateTimePicker (the Clock rule's lint refuses a typed datetime field)."""
+    The picker is the site's WhenPicker — a calendar day and a 15-minute select (the phase 4 final review: a
+    DateTimePicker's time is typed, and the Clock rule's lint refuses it)."""
     card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
-    assert "/reschedule`" in card and "<DateTimePicker" in card and "pv.sentences.join" in card and "rev: pv.rev" in card
+    assert "/reschedule`" in card and "<WhenPicker" in card and "<DateTimePicker" not in card and "pv.sentences.join" in card and "rev: pv.rev" in card
     assert 'confirmLabel: "Move"' in card and "Reschedule…" in card
     assert "e.cancel_tells_channel !== false" in card  # a later raid whose first finished: no channel line to offer
     sched = (SRC / "pages" / "LineupPage.tsx").read_text()
@@ -947,16 +950,14 @@ def test_the_raids_page_carries_the_earlier_reviews():
     the size is displayed, never edited; SlotIcon / RoleIcon live in components/Icons."""
     page = _code_only((SRC / "pages" / "Raids.tsx").read_text())
     assert "page.boxes.reset" in page and "`config:raid_all:${r.id}`" in page and "opsApi.confirm(" in page
-    assert "always: true" in page and 'verb: "Save"' in page and "useDirty(`raid:${r.id}`, editing, { n, name: r.name })" in page
+    assert "always: true" in page and "box: true" in page and "useDirty(`raid:${r.id}`, editing, { n, name: r.name })" in page
     assert 'm.min === "0" ? null' in page, "a minimum of 0 goes as a clear"
     rules = _code_only((SRC / "components" / "raids" / "RulesView.tsx").read_text())
     assert 'label === "Size"' not in rules, "the size is the game's: shown by the server's Details, never a field"
     ready = _code_only((SRC / "components" / "raids" / "ReadinessView.tsx").read_text())
     assert "the guild's" not in ready.lower() and len(re.findall(r"<Table\.Th\b", ready)) == 3 and "m.have < m.min" not in ready
-    icons = (SRC / "components" / "Icons.tsx").read_text()
-    assert "export function SlotIcon(" in icons and "export function RoleIcon(" in icons
     review = (SRC / "components" / "ReviewModal.tsx").read_text()
-    assert "d?.box" in review and "verb?: string" in review and "always?: boolean" in review
+    assert "d?.box" in review and "box?: boolean" in review and "always?: boolean" in review
 
 
 def test_the_raids_page_fix_round_one():
@@ -975,9 +976,9 @@ def test_the_raids_page_fix_round_one():
     rules = _code_only((SRC / "components" / "raids" / "RulesView.tsx").read_text())
     assert "sizes.slice(m.floor)" in rules and "floor: 0" in rules
     review = _code_only((SRC / "components" / "ReviewModal.tsx").read_text())
-    box_mode = review[review.index("if (verb) {"):review.index("title={result ?")]
+    box_mode = review[review.index("if (boxed) {"):review.index("title={result ?")]
     assert "<BoxButtons" in box_mode and "verb: null" in box_mode and "Nothing to review" not in box_mode and "Apply {n}" not in box_mode and "Back to edits" not in box_mode
-    assert review.index("if (verb) {") < review.index("<ResultSheet"), "with a verb the result sheet is never reached"
+    assert review.index("if (boxed) {") < review.index("<ResultSheet"), "in box mode the result sheet is never reached"
     ready = _code_only((SRC / "components" / "raids" / "ReadinessView.tsx").read_text())
     assert "level={view.level}" in ready and "view.standing_why" in ready and "HAVE_COLOUR[m.level]" in ready
     assert "onEdit" in ready, "the empty make-up's 'Edit the raid' sentence has its Edit beside it"
@@ -1068,7 +1069,7 @@ def test_the_schedule_editor_keeps_every_setting():
     editor = page[page.index("function ScheduleEditor("):]
     for needle in ("fixedFirst={!!sid}", "opts.hours", "opts.presets", "opts.split_policies", "opts.max_weight", "W.raids_own",
                    "F = W.schedule_fields", "label={F[k]}", 'toggle("nudge")', 'toggle("autofill")', 'toggle("open_dm")', 'toggle("confirm")',
-                   "W.split[p]", "kind: d.kind", "QUARTER_HOURS", "guardNav(", "Reload", 'useDirty(`schedule:${sid ?? "new"}`', 'verb: sid ? "Save" : "Create schedule"'):
+                   "W.split[p]", "kind: d.kind", "QUARTER_HOURS", "guardNav(", "Reload", 'useDirty(`schedule:${sid ?? "new"}`', "box: true"):
         assert needle in editor, needle
     assert "confirmed" not in editor and "opsApi.confirm(" not in editor and "staleOnPage: true" in editor
     # fix round 1: the labels are the server's words (the Save box's diff lines say the same), none written here
@@ -1120,7 +1121,7 @@ def test_new_event_prints_only_the_servers_words():
     assert "minDate={minDate}" in when and "opts.today" in page and "toISOString" not in when + page
     assert "max={opts.lineup_max}" in page and '"/api/event-new"' in page
     assert "useConfirmBox(" in page and "seen: fp" in page and 'p.kind === "scheduled" ? p.schedule :' in page
-    assert 'valueFormat="ddd D MMM"' in when and "Array.from({ length: 96 }, (_, i) => ({ value: hhmm(i * 15), label: clock12(i * 15) }))" in when
+    assert 'dayFormat = "ddd D MMM"' in when and "valueFormat={dayFormat}" in when and "Array.from({ length: 96 }, (_, i) => ({ value: hhmm(i * 15), label: clock12(i * 15) }))" in when
     b = _code_only((SRC / "components" / "lineup" / "LineupBuilder.tsx").read_text())
     assert "Drop a raid here for step" in b and "-player · about" in b and "aria-label={`Move ${" in b
     assert "fetch(" not in b and "api." not in b, "the builder is pure: it never fetches"
@@ -1171,7 +1172,7 @@ def test_the_events_page_asks_with_the_servers_box_and_lives():
     for r in ('path="/events"', 'path="/events/:key"', 'path="/events/coming/:sid/:occurrence"', 'path="/events/new"'):
         assert r in app, r
     assert '<Navigate to="/rosters"' not in app
-    assert "navigate(`/events/${r.key}`)" in _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    assert "navigate(`/events/${encodeURIComponent(r.key)}`)" in _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
     menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
     some = menu[menu.index("type AnswerPick"):menu.index("export function RepostSheetModal")]
     assert "useConfirmBox(" in some and "preview: true" in some and "seen: fp" in some and "useConfirm(" not in some
@@ -1245,7 +1246,7 @@ def test_the_events_page_fix_round_one():
     assert "if (n !== seq.current) return;" in page and "useAnyBoxOpen()" in page and "held && lastLive.current" in page
     confirm = _code_only((SRC / "components" / "ConfirmBox.tsx").read_text())
     assert "setChanged(fresh.verb !== null)" in confirm and "setChanged(true); } else close(true)" not in confirm
-    assert '<Text fw={700} px={6}>{n}</Text>' in sign, "a 0 is plain text, never a greyed button"
+    assert '<Text fw={700} px={7} className={css.countZero}>{n}</Text>' in sign, "a 0 is plain text, never a greyed button"
     assert "const first = await preview(now);\n      setBusy(false);" in menu, "the button behind an open box is not busy"
 
 
@@ -1356,7 +1357,7 @@ def test_the_event_page_shows_its_raid_night_facts_and_split_strategy():
     assert "/strategy`" in more and "preview: true" in more and "seen: fp" in more and "ev.strategies" in more and "replaceSplit" in more
     assert 's.state === "open" && p.strategy' in more and "Split strategy…" in more
     assert "busy={busy}" in more and 'busy ? "withdraw" : null' not in more and "post(path, payload, k)" in more
-    assert "${L.remind} for ${s.run_title}?" in more and "End ${s.run_title}?" in more and " on ${name}?" not in more
+    assert "${L.remind} for" not in more and "End ${s.run_title}?" not in more and " on ${name}?" not in more, "the run is named in the server's box"
     lineup = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
     edit = lineup[lineup.index("function EditLineup"):]
     assert "navigate(`/events/${encodeURIComponent(evKey)}`" in edit and "setChanges" not in edit
@@ -1396,7 +1397,7 @@ def test_a_refusal_without_a_server_box_never_carries_the_question_title():
     write refused after the press) is titled with the server's refusal title (/api/meta.confirm_words.refused), never the
     page's question ("Save Hyjal Summit?")."""
     review = _code_only((SRC / "components" / "ReviewModal.tsx").read_text())
-    box_mode = review[review.index("if (verb) {"):review.index("title={result ?")]
+    box_mode = review[review.index("if (boxed) {"):review.index("title={result ?")]
     fallback = box_mode[box_mode.index("const box: Box = said ||"):]
     fallback = fallback[:fallback.index("\n")]
     assert "title: boxWords().refused" in fallback and "title: title" not in fallback and "title ||" not in fallback
@@ -1423,3 +1424,70 @@ def test_the_final_look_fixes():
     regs = _code_only((SRC / "components" / "schedules" / "RegularsSection.tsx").read_text())
     early = regs[regs.index("openEarly(f)}>") - 200:regs.index("openEarly(f)}>")]
     assert 'color="red"' not in early
+
+
+def test_the_final_review_pages_fixes():
+    """The phase 4 final review, the pages' half. (1) Clock rule: a raid's First opens is a calendar day and a 15-minute
+    select (WhenPicker), never a typed DateTimePicker, and no phase 4 page imports a typing time picker. (2) Remind, End
+    the run and a LOCKED event's board moves print the server's box (preview) and press with `seen`; a 409's box comes
+    back; the Test bench's board keeps its own confirm. (3) New event and New schedule count differences from their
+    seed, never presses. (4) A Save's spinner stops when the server answers (onShown), never behind the open box. (5)
+    Split strategy's picks: the newest answer wins. (6) A regular's Remove refreshes the rev with a 409's box. (7)
+    The pages' GETs: the latest answer wins; Coming up waits for an open box before it follows the night's event. (8)
+    The pages' own sentences are the server's PAGE_WORDS; the box's verb is the server's. (10) No dead icon helpers;
+    keys in URLs are encoded."""
+    rules = _code_only((SRC / "components" / "raids" / "RulesView.tsx").read_text())
+    assert "DateTimePicker" not in rules and "<WhenPicker" in rules and 'label="First opens"' in rules
+    assert "`${day}T${time}`" in rules, "the Save sends the same machine form as before"
+    for f in ("pages/Raids.tsx", "pages/Events.tsx", "pages/Schedules.tsx", "pages/LineupPage.tsx", "components/raids/RulesView.tsx",
+              "components/events/RescheduleBox.tsx", "components/WhenPicker.tsx"):
+        code = _code_only((SRC / f).read_text())
+        assert not re.search(r"\b(DateTimePicker|TimeInput|TimePicker)\b", code), f"{f}: a time is picked from 15-minute steps"
+    more = _code_only((SRC / "components" / "events" / "EventMore.tsx").read_text())
+    boxed = more[more.index("async function boxed("):more.index("const remind")]
+    assert "preview: true" in boxed and "seen: fp" in boxed and "boxOf_(e)" in boxed and "refresh: preview" in boxed
+    assert "splitSeq.current" in more and "if (n === splitSeq.current) replaceSplit(b)" in more
+    board = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    server = board[board.index("async function serverMove("):board.index("async function place(")]
+    assert "preview: true" in server and "seen: fp" in server and 'state: "locked"' in server and "b?.board" in server
+    assert 'fp: ""' not in board, "no page-made box on the board"
+    assert "if (event && locked) {" in board and "await serverMove(name, target)" in board
+    place = board[board.index("async function place("):]
+    assert "confirmMove(" in place, "the Test bench's board keeps its own confirm"
+    page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    new = page[page.index("function NewEvent("):page.index("function EditLineup(")]
+    assert "setChanges" not in new and "seed.lineup[k]" in new and "lock !== seed.lock" in new
+    assert "{!refusal && <Button disabled={!ready}" in new, "a refusal box has Back alone"
+    editor = page[page.index("function ScheduleEditor("):]
+    assert "setMade" not in editor and "newEdits(d, seed.current)" in editor and "onShown: () => setBusy(false)" in editor
+    assert "title:" not in editor[editor.index("async function saveSchedule"):editor.index("const fromData")], "the box's title is the server's"
+    assert "W.weight_same" in editor and "W.schedule_no_lineup" in editor
+    assert "meta.page_words.new_event_no_lineup" in new and "meta.page_words.new_event_no_time" in new
+    raids = _code_only((SRC / "pages" / "Raids.tsx").read_text())
+    assert "onShown: () => setBusy(false)" in raids and "n === seq.current" in raids
+    assert "meta.page_words.raids_empty" in raids and "meta.page_words.raid_missing" in raids
+    review = _code_only((SRC / "components" / "ReviewModal.tsx").read_text())
+    assert "? said.verb : null" in review and "opts?.onShown?.()" in review
+    regs = _code_only((SRC / "components" / "schedules" / "RegularsSection.tsx").read_text())
+    assert "if (x) shown.rev = x.rev;\n            return b;" in regs
+    sched = _code_only((SRC / "pages" / "Schedules.tsx").read_text())
+    assert "n === listSeq.current" in sched and "n === seq.current" in sched and "meta.page_words.schedules_empty" in sched
+    coming = _code_only((SRC / "components" / "events" / "ComingUpView.tsx").read_text())
+    assert "n === seq.current" in coming and "useAnyBoxOpen()" in coming and "if (openedAt && !held)" in coming and "boxWords().refused" in coming
+    events = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert "meta.page_words.events_empty" in events
+    assert "pageWords().activity_empty" in _code_only((SRC / "components" / "events" / "ActivitySection.tsx").read_text())
+    menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
+    assert "pageWords().nothing_applies" in menu and "pageWords().repost_sheet" in menu
+    for f, words in (("pages/Events.tsx", "No event yet"), ("pages/Schedules.tsx", "No schedule yet"), ("pages/Raids.tsx", "isn't in this game"),
+                     ("components/events/ActivitySection.tsx", "The log fills"), ("components/board/MemberMenu.tsx", "Nothing applies"),
+                     ("components/board/MemberMenu.tsx", "The live sheet moves"), ("pages/LineupPage.tsx", "Add a raid to the lineup")):
+        assert words not in _code_only((SRC / f).read_text()), f"{f}: {words} is the server's word now"
+    icons = _code_only((SRC / "components" / "Icons.tsx").read_text())
+    assert "SlotIcon" not in icons and "RoleIcon" not in icons
+    for f in ("components/events/EventMore.tsx", "components/board/BoardView.tsx", "pages/LineupPage.tsx", "components/board/FillModal.tsx"):
+        code = _code_only((SRC / f).read_text())
+        assert not re.search(r"`/(api/run|api/loot|events|api/raid)/\$\{(?!encodeURIComponent)", code), f"{f}: an unencoded key in a URL"
+    board_head = _code_only((SRC / "components" / "events" / "EventBoard.tsx").read_text())
+    assert "!(finished && parts.length === 1)" in board_head, "a finished event says Rostered once"
+    assert "minHeight: mobile ? 44 : undefined }}>log out</a>" in _code_only((SRC / "App.tsx").read_text())

@@ -126,14 +126,14 @@ export function FillModal({ e, meta, opened, onClose, onSent }: { e: Sheet; meta
   useEffect(() => {
     if (!opened) return;
     setP(null); setBusy(true); setPicks({}); setNotice(null);
-    api.post<FillPreview>(`/api/run/${e.key}/fill/preview`, {}).then(setP).catch((err) => { fail(err); onClose(); }).finally(() => setBusy(false));
+    api.post<FillPreview>(`/api/run/${encodeURIComponent(e.key)}/fill/preview`, {}).then(setP).catch((err) => { fail(err); onClose(); }).finally(() => setBusy(false));
   }, [opened, e.key]); // eslint-disable-line react-hooks/exhaustive-deps
   const plan = p?.plan;
   const count = plan ? sendBatch(plan, picks).length : 0;
   async function send() {
     setSending(true);
     try {
-      const r = await api.post<{ message: string }>(`/api/run/${e.key}/fill`, { rev: plan?.rev, picks });
+      const r = await api.post<{ message: string }>(`/api/run/${encodeURIComponent(e.key)}/fill`, { rev: plan?.rev, picks });
       ok(r.message); await onSent(); onClose();
     } catch (err) {
       const fresh = err instanceof ApiError && err.status === 409 ? (err.body as { plan?: Plan })?.plan : undefined;

@@ -63,7 +63,7 @@ export function SignupsSection({ ev, meta, onDone }: { ev: EventView; meta: Meta
             <div key={c.row}>
               <dt>{c.label}</dt>
               <dd>
-                {n === 0 ? <Text fw={700} px={6}>{n}</Text> : (
+                {n === 0 ? <Text fw={700} px={7} className={css.countZero}>{n}</Text> : (
                   <Button variant={open === c.row ? "light" : "subtle"} size="compact-md" px={6} fw={700}
                     aria-expanded={open === c.row} aria-controls="event-signups" aria-label={`${c.label}: ${n}`}
                     onClick={() => setOpen((o) => (o === c.row ? null : c.row))}>{n}</Button>

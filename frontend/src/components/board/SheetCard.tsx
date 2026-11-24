@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Text, Textarea, Tooltip } from "@mantine/core";
-import { DateTimePicker } from "@mantine/dates";
+import { WhenPicker, wallTime } from "../WhenPicker";
 import { IconBell, IconCalendarTime, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import { api, type Meta, type Person, type RunPreview, type Sheet, type Signup } from "../../api";
@@ -341,24 +341,25 @@ function LockModal({ e, meta, opened, preview: startWithPreview = false, onClose
   );
 }
 
-/** Reschedule: the new day and time, picked from a widget (the Clock rule: never typed), prefilled with the run's start
- *  in guild time and sent as guild wall time 'YYYY-MM-DD HH:MM'; Next asks the server what the move does — the card
- *  prints only its sentences before Move. */
+/** Reschedule: the new day from a calendar and the time from the 15-minute select (WhenPicker — the Clock rule: never
+ *  typed), prefilled with the run's start in guild time and sent as guild wall time 'YYYY-MM-DD HH:MM'; Next asks the
+ *  server what the move does — the card prints only its sentences before Move. */
 function RescheduleModal({ e, opened, onClose, onPick }: { e: NightSheet; opened: boolean; onClose: () => void; onPick: (start: string) => Promise<void> }) {
-  const initial = e.start_local ? `${e.start_local.replace("T", " ")}:00` : null;
-  const [when, setWhen] = useState<string | null>(initial);
+  const [day, setDay] = useState<string | null>(e.start_local ? e.start_local.slice(0, 10) : null);
+  const [time, setTime] = useState<string | null>(e.start_local ? e.start_local.slice(11, 16) : null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (opened) setWhen(initial); }, [opened]);  // eslint-disable-line react-hooks/exhaustive-deps -- a fresh draft per opening; a reload never resets it
+  useEffect(() => {  // a fresh draft per opening; a reload never resets it
+    if (opened) { setDay(e.start_local ? e.start_local.slice(0, 10) : null); setTime(e.start_local ? e.start_local.slice(11, 16) : null); }
+  }, [opened]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const when = day && time ? wallTime(day, time) : null;
   useDirty(`reschedule:${e.key}`, opened);  // an open picker holds a draft
   return (
     <Modal opened={opened} onClose={onClose} title={`Reschedule ${runName(e as unknown as Sheet)}`} centered>
       <Stack gap="md">
-        <DateTimePicker label="New start" description="guild time — every raid of the run moves with it" value={when} onChange={setWhen}
-          valueFormat="ddd D MMM YYYY h:mm A"
-          timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }} popoverProps={{ withinPortal: true }} aria-label="the run's new start" />
+        <WhenPicker label="the run's new start" dayLabel="New day" dayFormat="ddd D MMM YYYY" day={day} time={time} onDay={setDay} onTime={setTime} />
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={onClose}>Back</Button>
-          <Button size="sm" loading={busy} disabled={!when} onClick={async () => { if (!when) return; setBusy(true); try { await onPick(when.slice(0, 16)); } finally { setBusy(false); } }}>Next</Button>
+          <Button size="sm" loading={busy} disabled={!when} onClick={async () => { if (!when) return; setBusy(true); try { await onPick(when); } finally { setBusy(false); } }}>Next</Button>
         </Group>
       </Stack>
     </Modal>

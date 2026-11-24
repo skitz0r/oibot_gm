@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button, Group, Stack, Text } from "@mantine/core";
 import { ViewSection } from "../Facts";
+import { pageWords } from "../ConfirmBox";
 
 /** Activity · {n} lines: the event's log (every raid's lines, newest first, `when` in the server's words), folded until
  *  asked for. `action` sits at the heading's right (the quiet Cancel event). */
@@ -18,7 +19,7 @@ export function ActivitySection({ activity, action }: { activity: { when: string
         {action}
       </Group>
     )}>
-      {n === 0 && <Text size="sm" c="dimmed">The log fills as people answer and officers act.</Text>}
+      {n === 0 && <Text size="sm" c="dimmed">{pageWords().activity_empty}</Text>}
       {open && (
         <Stack id="event-activity" gap={4}>
           {activity.map((a, i) => (

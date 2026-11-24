@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActionIcon, Box, Button, Group, Popover, SegmentedControl, Stack, Text, Tooltip } from "@mantine/core";
 import { IconInfoCircle, IconRefresh, IconScale, IconUsers } from "@tabler/icons-react";
-import { api, type Board, type GroupSummary, type Meta, type Seat, type Sheet } from "../../api";
+import { api, ApiError, type Board, type Box as BoxT, type GroupSummary, type Meta, type Seat, type Sheet } from "../../api";
 import { SPLIT_LABEL } from "./shared";
 import { RaidWide } from "../GroupsBlock";
 import { Eyebrow, fail, ok } from "../Page";
@@ -38,7 +38,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
   const event = variant === "event";
   const readOnly = event && e.state !== "open" && e.state !== "locked";  // a finished event: the board as it was locked
   const drags = !event || !locked;  // the Events page drags only before the lock
-  const [askBox, boxDialog] = useConfirmBox();
+  const [askBox, boxDialog] = useConfirmBox(event ? ["run:"] : []);
   const conf = Object.fromEntries((e.confirmations || []).map((c) => [c.display_name, c.answer]));
   const drag = useRef<Drag | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
   async function send(path: string, payload: unknown) {
     setSaving(true);
     try {
-      const r = await api.post<Reply>(`/api/run/${e.key}/${path}`, payload);
+      const r = await api.post<Reply>(`/api/run/${encodeURIComponent(e.key)}/${path}`, payload);
       onBoard(e.key, r.board, r.needs, r.rev);
       if (r.message) ok(r.message);
     } catch (err) {
@@ -94,16 +94,44 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
 
   const groupName = (r: number, g: number) => (board.rosters.length > 1 ? `Roster ${r + 1} · Group ${g + 1}` : `Group ${g + 1}`);
   const bankWord = words.bank[locked ? "locked" : "open"];
-  /** The confirm before a move: a title naming the people, and ONLY the server's sentence for the verb
-   *  (ev_json.consequences, with the names put where the server left {name} / {other} / {to}) — Back / the verb. */
+  /** The confirm before a move (the Test bench's board): a title naming the people, and ONLY the server's sentence for
+   *  the verb (ev_json.consequences, with the names put where the server left {name} / {other} / {to}) — Back / the verb. */
   function confirmMove(verb: Verb, name: string, n: { other?: string; to?: string }) {
     const c = e.consequences || ({} as NonNullable<Sheet["consequences"]>);
     const sentence = verb === "release" ? (c.release_named || c.release) : c[verb];
     const title = { move: `Move ${name} to ${n.to}?`, roster: `Move ${name} to ${n.to}?`, swap: `Swap ${name} and ${n.other}?`,
       substitute: `Put ${name} in ${n.other}'s seat?`, release: locked ? `Take ${name} off the roster?` : `Move ${name} to ${bankWord.toLowerCase()}?` }[verb];
     const label = { move: "Move", roster: "Move", swap: "Swap", substitute: "Put them in", release: locked ? "Release the seat" : "Move" }[verb];
-    if (event) return askBox({ box: { title, sentences: [fillNames(sentence, { name, ...n })], verb: label, danger: verb === "release" || verb === "substitute", diff: [], fp: "" } });
     return ask({ title, message: fillNames(sentence, { name, ...n }), confirmLabel: label, cancelLabel: "Back", color: verb === "release" || verb === "substitute" ? "red" : undefined });
+  }
+  /** A LOCKED event's move (the Events page, §7b): the SERVER's box for it (POST /move `preview` →
+   *  consequences.board_move_box: which move it is on the board as it stands, its title, sentences and verb), the press
+   *  sends the box's fp as `seen`. A board that changed while the box was open answers 409 with the fresh box (and the
+   *  board, drawn at once); a move that can't be made, its refusal box (Back alone). */
+  async function serverMove(name: string, target: Target) {
+    const url = `/api/run/${encodeURIComponent(e.key)}/move`;
+    const base = { member: name, to: target, state: "locked", shown: true };
+    const boxOfErr = (err: unknown): BoxT | undefined => (err instanceof ApiError ? (err.body as { box?: BoxT } | undefined)?.box : undefined);
+    const preview = async (): Promise<BoxT> => {
+      try { return (await api.post<{ box: BoxT }>(url, { ...base, preview: true })).box; } catch (err) { const b = boxOfErr(err); if (b) return b; throw err; }
+    };
+    let first: BoxT;
+    try { first = await preview(); } catch (err) { fail(err); return; }
+    const said = { text: "" };
+    const done = await askBox({
+      box: first, refresh: preview,
+      act: async (fp) => {
+        try {
+          const r = await api.post<Reply>(url, { ...base, seen: fp });
+          onBoard(e.key, r.board, r.needs, r.rev); said.text = r.message || ""; return null;
+        } catch (err) {
+          const b = (err as { body?: Partial<Reply> }).body;
+          if (b?.board) onBoard(e.key, b.board, b.needs, b.rev);
+          const bx = boxOfErr(err); if (bx) return bx; throw err;
+        }
+      },
+    });
+    if (done && said.text) ok(said.text);
   }
   /** ONE path for every move — a drag and the ⋮ menu's Move to… — so both send the same POST /move body. After the lock
    *  every move edits the roster and asks first; before it a drag is free (it only shapes the layout the lock uses) and
@@ -112,6 +140,12 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
     const L = layout();
     if (from) L[from.r][from.g] = L[from.r][from.g].filter((x) => x !== name);
     const asks = locked || (via === "menu" && !event);  // the Events page: before the lock a move goes at once
+    if (event && locked) {  // a locked event's move: the server says which move it is and asks (a reorder in one group goes at once)
+      const same = !!from && !!target && from.r === target.r && from.g === target.g;
+      if (target === null && !from) return;
+      if (same) { move(name, target); return; }
+      await serverMove(name, target); return;
+    }
     if (target === null) {
       if (!from) return;
       if (asks && !(await confirmMove("release", name, {}))) return;

@@ -74,7 +74,8 @@ export function EventBoard({ meta, view, onReload }: { meta: Meta; view: EventVi
       <dl className={css.facts} style={{ marginBottom: 12 }}>
         <div><dt>Rosters</dt><dd>{part.rosters_words}</dd></div>
         {part.placed_words && <div><dt>Placed</dt><dd>{part.placed_words}</dd></div>}
-        {part.rostered_words && <div><dt>{"Rostered"}</dt><dd>{part.rostered_words}</dd></div>}
+        {/* a finished one-raid event says Rostered once, in Details */}
+        {part.rostered_words && !(finished && parts.length === 1) && <div><dt>{"Rostered"}</dt><dd>{part.rostered_words}</dd></div>}
         {short && <div><dt>Short</dt><dd><ShortRoles meta={meta} roles={part.short} /></dd></div>}
       </dl>
       {part.board_state === "working" && (

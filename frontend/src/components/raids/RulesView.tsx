@@ -1,5 +1,5 @@
 import { Group, Select, Table, Text, Tooltip } from "@mantine/core";
-import { DateTimePicker } from "@mantine/dates";
+import { WhenPicker } from "../WhenPicker";
 import type { CompSlot, RaidPage } from "../../api";
 import { Facts, ViewSection } from "../Facts";
 import css from "../../pages/listpage.module.css";
@@ -14,13 +14,12 @@ export type RaidDraft = { lockout_days: string; duration_hours: string; first_op
 const LOCKOUT_DAYS = Array.from({ length: 14 }, (_, i) => String(i + 1));
 const HALF_HOURS = Array.from({ length: 16 }, (_, i) => String((i + 1) / 2));
 
-/** The draft keeps the API's machine form ('2026-12-09T15:00', guild time); the picker speaks 'YYYY-MM-DD HH:mm:ss'. */
-function pickerValue(iso: string): string | null {
-  return iso ? `${iso.slice(0, 16).replace("T", " ")}:00` : null;
-}
-function fromPicker(v: string | null, keep: string): string {
-  return v ? v.slice(0, 16).replace(" ", "T") : keep;
-}
+/** The draft keeps the API's machine form ('2026-12-09T15:00', guild time, what the Save sends); First opens is picked
+ *  as the Clock rule says — the day from a calendar, the time from the 15-minute select (WhenPicker) — and composed
+ *  back into that form. Nobody types a time. */
+const dayOf = (iso: string) => (iso ? iso.slice(0, 10) : null);
+const timeOf = (iso: string) => (iso ? iso.slice(11, 16) : null);
+const firstOpen = (day: string | null, time: string | null, keep: string) => (day && time ? `${day}T${time}` : keep);
 
 /** The Raids page's Rules view (design §7a): Details (the server's facts — Size, Groups, Lockout, Length, First opens,
  *  Played in) and Group make-up (In each roster · Minimum: Registry.minimums, the one answer). In the edit mode the
@@ -36,8 +35,9 @@ export function RulesView({ page, size, draft, setDraft, slots }: {
     if (label === "Lockout") return <Select aria-label="Lockout in days" w={120} data={LOCKOUT_DAYS} value={draft.lockout_days} allowDeselect={false} onChange={(v) => v && setDraft({ ...draft, lockout_days: v })} rightSection={<Text size="xs" c="dimmed">days</Text>} />;
     if (label === "Length") return <Select aria-label="Length in hours" w={120} data={HALF_HOURS} value={draft.duration_hours} allowDeselect={false} onChange={(v) => v && setDraft({ ...draft, duration_hours: v })} rightSection={<Text size="xs" c="dimmed">h</Text>} />;
     if (label === "First opens") return (
-      <DateTimePicker aria-label="First opens" value={pickerValue(draft.first_open)} onChange={(v) => setDraft({ ...draft, first_open: fromPicker(v, draft.first_open) })}
-        valueFormat="ddd D MMM YYYY h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }} popoverProps={{ withinPortal: true }} w={230} />
+      <WhenPicker label="First opens" dayFormat="ddd D MMM YYYY" day={dayOf(draft.first_open)} time={timeOf(draft.first_open)}
+        onDay={(d) => setDraft({ ...draft, first_open: firstOpen(d, timeOf(draft.first_open) || "00:00", draft.first_open) })}
+        onTime={(t) => setDraft({ ...draft, first_open: firstOpen(dayOf(draft.first_open), t, draft.first_open) })} />
     );
     return undefined;
   } : null;

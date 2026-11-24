@@ -25,7 +25,12 @@ export function SchedulesPage({ meta }: { meta: Meta }) {
   const { id } = useParams();
   const phone = useMediaQuery("(max-width: 48em)");
   const [list, setList] = useState<ScheduleList | null>(null);
-  const loadList = () => api.get<ScheduleList>("/api/schedules").then((l) => { setList(l); return l; }).catch((e) => { fail(e); return null; });
+  const listSeq = useRef(0);  // the latest GET wins: an older answer never overwrites a newer one
+  const loadList = () => {
+    const n = ++listSeq.current;
+    return api.get<ScheduleList>("/api/schedules").then((l) => { if (n === listSeq.current) setList(l); return l; })
+      .catch((e) => { if (n === listSeq.current) fail(e); return null; });
+  };
   useEffect(() => { loadList(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
   useRefresh(loadList);
   useLive(loadList, ["config", "member"]);
@@ -40,7 +45,7 @@ export function SchedulesPage({ meta }: { meta: Meta }) {
       groups={[{ label: "Active", items: list.active.map(item) }, { label: "Paused", items: list.paused.map(item) }]}
       more={removed}
       empty={<>
-        <Text size="sm" c="dimmed" px={12}>No schedule yet. New schedule makes one: what it repeats, its lineup and its sheet timing.</Text>
+        <Text size="sm" c="dimmed" px={12}>{meta.page_words.schedules_empty}</Text>
         {removed}
       </>}>
       {selected && <ScheduleDetail key={selected} sid={selected} meta={meta} onChanged={loadList} />}
@@ -58,13 +63,17 @@ function ScheduleDetail({ sid, meta, onChanged }: { sid: string; meta: Meta; onC
   const [gone, setGone] = useState<string | null>(null);
   const goneWords = useRef("");  // the route's 404 sentence when the schedule went while a box was open
   const [ask, dialog] = useConfirmBox(["config", "member", "run:"]);
-  const load = () => api.get<ScheduleView>(`/api/schedules/${encodeURIComponent(sid)}`).then((v) => { setView(v); setGone(null); return v; }).catch((e) => {
-    if (e instanceof ApiError && e.status === 404) {
-      goneWords.current = (e.body as { error?: string } | undefined)?.error || e.message;
-      setGone(goneWords.current);
-    } else fail(e);
-    return null;
-  });
+  const seq = useRef(0);  // the latest GET wins: an older answer never overwrites a newer one
+  const load = () => {
+    const n = ++seq.current;
+    return api.get<ScheduleView>(`/api/schedules/${encodeURIComponent(sid)}`).then((v) => { if (n === seq.current) { setView(v); setGone(null); } return v; }).catch((e) => {
+      if (e instanceof ApiError && e.status === 404) {
+        goneWords.current = (e.body as { error?: string } | undefined)?.error || e.message;
+        if (n === seq.current) setGone(goneWords.current);
+      } else if (n === seq.current) fail(e);
+      return null;
+    });
+  };
   useEffect(() => { load(); }, [sid]);  // eslint-disable-line react-hooks/exhaustive-deps
   useLive(load, ["config", "member", "run:"]);
   if (gone) return <Text c="dimmed">{gone}</Text>;

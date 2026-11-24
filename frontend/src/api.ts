@@ -157,6 +157,10 @@ export interface PageWords {
     | "split_policy" | "weights", string>;
   raid_fields: Record<string, string>; split: Record<string, string>; on: string; off: string; raids_own: string; suggested: string;
   regulars_one: string; regulars_n: string; away_n: string;
+  /** the empty lists, hints and lines the pages wrote themselves until the final review */
+  events_empty: string; schedules_empty: string; raids_empty: string; raid_missing: string; new_event_no_lineup: string;
+  new_event_no_time: string; schedule_no_lineup: string; activity_empty: string; repost_sheet: string; nothing_applies: string;
+  weight_same: string;
 }
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */

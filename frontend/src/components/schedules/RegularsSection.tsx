@@ -49,6 +49,12 @@ function useRemove(onDone: () => void) {
           return null;
         } catch (e) {
           const b = boxOf(e);
+          // a 409 with the fresh box: the record's rev moved too — read it with the row, so the next press goes through
+          if (b && e instanceof ApiError && e.status === 409) {
+            const x = await fresh().catch(() => null);
+            if (x) shown.rev = x.rev;
+            return b;
+          }
           if (b) return b;
           if (e instanceof ApiError && e.status === 409) return again();
           throw e;

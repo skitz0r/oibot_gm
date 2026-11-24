@@ -18,6 +18,8 @@
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px 24px; margin: 0; }
 .facts dt { font-size: 12px; color: var(--mantine-color-dimmed); font-weight: 600; margin-bottom: 2px; }
 .facts dd { margin: 0; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+/* Signups: a count of 0 is text where the others are buttons — it sits on their line (a compact button's height) */
+.countZero { display: inline-flex; align-items: center; min-height: 30px; border: 1px solid transparent; }
 .scroll { overflow-x: auto; max-width: 100%; }
 /* the Schedules page's next four weeks: one night per row, its own why under it */
 .nights { display: flex; flex-direction: column; min-width: 0; }
@@ -49,6 +51,7 @@
   /* a text link that is a control (Back to …) and a switch's whole label row: thumb-sized too */
   .touch :global(.mantine-Anchor-root) { display: inline-flex; align-items: center; min-height: 44px; }
   .touch :global(.mantine-Switch-body) { min-height: 44px; align-items: center; }
+  .touch .countZero { min-height: 44px; }
   .menuItem { min-height: 44px; }
   /* a select's options open in a portal, outside .touch: thumb-sized on every page */
   :global([data-combobox-option][data-combobox-option]) { min-height: 44px; display: flex; align-items: center; }

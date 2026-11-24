@@ -12,6 +12,9 @@ let meta: Meta | null = null;
 export function setBoxMeta(m: Meta) { meta = m; }
 /** the fixed words, read when a box draws (App sets them before any page renders) */
 export function boxWords(): Meta["confirm_words"] { return meta!.confirm_words; }
+/** the pages' value words (/api/meta.page_words) for a component that is handed no meta (the board's member menu,
+ *  Activity) — the same object App hands every page */
+export function pageWords(): Meta["page_words"] { return meta!.page_words; }
 
 /** A box's body: the "changed" line when it was swapped while open, the title is the Modal's; the diff lines, the page's
  *  fields, the sentences. Shared with useOpsSave's review (a raid's or a schedule's Save prints `described.box`). */

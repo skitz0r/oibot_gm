@@ -701,11 +701,27 @@ def typed_time_fields(src: str) -> list[str]:
     return bad
 
 
+TYPED_PICKERS = re.compile(r"<(DateTimePicker|TimeInput|TimePicker)\b")
+
+
+def typed_time_pickers(src: str) -> list[str]:
+    """A date-and-time or time widget whose time part is TYPED (Mantine's DateTimePicker / TimeInput / TimePicker take
+    any minute from the keyboard): the phase 4 final review — a time is a Select of 15-minute steps (WhenPicker)."""
+    return [m.group(0) for m in TYPED_PICKERS.finditer(src)]
+
+
 def test_no_free_typed_timezone_date_or_time_field_in_the_frontend():
-    """The clock rule's second half: a person PICKS a timezone, a date or a time from a widget (Select, TimePicker,
-    DateTimePicker, DatePickerInput); no free-text field asks for one."""
-    bad = [f"{f.relative_to(FRONT)}: {t}" for f in sorted(FRONT.rglob("*.tsx")) for t in typed_time_fields(f.read_text())]
+    """The clock rule's second half: a person PICKS a timezone, a date or a time from a widget (Select, DatePickerInput,
+    a 15-minute Select); no free-text field asks for one, and no picker takes a typed time."""
+    bad = [f"{f.relative_to(FRONT)}: {t}" for f in sorted(FRONT.rglob("*.tsx")) for t in typed_time_fields(f.read_text()) + typed_time_pickers(f.read_text())]
     assert not bad, "typed timestamps:\n" + "\n".join(bad)
+
+
+def test_the_typed_picker_lint_catches_first_opens():
+    """Regression (phase 4 final review): the Raids page's First opens was a DateTimePicker whose time was typed."""
+    old = '<DateTimePicker aria-label="First opens" value={pickerValue(draft.first_open)} timePickerProps={{ format: "12h" }} w={230} />'
+    assert typed_time_pickers(old)
+    assert not typed_time_pickers('<WhenPicker label="First opens" day={d} time={t} onDay={setD} onTime={setT} />')
 
 
 def test_the_typed_field_lint_catches_the_old_timezone_box():

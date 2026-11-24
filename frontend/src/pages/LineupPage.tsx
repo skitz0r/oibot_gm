@@ -42,7 +42,7 @@ const EVENTS = "/events";
 export function LineupPage({ meta, mode }: { meta: Meta; mode: "new-event" | "edit-lineup" | "new-schedule" | "edit-schedule" }) {
   if (mode === "new-schedule" || mode === "edit-schedule") return <ScheduleEditor meta={meta} edit={mode === "edit-schedule"} />;
   if (mode === "edit-lineup") return <EditLineup />;
-  return <NewEvent />;
+  return <NewEvent meta={meta} />;
 }
 
 /** The New event page: Start from (copy a schedule's lineup, or an empty one), the lineup builder, When (Day from a
@@ -50,7 +50,7 @@ export function LineupPage({ meta, mode }: { meta: Meta; mode: "new-event" | "ed
  *  (the latest answer wins). That section is the confirmation: Open the sheet opens a one-off at once; a time that is
  *  a schedule's night opens THAT schedule's event through the server's box (its lineup shown, the builder's not used).
  *  Nothing is written before Open the sheet; leaving with edits asks first (useDirty + the leave guard). */
-function NewEvent() {
+function NewEvent({ meta }: { meta: Meta }) {
   const navigate = useNavigate();
   const [opts, setOpts] = useState<Options | null>(null);
   const [from, setFrom] = useState<string>("");
@@ -58,7 +58,9 @@ function NewEvent() {
   const [day, setDay] = useState<string | null>(null);
   const [time, setTime] = useState<string | null>(null);
   const [lock, setLock] = useState<string>("2");
-  const [changes, setChanges] = useState(0);
+  // what the page started with (the first schedule's lineup, no day or time, the first Locks choice): the leave guard
+  // counts what differs from it, so an edit undone holds nothing to lose
+  const [seed, setSeed] = useState<{ from: string; lineup: LineupEntry[]; lock: string } | null>(null);
   const [p, setP] = useState<Preview | null>(null);
   const [refused, setRefused] = useState<Box | null>(null);  // the preview's own refusal (a lineup the server won't open)
   const [checking, setChecking] = useState(false);
@@ -73,11 +75,14 @@ function NewEvent() {
       const first = o.lineups[0];  // the first schedule's lineup, else an empty one
       if (first) { setFrom(first.id); setLineup(first.lineup.map((e) => ({ ...e }))); }
       setLock(String(o.locks[0]?.hours ?? 2));
+      setSeed({ from: first?.id ?? "", lineup: (first?.lineup || []).map((e) => ({ ...e })), lock: String(o.locks[0]?.hours ?? 2) });
     }).catch(fail);
   }, []);
   useLive(() => setTick((t) => t + 1), ["run:", "config"]);  // an event opened elsewhere, a schedule edited: ask again
+  const changes = !seed ? 0 : [from !== seed.from, day !== null, time !== null, lock !== seed.lock].filter(Boolean).length
+    + Array.from({ length: Math.max(lineup.length, seed.lineup.length) }, (_, k) => k)
+      .filter((k) => JSON.stringify(lineup[k] ?? null) !== JSON.stringify(seed.lineup[k] ?? null)).length;
   useDirty("lineup:new", changes > 0, { n: changes, name: "New event" });
-  const edit = () => setChanges((n) => n + 1);
 
   const later = lineup.slice(1).map((e) => ({ raid: e.raid, rosters: e.rosters, starts: e.starts }));
   const timing = { lock_hours_before: Number(lock) };
@@ -87,7 +92,7 @@ function NewEvent() {
     const n = ++seq.current;
     if (!body) { setP(null); setRefused(null); setChecking(false); return; }
     setChecking(true);
-    api.post<Preview>(`/api/raid/${lineup[0].raid}/open/preview`, body)
+    api.post<Preview>(`/api/raid/${encodeURIComponent(lineup[0].raid)}/open/preview`, body)
       .then((x) => { if (n === seq.current) { setP(x); setRefused(null); } })
       .catch((e) => {
         if (n !== seq.current) return;
@@ -108,13 +113,12 @@ function NewEvent() {
 
   const opened = (r: Opened) => {
     clearDirty();
-    setChanges(0);
     ok(r.message);
-    navigate(`/events/${r.key}`);
+    navigate(`/events/${encodeURIComponent(r.key)}`);
   };
   async function open() {
     if (!p || !ready) return;
-    const url = `/api/raid/${lineup[0].raid}/open`;
+    const url = `/api/raid/${encodeURIComponent(lineup[0].raid)}/open`;
     const sent = { start: p.start, schedule: p.kind === "scheduled" ? p.schedule : (p.schedule || "adhoc"), occurrence: p.occurrence };
     if (scheduled && p.box) {  // a schedule's night: the Open the sheet box, with `seen` (a box whose facts changed comes back fresh)
       let got: Opened | null = null;
@@ -148,29 +152,28 @@ function NewEvent() {
               const id = v ?? "";
               setFrom(id);
               setLineup((opts.lineups.find((l) => l.id === id)?.lineup || []).map((e) => ({ ...e })));
-              edit();
             }} />
         </ViewSection>
         <ViewSection title="Lineup">
           {scheduled && p ? <LineupPicture lineup={p.lineup} /> : (
             <LineupBuilder raids={opts.raids} value={lineup} max={opts.lineup_max} fullWords={opts.lineup_full} startClock={time}
               times={own ? p.lineup.map((s) => s.time_words) : undefined}
-              onChange={(next) => { setLineup(next); edit(); }} />
+              onChange={setLineup} />
           )}
         </ViewSection>
         <ViewSection title="When">
           <WhenPicker label="When the event starts" day={day} time={time} minDate={opts.today}
-            onDay={(d) => { setDay(d); edit(); }} onTime={(t) => { setTime(t); edit(); }}>
+            onDay={setDay} onTime={setTime}>
             {!scheduled && (
               <Select label="Locks" w={180} allowDeselect={false} value={lock} comboboxProps={{ withinPortal: true }}
-                data={opts.locks.map((l) => ({ value: String(l.hours), label: l.words }))} onChange={(v) => { if (v) { setLock(v); edit(); } }} />
+                data={opts.locks.map((l) => ({ value: String(l.hours), label: l.words }))} onChange={(v) => { if (v) setLock(v); }} />
             )}
           </WhenPicker>
         </ViewSection>
         <ViewSection title="What this makes">
           <Stack gap="sm">
-            {!lineup.length && <Text size="sm" c="dimmed">Add a raid to the lineup to see what this event makes.</Text>}
-            {lineup.length > 0 && !body && <Text size="sm" c="dimmed">Pick the day and the start time to see what this event makes.</Text>}
+            {!lineup.length && <Text size="sm" c="dimmed">{meta.page_words.new_event_no_lineup}</Text>}
+            {lineup.length > 0 && !body && <Text size="sm" c="dimmed">{meta.page_words.new_event_no_time}</Text>}
             {refusal && (
               <MBox role="alert" p="sm" style={{ border: "1px solid var(--mantine-color-red-7)", borderRadius: 8 }}>
                 <Text size="sm" fw={700}>{refusal.title}</Text>
@@ -181,7 +184,7 @@ function NewEvent() {
             {p && !refusal && p.notes.map((s) => <Text key={s} size="sm" c="dimmed">{s}</Text>)}
             <Group justify="flex-end" gap="sm" mt="xs">
               <Button variant="default" onClick={() => guardNav(EVENTS)}>Back</Button>
-              <Button disabled={!ready} loading={busy} onClick={open}>Open the sheet</Button>
+              {!refusal && <Button disabled={!ready} loading={busy} onClick={open}>Open the sheet</Button>}
             </Group>
           </Stack>
         </ViewSection>
@@ -387,6 +390,13 @@ function seedOf(opts: Opts, view: ScheduleView | null, from: string): SchedDraft
   return { name: "", id: "", idTyped: false, kind: "weekly", slots: [], days: [], time: "20:00", lineup, timing: suggested(opts, "weekly", lineup[0]?.raid),
     split: "", weights: Object.fromEntries(Object.keys(PRIORITY_KEYS).map((k) => [k, ""])) };
 }
+/** A new schedule's edits against its seed: one per field that differs (the weights one per key; `idTyped` is how the
+ *  id came, not an edit). */
+function newEdits(d: SchedDraft, seed: SchedDraft): number {
+  return (Object.keys(d) as (keyof SchedDraft)[]).filter((k) => k !== "idTyped" && k !== "weights")
+    .filter((k) => JSON.stringify(d[k]) !== JSON.stringify(seed[k])).length
+    + Object.keys(d.weights).filter((k) => d.weights[k] !== seed.weights[k]).length;
+}
 /** the priority's five weights in the Priority view's order (constants.PAGE_WORDS["priority"]'s keys) */
 const PRIORITY_KEYS = { regular: 0, rank: 0, main: 0, sat_out: 0, signup_order: 0 };
 
@@ -412,7 +422,6 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
   const [from, setFrom] = useState<string>("");
   const [d, setD] = useState<SchedDraft | null>(null);
   const seed = useRef<SchedDraft | null>(null);
-  const [made, setMade] = useState(0);  // a new schedule's edits (an edit counts what differs from the schedule instead)
   const [timingTyped, setTimingTyped] = useState(false);
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState<string | null>(null);
@@ -438,7 +447,10 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
   const taken = list ? [...list.active, ...list.paused].map((s) => s.id) : [];
   const id = sid ?? (d ? (d.idTyped ? d.id : slug(d.name, taken, list?.reserved_ids || [])) : "");
   const fields = d && opts ? fieldsOf(d, opts) : {};
-  const n = sid ? Object.entries(fields).reduce((a, [k, v]) => a + (k === "weights" ? Object.keys(v as object).length : 1), 0) : made;
+  // the leave guard's count: what differs from the draft the editor started with — an edit, the fields it would send; a
+  // new schedule, each field changed from its seed (an edit undone holds nothing to lose)
+  const n = sid ? Object.entries(fields).reduce((a, [k, v]) => a + (k === "weights" ? Object.keys(v as object).length : 1), 0)
+    : d && seed.current ? newEdits(d, seed.current) : 0;
   const name = sid ? view?.name || "" : d?.name.trim() || "New schedule";
   useDirty(`schedule:${sid ?? "new"}`, n > 0, { n, name });
   const back = sid ? `${SCHEDULES}/${encodeURIComponent(sid)}` : SCHEDULES;
@@ -480,7 +492,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
   if (!list || !opts || !d) return <Text c="dimmed">Loading…</Text>;
   if (view?.gone) return <Text c="dimmed">{view.gone}</Text>;
 
-  const set = (patch: Partial<SchedDraft>) => { setD({ ...d, ...patch }); setMade((k) => k + 1); setRefusal(null); };
+  const set = (patch: Partial<SchedDraft>) => { setD({ ...d, ...patch }); setRefusal(null); };
   const setTiming = (k: string, v: number | boolean) => { setTimingTyped(true); set({ timing: { ...d.timing, [k]: v } }); };
   const firstRaid = opts.raids.find((r) => r.id === d.lineup[0]?.raid);
   const startClock = d.kind === "weekly" ? (d.slots[0] ? d.slots[0].split(" ")[1] : null) : d.kind === "lockout" ? d.time : null;
@@ -488,7 +500,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
   const shown = (k: string) => !(pickup && PICKUP_HIDDEN.has(k));
   /** every label is the server's word for the setting (PAGE_WORDS schedule_fields): the Save box's diff lines say the same */
   const W = meta.page_words, F = W.schedule_fields;
-  const useRaids = `Use ${W.raids_own}`;
+  const useRaids = `Use ${W.raids_own}`;  // the Priority section's button: clears every weight back to the raid's
   const hourSelect = (k: TimingKey) => (
     <Select key={k} label={F[k]} w={200} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }} placeholder="Pick one"
       value={d.timing[k] !== undefined ? String(d.timing[k]) : null} data={(opts.hours[k] || []).map((c) => ({ value: String(c.value), label: c.words }))}
@@ -499,7 +511,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
   );
   const preset = opts.presets.find((p) => Object.entries(p.values).every(([k, v]) => Number(d.timing[k]) === v));
   const raidWeights = pickup ? opts.adhoc.weights : firstRaid?.weights || {};
-  const weightData = (k: string) => [{ value: SAME, label: `${useRaids} (${raidWeights[k] ?? 0})` },
+  const weightData = (k: string) => [{ value: SAME, label: W.weight_same.replace("{n}", String(raidWeights[k] ?? 0)) },
     ...Array.from({ length: opts.max_weight + 1 }, (_, i) => ({ value: String(i), label: String(i) }))];
 
   async function saveSchedule() {
@@ -507,11 +519,11 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
     setBusy(true); setRefusal(null);
     try {
       const x = await save([{ kind: "schedule", target: id, fields }], {
-        always: true, verb: sid ? "Save" : "Create schedule", title: sid ? `Save ${name}?` : `Create ${name}?`,
+        always: true, box: true, onShown: () => setBusy(false),
         revs: sid && view ? { [`config:schedule:${sid}`]: view.rev } : undefined, staleOnPage: true,
       });
       if (x?.changed?.length) setStale(x.error || "");  // someone changed it meanwhile: the draft stays, the server's words say so
-      else if (x?.applied?.length) { clearDirty(); setMade(0); navigate(`${SCHEDULES}/${encodeURIComponent(id)}`); }
+      else if (x?.applied?.length) { clearDirty(); navigate(`${SCHEDULES}/${encodeURIComponent(id)}`); }
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setStale(e.message);
       else if (e instanceof ApiError && e.status === 400) setRefusal(e.message);  // the server's refusal (an id another schedule holds)
@@ -623,7 +635,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
                 <Text size="sm">{refusal}</Text>
               </MBox>
             )}
-            {!d.lineup.length && <Text size="sm" c="dimmed">Add a raid to the lineup to make the schedule.</Text>}
+            {!d.lineup.length && <Text size="sm" c="dimmed">{W.schedule_no_lineup}</Text>}
             <Group justify="flex-end" gap="sm">
               <Button variant="default" onClick={() => guardNav(back)}>Back</Button>
               <Button loading={busy} disabled={!Object.keys(fields).length || !d.lineup.length || !id} onClick={saveSchedule}>{sid ? "Save" : "Create schedule"}</Button>

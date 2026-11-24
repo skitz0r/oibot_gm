@@ -22,8 +22,8 @@ export interface ReviewModalProps {
   notice?: string | null;
   onApply: () => void;
   onClose: () => void;
-  /** the phase 4 pages: the server's box (described.box) is printed instead of the lines, with this verb */
-  verb?: string;
+  /** the phase 4 pages: the server's box (described.box) is printed instead of the lines, with ITS verb */
+  boxed?: boolean;
 }
 
 export function DescribedView({ d }: { d: Described }) {
@@ -68,13 +68,13 @@ export function ResultSheet({ r }: { r: OpsReply }) {
   );
 }
 
-export function ReviewModal({ opened, title, preview, result, busy, notice, onApply, onClose, verb }: ReviewModalProps) {
+export function ReviewModal({ opened, title, preview, result, busy, notice, onApply, onClose, boxed }: ReviewModalProps) {
   const d = preview?.described;
   const n = d ? d.lines.filter((l) => !l.error).length : 0;
-  // the phase 4 pages (a `verb` given): always a §7b box, never the lines / result sheet below — the server's box (its
+  // the phase 4 pages (`boxed`): always a §7b box, never the lines / result sheet below — the server's box (its
   // title, diff and sentences, Back then the verb); a box the server refused with (verb null), a line that can't apply,
   // a refusal or a refused write is a box with the server's words and Back alone
-  if (verb) {
+  if (boxed) {
     const errors = result
       ? [...(result.refused || []), ...(result.results || []).filter((x) => !x.ok).map((x) => `${x.label}: ${x.line}`)]
       : [...(d?.lines || []).filter((l) => l.error).map((l) => `${l.label}: ${l.error}`), ...(d?.refused || [])];
@@ -82,7 +82,7 @@ export function ReviewModal({ opened, title, preview, result, busy, notice, onAp
     // no box from the server = a refusal (line errors, `refused`, a write refused after the press): it never carries the
     // question title ("Save Hyjal Summit?") — the server's refusal title stands above the server's words
     const box: Box = said || { title: boxWords().refused, sentences: errors.length ? [] : [(result || preview)?.summary || ""].filter(Boolean), verb: null, danger: false, diff: [], fp: "" };
-    const go: Box = { ...box, verb: said?.verb && !errors.length && n && preview?.token ? verb : null };
+    const go: Box = { ...box, verb: said?.verb && !errors.length && n && preview?.token ? said.verb : null };
     return (
       <Modal opened={opened} onClose={onClose} title={box.title} centered classNames={{ content: touch.touch }}>
         <Stack gap="md">
@@ -128,10 +128,12 @@ type Waiter = (r: OpsReply | null) => void;
  *  the result sheet. A token that went stale re-previews: applied silently when the lines are the ones shown, otherwise shown
  *  again ("Updated since you looked"); a 400 for the token (the bot restarted) says so and shows the fresh preview.
  *  A 409 (someone else changed the section since the page loaded) resolves with `{ ...body, changed }` for the page to mark. */
-/** `verb` (the phase 4 pages): the server's box (described.box) is printed with this verb and Back in place of the lines,
- *  Apply N changes and Back to edits; a write that went through closes the box with a toast (no result sheet).
- *  `always`: the box shows even where the server would apply at once (a Save is a preview first). */
-export type OpsSaveOpts = { revs?: Record<string, string>; title?: string; verb?: string; always?: boolean;
+/** `box` (the phase 4 pages): the server's box (described.box) is printed — its title, sentences and verb — with Back in
+ *  place of the lines, Apply N changes and Back to edits; a write that went through closes the box with a toast (no
+ *  result sheet). `always`: the box shows even where the server would apply at once (a Save is a preview first).
+ *  `onShown`: called once the server answered the Save, before any box opens (the page's Save spinner stops there:
+ *  it never spins behind an open box). */
+export type OpsSaveOpts = { revs?: Record<string, string>; title?: string; box?: boolean; always?: boolean; onShown?: () => void;
   /** the page says a 409 itself (the schedule editor's alert beside its Save): no toast on top of it */
   staleOnPage?: boolean };
 
@@ -141,8 +143,8 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState<string | undefined>();
-  const [verb, setVerb] = useState<string | undefined>();
-  const ctx = useRef<{ changes: OpsChange[]; revs?: Record<string, string>; done: Waiter; verb?: string; staleOnPage?: boolean } | null>(null);
+  const [boxed, setBoxed] = useState(false);
+  const ctx = useRef<{ changes: OpsChange[]; revs?: Record<string, string>; done: Waiter; boxed?: boolean; staleOnPage?: boolean } | null>(null);
 
   const close = () => {
     const c = ctx.current;
@@ -166,7 +168,7 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
       if (r.needs_review) {  // the token went stale and the lines moved (or the bot restarted): look again
         setNotice(r.restarted ? "The bot restarted — review again." : "Updated since you looked — check the changes again.");
         setPreview(r);
-      } else if (c.verb && !r.refused?.length) {  // the box's write went through: close it, say so
+      } else if (c.boxed && !r.refused?.length) {  // the box's write went through: close it, say so
         ctx.current = null;
         setPreview(null); setResult(null); setNotice(null);
         ok(r.summary || "saved");
@@ -190,12 +192,14 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
     try {
       r = await (opts?.always ? opsApi.preview(changes, opts?.revs) : opsApi.save(changes, opts?.revs));
     } catch (e) {
+      opts?.onShown?.();
       if (e instanceof ApiError && e.status === 409) {
         if (!opts?.staleOnPage) fail(e);
         return { ...(e.body as OpsReply), changed: (e.body as OpsReply).changed || [] };
       }
       throw e;
     }
+    opts?.onShown?.();
     // nothing differs from what is stored and the server has nothing to say about it: a toast; a box it answered with
     // (a refusal like "Nothing to save") or a refusal is shown as a box
     const said = !!r.described?.box || !!r.refused?.length || !!r.described?.lines.some((l) => l.error);
@@ -209,12 +213,12 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
       return r;
     }
     return new Promise<OpsReply | null>((resolve) => {
-      ctx.current = { changes, revs: opts?.revs, done: resolve, verb: opts?.verb, staleOnPage: opts?.staleOnPage };
-      setTitle(opts?.title); setVerb(opts?.verb);
+      ctx.current = { changes, revs: opts?.revs, done: resolve, boxed: opts?.box, staleOnPage: opts?.staleOnPage };
+      setTitle(opts?.title); setBoxed(!!opts?.box);
       if (review) { setResult(null); setPreview(r); } else showResult(r);
     });
   }, []);
 
-  const dialog = <ReviewModal opened={preview !== null || result !== null} title={title} preview={preview} result={result} busy={busy} notice={notice} onApply={apply} onClose={close} verb={verb} />;
+  const dialog = <ReviewModal opened={preview !== null || result !== null} title={title} preview={preview} result={result} busy={busy} notice={notice} onApply={apply} onClose={close} boxed={boxed} />;
   return [save, dialog];
 }
