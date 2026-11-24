@@ -16,11 +16,21 @@ export function guardNav(to: string) {
   else window.location.assign(`/app${to}`);
 }
 
+/** A link's click through the guard: a plain main-button click is held and goes through guardNav; a modified click
+ *  (new tab, new window) or another button is left to the browser. */
+export function guardClick(to: string) {
+  return (e: React.MouseEvent) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    guardNav(to);
+  };
+}
+
 /** The leave box from the meta's words (the server's template, filled here as consequences.leave_unsaved_sentence fills it). */
 function leaveBox(meta: Meta): Box {
   const w = dirtyWhat();
-  const sentence = !w ? null : w.n === 1 ? meta.leave.one.replace("{name}", w.name) : meta.leave.many.replace("{n}", String(w.n)).replace("{name}", w.name);
-  return { title: meta.confirm_words.leave_title, sentences: sentence ? [sentence] : [], verb: meta.confirm_words.discard, danger: true, diff: [], fp: "leave" };
+  const sentence = !w ? meta.leave.page : w.n === 1 ? meta.leave.one.replace("{name}", w.name) : meta.leave.many.replace("{n}", String(w.n)).replace("{name}", w.name);
+  return { title: meta.confirm_words.leave_title, sentences: [sentence], verb: meta.confirm_words.discard, danger: true, diff: [], fp: "leave" };
 }
 
 export function LeaveGuard({ meta }: { meta: Meta }) {

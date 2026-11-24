@@ -1,6 +1,6 @@
 import { Anchor, Group, Title } from "@mantine/core";
 import { Link } from "react-router-dom";
-import { guardNav } from "./LeaveGuard";
+import { guardClick } from "./LeaveGuard";
 import css from "../pages/listpage.module.css";
 
 export type ListItem = { id: string; title: string; subtitle?: string; to: string; chip?: string };
@@ -15,7 +15,6 @@ export function ListPage({ title, action, groups, selected, back, children, empt
   children?: React.ReactNode; empty?: React.ReactNode;
 }) {
   const none = groups.every((g) => !g.items.length);
-  const pick = (to: string) => (e: React.MouseEvent) => { e.preventDefault(); guardNav(to); };
   return (
     <div className={css.touch}>
       <Group justify="space-between" align="center" wrap="wrap" gap="sm">
@@ -29,7 +28,7 @@ export function ListPage({ title, action, groups, selected, back, children, empt
               {groups.length > 1 && g.items.length > 0 && <div className={css.group}>{g.label}</div>}
               {g.items.map((it) => (
                 <a key={it.id} href={`/app${it.to}`} data-list-item className={[css.item, it.id === selected ? css.on : ""].join(" ")}
-                  aria-current={it.id === selected ? "page" : undefined} onClick={pick(it.to)}>
+                  aria-current={it.id === selected ? "page" : undefined} onClick={guardClick(it.to)}>
                   <span className={css.itemTitle}>{it.title}</span>
                   {it.subtitle}{it.chip ? ` · ${it.chip}` : ""}
                 </a>
@@ -39,7 +38,7 @@ export function ListPage({ title, action, groups, selected, back, children, empt
         </nav>
         <div className={css.detail}>
           {selected !== null && (
-            <Anchor component={Link} to={back} className={css.back} onClick={pick(back)} size="sm">Back to {title}</Anchor>
+            <Anchor component={Link} to={back} className={css.back} onClick={guardClick(back)} size="sm">Back to {title}</Anchor>
           )}
           {children}
         </div>

@@ -4,8 +4,10 @@ import type { CompSlot, RaidPage } from "../../api";
 import { Facts, ViewSection } from "../Facts";
 import css from "../../pages/listpage.module.css";
 
-/** One minimum in the draft: the slot, its words, at least how many (a select's string), the stored reason kept. */
-export type MinRow = { slot: string; label: string; min: string; note: string | null };
+/** One minimum in the draft: the slot, its words, at least how many (a select's string), the stored reason kept, and the
+ *  lowest it may go: 0 for a minimum the guild set itself (0 = a clear, so the game's applies again), the game's own value
+ *  for a row only the game sets (a clear would change nothing; the server says "Nothing to save"). */
+export type MinRow = { slot: string; label: string; min: string; note: string | null; floor: number };
 /** The raid's edit draft (Rules and Priority share it; one Save writes both). Selects hold strings. */
 export type RaidDraft = { lockout_days: string; duration_hours: string; first_open: string; weights: Record<string, string>; mins: MinRow[] };
 
@@ -22,8 +24,9 @@ function fromPicker(v: string | null, keep: string): string {
 
 /** The Raids page's Rules view (design §7a): Details (the server's facts — Size, Groups, Lockout, Length, First opens,
  *  Played in) and Group make-up (In each roster · Minimum: Registry.minimums, the one answer). In the edit mode the
- *  Lockout, the Length (half hours) and First opens become pickers, each minimum a select from 0 to the raid's size
- *  (0 takes the guild's own minimum away: it is sent as a clear, never saved), and Add a role or class adds a row.
+ *  Lockout, the Length (half hours) and First opens become pickers, each minimum a select up to the raid's size, from 0
+ *  on a row the guild set (0 takes it away: sent as a clear, never saved) and from the game's value on a row only the
+ *  game sets; Add a role or class adds a row.
  *  The size is shown, never edited (the game's). No other time than First opens is a raid's. */
 export function RulesView({ page, size, draft, setDraft, slots }: {
   page: RaidPage; size: number; draft: RaidDraft | null; setDraft: (d: RaidDraft) => void; slots: CompSlot[] | null;
@@ -55,7 +58,7 @@ export function RulesView({ page, size, draft, setDraft, slots }: {
                 {draft ? draft.mins.map((m, i) => (
                   <Table.Tr key={m.slot}>
                     <Table.Td>{m.label}</Table.Td>
-                    <Table.Td><Select aria-label={`${m.label}: minimum`} w={110} data={sizes} value={m.min} allowDeselect={false} onChange={(v) => v !== null && setMin(i, v)} /></Table.Td>
+                    <Table.Td><Select aria-label={`${m.label}: minimum`} w={110} data={sizes.slice(m.floor)} value={m.min} allowDeselect={false} onChange={(v) => v !== null && setMin(i, v)} /></Table.Td>
                   </Table.Tr>
                 )) : page.make_up.map((m) => (
                   <Table.Tr key={m.slot}>
@@ -73,7 +76,7 @@ export function RulesView({ page, size, draft, setDraft, slots }: {
               data={(slots || []).filter((x) => !taken.has(x.value)).map((x) => ({ value: x.value, label: x.label }))}
               onChange={(v) => {
                 const s = (slots || []).find((x) => x.value === v);
-                if (s) setDraft({ ...draft, mins: [...draft.mins, { slot: s.value, label: s.label, min: "1", note: null }] });
+                if (s) setDraft({ ...draft, mins: [...draft.mins, { slot: s.value, label: s.label, min: "1", note: null, floor: 0 }] });
               }} />
           </Group>
         )}

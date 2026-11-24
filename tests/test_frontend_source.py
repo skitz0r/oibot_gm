@@ -884,7 +884,7 @@ def test_confirm_box_prints_the_servers_box():
 
 def test_leaving_asks_first():
     app = _code_only((SRC / "App.tsx").read_text()); guard = _code_only((SRC / "components" / "LeaveGuard.tsx").read_text())
-    assert "<LeaveGuard" in app and "guardNav(" in app and "confirm_words.discard" in guard and "beforeunload" in guard
+    assert "<LeaveGuard" in app and ("guardNav(" in app or "guardClick(" in app) and "confirm_words.discard" in guard and "beforeunload" in guard
 
 
 def test_raids_page_is_a_list_with_three_views():
@@ -909,11 +909,48 @@ def test_the_raids_page_carries_the_earlier_reviews():
     rules = _code_only((SRC / "components" / "raids" / "RulesView.tsx").read_text())
     assert 'label === "Size"' not in rules, "the size is the game's: shown by the server's Details, never a field"
     ready = _code_only((SRC / "components" / "raids" / "ReadinessView.tsx").read_text())
-    assert "the guild's" not in ready.lower() and len(re.findall(r"<Table\.Th\b", ready)) == 3 and "m.have < m.min" in ready
+    assert "the guild's" not in ready.lower() and len(re.findall(r"<Table\.Th\b", ready)) == 3 and "m.have < m.min" not in ready
     icons = (SRC / "components" / "Icons.tsx").read_text()
     assert "export function SlotIcon(" in icons and "export function RoleIcon(" in icons
     review = (SRC / "components" / "ReviewModal.tsx").read_text()
     assert "d?.box" in review and "verb?: string" in review and "always?: boolean" in review
+
+
+def test_the_raids_page_fix_round_one():
+    """Task 6 review: (1) the Reset sends the rev of the box ON SCREEN — a 409's fresh box comes with its fresh rev, so
+    the next press goes through instead of 409 forever; (2) a row only the game sets never offers 0 (its select starts
+    at the game's number), and with a verb the review is always a §7b box — a refusal box with Back alone, never
+    "Nothing to review" / "Apply N changes" / the result sheet; (3) Readiness prints the server's Standing level and its
+    sentence and compares nothing; (4) an internal Facts link goes through the leave guard; (8) a modified click is
+    the browser's, the boxes' buttons are thumb-sized on a phone, an edit mode without a count still gets a sentence."""
+    page = _code_only((SRC / "pages" / "Raids.tsx").read_text())
+    reset = page[page.index("async function onReset()"):]
+    reset = reset[:reset.index("\n  }\n")]
+    assert "shown.rev = fresh.reset_rev" in reset and "shown.rev ? { [`config:raid_all:${r.id}`]: shown.rev }" in reset
+    assert "r.reset_rev ? {" not in reset, "the rev of the box the page opened with goes stale after a 409"
+    assert "floor: m.own ? 0 : m.min" in page
+    rules = _code_only((SRC / "components" / "raids" / "RulesView.tsx").read_text())
+    assert "sizes.slice(m.floor)" in rules and "floor: 0" in rules
+    review = _code_only((SRC / "components" / "ReviewModal.tsx").read_text())
+    box_mode = review[review.index("if (verb) {"):review.index("title={result ?")]
+    assert "<BoxButtons" in box_mode and "verb: null" in box_mode and "Nothing to review" not in box_mode and "Apply {n}" not in box_mode and "Back to edits" not in box_mode
+    assert review.index("if (verb) {") < review.index("<ResultSheet"), "with a verb the result sheet is never reached"
+    ready = _code_only((SRC / "components" / "raids" / "ReadinessView.tsx").read_text())
+    assert "level={view.level}" in ready and "view.standing_why" in ready and "HAVE_COLOUR[m.level]" in ready
+    assert "onEdit" in ready, "the empty make-up's 'Edit the raid' sentence has its Edit beside it"
+    assert "guardClick(href)" in _code_only((SRC / "components" / "Facts.tsx").read_text())
+    guard = _code_only((SRC / "components" / "LeaveGuard.tsx").read_text())
+    assert "e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey" in guard and "meta.leave.page" in guard
+    for f in ("ConfirmBox.tsx", "ReviewModal.tsx"):
+        assert "content: touch.touch" in (SRC / "components" / f).read_text(), f"{f}: 44 px buttons on a phone"
+    app = _code_only((SRC / "App.tsx").read_text())
+    assert "e.preventDefault(); guardNav" not in app and "onClick={guardClick(n.to)}" in app
+    import sys
+
+    sys.path.insert(0, str(SRC.parents[1] / "src"))
+    from oibot_gm import consequences as cq
+
+    assert cq.leave_unsaved_sentence(0, "") == cq.LEAVE_TEMPLATE["page"] == "Your edits on this page are not saved yet."
 
 
 def test_schedule_editing_stays_reachable_until_the_schedules_page():

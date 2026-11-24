@@ -136,7 +136,7 @@ export interface Meta {
    *  leave guard's sentence templates ({name}, {n}) — a page prints these, never its own copy */
   page_words: PageWords;
   confirm_words: { back: string; keep: string; discard: string; leave_title: string; changed: string };
-  leave: { one: string; many: string };
+  leave: { one: string; many: string; page: string };
   /** registry.RESERVED_SCHEDULE_IDS: the ids no new schedule takes (a schedule editor never holds its own copy) */
   reserved_schedule_ids?: string[];
 }
@@ -181,14 +181,16 @@ export interface ScheduleView {
 /** /api/raids rows' `page` (raid_page.raid_row): Rules, Priority and the Reset box in words. `make_up` = Registry.minimums
  *  alone (one answer with Readiness). */
 export interface RaidPage {
-  details: Fact[]; make_up: { slot: string; label: string; min: number; note: string | null }[]; make_up_empty: string | null;
+  details: Fact[]; make_up: { slot: string; label: string; min: number; note: string | null; own: boolean }[]; make_up_empty: string | null;
   priority: { key: string; label: string; value: number }[]; used_when: string; one_off_rule: string; open_events: number;
   boxes: { reset: Box };
 }
 /** /api/readiness rows' `view` (raid_page.readiness_view): the Raids page's Readiness — the same make-up rows as the Rules
  *  view with how many mains the guild has for each. */
 export interface ReadinessView {
-  who_could_play: Fact[]; make_up: { slot: string; label: string; have: number; min: number }[]; make_up_empty: string | null;
+  who_could_play: Fact[]; make_up: { slot: string; label: string; have: number; min: number; own: boolean; level: string }[]; make_up_empty: string | null;
+  /** Standing as the page prints it (raid_page.standing) and the sentence naming why — null when ready */
+  level: string; standing_why: string | null;
 }
 /** A row of the Events list (GET /api/event-list): `key` = the event's first raid, `title` its start in words. */
 export interface EventRow { key: string; title: string; subtitle: string; state: "open" | "locked" | "done" | "cancelled"; chip: string }

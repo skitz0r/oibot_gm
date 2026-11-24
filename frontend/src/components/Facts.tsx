@@ -3,13 +3,14 @@ import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import type { Fact } from "../api";
 import { Eyebrow } from "./Page";
+import { guardClick } from "./LeaveGuard";
 import css from "../pages/listpage.module.css";
 
-/** A place a Fact points at: a site path (`/schedules/tuesday`) is a router link, anything else (a Discord jump link) a
+/** A place a Fact points at: a site path (`/schedules/tuesday`) is a router link through the leave guard (an open draft is never dropped unasked), anything else (a Discord jump link) a
  *  plain link in a new tab. */
 function Place({ href, children }: { href: string; children: React.ReactNode }) {
   return href.startsWith("/")
-    ? <Anchor component={Link} to={href}>{children}</Anchor>
+    ? <Anchor component={Link} to={href} onClick={guardClick(href)}>{children}</Anchor>
     : <Anchor href={href} target="_blank" rel="noopener noreferrer">{children}</Anchor>;
 }
 

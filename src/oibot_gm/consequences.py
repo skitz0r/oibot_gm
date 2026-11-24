@@ -89,11 +89,16 @@ def move_past_sentence(reg: Registry, new, old) -> str:
     return rc.Refusal(PAST_TAIL.format(new=reg.local12(new), old=reg.local12(old)), "past")
 
 
-LEAVE_TEMPLATE = {"one": "Your one edit to {name} is not saved yet.", "many": "Your {n} edits to {name} are not saved yet."}
+LEAVE_TEMPLATE = {"one": "Your one edit to {name} is not saved yet.", "many": "Your {n} edits to {name} are not saved yet.",
+                  # an edit mode that doesn't say what it holds (the older pages' useDirty without a count)
+                  "page": "Your edits on this page are not saved yet."}
 
 
 def leave_unsaved_sentence(n: int, name: str) -> str:
-    """Leaving a page with unsaved edits (the site fills LEAVE_TEMPLATE itself; this is the same words in code)."""
+    """Leaving a page with unsaved edits (the site fills LEAVE_TEMPLATE itself; this is the same words in code); no
+    name = an edit mode that doesn't say what it holds."""
+    if not name:
+        return LEAVE_TEMPLATE["page"]
     return LEAVE_TEMPLATE["one"].format(name=name) if n == 1 else LEAVE_TEMPLATE["many"].format(n=n, name=name)
 
 

@@ -5,7 +5,7 @@ import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconCalendarRepeat, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus, IconCoin } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { LeaveGuard, guardNav } from "./components/LeaveGuard";
+import { LeaveGuard, guardClick } from "./components/LeaveGuard";
 import { setBoxMeta } from "./components/ConfirmBox";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
@@ -150,7 +150,7 @@ export default function App() {
   const pricesTab = !!meta.prices?.market;  // absent on a version without auction houses (tbc)
   const nav = pricesTab ? [...NAV.slice(0, 3), PRICES, ...NAV.slice(3)] : NAV;
   const link = (n: { to: string; label: string; icon: React.ElementType }) => (
-    <NavLink key={n.to} component={Link} to={n.to} onClick={(e: React.MouseEvent) => { e.preventDefault(); guardNav(n.to); }} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7 }} />
+    <NavLink key={n.to} component={Link} to={n.to} onClick={guardClick(n.to)} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7 }} />
   );
   return (
     <AppShell navbar={{ width: 212, breakpoint: "sm", collapsed: { mobile: !opened } }} header={{ height: 52, collapsed: !mobile }} padding="lg">

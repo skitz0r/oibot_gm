@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Alert, Badge, Button, Group, Modal, Stack, Text } from "@mantine/core";
-import { ApiError, opsApi, type Described, type OpsChange, type OpsReply } from "../api";
+import { ApiError, opsApi, type Box, type Described, type OpsChange, type OpsReply } from "../api";
+import touch from "../pages/listpage.module.css";
 import { fail, ok } from "./Page";
 import { BoxBody, BoxButtons } from "./ConfirmBox";
 
@@ -70,18 +71,22 @@ export function ResultSheet({ r }: { r: OpsReply }) {
 export function ReviewModal({ opened, title, preview, result, busy, notice, onApply, onClose, verb }: ReviewModalProps) {
   const d = preview?.described;
   const n = d ? d.lines.filter((l) => !l.error).length : 0;
-  // the phase 4 pages (a `verb` given): the server's §7b box — its title, diff and sentences, Back then the verb; any
-  // line that can't apply (or a refusal) still shows under it, and then only Back
-  const box = verb && d?.box ? d.box : null;
-  if (box && d && !result) {
-    const errors = [...d.lines.filter((l) => l.error).map((l) => `${l.label}: ${l.error}`), ...d.refused];
-    const go = { ...box, verb: errors.length || !n || !preview?.token ? null : verb ?? null };
+  // the phase 4 pages (a `verb` given): always a §7b box, never the lines / result sheet below — the server's box (its
+  // title, diff and sentences, Back then the verb); a box the server refused with (verb null), a line that can't apply,
+  // a refusal or a refused write is a box with the server's words and Back alone
+  if (verb) {
+    const errors = result
+      ? [...(result.refused || []), ...(result.results || []).filter((x) => !x.ok).map((x) => `${x.label}: ${x.line}`)]
+      : [...(d?.lines || []).filter((l) => l.error).map((l) => `${l.label}: ${l.error}`), ...(d?.refused || [])];
+    const said = !result && d?.box ? d.box : null;
+    const box: Box = said || { title: title || "", sentences: errors.length ? [] : [(result || preview)?.summary || ""].filter(Boolean), verb: null, danger: false, diff: [], fp: "" };
+    const go: Box = { ...box, verb: said?.verb && !errors.length && n && preview?.token ? verb : null };
     return (
-      <Modal opened={opened} onClose={onClose} title={box.title} centered>
+      <Modal opened={opened} onClose={onClose} title={box.title} centered classNames={{ content: touch.touch }}>
         <Stack gap="md">
           {notice && <Alert color="blue" variant="light" p="xs"><Text size="sm">{notice}</Text></Alert>}
           <BoxBody box={box} />
-          {errors.map((x, i) => <Text key={i} size="sm" c="red">⛔ {x}</Text>)}
+          {errors.map((x, i) => <Text key={i} size="sm" c="red">{x}</Text>)}
           <BoxButtons box={go} busy={busy} onBack={onClose} onGo={onApply} />
         </Stack>
       </Modal>
@@ -181,11 +186,14 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Pro
       if (e instanceof ApiError && e.status === 409) { fail(e); return { ...(e.body as OpsReply), changed: (e.body as OpsReply).changed || [] }; }
       throw e;
     }
-    if (opts?.always && !r.token && !(r.refused?.length) && !r.described?.lines.length) {  // nothing differs from what is stored
+    // nothing differs from what is stored and the server has nothing to say about it: a toast; a box it answered with
+    // (a refusal like "Nothing to save") or a refusal is shown as a box
+    const said = !!r.described?.box || !!r.refused?.length || !!r.described?.lines.some((l) => l.error);
+    if (opts?.always && !r.token && !said) {
       ok(r.summary || "nothing changed");
       return null;
     }
-    const review = r.needs_review || (opts?.always && !!r.token);
+    const review = r.needs_review || (opts?.always && (!!r.token || said));
     if (!review && !(r.refused?.length)) {
       ok(r.summary || "saved");
       return r;

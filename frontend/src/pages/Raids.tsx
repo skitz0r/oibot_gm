@@ -57,7 +57,7 @@ function toDraft(r: RaidRule): RaidDraft {
   return {
     lockout_days: String(r.lockout_days), duration_hours: String(r.duration_hours), first_open: r.first_open_local,
     weights: Object.fromEntries(Object.entries(r.weights).map(([k, v]) => [k, String(v)])),
-    mins: (r.page?.make_up || []).map((m) => ({ slot: m.slot, label: m.label, min: String(m.min), note: m.note })),
+    mins: (r.page?.make_up || []).map((m) => ({ slot: m.slot, label: m.label, min: String(m.min), note: m.note, floor: m.own ? 0 : m.min })),
   };
 }
 
@@ -116,15 +116,21 @@ function RaidDetail({ r, meta, view, setView, onEditing, onSaved, fetchRaid }: {
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
 
-  /** Reset: the server's box (page.boxes.reset, checked against config:raid_all); a 409 shows the fresh box. */
+  /** Reset: the server's box (page.boxes.reset, checked against config:raid_all). The rev sent is the one of the box on
+   *  screen: a 409 or a live change brings the fresh box AND its rev, so the next press can go through. */
   async function onReset() {
-    const resetBox = async (): Promise<Box> => (await fetchRaid()).page!.boxes.reset;
+    const shown = { rev: r.reset_rev };
+    const resetBox = async (): Promise<Box> => {
+      const fresh = await fetchRaid();
+      shown.rev = fresh.reset_rev;
+      return fresh.page!.boxes.reset;
+    };
     await ask({
       box: page.boxes.reset,
       refresh: resetBox,
       act: async () => {
         try {
-          const x = await opsApi.confirm([{ kind: "raid_reset", target: r.id }], r.reset_rev ? { [`config:raid_all:${r.id}`]: r.reset_rev } : undefined);
+          const x = await opsApi.confirm([{ kind: "raid_reset", target: r.id }], shown.rev ? { [`config:raid_all:${r.id}`]: shown.rev } : undefined);
           if (x.refused?.length) fail(new Error(x.refused.join("\n")));
           else ok(x.summary || "saved");
           onSaved();
@@ -162,7 +168,7 @@ function RaidDetail({ r, meta, view, setView, onEditing, onSaved, fetchRaid }: {
       </div>
       {view === "rules" && <RulesView page={page} size={r.size} draft={draft} setDraft={setDraft} slots={slots} />}
       {view === "priority" && <PriorityView page={page} draft={draft} setDraft={setDraft} />}
-      {view === "readiness" && <ReadinessView meta={meta} view={ready?.view || null} />}
+      {view === "readiness" && <ReadinessView meta={meta} view={ready?.view || null} onEdit={() => { if (!draft) setDraft(toDraft(r)); setView("rules"); }} />}
       {review}
       {boxDialog}
     </section>

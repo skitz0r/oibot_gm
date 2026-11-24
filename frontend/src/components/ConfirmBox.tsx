@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Box as MBox, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { guildQuery, type Box, type Meta } from "../api";
 import { fail } from "./Page";
+import touch from "../pages/listpage.module.css";
 
 /** The confirmation box (design §7b) as the site prints it: the SERVER's box (consequences.box) and nothing composed
  *  here — its title, the "label: old → new" lines, any fields the page adds, then its sentences; two buttons, Back then
@@ -103,7 +104,7 @@ export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<bo
   };
 
   const dialog = (
-    <Modal opened={open !== null && box !== null} onClose={() => { if (!busy) close(false); }} title={box?.title} centered>
+    <Modal opened={open !== null && box !== null} onClose={() => { if (!busy) close(false); }} title={box?.title} centered classNames={{ content: touch.touch }}>
       {box && (
         <Stack gap="md">
           <BoxBody box={box} fields={open?.fields} changed={changed} />
