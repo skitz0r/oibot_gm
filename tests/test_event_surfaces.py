@@ -198,7 +198,8 @@ def test_the_routes_preview_then_write(w):
     assert r.status_code == 409 and r.json()["error"] == rc.RUN_CHANGED and ev.start == new, "the rev the preview showed is stale now"
     past = reg.now_local() - timedelta(days=1)
     r = w.c.post(f"/api/run/{ev.key}/reschedule", json={"start": reg.local(past, "%Y-%m-%dT%H:%M")}, headers=h)
-    assert r.status_code == 400 and r.json()["error"] == rc.MOVE_PAST
+    assert r.status_code == 400 and r.json()["error"] == cq.move_past_sentence(reg, rc.move_start(reg, reg.local(past, "%Y-%m-%dT%H:%M")), ev.start)
+    assert r.json()["box"]["title"] == "That time has passed" and r.json()["box"]["verb"] is None
     m = reg.test_members()[0]
     r = w.c.post(f"/api/run/{ev.key}/reschedule", json={"start": reg.local(new, "%Y-%m-%dT%H:%M"), "preview": True}, headers=as_user(w.c, m.discord_id))
     assert r.status_code == 403

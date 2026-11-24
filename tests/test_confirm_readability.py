@@ -763,8 +763,116 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     # ---- editing a run's lineup before the lock (phase 3, Task 6)
     lineup_cases(reg, rs, runs, ms, dump, monkeypatch)
 
+    # ---- the confirmation boxes (phase 4, Task 1; design §7b)
+    box_cases(reg, rs, runs, ms, dump)
+
     dump.write()
     assert not dump.problems, f"{len(dump.problems)} confirm sentences break the Confirm rule:\n" + "\n".join(dump.problems)
+
+
+def box_cases(reg, rs, runs, ms, dump):
+    """Every box generator across its cases (each variant of the §7b table, DMs on and off, 0 / 1 / many): the title is
+    linted as a line of its own, then the sentences as one confirm."""
+    hy, ony = "hyjal_summit_forever", "onyxias_lair"
+
+    def add(generator, case, b):
+        assert set(b) == {"title", "sentences", "verb", "danger", "diff", "fp"}, generator
+        assert b["verb"] is not None or len(b["sentences"]) == 1, f"{generator} · {case}: a refusal is one sentence"
+        title = b["title"] if b["title"][-1:] in ".?!" else b["title"] + "."  # a heading: linted for case, length and glue
+        dump.add(f"{generator} title", case, [title])
+        dump.add(generator, case, b["sentences"])
+
+    for case, ev in runs.items():
+        add("lock_box", case, cq.lock_box(reg, ev, rs))
+        add("cancel_box", case, cq.cancel_box(reg, ev, rs))
+    ev = runs["open recurring"]
+    add("reschedule_box", "open, answers", cq.reschedule_box(reg, rs, ev, ev.start + timedelta(hours=1)))
+    quiet = runs["open recurring, nobody joined"]
+    add("reschedule_box", "nobody answered", cq.reschedule_box(reg, rs, quiet, quiet.start + timedelta(hours=1)))
+    add("reschedule_box", "into the past", cq.reschedule_box(reg, rs, ev, reg.now_local() - timedelta(days=2)))
+    lk = runs["locked recurring, autofill on"]
+    add("reschedule_box", "locked", cq.reschedule_box(reg, rs, lk, lk.start + timedelta(hours=2)))
+    three = runs["three raids, first"]
+    L = lambda *raids: [{"raid": r, "rosters": 1} if isinstance(r, str) else {"raid": r[0], "rosters": r[1]} for r in raids]  # noqa: E731
+    for case, lineup in (("a roster count", L(hy, (RID, 1), ony)), ("remove", L(hy, ony)), ("reorder", L(hy, ony, (RID, 2))),
+                         ("add", None), ("locked", "locked")):
+        if lineup is None:
+            solo = rc.open_run(reg, rs, hy, three.start + timedelta(days=9), by="t", schedule=rc.ADHOC_SCHEDULE)
+            b = cq.lineup_box(reg, rs, solo, L(hy, (RID, 2)))
+        elif lineup == "locked":
+            b = cq.lineup_box(reg, rs, lk, L(RID, ony))
+        else:
+            b = cq.lineup_box(reg, rs, three, lineup)
+        add("lineup_box", case, b)
+    m = ms[2]
+    add("switch_box", "before the lock", cq.switch_box(reg, ev, m, None, "Shadow", [RID]))
+    add("switch_box", "another character", cq.switch_box(reg, ev, m, "Kingsley", "Fire", [RID, hy]))
+    add("switch_box", "after the lock, DMs on", cq.switch_box(reg, lk, m, None, "Shadow", [RID], locked=True))
+    m.dm_opt_out = True
+    add("switch_box", "after the lock, DMs off", cq.switch_box(reg, lk, m, None, "Shadow", [RID], locked=True))
+    m.dm_opt_out = False
+    add("answer_box", "join before the lock", cq.answer_box(reg, quiet, ms[4], "join", ms[4].main.label, "Fire", by_id=OFFICER_ID))
+    add("answer_box", "join on their own record", cq.answer_box(reg, quiet, ms[4], "join", by_id=ms[4].discord_id))
+    add("answer_box", "bench after the lock", cq.answer_box(reg, lk, ms[1], "bench", by_id=OFFICER_ID))
+    for n in (1, 4):
+        add("undo_box", f"{n} moves", cq.undo_box(n))
+    start = reg.now_local() + timedelta(days=6)
+    for case, opens, kw in (("three days early", reg.now_local() + timedelta(days=3, minutes=5), {}),
+                            ("one day early", reg.now_local() + timedelta(days=1, minutes=5), {}),
+                            ("five hours early", reg.now_local() + timedelta(hours=5, minutes=5), {}),
+                            ("due now", reg.now_local(), {}), ("no signup channel", reg.now_local() + timedelta(days=2), {"channel": False}),
+                            ("a raid first opens after it", reg.now_local() + timedelta(days=2),
+                             {"lineup": [{"raid": RID, "rosters": 1}, {"raid": ony, "rosters": 1}]})):
+        was = reg.raid_def(ony).get("first_open")
+        if kw.get("lineup"):
+            reg.set_raid_overrides(ony, {"first_open": (start + timedelta(days=30)).isoformat()}, "t")
+        b = cq.open_now_box(reg, start, opens, start - timedelta(hours=24), **kw)
+        reg.set_raid_overrides(ony, {"first_open": was}, "t")
+        assert not kw.get("lineup") or "first opens" in b["sentences"][1], b
+        add("open_now_box", case, b)
+    # schedules: the harness's weekly Barrow Deeps schedule has many runs open; a fresh one has none
+    sid = "barrow-deeps"
+    entry = reg.schedule_entry(sid)
+    add("schedule_create_box", "three nights a week", cq.schedule_create_box(reg, entry))
+    reg.set_schedule("tue", {"kind": "weekly", "slots": ["Tue 18:30"], "name": "Tuesday raid night"}, "t", raid=hy)
+    add("schedule_create_box", "one night", cq.schedule_create_box(reg, reg.schedule_entry("tue")))
+    reg.set_schedule("lk", {"kind": "lockout", "days": [1], "time": "20:00", "name": "Lockout night"}, "t", raid=ony)
+    add("schedule_create_box", "a lockout day", cq.schedule_create_box(reg, reg.schedule_entry("lk")))
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=hy)
+    add("schedule_create_box", "a pickup template", cq.schedule_create_box(reg, reg.schedule_entry("pug")))
+    add("schedule_save_box", "many open", cq.schedule_save_box(reg, rs, sid, {"lock_hours_before": 12}, ["Locks: 24 hours before → 12 hours before"]))
+    add("schedule_save_box", "none open", cq.schedule_save_box(reg, rs, "tue", {"name": "Tues"}))
+    add("schedule_save_box", "a priority change", cq.schedule_save_box(reg, rs, sid, {"weights": {"rank": 5}}))
+    tue_ev = rc.open_run(reg, rs, hy, rc.next_runs_of(reg, hy, reg.schedule_entry("tue"), n=2)[1], schedule="tue")
+    add("schedule_save_box", "one open", cq.schedule_save_box(reg, rs, "tue", {"lock_hours_before": 12}))
+    for case, x in (("one open", "tue"), ("many open", sid), ("none open", "lk")):
+        add("schedule_pause_box", case, cq.schedule_pause_box(reg, rs, x))
+        add("schedule_remove_box", case, cq.schedule_remove_box(reg, rs, x))
+    reg.set_schedule("lk", {"active": "false"}, "t")
+    add("schedule_resume_box", "the next sheet later", cq.schedule_resume_box(reg, rs, "lk"))
+    reg.set_schedule("lk", {"signup_lead_hours": 24 * 20}, "t")
+    add("schedule_resume_box", "the next sheet now", cq.schedule_resume_box(reg, rs, "lk"))
+    add("schedule_resume_box", "a pickup template", cq.schedule_resume_box(reg, rs, "pug"))
+    for x in ms[:6]:
+        reg.regular_add(x.discord_id, "tue", "t")
+    reg.set_schedule("tue", {"weights": {"rank": 5}}, "t")
+    add("schedule_remove_box", "6 regulars, one open with its own weights", cq.schedule_remove_box(reg, rs, "tue"))
+    add("regular_remove_box", "an open event", cq.regular_remove_box(reg, reg.members[ms[0].discord_id], "tue"))
+    rc.end_run(reg, rs, tue_ev, "t")
+    add("regular_remove_box", "no open event", cq.regular_remove_box(reg, reg.members[ms[0].discord_id], "tue"))
+    add("regular_remove_box", "a removed schedule", cq.regular_remove_box(reg, reg.members[ms[0].discord_id], "gone"))
+    for case, rid in (("some open", ony), ("many open", RID)):
+        for kind, changed in (("one minimum", {"minimum:healer"}), ("two minimums", {"minimum:healer", "minimum:tank"}),
+                              ("priority", {"weight:rank"}), ("lockout", {"lockout_days"}), ("mixed", {"minimum:healer", "weight:rank"}),
+                              ("notes", {"notes"})):
+            add("raid_save_box", f"{kind}, {case}", cq.raid_save_box(reg, rs, rid, changed, ["Healers, minimum: 5 → 4"]))
+    reg.set_minimums(ony, {"healer": {"min": 3}, "Paladin:Holy": {"min": 1}}, "t")
+    add("raid_reset_box", "only minimums", cq.raid_reset_box(reg, ony))
+    add("raid_reset_box", "already the game's", cq.raid_reset_box(reg, hy))
+    for n in (1, 2):
+        add("leave_box", f"{n} edits", cq.leave_box(n, "Hyjal Summit"))
+    for kind, title in cq.REFUSAL_TITLES.items():
+        add("refusal_box", kind, cq.refusal_box(title, rc.LINEUP_LOCKED))
 
 
 def reschedule_cases(reg, rs, runs, ms, dump):

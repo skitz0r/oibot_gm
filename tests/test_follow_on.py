@@ -450,10 +450,10 @@ def test_cleanup_drops_an_orphaned_follow_on(reg, rs):
 def test_the_sentences(reg, rs, monkeypatch):
     bot = NightBot(reg, rs)
     lead, fev, ms = locked_pair(reg, rs, monkeypatch, bot)
-    assert "Barrow Deeps follow-on is cancelled with it" in " ".join(cq.consequence("cancel", reg, lead))
+    assert cq.consequence("cancel", reg, lead)[0] == "Both raids of this event are cancelled."
     follow_cancel = cq.consequence("cancel", reg, fev)
-    assert follow_cancel[0] == "The whole Hyjal Summit run is cancelled, with Barrow Deeps."
-    assert follow_cancel[1] == "Nobody gets a DM, but the sheet and every ask card say Cancelled."
+    assert follow_cancel[0] == "Both raids of this event are cancelled.", "any raid of it cancels the whole event"
+    assert follow_cancel[1] == "The 20 rostered see it on the sheet, and nobody gets a DM."
     refill = rc.refill_sentence(reg, fev)
     assert cq.leave_follow_consequence(reg, fev, True, True) == ["You stay on the Hyjal Summit roster.", "Your Barrow Deeps place is freed.", refill]
     assert cq.leave_follow_consequence(reg, fev, True, False) == ["Your Hyjal Summit answer stands.", "Your Barrow Deeps place is freed.", refill]

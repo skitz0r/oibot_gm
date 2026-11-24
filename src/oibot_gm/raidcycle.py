@@ -488,6 +488,83 @@ def follow_words_of(reg: Registry, ev: "RaidEvent") -> str:
     return reg.later_words([{"raid": t.get("instance"), "rosters": t.get("rosters") or 1} for t in later_dicts(reg, ev)])
 
 
+def _raid_name(reg: Registry, raid: str | None) -> str:
+    return reg.raid_def(raid).get("name", raid) if raid in reg.profile.raids else str(raid or "")
+
+
+def lineup_words(reg: Registry, lineup: list[dict]) -> str:
+    """'Hyjal Summit, then Barrow Deeps × 2' — a whole lineup ([{raid, rosters}], its first raid first) as the Events
+    and Schedules pages print it."""
+    def one(e: dict) -> str:
+        n = int(e.get("rosters") or 1)
+        return _raid_name(reg, e.get("raid")) + (f" × {n}" if n > 1 else "")
+    return ", then ".join(one(e) for e in lineup or [] if e)
+
+
+def lineup_roster_words(reg: Registry, lineup: list[dict]) -> str:
+    """'Hyjal Summit and both Barrow Deeps rosters' — every roster of a lineup as a sentence names them (the lock box):
+    one roster = the raid's name, two = 'both {Raid} rosters', three or four = 'all {n} {Raid} rosters'."""
+    def one(e: dict) -> str:
+        n, name = int(e.get("rosters") or 1), _raid_name(reg, e.get("raid"))
+        return name if n == 1 else f"both {name} rosters" if n == 2 else f"all {n} {name} rosters"
+    items = [one(e) for e in lineup or [] if e]
+    if not items:
+        return ""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def event_lineup(reg: Registry, ev: "RaidEvent") -> list[dict]:
+    """The lineup of `ev`'s event ([{raid, rosters}], its first raid first), from the run dicts alone: part 0's dict
+    `lineup`, else its raid and rosters followed by its later dicts (any part stands for its event)."""
+    t0 = reg.config.team(ev.team)
+    seen = {ev.team}
+    while t0 is not None and t0.get("follows") and t0["follows"] not in seen:  # a later part's dict: up to part 0's
+        seen.add(t0["follows"])
+        up = reg.config.team(t0["follows"])
+        if up is None:
+            break
+        t0 = up
+    if t0 is None:
+        return [{"raid": ev.instance, "rosters": 1}]
+    if t0.get("lineup"):
+        return [{"raid": e["raid"], "rosters": int(e.get("rosters") or 1)} for e in t0["lineup"]]
+    first = RaidEvent(key=t0["key"], team=t0["key"], instance=t0.get("instance") or ev.instance, starts_at=ev.starts_at)
+    return [{"raid": first.instance, "rosters": int(t0.get("rosters") or 1)}] + [
+        {"raid": t.get("instance"), "rosters": int(t.get("rosters") or 1)} for t in later_dicts(reg, first)]
+
+
+def priority_words(reg: Registry, ev_or_schedule_def) -> str:
+    """Who gets a seat first when more join than there are seats (D17), short: 'First to join' for a one-off, else the
+    two heaviest weights — 'Regulars first, then rank' (constants.PRIORITY_SHORT)."""
+    from .constants import PRIORITY_SHORT
+    from .registry import schedule_class
+
+    x = ev_or_schedule_def
+    if isinstance(x, RaidEvent):
+        if run_kind(reg, x) == "adhoc":
+            return "First to join"
+        weights = run_weights(reg, x)
+    else:
+        if schedule_class((x or {}).get("kind")) == "adhoc":
+            return "First to join"
+        weights = dict((x or {}).get("weights") or {})
+    order = list(PRIORITY_SHORT)
+    top = sorted((k for k in order if float(weights.get(k) or 0) > 0), key=lambda k: (-float(weights.get(k) or 0), order.index(k)))[:2]
+    if not top:
+        return "First to join"
+    a = PRIORITY_SHORT[top[0]]
+    a = a[:1].upper() + a[1:]
+    if len(top) == 1:
+        return f"{a} first"
+    b = PRIORITY_SHORT[top[1]]
+    return f"{a} first, then {b[:1].lower() + b[1:]}"
+
+
+def confirmation_words(confirm: bool) -> str:
+    """Whether the rostered are asked to confirm, as the Details label's value reads."""
+    return "Asked at the lock" if confirm else "Not asked"
+
+
 def lead_name_of(reg: Registry, ev: "RaidEvent") -> str:
     """'Hyjal Summit' for a follow-on's lead ('' when the run is not a follow-on)."""
     lt = lead_dict(reg, ev)
@@ -1309,7 +1386,6 @@ def place_run(reg: Registry, ev: "RaidEvent", start: datetime, team: dict | None
 EVENT_TIMING = {"nudge_hours_before": "cutoff_soft_hours", "lock_hours_before": "cutoff_hard_hours",
                 "confirm_hours_before": "confirm_hours", "fill_ask_hours": "fill_ask_hours", "nudge": "reminders",
                 "autofill": "autofill"}
-MOVE_PAST = "That start is in the past. Pick a time from now on."
 MOVE_CLOSED = "This run is finished or cancelled, so it can't move."
 MOVE_STARTED = "This run has started, so it can't move."
 TIMING_SAME = "The run already has that timing."
@@ -1430,7 +1506,7 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
                        now: datetime | None = None) -> str | None:
     """Why `ev`'s run can't move to `start` / take `timing`, in one sentence, else None — in this order: finished or
     cancelled (MOVE_CLOSED), already started (MOVE_STARTED: neither start nor timing), a start more than
-    PAST_GRACE_MINUTES ago (MOVE_PAST), nothing that changes (MOVE_SAME; TIMING_SAME for a timing-only no-op), its
+    PAST_GRACE_MINUTES ago (consequences.move_past_sentence), nothing that changes (MOVE_SAME; TIMING_SAME for a timing-only no-op), its
     first raid already has another live run at that minute (MOVE_CLASH), timing on a locked run (TIMING_LOCKED), a
     reminder after the lock or a confirm-by before it (TIMING_ORDER). Any raid of a run answers for its first raid."""
     first = first_part(rs, ev)
@@ -1444,7 +1520,9 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
     except RegistryError as e:
         return str(e)
     if start is not None and start < now - timedelta(minutes=PAST_GRACE_MINUTES):
-        return MOVE_PAST
+        from .consequences import move_past_sentence
+
+        return move_past_sentence(reg, start, first.start)
     if (start is None or start == first.start) and not values:
         return TIMING_SAME if timing else MOVE_SAME
     if start is not None and start != first.start:

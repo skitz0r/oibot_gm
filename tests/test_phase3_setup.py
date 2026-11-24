@@ -23,6 +23,7 @@ from test_people import real
 from wizard_harness import Harness
 
 from oibot_gm import configops, raidcycle as rc
+from oibot_gm import consequences as cq
 from oibot_gm import flows_config  # noqa: F401 — registers the flows
 from oibot_gm.configops import ConfigOp
 from oibot_gm.registry import ConfigChanged, RegistryError
@@ -117,7 +118,8 @@ def test_schedule_removal_effects_names_regulars_and_open_runs(reg, rs):
     s = eff.sentence()
     assert s.startswith("The Alt run schedule is removed.") and f"{m.display_name} comes off its regulars and sees a notice" in s and "keeps its time and sheet" in s
     cons = configops.op_consequences(reg, ConfigOp(op="schedule_remove", target="alt"))
-    assert cons == eff.lines()
+    assert cons == cq.schedule_remove_box(reg, rs, "alt")["sentences"], "the confirm is the Remove box (design §7b)"
+    assert cons[0] == "The schedule and its one regular spot are removed, and that regular sees a notice."
     with pytest.raises(RegistryError, match="no schedule called"):
         reg.schedule_removal_effects("nope", rs)
     reg.set_schedule("sun", {"kind": "weekly", "slots": "Sun 20:00", "name": "Sundays"}, "t", raid="barrow_deeps")

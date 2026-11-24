@@ -209,8 +209,8 @@ def test_cancel_on_any_part_cancels_the_whole_run(bot, reg, rs):
     from oibot_gm import consequences as cq
 
     said = cq.consequence("cancel", reg, parts[2])
-    assert said[0] == "The whole Hyjal Summit run is cancelled, with Barrow Deeps, Extra A and Extra B."
-    assert cq.consequence("cancel", reg, first)[1] == "The Barrow Deeps, Extra A and Extra B follow-ons are cancelled with it, and nobody gets a DM."
+    assert said[0] == "All 4 raids of this event are cancelled."
+    assert cq.consequence("cancel", reg, first)[0] == "All 4 raids of this event are cancelled."
     run(bot.cancel_run(reg, rs, parts[2], "Jon", "storm"))
     assert [p.state for p in rc.event_parts(rs, first)] == ["cancelled"] * 4
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
@@ -381,8 +381,8 @@ def test_a_cancel_after_the_first_raid_finished_takes_every_raid_still_to_play(b
     rs.save(first, "harness: the first raid finished")
     parts = rc.event_parts(rs, first)
     said = cq.consequence("cancel", reg, parts[2], rs=rs)
-    assert said == ["The Barrow Deeps, Extra A and Extra B raids are cancelled.",
-                    "Nobody gets a DM, but every ask card says Cancelled.", "A cancelled run can't be reopened."]
+    assert said == ["The Barrow Deeps, Extra A and Extra B raids of this event are cancelled.",
+                    "Nobody gets a DM, but every ask card says Cancelled.", "A cancelled event cannot be reopened."]
     run(bot.cancel_run(reg, rs, parts[2], "Jon", None))
     assert [p.state for p in rc.event_parts(rs, first)] == ["done", "cancelled", "cancelled", "cancelled"]
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
@@ -396,8 +396,8 @@ def test_the_confirm_names_only_the_raids_still_live(reg, rs):
     parts = rc.event_parts(rs, first)
     parts[3].state = "cancelled"  # an older run's raid cancelled on its own
     rs.save(parts[3], "harness")
-    assert cq.consequence("cancel", reg, parts[1], rs=rs)[0] == "The whole Hyjal Summit run is cancelled, with Barrow Deeps and Extra A."
-    assert cq.consequence("cancel", reg, first, rs=rs)[1] == "The Barrow Deeps and Extra A follow-ons are cancelled with it, and nobody gets a DM."
+    assert cq.consequence("cancel", reg, parts[1], rs=rs)[0] == "All 3 raids of this event are cancelled."
+    assert cq.consequence("cancel", reg, first, rs=rs)[0] == "All 3 raids of this event are cancelled.", "any raid of it names the same event"
 
 
 @pytest.mark.parametrize("keep, words", [((1, 3), "Your Barrow Deeps and Extra B places go too."), ((2,), "Your Extra A place goes too.")],

@@ -928,10 +928,9 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   same character on two schedules of one raid is allowed with a warning (one lockout). A test puppet is never a
   regular — a test run treats every puppet as one. Removing a schedule never strips its regulars silently: the Rosters
   page lists them to clear. Removing a regular (× on the site, `/roster remove`) and clearing a removed schedule's one
-  both ask first with the same sentences — *"Bramble stops being a regular of Barrow Deeps Raid nights. Its sheets no
-  longer wait for their answer, and the lock no longer weights them as a regular. They can still join any sheet, and
-  nobody is told."* — and if the member's record changed since the page loaded, nothing is written
-  and the page asks you to reload.
+  both ask first with the same sentences — *"Bramble is no longer a regular of Raid nights. They keep their answer on
+  the open event. You can add them again."* (the middle sentence only while the schedule has an event open) — and if
+  the member's record changed since the page loaded, nothing is written and the page asks you to reload.
 - The **Members** page shows each member's **rank** (it weighs on seating; change it from their ⋮ → **Rank…**) and, under
   each character, *regular of …* (the schedules it is a regular of); officers change regulars on the Rosters page and
   ranks with Rank… or `/roster rank`.
@@ -1082,8 +1081,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    yourself. After lock the leftovers are simply the bench — the first people Fill seats… asks when a seat frees up; each
    gets one notice on the Me page (*"You weren't rostered (20 seats, 23 joined). You're in line for a freed seat"*),
    never a DM until a seat is actually offered.
-   **Cancel run** is one screen everywhere: first the sentence from the run as it stands — how many seats are
-   released, how many confirmation and fill asks close — then an optional **reason** (officers only: it goes to the
+   **Cancel run** is one screen everywhere: first the sentences from the event as it stands — how many of its raids
+   go, who sees it and where (*"Both raids of this event are cancelled. The 18 who joined see it on the sheet, and
+   nobody gets a DM. A cancelled event cannot be reopened."*; after the lock *"The 10 rostered see it on their cards…"*)
+   — then an optional **reason** (officers only: it goes to the
    run's updates thread and the ops feed, never to the signup channel) and **Tell the channel?** (a fixed line in the
    signup channel — "🛑 Barrow Deeps … is cancelled. Rostered seats are released — nothing to do." — on by default, or
    no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
@@ -1098,7 +1099,13 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    time"; the open screen and the site say so before you press anything). A test run opened in the same minute as one
    you just cleared starts a minute later.
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
-   the roster(s); the sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
+   the roster(s). Lock now asks first and its confirm names every roster and says who is told: *"The board becomes the
+   roster for Hyjal Summit and both Barrow Deeps rosters. The 20 rostered get the Confirm or Can't make it DM. They have
+   until Tue 15 Dec 12:30 PM to answer."* — on a one-off *"Nobody is asked to confirm. You can still move people after
+   the lock."* On the site every such confirm is one box: a title naming the action (*Lock Tue 15 Dec 6:30 PM?*), at
+   most three sentences, **Back** and the action's own verb (red only when it can't be undone). If what the box said
+   changed while it was open — someone joined, the run moved — pressing the verb changes nothing and the box shows the
+   new sentences under *"This changed while the box was open. Read it again before you press."* The sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
    make it* button); the officer channel gets the roster cards. A roster that came out under its tank/healer minimum
    (nobody else could fill it) says **Locked short** with the role icons and a number, instead of locking quietly; the
    card also lists who the lock moved to an offspec (*Playing an offspec*, one per line) and, on a recurring schedule,
@@ -1115,7 +1122,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    *Lock failed <time> — the sheet stays open, retrying* and so does the site. With confirmations off (the ad hoc default) nobody is asked and
    no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable,
    and every change — a drag or **Move to…** — asks first with one sentence from the bot: moving people between groups
-   (*"Nettle moves to Group 2 and stays rostered. Nobody is told."*) or swapping two changes nothing else; bringing
+   (*"Nettle moves to Group 2 and stays rostered. Nobody is told."*) changes nothing else, and swapping two says who sees it
+   (*"Nettle and Ivy swap seats. Both see the change on the roster card. You can swap them back."*); bringing
    someone in from *Not rostered* to an open seat asks them to confirm (*"Nettle takes an open seat in Group 2 and gets
    the Confirm or Can't make it DM. With DMs off it waits on their Me page. The seat is theirs once they say yes."* — on
    an ad hoc run *"On an ad hoc run Join is the commitment, so the seat is theirs now."*); dropping them on someone is a
@@ -1204,13 +1212,13 @@ one the move would leave in the past is set to within the hour. A fill ask keeps
 lock time is then past locks it at the scheduler's next minute, and the confirm says so first. Before the lock a run can
 also take its own **sheet timing** — the reminder, the lock, confirm-by, how long a fill ask waits and automatic asks —
 kept on that run alone (its schedule is never changed); once the roster locks only the start can move. The confirm
-reads, for example, *"Barrow Deeps moves to Wed 2 Dec 8:00 PM. Answers stand, and the 7 who answered see a notice. You
-can move it again until it starts."*; it names people also on another run that night when there are any. The first
+reads, for example, *"The event moves to Wed 2 Dec 8:00 PM. All 7 answers stand, and each person gets a notice. The
+sheet in Discord shows the new time."*; it names people also on another run that night when there are any. The first
 sentence says only what really changes: the move, this run's own settings (*"For this run, automatic asks are off."*),
 or both (*"… moves to Wed 2 Dec 8:00 PM with its own lock time."*). A run is refused in one sentence when it is finished
 or cancelled, when it has already started (*"This run has started, so it can't move."* — its timing doesn't change
-either), when the start is in the past, when nothing would change, and when its raid already has another run at that
-minute. A moved run still counts as the run of the date its schedule gave it: that date never opens a second sheet, and
+either), when the start is in the past (*"Fri 20 Nov 7:00 PM is in the past, so the event stays at Thu 10 Dec 6:30
+PM."*), when nothing would change, and when its raid already has another run at that minute. A moved run still counts as the run of the date its schedule gave it: that date never opens a second sheet, and
 the schedule's next runs open on time wherever the moved one now sits. Moved exactly onto another night of its schedule
 that hasn't opened yet, it becomes that night's run, and the confirm says so (*"That night's Raid nights run is this
 one."*). When a schedule's run time changes while its run is open or locked — a later hour, past midnight or another
@@ -1235,13 +1243,14 @@ after the first, one taken out, the later raids put in another order, or a raid'
 raid stays (*"The first raid of a run can't change. Start a new run instead."*), the four-raid limit and the order of
 the starts hold as for a schedule, and a raid the game doesn't have is refused. Each raid without its own start begins
 when the one before it ends, so taking out the second raid brings the third forward, and a new order moves every raid
-after the first. When a raid that stays starts at another time the confirm gives its new time (*"The lineup becomes
-Hyjal Summit, then Onyxia's Lair at 9:30 PM."*; on a long lineup the clock alone, or that the people who
-answered see their new start times) and everyone who answered gets a notice on the Me page and in `/me view`
+after the first. The confirm says the first change (*"Barrow Deeps goes from two rosters to one."*, *"Onyxia's Lair
+joins the lineup after Hyjal Summit."*) and, on the site, lists every change above it (*Barrow Deeps: 2 rosters → 1
+roster*). When a raid that stays starts at another time the confirm gives its new time (*"Onyxia's Lair now starts at
+9:30 PM."*) and everyone who answered gets a notice on the Me page and in `/me view`
 (*"Onyxia's Lair now starts Thu 10 Dec 9:30 PM."*), as when a run moves. Adding a raid that hasn't first opened by its
 start is allowed, and the confirm says when it opens. Only that run changes — its schedule keeps its own lineup, and the
 confirm says so on a schedule's run when it has room. The first raid's answers are never touched, and every raid of the new lineup takes
-them, a new raid included (*"Everyone's answer now covers the new lineup."*). A raid that stays keeps its board, its pins
+them, a new raid included (*"All 18 answers stand."*). A raid that stays keeps its board, its pins
 and the plans to leave before it, in its new place. A raid taken out is cancelled with what it held, always counted in
 the confirm (*"Barrow Deeps is taken out with its 3 board places, 1 pin and 1 plan to leave early."*); an open ask on
 it closes and its card says so. A raid taken out answers as itself afterwards: cancelling it again says it is already

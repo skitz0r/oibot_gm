@@ -89,8 +89,8 @@ def test_answers_stand_and_everyone_who_answered_gets_a_notice(reg, rs):
     before = {k: v.status for k, v in ev.signups.items()}
     new = ev.start + timedelta(days=1)
     lines = run(bot.reschedule_event(reg, rs, ev, start=new, by="o", by_id=OFFICER_ID, preview=True))
-    assert lines[0] == f"Barrow Deeps moves to {reg.local12(new)}." and ev.start != new, "a preview writes nothing"
-    assert lines[1] == "Answers stand, and the 4 who answered see a notice."
+    assert lines[0] == f"The event moves to {reg.local12(new)}." and ev.start != new, "a preview writes nothing"
+    assert lines[1] == "All 4 answers stand, and each person gets a notice."
     run(bot.reschedule_event(reg, rs, ev, start=new, by="o", by_id=OFFICER_ID))
     assert {k: v.status for k, v in ev.signups.items()} == before and ev.start == new
     assert all(moved_notices(reg, k) for k in before)
@@ -301,7 +301,7 @@ def test_refusals_are_one_sentence(reg, rs, case, sentence):
     else:
         start = ev.start
     why = rc.reschedule_refusal(reg, rs, ev, start, None)
-    assert why in (rc.MOVE_PAST, rc.MOVE_CLOSED, rc.MOVE_SAME, rc.MOVE_CLASH.format(raid="Barrow Deeps", when=reg.local12(start)))
+    assert why in (cq.move_past_sentence(reg, start, ev.start), rc.MOVE_CLOSED, rc.MOVE_SAME, rc.MOVE_CLASH.format(raid="Barrow Deeps", when=reg.local12(start)))
     assert sentence in why
     raw = (reg.store.root / ev.rel_path(reg.key)).read_text()
     n0 = commit_count(reg.store)
@@ -336,7 +336,7 @@ def test_timing_lives_on_the_run_alone(reg, rs):
     only = cq.reschedule_consequence(reg, rs, ev, None, {"autofill": False})
     assert only[0] == "For this run, automatic asks are off.", "the lock time didn't change, so it isn't named"
     both = cq.reschedule_consequence(reg, rs, ev, t + timedelta(days=1), {"autofill": False, "lock_hours_before": 6})
-    assert both[0] == f"Barrow Deeps moves to {reg.local12(t + timedelta(days=1))} with its own lock time and automatic asks."
+    assert both[0] == f"The event moves to {reg.local12(t + timedelta(days=1))} with its own lock time and automatic asks."
     assert rc.reschedule_refusal(reg, rs, ev, None, {"lock_hours_before": rc.run_team(reg, ev)["cutoff_hard_hours"]}) == rc.TIMING_SAME
     run(bot.reschedule_event(reg, rs, ev, timing={"lock_hours_before": 6, "nudge": False, "autofill": False, "fill_ask_hours": 2},
                              by="o", by_id=OFFICER_ID))
@@ -438,7 +438,7 @@ def test_the_confirm_says_it_locks_now_and_names_a_clash_of_people(reg, rs):
     join(reg, rs, other, people)
     lines = cq.reschedule_consequence(reg, rs, ev, later, None)
     assert lines[-1] == f"{people[0].display_name} and 2 others are also on Hyjal Summit {reg.local12(other.start)} that night."
-    assert cq.reschedule_consequence(reg, rs, ev, ev.start + timedelta(days=1), None)[-1] == "You can move it again until it starts."
+    assert cq.reschedule_consequence(reg, rs, ev, ev.start + timedelta(days=1), None)[-1] == "The sheet in Discord shows the new time."
 
 
 # ---------------------------------------------------------------- fix round 1

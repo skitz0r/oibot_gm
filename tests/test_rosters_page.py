@@ -214,7 +214,7 @@ def test_the_confirmations_off_sentence_is_one_constant_on_every_discord_card(re
     text = "\n".join(i.content for i in card.walk_children() if isinstance(getattr(i, "content", None), str))
     assert rc.NO_CONFIRMATIONS in text and "synergy" not in text and "first come —" not in text
     lock = " ".join(consequences.consequence("lock", reg, fresh))
-    assert "Join is the commitment, so nobody is asked to confirm." in lock and "Joining was" not in lock
+    assert "Nobody is asked to confirm." in lock and "Joining was" not in lock
 
 
 # ---------------------------------------------------------------- phase 3: behaviour (design §5.56 "Phase 3 — behaviour")
@@ -253,7 +253,7 @@ def test_board_moves_before_the_lock_tell_nobody_on_either_kind_of_run(reg, rs, 
 def test_board_moves_after_the_lock_on_a_run_with_confirmations(reg, rs):
     ev, seated = locked_ten(reg, rs, asks=True)
     assert said("move", reg, ev) == "Nettle moves to Group 2 and stays rostered. Nobody is told."
-    assert said("swap", reg, ev) == "Nettle and Ivy swap places and both stay rostered. Nobody is told."
+    assert said("swap", reg, ev) == "Nettle and Ivy swap seats. Both see the change on the roster card. You can swap them back."
     roster = said("roster", reg, ev)
     assert roster == ("Nettle takes an open seat in Group 2 and gets the Confirm or Can't make it DM. With DMs off it waits on their Me page. "
                       "The seat is theirs once they say yes.")
@@ -311,7 +311,7 @@ def test_a_regulars_remove_and_an_orphan_clear_carry_the_servers_sentence_and_a_
     m = reg.members[REAL]
     row = next(x for s in raid(c)["series"] for x in s["regulars"] if x["uid"] == str(REAL))
     assert row["remove"] == " ".join(cq.regular_remove(reg, m, "barrow-deeps"))
-    assert row["remove"].startswith("Bramble stops being a regular of ") and "nobody is told" in row["remove"] and "weights them as a regular" in row["remove"]
+    assert row["remove"] == "P0 is no longer a regular of Raid nights. You can add them again."
     post = lambda body: c.post("/api/admin/raid/regulars", json=body, headers={**bearer(), "X-Requested-With": "oibot"})  # noqa: E731
     stale = post({"raid": RID, "schedule": "barrow-deeps", "uid": str(REAL), "on": False, "rev": "0" * 12})
     assert stale.status_code == 409 and "changed since you loaded them" in stale.json()["error"]

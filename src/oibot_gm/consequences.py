@@ -34,6 +34,94 @@ def _n(n: int, one: str, many: str | None = None) -> str:
     return f"{n} {one if n == 1 else (many or one + 's')}"
 
 
+# ---------------------------------------------------------------- the confirmation box (design §7b, D18)
+# Every press that asks first on the site prints ONE shape, built only here: a title naming the action and its object,
+# at most three sentences under the Confirm rule, the verb (None = a refusal: only Back), red only when it cannot be
+# undone, the edit's "label: old → new" lines, and a fingerprint the action route re-checks (`seen` → 409 with the
+# fresh box when the facts it printed changed while it was open).
+
+def box(title: str, sentences: list[str], verb: str | None, *, danger: bool = False, diff=(), rev: str = "") -> dict:
+    """{title, sentences, verb, danger, diff, fp}. `fp` = sha1 of the title, the diff lines and the sentences joined by
+    newlines (first 12 hex) — and of `rev` when given: the fingerprint of what the write can clobber that the sentences
+    don't print (rc.event_rev for a run, config_rev('schedule:<id>') for a schedule, config_rev('raid_all:<id>'))."""
+    import hashlib
+
+    sentences, diff = [str(s) for s in sentences if s], [str(x) for x in diff]
+    blob = "\n".join([title, *diff, *sentences] + ([rev] if rev else []))
+    return {"title": title, "sentences": sentences, "verb": verb, "danger": bool(danger), "diff": diff,
+            "fp": hashlib.sha1(blob.encode()).hexdigest()[:12]}
+
+
+def refusal_box(title: str, sentence: str) -> dict:
+    """A refused action: the same box with one sentence and only Back."""
+    return box(title, [sentence], None)
+
+
+REFUSAL_TITLES = {"past": "That time has passed", "clash": "That time is taken", "closed": "This event is over",
+                  "locked": "The lineup is fixed", "other": "This can't go ahead"}
+
+
+def refusal_kind(sentence: str) -> str:
+    """Which REFUSAL_TITLES a verb's refusal sentence answers to (the reschedule and lineup refusals' own words)."""
+    s = str(sentence or "")
+    if " is in the past, so the event stays at " in s:
+        return "past"
+    if " already has a run at " in s:
+        return "clash"
+    if s in (rc.MOVE_CLOSED, rc.LINEUP_CLOSED) or s.startswith(("This run is already finished", "This run is already cancelled")):
+        return "closed"
+    if s == rc.LINEUP_LOCKED:
+        return "locked"
+    return "other"
+
+
+def refusal_box_for(sentence: str) -> dict:
+    """The box a route answers a refusal with: the title its kind gives, the verb's own sentence."""
+    return refusal_box(REFUSAL_TITLES[refusal_kind(sentence)], str(sentence))
+
+
+PAST_TAIL = "{new} is in the past, so the event stays at {old}."
+
+
+def move_past_sentence(reg: Registry, new, old) -> str:
+    """Reschedule into the past, refused: 'Fri 20 Nov 7:00 PM is in the past, so the event stays at Thu 10 Dec 6:30 PM.'"""
+    return PAST_TAIL.format(new=reg.local12(new), old=reg.local12(old))
+
+
+LEAVE_TEMPLATE = {"one": "Your one edit to {name} is not saved yet.", "many": "Your {n} edits to {name} are not saved yet."}
+
+
+def leave_unsaved_sentence(n: int, name: str) -> str:
+    """Leaving a page with unsaved edits (the site fills LEAVE_TEMPLATE itself; this is the same words in code)."""
+    return LEAVE_TEMPLATE["one"].format(name=name) if n == 1 else LEAVE_TEMPLATE["many"].format(n=n, name=name)
+
+
+def leave_box(n: int, name: str) -> dict:
+    """Box 20: Keep editing in place of Back, Discard edits red."""
+    from .constants import CONFIRM_WORDS
+
+    return box(CONFIRM_WORDS["leave_title"], [leave_unsaved_sentence(n, name)], CONFIRM_WORDS["discard"], danger=True)
+
+
+_COUNT = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+
+
+def count_words(n: int) -> str:
+    """one–ten spelled, then digits."""
+    return _COUNT[n] if 0 <= n <= 10 else str(n)
+
+
+def event_title(reg: Registry, ev: rc.RaidEvent) -> str:
+    """An event as a box title names it: its first raid's start in local12 words ('Thu 10 Dec 6:30 PM'); any raid of
+    the event stands for its first."""
+    first_start = ev.start - timedelta(minutes=int(ev.starts or 0)) if rc.is_follow(ev) else ev.start
+    return reg.local12(first_start)
+
+
+def _raid(reg: Registry, rid: str | None) -> str:
+    return reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else str(rid or "")
+
+
 def consequence(verb: str, reg: Registry, ev: rc.RaidEvent, *, name: str | None = None, other: str | None = None,
                 to: str | None = None, rs=None) -> list[str]:
     """The sentence(s) the confirm screen shows before `verb` on `ev`. `name`: the member a `release` or a board move
@@ -89,12 +177,13 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     joined = ev.by_status("in")
     seats = rc.run_size(reg, ev) * max(1, rc.run_rosters(reg, ev))
     n = min(len(joined), seats)
-    lines = ["The board becomes the roster."]
+    lineup = rc.event_lineup(reg, ev)
+    head = f"The board becomes the roster for {rc.lineup_roster_words(reg, lineup)}."
+    lines = [head if _words(head) <= 20 else f"The board becomes the roster for all {len(lineup)} raids."]
     test = rc.is_test_run(reg, ev)
-    if not rc.run_confirms(reg, ev):  # ad hoc (D5): Join is the commitment
-        lines.append(rc.no_confirm_sentence(reg, ev))
-        if test:
-            lines.append("On a test run the puppets' messages come to the tester.")
+    if not rc.run_confirms(reg, ev):  # a one-off (D5): Join is the commitment
+        lines.append("Nobody is asked to confirm.")
+        lines.append("On a test run the puppets' messages come to the tester." if test else "You can still move people after the lock.")
         return lines
     if n == 0:
         lines.append("Nobody has joined yet, so nobody is asked to confirm.")
@@ -114,36 +203,50 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     return lines
 
 
+def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
+    """Boxes 1 and 2: Lock an event (`rs` adds the event's fingerprint, so a box whose run changed is refused). An event
+    already locked, finished or cancelled answers with a refusal box."""
+    if ev.state != "open":
+        return refusal_box_for(_lock(reg, ev)[0])
+    return box(f"Lock {event_title(reg, ev)}?", _lock(reg, ev), "Lock", rev=rc.event_rev(reg, rs, ev) if rs is not None else "")
+
+
 def _cancel(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
-    """Who the cancel touches, from rc.cancel_effects. Nobody is DMed (the DM rule): the sheet is edited to its final
-    state and every open ask card says Cancelled; the screen's own choice says whether a line goes to the signup channel."""
+    """Cancel an event (a cancel on any raid of it cancels every live raid of it — RaidMixin.cancel_run): how many raids
+    go, who sees it, and that it can't be reopened. Nobody is DMed (the DM rule): the sheet is edited to its final state
+    and every open ask card says Cancelled. The answers live on the first raid, so who sees it is read there."""
     if (closed := _closed(ev)):
         return closed
     fx = rc.cancel_effects(reg, ev, rs)
-    fills = len(fx["fill_asks"])
+    gone = "A cancelled event cannot be reopened."
     if fx.get("first_closed"):  # a later raid once the first raid has finished: the raids still to play go, no sheet changes
-        names = [n for n in fx["later"] if n] or [reg.raid_def(ev.instance).get("name", ev.instance)]
-        return [f"The {rc.join_words(names)} raid{'s are' if len(names) > 1 else ' is'} cancelled.",
-                "Nobody gets a DM, but every ask card says Cancelled.", "A cancelled run can't be reopened."]
-    if fx.get("lead"):  # a later raid: a cancel on any raid of a run cancels the whole run (its sheet is the first raid's)
-        with_ = [n for n in fx["later"] if n] or [reg.raid_def(ev.instance).get("name", ev.instance)]
-        return [f"The whole {fx['lead']} run is cancelled, with {rc.join_words(with_)}.",
-                "Nobody gets a DM, but the sheet and every ask card say Cancelled.", "A cancelled run can't be reopened."]
-    if not fx["locked"]:
-        n = fx["answered"]
-        head = (f"The sheet closes for the {_n(n, 'person', 'people')} who answered" if n > 1 else
-                "The sheet closes for the one person who answered" if n else "The sheet closes before anyone answered")
-        head += f", and {_n(fills, 'open ask')} close{'s' if fills == 1 else ''}." if fills else "."
-    else:
-        r, asks = len(fx["rostered"]), len(fx["open_asks"]) + fills
-        head = (f"The sheet closes, the {r} rostered lose their seats" if r != 1 else "The sheet closes, the one person rostered loses their seat")
-        head += f" and {_n(asks, 'open ask')} close{'s' if asks == 1 else ''}." if asks else "."
-        if not asks:
-            head = head.replace("The sheet closes, the", "The sheet closes and the", 1)
-    if fx.get("follow"):
-        many = len(fx["later"]) > 1
-        return [head, f"The {fx['follow']} follow-on{'s are' if many else ' is'} cancelled with it, and nobody gets a DM.", "A cancelled run can't be reopened."]
-    return [head, "Nobody gets a DM, but the sheet and every ask card say Cancelled.", "A cancelled run can't be reopened."]
+        names = [n for n in fx["later"] if n] or [_raid(reg, ev.instance)]
+        return [f"The {rc.join_words(names)} raid{'s of this event are' if len(names) > 1 else ' of this event is'} cancelled.",
+                "Nobody gets a DM, but every ask card says Cancelled.", gone]
+    k = 1 + len(fx["later"])
+    head = ("This event is cancelled." if k == 1 else "Both raids of this event are cancelled." if k == 2
+            else f"All {k} raids of this event are cancelled.")
+    first = rc.first_part(rs, ev) if rs is not None else ev
+    ffx = fx if first is ev else rc.cancel_effects(reg, first, rs)
+    if not ffx["locked"]:
+        n, asks = len(first.by_status("in")), len(ffx["fill_asks"])
+        who = ("Nobody has joined" if n == 0 else "The one who joined sees it on the sheet" if n == 1
+               else f"The {n} who joined see it on the sheet")
+        tail = (f", and {asks} open ask card{'s say' if asks > 1 else ' says'} Cancelled." if asks else ", and nobody gets a DM.")
+        return [head, who + tail, gone]
+    r = len(ffx["rostered"])
+    where = "on their card" if rc.run_confirms(reg, first) else "on the sheet"
+    who = ("Nobody is rostered" if r == 0 else f"The one person rostered sees it {where}" if r == 1
+           else f"The {r} rostered see it {where.replace('their card', 'their cards')}")
+    return [head, who + ", and nobody gets a DM.", gone]
+
+
+def cancel_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
+    """Box 5: Cancel an event — red, it cannot be undone. A finished or cancelled event answers with a refusal box."""
+    if (closed := _closed(ev)):
+        return refusal_box_for(closed[0])
+    return box(f"Cancel {event_title(reg, ev)}?", _cancel(reg, ev, rs), "Cancel event", danger=True,
+               rev=rc.event_rev(reg, rs, ev) if rs is not None else "")
 
 
 def before_first_open_sentence(reg: Registry, lineup: list[dict], start, only: set[str] | None = None) -> str | None:
@@ -210,7 +313,7 @@ def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: b
     names = [TIMING_NAMES[k] for k in TIMING_ORDER_OF if k in changed
              and not (k == "cutoff_soft_hours" and "reminders" in changed)]  # the reminder's time and switch: "reminder"
     if moves:
-        head = f"{name} moves to {reg.local12(start)}"
+        head = f"The event moves to {reg.local12(start)}"
         if not names:
             return head + "."
         full = f"{head} with its own {_and(names)}."
@@ -233,10 +336,15 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     name = reg.raid_def(first.instance).get("name", first.instance)
     moves = start is not None and start != first.start
     out = [_what_changes(reg, name, first, start, moves, mv.timing)]
-    stands = "The roster stands" if first.state == "locked" else "Answers stand"
     n = len(mv.told)
-    out.append(f"{stands}." if n == 0 else f"{stands}, and the one who answered sees a notice." if n == 1
-               else f"{stands}, and the {n} who answered see a notice.")
+    if first.state == "locked":
+        out.append("The roster stands." if n == 0 else "The roster stands, and the one who answered gets a notice." if n == 1
+                   else f"The roster stands, and the {n} who answered each get a notice.")
+    elif not moves:  # the start stays: nobody's night changes, so nobody is told
+        out.append("Answers stand.")
+    else:
+        out.append("Nobody has answered yet." if n == 0 else "The one answer stands, and that person gets a notice." if n == 1
+                   else f"All {n} answers stand, and each person gets a notice.")
     absorbed = rc.absorbed_schedule_run(reg, rs, first, start) if moves else None
     if mv.locks_now:
         out.append("It locks within a minute, because its lock time has passed.")
@@ -255,8 +363,17 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     elif mv.absence_cleared or mv.absence_written:
         out.append("Away answers are worked out again for the new day.")
     else:
-        out.append("You can move it again until it starts.")
+        out.append("The sheet in Discord shows the new time.")
     return out
+
+
+def reschedule_box(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None = None) -> dict:
+    """Box 3: Move an event (reschedule_consequence's sentences); a refusal is refusal_box_for(rc.reschedule_refusal)."""
+    why = rc.reschedule_refusal(reg, rs, ev, start, timing)
+    if why:
+        return refusal_box_for(why)
+    return box(f"Move {event_title(reg, rc.first_part(rs, ev))}?", reschedule_consequence(reg, rs, ev, start, timing), "Move",
+               rev=rc.event_rev(reg, rs, ev))
 
 
 def _clock_on(reg: Registry, day_of, t) -> str:
@@ -300,32 +417,59 @@ def _one_or_n(n: int, one: str, many: str | None = None) -> str:
     return one if n == 1 else f"{n} {many or one + 's'}"
 
 
+def _rosters_words(n: int) -> str:
+    return f"{count_words(n)} roster{'' if n == 1 else 's'}"
+
+
+def _first_change(reg: Registry, old: list[dict], new: list[dict]) -> str:
+    """The first thing an edited lineup changes, in one sentence (the diff lines list every change): a raid taken out,
+    a raid's roster count, a raid added, the order, else a later raid's start."""
+    new_by = {e["raid"]: e for e in new}
+    old_by = {e["raid"]: e for e in old}
+    for e in old:
+        if e["raid"] not in new_by:
+            return f"{_raid(reg, e['raid'])} leaves the lineup."
+        a, b = int(e.get("rosters") or 1), int(new_by[e["raid"]].get("rosters") or 1)
+        if a != b:
+            return f"{_raid(reg, e['raid'])} goes from {_rosters_words(a)} to {count_words(b)}."
+    for i, e in enumerate(new):
+        if e["raid"] not in old_by:
+            return f"{_raid(reg, e['raid'])} joins the lineup after {_raid(reg, new[i - 1]['raid'])}."
+    if [e["raid"] for e in old] != [e["raid"] for e in new]:
+        head = f"The lineup becomes {rc.lineup_words(reg, new)}."
+        return head if _words(head) <= 20 else "The raids of the lineup change order."
+    return "Some raids of the lineup start at new times."
+
+
 def lineup_consequence(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) -> list[str]:
     """The confirm of editing a run's lineup before the lock (rc.plan_lineup — nothing written): at most three
     sentences of twenty words or fewer, ranked so that a loss is NEVER dropped:
-    1. what a removed raid takes with it — its board places, pins, plans to leave early and open asks, counted apart
+    1. the first change (_first_change; the box's diff lines list every change);
+    2. that every answer stands — and, when a kept raid's start changes, that each person who answered gets
+       reschedule's `moved` notice;
+    3. what a removed raid takes with it — its board places, pins, plans to leave early and open asks, counted apart
        (falling back to "…taken out with everything on its board") — always there when a removed raid held anything;
-    2. who is told — when a kept raid's start changes, how many who answered see reschedule's `moved` notice;
-    3. the rest: the new times of the kept raids that move, an ADDED raid starting before it first opens (C9: allowed,
-       said), the new lineup itself (the sheet shows it, so it may go), then that a schedule's run changes alone.
-    The times degrade before anything else goes: the lineup with each new time (a day form past midnight), then the
-    clock alone, then "Onyxia's Lair now starts 1:30 AM, and the 12 who answered see a notice.", and last "The run
-    becomes 3 raids, and the 12 who answered see their new start times." A refusal is rc.lineup_refusal's own
-    sentence, not this."""
+       else an ADDED raid starting before it first opens (C9: allowed, said); else the kept raids' new starts; else,
+       for a schedule's run, that its schedule keeps its own lineup.
+    A refusal is rc.lineup_refusal's own sentence, not this."""
     first = rc.first_part(rs, ev)
     ch = rc.plan_lineup(reg, rs, first, lineup)
-    fits = lambda xs: all(_words(x) <= 20 for x in xs)  # noqa: E731
-    n = len(ch.told)
-    moves = bool(ch.moved)
-    told = ("" if n == 0 else "the one who answered sees a notice" if n == 1 else f"the {n} who answered see a notice")
-    # 1. what is taken out with a removed raid
+    old = rc.run_lineup(reg, rs, first)
+    n = len(rc.answered_ids(first))
+    out = [_first_change(reg, old, ch.lineup)]
+    if ch.told:
+        out.append("Nobody has answered yet." if n == 0 else "The one answer stands, and that person gets a notice." if n == 1
+                   else f"All {n} answers stand, and each person gets a notice.")
+    else:
+        out.append("Nobody has answered yet." if n == 0 else "The one answer stands." if n == 1 else f"All {n} answers stand.")
+    # 3. what is taken out with a removed raid
     loss = None
     held = [rs.events[k] for k in ch.removed
             if ch.dropped_places.get(k) or ch.dropped_pins.get(k) or ch.dropped_leaving.get(k) or ch.dropped_asks.get(k)]
     if held:
         one = len(held) == 1
         its = "its" if one else "their"
-        raids = rc.join_words([reg.raid_def(p.instance).get("name", p.instance) for p in held])
+        raids = rc.join_words([_raid(reg, p.instance) for p in held])
         counts = [(sum(ch.dropped_places.values()), "board place", None), (sum(ch.dropped_pins.values()), "pin", None),
                   (sum(ch.dropped_leaving.values()), "plan to leave early", "plans to leave early"),
                   (sum(ch.dropped_asks.values()), "open ask", None)]
@@ -338,42 +482,51 @@ def lineup_consequence(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) 
                 else f"{raids} {'is' if one else 'are'} taken out with everything on {its} board.")
     added = {e["raid"] for e in ch.added}
     early = before_first_open_sentence(reg, [ch.lineup[0], *ch.added], first.start, only=added) if added else None
-    # 2 + 3. the lineup, the times and who is told, most detailed first
-    plain = f"The run becomes {lineup_words(reg, rs, first, ch, times=False)}." if not ch.lineup[1:] else \
-        f"The lineup becomes {lineup_words(reg, rs, first, ch, times=False)}."
-    heads: list[list[str]] = []
-    if moves:
-        answers = f"Everyone's answer covers the new lineup, and {told}." if told else "Everyone's answer covers the new lineup."
-        heads.append([f"The lineup becomes {lineup_words(reg, rs, first, ch)}.", answers])
-        heads.append([f"The lineup becomes {lineup_words(reg, rs, first, ch, clock_only=True)}.", answers])
-        for clock_only in (False, True):
-            when = _moved_at(reg, rs, first, ch, clock_only=clock_only)
-            times = _and([f"{reg.raid_def(r).get('name', r)} {'now starts ' if i == 0 else ''}{w}" for i, (r, w) in enumerate(when.items())])
-            merged = f"{times}, and {told}." if told else f"{times}."
-            heads.append([plain, merged])
-            heads.append([merged])
-        k = len(ch.lineup)
-        heads.append([f"The run becomes {k} raids, and {told.replace('see a notice', 'see their new start times').replace('sees a notice', 'sees their new start times')}."
-                      if told else f"The run becomes {k} raids, and some start at new times."])
-    else:
-        answers = "Everyone's answer now covers the new lineup."
-        heads += [[plain, answers], [plain], [answers]]
-    must = [loss] if loss else []
-    extra = [early] if early else []
-    pick = next((h for h in heads if len(h) + len(must) + len(extra) <= 3 and fits(h)), None)
-    if pick is None:  # C9 can't be kept beside the loss and who is told: it goes, never the loss
-        extra = []
-        pick = next((h for h in heads if len(h) + len(must) <= 3 and fits(h)), heads[-1])
-    out = list(pick)
-    if first.schedule:  # a reader editing Tuesday's run may expect Tuesdays to change: said where there is room
-        i = next((i for i, x in enumerate(out) if x == "Everyone's answer now covers the new lineup."), None)
-        if i is not None:
-            out[i] = "Everyone's answer now covers the new lineup, and the schedule keeps its own lineup."
-        elif len(out) + len(must) + len(extra) < 3:
-            extra.append("Its schedule keeps its own lineup.")
-    out = out + must + extra
-    assert not held or loss in out, "a removed raid's losses are never dropped from the confirm"
+    times = None
+    if ch.moved:
+        when = _moved_at(reg, rs, first, ch)
+        said = _and([f"{_raid(reg, r)} {'now starts ' if i == 0 else ''}{at_on(w)}" for i, (r, w) in enumerate(when.items())]) + "."
+        times = said if _words(said) <= 20 else "Some raids start at new times."
+    lost = loss
+    if loss and out[0] in {f"{_raid(reg, p.instance)} leaves the lineup." for p in held}:
+        out[0], loss = loss, None  # the loss names the raid taken out: it says the change itself, with room for one more
+    third = loss or early or times or ("Its schedule keeps its own lineup." if first.schedule else None)
+    if third:
+        out.append(third)
+    assert not held or lost in out, "a removed raid's losses are never dropped from the confirm"
     return out
+
+
+def lineup_diff_lines(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) -> list[str]:
+    """An edited lineup's "label: old → new" lines (the Save lineup box): the order or the raids when they change, each
+    kept raid's roster count, each kept later raid's start."""
+    first = rc.first_part(rs, ev)
+    ch = rc.plan_lineup(reg, rs, first, lineup)
+    old = rc.run_lineup(reg, rs, first)
+    out = []
+    if [e["raid"] for e in old] != [e["raid"] for e in ch.lineup]:
+        out.append(f"Lineup: {rc.lineup_words(reg, old)} → {rc.lineup_words(reg, ch.lineup)}")
+    new_by = {e["raid"]: e for e in ch.lineup}
+    for e in old:
+        b = new_by.get(e["raid"])
+        if b is None:
+            continue
+        x, y = int(e.get("rosters") or 1), int(b.get("rosters") or 1)
+        if x != y:
+            out.append(f"{_raid(reg, e['raid'])}: {_n(x, 'roster')} → {_n(y, 'roster')}")
+        if e.get("starts") and int(b["starts"]) != int(e["starts"]):
+            was, now_ = rc.after_minutes(first.start, int(e["starts"])), rc.after_minutes(first.start, int(b["starts"]))
+            out.append(f"{_raid(reg, e['raid'])} starts: {_clock_on(reg, first.start, was)} → {_clock_on(reg, first.start, now_)}")
+    return out
+
+
+def lineup_box(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) -> dict:
+    """Box 4: Edit lineup's Save; a refusal is refusal_box_for(rc.lineup_refusal)."""
+    why = rc.lineup_refusal(reg, rs, ev, lineup)
+    if why:
+        return refusal_box_for(why)
+    return box("Save this lineup?", lineup_consequence(reg, rs, ev, lineup), "Save lineup",
+               diff=lineup_diff_lines(reg, rs, ev, lineup), rev=rc.event_rev(reg, rs, ev))
 
 
 def later_places_sentence(reg: Registry, held: list) -> str:
@@ -451,7 +604,7 @@ def _board(verb: str, reg: Registry, ev: rc.RaidEvent, name: str, other: str, to
     if verb == "move":
         return [f"{name} moves to {to} and stays rostered.", "Nobody is told."]
     if verb == "swap":
-        return [f"{name} and {other} swap places and both stay rostered.", "Nobody is told."]
+        return [f"{name} and {other} swap seats.", "Both see the change on the roster card.", "You can swap them back."]
     confirms = rc.run_confirms(reg, ev)
     if verb == "roster":
         if not confirms:
@@ -523,17 +676,284 @@ def series_words(reg: Registry, key: str) -> str:
     return f"{reg.raid_def(s['raid']).get('name', s['raid'])} {s.get('name') or sid}"
 
 
+def _schedule_name(reg: Registry, sid: str) -> str:
+    try:
+        e = reg.schedule_entry(sid)
+    except RegistryError:
+        return str(sid)
+    return e.get("name") or e["id"]
+
+
+def _open_events(reg: Registry, rs, sid: str) -> list[rc.RaidEvent]:
+    """The live events schedule `sid` opened, their first raids only, soonest first (test runs left out)."""
+    out = []
+    for ev in reg._live_runs(rs):
+        if rc.is_follow(ev) or ev.test:
+            continue
+        t = reg.config.team(ev.team) or {}
+        if str(t.get("schedule_id") or ev.schedule or "") == sid and not t.get("test"):
+            out.append(ev)
+    return sorted(out, key=lambda e: e.start)
+
+
 def regular_remove(reg: Registry, m, key: str) -> list[str]:
-    """Taking `m` off the regulars of series `key` (Registry.regular_remove — the Rosters page's remove and the orphan
-    clear, Discord's /roster remove, plain text, MCP): no DM and no notice; their sheets stop expecting them and the lock
-    stops weighting them as a regular (rc.seat_bonus). A removed schedule's leftovers change nothing else."""
-    chars = [c.label for c in m.characters if key in c.rosters] or [m.display_name]
-    who = " and ".join(chars)
+    """Taking `m` off the regulars of schedule `key` (Registry.regular_remove — the Schedules page's remove and the
+    orphan clear, Discord's /roster remove, plain text, MCP): no DM and no notice; the lock stops weighting them as a
+    regular (rc.seat_bonus) and their answer on an open event stays. A removed schedule's leftovers change nothing else."""
+    name = m.display_name
+    sid = reg.config.schedule_aliases.get(str(key), str(key))
     if key not in dict(reg.series("recurring")):
-        return [f"{who} stops being a regular of {series_words(reg, key)}.", "Nothing else changes, and nobody is told."]
-    return [f"{who} stops being a regular of {series_words(reg, key)}.",
-            "Its sheets no longer wait for their answer, and the lock no longer weights them as a regular.",
-            "They can still join any sheet, and nobody is told."]
+        return [f"{name} is no longer a regular of {series_words(reg, key)}.", "Nothing else changes."]
+    out = [f"{name} is no longer a regular of {_schedule_name(reg, sid)}."]
+    if _open_events(reg, None, sid):
+        out.append("They keep their answer on the open event.")
+    out.append("You can add them again.")
+    return out
+
+
+def regular_remove_box(reg: Registry, m, key: str) -> dict:
+    """Box 18: take a member off a schedule's regulars."""
+    return box(f"Take {m.display_name} off the regulars?", regular_remove(reg, m, key), "Remove")
+
+
+def undo_box(n: int, rev: str = "") -> dict:
+    """Box 9: Undo my moves (`rev`: the board's fingerprint, rc.board_rev)."""
+    head = "Your one move on this board is dropped." if n == 1 else f"Your {n} moves on this board are dropped."
+    return box("Undo your moves?", [head, "Everyone goes back to where the lock would place them."], "Undo moves", rev=rev)
+
+
+def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: str, raids, *, locked: bool = False, rev: str = "") -> dict:
+    """Boxes 6 and 7: a role switch. Before the lock it changes the answer (a notice); after it, it sends an ask (a DM
+    with Yes and No, or on the Me page with DMs off) and the seat changes only on a yes."""
+    name = m.display_name
+    where = rc.join_words([_raid(reg, r) for r in raids]) or _raid(reg, ev.instance)
+    if locked:
+        told = "They get a DM with Yes and No." if rc.reachable(m) else "It waits on their Me page."
+        return box(f"Ask {name} to play {spec}?", [f"{name} is asked to play {spec} for {where}.", told,
+                                                  "Their seat changes only when they say yes."], "Ask", rev=rev)
+    sg = ev.signups.get(str(m.discord_id))
+    old_char = sg.character if sg else (m.main.label if m.main else None)
+    old_spec = sg.spec if sg else (m.main.spec if m.main else None)
+    if character and old_char and character != old_char:
+        head = f"{name} plays {character}, {spec} for {where}."
+    else:
+        head = f"{name} plays {spec} for {where}, not {old_spec}." if old_spec and old_spec != spec else f"{name} plays {spec} for {where}."
+    return box(f"Switch {name} to {spec}?", [head, "They get a notice.", "You can switch them back until the lock."], "Switch", rev=rev)
+
+
+def answer_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: str | None = None, spec: str | None = None, *,
+               by_id: int | None = None, rev: str = "") -> dict:
+    """Box 8: Answer for someone / Answer for them (inbox.action_lines' sentences)."""
+    from .inbox import action_lines
+
+    return box("Answer for someone", action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id), "Record answer", rev=rev)
+
+
+def open_now_box(reg: Registry, start, opens, lock_at, *, lineup: list[dict] | None = None, channel: bool = True, rev: str = "") -> dict:
+    """Box 11: Open the sheet now, on a coming-up event: how early, where it posts (or C9's line when a raid of the
+    `lineup` first opens after it starts), and when it still locks."""
+    hours = (opens - reg.now_local()).total_seconds() / 3600
+    if hours >= 24:
+        d = round(hours / 24)
+        head = f"The sheet opens now, {count_words(d)} day{'' if d == 1 else 's'} early."
+    elif round(hours) >= 1:
+        h = round(hours)
+        head = f"The sheet opens now, {count_words(h)} hour{'' if h == 1 else 's'} early."
+    else:
+        head = "The sheet opens now."
+    where = (before_first_open_sentence(reg, lineup, start) if lineup else None) or (
+        "It posts in the signup channel." if channel else "No signup channel is set, so the sheet waits until one is.")
+    return box(f"Open the sheet for {reg.local12(start, '%a %d %b')}?", [head, where, f"It still locks {reg.local12(lock_at)}."],
+               "Open the sheet", rev=rev)
+
+
+def _schedule_rev(reg: Registry, sid: str) -> str:
+    try:
+        return reg.config_rev(f"schedule:{sid}")
+    except RegistryError:
+        return ""
+
+
+def _day(reg: Registry, t) -> str:
+    return reg.local12(t, "%a %d %b")
+
+
+_DAY_NAMES = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday", "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday"}
+
+
+def repeat_words(reg: Registry, entry: dict) -> str | None:
+    """When a schedule's events start, as the create box says it: 'every Tuesday at 6:30 PM', 'every Tuesday and
+    Thursday at 7:30 PM', 'on day 1 of each 7-day lockout at 8:00 PM'; None for a pickup or a schedule with no times."""
+    kind = entry.get("kind") or "weekly"
+    if kind == "lockout":
+        days = list(entry.get("days") or [])
+        if not days:
+            return None
+        lockout = int(reg.raid_def(entry.get("raid")).get("lockout_days") or 7)
+        return f"on day{'s' if len(days) > 1 else ''} {rc.join_words([str(d) for d in days])} of each {lockout}-day lockout at {reg.time_label(entry.get('time'))}"
+    if kind != "weekly":
+        return None
+    order = list(_DAY_NAMES)
+    by_time: dict[str, list[str]] = {}
+    for slot in sorted(entry.get("slots") or [], key=lambda x: (order.index(x.split()[0][:3].title()) if x.split()[0][:3].title() in order else 9)):
+        day, hm = slot.split()
+        by_time.setdefault(hm, []).append(_DAY_NAMES.get(day[:3].title(), day))
+    if not by_time:
+        return None
+    return " and ".join(f"every {_and(days)} at {reg.time_label(hm)}" for hm, days in by_time.items())
+
+
+def _next_unopened(reg: Registry, rs, entry: dict, sid: str):
+    """The schedule's first coming start no sheet has opened for yet, else None."""
+    try:
+        starts = rc.next_runs_of(reg, entry["raid"], entry, n=12)
+    except Exception:  # noqa: BLE001 — a schedule the engine can't read has no next event to name
+        return None
+    open_ = {(ev.occurrence or "") for ev in _open_events(reg, rs, sid)}
+    return next((t for t in starts if rc.occurrence_stamp(reg, t) not in open_), None)
+
+
+def _lead_hours(reg: Registry, entry: dict) -> float:
+    try:
+        return float(reg.schedule_def(entry["raid"], entry["id"])["signup_lead_hours"])
+    except (RegistryError, KeyError, TypeError, ValueError):
+        return 0.0
+
+
+def schedule_create_box(reg: Registry, entry: dict) -> dict:
+    """Box 13: a new schedule's Save (`entry` = the schedule as it would be: an all_schedules row)."""
+    name = entry.get("name") or entry.get("id")
+    rep = repeat_words(reg, entry)
+    if (entry.get("kind") or "weekly") == "pickup":
+        lines = ["It opens no event by itself.", "An officer opens each event from it with Open the sheet.",
+                 "You can edit or remove the schedule at any time."]
+    elif rep is None:
+        lines = ["No event opens until the schedule has run times.", "You can pause or edit the schedule at any time."]
+    else:
+        first = (rc.next_runs_of(reg, entry["raid"], entry, n=1) or [None])[0]
+        head = f"An event opens {rep}" + (f", starting {_day(reg, first)}." if first else ".")
+        if _words(head) > 20:
+            head = f"An event opens at each of its run times, starting {_day(reg, first)}." if first else "An event opens at each of its run times."
+        lines = [head]
+        if first is not None:
+            opens = first - timedelta(hours=_lead_hours(reg, entry))
+            lines.append("Its first sheet opens within a minute." if opens <= reg.now_local() else f"Its first sheet opens {reg.local12(opens)}.")
+        lines.append("You can pause or edit the schedule at any time.")
+    return box(f"Create {name}?", lines, "Create schedule", rev=_schedule_rev(reg, entry.get("id") or ""))
+
+
+def _open_sentence(reg: Registry, opened: list, one: str, many: str) -> str | None:
+    """'{day}' / '{n}' filled: one sentence about the events a schedule has open, None with none."""
+    if not opened:
+        return None
+    return one.format(day=_day(reg, opened[0].start)) if len(opened) == 1 else many.format(n=len(opened))
+
+
+PRIORITY_FIELDS = {"weights"}  # read live at the lock (rc.run_weights): a change reaches the events open now
+
+
+def schedule_save_box(reg: Registry, rs, sid: str, fields, diff=()) -> dict:
+    """Box 14: a schedule edit's Save. Its timing, lineup and rosters are copied onto an event when its sheet opens, so
+    the change starts with the first event without a sheet and the open ones keep theirs; a priority change is read at
+    each lock, so it reaches the events open now."""
+    entry = reg.schedule_entry(sid)
+    name = entry.get("name") or entry["id"]
+    opened = _open_events(reg, rs, entry["id"])
+    keys = {str(k).split(".")[0] for k in (fields or [])}
+    if keys and keys <= PRIORITY_FIELDS:
+        lines = ["The new priority applies at the next lock."]
+        said = _open_sentence(reg, opened, "That includes the event open now.", "That includes the {n} events open now.")
+    else:
+        nxt = _next_unopened(reg, rs, entry, entry["id"])
+        lines = [f"The change starts with the {_day(reg, nxt)} event." if nxt else "The change starts with the next event it opens."]
+        said = _open_sentence(reg, opened, "The {day} event is already open and keeps its timing.", "The {n} open events keep their timing.")
+    if said:
+        lines.append(said)
+    return box(f"Save {name}?", lines, "Save", diff=diff, rev=_schedule_rev(reg, entry["id"]))
+
+
+def schedule_pause_box(reg: Registry, rs, sid: str) -> dict:
+    """Box 15: Pause a schedule."""
+    entry = reg.schedule_entry(sid)
+    name = entry.get("name") or entry["id"]
+    opened = _open_events(reg, rs, entry["id"])
+    lines = ["No new sheet opens from this schedule.",
+             _open_sentence(reg, opened, "The event already open stays open.", "The {n} events already open stay open."),
+             "Regulars keep their spots."]
+    return box(f"Pause {name}?", [x for x in lines if x], "Pause", rev=_schedule_rev(reg, entry["id"]))
+
+
+def schedule_resume_box(reg: Registry, rs, sid: str) -> dict:
+    """Box 16: Resume a schedule — when its next sheet opens, and for which event."""
+    entry = reg.schedule_entry(sid)
+    name = entry.get("name") or entry["id"]
+    lines = ["Sheets open from this schedule again."]
+    nxt = _next_unopened(reg, rs, entry, entry["id"]) if (entry.get("kind") or "weekly") != "pickup" else None
+    if nxt is not None:
+        opens = nxt - timedelta(hours=_lead_hours(reg, entry))
+        lines.append(f"The next one opens now, for {reg.local12(nxt)}." if opens <= reg.now_local()
+                     else f"The next one opens {reg.local12(opens)}, for {reg.local12(nxt)}.")
+    return box(f"Resume {name}?", lines, "Resume", rev=_schedule_rev(reg, entry["id"]))
+
+
+def schedule_remove_box(reg: Registry, rs, sid: str) -> dict:
+    """Box 17: Remove a schedule (counts from Registry.schedule_removal_effects) — red, it cannot be brought back. What
+    the open events no longer get at their lock (Effects.loses) is never dropped."""
+    entry = reg.schedule_entry(sid)
+    name = entry.get("name") or entry["id"]
+    fx = reg.schedule_removal_effects(entry["id"], rs)
+    n = len(fx.regulars)
+    lines = [(f"The schedule and its {n} regular spots are removed, and each regular sees a notice." if n > 1 else
+              "The schedule and its one regular spot are removed, and that regular sees a notice." if n == 1 else "The schedule is removed.")]
+    k = len(_open_events(reg, rs, entry["id"])) or len(fx.open_runs)
+    if k:
+        keep = "The open event keeps its sheet and its answers" if k == 1 else f"The {k} open events keep their sheets and their answers"
+        if fx.loses:
+            keep = keep.replace(" and its answers", " and answers").replace(" and their answers", " and answers")
+            keep += f", but lock{'s' if k == 1 else ''} with {rc.join_words(fx.loses)}"
+        lines.append(keep + ".")
+    lines.append("A removed schedule cannot be brought back.")
+    return box(f"Remove {name}?", lines, "Remove schedule", danger=True, rev=_schedule_rev(reg, entry["id"]))
+
+
+LOCKOUT_FIELDS = {"lockout_days", "first_open", "duration_hours"}
+
+
+def _open_events_of_raid(reg: Registry, rs, rid: str) -> int:
+    """How many live events (test runs left out) play raid `rid` in any part."""
+    return len({rc.event_id(ev) for ev in reg._live_runs(rs) if ev.instance == rid and not ev.test})
+
+
+def raid_save_box(reg: Registry, rs, rid: str, changed, diff=()) -> dict:
+    """Box 19: a raid edit's Save. `changed`: what changes — 'minimum:<slot>' per minimum, 'weight:<key>' (or
+    'weights') per priority weight, a setting's name otherwise (lockout_days, first_open, duration_hours…)."""
+    changed = {str(c) for c in changed or ()}
+    mins = {c for c in changed if c.startswith("minimum")}
+    weights = {c for c in changed if c.startswith("weight")}
+    lockout = changed & LOCKOUT_FIELDS
+    rest = changed - mins - weights - lockout
+    kinds = [x for x in (mins, weights, lockout, rest) if x]
+    n = _open_events_of_raid(reg, rs, rid)
+    reaches = "That includes the event open now." if n == 1 else f"That includes the {n} events open now." if n else None
+    if len(kinds) > 1:
+        head = "The changes apply at the next lock."
+    elif mins:
+        head = "The new minimums apply at the next lock." if len(mins) > 1 else "The new minimum applies at the next lock."
+    elif weights:
+        head = "The new priority applies at the next lock."
+    elif lockout:
+        head = "Lockout checks use the new values from now on."
+    else:
+        head, reaches = "The new value applies from now on.", None
+    lines = [head] + ([reaches] if reaches else [])
+    return box(f"Save {_raid(reg, rid)}?", lines, "Save", diff=diff, rev=reg.config_rev(f"raids:{rid}"))
+
+
+def raid_reset_box(reg: Registry, rid: str, *, unsaved: int = 0) -> dict:
+    """A raid's Reset (carried: the server's sentence, checked against `raid_all:<rid>`) — red, the stored changes go."""
+    lines = raid_reset_consequence(reg, rid, unsaved=unsaved)
+    return box(f"Reset {_raid(reg, rid)}?", lines, "Reset" if len(lines) > 1 else None, danger=len(lines) > 1,
+               rev=reg.config_rev(f"raid_all:{rid}"))
 
 
 # ---------------------------------------------------------------- people (design §5.58): one generator per people verb
@@ -917,9 +1337,17 @@ def raid_reset_consequence(reg: Registry, raid: str, *, unsaved: int = 0) -> lis
     parts = [words for key, words in RESET_WORDS if over.get(key)]
     if any(v not in (None, [], {}, "") for key, v in over.items() if key not in dict(RESET_WORDS)):
         parts.append("other settings" if parts else "settings")
-    goes = "Its " + ((", ".join(parts[:-1]) + " and " + parts[-1]) if len(parts) > 1 else (parts[0] if parts else "settings"))
     edits = "so does your unsaved change" if unsaved == 1 else f"so do your {unsaved} unsaved changes"
-    lines = [f"{name} goes back to the game's defaults.", f"{goes} go" + (f", and {edits}." if unsaved else ".")]
+
+    def said(ps: list[str]) -> str:
+        goes = "Its " + ((", ".join(ps[:-1]) + " and " + ps[-1]) if len(ps) > 1 else (ps[0] if ps else "settings"))
+        return f"{goes} go" + (f", and {edits}." if unsaved else ".")
+    second = said(parts)
+    if "minimums" in parts:  # carried (phase 2 review): the minimums that go are named, where the sentence has room
+        slots = [reg.comp_slot_words(k) for k in (over.get("minimums") or {})]
+        named = said([f"minimums for {_and(slots)}" if p == "minimums" else p for p in parts]) if slots else second
+        second = named if _words(named) <= 20 else second
+    lines = [f"{name} goes back to the game's defaults.", second]
     if over.get("schedules"):
         lines.append("No sheet opens for this raid until someone adds a schedule again.")
     return lines

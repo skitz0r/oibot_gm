@@ -700,7 +700,7 @@ def test_lock_preview_route_shows_the_roster_and_saves_nothing_but_the_proposal(
     r = web_bot.c.post(f"/api/run/{ev.key}/lock/preview", json={}, headers=H())
     assert r.status_code == 200, r.text
     j = r.json()
-    assert j["board"]["rosters"][0]["rostered"] == 10 and "The board becomes the roster." in j["consequence"]
+    assert j["board"]["rosters"][0]["rostered"] == 10 and "The board becomes the roster for Barrow Deeps." in j["consequence"]
     assert ev.state == "open" and not ev.rosters and ev.last_proposal["kind"] == "lock preview"
 
 
@@ -916,7 +916,7 @@ def test_plain_text_cancel_keeps_its_surface_and_can_be_quiet(reg, rs):
     ev.channel_id = bot.signup.id
     owner = reg.config.owner_discord_id
     preview = configops.describe(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"))
-    assert "Nobody gets a DM" in preview and "No line goes to the signup channel." in preview
+    assert "nobody gets a DM" in preview and "No line goes to the signup channel." in preview
     line = run(configops.apply_async(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"), "Jon", True, bot=bot, by_id=owner, via="chat"))
     assert "no line in the signup channel" in line and not bot.signup.sent
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t and rc.run_words(reg, ev) in t]

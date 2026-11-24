@@ -1275,6 +1275,20 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         ev = find_live(reg, rs, key)
         return rs, ev, (rc.run_team(reg, ev))
 
+    def box_refused(sentence: str, status: int = 400):
+        """A refusal as the confirmation box shows it (design §7b): the verb's own sentence, its title, only Back."""
+        return JSONResponse({"error": str(sentence), "box": cq.refusal_box_for(str(sentence))}, status_code=status)
+
+    def box_stale(d: dict, fresh: dict):
+        """`seen` (a box's fp) carried by a write: when the box built NOW differs, nothing is written and the fresh box
+        comes back (409) for the page to show above CONFIRM_WORDS['changed']; None = go ahead (no `seen`: MCP, plain text)."""
+        from ..constants import CONFIRM_WORDS
+
+        seen = str(d.get("seen") or "").strip()
+        if not seen or seen == fresh.get("fp"):
+            return None
+        return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
+
     @app.get("/api/run/{key}")
     async def run_get(request: Request, key: str):
         """One run in full (the sheet, board, confirmations, fill asks, absences that day, log). Closed runs too, by key."""
@@ -1315,6 +1329,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if strategy and strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": f"strategy must be one of {', '.join(SPLIT_POLICIES)}"}, status_code=400)
         was_open = ev.state == "open"
+        if d.get("preview") or d.get("seen"):  # Undo my moves asks first (§7b): its box carries the board's fingerprint
+            fresh = cq.undo_box(int(d.get("moves") or 0), rev=rc.board_rev(v.reg, ev))
+            if d.get("preview"):
+                return {"box": fresh}
+            if (r := box_stale(d, fresh)) is not None:
+                return r
         try:  # a whole-board write (Clear, Use this split) is only safe on the board its author was looking at
             line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name, via=v.via, strategy=strategy)
         except rc.BoardChanged:
@@ -1540,10 +1560,18 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/lock")
     async def run_lock(request: Request, key: str):
-        v, _ = await body(request, officer=True)
+        """Lock the event (RaidMixin.lock_run). {preview?, seen?}: `preview` → {box} (consequences.lock_box), nothing
+        written; `seen` = the box's fp the officer pressed on — when the box built now differs (someone joined, the run
+        changed) nothing is locked and the fresh box comes back (409)."""
+        v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        if ev.state != "open":
-            return JSONResponse({"error": "already locked"}, status_code=400)
+        fresh = cq.lock_box(v.reg, ev, rs)
+        if fresh["verb"] is None:  # already locked, finished or cancelled
+            return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+        if d.get("preview"):
+            return {"box": fresh}
+        if (r := box_stale(d, fresh)) is not None:
+            return r
         try:  # lock_run holds the run's solver single-flight and board lock itself
             line = await bot.lock_run(v.reg, rs, ev, by=v.name)
         except RegistryError as e:  # rc.SolverBusy (someone else is locking it), or no longer open
@@ -1633,10 +1661,18 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rs = bot.raids.store(v.reg)
         ev = rs.events.get(key) or find_live(v.reg, rs, key)
         notify = d.get("notify", True) not in (False, "false", "no", 0, "0")
+        if d.get("preview") or d.get("seen"):  # {preview} → the box; {seen} → refused with the fresh box when it changed
+            fresh = cq.cancel_box(v.reg, ev, rs)
+            if fresh["verb"] is None:  # finished or cancelled
+                return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+            if d.get("preview"):
+                return {"box": fresh}
+            if (r := box_stale(d, fresh)) is not None:
+                return r
         try:  # cancel_run re-renders the sheet and cards, closes every open ask and writes the audit line itself
             line = await maybe_await(bot.cancel_run(v.reg, rs, ev, v.name, (d.get("reason") or "").strip()[:300] or None, notify=notify, by_id=v.uid, via=v.via))
         except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+            return box_refused(str(e))
         return {"message": line}
 
     def event_of(reg, rs, key: str):
@@ -1662,12 +1698,18 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             start = rc.move_start(v.reg, d["start"]) if d.get("start") not in (None, "") else None
             if d.get("preview"):
                 lines = await bot.reschedule_event(v.reg, rs, ev, start=start, timing=timing, by=v.name, by_id=v.uid, via=v.via, preview=True)
-                return {"sentences": lines, "rev": rc.event_rev(v.reg, rs, ev)}
+                return {"sentences": lines, "rev": rc.event_rev(v.reg, rs, ev), "box": cq.reschedule_box(v.reg, rs, ev, start, timing)}
+            if d.get("seen"):
+                fresh = cq.reschedule_box(v.reg, rs, ev, start, timing)
+                if fresh["verb"] is None:
+                    return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+                if (r := box_stale(d, fresh)) is not None:
+                    return r
             lines = await bot.reschedule_event(v.reg, rs, ev, start=start, timing=timing, by=v.name, by_id=v.uid, via=v.via, rev=str(d.get("rev") or "") or None)
         except RegistryError as e:
             if str(e) == rc.RUN_CHANGED:
                 return JSONResponse({"error": str(e), "rev": rc.event_rev(v.reg, rs, ev)}, status_code=409)
-            return JSONResponse({"error": str(e)}, status_code=400)
+            return box_refused(str(e))
         return {"message": " ".join(lines)}
 
     @app.post("/api/run/{key}/lineup")
@@ -1685,12 +1727,18 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         try:
             if d.get("preview"):
                 lines = await bot.edit_lineup(v.reg, rs, ev, lineup, by=v.name, by_id=v.uid, via=v.via, preview=True)
-                return {"sentences": lines, "rev": rc.event_rev(v.reg, rs, ev)}
+                return {"sentences": lines, "rev": rc.event_rev(v.reg, rs, ev), "box": cq.lineup_box(v.reg, rs, ev, lineup)}
+            if d.get("seen"):
+                fresh = cq.lineup_box(v.reg, rs, ev, lineup)
+                if fresh["verb"] is None:
+                    return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+                if (r := box_stale(d, fresh)) is not None:
+                    return r
             lines = await bot.edit_lineup(v.reg, rs, ev, lineup, by=v.name, by_id=v.uid, via=v.via, rev=str(d.get("rev") or "") or None)
         except RegistryError as e:
             if str(e) == rc.RUN_CHANGED:
                 return JSONResponse({"error": str(e), "rev": rc.event_rev(v.reg, rs, ev)}, status_code=409)
-            return JSONResponse({"error": str(e)}, status_code=400)
+            return box_refused(str(e))
         return {"message": " ".join(lines)}
 
     @app.post("/api/run/{key}/reopen")
@@ -1777,6 +1825,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise RegistryError(why)
         return [dict(e) for e in later]
 
+    def open_box(reg, rid: str, p: dict) -> dict:
+        """Open the sheet now's box (consequences.open_now_box) from rc.open_preview's answer `p`: how early against the
+        schedule's own opening, where it posts, when it still locks."""
+        start = datetime.fromisoformat(p["start"])
+        sd = reg.schedule_def(rid, p.get("schedule"))
+        lineup = [{"raid": rid, "rosters": int(sd.get("rosters") or 1)}] + [{"raid": e["raid"], "rosters": int(e.get("rosters") or 1)} for e in p.get("later") or []]
+        return cq.open_now_box(reg, start, start - timedelta(hours=float(sd["signup_lead_hours"])),
+                               start - timedelta(hours=float(sd["lock_hours_before"])), lineup=lineup, channel=bool(p.get("channel")))
+
     @app.post("/api/raid/{rid}/open/preview")
     async def raid_open_preview(request: Request, rid: str):
         """What Open would do, nothing written (design B4; rc.open_preview — the /raid open wizard says the same):
@@ -1797,6 +1854,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         # where the sheet goes, in one sentence from code (the confirm prints it; the page composes none)
         p["posts"] = (f"The sheet posts in #{p['channel_name'] or 'the signup channel'}." if p.get("channel")
                       else "No signup channel is set, so the sheet waits until one is.")
+        try:
+            p["box"] = open_box(v.reg, rid, p)
+        except (RegistryError, KeyError, ValueError):
+            p["box"] = None
         return p
 
     @app.post("/api/raid/{rid}/open")
@@ -1826,6 +1887,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 return JSONResponse({"error": "That time now opens a different run than the preview showed — check it and open again.",
                                      "preview": rc.open_preview(reg, bot.raids.store(reg), rid, start.isoformat(), sid)}, status_code=409)
         rs = bot.raids.store(reg)
+        if d.get("seen"):  # Open the sheet now asks first (§7b): a box whose facts changed is refused with the fresh one
+            try:
+                fresh = open_box(reg, rid, rc.open_preview(reg, rs, rid, start.isoformat(), sid, follow=fw, lineup=later))
+            except RegistryError as e:
+                return box_refused(str(e))
+            if (r := box_stale(d, fresh)) is not None:
+                return r
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
             ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, follow=later[0] if later and len(later) == 1 else (None if later else fw),
                                                          schedule=sid, **({"lineup": later} if later and len(later) > 1 else {})))

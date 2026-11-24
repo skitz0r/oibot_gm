@@ -44,3 +44,12 @@ def hours_words(h) -> str:
     if h >= 48 and h % 24 == 0:
         return f"{int(h // 24)} days"
     return f"{h:g} hour{'' if h == 1 else 's'}"
+
+
+# the confirmation box's fixed words (design §7b, D18): the site's ConfirmBox and the leave guard print these, never their own
+CONFIRM_WORDS = {"back": "Back", "keep": "Keep editing", "discard": "Discard edits", "leave_title": "Leave without saving?",
+                 "changed": "This changed while the box was open. Read it again before you press."}
+
+# a priority weight as a short phrase (rc.priority_words: "Regulars first, then rank")
+PRIORITY_SHORT = {"regular": "Regulars", "rank": "rank", "main": "main characters", "sat_out": "who sat out last time",
+                  "signup_order": "who signed up first"}

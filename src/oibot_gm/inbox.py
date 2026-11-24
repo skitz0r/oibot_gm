@@ -134,11 +134,19 @@ def _has_card(reg: Registry, ev, m: Member, key: str) -> bool:
     return False
 
 
-def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | None = None, *, by_id: int | None = None) -> str:
+def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | None = None, *, spec: str | None = None,
+                       by_id: int | None = None) -> str:
     """What one on-behalf action does, from code (design §2.3) — the SetWizard's decide screen and the site's confirm print
     exactly this, in at most three sentences (the Confirm rule, design §5.57): what changes, who is told and how. Says
     who is told and how (a notice; their open DM card edited) — never more than happens. `by_id` = the officer recording
-    it: on their OWN record the verbs treat it as their own answer and write no notice, so the sentence promises none."""
+    it: on their OWN record the verbs treat it as their own answer and write no notice, so the sentence promises none.
+    `spec`: the spec the answer plays (Answer for someone's pick). The same sentences as a list: action_lines."""
+    return " ".join(action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id))
+
+
+def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None = None, *, spec: str | None = None,
+                 by_id: int | None = None) -> list[str]:
+    """action_consequence's sentences as a list (the confirmation box, consequences.answer_box)."""
     from .consequences import CONFIRM_DM
 
     name, run = m.display_name, rc.run_on(reg, ev)
@@ -149,8 +157,8 @@ def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | 
     own = by_id is not None and int(by_id) == m.discord_id
     told = [] if own else [_told(reg, ev, m, _has_card(reg, ev, m, key))]
 
-    def say(*lines: str) -> str:
-        return " ".join([*lines, *told])
+    def say(*lines: str) -> list[str]:
+        return [*lines, *told]
 
     if key == "callout":
         if locked and seated:
@@ -162,7 +170,12 @@ def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | 
         return say(f"{name} goes to No thanks for {run}.", "No callout is recorded.")
     if key == "join":
         if not locked:
-            return say(f"{name} joins {run} as {char}.", "The lock decides the roster.")
+            plays = spec or (s.spec if s and s.character == char else next((c.spec for c in m.characters if c.label == char), None)) or char
+            if plays != char and char != name and char != "their main":  # another character than the member's name: named too
+                plays = f"{char}, {plays}"
+            if own:
+                return [f"{name} is marked as joined, playing {plays}.", "You can change the answer until the lock."]
+            return [f"{name} is marked as joined, playing {plays}.", "They get a notice.", "They can change the answer themselves."]
         if seated:
             return say(f"{name} plays {char} on {run} and keeps their seat.")
         free = any(len(r.selected) < rc.run_size(reg, ev) for r in ev.all_rosters)
@@ -171,9 +184,9 @@ def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | 
         if not rc.run_confirms(reg, ev):
             return say(f"{name} is rostered on {run} as {char}.", rc.no_confirm_sentence(reg, ev, "they aren't asked to confirm"))
         if not rc.reachable(m):  # DMs off: the confirmation waits on the Me page (confirm_one's channel "web")
-            return " ".join([f"{name} is rostered on {run} as {char}.", "With DMs off, they confirm on their Me page."])
+            return [f"{name} is rostered on {run} as {char}.", "With DMs off, they confirm on their Me page."]
         # DMs on: a seat taken means confirm_one sends the Confirm / Can't card — an ask they must act on, so say so
-        return f"{name} is rostered on {run} as {char}. They get {CONFIRM_DM}."
+        return [f"{name} is rostered on {run} as {char}.", f"They get {CONFIRM_DM}."]
     if key == "bench":
         if seated:
             return say(f"{name} goes to Bench for {run}.", "They stay rostered until set to No thanks.")
@@ -195,11 +208,11 @@ def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | 
             f"The seat waits for {rc.fill_button_words()}."
         return say(f"{name} says no to the open seat for {run}.", nxt)
     if key == "pin_in":
-        return f"{name} is pinned in for {run}, so the lock keeps them on the roster. Only officers see pins."
+        return [f"{name} is pinned in for {run}, so the lock keeps them on the roster.", "Only officers see pins."]
     if key == "pin_out":
-        return f"{name} is kept off the roster when {run} locks. Only officers see pins."
+        return [f"{name} is kept off the roster when {run} locks.", "Only officers see pins."]
     if key == "unpin":
-        return f"{name}'s pin comes off, so the lock places them like anyone else. Only officers see pins."
+        return [f"{name}'s pin comes off, so the lock places them like anyone else.", "Only officers see pins."]
     raise RegistryError(f"unknown action {key}")
 
 

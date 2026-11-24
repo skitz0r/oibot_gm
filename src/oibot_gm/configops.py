@@ -4498,23 +4498,6 @@ SCHEDULE_TIME_SETTINGS = {"kind", "slots", "days", "time", "lockout", "cadence",
                           "lock_hours_before", "confirm_hours_before", "fill_ask_hours"}  # what sets a run's start or its week
 
 
-def _schedule_keeps(reg: Registry, op: ConfigOp) -> list[str]:
-    """C10: an edit of a schedule's run times or its week leaves the runs it already opened as they are — said once
-    (consequences.schedule_keeps_sentence) when it has open runs. A new schedule has none; a pause says its own."""
-    if op.op != "schedule_set":
-        return []
-    try:
-        sid, setting = _schedule_ref(op)
-    except RegistryError:
-        return []
-    if setting not in SCHEDULE_TIME_SETTINGS or sid not in {s["id"] for s in reg.all_schedules()}:
-        return []
-    from .consequences import schedule_keeps_sentence
-
-    said = schedule_keeps_sentence(len(reg.schedule_runs_open(sid)))
-    return [said] if said else []
-
-
 def _timezone_consequences(reg: Registry, op: ConfigOp) -> list[str]:
     """A timezone change with runs already open or locked: each run whose clock reading moves, in the words of
     Registry.timezone_change_effects (the TimezoneWizard, the Config page's review and MCP's preview print them)."""
@@ -4524,7 +4507,72 @@ def _timezone_consequences(reg: Registry, op: ConfigOp) -> list[str]:
 
 
 CONSEQUENCE_HOOKS.append(_timezone_consequences)
-CONSEQUENCE_HOOKS.append(_schedule_keeps)
+
+
+# ---- the confirmation box (design §7b): a schedule's create / Save / Pause / Resume / Remove and a raid's Save carry
+# ONE box; its sentences are the op's consequences, so every surface reads the same words
+
+def _box_group(op: ConfigOp) -> tuple[str, str] | None:
+    """("schedule", id) / ("raid", raid id) for an op a box speaks for, else None."""
+    try:
+        if op.op in ("schedule_set", "schedule_remove"):
+            return ("schedule", _schedule_sid(op))
+    except RegistryError:
+        return None
+    if op.op in ("raid_set", "comp_target", "comp_target_clear") and (op.target or "").strip():
+        return ("raid", op.target.strip())
+    return None
+
+
+def _raid_changed(op: ConfigOp) -> set[str]:
+    """raid_save_box's `changed` from one raid op (merged or not)."""
+    out = set()
+    for p in (op.parts if isinstance(op, MergedOp) else [op]):
+        f = (p.field or p.path or "").strip()
+        if p.op in ("comp_target", "comp_target_clear"):
+            out.add(f"minimum:{f}")
+        elif f.startswith("weight"):
+            out.add(f"weight:{f.removeprefix('weight_')}")
+        elif f:
+            out.add(f)
+    return out
+
+
+def op_box(reg: Registry, ops, diff=()) -> dict | None:
+    """The box for one write (or several on the same schedule or raid): a NEW schedule → create (13), only `active`
+    changing → Pause (15) / Resume (16), any other schedule edit → Save (14), schedule_remove → Remove (17), raid_set /
+    comp_target → the raid's Save (19). None for anything else, or a batch spanning several schedules or raids."""
+    from . import consequences as cq
+    from .registry import parse_bool
+
+    ops = list(ops) if isinstance(ops, (list, tuple)) else [ops]
+    groups = {_box_group(o) for o in ops}
+    if len(groups) != 1 or None in groups:
+        return None
+    kind, ref = next(iter(groups))
+    try:
+        if kind == "raid":
+            if ref not in reg.profile.raids:
+                return None
+            changed = set().union(*(_raid_changed(o) for o in ops))
+            return cq.raid_save_box(reg, None, ref, changed, diff)
+        if any(o.op == "schedule_remove" for o in ops):
+            return cq.schedule_remove_box(reg, None, ref)
+        parts = [p for o in ops for p in (o.parts if isinstance(o, MergedOp) else [o])]
+        fields = {}
+        for p in parts:
+            _sid, setting = _schedule_ref(p)
+            fields[setting] = p.value
+        if ref not in {x["id"] for x in reg.all_schedules()}:  # create: the schedule as it would be, on a throw-away copy
+            sh = reg.shadow()
+            for o in ops:
+                apply(sh, o, "preview", True)
+            return cq.schedule_create_box(sh, sh.schedule_entry(ref))
+        if set(fields) == {"active"}:
+            return (cq.schedule_resume_box if parse_bool(fields["active"] or "") else cq.schedule_pause_box)(reg, None, ref)
+        return cq.schedule_save_box(reg, None, ref, fields, diff)
+    except (RegistryError, ValueError):
+        return None  # the line's own refusal says what is wrong
 
 
 def aura_reset_one_sentence(reg: Registry, target: str) -> str:
@@ -4563,16 +4611,14 @@ def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None =
     """What a write does beyond the setting itself, in sentences from code (seats, regulars, members, where things post) —
     the same words on every surface. Empty for a routine reversible edit. `roles_after`: the officer role list once the
     whole batch has landed (officer_roles_after), so removing every role in one batch says so; None = this op alone."""
+    b = op_box(reg, op)
+    if b is not None:  # a schedule's or a raid's write: the box's sentences, on every surface
+        return list(b["sentences"])
     if isinstance(op, MergedOp):
         return list(dict.fromkeys(s for p in op.parts for s in op_consequences(reg, p, roles_after)))
     out: list[str] = []
     try:
-        if op.op == "schedule_remove":
-            out += reg.schedule_removal_effects(_removed_id(reg, op)).lines()
-        elif op.op == "schedule_set" and _warn_schedule(reg, op):
-            sid, _ = _schedule_ref(op)
-            out.append(schedule_pause_sentence(reg, reg.schedule_entry(sid)["raid"], sid, True))
-        elif op.op == "aura_reset" and not (op.target or "").strip():
+        if op.op == "aura_reset" and not (op.target or "").strip():
             out.append(reg.aura_reset_sentence())
         elif op.op == "aura_reset":
             out.append(aura_reset_one_sentence(reg, (op.target or "").strip()))
@@ -4651,6 +4697,7 @@ class DescribedLine(BaseModel):
     warn: bool = False
     consequences: list[str] = Field(default_factory=list)
     ops: list[dict] = Field(default_factory=list)
+    box: Optional[dict] = None
 
     @property
     def before(self) -> Optional[str]:
@@ -4670,10 +4717,14 @@ class Described(BaseModel):
     refused: list[str] = Field(default_factory=list)
     consequences: list[str] = Field(default_factory=list)
     warn: bool = False
+    box: Optional[dict] = None  # the confirmation box (design §7b) when the batch is one schedule's or one raid's write
+    quiet: list[str] = Field(default_factory=list, exclude=True)  # box sentences that alone never make a Save reviewed
 
     @property
     def review(self) -> bool:
-        return self.warn or bool(self.consequences)
+        """The site's box asks first on every surface that shows it; the TIERED Save (useOpsSave, the admin translators,
+        MCP) still reviews only what it reviewed before: a warn op or a consequence beyond a routine box's sentences."""
+        return self.warn or any(c not in self.quiet for c in self.consequences)
 
     @property
     def fingerprint(self) -> str:
@@ -4697,7 +4748,7 @@ class Described(BaseModel):
                            "parts": [{"label": r(p.label), "before": r(p.before) if p.before is not None else None, "after": r(p.after) if p.after is not None else None} for p in ln.parts],
                            "notes": [r(n) for n in ln.notes], "consequences": [r(c) for c in ln.consequences], "ops": ln.ops} for ln in self.lines],
                 "refused": [r(x) for x in self.refused], "consequences": [r(c) for c in self.consequences], "warn": self.warn, "review": self.review,
-                "fingerprint": self.fingerprint}
+                "fingerprint": self.fingerprint, "box": self.box}
 
     def as_text(self, reg: Registry, channels: list[dict] | None = None) -> str:
         """Plain text (MCP's preview message): one line per write, then refusals and consequences."""
@@ -4908,6 +4959,20 @@ PURE_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "schedul
             "comp_target", "comp_target_clear", "loot_weights"}
 
 
+def _diff_lines(ln: DescribedLine) -> list[str]:
+    """A described write's parts as the box's "label: old → new" lines; a minimum reads 'Healers, minimum: 5 → 4'."""
+    out = []
+    for p in ln.parts:
+        if not p.label:
+            continue
+        label, before, after = p.label, p.before, p.after if p.after not in (None, "") else "cleared"
+        if ln.op in ("comp_target", "comp_target_clear"):
+            num = lambda v: (m.group(0) if (m := re.search(r"\d+", str(v or ""))) else v)  # noqa: E731
+            label, before, after = f"{label}, minimum", num(before) if before is not None else None, num(after)
+        out.append(f"{label}: {before} → {after}" if before is not None else f"{label}: {after}")
+    return out
+
+
 def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None = None, channel=PLAIN_WEB, *, by_id: int | None = None) -> Described:
     """The structured preview of a batch: ops coalesced exactly as apply_ops will write them (one line per write), each
     with its parts (current → new, in words), the refusal its apply would give (dry-run on a shadow copy), its warn flag
@@ -4949,6 +5014,16 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
         d.lines.append(line)
         d.consequences += [c for c in cons if c not in d.consequences]
         d.warn = d.warn or line.warn
+    boxed = [(op, ln) for op, ln in zip(merged, d.lines) if _box_group(op) is not None]
+    if boxed:
+        d.box = op_box(reg, [op for op, _ln in boxed], [x for _op, ln in boxed for x in _diff_lines(ln)])
+        if d.box is not None:
+            for op, ln in boxed:
+                ln.box = op_box(reg, op, _diff_lines(ln))
+            mine = {c for _op, ln in boxed for c in ln.consequences}
+            if d.box["verb"] in ("Create schedule", "Resume", "Save"):  # routine: only an open event keeping its own is reviewed (C10)
+                d.quiet = [c for c in d.box["sentences"] if "already open and keeps" not in c and "open events keep their" not in c]
+            d.consequences = list(d.box["sentences"]) + [c for c in d.consequences if c not in mine and c not in d.box["sentences"]]
     _batch_roles(reg, list(ops), d)
     return d
 

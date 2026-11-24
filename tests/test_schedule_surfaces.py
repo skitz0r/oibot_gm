@@ -119,7 +119,7 @@ def test_a_schedule_edit_says_open_runs_keep_their_times(reg, rs):
     before = dict(reg.config.roster(ev.team))
     op = ConfigOp(op="schedule_set", target="tue", field="lock_hours_before", value="30")
     d = configops.describe_ops(reg, [op])
-    assert "The open run keeps its old times." in d.consequences
+    assert f"The {reg.local12(start, '%a %d %b')} event is already open and keeps its timing." in d.consequences and d.review
     configops.apply(reg, op, "Officer", False)
     assert reg.schedule_def(RID, "tue")["lock_hours_before"] == 30
     assert reg.config.roster(ev.team)["cutoff_hard_hours"] == before["cutoff_hard_hours"]

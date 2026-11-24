@@ -47,7 +47,7 @@ def test_lock_consequence_counts_dms_and_names_the_deadline_in_words(reg, rs):
     reg.save(ms[0], "dms off")
     lines = consequences.consequence("lock", reg, ev)
     text = " ".join(lines)
-    assert lines[0] == "The board becomes the roster."
+    assert lines[0] == "The board becomes the roster for Barrow Deeps."
     assert "The 6 rostered get the Confirm or Can't make it DM, and the puppets' DMs come to the tester." in lines, "a test run says where the DMs really go"
     assert re.search(r"They have until \w{3} \d{1,2} \w{3} \d{1,2}:\d\d [AP]M to answer\.", text), text
     assert not MILITARY.search(text) and not ISO_DAY.search(text), "the clock rule: words, never 24-hour or ISO"
@@ -63,15 +63,15 @@ def test_lock_consequence_on_an_ad_hoc_run_promises_no_dms(reg, rs):
     join(reg, rs, ev, reg.test_members()[:4])
     assert rc.run_kind(reg, ev) == "adhoc" and not rc.run_confirms(reg, ev)
     text = " ".join(consequences.consequence("lock", reg, ev))
-    assert "On an ad hoc run Join is the commitment, so nobody is asked to confirm." in text and "DM" not in text
+    assert "Nobody is asked to confirm." in text and "DM" not in text
 
 
 def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     ev = open_test_run(reg, rs)
     names = [m.display_name for m in reg.test_members()[:5]]
     join(reg, rs, ev, reg.test_members()[:5])
-    assert consequences.consequence("cancel", reg, ev)[0] == "The sheet closes for the 5 people who answered."
-    assert consequences.consequence("cancel", reg, ev)[1].startswith("Nobody gets a DM")  # the DM rule (phase 2)
+    assert consequences.consequence("cancel", reg, ev)[0] == "This event is cancelled."
+    assert consequences.consequence("cancel", reg, ev)[1] == "The 5 who joined see it on the sheet, and nobody gets a DM."  # the DM rule (phase 2)
     assert consequences.consequence("clear", reg, ev) == ["The board is already empty."]
     ev.layout = [names[:3], names[3:]]
     assert consequences.consequence("clear", reg, ev)[0] == "The 5 people on the board go back to Not placed."
@@ -80,7 +80,7 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     for m in reg.test_members()[:5]:
         reg.add_placement_ask(m.discord_id, ev.team, m.display_name, "t")
     cancel = consequences.consequence("cancel", reg, ev)
-    assert cancel[0] == "The sheet closes, the 5 rostered lose their seats and 5 open asks close." and cancel[1].startswith("Nobody gets a DM")
+    assert cancel[:2] == ["This event is cancelled.", "The 5 rostered see it on their cards, and nobody gets a DM."]
     assert consequences.consequence("clear", reg, ev)[:2] == ["All 5 seats are released.", "The 5 rostered see it on their Confirm card and their Me page."]
     assert consequences.consequence("release", reg, ev, name="Jonny")[:2] == ["Jonny's seat is released.", "They see it on their card and their Me page."]
     assert consequences.consequence("release", reg, ev)[0] == "The seat is released."
@@ -116,7 +116,7 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
     start = (reg.now_local() + timedelta(days=2, hours=3)).replace(second=0, microsecond=0)
     adhoc = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=rc.ADHOC_SCHEDULE)
     d = c.get(f"/api/run/{adhoc.key}", headers=bearer()).json()
-    assert d["consequences"]["lock"] == "The board becomes the roster. On an ad hoc run Join is the commitment, so nobody is asked to confirm."
+    assert d["consequences"]["lock"] == "The board becomes the roster for Barrow Deeps. Nobody is asked to confirm. You can still move people after the lock."
     assert "DM" not in d["consequences"]["lock"], "the old SheetCard text promised confirmation DMs on ad hoc runs (§4 item 5)"
     assert set(d["consequences"]) == set(consequences.VERBS) | {"release_named"}
     from pathlib import Path
@@ -315,7 +315,7 @@ def test_cancel_card_button_is_the_one_cancel_screen_with_reason_and_notify(reg,
 
     async def go():
         await RunButton(reg.key, ev.key, "cancel").callback(h.card_press())
-        assert "The sheet closes for the 3 people who answered." in h.text and h.buttons() == ["Cancel the run…", "Back"]
+        assert "The 3 who joined see it on the sheet, and nobody gets a DM." in h.text and h.buttons() == ["Cancel the run…", "Back"]
         assert h.screen["view"].children[0].style == discord.ButtonStyle.danger
         await h.press("Back")
         assert calls == [] and "Nothing was changed." in h.text

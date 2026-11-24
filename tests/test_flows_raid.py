@@ -350,7 +350,7 @@ def test_set_picks_run_then_only_what_applies_then_the_character(reg, rs, office
         await h.press("Join")
         assert h.selects() == ["Pick the character"]
         await h.pick("Pick the character", "Altonar")
-        assert "Altonar" in h.text and "They see it on their Me page." in h.text and "no new DM" not in h.text
+        assert "Altonar" in h.text and "They get a notice." in h.text and "no new DM" not in h.text
         assert h.buttons() == ["Join", "Back"]
         assert not bot.calls
         await h.press("Join")
@@ -479,7 +479,7 @@ def test_lock_with_one_run_needs_no_picker(reg, rs, officer, channel):
     async def go():
         # THE lock confirm screen (phase 2): the consequence from code, Lock now · Preview lock · Back — nothing before the press
         await FLOWS["raid_lock"](h.command(), reg)
-        assert h.buttons() == ["Lock now", "Preview lock", "Back"] and "The board becomes the roster." in h.text and not bot.calls
+        assert h.buttons() == ["Lock now", "Preview lock", "Back"] and "The board becomes the roster for Barrow Deeps." in h.text and not bot.calls
         await h.press("Lock now")
         assert bot.calls[0] == ("lock_run", ev.key, "Tester") and bot.calls[1][0] == "emit"
         assert h.text.endswith(f"{ev.key}: locked")
@@ -656,7 +656,7 @@ def test_cancel_shows_the_consequence_then_one_form_with_reason_and_notify(reg, 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
         # THE cancel screen (phase 2): the consequence from code, then one Form — nothing written before Submit
-        assert h.buttons() == ["Cancel the run…", "Back"] and "Nobody gets a DM" in h.text and not bot.calls
+        assert h.buttons() == ["Cancel the run…", "Back"] and "nobody gets a DM" in h.text and not bot.calls
         await h.press("Cancel the run…")
         assert h.modal is not None and set(h.modal._items) == {"reason", "notify"}
         await h.submit(reason="tank flu", notify="post")
