@@ -40,7 +40,7 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
   a "Nothing to do." / "look again" / "say it again" tail, or a code word (LLM, token, an exception's type);
   `tests/test_quiet_edges.py` pins it. `tests/test_copy.py` lints it; the only exceptions are the operator
   surfaces (the Host card, the Agents page) and code a person types or pastes — an `ALLOW` entry each, scoped and reasoned.
-- **Confirm rule (user decision 2026-10-26):** a confirm sentence — anything a `decide` screen, a `useConfirm`, a review diff or a
+- **Confirm rule (user decision 2026-10-26):** a confirm sentence — anything a `decide` screen, a `useConfirm`, a `ConfirmBox`, a review diff or a
   preview prints before a press (consequences.py, inbox.action_consequence, every `*_consequence` / `*_effects` / `*_sentence` /
   `*_refusal` generator) — is read aloud by a raid leader with their finger on the button. At most three sentences, in this order:
   what changes, who is told and how, what can still be undone. Each one a full sentence: a capital letter, one idea, a period,
@@ -71,11 +71,15 @@ profiles/forever/      guides.yaml = the leveling-guide tool's tables (zone ids,
                        ItemName) and discord_bot.wowhead (the loot item card's link); tbc keeps its own; null = no links
 fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg, gitignored): REAL (BisCouncil ledger, WCL attendance/roster) + MOCK (tiers, wishlists, policy, ranks)
 src/oibot_gm/
-  constants.py         ROLES / MARK (+ MARK_WORDS) / LEVEL_COLOUR / LEVEL_WORDS / TEAL shared by Discord, web and render (no per-module copies); CLOCK12 + fmt12 = the one 12-hour formatter behind every clock that is not Registry.local12
+  constants.py         ROLES / MARK (+ MARK_WORDS) / LEVEL_COLOUR / LEVEL_WORDS / TEAL shared by Discord, web and render (no per-module copies); CLOCK12 + fmt12 = the one 12-hour formatter behind every clock that is not Registry.local12;
+                       hours_words ('5 days', 'a week'); CONFIRM_WORDS = the box's fixed words (Back, Keep editing, Discard edits, Leave without saving?,
+                       the "changed" line — /api/meta.confirm_words); PAGE_WORDS (§5.67 phase 4) = every value word of the Events, New event, Schedules
+                       and Raids pages ONCE (the read models print them, /api/meta.page_words carries them, no page file holds one; `schedule_fields` /
+                       `raid_fields` / `split` / `priority` = the settings' names the editors AND the Save box's diff lines share)
   consequences.py      consequence(verb, reg, ev) for lock / cancel / clear / release, the board's move / roster / swap / substitute ({name} / {other} /
                        {to} tokens the board fills — shared.fillNames), remind and end (Reopen's window from rc.REOPEN_GRACE_HOURS; LootMixin.end_consequence
                        puts the council's part in front), regular_remove(reg, m, key): the ONE confirm sentence from code (design §5.33, §5.56 phase 3);
-                       ev_json.consequences carries it to the site (a regular's `remove` / an orphan's `clear` on /api/rosters), wizard.decide shows it in Discord
+                       ev_json.consequences carries it to the site (the board's verbs on the Events page and the Test bench card), wizard.decide shows it in Discord
                        — under the Confirm rule (design §5.57): CONFIRM_DM, reopen_sentence, ended_line, series_words; rc.run_on / rc.refill_sentence /
                        rc.no_confirm_sentence / rc.open_rules are the shared words; tests/test_confirm_readability.py renders and lints every generator.
                        People (design §5.58): people_consequence(reg, rs, m, verb, by_id=) → retire / delete / main / spec / flex / rank / confirm / dm /
@@ -99,11 +103,24 @@ src/oibot_gm/
                        raid ALWAYS counted — an assert —, the new start times degrading to the clock or "see their new start times", C9, the
                        schedule note when it has room) over lineup_words (also edit_lineup's done / thread lines); later_places_sentence(reg, held) =
                        the ONE "Your X and Y places go too." (the Me page's Can't, /raid out); before_first_open_sentence(…, only=) (C9);
-                       schedule_keeps_sentence(n) (C10, configops' _schedule_keeps hook); consequence("cancel", …, rs=) names every live raid of the
+                       schedule_keeps_sentence(n) (C10, the Discord raid wizard's); consequence("cancel", …, rs=) names every live raid of the
                        run (first_closed: no "whole", no sheet); raid_reset_consequence(reg, raid, unsaved=) = the raid wizard's Reset
+                       THE confirmation box (§5.67 phase 4, spec §7b): box(title, sentences, verb, *, danger, diff, rev) → {title, sentences, verb,
+                       danger, diff, fp} (fp = sha1 of title + diff + sentences + rev, 12 hex; verb None = a refusal, Back alone; red only when it can't
+                       be undone); refusal_box / refusal_kind (the kind a built refusal carries — rc.Refusal past | clash — or the constant it equals,
+                       never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box (1–2; counts joiners minus rc.lock_forces'
+                       kept_off, lock_refusal = everyone kept off), reschedule_box (3) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
+                       cancel_box (5, red), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines), undo_box / undo_box_for (9),
+                       the board's consequence("swap") after the lock (10), open_now_box (11), move_past_sentence / PAST_TAIL (12),
+                       schedule_create_box / schedule_save_box / schedule_pause_box / schedule_resume_box / schedule_remove_box (13–17; 14 says
+                       "keeps its timing" only for a time setting, "keeps its lineup" for lineup / rosters), regular_remove_box (18), raid_save_box
+                       (19, open_events_of_raid), leave_box / leave_unsaved_sentence / LEAVE_TEMPLATE (20, /api/meta.leave); + raid_reset_box,
+                       strategy_box (More › Split strategy, fp = rc.board_rev; STRATEGY_LOCKED refuses after the lock); event_title, count_words.
+                       A route takes `preview` → {box} and `seen` (the fp pressed) → 409 {error: CONFIRM_WORDS changed, box: fresh}, nothing written;
+                       a refusal → 400 {error, box}. lineup_consequence counts a lowered roster count's dropped board places (rc.roster_trim), losses first
   inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
-                       (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
-                       do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
+                       (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(spec=, by_id=) / action_lines
+                       (the same sentences as a list: consequences.answer_box) / no_longer_applies + do_member_action(spec=) over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
                        THE pin write (every surface; re-renders the sheet's pin footer). Never a DM from here
   conversation.py      plain-text memory (design §5.51): a ring per (guild, channel|DM, uid) of the last 4 exchanges, IN MEMORY only (a restart
                        forgets); recall = a Discord reply to the bot's message (any age) else the same person + place within 20 min; context_block =
@@ -223,7 +240,12 @@ src/oibot_gm/
                        rostered as extra; scaled_role_minimums = the game's tank / healer minimums, rounded up — design §5.67 phase 2;
                        REPEATABLE per budget: interleave_search with RANDOM_SEED 0 and a deterministic-time limit (time_limit_s × DTIME_PER_SECOND), so
                        Preview lock and Lock land on one roster; the wall clock only as a safety net, WALL_CEILING 2 × the budget — re-check
-                       tests/test_solver_repeatable.py on every OR-tools upgrade), explain.py (advisories), coverage.py (slot-aware)
+                       tests/test_solver_repeatable.py on every OR-tools upgrade); §5.67 phase 4: seats counted from SEATABLE players (_Model.seatable =
+                       the pool minus force_out — a kept-off name never makes an under-filled raid infeasible; with nobody kept off the model is
+                       unchanged), _refuse_conflicts → Conflict(reason KEPT_ON | KEPT_BOTH | GROUP_FULL | GROUP_ROLES, names, group, roster, have,
+                       seats) before searching (str() keeps "no roster found: <reason>"); Stop (CpSolver.stop_search on every attached solver) /
+                       Stopped = THE way the Events board's pictures give way to a lock (only they pass one); SolveOptions.kept_off is informational
+                       (explain's Closest to a seat skips it)), explain.py (advisories), coverage.py (slot-aware)
   loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
                        Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),
                        session.py (LootSession keyed (guild, run), Drop/drop_id, Proposal + pending Override, batch_rev/drops_rev, LootChanged/LootBusy,
@@ -325,7 +347,9 @@ src/oibot_gm/
                        fill_ask_hours, a refused raid kept) → timing_moved / timing_dropped, saved by migrate_schedules in the same commit, the start's
                        second ops line from timing_saved; minimums (D16): raids.<id>.minimums {slot: {min, note?}}, minimums(raid, size) = THE reader
                        (the game's tank / healer scaled up, a raid's own half up, never below 1), set_minimums = THE writer (NO_UPPER_LIMIT,
-                       MINIMUM_ON_RAID, role_limit_refusal), lift_minimums at load (comp / comp_targets → minimums; maxima and tank / healer aims
+                       MINIMUM_ON_RAID, role_limit_refusal; a minimum of 0 is never saved — it clears the guild's own — and a STORED 0 reads as absent,
+                       §5.67 phase 4: game_minimum / cleared_words / minimum_words / GAME_MINIMUM_WORDS / NO_MINIMUM_WORDS = what a slot reads without
+                       the guild's own; section_words(section, reg) names a raid, "schedule's settings", "raid's settings", never an id), lift_minimums at load (comp / comp_targets → minimums; maxima and tank / healer aims
                        dropped; its ops line), lower_minimums = scripts/lower_schedules.py --minimums-only (the way back to phase 1 = main 53b9153,
                        never 4ef2e35); a lift that fails at load leaves the file and is one ops warning (lift_failed_line);
                        Phase 3 (§5.67): schedule ids are GUILD-UNIQUE (^[a-z0-9][a-z0-9_-]{0,15}$; RESERVED_SCHEDULE_IDS default / adhoc / test / after;
@@ -521,7 +545,7 @@ src/oibot_gm/
                        RaidEvent.lock_seats, the seats at the flip — never a fill-seated or later seat; legacy_lock_sent = a pre-field run is stamped); cancel_effects;
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
-                       asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; upcoming_rows (each active schedule's next three runs whatever the horizon, can_open + open_row_refusal's why) / short_why (the Rosters card's short clause) — §5.56; FillAsk.channel dm|web (a failed DM = web)
+                       asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; upcoming_rows (each active schedule's next three runs whatever the horizon, can_open + open_row_refusal's why) / short_why (a run card's short clause) — §5.56; FillAsk.channel dm|web (a failed DM = web)
                        Identity (§5.67 phase 3): a run's key is new_run_key(reg, rs, raid) = '<abbr>-<6 of KEY_ALPHABET>' (no 0/1/i/l/o/r), the run
                        dict's key and the run file's key the same string; NOTHING reads a raid, a date, a time or a schedule out of a key or builds one
                        from a time (run_key, event_key, schedule_kw, RunKeyClash and TEST_SCHEDULE are gone; tests/test_event_identity.py pins it).
@@ -566,6 +590,28 @@ src/oibot_gm/
                        LINEUP_FIRST, LINEUP_GONE, LINEUP_ORDER, LINEUP_SAME), plan_lineup → LineupChange (kept / new / removed, moved, told,
                        dropped_*), apply_lineup = THE write (run keys never change; a removed raid's file cancelled with `dropped`, its dict dropped,
                        no notice, no card; one store.batch), _part_dict (shared with ensure_run)
+                       Phase 4 (§5.67, the Events / Schedules / Raids pages): occurrence_index(reg, rs) = event_of_occurrence for many nights in ONE pass
+                       (the finder answers through it); next_runs_of; pool_unanswered(reg, ev) = the pool minus everyone with a row (No answer yet,
+                       Answer for someone, health's hint); rehearsal_run; run_timing(reg, first) (the inverse of the settings Reschedule takes);
+                       lineup_fixed(rs, ev) = THE lineup lock rule (lineup_refusal and Edit lineup read it); parse_run_lineup; roster_trim = a lowered
+                       roster count drops the board places and pins on the roster that goes (plan_lineup's trimmed_places / trimmed_pins, apply_lineup);
+                       priority_words / confirmation_words / lineup_words / lineup_roster_words / event_lineup; gone_sentence; series_forecast(if_resumed=);
+                       ensure_run / open_run(lock_hours=, first_rosters=) (the New event page's one-off choices, never a test run); site_words = a verb's
+                       Discord line as the site prints it (no <t:…> stamp); open_seat_count / open_seats_words (a locked run's idle open seats said truly).
+                       The board picture: event_board_preview(reg, rs, first, parts=, stop=, memo=, raid_key=) = every OPEN raid through _solve_run with
+                       the lock's strategy and budget, `earlier` = the earlier raids' locked or previewed rosters (PURE; a raid nobody joined drawn
+                       empty); overlay_board (the last picture with the officers' current moves on it); apply_move_shown (a move read on the shown
+                       picture: only the mover and a swapped partner pinned, a drop on Not placed pinned out); RaidEvent.placed_by {name: officer} and
+                       drag_pins {uid: {by, was, now}} (cleared at the lock) via record_moves (a move from another surface clears it), own_moves /
+                       own_pins / undo_rev; open_seat_roles. The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
+                       off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
+                       ALL_KEPT_OFF raised before solving when every joiner is kept off; _solve_run's later-raid branch no longer reuses the groups per
+                       roster as the part number (a hand place past a later raid's first groups reaches the solve); SOLVER_WORDS + conflict_sentence →
+                       solver_error_text (a timeout checked before infeasible; never an exception's words; a stored sentence reads as itself).
+                       Role switches: event_switches(reg, rs, first, viewer=) → {short [{raid, roles, why}], rows, revs} composed from each live raid's
+                       role_plan (before the lock a row merges across raids — switch_raids —, after it is its raid's own, the officer's own row left
+                       out); switch_box_for → (box, button Switch | Answer for them | Ask); _short_why; spec_role; set_signup(spec=) refuses SPEC_SEATED
+                       once the member holds a seat on the locked roster (every surface); pick_asks / send_batch(seats=); member_state_rev
   discord_raid.py      RaidMixin on the client: send_member_dm (test puppets → the tester), set_answer / call_out (the one path for an answer; `by` = a
                        display name to read, `by_id` = the actor's Discord id decides "their own" — never a name compare; seats found by id, ev.seat_of(member)), lock_run → roster
                        cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below.
@@ -588,6 +634,55 @@ src/oibot_gm/
                        (LINEUP_OFFICER_ONLY; plan_lineup + apply_lineup under the board locks; a removed raid's pending asks closed under its plan_lock
                        and their cards edited "… was taken out of the … run, so this ask is closed."; the `moved` notice when a kept raid's start
                        changes; NO DM). cleanup_ephemeral drops a first part's dict with no run file after rc.DICT_WITHOUT_RUN_HOURS
+                       Phase 4 (§5.67): solving(reg, key) = the solver's single flight per run AND the Events board's pause() / resume() (a running
+                       picture abandoned, none started while it holds; both wrapped so a board fault never touches the lock); board_move(…, by_id=,
+                       shown=) (shown: the move read on event_board's shown_layout through rc.apply_move_shown, recorded per officer); undo_moves(reg,
+                       rs, ev, by_id, by, rev=) = Undo my moves (only that officer's placements and the pins their drags changed, rc.undo_rev checked);
+                       set_answer(…, spec=, via=) (a role switch: the spec on the answer for the whole evening, a notice, one audited line);
+                       send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);
+                       the lock's failure line names its conflict (escaped for Discord)
+  event_view.py        the Events page's read model (§5.67 phase 4), PURE builders over the existing readers (nothing solves, writes or composes
+                       a fact of its own; words from PAGE_WORDS; a run key only as an id): event_list(reg, rs, now, offset) → {open (open AND locked,
+                       soonest first), coming (coming_nights: each active schedule's next COMING_PER_SCHEDULE 3 nights with no event, through
+                       rc.next_runs_of), history (HISTORY_PAGE 20, newest first), history_more, tz_words}, a row {key, title, subtitle, state, chip}; test
+                       runs (rc.rehearsal_run) and dropped parts never listed; one rc.occurrence_index per request. event_json(reg, rs, ev, viewer,
+                       sheet=, board=) — any part's key answers as its event: details (Lineup, Comes from, Priority, Confirmation, Sheet opened, Locks,
+                       Signup sheet; locked: Confirmed, Open seats; _night_facts / _discord_links = the raid-night facts read from each raid's ev_json:
+                       Reminder, Confirm by, Confirmations pending, Open seats per raid, Reminded, Automatic asks paused by, Also on another event, Away
+                       that day, the officer card / updates thread / loot thread links), signups (counts + rows; none = rc.pool_unanswered), parts
+                       (_part_view: label, rosters_of, placed_of, short, sheet = ev_json, board_state ready | working | failed | locked, board_error,
+                       mine, undo_box, layout, strategy), activity, boxes {lock, cancel, reschedule}, actions, switches (rc.event_switches), lineup,
+                       timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks; coming_json (Details with
+                       "Opening by hand: From <start − OPEN_HORIZON_DAYS>", can_open / why, open, box 11; ComingGone COMING_OPENED (with the key) |
+                       COMING_GONE); new_event_options (raids, lineups to copy — no pickup templates —, NEW_EVENT_LOCKS (2, 24), lock_choices, the
+                       guild's date), new_event_view (What this makes; SCHEDULED_NIGHT), lineup_edit_json (refused through rc.lineup_fixed) /
+                       lineup_draft_json (nothing written), seats_words, tz_words, character_rows. The routes run these in a thread
+  event_board.py       the Events board before the lock (§5.67 phase 4): BoardCache (cache_of(bot)), keyed (guild key, first raid's key), ONE entry per
+                       event; get → "ready" when fingerprint(reg, view, parts) matches, else ONE background solve (rc.event_board_preview: the lock's
+                       own solve and budget, so the picture IS the roster lock_run builds) and "working" with the previous picture; the fingerprint =
+                       only what the solve reads, computed as it computes it, from snapshot / frozen views taken on the loop (a card id or a re-press
+                       changes nothing); PREVIEW_WORKERS 1 dedicated executor (never the loop, never the request pool); MAX_BOARDS 32 (least recently
+                       used dropped; an event with no open raid pruned at every get); a per-raid memo (MEMO_PER_EVENT 8, raid_key) so a move re-solves
+                       only its raid — the lock never reads it; a fresh picture → BOARD_LISTENERS → publish('run:<event key>'); a stale one kept and
+                       solved again; an unexpected failure kept as PAGE_WORDS board_failed for that fingerprint (logged once, never re-solved);
+                       pause() / resume() (RaidMixin.solving: the lock comes first — a picture is stopped through solver.Stop, none starts while any
+                       lock-side solve holds a run); shown_layout(reg, ev) = the picture a drag is applied to
+  schedule_view.py     the Schedules page's read model (§5.67 phase 4), PURE: schedule_list(reg) → {active, paused (each {id, name, repeats}),
+                       reserved_ids (RESERVED_SCHEDULE_IDS: the editor holds no copy), orphans (a removed schedule's leftover regulars with box 18),
+                       editor (editor_options: the palette with lockout_days / weights / timing_suggestion, pickup defaults, lineups, hour choices in
+                       words, presets, split_policies, MAX_WEIGHT 6)}; schedule_json(reg, rs, sid, now) → {id, name, active, chip, kind, gone
+                       (rc.gone_sentence + GONE_TAIL when a lineup raid left the game), details (Repeats — repeats_words —, First event / Next event if
+                       resumed, Priority, Confirmation, Open seats after the lock, Answers), lineup (seats None for a gone raid), timing, next
+                       (NEXT_EVENTS 3: starts, opens, locks, occurrence, the event's key) + next_empty, regulars (_regulars: count vs seats, short,
+                       rc.series_forecast — if_resumed on a paused one — as forecast rows with can_open / why for Open early, rows with box 18 + the
+                       record's rev; None for a pickup), people, boxes {pause | resume, remove}, stored (stored_entry, the editor's machine form), rev
+                       (config_rev schedule:<id>)}; RegistryError NO_SCHEDULE for an unknown id
+  raid_page.py         the Raids page's read model (§5.67 phase 4), PURE: raid_row(reg, rs, rid) (/api/raids `page`) → details (Size — shown, never
+                       edited —, Groups, Lockout, Length, First opens, Played in with each schedule's link), make_up (minimum_rows: Registry.minimums
+                       ALONE, `own` = the guild set it), make_up_empty, priority bars, used_when / one_off_rule, open_events, boxes.reset;
+                       readiness_view(reg, rid, r, players) (/api/readiness `view`) → who_could_play, the same make-up rows with have + level, level and
+                       standing_why from standing() = exactly the printed rows (headcount, tank / healer, each minimum; the buff matrix's class wants
+                       stay out)
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
                        run_times, run_label/run_title/clock12, gaps_text/ask_line, leftover_block, split_away (the sheet's Away row); BotProto = what the mixins expect from the client;
@@ -712,7 +807,8 @@ src/oibot_gm/
                        known, professions followed or kept by hand; one <member-text source="armory"> block; where armory.available; never another member's — §5.64);
                        `guides` section (every member, gated on "guide" as a word: each faction's latest guild guide, uploader unfenced — §5.63);
                        manual_sections (the manual by its own ## headings, mtime-cached, tiers tagged — the Help page), command_rows(tree, tier),
-                       site_url(reg, path, anchor) = THE site link (?g= before the #anchor)
+                       site_url(reg, path, anchor) = THE site link (?g= before the #anchor; & when the path has a query); PAGES names the officers'
+                       events / schedules / raids pages (no rosters / readiness), PAGE_ALIASES rosters → events, readiness → raids
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
                        @mentions and DMs routed by intent under the plain-text policy)
   wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms; Wizard.decide = THE confirm screen (consequence · Do it · Do it with a note… · Back; guard re-run on every press)
@@ -758,7 +854,7 @@ src/oibot_gm/
                        (one `lineup` field) when it names no CREATE_SHAPED field or carries the schedule's rev; with run times, no rev and its own first
                        raid → SCHEDULE_EDIT_SPLIT ("… Change its raids and its run times in two saves, one after the other." — MCP's schedule_set
                        carries no rev), another first raid → ID_TAKEN; else it creates (3–4 raids travel as one `lineup` field); a plain-text lineup
-                       edit keeps a kept raid's start while the raid before it is unchanged; _schedule_keeps = the C10 hook. Runs:
+                       edit keeps a kept raid's start while the raid before it is unchanged; the C10 sentence is box 14's (op_box). Runs:
                        run_reschedule (target = run key; field `start` = 'YYYY-MM-DD HH:MM' guild time through rc.move_start, or an rc.EVENT_TIMING
                        setting; several on one run coalesce into one reschedule_event) and run_lineup (value = the later raids, parse_lineup_text;
                        "none" = the first raid alone) — RUN_OPS / group `runs`, EVENT_OPS (Apply passes the `event:<key>` rev = rc.event_rev),
@@ -766,6 +862,12 @@ src/oibot_gm/
                        their Discord rows (phase 5 wizards; /gm change reaches them meanwhile); run_words(reg, ev) = a run as a person reads it in a
                        plain-text line or refusal (raid + 12-hour start, never the key); every ops / audit line names runs the same way (raid_views.run_title,
                        rc.run_words, LootMixin.loot_where; the help snapshot too) — MCP fields, log.* lines and commit messages keep the key
+                       Phase 4 (§5.67): op_box(reg, ops, diff, rs=) → Described.box (and each line's) for one schedule's or one raid's write (boxes
+                       13–17 and 19); Described.asks_first (a box with a verb: the site's Save always previews) beside review, and Described.quiet (a
+                       routine box's sentences never make the TIERED Save reviewed alone); Described.fingerprint covers the box's title, sentences and
+                       diff; _diff_lines = "label: old → new" in the pages' words (PAGE_WORDS schedule_fields / raid_fields through
+                       _schedule_value_words / _raid_field_words / _amount); minimum_unchanged_box ("Nothing to save", no verb) for a comp change of
+                       only no-op clears; a comp minimum of 0 previews as what applies (Registry.minimum_words); `run_answer`'s field = the spec
                        Professions (the owner, 2026-11-16): NOT written from plain text — the schema tells the parser so ("Not settable here") and
                        _character_rows refuses the four old fields (PROFESSION_FIELDS) with PROFESSIONS_NOT_HERE; the editors are /me professions and the
                        Me page, a linked character follows the armory. The listening gate (discord_bot.LISTEN_QUESTION / LISTEN_CRITERIA) treats "I have /
@@ -796,7 +898,9 @@ src/oibot_gm/
                        (raid_all:<rid>; without them the reset is unchecked, like every setup tool); list_regulars rows keyed by schedule id;
                        open_run(…, lineup=) (the later raids); reschedule_run(run, when, timing, preview, rev) and edit_lineup(run, lineup, preview,
                        rev) → POST /api/run/{key}/reschedule | /lineup (preview first and send its `rev` back; no actor — the bearer is the owner,
-                       as lock_run / cancel_run)
+                       as lock_run / cancel_run). Phase 4: set_answer(spec=) (a role switch; SPEC_SEATED once seated on a locked roster),
+                       fill_seats(seats=) (one ask, as the Events page's Switch); set_strategy is refused after the lock (STRATEGY_LOCKED); no tool
+                       sends `seen` (MCP writes go ahead as before the boxes)
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change, /gm config plain (the D37 READ view, registered here); handle_change for every
                        plain-text path (ConfigConfirmView re-authorizes the presser; a diff nobody presses in 10 min DELETES itself —
                        PendingView.expire, DELETE_ON_TIMEOUT; a policy reading nobody confirms in 15 min UNWINDS its edit as Discard would
@@ -849,6 +953,13 @@ scripts/raidhelper_roster.py  a Raid-Helper event export (JSON) → `<guild>/tes
                        PRIVATE data repo: the test bench's seed then rehearses against the guild's real signup shape (§5.42); `--members` → the import rows
                        {discord_id, name, character, cls, spec} for Registry.import_members (POST /api/members/import, MCP import_members — §5.53: the
                        real roster from a signup list; skipped rows named, preview writes nothing, a rank needs the actor); specs → classes, never names here
+scripts/serve_scratch.py  THIS worktree's site on a throw-away copy of fixtures/demo for screenshots (§5.67 phase 4; never the live bot):
+                       a git-inited data repo under the temp directory (GitStore push=False), the demo characters imported, `--seed` = a two-raid open
+                       one-off, a locked and a finished one, a schedule with regulars, a minimum; the bot = tests/test_raid_night.NightBot (Discord
+                       recorded, never called), uvicorn on 127.0.0.1 only, the login = the test suite's bearer. Refuses with DISCORD_TOKEN set, on
+                       LIVE_PORT, or on a folder outside the temp directory or holding anything it didn't write (MARKER: it deletes only what it
+                       built); .env loading off and every secret out of the environment before AND after the imports; every module-level output path
+                       in the scratch folder; the suite's refused network reads refused. scripts/shots.py <base> refuses without a URL
 scripts/agents/        loop EVERY guild (Api().guilds()): review.py (daily 9:00 AM; one tagged run per guild, its own since, a Claude session only for a
                        guild with new news, pinned with OIBOT_MCP_GUILD), apply.py (every 15 min; X-Oibot-Job: apply; recovery of `applying`; every guild
                        setting this poll, then the first profile edit whose preflight + D33 guard pass: resolve("applying") gate, Claude, checks/commit/push,
@@ -873,7 +984,9 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
   web/api_policy.py    the Policy page's routes (GET /api/policy, /api/policy/{doc} PUT · append · compile · confirm · discard) and GET /api/manual (Help)
   web/api_ops.py       install_ops_api (called from api.py): POST /api/ops/change — `text` (officers, Claude) or typed `changes`/`ops` (tiered: a Save applies
                        unless Described.review, then needs_review + token; `confirmed`; `revs` config:<section> → 409; BOOT-prefixed tokens: expired → silent
-                       re-preview when the fingerprint matches, restarted → shown again); the admin setup routes (/api/admin/config|aura|family|aura/reset|raid|
+                       re-preview when the fingerprint matches, restarted → shown again; §5.67 phase 4: review = Described.review OR asks_first — a
+                       schedule's or raid's Save always previews its box first —, and a held structured token is DESCRIBED AGAIN at the press: other
+                       words → needs_review + the fresh box + a new token, nothing written); the admin setup routes (/api/admin/config|aura|family|aura/reset|raid|
                        raid/reset|raid/schedule|raid/schedule/remove|recruitment|plain-permissions, + api_setup's channels via app.state.ops_translate) are TRANSLATORS
                        into changes through apply_ops under the SAME tier (D51): a warn-class / consequence batch needs `confirmed` + the section revs it touches,
                        else it answers `review_required` with the Described preview and writes nothing; no page posts to them (tests/test_frontend_source.py)
@@ -945,7 +1058,19 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        /api/memories/{key}/forget (officers; MCP needs the actor), POST /api/me/memories/{key}/forget (own words only, never MCP)
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
-                       officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409); sheet_row_extras
+                       officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409; `spec`; §5.67 phase 4: `preview` → {box} =
+                       consequences.answer_box (fp over rc.member_state_rev), `seen` → 409 with the fresh box, a refusal → 400 {error, box}); sheet_row_extras
+  web/api_events.py    install_events_api (called from api.py; §5.67 phase 4) = thin callers of event_view, officers, each in a thread (GET
+                       /api/events stays the live stream): GET /api/event-list?history_offset=, GET /api/event-new, GET /api/event/{key} (any part's
+                       key; its open raids' boards from event_board's cache; NO_EVENT 404 for a gone or dropped key), GET /api/event/{key}/lineup +
+                       POST it {lineup} (What this makes, nothing written — the Save is /api/run/{key}/lineup), GET /api/event/coming/{sid}/{occurrence}
+                       (404 {error, key}), POST /api/run/{key}/switch {uid, character, spec, part, seat, option, rev, preview?, seen?} → one Role
+                       switches row: before the lock RaidMixin.set_answer(spec=) on the first raid, after it send_plan(seats=[seat]) on its raid; a row
+                       no longer listed → 409 {error: SWITCH_GONE, switches}; answers {message (rc.site_words), switches}. The page reloads on run:,
+                       member and config
+  web/api_schedules.py install_schedules_api (called from api.py; §5.67 phase 4), officers, in a thread: GET /api/schedules → schedule_list, GET
+                       /api/schedules/{id} → schedule_json (404 NO_SCHEDULE_HERE). Writes stay elsewhere: POST /api/ops/change (kinds schedule /
+                       schedule_remove, the box first) and POST /api/admin/raid/regulars by the schedule's id
   web/api_loot.py      the loot council on the web (design §5.36): /api/loot (+ /run/{run}), /api/loot/{run}/open|tick|distribute|override|confirm|
                        discard|reason|correct|end|… (the LootMixin verbs; LootChanged/LootBusy → 409 + `state`), history, precedents (+ retire), items
                        (+ tiers with the D12 re-weight ask), wishlists (+ TMB import), /api/me/loot, /api/me/wishlist, /api/members/wishlist, /api/loot/log
@@ -972,11 +1097,35 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        decides live; preview → {sentences, rev}; a refusal 400, a stale rev 409 with the fresh rev); /api/raid/{rid}/open (+ /preview)
                        take `lineup` (lineup_arg) and carry `occurrence` back (a different one → 409 + the fresh preview); the open route's and the
                        test bench's messages name the run (raid_views.run_title), never its key
+                       §5.67 phase 4: /api/meta `page_words` (PAGE_WORDS), `confirm_words` (CONFIRM_WORDS), `leave` (LEAVE_TEMPLATE); box_refused /
+                       box_stale = THE `preview` / `seen` handling of /api/run/{key}/lock | cancel | reschedule | lineup | layout (Undo my moves:
+                       undo_box_for, RaidMixin.undo_moves) | strategy (strategy_box) and /api/raid/{rid}/open (box 11; OPEN_UNREAD); POST
+                       /api/admin/raid/regulars takes preview / seen on a removal (box 18); /api/run/{key}/move `shown` (+ by_id); /api/run/{key}/set
+                       `spec` and its line through rc.site_words; /api/raid/{rid}/open/preview adds event_view.new_event_view when a lineup is sent,
+                       open takes one_off_args (timing.lock_hours_before ∈ NEW_EVENT_LOCKS, rosters 1–4); /api/raids `page` (raid_page.raid_row),
+                       /api/readiness `view` (raid_page.readiness_view); event_board.BOARD_LISTENERS → board_ready → publish('run:<event key>');
+                       install_events_api / install_schedules_api
 frontend/              React + Mantine app (Vite). components/board/* (SheetCard, BoardView, SplitModal, BoardPreview, FillModal), components/Cells.tsx (icon-only cells),
                        components/CharacterTable.tsx (the Me page's characters; Retire / Delete / Make main / Save print only /api/me/characters' preview `sentences`), components/ProfessionLine.tsx (a character's professions on one line: icon + skill ONLY — no recipe chips since 2026-11-13, the tooltip carries the specialization and the recipe count; Me and Members) + ProfessionsEditor.tsx (one character's professions in place from the ⋮ › Professions…; with meta.professions.recipe_list the Add box is RecipePicker.tsx = a search of that profession's recipes over /api/professions/find?profession= — a pick = the recipe id, twins by category, held ones left out, the server's empty / "more" sentences — and `unmatched` recipes are marked and sent back untouched; without the list a typed name; Save prints only the preview's `sentences` — Me: /api/me/characters, Members: /api/members/set — §5.60, §5.64), AbsencesModal/AbsencesCard/AbsencesTable.tsx (From picked on a calendar + For how long, the server's absence_consequence above Add the absence, I'm back; the Absences tab a card per absence below sm),
-                       components/ConfirmModal.tsx (useConfirm), components/ReviewModal.tsx (THE edit-mode review: ReviewModal + useOpsSave = the tiered Save over
-                       /api/ops/change, the result sheet, stale-token / restart handling; api.ts opsApi + OpsChange / Described / OpsReply), components/PlainPermissions.tsx (Ops page: who may do what, where; §5.59 phase 2: the Listening column — a Watches / Replies badge, the owner's
-                       Off · Watches · Replies sent as `listen` in the one plain change — and Recent decisions (plain.module.css: a card per verdict below sm, the `listen` topic)), components/RaidCard.tsx (the Raids card's pieces — §5.54: Section / Panel / Pair, WhenItRuns (live_runs + next_run), RunWeek fed by a rule OR an editor's draft (WeekRule), SeatWeights; HOUR_WORDS / SWITCH_WORDS / WEIGHT_WORDS = THE words of a run's week, read by the card and both editors; §5.56: WhenItRuns takes either page's raid (RunsOf) and RunStrip = one run's week with a now mark from ev_json.week — both on the Rosters cards too), components/ScheduleCard.tsx (Raids page schedules + the editor IN PLACE of the row: Pause/Resume, diff-only Save, presets that light up when matched, the draft's timeline, the server's preview; §5.67 phase 3: addressed by `s.id`, scheduleRevs sends config:schedule:<id>, the free-id check against the guild's ids (`taken`) and the reserved ones, and "Then, the same night" = up to three later-raid rows (raid · rosters · start, "When X ends" or 30-minute steps) sent as the whole fields.lineup), components/board/SheetCard.tsx's run menu Reschedule… (a DateTimePicker in guild time → the server's preview sentences in useConfirm → Move with the rev; the Cancel modal hides Tell the channel when cancel_tells_channel is false), components/TellTheBot.tsx (the officers' box: /api/ask → or the plain-text preview + Apply; officer pages' rail + each SheetCard; NEVER on Me — D40), components/LevelChip.tsx (THE ready / thin / short chip: Readiness and Rosters' Regulars, words from meta.level_words), components/CompTargets.tsx (a raid's minimums, one row each: At least + Why, Set minimums / Edit minimums → a `comp` change, officers; a phone-safe grid editor; SlotIcon draws dps as melee + ranged; Readiness + Raids), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
+                       components/ConfirmModal.tsx (useConfirm: the older pages' page-worded confirm), components/ConfirmBox.tsx (§5.67 phase 4: THE
+                       server's box — BoxBody / BoxButtons, useConfirmBox(topics) → (ask({box, refresh, act}), node, replace); Back then the box's verb,
+                       red iff `danger`, a refusal Back alone; a 409 box shown under confirm_words.changed and waits again; setBoxMeta — replaces useConfirm
+                       on the Events, Schedules, Raids and New event pages but for the Signups row menu's callouts and pins), components/LeaveGuard.tsx
+                       (box 20: guardNav / guardClick — the rail, every list pick and in-page Back ask "Leave without saving?" with /api/meta.leave's
+                       sentence; beforeunload for the tab; browser Back is not guarded), components/ListPage.tsx (the list pages: a grouped list beside
+                       the detail, list-then-detail by URL below sm; `intro`, `more`, `empty`), components/Facts.tsx (Facts = the server's Details as a
+                       label / value grid with links, ViewSection), components/WhenPicker.tsx (clock12, QUARTER_HOURS, wallTime: a day from a calendar,
+                       a time in 15-minute steps), components/lineup/LineupBuilder.tsx (THE lineup builder: up to lineup_max raids, rosters 1–4, starts
+                       in 15-minute steps; StepNodes and the connectors) + LineupPicture.tsx (read-only), components/events/* (EventBoard = the raid
+                       switch, Rosters / Placed / Short and BoardView variant="event" over the server's picture — working dimmed, failed with its
+                       sentence, Undo my moves greyed with the server's reason; RoleSwitches; SignupsSection (counts that unfold, the row ⋮ through the
+                       answer box); EventDetails; ActivitySection; EventMore = the ⋯ More menu: Suggest… / Fill seats…, Remind, Pause / Resume, Re-post
+                       the sheet…, Split strategy…, Loot, the asks out, End, Reopen; RescheduleBox.tsx (useRescheduleBox: the picker inside box 3, Locks only while open); shared.tsx EventHead;
+                       ComingUpView; HistoryView), components/schedules/* (ScheduleDetails, RegularsSection + RemovedRegulars, NameFields),
+                       components/raids/* (RulesView, PriorityView, ReadinessView), components/ReviewModal.tsx (THE edit-mode review: ReviewModal +
+                       useOpsSave = the tiered Save over /api/ops/change — opts always / verb / title / staleOnPage, the box's diff and sentences
+                       through BoxBody —, the result sheet, stale-token / restart handling; api.ts opsApi + OpsChange / Described / OpsReply), components/PlainPermissions.tsx (Ops page: who may do what, where; §5.59 phase 2: the Listening column — a Watches / Replies badge, the owner's
+                       Off · Watches · Replies sent as `listen` in the one plain change — and Recent decisions (plain.module.css: a card per verdict below sm, the `listen` topic)), components/RaidCard.tsx (since phase 4 only RunStrip = one run's week with a now mark from ev_json.week, and HOUR_WORDS / HOUR_HINT / DONE_WORDS: the Test bench card's strip), components/board/SheetCard.tsx = the Test bench's run card (its run menu Reschedule… — a DateTimePicker in guild time → the server's preview sentences in useConfirm → Move with the rev; the Cancel modal with a reason and Tell the channel, hidden when cancel_tells_channel is false; Propose and the split choices via BoardView / SplitModal), components/TellTheBot.tsx (the officers' box: /api/ask → or the plain-text preview + Apply; officer pages' rail + each SheetCard; NEVER on Me — D40), components/LevelChip.tsx (THE ready / thin / short chip: the Raids page's Readiness view, words from meta.level_words), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
                        components/ChannelsCard.tsx + SetupCard.tsx (Config: channels edit mode via useOpsSave; Setup / Host cards),
                        components/ItemName.tsx (§5.65) = THE item name: with an id and /api/meta.item_url (setItemUrl, set by App) a plain link (new tab,
                        noopener noreferrer, `{id}` filled), else text; no page names Wowhead or loads its script; used on Professions, Loot › Tonight ·
@@ -999,9 +1148,14 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        explorer in a sandboxed iframe; GuideLibrary.tsx above it = the guild guides, §5.63: a block per faction, Get it for my BattleTag, officers' ⋮ Withdraw… / Restore…, Upload a guild guide; the Me page is tabbed — My record · Leveling guide — when meta.guides is on), CompanionsCard.tsx (Config › Companions, owner: issue → the token once in a modal with
                        Copy / "I've saved it", revoke via useConfirm, presence per token), setupApi.ts (their shapes), hooks/useDirty.ts (EVERY edit mode registers — linted — so the server selector asks
                        "Save or discard your edits first");
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Professions (members, §5.60, §5.64: pages/Professions.tsx + professions.module.css = the finder over the game's whole list — part of a name → each recipe's category, what it makes, reagents and crafters highest skill first, else the server's `nobody` / `message` / `more` sentences —, a tab per profession = crafters with a skill bar + (with the list) What the guild makes grouped by category, officers' card of recipes not in the game's list with Pick the recipe… (RecipePicker) / Remove previewing POST /api/professions/unmatched's sentences; search first, cards and sideways tabs below sm; §5.65: under a hit's reagents CostLines = a line per reagent (ItemName × quantity · unit_words each · total_words, or none listed) + the server's cost.sentence and made_words, What the guild makes shows each recipe's sentence + made_words, the status sentence once per card, PriceBox "What does it go for?" above the tabs over /api/prices/find (the server's message / words / more), with prices off only the owner's meta.prices.words; the `prices` topic reloads) · Prices (members, §5.66: in the rail after Professions only when meta.prices?.market; pages/Prices.tsx + prices.module.css = the status sentence once, What does it go for? (/api/prices/find, while prices show) with Watch / Stop watching per row, Your watch list (/api/prices/watching) — two tabs since 2026-11-15, Yours · Guild: Guild = GET /api/prices/guild-watching?window= → prices.guild_watch (every item a member in the server watches, the most watched first, ≤ GUILD_WATCH_TOP 50, with `watchers` / `watchers_words` — a COUNT, never who: no name or id in the answer; 403 from MCP; a member's own choice Visibility · Public | Private on the tabs' line (2026-11-16; the switch Share with the guild before) = POST /api/prices/watch/share {on} → prices.share_watch → Registry.set_watch_shared (Member.watch_hidden, shared until hidden; hidden = counts for nothing; GET watching's `shared`)) — above the rows a type-ahead filter by name (2026-11-16: on the page, over the rows already here; the group counts follow it; no match → one sentence) and Movers' two choices (2026-11-15): the window (?window= / the watch POST's `window` → prices.spark(window=), the server's `windows`) and the item group (rows' `group` + `groups` from prices.watch_groups; only groups the list holds, filtered on the page) — a row per item opened in place to components/PriceChart.tsx + the server's history sentences + Stop watching; the server's `empty`, or for a viewer without a record the refusal a press got; a press waits for POST /api/prices/watch and takes its rows; names alone while hidden; a card per row below sm; useLive `prices` + `member`; no edit mode; layout (the owner, 2026-11-15): from 80em two columns — css.cols = css.main (search + Movers; Dips and Rising = two tabs with their counts, one list at a time) and css.side (the watch list, sticky with its own scroll, rows without the listed count) —, below that one column with the watch list first. PriceChart = inline SVG at the container's width (no chart library — C17): under the plot bars of how many were listed (2026-11-15: a point's `qty` / `listed_words` from prices._point_json — supply, the feed has no sales; none on a folded day), a step line of the lowest price broken where low is null (nothing listed, or an unread point), a faint band low → high on folded days, y over the span's low..high padded (flat = mid-height), x over the server's since..until (no browser clock), high_words / low_words and the first / last `when` as labels, a pointer / arrow-key read-out (`when` · `words`), Mantine colour variables only (no hex — P3), an aria-label from the sentences; one point = a held line to until, no point or nothing listed all span = no frame; the span switch = the server's spans, showing the span pressed while it loads) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (§5.58: pages/Members.tsx + members.module.css = count chips that filter, search, one row per member (a card below sm), the member ⋮ and character ⋮ — every press previews POST /api/members/set|dm and prints only the server's sentences; components/members/MemberEdit.tsx = one member edited in place (Save previews /api/members/save), PeopleDialogs.tsx = PickModal (Rank… / Spec… / Extra roles… with the live preview) + ConfirmWalk (Confirm characters…); folds for not in the server (Remove record…) / no character yet / puppets; tabs Members · Absences · Test bench (#test-bench); components/TestBench.tsx = seed/compose, ONE Rehearse with raid picker for Try a comp and the test run, the tempo as RunStrip (still) over /api/test tempos[].week, a why line under greyed buttons, answer test runs, TestFeed.tsx = the live test feed (each run by its title); Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents (+ Distil.tsx) · Items (+ Claude draft, CSV import/export, LedgerImport.tsx = the loot history import) · Wishlists (TMB import previewed per character) · Appeals (L32) · Companions); Me › My loot's Ask the council (MyLoot.tsx) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode + ArmoryGuildCard.tsx (meta.armory: the guild's name → Look it up → the found facts + the server's sentences →
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Professions (members, §5.60, §5.64: pages/Professions.tsx + professions.module.css = the finder over the game's whole list — part of a name → each recipe's category, what it makes, reagents and crafters highest skill first, else the server's `nobody` / `message` / `more` sentences —, a tab per profession = crafters with a skill bar + (with the list) What the guild makes grouped by category, officers' card of recipes not in the game's list with Pick the recipe… (RecipePicker) / Remove previewing POST /api/professions/unmatched's sentences; search first, cards and sideways tabs below sm; §5.65: under a hit's reagents CostLines = a line per reagent (ItemName × quantity · unit_words each · total_words, or none listed) + the server's cost.sentence and made_words, What the guild makes shows each recipe's sentence + made_words, the status sentence once per card, PriceBox "What does it go for?" above the tabs over /api/prices/find (the server's message / words / more), with prices off only the owner's meta.prices.words; the `prices` topic reloads) · Prices (members, §5.66: in the rail after Professions only when meta.prices?.market; pages/Prices.tsx + prices.module.css = the status sentence once, What does it go for? (/api/prices/find, while prices show) with Watch / Stop watching per row, Your watch list (/api/prices/watching) — two tabs since 2026-11-15, Yours · Guild: Guild = GET /api/prices/guild-watching?window= → prices.guild_watch (every item a member in the server watches, the most watched first, ≤ GUILD_WATCH_TOP 50, with `watchers` / `watchers_words` — a COUNT, never who: no name or id in the answer; 403 from MCP; a member's own choice Visibility · Public | Private on the tabs' line (2026-11-16; the switch Share with the guild before) = POST /api/prices/watch/share {on} → prices.share_watch → Registry.set_watch_shared (Member.watch_hidden, shared until hidden; hidden = counts for nothing; GET watching's `shared`)) — above the rows a type-ahead filter by name (2026-11-16: on the page, over the rows already here; the group counts follow it; no match → one sentence) and Movers' two choices (2026-11-15): the window (?window= / the watch POST's `window` → prices.spark(window=), the server's `windows`) and the item group (rows' `group` + `groups` from prices.watch_groups; only groups the list holds, filtered on the page) — a row per item opened in place to components/PriceChart.tsx + the server's history sentences + Stop watching; the server's `empty`, or for a viewer without a record the refusal a press got; a press waits for POST /api/prices/watch and takes its rows; names alone while hidden; a card per row below sm; useLive `prices` + `member`; no edit mode; layout (the owner, 2026-11-15): from 80em two columns — css.cols = css.main (search + Movers; Dips and Rising = two tabs with their counts, one list at a time) and css.side (the watch list, sticky with its own scroll, rows without the listed count) —, below that one column with the watch list first. PriceChart = inline SVG at the container's width (no chart library — C17): under the plot bars of how many were listed (2026-11-15: a point's `qty` / `listed_words` from prices._point_json — supply, the feed has no sales; none on a folded day), a step line of the lowest price broken where low is null (nothing listed, or an unread point), a faint band low → high on folded days, y over the span's low..high padded (flat = mid-height), x over the server's since..until (no browser clock), high_words / low_words and the first / last `when` as labels, a pointer / arrow-key read-out (`when` · `words`), Mantine colour variables only (no hex — P3), an aria-label from the sentences; one point = a held line to until, no point or nothing listed all span = no frame; the span switch = the server's spans, showing the span pressed while it loads) · Help (members: the manual by section, commands by tier) · Events (officers, §5.67 phase 4: pages/Events.tsx on ListPage — Open (open and locked) · Coming up · History with Show older over /api/event-list; /events/<key> one event: header Lock now (box 1–2), Edit lineup (hidden once locked), Reschedule… (useRescheduleBox), EventMore, Cancel event (box 5) by Activity; Details, Signups, Board (EventBoard), Role switches, Activity; /events/coming/<schedule>/<occurrence> = ComingUpView with Open the sheet now (box 11); a finished event = HistoryView; useLive run: / member / config) · New event and Edit lineup (pages/LineupPage.tsx modes new-event / edit-lineup at /events/new and /events/:key/lineup: the builder, the Day / Starts / Locks pickers, What this makes in the server's words — /api/raid/{rid}/open/preview, /api/event/{key}/lineup —, the Open and Save boxes) · Schedules (pages/Schedules.tsx: Active · Paused, one schedule's header Edit / Pause / Resume / Remove (boxes 15–17 through the token path), ScheduleDetails, LineupPicture, RegularsSection with the next four weeks and Open early, removed schedules' regulars under the list; New schedule / Edit = LineupPage modes new-schedule / edit-schedule at /schedules/new and /schedules/:id/edit: Name / Id, Repeats, the builder, Sheet timing from the server's choices and presets, Priority — one Save through useOpsSave always, labels from PAGE_WORDS schedule_fields) · Raids (pages/Raids.tsx: the game's raids, /raids/<id>?view=rules|priority|readiness — Rules (Details, Group make-up), Priority (weight bars), Readiness (who could play, make-up with have, Standing + standing_why); one edit draft for Rules and Priority, one Save (box 19), Reset (raid_reset_box)) · Applications (officers, D32) · Members (§5.58: pages/Members.tsx + members.module.css = count chips that filter, search, one row per member (a card below sm), the member ⋮ and character ⋮ — every press previews POST /api/members/set|dm and prints only the server's sentences; components/members/MemberEdit.tsx = one member edited in place (Save previews /api/members/save), PeopleDialogs.tsx = PickModal (Rank… / Spec… / Extra roles… with the live preview) + ConfirmWalk (Confirm characters…); folds for not in the server (Remove record…) / no character yet / puppets; tabs Members · Absences · Test bench (#test-bench); components/TestBench.tsx = seed/compose, ONE Rehearse with raid picker for Try a comp and the test run, the tempo as RunStrip (still) over /api/test tempos[].week, a why line under greyed buttons, answer test runs, TestFeed.tsx = the live test feed (each run by its title); Test runs = the rehearsals' SheetCards) · Loot (components/loot/*: Tonight · History · Precedents (+ Distil.tsx) · Items (+ Claude draft, CSV import/export, LedgerImport.tsx = the loot history import) · Wishlists (TMB import previewed per character) · Appeals (L32) · Companions); Me › My loot's Ask the council (MyLoot.tsx) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode + ArmoryGuildCard.tsx (meta.armory: the guild's name → Look it up → the found facts + the server's sentences →
                        Link this guild / Unlink… through useConfirm) · Channels (ChannelsCard) + News · Recruitment and more (+ LootWeightsCard.tsx = Loot scoring, §5.48) · Companions (owner); Mantine, left rail,
-                       tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
+                       tables switch to an edit mode with one Save). Rail (officers): Events, Schedules, Raids, Members, Applications, Loot, Auras, Ops, Policy, Agents,
+                       Config; deleted in phase 4: pages/Rosters.tsx, pages/Readiness.tsx, components/CompTargets.tsx, ScheduleCard.tsx, RaidHeader.tsx and
+                       RaidCard.tsx's other pieces — /rosters (+ #run-<key>) → /events[/<key>] (RostersRedirect; web/app.py sends the old short addresses
+                       to /app/rosters so the hash survives), /readiness[?raid=] → the Raids page's Readiness view.
+                       Screenshot audit: `uv run python scripts/serve_scratch.py --seed`, then `uv run python scripts/shots.py http://127.0.0.1:8799
+                       --guild demo` (Playwright, desktop + phone; list pages shoot their first detail too) — never the live bot
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            raid thumbnails and generated class / role / buff badges (the emoji fallback; no roster or analytics images any more);  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`

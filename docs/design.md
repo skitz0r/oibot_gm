@@ -3312,6 +3312,11 @@ rows stay outside it. Tests: `tests/test_member_import.py`, the import test in `
 
 ### 5.54 The Raids page reads by its shape (built 2026-10-26)
 
+*Superseded in part (§5.67 phase 4, 2026-11-24):* the page described here — a card per raid with its schedules, the
+rules editor, `RaidCard.tsx`'s Section / Panel / Pair / RunWeek / WhenItRuns / SeatWeights, `ScheduleCard.tsx`,
+`CompTargets.tsx` — is gone. A raid is now Rules · Priority · Readiness on the Raids page and schedules have their own
+page; what follows is the history of the older page.
+
 **Why.** A review of the Raids page against the roster page's standard (2026-10-25) found the behaviour sound and the
 layout drifting: the card said *next: Tue 15 Dec* last, under the schedules, while the Rosters page showed a sheet
 already open for that raid; the rules editor was one flat form of fourteen inputs with the card's amber lost; three edit
@@ -3430,6 +3435,11 @@ possessive runs (the old one was quadratic and froze the loop under the GIL); an
 membership check and only its first 13 characters are compared with "convert guide" (never scanned); `a32` is zlib.adler32.
 
 ### 5.56 The Rosters page reads by its shape (built 2026-10-26)
+
+*Superseded in part (§5.67 phase 4, 2026-11-24):* `pages/Rosters.tsx` and `pages/Readiness.tsx` are deleted; a night is
+worked on the Events page (`/rosters#run-<key>` redirects to its event) and readiness is a view of the Raids page. The
+server pieces below (the run vocabulary, `RUN_WORDS`, ev_json, the confirm sentences, `RunStrip` on the Test bench card)
+stand; the page layouts described here are history.
 
 **Why.** A review of the Rosters page against the standard §5.54 set for Raids (2026-10-26, 50 findings; the user
 approved desktop, board and phone mockups) found the actions sound and the page hard to read on the night it matters:
@@ -5363,7 +5373,7 @@ officer, owner or tool view of who watches what; a chart image in Discord; histo
 history of anything but the lowest price and quantity listed; sale prices. The history file's real size after a week is
 still to be measured and recorded in the operator notes.
 
-### 5.67 Raids, events and schedules: schedules stored at guild level (phase 1 built 2026-11-22; phase 2 2026-11-23; phase 3 2026-11-23)
+### 5.67 Raids, events and schedules: schedules stored at guild level (phase 1 built 2026-11-22; phase 2 2026-11-23; phase 3 2026-11-23; phase 4 2026-11-24)
 
 **Why.** The owner's direction (2026-11-22): raids and schedules are distinct things. A schedule says WHEN one or more
 raids run; a raid says what the instance is. Until now a schedule lived under the raid it ran (`raids.<id>.schedules`,
@@ -5729,8 +5739,8 @@ each keep their own lineup (`rc.conflicts` flags people on both). A plain-text l
 own start goes back to the default once the raid before it changes (the confirm shows the new times). The help
 snapshot's recent-changes lines quote commit messages, which carry run keys; the non-strict
 plain-text describe fallback still prints a run key. Discord's raid wizard shows one follow-on and keeps later entries
-untouched; the site's Edit lineup waits for phase 4's builder (the route exists for MCP and the matrix), and so does a
-Schedules page that lists a schedule whose first raid left the game. Tests: `tests/test_schedule_ids.py`,
+untouched; the site's Edit lineup waited for phase 4's builder (the route exists for MCP and the matrix), and so did a
+Schedules page that lists a schedule whose first raid left the game (both built in phase 4, below). Tests: `tests/test_schedule_ids.py`,
 `tests/test_schedule_surfaces.py`, `tests/test_event_identity.py`, `tests/test_lineups.py`, `tests/test_lineup_solver.py`,
 `tests/test_reschedule.py`, `tests/test_edit_lineup.py`, `tests/test_event_surfaces.py`.
 
@@ -5741,7 +5751,225 @@ at `WALL_CEILING` × the budget, so Preview lock and Lock land on the same roste
 `rc.run_strategy` is THE split-strategy chain (run → roster → raid → balanced) the lock and Preview lock share, and Preview
 lock solves with the lock's own budget. `consequences.raid_reset_consequence` is the raid wizard's Reset confirm.
 
-**Later phases** (spec §9): the Events, Schedules and Raids pages (phase 4, which also builds the site's lineup editor),
-the Discord wizards (phase 5, closing the two `PARITY_PENDING` rows) and the words (phase 6). Phases 1 and 2's tests:
+**Phase 4 built (2026-11-24): the Events, Schedules and Raids pages.** Spec §7a, §7b and §9 item 4 (D18); plan
+`docs/superpowers/plans/2026-11-23-events-schedules-raids-pages.md`. The site's Rosters and Readiness pages are gone: an
+officer works a night on the **Events** page, edits when raids run on the **Schedules** page and what a raid is on the
+**Raids** page, and every press that tells someone something asks first in ONE box built on the server. The read models
+are pure builders over the readers phases 1–3 left (they compose no fact of their own); every value word is in
+`constants.PAGE_WORDS` (carried to the site as `/api/meta.page_words`), so no page file holds one.
+
+*The box (§7b).* `consequences.box(title, sentences, verb, *, danger, diff, rev)` → `{title, sentences, verb, danger,
+diff, fp}` is the one shape: a title naming the action and its object, at most three Confirm-rule sentences, the verb (None
+= a refusal: Back alone), red only when it cannot be undone, the edit's "label: old → new" lines, and `fp` = the first 12
+hex of a sha1 over the title, the diff, the sentences and `rev` (what the write could clobber that the sentences don't
+print: `rc.event_rev`, `rc.board_rev` / `rc.undo_rev`, `rc.member_state_rev`, a plan rev, `config_rev('schedule:<id>')` or
+`'raid_all:<id>'`). `refusal_box(title, sentence)`; `refusal_kind` reads the kind a built refusal carries (`rc.Refusal`:
+past, clash) or the refusal constant it equals (closed, locked), never words inside a sentence; `refusal_box_for` gives
+`REFUSAL_TITLES[kind]`. The twenty boxes and their generators: 1–2 Lock (`lock_box`; the count is the joiners minus
+`rc.lock_forces(...).kept_off`; an event whose every joiner is kept off is refused — `lock_refusal` = SOLVER_WORDS
+`all_off`; one nobody joined still locks as before); 3 Move (`reschedule_box`, opened on `reschedule_pick_box`); 4 Save
+this lineup (`lineup_box` over `lineup_consequence` + `lineup_diff_lines`); 5 Cancel event (`cancel_box`, red); 6–7 Switch
+/ Ask (`switch_box`, `locked=`, `swap=`, `own=`); 8 Answer for someone (`answer_box` over `inbox.action_lines`); 9 Undo
+your moves (`undo_box` / `undo_box_for`); 10 a move after the lock (the board's `consequence` sentences from ev_json
+`consequences`, drawn in the box shape; a locked event takes no drag, its Move to… asks); 11 Open the sheet
+now (`open_now_box`); 12 the past refusal (`move_past_sentence`, `PAST_TAIL`); 13–17 a schedule's create, Save, Pause,
+Resume, Remove (`schedule_create_box`, `schedule_save_box`, `schedule_pause_box`, `schedule_resume_box`,
+`schedule_remove_box`, red); 18 a regular's removal (`regular_remove_box`); 19 a raid's Save (`raid_save_box`); 20 Leave
+without saving (`leave_box`: "Keep editing" in Back's place, "Discard edits" red, the sentence `leave_unsaved_sentence` /
+`LEAVE_TEMPLATE`, carried as `/api/meta.leave`; the fixed words are `constants.CONFIRM_WORDS`, `/api/meta.confirm_words`);
+beside them `raid_reset_box` (names the minimums that go), `strategy_box` (More › Split strategy, fp = `board_rev`) and
+`configops.minimum_unchanged_box` ("Nothing to save", no verb). Box 14 says "keeps its timing" only when a time setting
+changes and "keeps its lineup" for a lineup or rosters change; a rename or notes edit says nothing about open events.
+Lowering a step's roster count drops the board places and pins on the roster that goes (`rc.roster_trim`, always cutting
+the layout to the kept rosters, also an empty padded tail) and box 4 says so ("Moves made on the removed roster are
+dropped.", the count from `plan_lineup`, losses before who is told).
+
+*Asking and staleness.* Every route a box guards takes `preview` → `{box}` (nothing written) and `seen` (the fp pressed):
+a box built now with another fp → 409 `{error: CONFIRM_WORDS['changed'], box}` and nothing written; the page shows the
+fresh box under the "changed" line and waits again; a refusal → 400 `{error, box}`. Routes: `/api/run/{key}/lock`,
+`/cancel`, `/reschedule`, `/lineup`, `/layout` (undo), `/strategy`, `/switch`, `/api/raid/{rid}/open`, `/api/admin/action`
+(Answer for someone, `spec` too), `/api/admin/raid/regulars` (a removal). A write without `seen` (MCP, plain text) goes
+ahead as before. Schedule and raid Saves go through `POST /api/ops/change`: `configops.op_box` puts the box on
+`Described.box` (and each line's), `Described.asks_first` (a box with a verb) makes the site's Save always preview first
+(`review = described.review or described.asks_first`), while the tiered Save of the admin translators and MCP keeps
+`review` (`Described.quiet`: a routine box's sentences never make it reviewed alone). `Described.fingerprint` covers the
+box's title, sentences and diff, and a held token is DESCRIBED AGAIN at the press: different words answer `needs_review`
+with the fresh box and a new token, nothing written (an event opening while the box is open changes "keeps its
+timing" without touching the schedule's rev). The diff lines use the pages' own words: `PAGE_WORDS['schedule_fields']`,
+`raid_fields`, `split`, `priority` through `configops._schedule_value_words` / `_raid_field_words` ("Locks: 24 hours before
+→ 12 hours before"), the same map the schedule editor's labels read.
+
+*The Events read model.* `event_view.py`; routes in `web/api_events.py` (officers, each in a thread; `GET /api/events`
+stays the live stream, so the list is `/api/event-list`). `event_list(reg, rs, now, offset)` → `{open, coming, history,
+history_more, tz_words}`: a row `{key (the first part's), title (its start, local12), subtitle (the schedule's name, a
+one-off's raids; history adds the state words), state, chip}`; `open` holds open AND locked events, soonest first;
+`history` `HISTORY_PAGE` (20) per page, newest first; `coming` = each active schedule's next `COMING_PER_SCHEDULE` (3)
+nights with no event (`coming_nights` over `rc.next_runs_of`, past any horizon); test runs (`rc.rehearsal_run`) and dropped
+parts are never listed; one `rc.occurrence_index(reg, rs)` per request (one pass over the run store, the same three
+tiers as `event_of_occurrence`, which now answers through it). `event_json(reg, rs, ev, viewer, sheet=, board=)` → any
+part's key answers as its event: `details` (Lineup, Comes from linking `/schedules/<id>`, Priority, Confirmation, Sheet
+opened, Locks, Signup sheet; locked: Confirmed and Open seats; and the raid-night facts read from each raid's own
+`ev_json` — `_night_facts` / `_discord_links`: Reminder, Confirm by, Confirmations pending, Open seats per raid,
+Reminded "…, by …", Automatic asks "Paused by …", Also on another event, Away that day, the officer card, updates thread
+and loot thread links), `signups` (joined, bench, no_thanks, no_answer with their rows; No answer yet =
+`rc.pool_unanswered`: the run's pool minus everyone with a row, so a one-off lists every main), `parts` (one PartView per
+raid: label "{time} · {Raid}", rosters_of, placed_of, `short`, `sheet` = ev_json, `board_state`, `board_error`, `mine`,
+`undo_box`, `layout`, `strategy`), `activity` (every raid's log, newest first), `boxes` {lock, cancel, reschedule},
+`actions`, `switches`, `lineup`, `timing` (`rc.run_timing`, the inverse of the settings Reschedule takes), `people`,
+`characters`, `strategies`, `test_chip`, `today`, `start_day` / `start_time` (in the guild's current zone), `locks`.
+`coming_json(reg, rs, sid, occurrence, now)` = a night with no sheet: Details (… "Opening by hand: From <start −
+OPEN_HORIZON_DAYS>"), `can_open` / `why` (`rc.open_row_refusal`), `open`, `box` (box 11); `ComingGone` → 404 `{error,
+key}` (`COMING_OPENED` with the event's key, `COMING_GONE` without). `GET /api/event-new` → `new_event_options` (raids,
+lineups to copy — pickup templates left out —, `NEW_EVENT_LOCKS` (2, 24), the guild's date); `GET`/`POST
+/api/event/{key}/lineup` → `lineup_edit_json` (refused through `rc.lineup_fixed`, THE lineup lock rule `lineup_refusal`
+reads too) / `lineup_draft_json` (What this makes, nothing written; the Save is `/api/run/{key}/lineup`); `POST
+/api/raid/{rid}/open/preview` adds `new_event_view` when the request carries a lineup, and Open takes the one-off's
+`timing.lock_hours_before` and `rosters` (`one_off_args` → `open_run(lock_hours=, first_rosters=)`; a schedule's night
+keeps its own). The page listens to `run:`, `member` and `config`.
+
+*The board picture.* `event_board.py`. Before the lock an open raid's board is where its LOCK would place everyone now:
+`rc.event_board_preview` solves each open raid through `_solve_run` with the run's strategy and the lock's budget
+(`SOLVE_TIME_LIMIT_S`), a later raid given the earlier raids' locked or previewed rosters (`earlier`), so the repeatable
+solver's answer is the roster `lock_run` then builds; a raid nobody joined is drawn empty without a solve. `BoardCache`
+(`cache_of(bot)`), keyed (guild key, first raid's key), ONE entry per event: `get` answers "ready" when the
+`fingerprint` matches, else starts one background solve and answers "working" with the previous picture under
+`rc.overlay_board` (the officers' current moves drawn on it, so a drag never snaps back; open seats only on a ready or
+locked board). The fingerprint is built only from what the solve reads, computed as the solve computes it (answers,
+characters, ranks, attendance, join order, weights, regulars, sat out, pins, the board, strategy, size, rosters,
+minimums, the comp policy, an earlier raid's locked roster), from a `snapshot` / `frozen` view taken on the loop: a
+card id or a re-press changes nothing. Solves run one at a time on a dedicated `PREVIEW_WORKERS` (1) executor, never on
+the loop; `MAX_BOARDS` (32) events kept, least recently used dropped, and an event with no open raid is pruned; each
+event keeps a per-raid memo (`MEMO_PER_EVENT` 8, `raid_key`), so a move on one raid re-solves only it — the lock never
+reads it. A finished solve whose fingerprint still holds calls `BOARD_LISTENERS` → `publish('run:<event key>')`; a stale
+one is kept as the previous picture and solved again; an unexpected failure is kept as `PAGE_WORDS['board_failed']` for
+that fingerprint (logged once, never re-solved), drawn over the officers' layout. The lock comes first: `solver.Stop`
+abandons a running picture (`CpSolver.stop_search`; `solver.Stopped`, never an answer), and `RaidMixin.solving` (every
+lock, Preview lock, auto-fill and split preview) calls `pause()` once it holds the run and `resume()` when it lets go,
+both wrapped so a board fault never touches the lock; no picture starts while any lock-side solve runs. A drag on the
+Events page sends `shown`: `RaidMixin.board_move` applies it to `shown_layout` (the picture the SERVER holds) with
+`rc.apply_move_shown`, which pins only the mover and a swapped partner (`RaidEvent.drag_pins` {by, was, now}) and records
+who placed whom (`RaidEvent.placed_by`, `rc.record_moves`; a move from another surface clears it); a drop on Not placed
+pins them out — the lock keeps that name off (`PAGE_WORDS['not_placed_off']`). Undo my moves = `RaidMixin.undo_moves`
+(the officer's own placements leave the layout, each pin their drag changed goes back while it is still as the drag left
+it — `rc.own_pins`; `rc.undo_rev` checked); everyone else's moves stay. `placed_by` and `drag_pins` are cleared at the
+lock.
+
+*The real lock, changed where it failed (safe by construction).* `roster/solver.py` counts seats from SEATABLE players
+(`_Model.seatable` = the pool minus `force_out`): with nobody kept off the model is byte-for-byte the old one, and with a
+kept-off name in a raid that fills anyway it is unchanged; only an under-filled raid with someone kept off — always
+INFEASIBLE before (a pin out, `always_bench`, a drag onto Not placed) — now locks with the people who may play.
+`_refuse_conflicts` refuses, before searching, the four conflicts that were infeasible anyway, as `solver.Conflict`
+(`KEPT_ON`, `KEPT_BOTH`, `GROUP_FULL`, `GROUP_ROLES`, with the people, group and counts); `rc.conflict_sentence` names
+them (escaped on the Discord lines). `rc.solver_error_text` maps everything to `rc.SOLVER_WORDS` (infeasible, time — a
+real timeout's UNKNOWN checked first —, other, changing, all_off, no_other; never "minimum", never an exception's words; a
+stored sentence reads as itself, also one stored before). `rc.lock_forces(reg, rs, ev, players)` is the ONE builder of
+who is kept on and off (`_solve_run`'s `force_in` / `force_out`, the lock box's count, `rc.kept_off_ids`), and
+`role_plan` never asks a kept-off name (the fill engine, `send_batch`, the pre-lock suggestions, Switch). `_solve_run`
+raises `ALL_KEPT_OFF` before solving when every joiner is kept off. In `_solve_run`'s later-raid branch the groups per
+roster are no longer overwritten by the part number, so a hand place on a later raid's board past its first groups
+reaches the solve (a lock change only for such a board; an untouched later board locks as before). The lineup edit trims
+a roster that goes (above). Re-check Preview lock == Lock under load in the pre-deploy rehearsal (the model hashes were
+compared at the review).
+
+*Role switches.* `rc.event_switches(reg, rs, first, viewer=)` → `{short, rows, revs}` composed from each live raid's
+`role_plan` (suggestions before the lock, the fill plan after — no second ranking): `short` per raid short of a tank or
+healer minimum (`rc.needs`, the Board's numbers) with `why` (`_short_why`: `short_cover`, `short_asked`,
+`short_counted`, `short_nobody`) when it has no row; a row = one option of a role seat with `button` from the server
+(`switch_button` Switch · `answer_button` Answer for them · `ask_button` Ask) and its box (`rc.switch_box_for`). Before
+the lock one answer serves the evening: a row merges across raids (`raids` = every raid it helps, minus those the member
+leaves — `rc.switch_raids`) and the press is `set_answer(…, spec=)` on the first raid (`rc.spec_role`, a notice, no DM);
+after the lock a row is its raid's own, the officer's own row is left out, and the press is `send_plan(…, seats=[seat])`
+(that one ask). `POST /api/run/{key}/switch` re-reads the list (a row gone → 409 `{error: SWITCH_GONE, switches}`).
+`rc.set_signup` refuses `spec` once the member holds a seat on the locked roster (`rc.SPEC_SEATED`, every surface). Lines
+a verb writes for Discord reach the site through `rc.site_words` (no `<t:…>` stamp). MCP: `set_answer(spec=)`,
+`fill_seats(seats=)`; plain text: `run_answer`'s field = the spec. Discord's switch is `RUN_SWITCH_DISCORD_PENDING` in the
+parity matrix (phase 5).
+
+*The Schedules and Raids read models.* `schedule_view.py`, routes in `web/api_schedules.py`: `GET /api/schedules` →
+`schedule_list` {active, paused (each `{id, name, repeats}`), `reserved_ids` (registry.RESERVED_SCHEDULE_IDS: the editor
+holds no copy), orphans (a removed schedule's leftover regulars with box 18), editor (`editor_options`: the palette with
+each raid's lockout, weights and `timing_suggestion`, pickup defaults, lineups, hour choices in words, presets, split
+policies, `MAX_WEIGHT` 6)}; `GET /api/schedules/{id}` → `schedule_json`: `details` (Repeats, First event / Next event if
+resumed, Priority, Confirmation, Open seats after the lock, Answers), `lineup` (each step's name, rosters, start words,
+seats — None for a raid gone from the game), `timing`, `next` (`NEXT_EVENTS` 3 nights with opens / locks and the event's
+key when it has one; `next_empty` says why there are none), `regulars` (`_regulars`: count against the seats, short,
+the next four weeks from `rc.series_forecast` — a paused schedule's `if_resumed=True` —, per short night its own Open
+early from `/api/event/coming`, who they are with box 18 and the record's rev), `people`, `boxes` {pause | resume,
+remove}, `stored` (`stored_entry`, the editor's machine form), `rev`, and `gone` (`rc.gone_sentence` when a lineup raid
+left the game: listed, no next events, Remove still works). Writes stay where they were: `POST /api/ops/change` (kinds
+`schedule` / `schedule_remove`) and `POST /api/admin/raid/regulars` by the schedule's id. `raid_page.py`: `raid_row`
+(`/api/raids` `page`): details (Size — shown, never edited: profile data —, Groups, Lockout, Length, First opens, Played
+in with each schedule's link), `make_up` (`minimum_rows`: `Registry.minimums` alone, `own` = the guild set it), priority
+bars, `open_events`, `boxes.reset`; `readiness_view` (`/api/readiness` `view`): who could play, the same make-up rows with
+`have` and `level`, and Standing from exactly the printed rows (`standing`: headcount, tank / healer and each minimum
+row's level; the buff matrix's class wants stay out) with `standing_why`. A minimum of 0 is never saved: it clears the
+guild's own (`Registry.minimum_words`, `cleared_words`, `game_minimum`, `GAME_MINIMUM_WORDS`; previews and Discord's
+block say "the game's minimum"), a STORED 0 reads as absent with no migration write, and the page offers no 0 on a row
+only the game sets. `registry.section_words(section, reg)` names a raid, "schedule's settings" and "raid's settings",
+never an id.
+
+*The pages.* `pages/Events.tsx` (list · one event · a coming night; header Lock now, Edit lineup — hidden once locked —,
+Reschedule…, the `⋯` More menu `components/events/EventMore.tsx` with Suggest… / Fill seats…, Remind, Pause / Resume, Re-post
+the sheet, Split strategy…, Loot, the asks out, End, Reopen; Details, Signups with the row ⋮ through the answer box, Board,
+Role switches, Activity), `pages/LineupPage.tsx` (New event, Edit lineup, New schedule, Edit schedule on ONE
+`components/lineup/LineupBuilder.tsx`: up to `lineup_max` raids, rosters 1–4, starts in 15-minute steps; What this makes
+in the server's words), `pages/Schedules.tsx`, `pages/Raids.tsx` (Rules · Priority · Readiness, one edit draft and one
+Save). Shared: `ListPage` (grouped list beside the detail; on a phone list-then-detail by URL), `Facts` / `ViewSection`,
+`ConfirmBox` (`useConfirmBox`, `BoxBody`, `BoxButtons`: the server's box only) replacing `useConfirm` on these four pages,
+`LeaveGuard` (`guardNav` / `guardClick`: the rail, every list pick and in-page Back), `WhenPicker` (`QUARTER_HOURS`,
+`clock12`), `LineupPicture`, `components/events/*`, `components/schedules/*`, `components/raids/*`; `ReviewModal` /
+`useOpsSave` gained `always`, `verb`, `title` and `staleOnPage` (other pages keep "Apply N changes" until phase 6).
+Deleted: `pages/Rosters.tsx`, `pages/Readiness.tsx`, `components/CompTargets.tsx`, `ScheduleCard.tsx`, `RaidHeader.tsx`
+and RaidCard.tsx's Section / Panel / Pair / RunWeek / WhenItRuns / SeatWeights (it keeps `RunStrip` and the week words
+for the Test bench card). `/rosters` (+ `#run-<key>`) → `/events[/<key>]`, `/readiness[?raid=]` → the Raids page's
+Readiness view (`web/app.py` sends the old short addresses to `/app/rosters` so the hash survives); `help.PAGES` names
+events / schedules / raids, `PAGE_ALIASES` maps rosters → events and readiness → raids;
+`tests/test_frontend_source.py::test_nothing_points_a_reader_at_a_page_or_control_that_is_gone` lints the rest. Rail:
+Events, Schedules, Raids, then the officers' pages as before.
+
+*Screenshots without the live bot.* `scripts/serve_scratch.py [--seed]` serves THIS worktree's app on a throw-away data
+repo under the temp directory built from `fixtures/demo` (git init, `GitStore(push=False)`, the demo characters
+imported; `--seed` adds a two-raid open one-off, a locked and a finished one, a schedule with regulars, a minimum) with
+`tests/test_raid_night.NightBot` as the bot (Discord recorded, never called) on 127.0.0.1 only; the login is the test
+suite's bearer. It refuses with `DISCORD_TOKEN` set, on the live port, or on a folder outside the temp directory or
+holding anything it didn't write (`MARKER`: it deletes only what it built); `.env` loading is off and every secret is
+taken out of the environment before AND after the imports; every module-level output path points into the scratch
+folder and the network reads the suite refuses are refused. `scripts/shots.py <base>` refuses without a URL (no
+default can reach the live bot) and uses the suite's token for the scratch address.
+
+*Calls made* (the plan's and the review rounds'; each with its cost if wrong). The list and one event are
+`/api/event-list` / `/api/event/{key}` (a rename of two routes). The Open group holds open and locked events. Box titles
+are built on the server. A stale box is caught by a fingerprint of its words (`seen`), not a data rev: a change nobody
+would read slips through. Undo my moves is per officer; a whole-board clear stays for MCP and plain text. A drag before
+the lock pins only what moved and the rest follow the lock's solve; `Move to…` before the lock moves at once. The
+picture solves in the background and the page reloads on `run:<key>` (a blocking 2–5 s request otherwise). The split
+strategy leaves the board for More › Split strategy…; the `/strategy` route refuses after the lock on every surface, MCP
+`set_strategy` included. A switch before the lock writes the spec on the answer for the whole evening; after it sends
+only that ask. Coming-up nights have no Reschedule. New event at a schedule's occurrence opens that schedule's event
+(`SCHEDULED_NIGHT`); its Locks offers two values. Size is shown, never edited. Schedule and raid Saves always show their
+box. Phone = list-then-detail with URLs. Standing derives from the printed rows (it no longer flags a missing buff
+class; the Auras page and the analytics card still do). A stored 0 minimum reads as absent (a guild that zeroed a game
+minimum gets it back). A lock with every joiner kept off is refused; one nobody joined locks empty as before. Schedule
+removal's second sentence says the open event keeps its sheet and answers (the mockup's "stays as a one-off" is not
+what happens).
+
+*Limits an operator should know.* Not on the site any more, still in Discord, plain text or MCP: a cancel's reason and
+its Tell the channel line (the site's Cancel event is the box alone); another layout, Propose, Place the rest and Clear
+of everyone's moves (Undo my moves is yours only; the Test bench card keeps Propose); opening a pickup template (Copy a
+lineup leaves templates out); one timing value back to the game's suggestion (`inherit`); start times off the 15-minute
+steps; why-notes, raid notes and the split policy on the Raids page; the regulars' level chip with its could-cover and
+recruit lines (`/roster overview`, the analytics card, MCP `list_regulars`); a new schedule made paused (the site creates
+it active). The Signups row menu's callouts and pins keep the older page-worded confirm until the confirms phase. A one-off's
+Lock box names nobody, so a join does not make it stale (a scheduled event's does). A board recompute costs about the
+lock's budget per raid it re-solves (the memo spares the others), and several events queue one after another. Browser
+Back is not guarded (the rail, the list and in-page Back are). The new verbs' Discord screens (lineup, reschedule,
+switch) are phase 5; the rename of "run" to "event" in existing strings, the activity log's code nouns and the older
+pages' Apply N changes are phase 6. Tests: `tests/test_confirm_boxes.py`, `tests/test_events_api.py`,
+`tests/test_events_lineups.py`, `tests/test_event_board.py`, `tests/test_event_board_solver.py` (slow),
+`tests/test_board_page_server.py`, `tests/test_role_switches.py`, `tests/test_schedules_api.py`,
+`tests/test_solver_kept_off.py`, `tests/test_kept_off_round2.py`, `tests/test_serve_scratch.py`.
+
+**Later phases** (spec §9): the Discord wizards (phase 5, closing the two `PARITY_PENDING` rows and the role switch's
+`RUN_SWITCH_DISCORD_PENDING`) and the words (phase 6). Phases 1 and 2's tests:
 `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`, `tests/test_minimums.py`, `tests/test_minimums_solver.py`,
 `tests/test_officer_raids.py`.
