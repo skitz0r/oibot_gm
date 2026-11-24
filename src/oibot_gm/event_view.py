@@ -144,32 +144,56 @@ def _confirmed_words(reg: Registry, ev: "rc.RaidEvent") -> str:
     return " · ".join(parts) if parts else rc.NO_CONFIRMATIONS
 
 
-def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None) -> dict:
-    """One raid of an event as the Board section draws it. `sheet` = ev_json (the route's) for BoardView's input."""
+def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, viewer: int | None = None,
+               board: tuple[str, dict | None] | None = None) -> dict:
+    """One raid of an event as the Board section draws it. `sheet(p, rosters=None)` = ev_json (the route's) for
+    BoardView's input. `board` = event_board's (state, previews) for the event. Before the lock the board is the
+    lock's placement: `board_state` ready (current), working (being placed again: the last picture, else the officers'
+    layout) or failed (the layout, `board_error` = the solver's sentence); a locked or finished raid's board is its
+    roster as it stands (locked). `mine` = the names the viewer placed by hand, `undo_box` their Undo my moves box,
+    `layout` the officers' own placements."""
     name = reg.raid_def(p.instance).get("name", p.instance) if p.instance in reg.profile.raids else str(p.instance)
     locked = p.state != "open" and bool(p.all_rosters)
     joined = p.by_status("in")
+    names = {s.display_name for s in joined}
+    rosters, state, error = None, "locked" if locked or p.state in CLOSED else "ready", None
+    if state == "ready" and board is not None:
+        st, previews = board
+        pv = (previews or {}).get(p.key)
+        if isinstance(pv, str):
+            state, error = "failed", pv
+        elif isinstance(pv, list):
+            rosters, state = pv, ("working" if st == "working" else "ready")
+        else:
+            state = "working"
     if locked:
         placed = len(p.seated())
+    elif rosters is not None:
+        placed = sum(1 for r in rosters for x in r.selected if x.signup_name in names)
     else:
-        names = {s.display_name for s in joined}
         placed = sum(1 for g in rc.board_layout(reg, p) for n in g if n in names)
-    n = len(p.all_rosters) if locked else rc.run_rosters(reg, p)
+    n = len(p.all_rosters) if locked else len(rosters) if rosters is not None else rc.run_rosters(reg, p)
+    live = p.state == "open"
+    mine = rc.own_moves(p, viewer) if live else []
     return {"key": p.key, "raid": p.instance, "raid_name": name, "label": f"{reg.local12(p.start, '%I:%M %p')} · {name}",
             "rosters_words": PAGE_WORDS["rosters_of"].format(n=n, size=rc.run_size(reg, p)),
             "placed_words": PAGE_WORDS["placed_of"].format(n=placed, m=len(joined)),
             "short": dict(rc.needs(reg, p)["roles"]) if p.state not in CLOSED else {},
-            "sheet": sheet(p) if sheet is not None else None,
-            "board_state": "locked" if locked or p.state in CLOSED else "ready", "board_error": None, "mine": [], "undo_box": None}
+            "sheet": sheet(p, rosters) if sheet is not None else None,
+            "board_state": state, "board_error": error, "mine": mine,
+            "undo_box": cq.undo_box_for(reg, p, viewer) if mine else None,
+            "layout": rc.board_layout(reg, p) if live else None}
 
 
-def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: int, *, sheet: Callable | None = None) -> dict:
+def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: int, *, sheet: Callable | None = None,
+               board: tuple[str, dict | None] | None = None) -> dict:
     """EventView: {key (part 0's), title, state, chip, kind (one_off | scheduled), schedule {id, name} | null, details
     [Fact], signups {joined, bench, no_thanks, no_answer, rows {in, sub, out, none}}, parts [PartView], activity [{when,
     line}] (every part's log, newest first), boxes {lock, cancel}, actions, lineup, start_iso, timing {setting: value}
     (rc.EVENT_TIMING's settings, what POST /api/run/{key}/reschedule takes back), people (members with no answer:
     Answer for someone), sheet_url}. Any part's key answers as its event. `viewer` = the officer looking (their own board
-    moves are Task 3's)."""
+    moves: each part's `mine` and Undo box). `board` = event_board.BoardCache.get's (state, previews): the open raids'
+    boards as the lock would place them (None: the officers' layout, as the Rosters page draws it)."""
     first = rc.first_part(rs, ev)
     parts = rc.event_parts(rs, first)
     state = _state(parts)
@@ -219,7 +243,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "kind": "scheduled" if sid else "one_off", "schedule": {"id": sid, "name": sname} if sid else None,
             "details": details,
             "signups": {"joined": len(rows["in"]), "bench": len(rows["sub"]), "no_thanks": len(rows["out"]), "no_answer": len(rows["none"]), "rows": rows},
-            "parts": [_part_view(reg, rs, p, sheet) for p in parts],
+            "parts": [_part_view(reg, rs, p, sheet, viewer, board) for p in parts],
             "activity": [{"when": r["when"], "line": r["text"]} for r in activity],
             "boxes": {"lock": cq.lock_box(reg, first, rs) if state == "open" else None, "cancel": cq.cancel_box(reg, first, rs) if live else None},
             "actions": {"reschedule": live and not started, "edit_lineup": state == "open" and first.state == "open",

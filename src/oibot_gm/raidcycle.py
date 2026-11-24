@@ -186,6 +186,10 @@ class RaidEvent(BaseModel):
     signups: dict[str, Signup] = Field(default_factory=dict)  # discord_id -> signup
     pins: dict[str, str] = Field(default_factory=dict)  # discord_id -> "in" | "out": officer decisions the solver must honour
     layout: Optional[list[list[str]]] = None  # the officers' board before lock: groups (across rosters) of signup display names
+    # before the lock, who placed a name by hand (a drag on the Events board): signup name → the officer's Discord id. A name
+    # in the layout, or pinned out by a drag to Not placed; pruned at every board write, cleared at the lock. "Undo my
+    # moves" drops exactly the viewer's names (RaidMixin.undo_moves)
+    placed_by: dict[str, int] = Field(default_factory=dict)
     split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
     cards: dict[str, int] = Field(default_factory=dict)  # officer cards in the roster channel: "health" | "lock:<i>" -> message id
     cards_channel_id: Optional[int] = None
@@ -3813,9 +3817,13 @@ def run_strategy(reg: Registry, ev: RaidEvent) -> str:
             or "balanced")
 
 
-def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None) -> tuple[list[Player], list[RosterResult], int]:
+def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None,
+               earlier: dict[int, int] | None = None) -> tuple[list[Player], list[RosterResult], int]:
     """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
-    the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective."""
+    the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective.
+    `earlier` (a later raid only): Discord id → how many raids before it rostered them, given instead of read from the
+    earlier raids' locked rosters — the board preview (event_board_preview) hands it the earlier PREVIEWS, which are
+    what those raids' locks will roster, so a later raid's preview is what its lock builds."""
     players = players_for(reg, ev)
     raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
     rd = reg.raid_def(raid_id)
@@ -3838,12 +3846,14 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     bonus = seat_bonus(reg, rs, ev, players)
     lead_rostered: tuple[str, ...] = ()
     if is_follow(ev):  # a later raid: the people rostered on the raids before it come first — its splits are theirs (design §5.62)
-        k = part_no(ev)
-        earlier = [p for p in event_parts(rs, ev) if part_no(p) < k and p.all_rosters]
         times: dict[int, int] = {}  # discord id → how many earlier raids rostered them
-        for p in earlier:
-            for uid in {player_uid(p, x) for x in p.seated()} - {None}:
-                times[uid] = times.get(uid, 0) + 1
+        if earlier is not None:
+            times = dict(earlier)
+        else:  # (never `k`: that is the groups per roster the board pins below are cut with)
+            no = part_no(ev)
+            for p in [p for p in event_parts(rs, ev) if part_no(p) < no and p.all_rosters]:
+                for uid in {player_uid(p, x) for x in p.seated()} - {None}:
+                    times[uid] = times.get(uid, 0) + 1
         # every one of them gets LEAD_SEAT_BONUS (and the solver never charges them as an extra tank or healer); someone
         # rostered on more of the earlier raids gets it once per raid, so a later raid keeps the night's longest players
         on_earlier = {p.signup_name: times[u] for p in players if (u := player_uid(ev, p)) in times}
@@ -3971,6 +3981,19 @@ def board_rev(reg: Registry, ev: RaidEvent) -> str:
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
+def own_moves(ev: RaidEvent, by_id: int | None) -> list[str]:
+    """The names officer `by_id` placed by hand on the board before the lock (ev.placed_by), sorted."""
+    return sorted(n for n, u in ev.placed_by.items() if by_id is not None and int(u) == int(by_id))
+
+
+def undo_rev(reg: Registry, ev: RaidEvent, by_id: int | None) -> str:
+    """What Undo my moves acts on: the board (board_rev) and the officer's own moves. The undo box's fingerprint and
+    RaidMixin.undo_moves' check: a board, or a set of moves, that changed since the box was shown is refused."""
+    import hashlib
+
+    return board_rev(reg, ev) + hashlib.sha1("\n".join(own_moves(ev, by_id)).encode()).hexdigest()[:8]
+
+
 LOCK_SOLVES = 3  # lock_run solves again when the answers or pins moved under it; after this many it gives up (sheet stays open)
 
 
@@ -4031,6 +4054,155 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
     if out:
         out[0].benched = [p for m, p in players.items() if m not in placed and p.status == "signed"]
     return out
+
+
+# ---------------------------------------------------------------- the board as the lock would place it (Events page)
+
+def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None) -> dict[str, "list[RosterResult] | str"]:
+    """Every OPEN raid of an event drawn as its lock would place people now — PURE: deep copies, nothing saved. Each
+    raid solves through the lock's own entry (_solve_run, the run's strategy, the lock's budget SOLVE_TIME_LIMIT_S, the
+    raid's minimums, pins and the officers' board as hard placements), so the solver's repeatable answer is the
+    roster lock_run then builds. A later raid gets `earlier` from the raids before it: their locked rosters, or the
+    previews of the ones still open (what their locks will roster). A raid nobody joined is never solved: its board is
+    every expected roster's groups, empty. A raid whose solve fails maps to rc.solver_error_text's sentence, and the
+    raids after it still solve with what the others placed. `parts` = the event's parts already copied (the board
+    cache's snapshot), else read from `rs`. → {run key: [RosterResult] (rosters[0].benched = the joiners not placed) |
+    the sentence}; a locked or closed raid has no entry (its board is its roster)."""
+    parts = [p.model_copy(deep=True) for p in (parts if parts is not None else event_parts(rs, first))]
+    out: dict[str, list[RosterResult] | str] = {}
+    times: dict[int, int] = {}  # discord id → how many raids before this one rostered (or will roster) them
+
+    def count(p: RaidEvent, rosters: list[RosterResult]) -> None:
+        for uid in {player_uid(p, x) for r in rosters for x in r.selected} - {None}:
+            times[uid] = times.get(uid, 0) + 1
+
+    for p in parts:
+        if p.state != "open":
+            if p.all_rosters:
+                count(p, p.all_rosters)
+            continue
+        if not p.by_status("in"):  # nobody joined: nothing to place, no solve
+            out[p.key] = board_rosters(reg, p, board_layout(reg, p), run_size(reg, p))
+            continue
+        try:
+            players, rosters, _ = _solve_run(reg, rs, p, time_limit=SOLVE_TIME_LIMIT_S, whatif=False,
+                                             earlier=dict(times) if is_follow(p) else None)
+        except Exception as e:  # noqa: BLE001 — infeasible / timed out: this raid says why, the others still solve
+            why = solver_error_text(e)
+            out[p.key] = why[:1].upper() + why[1:] + ("" if why.endswith(".") else ".")
+            continue
+        placed = {x.signup_name for r in rosters for x in r.selected}
+        rosters[0].benched = [x for x in players if x.signup_name not in placed and x.status == "signed"]
+        out[p.key] = rosters
+        count(p, rosters)
+    return out
+
+
+def _slot_role(reg: Registry, slot: str) -> str:
+    """The role a minimum's slot is drawn with: a role is itself, a spec its role, a class the role most of its specs
+    play (ties in ROLES order)."""
+    if slot in ROLES:
+        return slot
+    cls, _, spec = slot.partition(":")
+    try:
+        if spec:
+            return reg.profile.spec(cls, spec).role
+        roles = [reg.profile.spec(cls, sp).role for sp in reg.profile.classes.get(cls, {})]
+    except KeyError:
+        return "melee"
+    return max(ROLES, key=lambda r: (roles.count(r), -ROLES.index(r))) if roles else "melee"
+
+
+def open_seat_roles(reg: Registry, ev: RaidEvent, rosters: list[RosterResult]) -> list[list[str]]:
+    """Per roster, its empty seats a minimum still wants, as roles (the page draws the role icon + "open seat"): the
+    tank shortfall first, then the healer's, then the other slots' (melee, ranged, a class, a spec) by their role — a
+    class or spec slot covers its role's shortfall as far as it goes (one Holy Paladin fills both), and never more
+    seats than the roster has empty."""
+    size = run_size(reg, ev)
+    mins = reg.minimums(ev.instance, size)
+    out = []
+    for r in rosters:
+        free = max(0, size - len(r.selected))
+        short = {slot: max(0, int(n) - sum(1 for p in r.selected if slot_holds(slot, p))) for slot, n in mins.items()}
+        by_role = {role: short.get(role, 0) for role in ROLES}
+        rest: list[str] = []
+        for slot, n in short.items():
+            if slot in ROLES or not n:
+                continue
+            role = _slot_role(reg, slot)
+            by_role[role] = max(0, by_role[role] - n)
+            rest += [role] * n
+        seats = ["tank"] * by_role["tank"] + ["healer"] * by_role["healer"] + ["melee"] * by_role["melee"] + ["ranged"] * by_role["ranged"]
+        out.append((seats + rest)[:free])
+    return out
+
+
+def apply_move_shown(reg: Registry, ev: RaidEvent, shown: list[list[str]], name: str, to: tuple[int, int] | None) -> tuple[list[list[str]], dict[str, str], list[str]]:
+    """One drag on the board AS THE PAGE SHOWS IT before the lock (the lock's placement, `shown` = its flat groups as
+    the server holds them now), written as the officers' own placements: the same swap and full-group rules as
+    apply_move, read on `shown`, but only the mover (and a swapped partner) changes in the officers' layout — pinned
+    to the group they land in — and every other name stays where ev.layout had it, or unplaced (the lock places them).
+    A drop on Not placed keeps them out of the lock (removed from the layout, pin "out"); a place in a group lifts an
+    "out" pin. ValueError when the group is full (on the picture, or with the officers' placements) or `name` hasn't
+    joined. → (the new layout, the new pins, the names moved)."""
+    sg = signup_by_name(ev, name)
+    if sg is None or sg.status != "in":
+        raise ValueError(f"{name} hasn't joined this run")
+    k = groups_per_roster(reg, run_size(reg, ev))
+    gsize = int(reg.profile.comp_rules["group_size"])
+    pic = [list(g) for g in shown]
+    lay = board_layout(reg, ev)
+    pins = dict(ev.pins)
+    joined = {s.display_name for s in ev.signups.values() if s.status == "in"}
+
+    def fit(n: int) -> None:
+        for board in (pic, lay):
+            while len(board) < n:
+                board.append([])
+
+    def uid(x: str) -> str | None:
+        s = signup_by_name(ev, x)
+        return str(s.discord_id) if s is not None else None
+
+    def place(x: str, gi: int, pos: int | None = None) -> None:
+        for g in lay:
+            if x in g:
+                g.remove(x)
+        fit(gi + 1)
+        lay[gi].insert(len(lay[gi]) if pos is None else max(0, min(pos, len(lay[gi]))), x)
+        if pins.get(uid(x)) == "out":
+            pins.pop(uid(x))
+
+    def keep_out(x: str) -> None:
+        for g in lay:
+            if x in g:
+                g.remove(x)
+        if uid(x) is not None:
+            pins[uid(x)] = "out"
+
+    origin = next((gi for gi, g in enumerate(pic) if name in g), None)
+    if to is None:
+        keep_out(name)
+        return lay, pins, [name]
+    gi, pos = to
+    fit(max(gi + 1, -(-(gi + 1) // k) * k))
+    g = pic[gi]
+    other = g[pos] if 0 <= pos < len(g) else None
+    if other is not None and other != name and other in joined and origin != gi:  # dropped on someone in another group: swap
+        place(name, gi, pos)
+        if origin is not None:
+            place(other, origin)
+        else:
+            keep_out(other)
+        moved = [name, other]
+    else:
+        if len([x for x in g if x != name]) >= gsize:
+            raise ValueError(f"group {gi % k + 1} is full")
+        place(name, gi, pos)
+        moved = [name]
+    if any(len(x) > gsize for x in lay):
+        raise ValueError(f"group {gi % k + 1} is full")
+    return lay, pins, moved
 
 
 def autofill(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[list[str]]:

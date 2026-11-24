@@ -144,7 +144,7 @@ export interface PageWords {
   open_in_discord: string; no_answer_yet: string; answers_one: string; bot_asks: string; officer_asks: string; every_main: string;
   used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
   rosters_of: string; placed_of: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string;
-  sheet_waits: string; sheet_not_posted: string;
+  sheet_waits: string; sheet_not_posted: string; open_seat: string; board_working: string;
 }
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */
@@ -161,6 +161,8 @@ export interface PartView {
   key: string; raid: string; raid_name: string; label: string; rosters_words: string; placed_words: string;
   short: Record<string, number>; sheet: Sheet | null; board_state: "ready" | "working" | "failed" | "locked";
   board_error: string | null; mine: string[]; undo_box: Box | null;
+  /** the officers' own placements (open raids; null once locked). Undo my moves is POST /api/run/{key}/layout {undo, seen}. */
+  layout: string[][] | null;
 }
 export interface EventPerson { uid: string; display_name: string; character: string; cls: string; spec: string }
 /** GET /api/event/{key} (any raid's key answers as its event). */
@@ -388,7 +390,8 @@ export interface GroupSummary {
 }
 export interface Signup { uid: string; display_name: string; character: string; cls: string; spec: string; offspec: string | null; role: string; status: string; label: string; source: string; note: string | null; pin: "in" | "out" | null }
 export interface Seat { display_name: string; character: string; cls: string; spec: string; role: string; uid?: string | null; answer?: string | null; signed_at?: string | null }
-export interface BoardRoster { n: number; rostered: number; synergy: number | null; advisories: string[]; groups: Seat[][]; summary: GroupSummary }
+/** `open` = the roster's empty seats a minimum still wants, as roles (tank first): the page draws the role icon + "open seat". */
+export interface BoardRoster { n: number; rostered: number; synergy: number | null; advisories: string[]; groups: Seat[][]; summary: GroupSummary; open?: string[] }
 /** `leftovers` = joiners the full roster(s) left out (names, also in `bank`); `another` = one line when leftovers + bench + pool could make another run. */
 export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[]; leftovers?: string[]; another?: string | null; balance?: string | null }
 /** Why the joiners make fewer runs than the headcount allows: run `run` is short these tank/healer counts (roles_allow 0 = not even one). */

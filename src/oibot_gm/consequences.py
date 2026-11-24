@@ -752,6 +752,13 @@ def undo_box(n: int, rev: str = "") -> dict:
     return box("Undo your moves?", [head, "Everyone goes back to where the lock would place them."], "Undo moves", rev=rev)
 
 
+def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | None:
+    """Box 9 for officer `viewer` on raid `ev`'s board: the count is THEIR moves as the server records them
+    (rc.own_moves), the fingerprint the board and those moves (rc.undo_rev). None when they have none."""
+    n = len(rc.own_moves(ev, viewer))
+    return undo_box(n, rev=rc.undo_rev(reg, ev, viewer)) if n else None
+
+
 def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: str, raids, *, locked: bool = False, rev: str = "") -> dict:
     """Boxes 6 and 7: a role switch. Before the lock it changes the answer (a notice); after it, it sends an ask (a DM
     with Yes and No, or on the Me page with DMs off) and the seat changes only on a yes."""

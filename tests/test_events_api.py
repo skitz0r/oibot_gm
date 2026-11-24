@@ -21,6 +21,15 @@ CLASSES = [("Warrior", "Protection"), ("Priest", "Holy"), ("Priest", "Holy"), ("
 
 
 @pytest.fixture(autouse=True)
+def _no_board_solves(monkeypatch):
+    """The board's lock placement is Task 3's (tests/test_event_board.py): here no background solve starts, so an
+    open event with joiners reads "working" with the officers' layout drawn."""
+    from oibot_gm import event_board
+
+    monkeypatch.setattr(event_board.BoardCache, "start", lambda self, *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def _opened(reg):
     for rid in reg.profile.raids:  # the profile's raids first open 9 Dec: every event here is after it
         reg.set_raid_overrides(rid, {"first_open": "2026-01-01T00:00"}, "t")
@@ -187,7 +196,8 @@ def test_an_open_event_reads_by_its_sections(officer_client, reg, rs):
     hy, bd = j["parts"]
     assert hy["label"] == f"6:30 PM · Hyjal Summit" and bd["raid_name"] == "Barrow Deeps"
     assert hy["rosters_words"] == f"1 of {rc.run_size(reg, ev)}" and bd["rosters_words"].startswith("2 of ")
-    assert hy["placed_words"] == "0 of 18 joined" and hy["board_state"] == "ready" and hy["sheet"]["key"] == ev.key
+    assert hy["placed_words"] == "0 of 18 joined" and hy["board_state"] == "working" and hy["sheet"]["key"] == ev.key, \
+        "18 joined: the lock's placement is being worked out, the officers' (empty) layout drawn meanwhile"
     assert hy["short"] == rc.needs(reg, ev)["roles"]
     assert j["lineup"] == rc.run_lineup(reg, rs, ev) and j["start_iso"] == ev.start.isoformat()
     assert set(j["timing"]) == set(rc.EVENT_TIMING) and rc.timing_changes(reg, ev, j["timing"]) == {}, "sent back as it is, it changes nothing"

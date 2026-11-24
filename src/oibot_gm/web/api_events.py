@@ -3,7 +3,9 @@ officer page, as /api/rosters is), each run in a thread. GET /api/events stays t
 existing topics `run:` (any run saved), `member` and `config` (a schedule edited).
 
 - GET /api/event-list?history_offset=0 → event_view.event_list
-- GET /api/event/{key} → event_view.event_json (any part's key answers as its event; finished and cancelled too)
+- GET /api/event/{key} → event_view.event_json (any part's key answers as its event; finished and cancelled too), its
+  open raids' boards from event_board's cache (the lock's placement; `board_state` working while it is solved, and the
+  page hears `run:<event key>` when it is ready)
 - GET /api/event/coming/{sid}/{occurrence} → event_view.coming_json; 404 {error, key} when the night has an event now
   (`key`: the page goes there) or is no longer on its schedule (`key` null)."""
 from __future__ import annotations
@@ -13,7 +15,7 @@ import asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from .. import event_view
+from .. import event_board, event_view
 
 # a link to an event that isn't one any more: its record is gone, or (a raid taken out of a lineup) it is no event of its own
 NO_EVENT = "This event is no longer on the Events list."
@@ -42,4 +44,7 @@ def install_events_api(app: FastAPI, bot, *, who, ev_json) -> None:
         ev = rs.events.get(key)
         if ev is None or ev.dropped:  # a dropped raid answers as nothing: no event of its own and no part of one
             return JSONResponse({"error": NO_EVENT}, status_code=404)
-        return await asyncio.to_thread(event_view.event_json, v.reg, rs, ev, v.uid, sheet=lambda p: ev_json(v.reg, rs, p))
+        # the board as the lock would place it (event_board): the current picture, else the last one while it is placed again
+        board = await event_board.cache_of(bot).get(v.reg, rs, ev)
+        return await asyncio.to_thread(event_view.event_json, v.reg, rs, ev, v.uid,
+                                       sheet=lambda p, rosters=None: ev_json(v.reg, rs, p, rosters=rosters), board=board)

@@ -1059,7 +1059,20 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    empty seats. An answer or pin that changes while the lock is building the roster (someone presses *No thanks*,
    you keep someone on the bench) makes the lock build it again from the sheet as it now is, so nobody is rostered
    from an answer they already took back; if the sheet keeps changing, the lock fails, the sheet stays open and
-   you lock again in a moment. More Join answers than a raid needs → the board shows a second (third…) roster for the same
+   you lock again in a moment.
+   **On the Events page** the board before the lock is drawn the way the lock would place everyone now — the same
+   placement the lock makes, worked out again after every change (a Join, a pin, a move, a raid's minimums or
+   priority, and for a later raid of the evening who the raids before it roster). While it is worked out again the
+   page keeps the last board with *Placing everyone again after the last change. This is the board from before it.*;
+   with no board yet it shows the placements officers made. An evening with nobody joined shows its groups empty. A
+   seat a minimum still wants shows its role icon and *open seat*. A drag moves one name on the board as the bot holds
+   it at that moment — even when it was placed again while you dragged — and keeps that person where you put them
+   when the lock comes; dropping on someone swaps the two, and dropping on *Not placed* keeps them off the roster.
+   The lock places everyone else. **Undo my moves** takes back only your own moves; another officer's stay. Its
+   confirm counts them (*Your 2 moves on this board are dropped. Everyone goes back to where the lock would place
+   them.*), and if the board changed while it was open you see the new count first. Once the sheet locks the board
+   is the roster, and a finished event shows the board as it was locked.
+   More Join answers than a raid needs → the board shows a second (third…) roster for the same
    slot while a full run with its tank/healer minimums is possible, and the button becomes **Propose
    splits**: pick a philosophy — **Balanced** (both runs equally strong in buffs, tanks, healers and seat quality),
    **Raid one first** (roster 1 gets the best, roster 2 the rest), **Rotation** (whoever sat out or was in

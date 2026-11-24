@@ -7,7 +7,7 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from conftest import join, weekly
+from conftest import OWNER, join, weekly
 from test_raid_night import H, web_bot  # noqa: F401 — the routes' fixture
 
 from oibot_gm import configops
@@ -440,13 +440,16 @@ def test_seen_on_reschedule_lineup_and_undo(reg, rs, web_bot):
     assert r.status_code == 200 and rc.run_lineup(reg, rs, ev)[1]["rosters"] == 1, "no seen: as before"
     r = c.post(f"/api/run/{ev.key}/reschedule", json={"start": new}, headers=h)
     assert r.status_code == 200 and rc.first_part(rs, ev).start.isoformat() == new, "no seen: as before"
-    # undo: the board's fingerprint
-    a = c.post(f"/api/run/{ev.key}/layout", json={"groups": [], "preview": True, "moves": 2}, headers=h).json()["box"]
-    assert a["sentences"][0] == "Your 2 moves on this board are dropped."
-    ev.layout = [[ms[0].display_name]]
+    # undo: the server counts the viewer's own moves (Task 3: ev.placed_by); the fp covers the board and those moves
+    for i, m in enumerate(ms[:2]):
+        asyncio.run(web_bot.bot.board_move(reg, rs, ev, m.display_name, (0, i), "Jon", by_id=OWNER))
+    a = c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "preview": True, "moves": 7}, headers=h).json()["box"]
+    assert a["sentences"][0] == "Your 2 moves on this board are dropped.", "the count is the server's, never the body's"
+    moved = [ms[0].display_name, ms[1].display_name, ms[2].display_name]
+    ev.layout = [list(moved)]
     rs.save(ev, "a move meanwhile")
-    r = c.post(f"/api/run/{ev.key}/layout", json={"groups": [], "seen": a["fp"], "moves": 2}, headers=h)
-    assert r.status_code == 409 and ev.layout == [[ms[0].display_name]]
+    r = c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "seen": a["fp"]}, headers=h)
+    assert r.status_code == 409 and ev.layout == [moved]
     assert c.post(f"/api/run/{ev.key}/layout", json={"groups": []}, headers=h).status_code == 200, "no seen: as before"
 
 

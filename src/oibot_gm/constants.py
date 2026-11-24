@@ -71,4 +71,7 @@ PAGE_WORDS = {
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
     # the Signup sheet fact while the sheet is not in Discord: no signup channel to post to, or not posted yet
     "sheet_waits": "Posts once a signup channel is set on the Config page's Channels tab", "sheet_not_posted": "Not in Discord yet",
+    # the Board before the lock: an empty seat a minimum wants (beside its role icon), and the line over a picture that is
+    # being placed again after a change (event_board: board_state "working")
+    "open_seat": "open seat", "board_working": "Placing everyone again after the last change. This is the board from before it.",
 }

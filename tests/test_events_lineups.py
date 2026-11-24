@@ -9,8 +9,17 @@ from conftest import OWNER, join
 from test_lineups import BD, H, LINEUP, bot, open_four, reg, start_in  # noqa: F401 — the wide profile's fixtures
 from test_raid_night import H as auth, web_bot  # noqa: F401 — the routes' fixture
 
+import pytest
+
 from oibot_gm import raidcycle as rc
 from oibot_gm.web.api_events import NO_EVENT
+
+
+@pytest.fixture(autouse=True)
+def _no_board_solves(monkeypatch):
+    from oibot_gm import event_board  # the board's lock placement is tests/test_event_board.py's: no solve here
+
+    monkeypatch.setattr(event_board.BoardCache, "start", lambda self, *a, **k: None)
 
 
 def get(web_bot, path):

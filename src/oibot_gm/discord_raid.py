@@ -923,6 +923,7 @@ class RaidMixin:
             ev.rosters = trial.rosters
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
+            ev.placed_by = {}  # the officers' own moves were the board before the lock; the roster is the board now
             ev.lock_seats = [uid for r in ev.all_rosters for g in r.groups for n in g if (uid := rc.uid_of_name(ev, n)) is not None]
             ev.log.append(f"locked by {by}")
             held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
@@ -1155,6 +1156,9 @@ class RaidMixin:
         groups = [[n for n in g if n in names] for g in groups]
         if ev.state == "open":
             ev.layout = groups if any(groups) else None
+            # an officer's own move stays theirs while it is on the board: a name in the layout, or kept out by a drag
+            out = {sg.display_name for u, v in ev.pins.items() if v == "out" and (sg := ev.signups.get(u)) is not None}
+            ev.placed_by = {n: u for n, u in ev.placed_by.items() if n in out or any(n in g for g in groups)}
             await asyncio.to_thread(rs.save, ev, f"board ({by})")
             return f"{run_title(reg, ev)}: board " + ("saved" if ev.layout else "cleared") + " (the lock uses it)"
         # on the loop, not a worker thread (stage C L3): a Can't make it, a fill yes or the scheduler's expiry changes the
@@ -1179,7 +1183,7 @@ class RaidMixin:
             return await self._write_board(reg, rs, ev, groups, by, via=via)
 
     async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None, via: str = "web",
-                         expect_state: str | None = None) -> str:
+                         expect_state: str | None = None, by_id: int | None = None, shown: bool = False) -> str:
         """One move applied to the board as it is NOW (so two officers moving at once merge): `to` = (flat group
         index, position) — group index = roster × groups per roster + group — or None for the bank. Dropping on
         someone swaps (the displaced person stays a joiner). ValueError when the group is full or `name` hasn't joined.
@@ -1187,12 +1191,52 @@ class RaidMixin:
         rc.BoardChanged (the site's drags pass none: they always act on the board as it is). `expect_state`: the state
         the board was RENDERED in (the site sends it): a drag made on the open board and dropped after the scheduler
         locked it is refused (BoardChanged) instead of being applied as a post-lock roster edit (a confirmation DM, a
-        freed seat) — design B6."""
+        freed seat) — design B6.
+        `shown` (the Events page, before the lock): the page draws the lock's placement (event_board), so the move is
+        read on THAT picture as the server holds it now (cache_of(self).shown_layout — never the page's copy, which may
+        be older) and written as the officers' own placements (rc.apply_move_shown: only the mover and a swapped partner
+        are pinned; a drop on Not placed keeps them out of the lock). Without a picture it is the move on the officers'
+        layout. `by_id`: the officer, recorded per name moved (ev.placed_by) so Undo my moves drops only theirs."""
         state = ev.state
         async with self.board_lock(reg, ev.key):
             if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state or (expect_state and ev.state != expect_state):
                 raise rc.BoardChanged("The run locked while you were dragging — the board is the roster now; check it and move again." if expect_state == "open" and ev.state != "open" else rc.BoardChanged().args[0])
-            groups = rc.apply_move(reg, ev, name, to)
+            moved = [name]
+            if ev.state == "open" and shown:
+                from .event_board import cache_of
+
+                picture = cache_of(self).shown_layout(reg, ev)
+                if picture is not None:
+                    groups, pins, moved = rc.apply_move_shown(reg, ev, picture, name, to)
+                    ev.pins = pins
+                else:
+                    groups = rc.apply_move(reg, ev, name, to)
+                    if (sg := rc.signup_by_name(ev, name)) is not None:
+                        if to is None:
+                            ev.pins[str(sg.discord_id)] = "out"  # Not placed on this board = kept out of the lock
+                        elif ev.pins.get(str(sg.discord_id)) == "out":
+                            ev.pins.pop(str(sg.discord_id))  # placed in a group again: no longer kept out
+            else:
+                groups = rc.apply_move(reg, ev, name, to)
+            if ev.state == "open" and by_id is not None:
+                ev.placed_by = {**ev.placed_by, **{n: int(by_id) for n in moved}}
+            return await self._write_board(reg, rs, ev, groups, by, via=via)
+
+    async def undo_moves(self, reg, rs, ev, by_id: int, by: str, *, rev: str | None = None, via: str = "web") -> str:
+        """Undo my moves (the Events board, before the lock): the names the officer `by_id` placed by hand leave the
+        officers' layout, and the ones they kept out by a drag lose that "out" pin; everyone else's moves stay, and
+        the lock places those people again. `rev` = rc.undo_rev the officer saw (the board and their moves): a changed
+        one raises rc.BoardChanged and nothing is written."""
+        async with self.board_lock(reg, ev.key):
+            if ev.state != "open" or (rev and rev != rc.undo_rev(reg, ev, by_id)):
+                raise rc.BoardChanged()
+            mine = set(rc.own_moves(ev, by_id))
+            for n in mine:
+                sg = rc.signup_by_name(ev, n)
+                if sg is not None and ev.pins.get(str(sg.discord_id)) == "out":
+                    ev.pins.pop(str(sg.discord_id))
+            ev.placed_by = {n: u for n, u in ev.placed_by.items() if n not in mine}
+            groups = [[n for n in g if n not in mine] for g in rc.board_layout(reg, ev)]
             return await self._write_board(reg, rs, ev, groups, by, via=via)
 
     # ---- a member's "can't make it" with a note, and fill answers from anywhere but the DM button

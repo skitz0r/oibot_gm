@@ -913,10 +913,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         team = reg.config.team(ev.team) or {}
         size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
         boards = []
+        opens = rc.open_seat_roles(reg, ev, rosters)  # each roster's empty seats a minimum wants, as roles: the page draws role icon + "open seat"
         for i, r in enumerate(rosters):
             by = {p.signup_name: p for p in r.selected}
             boards.append({"n": i + 1, "rostered": len(r.selected), "synergy": r.synergy_value or None, "advisories": list(r.advisories[:6]),
-                           "groups": [[seat_json(by[m], conf, uids) for m in g if m in by] for g in r.groups], "summary": roster_summary(reg, r)})
+                           "groups": [[seat_json(by[m], conf, uids) for m in g if m in by] for g in r.groups], "summary": roster_summary(reg, r),
+                           "open": opens[i]})
         bench = rosters[0].benched if rosters else []
         # joiners the full roster(s) left out (listed apart from the Bench answers), and whether the leftovers + bench +
         # pool could make another run: one line, no action
@@ -952,7 +954,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "short_after": plan.short_after, "still_short": rc.still_short_words(plan), "rev": plan.rev, "lines": rc.plan_lines(reg, plan),
                 "room": plan.room if plan.phase == "fill" else None, "batch_lines": rc.batch_preview(plan)}
 
-    def ev_json(reg, rs, ev, full: bool = True) -> dict:
+    def ev_json(reg, rs, ev, full: bool = True, rosters=None) -> dict:
         t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
         live = ev.state not in ("done", "cancelled")
         rd = reg.raid_def(ev.instance)
@@ -985,7 +987,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         soft, hard, confirm = run_times(reg, ev, t)
         conf_rows = rc.confirmations(reg, ev) if ev.all_rosters else []
-        board_rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev))
+        # `rosters`: the board as the lock would place it (the Events page's event_board preview); else the roster or the layout
+        board_rosters = (rosters if rosters is not None else ev.all_rosters if ev.state != "open" and ev.all_rosters
+                         else rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev)))
         absences = [{"display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "signed": str(m.discord_id) in ev.signups}
                     for m in reg.members.values() for a in m.absences if a.start <= day <= a.end]
         busy = rc.conflicts(rs, ev) if live else {}
@@ -1324,6 +1328,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """The board after a write; after lock the line says who was asked / freed (before lock the drag speaks for itself)."""
         return board_reply(v.reg, ev) if was_open else {**board_reply(v.reg, ev), "message": line}
 
+    NO_MOVES = "You have no moves of your own on this board, so there is nothing to undo."
+    NO_UNDO_LOCKED = "The roster is locked, so the board is the roster now and your moves are part of it."
+
     @app.post("/api/run/{key}/layout")
     async def run_layout(request: Request, key: str):
         """The board after a drag: before lock it is saved as the layout the lock will use; after lock it is the roster
@@ -1336,12 +1343,23 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if strategy and strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": f"strategy must be one of {', '.join(SPLIT_POLICIES)}"}, status_code=400)
         was_open = ev.state == "open"
-        if d.get("preview") or d.get("seen"):  # Undo my moves asks first (§7b): its box carries the board's fingerprint
-            fresh = cq.undo_box(int(d.get("moves") or 0), rev=rc.board_rev(v.reg, ev))
+        if d.get("undo") or d.get("preview") or d.get("seen"):
+            # Undo my moves (§7b): the server counts the viewer's own moves (ev.placed_by) and drops exactly those; the
+            # box's fingerprint covers the board and those moves, so a box shown before anyone moved again is refused
+            if not was_open:
+                return box_refused(NO_UNDO_LOCKED)
+            fresh = cq.undo_box_for(v.reg, ev, v.uid)
+            if fresh is None:
+                return box_refused(NO_MOVES)
             if d.get("preview"):
                 return {"box": fresh}
             if (r := box_stale(d, fresh)) is not None:
                 return r
+            try:
+                line = await bot.undo_moves(v.reg, rs, ev, v.uid, v.name, rev=rc.undo_rev(v.reg, ev, v.uid), via=v.via)
+            except rc.BoardChanged:
+                return stale(v, ev)
+            return board_written(v, ev, was_open, line)
         try:  # a whole-board write (Clear, Use this split) is only safe on the board its author was looking at
             line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name, via=v.via, strategy=strategy)
         except rc.BoardChanged:
@@ -1354,7 +1372,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         dragging at once merge; nothing is overwritten. Same effects as a whole-board write after lock (confirm DM / seat
         freed). `state` = the state the board was rendered in (open | locked): when the run's state differs (the
         scheduler locked it mid-drag) the move is refused with 409 + the current board, never applied as a post-lock
-        roster edit (design B6). The write is RaidMixin.board_move."""
+        roster edit (design B6). `shown: true` (the Events page): the board drawn is the lock's placement, so the move is
+        read on the picture the server holds NOW and pins only the mover (and a swapped partner) — RaidMixin.board_move.
+        The officer is recorded per name moved, for Undo my moves."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         name, to = str(d.get("member") or ""), d.get("to")
@@ -1365,7 +1385,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         target = None if not to else (as_int(to.get("r"), "to.r") * n + as_int(to.get("g"), "to.g"), as_int(to.get("i", 99), "to.i"))
         was_open = ev.state == "open"
         try:
-            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name, via=v.via, expect_state=seen)
+            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name, via=v.via, expect_state=seen, by_id=v.uid, shown=bool(d.get("shown")))
         except rc.BoardChanged as e:
             return JSONResponse({"error": str(e), "state": ev.state, **board_reply(v.reg, ev)}, status_code=409)
         except ValueError as e:
@@ -1402,7 +1422,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         publish(f"loot:{run_key}", guild_key)  # LootSession.save / archive (design §2.4: every save publishes through listeners)
 
     app.state.publish = publish  # the agents API and the tests reach the one fan-out through here
-    from .. import ops as ops_mod, registry as registry_mod
+    from .. import event_board as event_board_mod, ops as ops_mod, registry as registry_mod
     from ..loot import session as loot_session_mod
 
     def test_event(guild_key: str, run_key: str) -> None:
@@ -1419,7 +1439,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def memory_changed(guild_key: str) -> None:
         publish("memory", guild_key)  # a memory kept or forgotten (§5.61): the Ops page's Memory tab and the Me page reload (rows filtered server-side)
 
-    for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
+    def board_ready(guild_key: str, event_key: str) -> None:
+        publish(f"run:{event_key}", guild_key)  # the Events board's lock placement is ready (event_board.BoardCache)
+
+    for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (event_board_mod.BOARD_LISTENERS, board_ready), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
                       (loot_session_mod.LOOT_LISTENERS, loot_saved), (testfeed.LISTENERS, test_event), (discord_bot_mod.MEMBERSHIP_LISTENERS, membership_changed),
                       (discord_bot_mod.LISTEN_LISTENERS, listen_verdict), (mem.MEMORY_LISTENERS, memory_changed)):
         hooks[:] = [f for f in hooks if getattr(f, "__name__", "") != fn.__name__] + [fn]  # one per process, the newest app wins
