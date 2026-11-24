@@ -119,7 +119,7 @@ def test_removing_a_raid_drops_only_its_board_places(bot, reg, rs):
     assert xa.signups[str(ms[5].discord_id)].status == "in", "leaving before Barrow Deeps was about Barrow Deeps alone"
     assert bot.dms == {} and bot.updates[-1] == "🗂 lineup changed by Jon: Hyjal Summit, then Extra A at 9:30 PM · 6 who answered see a notice"
     audits = [t for _lvl, t in bot.ops.lines if "lineup" in t]
-    assert len(audits) == 1 and bd.key in audits[0]
+    assert len(audits) == 1 and rv.run_title(reg, bd) in audits[0] and bd.key not in audits[0]
     assert_one_chain(reg, rs, first)
 
 

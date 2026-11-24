@@ -328,7 +328,8 @@ def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
 
 
 TIMING_MOVED = "Sheet timing now belongs to each schedule. Moved: Barrow Deeps · Raid nights: confirm-by 12 hours before."
-IDS_LINE = "Schedules now have ids of their own: Barrow Deeps · Raid nights is now barrow-deeps · Onyxia's Lair · Raid nights is now onyxias-lair."
+IDS_LINE = ("Each schedule now stands on its own instead of under one raid, and its regulars came with it: "
+            "Barrow Deeps · Raid nights · Onyxia's Lair · Raid nights.")
 
 
 def _start(reg) -> list[tuple[str, str]]:

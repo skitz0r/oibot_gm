@@ -81,8 +81,8 @@ how to do something (how_to=true), the contents list is NOT the manual: unless f
 set `read` to the ids of the parts you need (leave `answer` empty) and the bot shows you them, with the parts whose
 words match the question. Pick few and specific parts; never answer a how-to from the contents list or from memory.
 With "Manual parts" shown, answer from them: a number, a limit or a button's name is only what that text says.
-If something is not built, say so. Use this guild's actual channel names, raid names, run keys, lock/confirm times and
-the asker's own characters when relevant.
+If something is not built, say so. Use this guild's actual channel names, raid names, lock/confirm times and the asker's
+own characters when relevant. Name a run by its raid and its time, as the live state does; never quote an id.
 The answer's shape: the first sentence IS the answer, and the answer stops when the question is answered. For a question
 that reads data (who, what, which, when, how many) give the facts asked for and nothing around them: never say where a
 fact comes from or how it is kept (the armory, typed by hand, the records, this snapshot), never add whose main or alt a
@@ -506,11 +506,11 @@ def member_lines(reg: Registry, rs, m, head: str, officer_view: bool) -> list[st
             seat = ev.seat_of(m) if ev.all_rosters else None
             pin = ev.pins.get(str(m.discord_id))
             if s or seat:
-                out.append(f"  on {ev.key}: {s.status + ' as ' + s.character + ' (' + s.spec + ', ' + s.source + ')' if s else 'no answer'}{' — ' + s.note if s and s.note else ''}"
+                out.append(f"  on {rc.run_words(reg, ev)}: {s.status + ' as ' + s.character + ' (' + s.spec + ', ' + s.source + ')' if s else 'no answer'}{' — ' + s.note if s and s.note else ''}"
                            + (f" · rostered (roster {seat[0] + 1})" if seat else (" · not rostered" if ev.state != "open" else "")) + (f" · pinned {pin}" if pin else ""))
             for a in ev.fill_asks:
                 if a.open and a.discord_id == m.discord_id:
-                    out.append(f"  fill ask on {ev.key}: {a.kind} as {a.character} {a.spec} for {a.role} ({a.reason}), answer by {reg.local12(a.expires_at) if a.expires_at else '?'} — the DM's Confirm / Can't make it")
+                    out.append(f"  fill ask on {rc.run_words(reg, ev)}: {a.kind} as {a.character} {a.spec} for {a.role} ({a.reason}), answer by {reg.local12(a.expires_at) if a.expires_at else '?'} — the DM's Confirm / Can't make it")
     return out
 
 
@@ -654,7 +654,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     spec_of = {s.display_name: f"{s.character} {s.spec} {s.cls}" for s in ev.signups.values()}
     test = " · TEST RUN (puppets + the tester only)" if team.get("test") else ""
     live = ev.state in ("open", "locked")
-    head = (f"{'live run' if live else 'closed run'} {ev.key} — {rd.get('name', ev.instance)} {reg.local12(ev.start, fmt)} ({ev.instance}, size {size}): state {ev.state}{test} · nudge {reg.local12(soft, fmt)} · lock {reg.local12(hard, fmt)} · confirmations expire {reg.local12(confirm, fmt)}"
+    head = (f"{'live run' if live else 'closed run'} {rd.get('name', ev.instance)} {reg.local12(ev.start, fmt)} ({ev.instance}, size {size}): state {ev.state}{test} · nudge {reg.local12(soft, fmt)} · lock {reg.local12(hard, fmt)} · confirmations expire {reg.local12(confirm, fmt)}"
             f" · split strategy {ev.split_strategy or rd.get('split_policy', 'balanced')} · fill {ev.fill_state} · health card {'posted' if ev.health_posted else 'not yet'}" + (f" · LAST LOCK FAILED: {ev.lock_error}" if ev.lock_error else ""))
     players = rc.players_for(reg, ev)
     rb = reg.role_bounds(ev.instance, size)
@@ -784,7 +784,7 @@ def closed_run_lines(reg: Registry, rs, per_raid: int = 3) -> list[str]:
             continue
         name = reg.raid_def(rid).get("name", rid)
         out.append(f"closed runs of {name}: " + " ; ".join(
-            f"{e.key} {reg.local12(e.start)} {e.state} ({len(e.by_status('in'))} joined / {len(e.seated())} rostered)" + (f" — {_cancel_reason(e)}" if e.state == "cancelled" and _cancel_reason(e) else "")
+            f"{reg.local12(e.start)} {e.state} ({len(e.by_status('in'))} joined / {len(e.seated())} rostered)" + (f" — {_cancel_reason(e)}" if e.state == "cancelled" and _cancel_reason(e) else "")
             for e in mine))
     return out
 
@@ -813,6 +813,8 @@ def next_sheet_lines(reg: Registry, rs) -> list[str]:
 
 def runs_block(ask: Ask, budget: int) -> list[str]:
     """Live runs (a named run in full, the rest sharing the budget), then closed runs and the next sheet per raid."""
+    from . import raidcycle as rc
+
     reg, rs = ask.reg, ask.rs
     if rs is None:
         return []
@@ -833,7 +835,7 @@ def runs_block(ask: Ask, budget: int) -> list[str]:
         parts[ev.key] = _clip(run_lines(reg, rs, ev, ask.officer, detail=True, viewer_id=ask.user_id), min(NAMED_RUN_CAP, max(RUN_MIN_SHARE, left // 2)))
     left -= sum(_size(p) + 1 for p in parts.values())
     rest = [ev for ev in shown if ev.key not in parts]
-    extra = [f"(+{len(live) - MAX_RUNS} more live runs: {', '.join(e.key for e in live[MAX_RUNS:])})"] if len(live) > MAX_RUNS else []
+    extra = [f"(+{len(live) - MAX_RUNS} more live runs: {', '.join(rc.run_words(reg, e) for e in live[MAX_RUNS:])})"] if len(live) > MAX_RUNS else []
     left -= _size(extra) + 1
     share = max(RUN_MIN_SHARE, left // max(1, len(rest))) if rest else 0
     for ev in rest:
@@ -1152,6 +1154,8 @@ def _applications(ask: Ask) -> list[str]:
 
 
 def _test_bench(ask: Ask) -> list[str]:
+    from . import raidcycle as rc
+
     reg, rs = ask.reg, ask.rs
     puppets = reg.test_members()
     specs: dict[str, int] = {}
@@ -1165,7 +1169,7 @@ def _test_bench(ask: Ask) -> list[str]:
     for e in rs.live() if rs is not None else []:
         t = reg.config.roster(e.team) or {}
         if t.get("test"):
-            runs.append(e.key + (f" (tester <@{t['test_by']}>)" if t.get("test_by") else ""))
+            runs.append(rc.run_words(reg, e) + (f" (tester <@{t['test_by']}>)" if t.get("test_by") else ""))
     return ["### Test bench (officers)",
             f"{len(puppets)} of {reg.TEST_MAX} puppets · roles " + " · ".join(f"{r} {n}" for r, n in roles.items()) + f" · test runs {', '.join(runs) or 'no test run open'}",
             "specs: " + (", ".join(f"{k} ×{v}" for k, v in sorted(specs.items())) or "no puppets yet (/gm test seed makes some)")]
@@ -1286,6 +1290,8 @@ def section_lines(ask: Ask) -> tuple[list[str], list[str], list[str]]:
 
 def core_lines(ask: Ask) -> list[str]:
     """Settings, recruitment, raids with their schedules, overrides, the test bench, and (officers) the index line."""
+    from . import raidcycle as rc
+
     reg, x = ask.reg, ask.extras
     cfg = reg.config
     known = x.channels if x else None
@@ -1353,7 +1359,7 @@ def core_lines(ask: Ask) -> list[str]:
         lines.append("the guild's changes to buffs: no buff or family changed — every aura reads the game's defaults")
     puppets = reg.test_members()
     rs = ask.rs
-    test_runs = [e.key for e in rs.live() if (cfg.roster(e.team) or {}).get("test")] if rs is not None else []
+    test_runs = [rc.run_words(reg, e) for e in rs.live() if (cfg.roster(e.team) or {}).get("test")] if rs is not None else []
     lines.append(f"test bench: {len(puppets)} puppet member(s)" + (f" ({_names((m.display_name for m in puppets), 8)})" if puppets else "") + f", test runs {', '.join(test_runs) or 'none'}" + ("; analytics cards paused until /gm test clear" if puppets else ""))
     return lines
 

@@ -6,10 +6,18 @@ Three ways back, in this order of how far back they go:
    a raid's own run times as its `default` schedule, regulars keyed "<raid>:<schedule>"): `--ids-only`. Each schedule
    goes back to the id its alias came from (registry.lower_schedule_ids: a raid's own run times to `default`), every
    member's regular spots, every applicant's schedules and every run dict's series back to "<raid>:<schedule>", and
-   `schedule_aliases` is emptied. Refused when a schedule runs more raids than the older code reads, two schedules of
-   one raid would both go back to one id, or ANY live run's key differs from the key the older code builds from its
-   raid, start and lowered schedule id (a run opened from `barrow-deeps` has a '-barrow-deeps' key the older code's
-   `default` never builds): the older code would open a second sheet for it, so end or cancel that run first.
+   `schedule_aliases` is emptied. The older code to go back to is commit 8b3bc81 (phase 2, = 1821e4d's code) — never
+   a55a112, which already holds phase 3's first task and would lift the ids again at its start. Refused when a schedule
+   runs more raids than the older code reads, two schedules of one raid would both go back to one id, or a run file is
+   one the older code's scheduler would get wrong (it finds a run only by the key it builds from the raid, the start
+   and the lowered schedule id, and never reads `stands_for`):
+   - a live run whose key differs (a run opened from `barrow-deeps` has a '-barrow-deeps' key the older code's
+     `default` never builds; a phase-3 key holds no time at all): a one-off is safe once ended or cancelled, a
+     schedule's run once it has been played and ended;
+   - a cancelled or finished schedule run whose key differs and whose own night is still ahead: the older code would
+     open that night again, so wait until it has passed, or pause or remove the schedule first;
+   - a run that stands in for another night of its schedule still ahead: the older code would open that night too, so
+     wait until it has passed.
 
 2. To the phase-1 code (schedules at guild level, timing on each schedule, but a raid's make-up still as the owner's
    limits and the officers' aims): `--minimums-only`. The ids are lowered as above, then each raid's `minimums` go back
@@ -69,34 +77,78 @@ def old_event_key(instance: str, start: datetime, sid: str | None, test: bool = 
     return f"{key}-{start.date().isoformat()}"
 
 
-def _run_refusal(gdir: Path, cfg: GuildConfig) -> str | None:
-    """One sentence when a LIVE run file has a key the older code won't build for it: each run's key is compared with
-    old_event_key from its raid, its start and the id its schedule lowers to (a run opened from `barrow-deeps` keyed
-    '…-barrow-deeps' where the older code builds no suffix for `default`; `tuesday-2` where it builds `tuesday`; a key
-    of Task 3's that holds no time at all). The older code would then open a second sheet for that run."""
+def _run_words(raw: dict, raids: dict, tz) -> str:
+    """A run as the refusal names it: its raid and its start in 12-hour guild time ('Barrow Deeps Tue 8 Dec 7:30 PM'),
+    never its key (random letters since phase 3)."""
+    from oibot_gm.constants import fmt12
+
+    name = (raids.get(raw.get("instance")) or {}).get("name") or raw.get("instance") or "The run"
+    try:
+        return f"{name} {fmt12(datetime.fromisoformat(raw['starts_at']).astimezone(tz))}"
+    except (KeyError, TypeError, ValueError):
+        return str(name)
+
+
+def _ahead(stamp: str | None, tz, now: datetime) -> bool:
+    """An occurrence stamp ('YYYY-MM-DDTHH:MM', guild wall time) that is still to come."""
+    try:
+        return bool(stamp) and datetime.fromisoformat(stamp).replace(tzinfo=tz) > now
+    except ValueError:
+        return False
+
+
+def _run_refusal(gdir: Path, cfg: GuildConfig, raids: dict | None = None, now: datetime | None = None) -> str | None:
+    """One sentence per run file the phase-2 scheduler would get wrong — it finds a run ONLY by the key it builds from
+    the raid, the start and the id its schedule lowers to (old_event_key), and it never reads `stands_for`:
+    - a LIVE run whose key differs (a run opened from `barrow-deeps` keyed '…-barrow-deeps' where the older code builds
+      no suffix for `default`; `tuesday-2` where it builds `tuesday`; a key of phase 3's that holds no time at all): it
+      would open a second sheet for it. A one-off is safe once it is ended or cancelled; a schedule's run once it has
+      been played (a cancelled one would be opened again — the next case);
+    - a CANCELLED or FINISHED schedule run whose key differs and whose own night is still ahead: the older code finds
+      nothing for that night and opens a fresh sheet for it. Safe once the night has passed, or with the schedule paused
+      or removed;
+    - a run (not cancelled) that stands in for another night of its schedule still ahead (`stands_for`, its file's or
+      its run dict's): the older code opens that night too. Safe once that night has passed.
+    None when no run is in the way."""
+    from zoneinfo import ZoneInfo
+
+    raids = raids or {}
+    tz = ZoneInfo(cfg.timezone)
+    now = now or datetime.now(tz)
     back = {new: old for old, new in cfg.schedule_aliases.items()}
     entries = {e["id"]: e for e in cfg.schedules if isinstance(e, dict) and e.get("id")}
-    names = {t.get("key"): t.get("name") for t in cfg.rosters if isinstance(t, dict)}
-    dict_sid = {t.get("key"): t.get("schedule_id") for t in cfg.rosters if isinstance(t, dict)}
-    bad = []
+    dicts = {t.get("key"): t for t in cfg.rosters if isinstance(t, dict)}
+    said = []
     for f in sorted((gdir / "raids").glob("*.json")) if (gdir / "raids").exists() else []:
         raw = json.loads(f.read_text())
-        if raw.get("state") in ("done", "cancelled"):
-            continue
+        t = dicts.get(raw.get("team")) or {}
+        live = raw.get("state") not in ("done", "cancelled")
+        run = _run_words(raw, raids, tz)
         # the run dict's schedule_id keeps the old suffix ('adhoc', 'after', 'test'); the file's stamp (phase 3) holds
         # a real schedule id only, so a stamped one-off reads its dict
-        sid = dict_sid.get(raw.get("team")) or raw.get("schedule")
+        sid = t.get("schedule_id") or raw.get("schedule")
         old = lowered_id(entries[sid], back) if sid in entries else sid
         try:
             want = old_event_key(raw["instance"], datetime.fromisoformat(raw["starts_at"]), old, bool(raw.get("test")))
         except (KeyError, TypeError, ValueError):
             want = None
-        if raw.get("key") != want:
-            bad.append(str(names.get(raw.get("team")) or raw.get("key")))
-    if not bad:
-        return None
-    return (f"The older code can't find the run {bad[0]}, so end or cancel it first." if len(bad) == 1
-            else f"The older code can't find the runs {', '.join(bad)}, so end or cancel them first.")
+        stands = t.get("stands_for", raw.get("stands_for")) if t else raw.get("stands_for")
+        entry = entries.get(sid) or {}  # a paused schedule or a pickup template opens nothing on its own
+        scheduled = (bool(entry) and entry.get("active", True) and entry.get("kind") != "pickup"
+                     and not raw.get("follows") and not raw.get("part") and not raw.get("test"))
+        if stands and raw.get("state") != "cancelled" and _ahead(stands, tz, now):  # a night gone by is never opened
+            said.append(f"The run {run} stands in for another night of its schedule, which the older code would open "
+                        "too, so wait until that night has passed.")
+        elif raw.get("key") == want:
+            continue
+        elif live and scheduled:
+            said.append(f"The older code can't find the run {run}, so wait until it has been played and ended.")
+        elif live:
+            said.append(f"The older code can't find the run {run}, so end or cancel it first.")
+        elif scheduled and _ahead(raw.get("occurrence") or None, tz, now):
+            said.append(f"The older code would open {run} again, so wait until that night has passed, "
+                        "or pause or remove its schedule first.")
+    return " ".join(said) or None
 
 
 def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, ids_only: bool = False) -> list[str]:
@@ -118,7 +170,7 @@ def lower(data_root: Path, dry_run: bool = False, minimums_only: bool = False, i
         before_a = [a.model_dump_json() for a in applicants]
         had_ids = bool(doc.get("schedule_aliases"))
         try:
-            why = _run_refusal(gdir, cfg)
+            why = _run_refusal(gdir, cfg, raids)
             if why:
                 raise RegistryError(why)
             ids = lower_schedule_ids(cfg, members, applicants)

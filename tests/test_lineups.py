@@ -214,7 +214,7 @@ def test_cancel_on_any_part_cancels_the_whole_run(bot, reg, rs):
     run(bot.cancel_run(reg, rs, parts[2], "Jon", "storm"))
     assert [p.state for p in rc.event_parts(rs, first)] == ["cancelled"] * 4
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
-    assert len(audits) == 1 and all(p.key in audits[0] for p in parts)
+    assert len(audits) == 1 and all(rc.run_words(reg, p) in audits[0] and p.key not in audits[0] for p in parts)
 
 
 def test_conflicts_never_count_another_part_of_the_same_run(reg, rs):
@@ -386,7 +386,7 @@ def test_a_cancel_after_the_first_raid_finished_takes_every_raid_still_to_play(b
     run(bot.cancel_run(reg, rs, parts[2], "Jon", None))
     assert [p.state for p in rc.event_parts(rs, first)] == ["done", "cancelled", "cancelled", "cancelled"]
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
-    assert len(audits) == 1 and all(p.key in audits[0] for p in parts[1:]) and first.key not in audits[0]
+    assert len(audits) == 1 and all(rc.run_words(reg, p) in audits[0] for p in parts[1:]) and rc.run_words(reg, first) not in audits[0]
 
 
 def test_the_confirm_names_only_the_raids_still_live(reg, rs):

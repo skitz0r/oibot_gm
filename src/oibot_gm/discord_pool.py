@@ -927,7 +927,7 @@ class SetupMixin:
         from . import raidcycle as rc
 
         ev = rc.open_comp_sandbox(reg, rs, raid, by, by_id)
-        await self._test_ops(reg, "warn", f"test bench: opened a comp sandbox {ev.key} with {len(reg.test_members())} test members joined (not posted)",
+        await self._test_ops(reg, "warn", f"test bench: opened a comp sandbox {views.run_title(reg, ev)} with {len(reg.test_members())} test members joined (not posted)",
                              by=by, via=via, by_id=by_id)
         return ev
 
@@ -1006,7 +1006,7 @@ class SetupMixin:
                             done.append(str(e))
         if done:
             await self.refresh_sheet(reg, ev)
-            await self._test_ops(reg, "info", f"test bench: {len(done)} answer(s) on {ev.key}", by=by, via=via, by_id=by_id)
+            await self._test_ops(reg, "info", f"test bench: {len(done)} answer(s) on {views.run_title(reg, ev)}", by=by, via=via, by_id=by_id)
         return done
 
     async def test_bench_clear(self, reg: Registry, by: str, *, via: str = "discord", by_id: int | None = None) -> str:
@@ -1018,7 +1018,7 @@ class SetupMixin:
             t = reg.config.roster(ev.team) or {}
             if t.get("test"):
                 await self.cancel_run(reg, rs, ev, by=by, reason="test bench cleared", notify=False, by_id=by_id, via=via)  # never a line where real members read
-                cancelled.append(ev.key)
+                cancelled.append(views.run_title(reg, ev))
         gone = await asyncio.to_thread(reg.clear_test_members, by)
         await self.cleanup_ephemeral(reg, rs)
         line = f"{gone} test member(s) removed, {len(cancelled)} test run(s) cancelled" + (f" ({', '.join(cancelled)})" if cancelled else "")

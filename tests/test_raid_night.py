@@ -919,7 +919,7 @@ def test_plain_text_cancel_keeps_its_surface_and_can_be_quiet(reg, rs):
     assert "Nobody gets a DM" in preview and "No line goes to the signup channel." in preview
     line = run(configops.apply_async(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"), "Jon", True, bot=bot, by_id=owner, via="chat"))
     assert "no line in the signup channel" in line and not bot.signup.sent
-    audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t and ev.key in t]
+    audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t and rc.run_words(reg, ev) in t]
     assert len(audits) == 1 and audits[0].startswith("[chat]"), audits
 
 

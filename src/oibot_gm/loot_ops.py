@@ -111,22 +111,26 @@ def _run_of(reg: Registry, target: str | None, raids=None):
     return rs, ev, None
 
 
-def _pick(sessions: list, ev, idx: int | None, ended_ok: bool = False):
-    """The council an op is for (a session, or — `ended_ok` — the id of one that has ended)."""
+def _pick(sessions: list, ev, idx: int | None, ended_ok: bool = False, reg: Registry | None = None):
+    """The council an op is for (a session, or — `ended_ok` — the id of one that has ended). A refusal names the run by
+    its raid and time, never its key."""
+    from . import raidcycle as rc
+
+    run = rc.run_words(reg, ev) if reg is not None else "this run"
     if idx is not None:
         s = next((s for s in sessions if s.roster_index == idx), None)
         if s is not None:
             return s
         if ended_ok:
             return f"{ev.key}-r{idx + 1}"
-        raise RegistryError(f"No loot council for roster {idx + 1} of {ev.key}.")
+        raise RegistryError(f"No loot council for roster {idx + 1} of {run}.")
     if len(sessions) == 1:
         return sessions[0]
     if not sessions:
         if ended_ok:
             return ev.key
-        raise RegistryError(f"No loot council is open on {ev.key} — open it first (loot open, /raid loot or the site).")
-    raise RegistryError(f"{ev.key} has one council per roster — say which: target = " + " or ".join(s.id for s in sessions))
+        raise RegistryError(f"No loot council is open on {run} — open it first (loot open, /raid loot or the site).")
+    raise RegistryError(f"{run} has one council per roster — say which: " + " or ".join(f"roster {(s.roster_index or 0) + 1}" for s in sessions) + ".")
 
 
 def _drop(s, ref: str | None, want: str):
@@ -179,7 +183,7 @@ def loot_revs(reg: Registry, ops, raids=None) -> dict[str, str]:
             continue
         try:
             _, ev, idx = _run_of(reg, op.target, raids)
-            s = _pick(_store_sessions(reg, ev.key), ev, idx)
+            s = _pick(_store_sessions(reg, ev.key), ev, idx, reg=reg)
             if whole:
                 out.setdefault(rev_key(op), ls.batch_rev(s))
             else:
@@ -234,7 +238,7 @@ def describe(reg: Registry, op, *, why: str | None = None) -> str:
         n_r = sum(len(s.pending_reasons) for s in sessions)
         bits = [f"{n_aw} award(s)"] + ([f"{n_p} pick(s) never confirmed"] if n_p else []) + ([f"{n_u} drop(s) never distributed"] if n_u else []) + ([f"{n_r} award(s) waiting for a reason"] if n_r else [])
         return f"end {title}" + (": " + ", ".join(bits) if sessions else ": no loot council is open") + " — the run is marked done" + (" and the council archived with its summary" if sessions else "")
-    s = _pick(sessions, ev, idx, ended_ok=f in ("reason", "correct"))
+    s = _pick(sessions, ev, idx, ended_ok=f in ("reason", "correct"), reg=reg)
     if f == "tick":
         names = [x.strip() for x in (op.value or "").split(",") if x.strip()]
         if not names:
@@ -439,7 +443,7 @@ async def apply_async(reg: Registry, op, by: str, bot, by_id: int | None, via: s
     if f == "end":
         return (await bot.end_run(reg, rs, ev, **kw)).replace("**", "")
     sessions = sorted([s for s in bot.events.values() if s.guild == reg.key and s.run_key == ev.key and s.origin == "raid"], key=lambda s: s.roster_index or 0)
-    s = _pick(sessions, ev, idx, ended_ok=f in ("reason", "correct"))
+    s = _pick(sessions, ev, idx, ended_ok=f in ("reason", "correct"), reg=reg)
     if f == "tick":
         add = []
         for n in [x.strip() for x in (op.value or "").split(",") if x.strip()]:

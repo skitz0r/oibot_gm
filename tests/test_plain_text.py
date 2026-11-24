@@ -135,7 +135,7 @@ def test_live_event_by_raid_id(reg, rs):
     open_test_run(reg, rs, days=10)
     with pytest.raises(RegistryError, match="2 live runs"):
         configops._live_event(reg, "barrow_deeps")
-    with pytest.raises(RegistryError, match="no live run"):
+    with pytest.raises(RegistryError, match="no live run by that name"):
         configops._live_event(reg, "hyjal_summit_forever")
 
 
@@ -161,7 +161,7 @@ def test_describe_run_ops(reg, rs):
     board = d(op="run_board", target=ev.key, value=f"{ms[0].display_name}, {ms[1].display_name} | {ms[2].display_name}")
     assert "board →" in board and "layout the lock will use" in board
     assert "not joined on this sheet: Nobody" in d(op="run_board", target=ev.key, value="Nobody")
-    assert "no live run bd-0101-0000" in d(op="run_lock", target="bd-0101-0000")
+    assert "There is no live run by that name." in d(op="run_lock", target="bd-0101-0000"), "the target is never echoed: it may be a key"
     o = d(op="run_open", target="barrow_deeps", value="2030-01-08 19:30")
     assert o.startswith("open Barrow Deeps Tue 8 Jan 7:30 PM now:") and "no signup channel" in o
     assert "unknown raid" in d(op="run_open", target="nowhere")
@@ -226,7 +226,7 @@ def test_run_lock_and_cancel(reg, rs):
     assert "already locked" in configops.describe(reg, ConfigOp(op="run_lock", target=ev.key))
     assert run(configops.apply_async(reg, ConfigOp(op="run_cancel", target=ev.key, reason="server down"), "Officer", False, bot=bot)) == f"Cancelled {ev.key}: server down"
     assert bot.calls[-1] == ("cancel_run", ev.key, "Officer", "server down")
-    with pytest.raises(RegistryError, match="no live run"):
+    with pytest.raises(RegistryError, match=f"^{configops.run_words(reg, ev)} is cancelled, so it can't change now.$"):
         run(configops.apply_async(reg, ConfigOp(op="run_cancel", target=ev.key), "Officer", False, bot=bot))
 
 
@@ -421,17 +421,17 @@ def test_guild_state_reads(reg, rs):
     rs.save(ev, "pin")
     reg.add_absence(ms[9].discord_id, ev.start.date().isoformat(), None, "wedding", "t")
     s = help_mod.guild_state(reg, rs, ms[0].discord_id, False)
-    assert f"live run {ev.key}" in s and "TEST RUN" in s and "state open" in s and "nudge " in s and "lock " in s
+    assert f"live run {configops.run_words(reg, ev)}" in s and ev.key not in s and "TEST RUN" in s and "state open" in s and "nudge " in s and "lock " in s
     assert "answers: 6 joined / 2 bench / 0 no thanks / 8 not answered" in s and f"pinned in: {ms[0].display_name}" in s
     assert f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec} {ms[0].main.cls})" in s
     assert f"absent that day: {ms[9].display_name}" in s and "wedding" not in s, "reasons are officer-only"
-    assert "## Asker (member)" in s and f"on {ev.key}: in as {ms[0].main.label}" in s and "pinned in" in s
-    assert "the guild's changes to buffs: no buff or family changed" in s and "test bench: 16 puppet member(s)" in s and f"test runs {ev.key}" in s
+    assert "## Asker (member)" in s and f"on {configops.run_words(reg, ev)}: in as {ms[0].main.label}" in s and "pinned in" in s
+    assert "the guild's changes to buffs: no buff or family changed" in s and "test bench: 16 puppet member(s)" in s and f"test runs {configops.run_words(reg, ev)}" in s
     assert "absences: <#" not in s and "absences: no channel set (/gm config channels)" in s
     # an officer asking about someone by character name gets their record; a member doesn't
     q = f"is {ms[3].main.name} coming tonight?"
     officer = help_mod.guild_state(reg, rs, ms[0].discord_id, True, q)
-    assert f"## Member named in the question: {ms[3].display_name}" in officer and f"on {ev.key}: in as {ms[3].main.label}" in officer
+    assert f"## Member named in the question: {ms[3].display_name}" in officer and f"on {configops.run_words(reg, ev)}: in as {ms[3].main.label}" in officer
     assert "## Member named in the question" not in help_mod.guild_state(reg, rs, ms[0].discord_id, False, q)
     # locked: groups with specs, confirmations, fill asks
     lock_with_board(reg, rs, ev, [m.display_name for m in ms[:5]])

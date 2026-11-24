@@ -699,7 +699,7 @@ def test_plain_text_test_ops_are_the_bench_verbs_with_one_audit_line_each(reg, r
     out, lines = plain("remove 1 Mage Frost")
     assert "1 removed" in out and len(lines) == 1 and lines[0][1].startswith("[chat] Officer: test bench: 0 added, 1 removed")
     out, lines = plain(f"answer {ev.key} join 3 bench 1")
-    assert out.startswith(f"test bench on {configops.run_words(reg, ev)}: ") and len(lines) == 1 and lines[0][1] == f"[chat] Officer: test bench: 4 answer(s) on {ev.key}"
+    assert out.startswith(f"test bench on {configops.run_words(reg, ev)}: ") and len(lines) == 1 and lines[0][1] == f"[chat] Officer: test bench: 4 answer(s) on {configops.run_words(reg, ev)}"
     out, lines = plain("comp barrow_deeps")
     assert out.startswith("comp sandbox ") and len(lines) == 1 and lines[0][1].startswith("[chat] Officer: test bench: opened a comp sandbox")
     out, lines = plain("clear")

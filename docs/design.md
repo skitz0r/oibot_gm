@@ -5526,7 +5526,9 @@ plus its rows as `schedules`; no `slots`). Writers: `set_schedule(sid, fields, b
 through `_write_schedules`, THE whole-list write of a raid's schedules (also `set_raid_overrides`' `schedules`), which
 refuses an id another raid holds (`ID_TAKEN`). Naming a raid (or a lineup) means CREATE: `Registry.schedule_raid` refuses
 an existing id with `ID_TAKEN`, or with `SCHEDULE_EXISTS` ("The schedule called {sid} already exists. To change it, name
-the schedule without a raid.") when the raid named is the schedule's own; a new id without its raid is `NO_SCHEDULE`. A
+the schedule without a raid.") only on an edit-shaped write naming the schedule's own raid (plain text naming its raid
+again, no kind); a create-shaped write (it names a kind: the site's new-schedule Save) is `ID_TAKEN` for its own raid too,
+so two officers creating one id never rewrite each other's; a new id without its raid is `NO_SCHEDULE`. A
 raid's `slots` or `schedules` are refused with `RUN_TIMES_ON_SCHEDULE`. Plain text and MCP name a schedule by its id alone
 (`SCHEDULE_ID_ALONE` refuses '<raid>:<id>', `SETTING_ALONE` an older '<id>.<setting>' field). Revs: `schedule:<id>` covers
 one schedule (absent = the id is free) and is what every schedule op checks; `raids:<id>` covers the raid's own changes
@@ -5553,8 +5555,9 @@ when its raid isn't fully answered for by the aliases (`_aliased_raids`: a raid 
 failed lift); otherwise it is dropped and named ("…: dropped a regular spot on a removed Barrow Deeps schedule"); a stray
 bare key that never named a schedule is dropped at the guild's first lift only. An unreadable entry is named by its raid
 and name (`unread_entry_name`), never by an id. `migrate_schedules` saves it in phase 1's one commit (guild.yaml plus each
-changed member and applicant file); its lines go to `ids_saved`, posted at start as one info line (`schedule_ids_line`:
-"Schedules now have ids of their own: Barrow Deeps · Raid nights is now barrow-deeps."). Phase 2's timing line names a
+changed member and applicant file); its lines go to `ids_saved`, posted at start as one info line in a raid leader's
+words (`schedule_ids_line`: "Each schedule now stands on its own instead of under one raid, and its regulars came with
+it: Barrow Deeps · Raid nights." — no id; a regular spot that could not follow is its own sentence after it). Phase 2's timing line names a
 schedule by its name ("Barrow Deeps · Raid nights: …"), never "default".
 
 *Run keys and stamps.* A new run's key is `new_run_key(reg, rs, raid)` = `<abbr>-<6 characters>` drawn with `secrets`
@@ -5629,8 +5632,10 @@ before, after)` before the new rows are installed, and stamps `stands_for: <occu
 test run) whose current night the new run times no longer give, in the same commit. The run times taken away and added
 are paired by time (`_slot_pairs`) inside the run's anchor window (`_anchor_window`: the raid's lockout window when it
 has a first opening, Monday-to-Sunday weeks only without one); the run stands for its pair's occurrence when the schedule
-gives it and no run holds it, else for nothing. `run_times_changed` returns early for a timing-only edit; a refused write
-restores the stamps. Readers only read (`stands_for_of`: the dict's, else the file's); a CANCELLED run holds no
+gives it and no run holds it, else for nothing; an edit that gives the run's own night again clears its `stands_for`
+(Tue → Wed, then "Tue, Wed": the run answers for Tuesday, Wednesday opens). The stamps go into the run dicts BEFORE the
+new rows are installed (the scheduler's minute takes no config_lock). `run_times_changed` returns early for a timing-only
+edit; a refused write restores the stamps. Readers only read (`stands_for_of`: the dict's, else the file's); a CANCELLED run holds no
 `stands_for` (its night opens again), a done one keeps it; `sync_stands_for` copies the dict's value onto the run file
 each scheduler minute and before `cleanup_ephemeral` drops the dict.
 
@@ -5653,27 +5658,48 @@ Apply; `run_open`'s text takes the same later-raid list. Site: `POST /api/run/{k
 `{sentences, rev}`; 400 refusal, 409 stale), the run card's Reschedule… (a date-time picker in guild time, the server's
 sentences, Move), the schedule editor's "Then, the same night" rows (up to three later raids with rosters and a start),
 `ev_json` `part` / `event` / `occurrence` / `lineup` / `start_local` / `cancel_tells_channel`, `schedule_json` `lineup` and
-every lineup raid in `raids`; a structured `lineup` naming no raid and no kind on an existing schedule is an edit. MCP:
+every lineup raid in `raids`; a structured `lineup` naming no raid and no kind on an existing schedule is an edit only
+with no create-shaped field (kind, slots, days, time) or with the schedule's own rev (the site's edit Save); with run
+times, no rev and its own first raid it is refused with `configops.SCHEDULE_EDIT_SPLIT` ("Raid nights already exists.
+Change its raids and its run times in two saves, one after the other." — MCP's `schedule_set` carries no rev), with
+another first raid `ID_TAKEN`. A plain-text lineup edit keeps a kept raid's start while the raid before it is unchanged. MCP:
 `reschedule_run`, `edit_lineup`, `open_run(lineup=)` (an optional `rev` from the preview). Discord has no new wizard: both
-ops are in `PARITY_PENDING` (phase 5), reachable through `/gm change` and @mentions. Person-facing plain-text lines and
-refusals name a run (`configops.run_words`: raid and 12-hour start), never its random key; ops lines and MCP fields keep it.
+ops are in `PARITY_PENDING` (phase 5), reachable through `/gm change` and @mentions. Every line a person reads names a
+run by its raid and 12-hour start (`configops.run_words` / `rc.run_words` / `raid_views.run_title`), never its random key:
+plain-text lines and refusals, the loot op refusals, the ops channel and every audit line (lock, cancel and its later
+raids, move, lineup, the scheduler's open, health, lock and close lines, the loot council's lines via
+`LootMixin.loot_where`, the test bench's), and the help snapshot (the SYSTEM prompt tells the model never to quote an id).
+MCP fields, `log.*` lines and commit messages keep the key.
 
 *The migration at start.* `rc.migrate_at_start(reg, rs)` = `migrate_schedules` (phases 1–3's lifts, the regulars) and
 `rc.stamp_runs` (every LIVE run file without `event` gets the five stamps, written from its own JSON so nothing else
 changes, and its run dict the same; finished and cancelled runs are never touched) in ONE `store.batch`: one commit per
 guild that owes one, none on a second start. `discord_bot._schedules_save` runs it first in `setup_hook`; on ready the
 ids line is posted with phase 2's lines. An older one-off pair keeps its keys, sheet and answers and reads as a two-raid
-run (its files' old `schedule: adhoc` / `after` stamps become None).
+run (its files' old `schedule: adhoc` / `after` stamps become None). The live runs are stamped first (`stamp_runs(commit=False)`,
+from the lifted config already in memory), then `migrate_schedules(stamped=)` saves guild.yaml once, so the commit carries
+ONE message, `Registry.migration_message`: what the save changes, each clause once (the guild-level lift, the sheet timing,
+the make-up, the schedule ids with their aliases, the regular spots and applications re-keyed, the spots dropped, the
+runs stamped). A live run the start's stamping missed is stamped at its first move or lineup edit
+(`rc.stamp_before_change`, from its own night, written in that change's batch), so the unstamped fallback never finds it
+by its new start.
 
 *Going back to phase 2's code.* Stop the bot, run `uv run python scripts/lower_schedules.py --ids-only --dry-run`, then
-without `--dry-run`, then start the phase-2 code. `lower_schedule_ids(cfg, members, applicants)` gives each schedule back
+without `--dry-run`, then start the phase-2 code: commit 8b3bc81 (= 1821e4d's code). Never a55a112 — it already holds
+this phase's first task and would lift the ids again at its start. Phase 1 stays 53b9153 through `--minimums-only`. `lower_schedule_ids(cfg, members, applicants)` gives each schedule back
 the id its alias came from (`lowered_id`: an alias counts only for the schedule's own first raid; a raid's lifted run times
 back to `default`; a schedule made since keeps its id as '<raid>:<id>' keys), every regular key, applicant schedule and run
 dict `series` / `schedule_id` back to "<raid>:<old id>", and empties the aliases; one commit per guild, member and
 applicant files in it. It refuses, writing nothing for that guild: a schedule of 3–4 raids; two schedules of one raid
-that would lower to one id; a stored entry that can't be read; and any LIVE run whose key differs from the one phase 2's
-code builds from its raid, start and lowered schedule (`_run_refusal`: every run opened by this phase's code, and one
-moved by a timezone change) — the older scheduler would open a second sheet for it, so end or cancel it first.
+that would lower to one id; a stored entry that can't be read; and a run file the phase-2 scheduler would get wrong
+(`_run_refusal`, one sentence per run naming its raid and time, never its key). Phase 2 finds a run ONLY by the key it
+builds from the raid, the start and the lowered schedule, and never reads `stands_for`, so: a LIVE run whose key differs
+(every run opened by this phase's code, and one moved by a timezone change) gets a second sheet — a one-off is safe once
+ended or cancelled, a schedule's run once played and ended; a CANCELLED or FINISHED schedule run whose key differs and
+whose own night is still ahead gets that night opened again — safe once the night has passed, or with the schedule
+paused or removed (cancelling a future night does NOT make the guild safe); and a run that stands in for another night
+(`stands_for` on its file or its dict, that night still ahead, the run not cancelled) gets that night opened too — safe once
+it has passed.
 `--minimums-only` (back to phase 1) and no flag (before guild-level schedules) lower the ids first. The phase-2 code
 ignores the new run fields (`RaidEvent` ignores unknown keys).
 
@@ -5689,7 +5715,8 @@ the schedule write (an edit made by older code or by hand in the file gets none,
 cancelled run gives its night back (a second sheet if an officer cancels expecting no run that week); the anchor is the
 lockout window (a move across a reset opens in the new lockout). A removed lineup raid's file is kept as cancelled with
 `dropped`. `LINEUP_LOCKED` keeps the plan's sentence. The site's Reschedule uses a date-time picker, not a typed field (the
-Clock rule's lint). A structured `lineup` on an existing id without a raid or kind is an edit (the site's editor needs it);
+Clock rule's lint). A structured `lineup` on an existing id without a raid or kind is an edit (the site's editor needs it)
+when it names no run times or carries the schedule's rev;
 `SCHEDULE_EXISTS` names the id, not the name (an unnamed schedule's name is its kind). MCP's new tools take an optional
 `rev`.
 
@@ -5699,8 +5726,9 @@ schedule whose raids have no first opening is anchored on Monday weeks: a Sunday
 week's (past) Monday, so the next Monday opens a day after the Sunday run. MCP or a raw HTTP reset sent without the
 preview's revs is unchecked, like every setup tool. A one-off's cancelled minute can be opened again. Two runs at one minute
 each keep their own lineup (`rc.conflicts` flags people on both). A plain-text lineup edit sets no starts, so a kept raid's
-own start goes back to the default (the confirm shows the new times). Test-bench answer lines and the non-strict
-plain-text describe fallback still print a run key. Discord's raid wizard shows one follow-on and keeps later entries
+own start goes back to the default once the raid before it changes (the confirm shows the new times). The help
+snapshot's recent-changes lines quote commit messages, which carry run keys; the non-strict
+plain-text describe fallback still prints a run key. Discord's raid wizard shows one follow-on and keeps later entries
 untouched; the site's Edit lineup waits for phase 4's builder (the route exists for MCP and the matrix), and so does a
 Schedules page that lists a schedule whose first raid left the game. Tests: `tests/test_schedule_ids.py`,
 `tests/test_schedule_surfaces.py`, `tests/test_event_identity.py`, `tests/test_lineups.py`, `tests/test_lineup_solver.py`,

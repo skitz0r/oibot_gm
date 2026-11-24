@@ -41,9 +41,10 @@ def test_a_past_run_named_in_words_gets_its_names(reg, rs):
     rs.save(old, "done")
     day = old.start.astimezone(reg.tz).strftime("%A")
     s = state(reg, rs, OWNER, True, f"who came last {day}?")
-    assert f"closed run {old.key}" in s and ms[0].display_name in s.split(f"closed run {old.key}")[1]
-    assert f"closed run {old.key}" not in state(reg, rs, OWNER, True, "who came to the onyxia raid last time?"), "another raid named: not this run"
-    assert f"closed run {old.key}" in state(reg, rs, OWNER, True, "who came to the last barrow deeps?")
+    head = f"closed run {rc.run_words(reg, old)}"
+    assert head in s and ms[0].display_name in s.split(head)[1] and old.key not in s
+    assert head not in state(reg, rs, OWNER, True, "who came to the onyxia raid last time?"), "another raid named: not this run"
+    assert head in state(reg, rs, OWNER, True, "who came to the last barrow deeps?")
 
 
 def test_status_carries_the_registry_change_log(reg, rs):
@@ -205,7 +206,7 @@ def test_plain_text_test_run_posts_where_it_was_asked_without_a_signup_channel(r
     out = asyncio.run(configops.apply_async(reg, ConfigOp(op="test", value="run barrow_deeps quick"), "Officer", False, bot=bot, by_id=42, channel_id=777))
     ev = rs.live()[0]
     assert ("post_sheet", ev.key) in bot.calls and "sheet in <#777>" in out, "the wizard's fallback: the channel it was asked in"
-    assert any(level == "warn" and f"opened test run {ev.key}" in line for level, line in bot.ops_lines), "the wizard's ops line"
+    assert any(level == "warn" and f"opened test run {rc.run_words(reg, ev)}" in line for level, line in bot.ops_lines), "the wizard's ops line"
 
 
 def test_the_sites_test_run_goes_through_the_one_opener(reg, rs, monkeypatch):

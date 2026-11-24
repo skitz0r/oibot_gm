@@ -316,7 +316,8 @@ src/oibot_gm/
                        GOING BACK: older code loads a lifted file, DROPS the list (GuildConfig ignores unknown keys), shows no schedules and
                        writes the file without them at its next save — so stop the bot, run scripts/lower_schedules.py (registry.lower_schedules:
                        each raid's entries back under raids.<id> as raid_override reads them, the list removed, one commit per guild; an
-                       unreadable entry refuses that guild), then start the older code;
+                       unreadable entry refuses that guild), then start the older code; back to phase 2's code = --ids-only, then commit 8b3bc81
+                       (= 1821e4d's code) — never a55a112 (it holds phase 3's first task and would lift the ids again at its start);
                        Phase 2 (§5.67, C7): SCHEDULE_TIMING = the nine values each stored schedule carries written out (write_out_timing on every
                        _set_raid_rows; timing_suggestion(raid) seeds a new one and is what "inherit" means); a raid refuses timing or a cadence preset
                        (TIMING_ON_SCHEDULE); effective_raid(base, over) = raid_def's pure merge; lift_timing(cfg, raids, skip) at every load (on a copy:
@@ -330,7 +331,8 @@ src/oibot_gm/
                        Phase 3 (§5.67): schedule ids are GUILD-UNIQUE (^[a-z0-9][a-z0-9_-]{0,15}$; RESERVED_SCHEDULE_IDS default / adhoc / test / after;
                        no DEFAULT_SCHEDULE, series_key or parse_series any more); all_schedules / schedule_entry(sid) / first_raid(sid) /
                        schedule_name(row) (a schedule is NAMED, never shown by its id: an unnamed one by its kind); schedule_raid(sid, raid) = naming a
-                       raid (or lineup) means CREATE — an existing id → ID_TAKEN, or SCHEDULE_EXISTS when it is the schedule's own raid; a new id needs
+                       raid (or lineup) means CREATE — an existing id → ID_TAKEN, SCHEDULE_EXISTS only on an edit-shaped write naming the schedule's own raid
+                       (plain text, no kind; a create-shaped one — it names a kind — is ID_TAKEN for its own raid too); a new id needs
                        its raid (NO_SCHEDULE); RUN_TIMES_ON_SCHEDULE refuses a raid's `slots` / `schedules`. lift_schedule_ids(cfg, raids) at every load
                        (after phase 2's lifts, on a copy): an old `default` entry → lifted_schedule_id(raid) ('barrow-deeps', ≤ 16, '-2' while taken)
                        named DEFAULT_SCHEDULE_NAME "Raid nights", kind weekly; a duplicate id → '<id>-2'; an id an alias already gives another raid's
@@ -341,10 +343,14 @@ src/oibot_gm/
                        a refused, unreadable or failed lift), drops and names one of a removed schedule, drops a stray bare key at the first lift
                        only; old_key_raid(key) = THE one reader of an old key's raid; series_label of a gone key = "A removed Barrow Deeps schedule";
                        unread_entry_name names an unreadable entry by raid + name. migrate_schedules saves it all in the one commit (guild.yaml +
-                       every changed member / applicant file) → ids_saved → schedule_ids_line ("Schedules now have ids of their own: …").
+                       every changed member / applicant file) → ids_saved → schedule_ids_line ("Each schedule now stands on its own instead of under one
+                       raid, and its regulars came with it: …" — no id); the commit message = migration_message(stamped) (what the save changes,
+                       each clause once: lift, timing, make-up, ids + aliases, regulars / applications re-keyed, spots dropped, runs stamped).
                        Way back: lower_schedule_ids(cfg, members, applicants) via lowered_id (an alias counts only for its own first raid) =
-                       scripts/lower_schedules.py --ids-only (refuses a lineup of 3–4 raids, two schedules lowering to one id, or a live run whose key
-                       the phase-2 code wouldn't build — _run_refusal); --minimums-only and no flag lower the ids first. NOTICE_KINDS gains `moved`
+                       scripts/lower_schedules.py --ids-only (refuses a lineup of 3–4 raids, two schedules lowering to one id, or a run phase 2's
+                       scheduler would get wrong — _run_refusal, one sentence per run by raid + time: a live run whose key it wouldn't build, a
+                       cancelled / finished schedule run with such a key whose own night is ahead (it would open it again: wait, or pause / remove
+                       the schedule), a run that stands in for another night still ahead (wait until it passes)); --minimums-only and no flag lower the ids first. NOTICE_KINDS gains `moved`
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
                        applies in Discord before registering: every first-character path checks it — Discord, plain text, the Me page);
                        PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check;
@@ -529,9 +535,10 @@ src/oibot_gm/
                        one-off's / rehearsal's (a cancelled one-off never blocks its minute); find_run = what an open at a start meets (open_run,
                        open_preview, the wizard, the plain-text describe); which_run / open_preview / upcoming_rows carry `occurrence`, never a key.
                        run_schedule_id(reg, ev) = the run dict's schedule_id, else a stamped file's `schedule` as is, else an old stamp through the
-                       aliases; run_series / run_kind read it. stamp_runs(reg, rs) stamps every LIVE unstamped run file (its own JSON, only the new
-                       keys) and dict; migrate_at_start = migrate_schedules + stamp_runs in ONE store.batch (one commit per guild; a second start
-                       writes nothing). ensure_run always CREATES (stamps `created_at`; a first part's dict with no run file after
+                       aliases; run_series / run_kind read it. stamp_runs(reg, rs, commit=) stamps every LIVE unstamped run file (its own JSON, only the
+                       new keys) and dict; migrate_at_start = stamp_runs(commit=False) then migrate_schedules(stamped=) in ONE store.batch (one commit
+                       per guild with one message; a second start writes nothing); stamp_before_change(reg, rs, parts) = the same stamps in memory for
+                       a live run the start missed, at reschedule_event / edit_lineup, written in their batch (never found by its new start). ensure_run always CREATES (stamps `created_at`; a first part's dict with no run file after
                        DICT_WITHOUT_RUN_HOURS is dropped by cleanup_ephemeral).
                        Lineups (§5.62, §5.67 phase 3): up to LINEUP_MAX 4 raids, one run file and one run dict per raid; part 0 owns the sheet, the
                        answers and the timing and its dict holds the whole `lineup`; every later part's `follows` = part 0's key, `followed_by` = the
@@ -552,7 +559,8 @@ src/oibot_gm/
                        fingerprint a preview hands out (RUN_CHANGED when stale). plan_stands_for(reg, raid, before, after) = THE decision, made once at
                        a schedule write (Registry._write_schedules, before the rows are installed, same commit): a live first part whose night the
                        new run times no longer give stands for the run time paired with its own (_slot_pairs by time; _anchor_window = the raid's
-                       lockout window with a first opening, else the Monday week); run_times_changed short-circuits a timing-only edit; a cancelled
+                       lockout window with a first opening, else the Monday week); an edit that gives its own night again clears it; the stamps are
+                       written into the dicts BEFORE the rows (the scheduler's minute takes no config_lock); run_times_changed short-circuits a timing-only edit; a cancelled
                        run holds no stands_for, a done one keeps it; sync_stands_for copies the dict's onto the file (scheduler minute, cleanup).
                        Edit lineup (§5.67 phase 3): run_lineup (what a run plays now), lineup_refusal (LINEUP_CLOSED, LINEUP_LOCKED, parse_lineup's,
                        LINEUP_FIRST, LINEUP_GONE, LINEUP_ORDER, LINEUP_SAME), plan_lineup → LineupChange (kept / new / removed, moved, told,
@@ -747,13 +755,17 @@ src/oibot_gm/
                        §5.67 phase 3: config_section = schedule:<id> for schedule ops, raid_all:<rid> for raid_reset (a schedule added since its
                        preview is a 409), raids:<rid> otherwise; _schedule_raid / _schedule_write = THE schedule write (Registry.schedule_raid's create
                        rule: ID_TAKEN / SCHEDULE_EXISTS); _schedule_ops: a structured `lineup` naming no raid and no kind on an EXISTING id is an EDIT
-                       (one `lineup` field), else it creates (3–4 raids travel as one `lineup` field); _schedule_keeps = the C10 hook. Runs:
+                       (one `lineup` field) when it names no CREATE_SHAPED field or carries the schedule's rev; with run times, no rev and its own first
+                       raid → SCHEDULE_EDIT_SPLIT ("… Change its raids and its run times in two saves, one after the other." — MCP's schedule_set
+                       carries no rev), another first raid → ID_TAKEN; else it creates (3–4 raids travel as one `lineup` field); a plain-text lineup
+                       edit keeps a kept raid's start while the raid before it is unchanged; _schedule_keeps = the C10 hook. Runs:
                        run_reschedule (target = run key; field `start` = 'YYYY-MM-DD HH:MM' guild time through rc.move_start, or an rc.EVENT_TIMING
                        setting; several on one run coalesce into one reschedule_event) and run_lineup (value = the later raids, parse_lineup_text;
                        "none" = the first raid alone) — RUN_OPS / group `runs`, EVENT_OPS (Apply passes the `event:<key>` rev = rc.event_rev),
                        RUN_VERBS_AUDITED, WARN_OPS (always reviewed); run_open's text takes the same later-raid list (lineup_of_op); PARITY_PENDING =
                        their Discord rows (phase 5 wizards; /gm change reaches them meanwhile); run_words(reg, ev) = a run as a person reads it in a
-                       plain-text line or refusal (raid + 12-hour start, never the key — ops lines and MCP fields keep it)
+                       plain-text line or refusal (raid + 12-hour start, never the key); every ops / audit line names runs the same way (raid_views.run_title,
+                       rc.run_words, LootMixin.loot_where; the help snapshot too) — MCP fields, log.* lines and commit messages keep the key
                        Professions (the owner, 2026-11-16): NOT written from plain text — the schema tells the parser so ("Not settable here") and
                        _character_rows refuses the four old fields (PROFESSION_FIELDS) with PROFESSIONS_NOT_HERE; the editors are /me professions and the
                        Me page, a linked character follows the armory. The listening gate (discord_bot.LISTEN_QUESTION / LISTEN_CRITERIA) treats "I have /

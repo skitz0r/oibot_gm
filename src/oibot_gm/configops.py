@@ -1644,10 +1644,13 @@ def _live_event(reg: Registry, target: str | None, raids=None):
         k = key.lower()
         hits = [e for e in rs.live() if e.instance and (e.instance.lower() == k or reg.raid_def(e.instance).get("name", "").lower() == k)]
         if len(hits) > 1:
-            raise RegistryError(f"{key} has {len(hits)} live runs: {', '.join(run_words(reg, e) for e in hits)}. Say which one.")
+            raid = reg.raid_def(hits[0].instance).get("name", hits[0].instance)
+            raise RegistryError(f"{raid} has {len(hits)} live runs: {', '.join(run_words(reg, e) for e in hits)}. Say which one.")
         ev = hits[0] if hits else None
     if ev is None or ev.state not in ("open", "locked"):
-        raise RegistryError(f"There is no live run {key}." if key else "Name the run.")
+        if ev is not None:  # never echo the target: it may be a run key (random letters since phase 3)
+            raise RegistryError(f"{run_words(reg, ev)} is {ev.state}, so it can't change now.")
+        raise RegistryError("There is no live run by that name. Name a raid with a run open." if key else "Name the run.")
     return rs, ev
 
 
@@ -1890,7 +1893,7 @@ def _ended_event(reg: Registry, target: str | None, raids=None):
                        and (e.instance.lower() == k or reg.raid_def(e.instance).get("name", "").lower() == k)), key=lambda e: e.closed_at or "", reverse=True)
         ev = hits[0] if hits else None
     if ev is None:
-        raise RegistryError(f"There is no run {key}." if key else "Name the run.")
+        raise RegistryError("There is no ended run by that name. Name the raid whose run ended." if key else "Name the run.")
     if ev.state == "cancelled":
         raise RegistryError(f"{run_words(reg, ev)} was cancelled — a cancelled run is never reopened; open a new one.")
     if ev.state != "done":
@@ -3980,6 +3983,8 @@ def _plain_merged(reg: Registry, parts: list[ConfigOp]) -> dict:
 
 
 CREATE_SHAPED = ("kind", "slots", "days", "time")  # what a new schedule's write names (what it is and when it runs)
+# an existing schedule's raids and run times changed together without its own rev (a structured edit, MCP): two saves work
+SCHEDULE_EDIT_SPLIT = "{name} already exists. Change its raids and its run times in two saves, one after the other."
 
 
 def _schedule_ops(reg: Registry, target: str | None, fields: dict, revs: dict | None = None) -> list[ConfigOp]:
@@ -4006,6 +4011,13 @@ def _schedule_ops(reg: Registry, target: str | None, fields: dict, revs: dict | 
 
         fields["lineup"] = json.dumps(rows)
         lineup = None
+    if (lineup is not None and exists and not raid and "kind" not in fields
+            and parse_lineup(lineup)[0]["raid"] == reg.first_raid(sid)):
+        # an edit of its raids AND its run times without the schedule's own rev (MCP's schedule_set carries none), its
+        # first raid kept: read as a create it would be refused as a clash it isn't — say what works, never rewrite unseen
+        from .registry import schedule_name
+
+        raise RegistryError(SCHEDULE_EDIT_SPLIT.format(name=schedule_name(reg.schedule_entry(sid))))
     if lineup is not None and exists:
         from .registry import ID_TAKEN
 

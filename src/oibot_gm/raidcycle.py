@@ -694,7 +694,7 @@ def plan_stands_for(reg: Registry, instance: str, before: dict[str, dict], after
     run's anchor window), and the run stands for that run time's occurrence in its ORIGINAL occurrence's anchor window
     (weekly: the raid's lockout window, else the Monday-to-Sunday week) or lockout window (days of each lockout) —
     when the schedule gives it and no other run holds it (by occurrence, or by stands_for unless cancelled). No added
-    run time, or a held one: it stands for nothing more. An edit back to its own night clears it. → {run dict key:
+    run time, or a held one: it stands for nothing more. An edit that gives its own night again clears it. → {run dict key:
     stands_for | None} for the dicts that change; the caller writes them (Registry._write_schedules)."""
     edited = {sid: (old, after[sid]) for sid, old in before.items() if run_times_changed(old, after.get(sid))}
     if not edited:
@@ -718,6 +718,10 @@ def plan_stands_for(reg: Registry, instance: str, before: dict[str, dict], after
             if f is None or f.get("state") not in ("open", "locked"):
                 continue
             own, was = t["occurrence"], t.get("stands_for")
+            if was and _given(reg, instance, new, own):  # its own night is given again: it answers for that one alone
+                out[t["key"]] = None
+                held.discard(was)
+                continue
             cur = was or own
             if _given(reg, instance, new, cur):
                 continue
@@ -1997,14 +2001,15 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
 STAMP_FIELDS = ("schedule", "occurrence", "event", "part", "starts")
 
 
-def stamp_runs(reg: Registry, rs: "RaidStore") -> list[str]:
+def stamp_runs(reg: Registry, rs: "RaidStore", commit: bool = True) -> list[str]:
     """At the start (phase 3): every LIVE run file without an `event` gets its identity stamps, read from what it already
     is — `event` = its own key (a follow-on: its `follows`), `part` 1 for a follow-on else 0, `starts` = minutes after its
     lead's start, `schedule` = its run dict's schedule_id when that is a real schedule id (else None: adhoc, after, test),
     `occurrence` = its start in guild wall time when it has a schedule. Its run dict gets the same `occurrence` / `event`
     / `part` / `starts`. Only those keys are added to a run file (written from its own JSON, every other value as it
     was); finished and cancelled runs are never touched. Idempotent: nothing to stamp = nothing written. The writes are
-    the caller's batch (migrate_at_start: one commit with the schedules lift). → the run keys stamped."""
+    the caller's batch; `commit=False` (migrate_at_start) leaves the run dicts' save and the commit message to the caller,
+    so the schedules lift and the stamps land in one commit saying each once. → the run keys stamped."""
     if getattr(reg, "_shadow", False):
         return []
     todo = [e for e in rs.live() if not e.event]
@@ -2012,11 +2017,7 @@ def stamp_runs(reg: Registry, rs: "RaidStore") -> list[str]:
         return []
     done, dicts = [], False
     for ev in todo:
-        lead = rs.events.get(ev.follows) if ev.follows else None
-        sid = schedule_stamp(run_schedule_id(reg, ev))
-        stamps = {"schedule": sid, "occurrence": occurrence_stamp(reg, ev.start) if sid else None,
-                  "event": ev.follows or ev.key, "part": 1 if ev.follows else 0,
-                  "starts": round((ev.start - lead.start).total_seconds() / 60) if lead is not None else 0}
+        stamps = _run_stamps(reg, rs, ev)
         path = reg.store.root / ev.rel_path(rs.key)
         raw = json.loads(path.read_text()) if path.exists() else json.loads(ev.model_dump_json())
         raw.update(stamps)
@@ -2028,19 +2029,49 @@ def stamp_runs(reg: Registry, rs: "RaidStore") -> list[str]:
             team.update({k: stamps[k] for k in STAMP_FIELDS if k != "schedule"})
             dicts = True
         done.append(ev.key)
+    if not commit:
+        return done
     if dicts:
         reg.save_config(f"live runs stamped with their schedule and occurrence ({len(done)})", notify=False)
     reg.store.commit(f"{rs.key}: live runs stamped with their schedule and occurrence: {', '.join(done)}")
     return done
 
 
+def _run_stamps(reg: Registry, rs: "RaidStore", ev: "RaidEvent") -> dict:
+    """The identity stamps stamp_runs gives a run file from before them, read from what it already is (its start now)."""
+    lead = rs.events.get(ev.follows) if ev.follows else None
+    sid = schedule_stamp(run_schedule_id(reg, ev))
+    return {"schedule": sid, "occurrence": occurrence_stamp(reg, ev.start) if sid else None,
+            "event": ev.follows or ev.key, "part": 1 if ev.follows else 0,
+            "starts": round((ev.start - lead.start).total_seconds() / 60) if lead is not None else 0}
+
+
+def stamp_before_change(reg: Registry, rs: "RaidStore", parts: list["RaidEvent"]) -> list[str]:
+    """A live run the start's stamping missed (stamp_runs failed) gets the same stamps IN MEMORY — the run and its run
+    dict — just before a move or a lineup edit, so the caller's own batch writes them with the change. Without them the
+    unstamped fallback would find the run by its NEW start and the scheduler would open its original night again.
+    Computed from the starts as they are now, so call it before anything moves. → the run keys stamped."""
+    if getattr(reg, "_shadow", False):
+        return []
+    todo = [p for p in parts if not p.event and p.state not in ("done", "cancelled")]
+    stamps = {p.key: _run_stamps(reg, rs, p) for p in todo}  # all read before any is set: a follow-on reads its lead's start
+    for p in todo:
+        for k, v in stamps[p.key].items():
+            setattr(p, k, v)
+        team = reg.config.roster(p.team)
+        if team is not None and not team.get("event"):
+            team.update({k: stamps[p.key][k] for k in STAMP_FIELDS if k != "schedule"})
+    return [p.key for p in todo]
+
+
 def migrate_at_start(reg: Registry, rs: "RaidStore", by: str = "migration") -> list[str]:
     """The start's one save per guild (discord_bot._schedules_save, else _schedules_migrate): Registry.migrate_schedules
     and stamp_runs in ONE store.batch, so the schedule lift and the live runs' stamps land in one commit; a second start
-    writes nothing. → the schedules lift's lines."""
+    writes nothing. The live runs are stamped first (in memory and on their files, from the lifted config already in
+    memory), then migrate_schedules saves guild.yaml once with ONE message naming both. → the schedules lift's lines."""
     with reg.store.batch():
-        lines = reg.migrate_schedules(by)
-        stamp_runs(reg, rs)
+        stamped = stamp_runs(reg, rs, commit=False)
+        lines = reg.migrate_schedules(by, stamped=stamped)
     return lines
 
 

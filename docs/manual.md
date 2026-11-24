@@ -196,7 +196,8 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   The sheet lists who joined in columns, a class per column with one character per line (spec icon + name);
   after lock the columns are the groups, with ✅ / ⏳ / ❌ for each person's confirmation.
 - **Absences channel** — a pinned card with *I'll be away*; each absence is announced there (no reason shown).
-- **Roster channel (officers)** — health cards, roster cards at lock, fill progress (🧩 lines). Each run's card
+- **Roster channel (officers)** — health cards, roster cards at lock, fill progress (🧩 lines). Here and in the ops
+  channel a run is always named by its raid and start time (*Barrow Deeps Tue 8 Dec 7:30 PM*), never by an internal id. Each run's card
   has an **updates thread** underneath where every ask, answer, freed seat, confirmation and expiry is logged. The
   **loot council's thread** lives here too (else in the ops channel), §9.
 - **Analytics channel (officers)** — one card per raid: how many could play (mains) against its size, role counts
@@ -778,7 +779,8 @@ several. One **run** = one slot occurrence = one sheet. A run is **open**, then 
 policy) and has no run times of its own. Each schedule has a name and an **id** that no other schedule of the guild has
 — two raids can't both have a *tuesday*. A guild whose raid had run times of its own before keeps them as an ordinary
 schedule named *Raid nights* (its id from the raid's name, e.g. *barrow-deeps*), and its regulars stay on it; the ops
-channel gets one line at the next start naming each schedule given a new id. A raid can have several schedules. Each
+channel gets one line at the next start naming each such schedule (*"Each schedule now stands on its own instead of under
+one raid, and its regulars came with it: Barrow Deeps · Raid nights."*). A raid can have several schedules. Each
 schedule holds its own **sheet timing** in full: when its sheet opens, nudges, locks and asks to confirm, how long
 fill asks wait, autofill and the DM on open. A new schedule starts from the game's suggestion for its raid (a pickup
 template from the ad hoc values below); setting one of them back to the default gives it the suggestion again. The
@@ -1218,7 +1220,8 @@ it came from (two changed at once pair up by time, whatever order they were type
 second run, and the next one opens at the new time; a new time that falls in the next lockout opens there. A run
 time that was only taken away stands for nothing new, a run already finished or cancelled is never changed, a
 cancelled run gives back the night it stood for (it opens after all), and a schedule with two run times keeps both:
-editing one never stops the other opening. Lockouts, the alt filter and *also on another run* read the new
+editing one never stops the other opening. An edit that gives the run's own time back — Tuesday moved to Wednesday, then
+both Tuesday and Wednesday set — makes the run answer for its Tuesday alone, and that Wednesday opens a sheet of its own. Lockouts, the alt filter and *also on another run* read the new
 start. **Where:** on the Rosters page, the run card's ⋮ menu has **Reschedule…** for an open or locked run: pick the new day and
 time, the dialog prints the bot's own confirm, and **Move** saves it. Plain text says it (*"move tonight's Barrow Deeps
 to Wednesday 8 PM"*, *"lock Thursday's run 12 hours before"*; the diff prints the same confirm, and a time the clocks

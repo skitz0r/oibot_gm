@@ -382,7 +382,7 @@ def test_run_snapshot_board_roles_closed_runs_and_next_sheet(reg, rs):
     assert f"board (layout the lock will use): roster 1: g1: {ms[0].display_name}" in s
     assert f"bank (joined, not on the board): {ms[8].display_name}" in s
     assert f"absent that day: {ms[14].display_name}" in s and "wedding" not in s
-    assert f"  fill ask on {ev.key}: sub as {ms[0].main.label}" in s, "the asker's own fill ask"
+    assert f"  fill ask on {rc.run_words(reg, ev)}: sub as {ms[0].main.label}" in s and ev.key not in s, "the asker's own fill ask"
     assert "log line 7" not in s and "log line 11" in s
     officer = state(reg, rs, OWNER, True, f"what happened on {ev.key}?")
     assert "log line 2" in officer, "a named run shows its long log"
@@ -435,7 +435,7 @@ def test_snapshot_stays_under_the_ceiling_with_8_runs_and_40_members(reg, rs):
         s = state(reg, rs, uid, officer, q, extras_full())
         assert len(s) <= help_mod.MAX_STATE_CHARS, (officer, len(s))
         for ev in runs:
-            assert f"run {ev.key}" in s, (officer, ev.key)
+            assert f"run {rc.run_words(reg, ev)}" in s, (officer, ev.key)
         assert "## Asker" in s
     full = help_mod.guild_state(reg, rs, OWNER, True, q, extras_full())
     assert "(snapshot truncated)" not in full, "the parts' own caps keep the snapshot under the ceiling"

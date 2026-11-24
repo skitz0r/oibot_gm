@@ -1966,8 +1966,14 @@ def lift_schedule_ids(cfg: "GuildConfig", raids: dict) -> tuple[list[str], bool]
 
 
 def schedule_ids_line(lines: list[str]) -> str:
-    """The start's one ops line for lift_schedule_ids' and Registry.remap_regulars' lines (migrate_schedules → ids_saved)."""
-    return "Schedules now have ids of their own: " + " · ".join(lines) + "."
+    """The start's one ops line for lift_schedule_ids' and Registry.remap_regulars' lines (migrate_schedules → ids_saved),
+    in a raid leader's words (the Copy rule: no id): the schedules that now stand on their own, named, then any regular
+    spot that could not follow. The commit message keeps the ids (lift_schedule_ids' own lines)."""
+    moved = [ln.rsplit(" is now ", 1)[0] for ln in lines if " is now " in ln]
+    rest = [ln for ln in lines if " is now " not in ln]
+    head = ["Each schedule now stands on its own instead of under one raid, and its regulars came with it: "
+            + " · ".join(moved) + "."] if moved else []
+    return " ".join(head + [f"{ln}." for ln in rest])
 
 
 def lowered_id(entry: dict, back: dict) -> str:
@@ -2878,27 +2884,54 @@ class Registry:
                                else set(raids) - left - unread_raids)
         return cfg
 
-    def migrate_schedules(self, by: str = "migration") -> list[str]:
+    def migration_message(self, stamped: list[str] = ()) -> str:
+        """The start's commit message: what this start's save actually changes, each clause once — the schedules lift,
+        the sheet timing, the make-up, the schedule ids (with their aliases), the regular spots and applications re-keyed
+        to them, the regular spots dropped, and the live runs stamped (rc.stamp_runs, `stamped`)."""
+        ids = list(getattr(self, "ids_lifted", []))
+        regs, apps = len(getattr(self, "_regulars_changed", ())), len(getattr(self, "_applicants_changed", ()))
+        dropped = list(getattr(self, "regulars_dropped", []))
+        parts = []
+        if getattr(self, "_lift_owed", False):
+            parts.append("schedules moved to the guild level")
+        if getattr(self, "timing_moved", []) or getattr(self, "timing_dropped", []):
+            parts.append("sheet timing moved onto each schedule")
+        if getattr(self, "minimums_lifted", []):
+            parts.append("make-up is one minimum per role or class")
+        if ids:
+            parts.append(f"schedules have ids of their own, the old names kept as aliases ({'; '.join(ids)})")
+        if regs or apps:
+            parts.append(f"regular spots of {regs} member(s) and {apps} application(s) keyed by schedule id")
+        if dropped:
+            parts.append(f"dropped: {'; '.join(dropped)}")
+        if stamped:
+            parts.append(f"live runs stamped with their schedule and occurrence: {', '.join(stamped)}")
+        return "; ".join(parts) or "schedules saved"
+
+    def migrate_schedules(self, by: str = "migration", stamped: list[str] = ()) -> list[str]:
         """Save an older file's lifted schedules (load_config) and the regulars translated to schedule ids
         (remap_regulars) once: ONE commit (a store.batch) holding guild.yaml and every member or applicant file that
         changed, then nothing on later calls. → the schedules lift's lines, [] when nothing was saved or no raid had a
         schedule to move (a raid whose old keys held nothing is saved without a line). The same commit carries the timing
         lift (lift_timing) and the make-up lift (lift_minimums): one ops line each goes into `timing_saved` for the start
-        hook; the ids lift (lift_schedule_ids) and the dropped regulars go into `ids_saved`. A preview copy never writes."""
+        hook; the ids lift (lift_schedule_ids) and the dropped regulars go into `ids_saved`. `stamped` = the live runs
+        rc.stamp_runs stamped just before (migrate_at_start): their run dicts are saved here too. The commit message is
+        migration_message — what the save changes, each clause once. A preview copy never writes."""
         regs_owed = getattr(self, "_regulars_owed", False)
-        if getattr(self, "_shadow", False) or not (self.schedules_lifted or getattr(self, "_schedules_owed", False) or regs_owed):
+        stamped = list(stamped or [])
+        owed = self.schedules_lifted or getattr(self, "_schedules_owed", False) or regs_owed
+        if getattr(self, "_shadow", False) or not (owed or stamped):
             return []
         with self.config_lock:
             lines = self.schedules_lifted
             moved, dropped = list(getattr(self, "timing_moved", [])), list(getattr(self, "timing_dropped", []))
             mins = list(getattr(self, "minimums_lifted", []))
             ids = list(getattr(self, "ids_lifted", [])) + list(getattr(self, "regulars_dropped", []))
-            what = ("schedules moved to the guild level" if getattr(self, "_lift_owed", True)
-                    else "sheet timing moved onto each schedule" if moved or dropped
-                    else "make-up is one minimum per role or class" if mins else "schedules have ids of their own")
-            with self.store.batch(f"{self.key}: {what} (by {by})"):  # a failure keeps the lines: the next start tries again
-                if getattr(self, "_schedules_owed", False) or self.schedules_lifted:
-                    self.save_config(f"{what} (by {by})", notify=False)
+            message = f"{self.migration_message(stamped)} (by {by})"
+            saved = getattr(self, "_schedules_owed", False) or bool(self.schedules_lifted) or bool(stamped)
+            with self.store.batch():  # ONE inner message, so the commit says it once; a failure keeps the lines for the next start
+                if saved:
+                    self.save_config(message, notify=False)
                 for uid in sorted(getattr(self, "_regulars_changed", ())):
                     m = self.members.get(uid)
                     if m is not None:
@@ -2908,7 +2941,8 @@ class Registry:
                     a = self.applicants.get(uid)
                     if a is not None:
                         self.store.write_text(Path(self.key) / "applicants" / f"{a.discord_id}.json", a.model_dump_json(indent=1))
-                self.store.commit(f"{self.key}: {what} (by {by})")
+                if not saved:  # the member / applicant files alone
+                    self.store.commit(f"{self.key}: {message}")
             if moved or dropped:
                 self.timing_saved = [*getattr(self, "timing_saved", []), timing_line(moved, dropped)]
             if mins:
@@ -5526,17 +5560,17 @@ class Registry:
                     self.config.schedule_aliases.setdefault(f"{instance}:{e['id']}", e["id"])
             # a live run whose night the edit took away stands for the run time put in its place (in its lockout), decided
             # here, once, with both lists known, BEFORE the rows go in (rc.plan_stands_for reads the run files) — so the
-            # rows and the stamps land back to back, in this same save; a refusal puts both back (the snapshot)
-            plan = {}
+            # rows and the stamps land back to back, in this same save; a refusal puts both back (the snapshot). The stamps
+            # go in FIRST: the scheduler's minute on the loop takes no config_lock, so it must never see the new run times
+            # without them (it would open the night the run now stands for)
             if not getattr(self, "_shadow", False):
                 from . import raidcycle as rc
 
-                plan = rc.plan_stands_for(self, instance, before, {e["id"]: e for e in out})
+                for key, value in rc.plan_stands_for(self, instance, before, {e["id"]: e for e in out}).items():
+                    t = self.config.team(key)
+                    if t is not None:
+                        t["stands_for"] = value
             self._set_raid_rows(instance, out)
-            for key, value in plan.items():
-                t = self.config.team(key)
-                if t is not None:
-                    t["stands_for"] = value
             self._check_raid(instance)
         except RegistryError:
             self._restore_raid(instance, snap)

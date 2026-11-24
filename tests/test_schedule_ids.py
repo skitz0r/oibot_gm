@@ -84,7 +84,10 @@ def test_the_oi_shape_keeps_its_confirm_by_and_its_start_line_names_the_schedule
     assert (s["raid"], s["name"], s["slots"], s["confirm_hours_before"]) == (RID, "Raid nights", ["Tue 04:00"], 12)
     assert reg.schedule_def(RID, "barrow-deeps")["confirm_hours_before"] == 12
     said = _start(reg)
-    assert ("info", "Schedules now have ids of their own: Barrow Deeps · Raid nights is now barrow-deeps.") in said
+    assert ("info", "Each schedule now stands on its own instead of under one raid, and its regulars came with it: "
+                    "Barrow Deeps · Raid nights.") in said
+    assert R.schedule_ids_line(["Kestrel: dropped a regular spot on a removed Barrow Deeps schedule"]) == (
+        "Kestrel: dropped a regular spot on a removed Barrow Deeps schedule."), "a spot that could not follow, said alone"
     assert not any("default" in text for _lvl, text in said)
 
 
@@ -405,10 +408,16 @@ def test_the_script_refuses_a_live_run_the_older_code_cannot_find(old_store_with
     n0, text = commit_count(store), (data_root / GUILD / "guild.yaml").read_text()
     said = _lower_script().lower(data_root, ids_only=True)
     name = reg.config.roster(ev.team)["name"]
-    assert said == [f"{GUILD}: refused, nothing changed. The older code can't find the run {name}, so end or cancel it first."]
+    assert said == [f"{GUILD}: refused, nothing changed. The older code can't find the run {name}, so wait until it has been played and ended."]
     assert commit_count(store) == n0 and (data_root / GUILD / "guild.yaml").read_text() == text
     ev.state = "cancelled"
     rs.save(ev, "cancelled")
+    store.flush()
+    assert _lower_script().lower(data_root, ids_only=True) == [  # its night is still ahead: the older code would open it again
+        f"{GUILD}: refused, nothing changed. The older code would open {name} again, so wait until that night has passed, "
+        "or pause or remove its schedule first."]
+    reg.set_schedule("barrow-deeps", {"active": False}, "t")
+    store.flush()
     assert _lower_script().lower(data_root, ids_only=True)[0].startswith(f"{GUILD}: moved the schedule ids back")
 
 

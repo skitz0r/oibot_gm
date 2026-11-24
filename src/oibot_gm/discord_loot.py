@@ -129,6 +129,17 @@ class LootMixin:
         rs = self.raids.store(reg)
         return rs, rs.events.get(session.run_key)
 
+    def loot_where(self, reg, sid: str | None) -> str:
+        """A council's run as an ops or audit line names it (raid name + 12-hour time) — never the run key, random letters
+        since design §5.67 phase 3. A split run's '<run>-r<N>' names its run; a run no longer on record reads as one."""
+        ev = None
+        try:
+            ev = self.raids.store(reg).events.get(_run_of(sid)) if sid else None
+        except Exception:  # noqa: BLE001 — a test double without a raid store
+            ev = None
+        m = re.search(r"-r(\d+)$", sid or "")
+        return (rc.run_words(reg, ev) if ev is not None else "an earlier run") + (f" roster {m.group(1)}" if m else "")
+
     def loot_live(self, session: LootSession) -> bool:
         """A session is live iff its run is locked (no separate session state)."""
         if session.origin != "raid":
@@ -298,7 +309,7 @@ class LootMixin:
             if not have.raid_thread_id:
                 await self.loot_ensure_thread(reg, have)
             return have, False
-        await self._audit(reg, by, f"opened the loot council for {ev.key}" + (f" (roster {roster + 1})" if roster is not None else "")
+        await self._audit(reg, by, f"opened the loot council for {rc.run_words(reg, ev)}" + (f" (roster {roster + 1})" if roster is not None else "")
                           + (" (rehearsal)" if s.test else "") + ("" if thread_id else " — thread pending"), via, by_id)
         if replay:
             await self.feed_replay(reg, ev)
@@ -352,7 +363,7 @@ class LootMixin:
                 self.loot_index(session)
         finally:
             busy.discard(session.key)
-        await self._audit(reg, "bot", f"loot {session.id}: the council's thread is up (it was pending)", "discord", None)
+        await self._audit(reg, "bot", f"loot {self.loot_where(reg, session.run_key or session.id)}: the council's thread is up (it was pending)", "discord", None)
         await self.loot_repost(reg, session)
         return True
 
@@ -458,7 +469,7 @@ class LootMixin:
             if removed:
                 parts.append("↩ un-ticked " + ", ".join(d.item_name for d in removed))
             line = " · ".join(parts)
-            await self._audit(reg, by, f"loot {session.run_key or session.id}: {line.replace('**', '')}", via, by_id)
+            await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: {line.replace('**', '')}", via, by_id)
             await self.loot_notify(reg, session, line, kind="tick")
         return {"added": added, "removed": removed, "line": line, "drops_rev": ls.drops_rev(session)}
 
@@ -525,7 +536,7 @@ class LootMixin:
             session.save(f"{session.guild}: loot {session.id}: {len(merged)} proposals ({by})" + (f", {len(stale)} stale" if stale else ""))
         line = (f"⚖️ {len(merged)} proposal(s)" + (" (re-judged)" if rejudge else "") + (f" · {len(stale)} drop(s) changed while judging — distribute again" if stale else "")) if merged or stale else None
         if merged or stale:
-            await self._audit(reg, by, f"loot {session.run_key or session.id}: distributed {len(merged)}" + (" (scores only)" if scores_only else ""), via, by_id)
+            await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: distributed {len(merged)}" + (" (scores only)" if scores_only else ""), via, by_id)
             await self.loot_notify(reg, session, line, kind="distribute")
         return {"batch": n if new else None, "proposals": merged, "stale": stale, "line": line, "scores_only": scores_only, "batch_rev": ls.batch_rev(session)}
 
@@ -581,7 +592,7 @@ class LootMixin:
             session.save(f"{session.guild}: loot {session.id}: {what}"[:150])
         target = "disenchant" if who == DISENCHANT else who
         line = f"⚠ **{d.item_name}** → **{target}** (bot picked {p.award_to}) — “{reason}” · not recorded until Confirm" if p.override else f"↩ **{d.item_name}** back to the bot's pick **{who}**"
-        await self._audit(reg, by, f"loot {session.run_key or session.id}: {d.item_name} → {target} (bot: {p.award_to}) — {reason}", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: {d.item_name} → {target} (bot: {p.award_to}) — {reason}", via, by_id)
         await self.loot_notify(reg, session, line, kind="override")
         others = [x.drop_id for x in session.proposals if x.drop_id != drop_id and not x.override]
         if rejudge and others:
@@ -656,7 +667,7 @@ class LootMixin:
         """After confirm's write (the caller released the lock): one ops line per award and the thread line."""
         lines = [f"{a.item_name} → {'disenchant' if a.raider == DISENCHANT else a.raider}" + (" (override)" if a.source == "override" else "") for a in awards]
         for a, ln in zip(awards, lines):
-            await self._audit(reg, by, f"loot {session.run_key or session.id}: recorded {ln}" + (" (rehearsal)" if session.test else ""), via, by_id)
+            await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: recorded {ln}" + (" (rehearsal)" if session.test else ""), via, by_id)
         await self.loot_notify(reg, session, "✅ " + " · ".join(lines), kind="confirm")
         return lines
 
@@ -712,7 +723,7 @@ class LootMixin:
         n_ov = sum(1 for p in gone if p.override)
         line = (f"⏸ {', '.join(p.item_name for p in gone)} held — still waiting" if only is not None else
                 f"🗑 {len(gone)} proposal(s) discarded — the ticks stay" + (f"; {n_ov} pending override(s) dropped" if n_ov else "") + "; nothing was recorded")
-        await self._audit(reg, by, f"loot {session.run_key or session.id}: {line}", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: {line}", via, by_id)
         await self.loot_notify(reg, session, line, kind="discard")
         return line
 
@@ -754,7 +765,7 @@ class LootMixin:
                 if not session.test:
                     ctx.append_precedent(prec)
         line = f"📌 Precedent: {aw.item_name} → {aw.raider} over {prec['bot']} — “{reason}”"
-        await self._audit(reg, by, f"loot {session.run_key or session.id}: {line}", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: {line}", via, by_id)
         await self.loot_notify(reg, session, line, kind="reason")
         return line
 
@@ -878,7 +889,7 @@ class LootMixin:
                 reg.store.commit(msg)
         target = "disenchant" if who == DISENCHANT else who
         line = f"✎ **{aw.item_name}**: was {aw.raider}, now **{target}** — “{reason}”"
-        await self._audit(reg, by, f"loot {sid}: {line.replace('**', '')}", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, sid)}: {line.replace('**', '')}", via, by_id)
         return line
 
     async def _reason_after_end(self, reg, run_key: str, drop_id: str, reason: str, *, by: str, by_id, via: str, replace: bool) -> str:
@@ -902,7 +913,7 @@ class LootMixin:
                 ctx.append_precedent(prec)
                 reg.store.commit(f"{reg.key}: loot {run_key}: reason for {aw.item_name} ({by})")
         line = f"📌 Precedent: {aw.item_name} → {aw.raider} over {prec['bot']} — “{reason}”"
-        await self._audit(reg, by, f"loot {run_key}: {line}", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, run_key)}: {line}", via, by_id)
         return line
 
     async def correct(self, reg, session: LootSession, drop_id: str, to: str, reason: str, *, by: str, by_id: int | None = None,
@@ -948,7 +959,7 @@ class LootMixin:
                     self._retire_corrected(ctx, aw.import_id, reason, by)
         target = "disenchant" if who == DISENCHANT else who
         line = f"✎ **{d.item_name}**: was {aw.raider}, now **{target}** — “{reason}”"
-        await self._audit(reg, by, f"loot {session.run_key or session.id}: {line.replace('**', '')}", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: {line.replace('**', '')}", via, by_id)
         await self.loot_notify(reg, session, line, kind="correct")
         return line
 
@@ -979,7 +990,7 @@ class LootMixin:
             session.note_change(by, f"{by} removed {gone[0].character or gone[0].signup_name} from the candidates")
             session.save(f"{session.guild}: loot {session.id}: candidate removed")
         name = gone[0].character or gone[0].signup_name
-        await self._audit(reg, by, f"loot {session.run_key or session.id}: {name} is no longer a candidate", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: {name} is no longer a candidate", via, by_id)
         await self.loot_notify(reg, session, f"➖ {name} is no longer a candidate", kind="roster")
         return name
 
@@ -991,7 +1002,7 @@ class LootMixin:
             session.note_change(by, f"{by} turned scores only {'on' if on else 'off'}")
             session.save(f"{session.guild}: loot {session.id}: scores only {'on' if on else 'off'}")
         line = "✎ Scores only " + ("on — picks by score, no model call" if on else "off")
-        await self._audit(reg, by, f"loot {session.run_key or session.id}: scores only {'on' if on else 'off'}", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: scores only {'on' if on else 'off'}", via, by_id)
         await self.loot_notify(reg, session, line, kind="scores_only")
         return line
 
@@ -1003,7 +1014,7 @@ class LootMixin:
             session.closing_notice_at = None
             session.note_change(by, f"{by} kept the council open")
             session.save(f"{session.guild}: loot {session.id}: kept open ({by})")
-        await self._audit(reg, by, f"loot {session.run_key or session.id}: kept open {minutes} min", via, by_id)
+        await self._audit(reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: kept open {minutes} min", via, by_id)
         return f"Kept open until {self.loot_clock(reg, session.keep_open_until)}."
 
     # ------------------------------------------------------------ end
@@ -1133,7 +1144,7 @@ class LootMixin:
             except Exception as e:  # noqa: BLE001 — the archive is written; the post is the surfaces'
                 log.warning("loot end post failed: %s", e)
         changed = rc.end_run(reg, rs, ev, by)
-        await self._audit(reg, by, f"ended {ev.key}" + (f" and its loot council ({len(texts)})" if texts else ""), via, by_id)
+        await self._audit(reg, by, f"ended {rc.run_words(reg, ev)}" + (f" and its loot council ({len(texts)})" if texts else ""), via, by_id)
         if changed and refresh and hasattr(self, "refresh_sheet"):  # the sheet and lock card leave their live buttons
             try:
                 await self.refresh_sheet(reg, ev)

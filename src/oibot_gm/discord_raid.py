@@ -396,7 +396,7 @@ class RaidMixin:
             if note:
                 line += f"\n{note}"
         if not mine:
-            await self.ops.emit(reg.config, "info", f"{by} set {m.display_name} {status} on {ev.key}")
+            await self.ops.emit(reg.config, "info", f"{by} set {m.display_name} {status} on {run_title(reg, ev)}")
             s = ev.signups.get(str(m.discord_id))  # B5: the member's notice (never a DM)
             rc.on_behalf_notice(reg, ev, m.discord_id, f"set you to {rc.LABELS[status]}" + (f" as {s.character}" if s and status != "out" else ""), by)
         return line
@@ -608,7 +608,7 @@ class RaidMixin:
         if failed:
             names = ", ".join(a.display_name for a in failed)
             ev.log.append(f"DM failed — waits on the site: {names}")
-            await self.ops.emit(reg.config, "warn", f"{ev.key}: DM failed — waits on the site: {names}")
+            await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: DM failed — waits on the site: {names}")
         return out
 
     @staticmethod
@@ -667,7 +667,7 @@ class RaidMixin:
             await self.post_run_update(reg, ev, f"🧩 {by} asked:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent)
                                        + (f"\n-# {plan.held_back} more wait — at most {rc.FILL_MAX_OPEN} asks out at once; the card keeps them" if plan.held_back else ""))
         await self.refresh_cards(reg, ev)
-        await self.ops.emit(reg.config, "info", f"{by} sent {len(sent)} {'pre-lock ' if prelock else ''}ask(s) on {ev.key}")
+        await self.ops.emit(reg.config, "info", f"{by} sent {len(sent)} {'pre-lock ' if prelock else ''}ask(s) on {run_title(reg, ev)}")
         return sent, plan
 
     async def withdraw_sent_ask(self, reg, rs, ev, uid: int, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
@@ -691,7 +691,7 @@ class RaidMixin:
             await self.withdraw_ask(reg, ev, other, f"{ask.display_name}'s half of the swap was withdrawn")
         await self.post_run_update(reg, ev, f"↩️ {by} withdrew the ask to {ask.display_name}")
         await self.refresh_cards(reg, ev)
-        await ops_mod.audited(self.ops, reg, by, f"withdrew the ask to {ask.display_name} on {ev.key}", via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"withdrew the ask to {ask.display_name} on {run_title(reg, ev)}", via=via, by_id=by_id)
         return f"Withdrew the ask to {ask.display_name}" + (f" (and {other.display_name}'s tied half)" if other is not None else "") + "."
 
     async def close_prelock_asks(self, reg, rs, ev) -> list:
@@ -764,7 +764,7 @@ class RaidMixin:
         if ask.held:  # the first yes of a tied pair: nothing changed yet, the partner's answer decides
             await self.post_run_update(reg, ev, f"🧩 {line}")
             await self.refresh_cards(reg, ev)
-            await self.ops.emit(cfg, "info", f"fill {ev.key}: {line}")
+            await self.ops.emit(cfg, "info", f"fill {run_title(reg, ev)}: {line}")
             return
         both = rc.tied_ask(ev, ask) if ask.answer == "yes" else None
         both = both if both is not None and both.answer == "yes" else None  # the partner's held yes took effect just now
@@ -776,12 +776,12 @@ class RaidMixin:
             plan = rc.role_plan(reg, rs, ev)
             await self.post_run_update(reg, ev, f"🧩 {line}" + (f" · still short {rc.still_short_words(plan)}" if plan.seats else " · **minimums covered**"))
             await self.refresh_cards(reg, ev)
-            await self.ops.emit(cfg, "info", f"suggestion {ev.key}: {line}")
+            await self.ops.emit(cfg, "info", f"suggestion {run_title(reg, ev)}: {line}")
             return
         nd = rc.needs(reg, ev, team)
         await self.post_run_update(reg, ev, f"🧩 {line}" + (f" · still short {gaps_text(self.ico, nd)}" if nd["headcount"] or nd["roles"] else " · **gaps filled**"))
         await self.refresh_cards(reg, ev)
-        await self.ops.emit(cfg, "info", f"fill {ev.key}: {line}")
+        await self.ops.emit(cfg, "info", f"fill {run_title(reg, ev)}: {line}")
         if ask.answer == "yes" and ev.state != "open":
             for done in [ask] + ([both] if both is not None else []):
                 m = reg.members.get(done.discord_id)
@@ -914,7 +914,7 @@ class RaidMixin:
                 if first:
                     await self.post_run_update(reg, ev, f"⚠️ lock by {by} failed — {why}. The sheet stays open; fix the board or the raid rules and lock again.")
                     await self.refresh_sheet(reg, ev)  # the sheet's footer says so too: the signup channel's truth matches the thread's
-                await self.ops.emit(reg.config, "warn", f"{ev.key}: lock failed — {why}")
+                await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: lock failed — {why}")
                 return f"{run_title(reg, ev)}: lock failed — {why}"
             if ev.state != "open":  # cancelled while the roster was being built
                 raise RegistryError(f"{run_title(reg, ev)} was {ev.state} before the roster was ready, so it was not locked.")
@@ -935,7 +935,7 @@ class RaidMixin:
         confirming.add((reg.key, ev.key))  # the scheduler's recovery step leaves the run alone while this fan-out runs
         try:
             if short:
-                await self.ops.emit(reg.config, "warn", f"{ev.key}: locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
+                await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
             for a in held:  # they said yes, but their partner never answered: nothing changed for them
                 await self.withdraw_ask(reg, ev, a, "the roster locked before the other half of the swap was answered")
             for a in pre_gone:  # the unanswered pre-lock asks: each card edited to its final state (no live Yes / No)
@@ -948,7 +948,7 @@ class RaidMixin:
             if ch:
                 await self.post_lock_cards(reg, rs, ev, team, ch)
             else:
-                await self.ops.emit(reg.config, "warn", f"{ev.key}: no roster/ops channel set — lock cards not posted")
+                await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: no roster/ops channel set — lock cards not posted")
             sent = await self.send_confirmations(reg, rs, ev, team, by) if confirms and ev.state == "locked" else 0
         finally:
             confirming.discard((reg.key, ev.key))
@@ -1000,7 +1000,7 @@ class RaidMixin:
                     warned: set = self.__dict__.setdefault("_follow_lock_warned", set())
                     if (reg.key, fev.key) not in warned:
                         warned.add((reg.key, fev.key))
-                        await self.ops.emit(reg.config, "warn", f"{fev.key}: follow-on not locked with {first.key}: {why}")
+                        await self.ops.emit(reg.config, "warn", f"{run_title(reg, fev)}: follow-on not locked with {run_title(reg, first)}: {why}")
                     tails.append(f"follow-on not locked: {why}")
                     break
                 tails.append(line)
@@ -1114,7 +1114,7 @@ class RaidMixin:
             return 0  # past the deadline: asking now would expire at once; the officers see the unasked on the card
         sent = await self.send_confirmations(reg, rs, ev, team, "recovery", resume=True)
         await self.post_run_update(reg, ev, f"🔁 the lock's confirmations were interrupted — asked the {len(missing)} not yet asked")
-        await self.ops.emit(reg.config, "warn", f"{ev.key}: lock recovery — {len(missing)} rostered had no confirmation ask; asked them ({sent} by DM)")
+        await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: lock recovery — {len(missing)} rostered had no confirmation ask; asked them ({sent} by DM)")
         await self.refresh_cards(reg, ev)
         return len(missing)
 
@@ -1139,7 +1139,7 @@ class RaidMixin:
             sent, nd = await self.run_fill(reg, rs, ev, team, by=by)
             if sent:
                 await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
-        await ops_mod.audited(self.ops, reg, by, f"edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""), via=via)
+        await ops_mod.audited(self.ops, reg, by, f"edited the {run_title(reg, ev)} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""), via=via)
 
     # ---- the board: one writer at a time per run, whoever writes (the site's drags, MCP, plain text)
     def board_lock(self, reg, key: str) -> asyncio.Lock:
@@ -1222,7 +1222,7 @@ class RaidMixin:
         await self.refresh_cards(reg, ev)
         await self.refill_after_release(reg, rs, ev, released)
         await self.post_run_update(reg, ev, f"⚑ {m.display_name} ({co.character}) called out, {co.hours_before:.0f}h before" + ("" if mine else f" (by {by})"))
-        await self.ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {ev.key} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else "") + ("" if mine else f" (by {by})"))
+        await self.ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {run_title(reg, ev)} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else "") + ("" if mine else f" (by {by})"))
         return line
 
     async def after_lead_out(self, reg, rs, lead, m, why: str, note: str | None) -> None:
@@ -1245,7 +1245,7 @@ class RaidMixin:
             raise RegistryError(f"{m.display_name} isn't marked as leaving after {lead}.")
         await self.refresh_cards(reg, ev)
         await self.post_run_update(reg, ev, f"↩ {m.display_name} is staying for {run_label(reg, ev)}")
-        await ops_mod.audited(self.ops, reg, by, f"{m.display_name} is staying for {ev.key}", via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"{m.display_name} is staying for {run_title(reg, ev)}", via=via, by_id=by_id)
         return f"Noted: you're staying for {run_label(reg, ev).replace('**', '')}. A freed seat can come back to you through Fill."
 
     async def answer_fill_for(self, reg, rs, ev, m, yes: bool, by: str, *, by_id: int | None = None) -> str:
@@ -1399,8 +1399,8 @@ class RaidMixin:
             officer_ch = self.officer_channel(reg, ev)
             if officer_ch is not None:
                 await self.post_health(reg, rs, ev, officer_ch, nudge=False, early=True)
-        await self.ops.emit(reg.config, "info", f"{by} opened {ev.key} ({len(ev.signups)} pre-filled out from absences)" + ("" if ev.message_id else " — no signup channel: sheet not posted")
-                             + "".join(f" then {reg.raid_def(p.instance).get('name', p.instance)} {p.key}" for p in rc.later_parts(rs, ev)))
+        await self.ops.emit(reg.config, "info", f"{by} opened {run_title(reg, ev)} ({len(ev.signups)} pre-filled out from absences)" + ("" if ev.message_id else " — no signup channel: sheet not posted")
+                             + "".join(f" then {run_title(reg, p)}" for p in rc.later_parts(rs, ev)))
         return ev
 
     async def open_test_run(self, reg, rs, raid: str, *, start_in: int, nudge_in: int, lock_in: int, confirm_in: int, dm: bool, by: str, by_id: int | None,
@@ -1426,7 +1426,7 @@ class RaidMixin:
         ev = rc.open_run(reg, rs, raid, start, by=by, cutoffs=cut)
         if target is not None and not ev.message_id:
             await self.post_sheet(reg, rs, ev, target)
-        await ops_mod.audited(self.ops, reg, by, f"test bench: opened test run {ev.key} (lock in {start_in - lock_in} min)", via=via, level="warn", by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"test bench: opened test run {run_title(reg, ev)} (lock in {start_in - lock_in} min)", via=via, level="warn", by_id=by_id)
         return ev, target
 
     async def cancel_run(self, reg, rs, ev, by: str, reason: str | None, *, notify: bool = True, by_id: int | None = None, via: str = "discord",
@@ -1485,10 +1485,10 @@ class RaidMixin:
             for fev in rc.event_parts(rs, ev):  # the first raid has closed (it ends before raids 3–4 of a long lineup play)
                 if fev is not ev and fev.state not in ("done", "cancelled"):
                     await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False)
-                    gone.append(fev.key)
+                    gone.append(run_title(reg, fev))
         tail = (f" and its follow-on {gone[0]}" if len(gone) == 1 else f" and its follow-ons {', '.join(gone)}") if gone else ""
         if audit:
-            await ops_mod.audited(self.ops, reg, by, f"cancelled {ev.key}{tail}" + (f": {reason}" if reason else ""), via=via, level="warn", by_id=by_id)
+            await ops_mod.audited(self.ops, reg, by, f"cancelled {run_title(reg, ev)}{tail}" + (f": {reason}" if reason else ""), via=via, level="warn", by_id=by_id)
         sheet = not rc.is_follow(ev)  # a later raid reached here once its first raid has closed: no sheet, no channel of its own
         told = ["the sheet shows it"] if sheet else []
         told += [f"{len(cards) + len(fills)} open ask card(s) now say Cancelled"] if cards or fills else []
@@ -1505,7 +1505,7 @@ class RaidMixin:
         await self.refresh_sheet(reg, ev)
         await self.refresh_cards(reg, ev)
         await self.post_run_update(reg, ev, f"↺ reopened by {by} — {'locked again' if back == 'locked' else 'the sheet is open again'}")
-        await ops_mod.audited(self.ops, reg, by, f"reopened {ev.key} ({back})", via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"reopened {run_title(reg, ev)} ({back})", via=via, by_id=by_id)
         return f"Reopened {run_title(reg, ev)} — {'locked, roster as it was' if back == 'locked' else 'the sheet is open again'}."
 
     async def reschedule_event(self, reg, rs, ev, *, start: datetime | None = None, timing: dict | None = None, by: str,
@@ -1539,6 +1539,7 @@ class RaidMixin:
             if rev and rev != rc.event_rev(reg, rs, first):  # changed since the confirm was shown: never overwritten unseen
                 raise RegistryError(rc.RUN_CHANGED)
             old = first.start
+            rc.stamp_before_change(reg, rs, parts)  # a run the start's stamping missed: stamped from its night, written below
             mv = rc.reschedule(reg, rs, first, start=start, timing=timing, by=by)
         name = reg.raid_def(first.instance).get("name", first.instance)
         when = reg.local12(first.start)
@@ -1564,7 +1565,7 @@ class RaidMixin:
         cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
         line = (f"🕒 {name} moved by {by} to {when}" if moved else f"🕒 {name}: its own sheet timing set by {by}") + cards
         await self.post_run_update(reg, first, line)
-        what = f"moved {first.key} from {reg.local12(old)} to {when}" if moved else f"set {first.key}'s own sheet timing"
+        what = f"moved {name} from {reg.local12(old)} to {when}" if moved else f"set {name}'s own sheet timing for {when}"
         if moved and mv.timing:
             what += " and set its own sheet timing"
         await ops_mod.audited(self.ops, reg, by, what, via=via, by_id=by_id)
@@ -1602,6 +1603,7 @@ class RaidMixin:
                 raise RegistryError(why)
             if rev and rev != rc.event_rev(reg, rs, first):  # changed since the confirm was shown: never overwritten unseen
                 raise RegistryError(rc.RUN_CHANGED)
+            rc.stamp_before_change(reg, rs, rc.event_parts(rs, first))  # a run the start's stamping missed, written below
             change = rc.plan_lineup(reg, rs, first, lineup)
             removed = [rs.events[k] for k in change.removed]
             rc.apply_lineup(reg, rs, first, change, by)
@@ -1627,8 +1629,8 @@ class RaidMixin:
         now_words = lineup_words(reg, rs, first, change)
         await self.post_run_update(reg, first, f"🗂 lineup changed by {by}: {now_words}"
                                    + (f" · {len(change.told)} who answered see a notice" if change.told else ""))
-        await ops_mod.audited(self.ops, reg, by, f"changed {first.key}'s lineup to {now_words}"
-                              + (f", removing {', '.join(change.removed)}" if change.removed else ""), via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"changed {run_title(reg, first)}'s lineup to {now_words}"
+                              + (f", removing {', '.join(run_title(reg, p) for p in removed)}" if removed else ""), via=via, by_id=by_id)
         return [f"The run is now {now_words}."]
 
     async def remind(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
@@ -1682,7 +1684,7 @@ class RaidMixin:
         await self.post_run_update(reg, ev, f"🔔 {by} reminded the unconfirmed: {sent} by DM" + (f" · {site} wait on the site" if site else "")
                                    + (f" · stopped: the run is {stopped}" if stopped else ""))
         await self.refresh_cards(reg, ev)
-        await ops_mod.audited(self.ops, reg, by, f"reminded {sent} unconfirmed on {ev.key}", via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"reminded {sent} unconfirmed on {run_title(reg, ev)}", via=via, by_id=by_id)
         if stopped:
             return f"Reminded {sent} by DM, then stopped: the run is {stopped}."
         return f"Reminded {sent} by DM" + (f"; {site} wait on the site (DMs off)" if site else "") + ". Next reminder possible in an hour."
@@ -1699,7 +1701,7 @@ class RaidMixin:
         rs.save(ev, f"autofill {'paused' if paused else 'resumed'} by {by}")
         await self.post_run_update(reg, ev, f"{'⏸️' if paused else '▶️'} automatic asks {'paused' if paused else 'resumed'} by {by}")
         await self.refresh_cards(reg, ev)
-        await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} automatic asks on {ev.key}", via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} automatic asks on {run_title(reg, ev)}", via=via, by_id=by_id)
         if not paused and ev.state == "locked" and rc.team_setting(rc.run_team(reg, ev), "autofill"):
             sent, _nd = await self.run_fill(reg, rs, ev, rc.run_team(reg, ev), by=f"resumed by {by}")
             if sent:

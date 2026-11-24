@@ -258,7 +258,7 @@ async def pin_member(bot, reg: Registry, rs, ev, m: Member, pin: str | None, *, 
     then the Discord sheet re-rendered so its footer's 'Pinned: N · Kept off: N' is current. Nobody is told."""
     line = pin_write(reg, rs, ev, m, pin, by)
     if audit and getattr(bot, "ops", None) is not None:
-        await ops_mod.audited(bot.ops, reg, by, f"{ev.key} {line.replace(': ', ' ', 1)}", via=via, by_id=by_id)  # 'bd-… Kestrel pinned in'
+        await ops_mod.audited(bot.ops, reg, by, f"{rc.run_words(reg, ev)} {line.replace(': ', ' ', 1)}", via=via, by_id=by_id)  # 'Barrow Deeps Tue 8 Dec 7:30 PM Kestrel pinned in'
     refresh = getattr(bot, "refresh_sheet", None)
     if refresh is not None:
         await refresh(reg, ev)

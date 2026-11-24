@@ -413,7 +413,7 @@ def test_cancel_lead_cancels_follow_on(reg, rs, monkeypatch):
     fev = rs.events[fev.key]
     assert lead.state == "cancelled" and fev.state == "cancelled"
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
-    assert len(audits) == 1 and fev.key in audits[0] and lead.key in audits[0]
+    assert len(audits) == 1 and rc.run_words(reg, fev) in audits[0] and rc.run_words(reg, lead) in audits[0]
 
 
 def test_cancel_on_the_follow_on_cancels_the_whole_run(reg, rs, monkeypatch):
@@ -423,7 +423,7 @@ def test_cancel_on_the_follow_on_cancels_the_whole_run(reg, rs, monkeypatch):
     run(bot.cancel_run(reg, rs, fev, "Jon", None))
     assert rs.events[fev.key].state == "cancelled" and lead.state == "cancelled" and lead.followed_by == fev.key
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t]
-    assert len(audits) == 1 and fev.key in audits[0] and lead.key in audits[0]
+    assert len(audits) == 1 and rc.run_words(reg, fev) in audits[0] and rc.run_words(reg, lead) in audits[0]
     run(bot.cleanup_ephemeral(reg, rs))
     assert reg.config.roster(lead.team) is None and reg.config.roster(fev.team) is None
 

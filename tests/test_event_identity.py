@@ -265,6 +265,12 @@ def test_the_start_saves_the_lift_and_the_stamps_in_one_commit(data_root, old_st
     rc.migrate_at_start(reg, rs)
     store.flush()
     assert commit_count(store) == n0 + 1 and all(e.event for e in rs.live()) and reg.ids_saved, "the ids lift and the stamps, one commit"
+    import subprocess
+
+    said = subprocess.run(["git", "log", "-1", "--format=%B"], cwd=store.root, check=True, capture_output=True, text=True).stdout.strip()
+    assert said == (f"{GUILD}: schedules have ids of their own, the old names kept as aliases "
+                    f"(Barrow Deeps · Raid nights is now barrow-deeps); live runs stamped with their schedule and occurrence: "
+                    f"{files[0]['key']}, {files[1]['key']} (by migration)"), "what the save changed, each clause once"
     assert rc.migrate_at_start(reg, rs) == []
     store.flush()
     assert commit_count(store) == n0 + 1, "a second start writes nothing"
@@ -344,7 +350,51 @@ def test_the_way_back_refuses_a_new_key_and_passes_a_stamped_old_pair(data_root,
     new = rc.open_run(reg, rs, RID, t + timedelta(days=2))
     store.flush()
     said = _lower_script().lower(data_root, ids_only=True, dry_run=True)
-    assert said == [f"{GUILD}: refused, nothing changed. The older code can't find the run {reg.config.roster(new.team)['name']}, so end or cancel it first."]
+    assert said == [f"{GUILD}: refused, nothing changed. The older code can't find the run Barrow Deeps {reg.local12(new.start)}, so end or cancel it first."]
+
+
+def test_the_way_back_refuses_a_cancelled_new_key_run_whose_night_is_ahead(data_root, old_store_with):
+    """Phase 2's scheduler finds a run only by the key it builds: a schedule's run with a phase-3 key, cancelled before
+    its night, is invisible to it — it would open a fresh sheet for that night."""
+    from test_guild_schedules import _lower_script
+
+    reg, rs, store = _old_guild(data_root, old_store_with, {"raids": {RID: OPENED}}, [])
+    rc.migrate_at_start(reg, rs)
+    sid = weekly(reg, RID, "Tue 19:30")
+    t = first_slot(reg, RID)
+    ev = rc.open_run(reg, rs, RID, t, schedule=sid)
+    store.flush()
+    assert _lower_script().lower(data_root, ids_only=True, dry_run=True) == [
+        f"{GUILD}: refused, nothing changed. The older code can't find the run Barrow Deeps {reg.local12(t)}, so wait until it has been played and ended."]
+    ev.state, ev.closed_at = "cancelled", rc.now()
+    rs.save(ev, "harness: cancelled")
+    store.flush()
+    assert _lower_script().lower(data_root, ids_only=True, dry_run=True) == [
+        f"{GUILD}: refused, nothing changed. The older code would open Barrow Deeps {reg.local12(t)} again, so wait until that night "
+        "has passed, or pause or remove its schedule first."]
+
+
+def test_the_way_back_refuses_a_run_that_stands_in_for_another_night(data_root, old_store_with):
+    """Phase 2 never reads `stands_for`: an old-key run that stands in for another night of its schedule (its night
+    was edited while it was open) would have that night opened too."""
+    from test_guild_schedules import _lower_script
+
+    t = _soon()
+    key = f"bd-{t:%m%d-%H%M}-{t.date().isoformat()}"
+    raw = _old_run(key, key[:-11], RID, t, schedule="default", series="barrow_deeps:default")
+    cfg = {"raids": {RID: OPENED}, "schedules": [{"id": "default", "lineup": [{"raid": RID, "rosters": 1}], "slots": [t.strftime("%a %H:%M")], **LEAD}],
+           "rosters": [_old_dict(key[:-11], RID, t, "default", series="barrow_deeps:default")]}
+    reg, rs, store = _old_guild(data_root, old_store_with, cfg, [raw])
+    rc.migrate_at_start(reg, rs)
+    store.flush()
+    assert "refused" not in _lower_script().lower(data_root, ids_only=True, dry_run=True)[0], "the old run alone is safe"
+    ev = rs.events[key]
+    ev.stands_for = rc.occurrence_stamp(reg, t + timedelta(days=1))
+    rs.save(ev, "harness: stands for the next day")
+    store.flush()
+    assert _lower_script().lower(data_root, ids_only=True, dry_run=True) == [
+        f"{GUILD}: refused, nothing changed. The run Barrow Deeps {reg.local12(t)} stands in for another night of its schedule, "
+        "which the older code would open too, so wait until that night has passed."]
 
 
 def test_the_old_one_off_pair_keeps_working_as_a_two_raid_run(data_root, old_store_with, monkeypatch):

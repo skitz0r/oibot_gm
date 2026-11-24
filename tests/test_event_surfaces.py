@@ -327,14 +327,19 @@ def test_a_schedule_edit_naming_its_own_raid_says_how(reg):
     assert rg.ID_TAKEN.format(sid="alt") in configops.describe(reg, other)
 
 
-def test_a_create_shaped_lineup_on_an_existing_id_is_id_taken_unless_the_edit_carries_its_rev(reg):
-    """A structured lineup with run times (create-shaped) on an id in use is a create: ID_TAKEN, nothing rewritten —
-    unless it carries the schedule's own rev (the site's edit Save), then it is the edit it looks like."""
+def test_a_create_shaped_lineup_on_an_existing_id_is_refused_unless_the_edit_carries_its_rev(reg):
+    """A structured lineup with run times (create-shaped) on an id in use is never a rewrite: with the schedule's own
+    first raid and no rev (MCP's schedule_set) it is told to save the two in turn; with another first raid it is a create
+    clash, ID_TAKEN; with the schedule's own rev (the site's edit Save) it is the edit it looks like."""
     opened_all(reg)
     weekly(reg, RID, "Tue 19:30", "alt")
     draft = {"lineup": [{"raid": RID, "rosters": 1}, {"raid": ONY, "rosters": 1}], "slots": ["Fri 20:00"]}
     with pytest.raises(RegistryError) as e:
         configops.ops_from_fields(reg, "schedule", "alt", dict(draft))
+    assert str(e.value) == "Raid nights already exists. Change its raids and its run times in two saves, one after the other."
+    assert reg.schedule_entry("alt")["slots"] == ["Tue 19:30"]
+    with pytest.raises(RegistryError) as e:
+        configops.ops_from_fields(reg, "schedule", "alt", {"lineup": [{"raid": ONY, "rosters": 1}], "slots": ["Fri 20:00"]})
     assert str(e.value) == rg.ID_TAKEN.format(sid="alt") and reg.schedule_entry("alt")["slots"] == ["Tue 19:30"]
     revs = {"config:schedule:alt": reg.config_rev("schedule:alt")}
     (op,) = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", dict(draft), revs=revs))

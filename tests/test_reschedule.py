@@ -147,6 +147,33 @@ def test_the_old_one_off_pair_moves_like_any_run(data_root, old_store_with):
     assert set(rs.events[fk].signups) == set(answers), "the follow-on's answers are still the lead's"
 
 
+@pytest.mark.parametrize("verb", ["move", "lineup"])
+def test_a_run_the_start_never_stamped_is_stamped_before_it_changes(data_root, old_store_with, verb):
+    """A live schedule run without stamps (the start's stamping failed) is stamped from its own night at the move or the
+    lineup edit, in the same write — else the unstamped fallback finds it by its new start and its night opens again."""
+    from test_event_identity import LEAD, OPENED as OPEN, _old_dict, _old_run, due
+
+    t = _soon()
+    key = f"bd-{t:%m%d-%H%M}-{t.date().isoformat()}"
+    cfg = {"raids": {RID: OPEN}, "schedules": [{"id": "default", "lineup": [{"raid": RID, "rosters": 1}], "slots": [t.strftime("%a %H:%M")], **LEAD}],
+           "rosters": [_old_dict(key[:-11], RID, t, "default", series="barrow_deeps:default")]}
+    reg, rs, store = _old_guild(data_root, old_store_with, cfg, [_old_run(key, key[:-11], RID, t, schedule="default", series="barrow_deeps:default")])
+    due(reg, RID, t)
+    bot, opened = _scheduler(reg, rs)
+    ev = rs.events[key]
+    assert ev.event is None, "the premise: the start's stamping never ran"
+    if verb == "move":
+        run(bot.reschedule_event(reg, rs, ev, start=t + timedelta(days=1), by="o", by_id=OFFICER_ID))
+    else:
+        run(bot.edit_lineup(reg, rs, ev, [{"raid": RID, "rosters": 1}, {"raid": ONY, "rosters": 1}], by="o", by_id=OFFICER_ID))
+    store.flush()
+    stored = json.loads((data_root / ev.rel_path(rs.key)).read_text())
+    assert (stored["event"], stored["occurrence"]) == (key, rc.occurrence_stamp(reg, t)), "written with the change"
+    assert reg.config.roster(ev.team)["occurrence"] == rc.occurrence_stamp(reg, t)
+    run(bot.scheduler_tick_guild(reg))
+    assert opened == [], "its own night never opens a second sheet"
+
+
 # ---------------------------------------------------------------- occurrences: never repeated, never blocked
 
 def _tuesdays(reg, sid_fields=None):
@@ -635,6 +662,26 @@ def test_two_edits_in_a_row(reg, rs, monkeypatch):
     assert _starts(rs, opened) == [tue, tue + timedelta(days=2)], "the Thursday after is the next lockout's"
     reg.set_schedule(sid, {"slots": "Tue 19:30"}, "t")
     assert reg.config.roster(r1.team)["stands_for"] is None, "back to its own night"
+
+
+def test_its_own_night_given_back_beside_the_new_one_clears_the_stand_in(reg, rs, monkeypatch):
+    """Tue → Wed with Tue's run open (it stands for that Wednesday), then 'Tue, Wed': the edit gives the run's own night
+    back, so it stands for Tuesday only and Wednesday opens a run of its own."""
+    sid = _schedule(reg, "Tue 19:30")
+    tue = _first_of(reg, "Tue 19:30")
+    wed = tue + timedelta(days=1)
+    bot, opened = _scheduler(reg, rs)
+    clock: dict = {}
+    _tick(bot, reg, monkeypatch, clock, tue - timedelta(hours=71))
+    r1 = rs.events[opened[0]]
+    reg.set_schedule(sid, {"slots": "Wed 19:30"}, "t")
+    assert reg.config.roster(r1.team)["stands_for"] == rc.occurrence_stamp(reg, wed)
+    reg.set_schedule(sid, {"slots": ["Tue 19:30", "Wed 19:30"]}, "t")
+    assert reg.config.roster(r1.team)["stands_for"] is None, "its own night is given again"
+    _tick(bot, reg, monkeypatch, clock, wed - timedelta(hours=71))
+    assert _starts(rs, opened) == [tue, wed], "Wednesday opens"
+    assert rc.event_of_occurrence(rs, sid, rc.occurrence_stamp(reg, tue), reg=reg) is r1
+    assert rc.event_of_occurrence(rs, sid, rc.occurrence_stamp(reg, wed), reg=reg) is rs.events[opened[1]]
 
 
 def _lockout(reg, days):

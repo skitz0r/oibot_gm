@@ -159,7 +159,7 @@ class RaidSchedulerMixin:
         rc.end_run(reg, rs, ev, "scheduler")
         exhausted_posted.discard((reg.key, ev.key))
         await self.refresh_sheet(reg, ev)
-        await self.ops.emit(reg.config, "info", f"{ev.key}: closed")
+        await self.ops.emit(reg.config, "info", f"{rc.run_words(reg, ev)}: closed")
 
     async def scheduler_tick_guild(self, reg) -> None:
         """One guild's minute: the armory's check (a background task when due) → open on cadence → health → lock → expire →
@@ -215,12 +215,12 @@ class RaidSchedulerMixin:
             state = sheet_state(ev)
             if state == "open" and not ev.health_posted and now >= soft:
                 await self.post_health(reg, rs, ev, officer_ch, nudge=True)
-                await self.ops.emit(cfg, "info", f"{ev.key}: health check posted, nudged {len(ev.nudged)}")
+                await self.ops.emit(cfg, "info", f"{rc.run_words(reg, ev)}: health check posted, nudged {len(ev.nudged)}")
             if state == "locked" and not ev.all_rosters:  # a lock that never finished (old code path / crash): back to open, retry below
                 ev.state, ev.locked_at, ev.confirm_by = "open", None, None
                 rs.save(ev, "lock recovered")
                 state = "open"
-                await self.ops.emit(cfg, "warn", f"{ev.key}: locked without a roster — reopened, retrying the lock")
+                await self.ops.emit(cfg, "warn", f"{rc.run_words(reg, ev)}: locked without a roster — reopened, retrying the lock")
             if state == "open" and now >= hard:
                 await self.close_prelock_asks(reg, rs, ev)  # pre-lock asks close at lock time ("released", as lock_run does)
                 tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None
@@ -259,7 +259,7 @@ class RaidSchedulerMixin:
                 await self.post_run_update(reg, ev, f"⌛ no confirmation from {', '.join(gone)} — seats freed")
                 await self.refresh_sheet(reg, ev)
                 await self.refresh_cards(reg, ev)
-                await self.ops.emit(cfg, "warn", f"{ev.key}: confirmations expired for {len(gone)}")
+                await self.ops.emit(cfg, "warn", f"{rc.run_words(reg, ev)}: confirmations expired for {len(gone)}")
             if ev.state != "locked":  # cancelled while the expired seats' cards were being edited: no fill step
                 continue
             expired, released = rc.expire_fill_asks(reg, rs, ev)
