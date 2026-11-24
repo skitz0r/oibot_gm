@@ -862,6 +862,14 @@ def live_at(rs: "RaidStore", instance: str, start: datetime, *, test: bool = Fal
     return _newest([e for e in rs.live() if _first_part(e) and e.instance == instance and e.start == start and bool(e.test) == test])
 
 
+def one_off_at(rs: "RaidStore", instance: str, start: datetime) -> "RaidEvent | None":
+    """A live ONE-OFF (no schedule stamp, not a rehearsal) whose first raid is `instance` at exactly `start`, among EVERY
+    live first part at that minute (live_at hands back only the newest, which may be a schedule's run sitting over it):
+    what holds a schedule's night against that schedule (open_refusal, the scheduler's skip). The newest such one."""
+    return _newest([e for e in rs.live() if _first_part(e) and e.instance == instance and e.start == start and not e.test
+                    and schedule_stamp(e.schedule) is None])
+
+
 def find_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, schedule: str | None = None, *,
              test: bool = False) -> "RaidEvent | None":
     """The run an open of `instance` at `start` meets: a schedule's run by its occurrence (in any state: open_run refuses
@@ -5266,17 +5274,28 @@ def open_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datetime,
     asked = schedule or night
     tpl = next((s for s in reg.schedules(instance) if s["id"] == asked), None)
     if asked == ADHOC_SCHEDULE or (tpl is not None and schedule_class(tpl.get("kind") or "weekly") == "adhoc"):
-        s = next((x for x in reg.schedules(instance) if x["id"] == night), None) or {}
-        return SCHEDULE_NIGHT.format(when=reg.local12(start), name=s.get("name") or night)
-    if asked != night:
-        return None  # another recurring schedule named: open_run's own rules
-    other = live_at(rs, instance, start)
-    if other is not None and schedule_stamp(other.schedule) is None:  # a one-off on the night: never a second run beside it
-        from .raid_views import run_title
+        from .registry import schedule_name
 
-        return NIGHT_TAKEN.format(title=run_title(reg, other), name=(tpl or {}).get("name") or night)
-    opens = start - timedelta(hours=float(reg.schedule_def(instance, night)["signup_lead_hours"]))
-    return None if opens <= now else open_row_refusal(reg, rs, instance, start, night, opens, now)
+        s = next((x for x in reg.schedules(instance) if x["id"] == night), None) or {"id": night}
+        return SCHEDULE_NIGHT.format(when=reg.local12(start), name=schedule_name(s))
+    if asked != night and not is_night_of(reg, instance, start, asked):
+        return None  # a recurring schedule named at a time that isn't its night: open_run's own rules
+    other = one_off_at(rs, instance, start)
+    if other is not None:  # a one-off on the night: never a second run beside it
+        from .raid_views import run_title
+        from .registry import schedule_name
+
+        return NIGHT_TAKEN.format(title=run_title(reg, other), name=schedule_name(tpl or {"id": night}))
+    opens = start - timedelta(hours=float(reg.schedule_def(instance, asked)["signup_lead_hours"]))
+    return None if opens <= now else open_row_refusal(reg, rs, instance, start, asked, opens, now)
+
+
+def is_night_of(reg: Registry, instance: str, start: datetime, sid: str) -> bool:
+    """Is `start` one of schedule `sid`'s nights (whatever the distance)? Two schedules of a raid may share a minute:
+    open_schedule names the first, this asks about the one named."""
+    now = reg.now_local()
+    hours = max(24 * OPEN_HORIZON_DAYS, (start - now).total_seconds() / 3600 + 1)
+    return any(s["id"] == sid and t == start for s, t in upcoming(reg, instance, now, hours))
 
 
 def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime | None = None, n: int = UPCOMING_PER_SCHEDULE) -> list[dict]:

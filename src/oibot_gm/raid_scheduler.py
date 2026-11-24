@@ -204,9 +204,8 @@ class RaidSchedulerMixin:
             for sched, start in rc.occurrences(reg, now, lead=True):
                 if rc.event_of_occurrence(rs, sched["id"], rc.occurrence_stamp(reg, start), reg=reg) is not None:
                     continue
-                other = rc.live_at(rs, sched["raid"], start)
-                if other is not None and rc.schedule_stamp(other.schedule) is None:  # a ONE-OFF already holds that minute
-                    # (another schedule's run at the same minute is its own run, never in the way)
+                other = rc.one_off_at(rs, sched["raid"], start)  # every live run at that minute, not only the newest
+                if other is not None:  # a ONE-OFF already holds that minute (another schedule's run there is never in the way)
                     await self._warn_night_taken(reg, sched, start, other)
                     continue
                 try:

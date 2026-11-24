@@ -146,3 +146,41 @@ def test_two_schedules_at_one_minute_both_open_through_the_scheduler(reg, rs, mo
     run(bot.scheduler_tick_guild(reg))
     at = [rs.events[k] for k in opened if rs.events[k].start == far]
     assert sorted(e.schedule for e in at) == sorted([sid, "alt"]) and not [w for w in warns if "did not open its night" in w]
+
+
+def test_a_one_off_under_a_newer_schedule_run_at_the_minute_still_holds_the_night(reg, rs, monkeypatch):
+    """The re-review: live_at answers only the NEWEST live run at a minute, so a one-off sitting under a newer
+    schedule-stamped run there was missed and a further run opened beside it. Every live run at the minute is read."""
+    sid, far, _near = nights(reg)
+    weekly(reg, RID, far.strftime("%a %H:%M"), sid="alt")
+    one_off = rc.open_run(reg, rs, RID, far, by="t", schedule=rc.ADHOC_SCHEDULE)  # made before the fix
+    one_off.created_at = "2026-11-01T00:00:00+00:00"  # and earlier than the schedule run below (one second can hold both)
+    rs.save(one_off, "older")
+    alt = rc.open_run(reg, rs, RID, far, by="t", schedule="alt")  # newer, stamped, same minute
+    assert rc.live_at(rs, RID, far) is alt, "the premise: the newest hides the one-off"
+    assert rc.one_off_at(rs, RID, far) is one_off
+    assert rc.open_refusal(reg, rs, RID, far, sid) == rc.NIGHT_TAKEN.format(title=run_title(reg, one_off), name="Raid nights")
+    bot, opened = _scheduler(reg, rs)
+    warns: list[str] = []
+
+    async def emit(cfg, level, text, *a, **k):
+        if level == "warn":
+            warns.append(text)
+    monkeypatch.setattr(bot.ops, "emit", emit)
+    lead = float(reg.schedule_def(RID, sid)["signup_lead_hours"])
+    monkeypatch.setattr(reg, "now_local", lambda: far - timedelta(hours=lead) + timedelta(minutes=5))
+    run(bot.scheduler_tick_guild(reg))
+    assert opened == [] and len([e for e in rs.live() if e.start == far]) == 2, "no third run at that minute"
+    assert len([w for w in warns if "did not open its night" in w and w.startswith("Raid nights")]) == 1, warns
+
+
+def test_a_refusal_names_a_schedule_by_its_name_never_its_id(reg, rs):
+    """The re-review: an unnamed schedule's sentence fell back to its id. registry.schedule_name reads it: its kind."""
+    reg.set_raid_overrides(RID, OPENED, "t")
+    near = (reg.now_local() + timedelta(days=8)).replace(hour=19, minute=30, second=0, microsecond=0)
+    reg.set_schedule("zq7", {"kind": "weekly", "slots": near.strftime("%a %H:%M")}, "t", raid=RID)
+    said = rc.open_refusal(reg, rs, RID, near, rc.ADHOC_SCHEDULE)
+    assert said and "zq7" not in said and said.startswith(f"{reg.local12(near)} is a night of "), said
+    rc.open_run(reg, rs, RID, near, by="t", schedule=rc.ADHOC_SCHEDULE)
+    said = rc.open_refusal(reg, rs, RID, near, None)
+    assert said and "zq7" not in said and "can't open that night beside it" in said, said
