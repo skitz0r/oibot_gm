@@ -46,7 +46,9 @@ def settled(cache, reg, rs, ev):
     return asyncio.run(go())
 
 
-def test_the_board_is_what_the_lock_rosters_on_every_raid_of_the_event(reg, rs):
+def _board_then(reg, rs):
+    """The non-trivial evening (a board place and a pin out on the first raid, a board place on the later raid), its
+    board pictures settled. → (ev, bd, names, bot, first_pic, bd_pic)."""
     ev, bd = evening(reg, rs)
     names = [s.display_name for s in ev.by_status("in")]
     ev.layout = [[], [names[5]]]  # an officer's hand placement: group 2 of the first raid
@@ -61,6 +63,18 @@ def test_the_board_is_what_the_lock_rosters_on_every_raid_of_the_event(reg, rs):
     first_pic, bd_pic = previews[ev.key], previews[bd.key]
     assert names[5] in first_pic[0].groups[1] and names[0] not in {p.signup_name for r in first_pic for p in r.selected}
     assert len(bd_pic) == 2 and names[7] in bd_pic[1].groups[0]
+    return ev, bd, names, bot, first_pic, bd_pic
+
+
+@pytest.mark.parametrize("forget", [False, True], ids=["kept answers", "searched again"])
+def test_the_board_is_what_the_lock_rosters_on_every_raid_of_the_event(reg, rs, forget):
+    """`searched again`: the kept answers forgotten between the picture and the lock, so the lock really searches at its
+    budget — the solver's own repeatability (what this test proved before the kept answer made the lock a cache hit)."""
+    from oibot_gm.roster import solver
+
+    ev, bd, names, bot, first_pic, bd_pic = _board_then(reg, rs)
+    if forget:
+        solver.forget_answers()
     line = asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
     assert ev.state == "locked" and rs.events[bd.key].state == "locked", line
     assert shape(first_pic) == shape(ev.all_rosters), "the first raid: the board was the lock"
@@ -129,21 +143,26 @@ def test_a_raid_not_full_locks_with_one_name_kept_off(reg, rs):
     assert shape(pic) == shape(ev.all_rosters)
 
 
-def _preview_later_then_lock(reg, rs):
+def _preview_later_then_lock(reg, rs, forget=False):
+    from oibot_gm.roster import solver
+
     ev, bd = evening(reg, rs)
     bot = NightBot(reg, rs)
     shown = asyncio.run(bot.lock_preview(reg, rs, bd, by="Jon"))  # the first raid is still open
+    if forget:  # the lock searches for itself at its budget: the solver's own repeatability
+        solver.forget_answers()
     asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
     bd = rs.events[bd.key]
     assert ev.state == "locked" and bd.state == "locked"
     return shown, bd
 
 
-def test_preview_lock_on_a_later_raid_while_the_first_is_open_is_what_its_lock_rosters(reg, rs):
+@pytest.mark.parametrize("forget", [False, True], ids=["kept answers", "searched again"])
+def test_preview_lock_on_a_later_raid_while_the_first_is_open_is_what_its_lock_rosters(reg, rs, forget):
     """The rehearsal's F2: Preview lock pressed on the later raid alone solved without the earlier raid's placement, so
     it could show another roster than the lock (which runs after the first raid locks and reads its roster). It now
     solves with who the first raid's lock will roster (rc.earlier_counts), as the board picture does."""
-    shown, bd = _preview_later_then_lock(reg, rs)
+    shown, bd = _preview_later_then_lock(reg, rs, forget)
     assert shape(shown) == shape(bd.all_rosters), "Preview lock was the lock"
 
 
@@ -152,3 +171,29 @@ def test_without_the_earlier_raids_the_later_preview_is_another_roster(reg, rs, 
     monkeypatch.setattr(rc, "earlier_counts", lambda *a, **k: None)
     shown, bd = _preview_later_then_lock(reg, rs)
     assert shape(shown) != shape(bd.all_rosters)
+
+
+def test_the_lock_after_a_settled_board_does_no_main_search(reg, rs, monkeypatch):
+    """The kept answer is what makes the picture the lock: after the board settled, lock_run's main solves (the lock
+    budget) take the kept answers and never search — only the bench what-ifs (their own, smaller budget) do. A change
+    that made the board's and the lock's models differ would search here and fail."""
+    from ortools.sat.python import cp_model
+
+    from oibot_gm.roster import solver
+
+    ev, bd, _names, bot, first_pic, bd_pic = _board_then(reg, rs)
+    lock_budget = rc.SOLVE_TIME_LIMIT_S * solver.DTIME_PER_SECOND
+    searched: list[float] = []
+    real = cp_model.CpSolver.Solve
+
+    def spy(self, model, *a, **k):
+        searched.append(self.parameters.max_deterministic_time)
+        return real(self, model, *a, **k)
+
+    monkeypatch.setattr(cp_model.CpSolver, "Solve", spy)
+    hits = solver.ceiling_hits
+    asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
+    assert ev.state == "locked" and rs.events[bd.key].state == "locked"
+    assert lock_budget not in searched, f"a main search at the lock budget ran: {searched}"
+    assert shape(first_pic) == shape(ev.all_rosters) and shape(bd_pic) == shape(rs.events[bd.key].all_rosters)
+    print(f"what-if searches: {len(searched)}, ceiling hits during the lock: {solver.ceiling_hits - hits}")

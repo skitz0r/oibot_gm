@@ -70,3 +70,34 @@ def test_nothing_is_kept_for_a_failed_solve():
     with pytest.raises(RuntimeError):
         solve_rosters(FOREVER, ps, "hyjal_summit_forever", SolveOptions(raid_size=20, time_limit_s=1e-6), rosters=1)
     assert not solver._answers
+
+
+def test_a_solve_the_wall_clock_cut_is_never_kept(monkeypatch):
+    """The re-review: a solve the hang guard cut short of its work budget depends on the load, so it is used once, logged
+    and never kept — a later quiet solve searches again and gives the repeatable answer."""
+    specs = [(c, s) for c, cd in FOREVER.classes.items() for s in list(cd)[:3]]
+    ps = [Player(signup_name=f"p{i}", pos=i, status="signed", cls=c, spec=s, role=FOREVER.spec(c, s).role)
+          for i, (c, s) in enumerate(specs[i % len(specs)] for i in range(40))]  # every class: a model not proved at once
+
+    def solve():
+        return solve_rosters(FOREVER, ps, "hyjal_summit_forever", SolveOptions(raid_size=20, time_limit_s=1.0), rosters=2)
+
+    monkeypatch.setattr(solver, "DTIME_PER_SECOND", 1e6)  # a work budget no search reaches here …
+    monkeypatch.setattr(solver, "WALL_CEILING", 3.0)  # … so the wall clock cuts it (3 s at a 1 s budget)
+    hits = solver.ceiling_hits
+    assert solve()[0].solver_status == "FEASIBLE"
+    assert solver.ceiling_hits == hits + 1 and not solver._answers, "cut: logged, not kept"
+    searched = []
+    real = cp_model.CpSolver.Solve
+
+    def spy(self, model, *a, **k):
+        searched.append(1)
+        return real(self, model, *a, **k)
+
+    monkeypatch.setattr(cp_model.CpSolver, "Solve", spy)
+    solve()
+    assert searched, "the same model searches again"
+
+
+def test_the_ceiling_is_a_hang_guard_far_past_the_budget():
+    assert solver.WALL_CEILING >= 10, "120 s at the lock's 12 s budget: it changes no answer that ends on its work budget"

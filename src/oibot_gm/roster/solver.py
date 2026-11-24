@@ -58,13 +58,15 @@ class SolveOptions:
 # what it holds at a wall-clock limit varies run to run; interleaved search is deterministic whatever the number of
 # workers (OR-tools 9.15 sat_parameters: interleave_search), and a deterministic-time limit stops it at the same work
 # on any machine under any load. DTIME_PER_SECOND turns a budget in seconds into deterministic time (measured on the
-# lock's 20- and 10-player models: about 6 units per wall second here). The wall-clock limit stays only as a safety
-# net, WALL_CEILING × the budget: a solve that reaches it is no longer repeatable, but a lock never hangs.
+# lock's 20- and 10-player models: about 6 units per wall second here). The wall-clock limit is a HANG GUARD only,
+# WALL_CEILING × the budget (120 s at the lock's 12 s): far past any solve that ends on its work budget, even with the
+# host busy (a parallel test run; two or three solves at one lock minute reached 19 s and more of the old 24 s), so it
+# changes no answer; a solve it does cut is no longer repeatable, is logged, and is never kept (below).
 # interleave_search is marked "Experimental" in OR-tools' sat_parameters: re-check its determinism (tests/
 # test_solver_repeatable.py) and DTIME_PER_SECOND's wall time on every OR-tools upgrade.
 RANDOM_SEED = 0
 DTIME_PER_SECOND = 6.0
-WALL_CEILING = 2.0
+WALL_CEILING = 10.0
 
 # One answer per model (the final fix wave of §5.67 phase 4, 2026-11-24). The deterministic limit makes a solve
 # repeatable only while it finishes inside WALL_CEILING: on a loaded machine (a full test run, another solve, the
@@ -73,7 +75,8 @@ WALL_CEILING = 2.0
 # numbered the other way round). So the process keeps the answer each model got (keyed by the model itself, every
 # variable, constraint and objective term, and the search parameters) and a solve of a model it has answered before
 # takes that answer: the picture, Preview lock and the lock give the same roster for the same input whatever the load.
-# A model never solved before searches exactly as before; nothing is kept for a stopped, infeasible or unfinished solve.
+# A model never solved before searches exactly as before; nothing is kept for a stopped or infeasible solve, nor for
+# one the wall-clock ceiling cut short of its work budget (a later quiet solve gives the repeatable answer).
 ANSWERS_MAX = 64  # models whose answer is kept (least recently used goes first)
 _answers: "OrderedDict[str, _Answer]" = OrderedDict()
 _answers_lock = threading.Lock()
@@ -754,9 +757,10 @@ def _run(s: _Model) -> tuple["cp_model.CpSolver | _Answer", int]:
         raise RuntimeError(f"no roster found: {solver.StatusName(status)}")
     budget = s.opts.time_limit_s * DTIME_PER_SECOND
     if status != cp_model.OPTIMAL and solver.deterministic_time < budget * 0.99:
-        ceiling_hits += 1  # the wall clock stopped it: this answer is the one kept for the model from now on
+        ceiling_hits += 1  # the wall clock cut it short of its work: used this once, never kept as the model's answer
         log.warning("a roster solve reached its wall-clock ceiling after %.1f s at %.0f of %.0f work units", solver.wall_time,
                     solver.deterministic_time, budget)
+        return solver, status
     return _keep(key, s, solver, status), status
 
 

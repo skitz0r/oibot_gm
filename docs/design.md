@@ -5745,9 +5745,14 @@ Schedules page that lists a schedule whose first raid left the game (both built 
 `tests/test_reschedule.py`, `tests/test_edit_lineup.py`, `tests/test_event_surfaces.py`.
 
 *Also on this branch (phase 2's final review).* The solver is repeatable per budget: interleaved search with a fixed
-seed (`RANDOM_SEED`) and a deterministic-time limit (`time_limit_s` × `DTIME_PER_SECOND`), the wall clock only a safety net
-at `WALL_CEILING` × the budget, so Preview lock and Lock land on the same roster even when the search stops early
-(`tests/test_solver_repeatable.py`; `interleave_search` is experimental in OR-tools — re-check on every upgrade).
+seed (`RANDOM_SEED`) and a deterministic-time limit (`time_limit_s` × `DTIME_PER_SECOND`), the wall clock only a hang
+guard at `WALL_CEILING` (10) × the budget — 120 s at the lock's 12 s, far past any solve that ends on its work budget
+even with the host busy (phase 4's final fix wave: at 2 × the budget a parallel test run or three solves at one lock
+minute cut solves short and the answer depended on the load) — so Preview lock and Lock land on the same roster even when
+the search stops early (`tests/test_solver_repeatable.py`; `interleave_search` is experimental in OR-tools — re-check on
+every upgrade). The process keeps one answer per model (keyed by the model proto and the search parameters, LRU 64): an
+identical model takes it without searching, so the Events board's picture, Preview lock and the lock agree; a solve the
+ceiling cut is logged and never kept.
 `rc.run_strategy` is THE split-strategy chain (run → roster → raid → balanced) the lock and Preview lock share, and Preview
 lock solves with the lock's own budget. `consequences.raid_reset_consequence` is the raid wizard's Reset confirm.
 
