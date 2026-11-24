@@ -97,8 +97,10 @@ class TestRunWizard(Wizard):
         except RegistryError as e:
             await self.refuse(interaction, str(e), self.start, "Back")
             return
+        from .raid_views import run_title
+
         where = f" in {channel.mention}" if channel is not None and getattr(channel, "mention", None) else ""
-        await self.finish(interaction, f"🧪 Test run {ev.key} open{where}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, "
+        await self.finish(interaction, f"🧪 Test run {run_title(reg, ev)} open{where}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, "
                                        f"confirm by {confirm_in} min before. Next: `/gm test answer`; the puppets' DMs reach *your* DMs as one digest per batch.")
 
 

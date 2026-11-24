@@ -699,7 +699,7 @@ def test_plain_text_test_ops_are_the_bench_verbs_with_one_audit_line_each(reg, r
     out, lines = plain("remove 1 Mage Frost")
     assert "1 removed" in out and len(lines) == 1 and lines[0][1].startswith("[chat] Officer: test bench: 0 added, 1 removed")
     out, lines = plain(f"answer {ev.key} join 3 bench 1")
-    assert out.startswith(f"test bench on {ev.key}: ") and len(lines) == 1 and lines[0][1] == f"[chat] Officer: test bench: 4 answer(s) on {ev.key}"
+    assert out.startswith(f"test bench on {configops.run_words(reg, ev)}: ") and len(lines) == 1 and lines[0][1] == f"[chat] Officer: test bench: 4 answer(s) on {ev.key}"
     out, lines = plain("comp barrow_deeps")
     assert out.startswith("comp sandbox ") and len(lines) == 1 and lines[0][1].startswith("[chat] Officer: test bench: opened a comp sandbox")
     out, lines = plain("clear")
@@ -719,9 +719,9 @@ def test_plain_text_test_answer_yes_no_answers_the_puppets_open_asks(reg, rs):
     run(bot.send_confirmations(reg, rs, ev, rc.run_team(reg, ev), "t"))
     run(bot.flush_puppet_digests())
     d = configops.describe(reg, ConfigOp(op="test", value=f"answer {ev.key} yes 3 no 1"))
-    assert d == f"test bench: on {ev.key}, 3 Confirm, 1 Can't make it from the 10 puppet(s) holding an open ask", d
+    assert d == f"test bench: on {configops.run_words(reg, ev)}, 3 Confirm, 1 Can't make it from the 10 puppet(s) holding an open ask", d
     out = run(configops.apply_async(reg, ConfigOp(op="test", value=f"answer {ev.key} yes 3 no 1"), "Officer", False, bot=bot, by_id=OWNER, via="chat"))
-    assert out.startswith(f"test bench on {ev.key}: ") and out.count(";") == 3
+    assert out.startswith(f"test bench on {configops.run_words(reg, ev)}: ") and out.count(";") == 3
     answers = [a["answer"] for m in ms for a in reg.members[m.discord_id].placement_asks if a["roster"] == ev.team]
     assert answers.count("yes") == 3 and answers.count("no") == 1
     assert [k for _m, k in SetupMixin.puppet_asks(reg, ev)].count("confirm") == 6  # (the Can't may start a fill ask for the freed seat)

@@ -146,7 +146,8 @@ def test_describe_run_ops(reg, rs):
     ms = reg.test_members()
     join(reg, rs, ev, ms[:6])
     d = lambda **kw: configops.describe(reg, ConfigOp(**kw))  # noqa: E731
-    assert d(op="run_lock", target=ev.key).startswith(f"lock ") and ev.key in d(op="run_lock", target=ev.key) and "confirmation DMs" in d(op="run_lock", target=ev.key)
+    title = f"Barrow Deeps {reg.local12(ev.start)}"  # a person reads the run's name and time, never its key (phase 3)
+    assert d(op="run_lock", target=ev.key).startswith(f"lock {title} ") and ev.key not in d(op="run_lock", target=ev.key) and "confirmation DMs" in d(op="run_lock", target=ev.key)
     assert "6 joined" in d(op="run_lock", target=ev.key)
     assert d(op="run_answer", target=ev.team, member=ms[0].display_name, value="bench").endswith(f"{ms[0].display_name} → Bench (now Join as {ms[0].main.label})")
     assert "hasn't answered" in d(op="run_answer", target=ev.key, member=ms[9].display_name, value="join")
@@ -235,9 +236,9 @@ def test_run_open(reg, rs):
         configops.apply(reg, ConfigOp(op="run_open", target="barrow_deeps", value="2030-01-08 19:30"), "officer", is_owner=False)
     out = run(configops.apply_async(reg, ConfigOp(op="run_open", target="barrow_deeps", value="2030-01-08 19:30"), "Officer", False, bot=bot))
     # a time that is none of the raid's upcoming runs is a one-off: ad hoc (roster redesign Phase 1)
-    assert re.match(r"opened bd-[a-z0-9]{6} ", out) and "no signup channel" in out
+    assert out.startswith("opened Barrow Deeps Tue 8 Jan 7:30 PM ") and not re.search(r"bd-[a-z0-9]{6}", out) and "no signup channel" in out
     assert bot.calls[0][:2] == ("open_run_and_post", "barrow_deeps") and bot.calls[0][2].startswith("2030-01-08T19:30") and bot.calls[0][4] == "adhoc"
-    ev = rs.for_team(out.split()[1])
+    (ev,) = rs.live()
     assert ev.state == "open" and ev.kind == "adhoc" and ev.series is None
     with pytest.raises(RegistryError, match="no recurring slots yet"):
         run(configops.apply_async(reg, ConfigOp(op="run_open", target="barrow_deeps"), "Officer", False, bot=bot))
@@ -247,12 +248,12 @@ def test_run_strategy_and_board_open(reg, rs):
     ev = open_test_run(reg, rs)
     ms = reg.test_members()
     join(reg, rs, ev, ms[:5])
-    assert configops.apply(reg, ConfigOp(op="run_strategy", target=ev.key, value="first"), "officer", is_owner=False, raids=rs) == f"{ev.key}: split strategy first"
+    assert configops.apply(reg, ConfigOp(op="run_strategy", target=ev.key, value="first"), "officer", is_owner=False, raids=rs) == f"Barrow Deeps {reg.local12(ev.start)}: split strategy first"
     assert rc.RaidStore(reg.store, reg.key).events[ev.key].split_strategy == "first"
     with pytest.raises(RegistryError, match="strategy is one of"):
         configops.apply(reg, ConfigOp(op="run_strategy", target=ev.key, value="chaos"), "officer", is_owner=False, raids=rs)
     layout = f"{ms[0].display_name}, {ms[1].display_name} | {ms[2].display_name}"
-    assert configops.apply(reg, ConfigOp(op="run_board", target=ev.key, value=layout), "officer", is_owner=False, raids=rs) == f"{ev.key}: board = {layout}"
+    assert configops.apply(reg, ConfigOp(op="run_board", target=ev.key, value=layout), "officer", is_owner=False, raids=rs) == f"Barrow Deeps {reg.local12(ev.start)}: board = {layout}"
     assert rs.events[ev.key].layout == [[ms[0].display_name, ms[1].display_name], [ms[2].display_name]]
     with pytest.raises(RegistryError, match="not joined on this sheet: Nobody"):
         configops.apply(reg, ConfigOp(op="run_board", target=ev.key, value="Nobody"), "officer", is_owner=False, raids=rs)
@@ -272,7 +273,7 @@ def test_run_board_locked(reg, rs):
     d = configops.describe(reg, ConfigOp(op="run_board", target=ev.key, value=", ".join(m.display_name for m in ms[1:6])))
     assert f"asked to confirm: {ms[5].display_name}" in d and f"freed: {ms[0].display_name}" in d
     out = run(configops.apply_async(reg, ConfigOp(op="run_board", target=ev.key, value=", ".join(m.display_name for m in ms[1:6])), "Officer", False, bot=bot))
-    assert out == f"{ev.key}: asked {ms[5].display_name} to confirm; freed {ms[0].display_name}"
+    assert out == f"Barrow Deeps {reg.local12(ev.start)}: asked {ms[5].display_name} to confirm; freed {ms[0].display_name}"
     assert bot.calls == [("after_board_change", ev.key, [ms[5].display_name], [ms[0].display_name], "Officer")]
     seated = {p.signup_name for p in rs.events[ev.key].seated()}
     assert ms[5].display_name in seated and ms[0].display_name not in seated
@@ -290,7 +291,7 @@ def test_run_fill(reg, rs):
     lock_with_board(reg, rs, ev, [m.display_name for m in ms[:6]])
     preview = configops.apply(reg, ConfigOp(op="run_fill", target=ev.key, value="preview"), "officer", is_owner=False, raids=rs)
     short = rc.run_size(reg, ev) - 6
-    assert preview.startswith(f"{ev.key}: short {short} seat(s)") and "; a send would ask (nothing sent): 1. " in preview and "from the bench" in preview
+    assert preview.startswith(f"Barrow Deeps {reg.local12(ev.start)}: short {short} seat(s)") and "; a send would ask (nothing sent): 1. " in preview and "from the bench" in preview
     assert not rs.events[ev.key].fill_asks, "preview sends nothing"
     assert run(configops.apply_async(reg, ConfigOp(op="run_fill", target=ev.key, value="preview"), "Officer", False, bot=bot)) == preview
     assert bot.calls == []
@@ -375,7 +376,7 @@ def test_test_bench(reg, rs):
         ev.message_id, ev.channel_id = 1, channel.id
     bot.post_sheet = post_sheet
     out = run(configops.apply_async(reg, ConfigOp(op="test", value="run barrow_deeps"), "Officer", False, bot=bot, by_id=42, channel_id=777))
-    assert out.startswith("test run bd-") and "lock 25 min before" in out and "sheet in <#777>" in out
+    assert out.startswith("test run Barrow Deeps ") and "lock 25 min before" in out and "sheet in <#777>" in out
     ev = rs.live()[0]
     t = reg.config.roster(ev.team)
     assert ev.test and t["test_channel"] == 777, "a rehearsal; its cards post where it was asked for (D20)"

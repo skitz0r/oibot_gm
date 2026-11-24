@@ -151,9 +151,18 @@ Auras (owner): aura_set: what the guild learns about a buff. target=<buff id, e.
 Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, or the raid id when only one of its runs is live):
   run_open: target=<raid id>, value=<optional "YYYY-MM-DD HH:MM" in guild time — one of the raid's upcoming runs listed below, or any
     other time for a one-off; a bare "HH:MM" = the next listed run at that time; blank = the raid's next run>, field=<optional schedule id:
-    its next run, or with a time its settings (a pickup template needs the time)>, text=<optional follow-on "<raid id> x<N>" — a second
-    raid the same night from the same signup, starting when the first ends ("10 man barrow deeps splits afterwards" = "barrow_deeps x2")>
+    its next run, or with a time its settings (a pickup template needs the time)>, text=<optional later raids "<raid id> x<N>, <raid id>"
+    — up to three more raids the same night from the same signup, each starting when the one before it ends ("10 man barrow deeps
+    splits afterwards" = "barrow_deeps x2")>
     — opens the sheet now and posts it in the signup channel.
+  run_reschedule: target, field=start with value=<"YYYY-MM-DD HH:MM" in guild time: the run's new start> — moves the whole run
+    (every raid of it keeps its offset), answers stand, everyone who answered sees a notice, nobody is DMed; or field=<one of this
+    run's own sheet timing settings, before lock only: nudge_hours_before|lock_hours_before|confirm_hours_before|fill_ask_hours
+    (value = hours before the start; fill_ask_hours = hours a fill ask waits) | nudge|autofill (value on|off)>, value. Its schedule
+    keeps its own. Several run_reschedule ops on one run in a row are saved together ("move it to 9 PM and lock 12 h before").
+  run_lineup: target, value=<the raids after the first one, in order: "<raid id> x<N>, <raid id>" ("barrow_deeps x2, onyxias_lair");
+    "none" = the first raid alone> — before lock only: adds, removes or reorders the raids that follow the first one the same
+    night (each starts when the one before it ends); the first raid never changes. Its schedule keeps its own lineup.
   run_answer: target, member, value=join|bench|no thanks, character=<optional: which of their characters>, reason=<optional, with
     no thanks: why, a note only the officers see> — an officer sets someone's answer, or someone answers for themselves
     (after lock: join seats them and asks them to confirm, no thanks frees their seat and the fill engine looks for cover).
@@ -232,19 +241,19 @@ class ConfigOp(BaseModel):
     # with no field at all (2026-10-30: "remove enchanting from Jonster" → a bare character op), every time.
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, run_reschedule, run_lineup, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, regular, comp_target*, comp_groups), schedule id alone (schedule_set, schedule_remove), run key (run_*, pin, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
-    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set/schedule_set: the setting name from the schema (schedule_set: raid = a new schedule's first raid); run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: the minimum as a whole number; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
+    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set/schedule_set: the setting name from the schema (schedule_set: raid = a new schedule's first raid); run_open / regular: a schedule id; run_reschedule: start or a timing setting; comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: the minimum as a whole number; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_reschedule start: 'YYYY-MM-DD HH:MM'; run_lineup: 'barrow_deeps x2, onyxias_lair'|'none'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
     end: Optional[str] = None
     reason: Optional[str] = Field(default=None, description="a note: run_cancel why, run_answer no thanks why (officers only), comp_target reason, application/proposal note, recruit hint; loot award/reason/correct/retire: the reason (required); wishlist: a note")
     doc: Optional[str] = Field(default=None, description="policy_append: loot|comp; policy: loot|comp|persona")
-    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional; loot tick: the boss; loot retire: restore; wishlist: ms|os; tier: reweight; run_open: the follow-on '<raid id> x<N>'")
+    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional; loot tick: the boss; loot retire: restore; wishlist: ms|os; tier: reweight; run_open: the later raids '<raid id> x<N>, <raid id>'")
 
 
 class ConfigRequest(BaseModel):
@@ -463,7 +472,9 @@ CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roste
 
 
 RUN_OPS = {"run_open", "run_answer", "run_lock", "run_cancel", "run_fill", "run_strategy", "run_autofill", "run_board", "run_move", "run_propose", "run_sheet", "confirm_for",
-           "run_remind", "run_pause", "run_withdraw", "run_reopen"}
+           "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_reschedule", "run_lineup"}
+# a run's start, timing and lineup (phase 3): Apply passes the run's rc.event_rev seen at preview (a changed run is refused)
+EVENT_OPS = {"run_reschedule", "run_lineup"}
 # the ops that write a run's board: Apply passes the board fingerprint seen at preview (a changed board is refused)
 BOARD_OPS = {"run_board", "run_move", "run_autofill", "run_propose"}
 NEEDS_BOT = "needs the bot (Discord side effects): apply it from /gm change or an @mention, not offline"
@@ -478,6 +489,7 @@ OP_GROUP = {
     "run_open": "runs", "run_answer": "runs", "run_lock": "runs", "run_cancel": "runs", "run_fill": "runs", "run_strategy": "runs",
     "run_autofill": "runs", "run_board": "runs", "run_move": "runs", "run_propose": "runs", "run_sheet": "runs", "confirm_for": "runs",
     "run_remind": "runs", "run_pause": "runs", "run_withdraw": "runs", "run_reopen": "runs",  # raid-night levers (phase 2 A, D15/D18/B6)
+    "run_reschedule": "runs", "run_lineup": "runs",  # move / re-time a run, change its raids (phase 3; officers live, C17)
     "pin": "runs",  # D16: a pin is a run decision (who the lock seats), not comp policy
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "policy_append": "comp",
     "raid_set": "comp", "raid_reset": "comp", "schedule_set": "comp", "schedule_remove": "comp",  # officers edit raids and schedules (D8)
@@ -519,6 +531,8 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
 # ops a surface is still missing from, with the plan that adds it — temporary, unlike BY_DESIGN_EXEMPT; the parity test
 # accepts these too but lists them apart, so the gap is written down rather than silent
 PARITY_PENDING: dict[str, dict[str, str]] = {
+    "run_reschedule": {"discord": "phase 5: the Reschedule wizard (date and time from selects); until then /gm change reaches it as plain text"},
+    "run_lineup": {"discord": "phase 5: the lineup wizard; until then /gm change reaches it as plain text"},
     # (phase 3 closed the comp-target rows: /roster comp, the Readiness page / Raids page's Desired comp through
     # POST /api/ops/change `comp` changes, MCP set_minimum — Registry.set_minimums underneath. comp_groups stays
     # plain text only on every surface — D48 — so its row names the plain-text paths.)
@@ -798,10 +812,10 @@ def _yes_no(value: str | None) -> bool:
 def _placement_ask(reg: Registry, ev, m) -> dict:
     """The open Confirm / Can't make it ask a locked run holds for this member (what the DM buttons answer)."""
     if ev.state != "locked":
-        raise RegistryError(f"{ev.key} isn't locked yet — confirmations start at lock (set their answer instead)")
+        raise RegistryError(f"{run_words(reg, ev)} isn't locked yet — confirmations start at lock (set their answer instead)")
     ask = next((a for a in reg.open_placement_asks(m.discord_id) if a["roster"] == ev.team), None)
     if ask is None:
-        raise RegistryError(f"{m.display_name} has no confirmation waiting on {ev.key}")
+        raise RegistryError(f"{m.display_name} has no confirmation waiting on {run_words(reg, ev)}")
     return ask
 
 
@@ -838,6 +852,51 @@ def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None 
 
     start, sid, _note = rc.open_when(reg, rid, value, schedule)
     return start, sid
+
+
+def _reschedule_args(reg: Registry, op: ConfigOp) -> tuple:
+    """run_reschedule (one op or several merged on one run) → (the new start or None, {timing setting: value}): field
+    `start` = guild wall time 'YYYY-MM-DD HH:MM' (rc.move_start: DST-safe, a skipped or doubled wall time refused), any
+    other field one of rc.EVENT_TIMING's settings (rc.TIMING_UNKNOWN otherwise)."""
+    from . import raidcycle as rc
+
+    start, timing = None, {}
+    for p in (op.parts if isinstance(op, MergedOp) else [op]):
+        f = (p.field or "").strip().lower()
+        if f in ("start", "when", "time"):
+            start = rc.move_start(reg, p.value)
+        elif f in rc.EVENT_TIMING:
+            timing[f] = (p.value or "").strip().lower()
+        else:
+            raise RegistryError(rc.TIMING_UNKNOWN if f else "Name the new start, or the setting to change.")
+    return start, timing
+
+
+def _lineup_args(reg: Registry, rs, first, op: ConfigOp) -> list[dict]:
+    """run_lineup's text (the later raids, registry.parse_lineup_text) → the run's whole lineup: the first raid with its
+    rosters now (or as the text names it, when its first part IS the first raid), then the later raids."""
+    from . import raidcycle as rc
+    from .registry import parse_lineup_text
+
+    later = parse_lineup_text(op.value)
+    head = rc.run_lineup(reg, rs, first)[0]
+    if later and later[0]["raid"] == first.instance:
+        head, later = {"raid": first.instance, "rosters": later[0]["rosters"]}, later[1:]
+    return [{"raid": head["raid"], "rosters": head["rosters"]}] + later
+
+
+def lineup_of_op(reg: Registry, rid: str, text) -> list[dict] | None:
+    """run_open's later raids from its `text` ('barrow_deeps x2, onyxias_lair'; registry.parse_lineup_text), each raid
+    checked (design §5.62): None when there are none (the schedule's own lineup, if any, applies)."""
+    from .registry import parse_lineup_text
+
+    later = parse_lineup_text(text)
+    for fw in later:
+        if fw["raid"] not in reg.profile.raids:
+            raise RegistryError(f"unknown raid {fw['raid']} for the follow-on (one of {', '.join(reg.profile.raids)})")
+        if fw["raid"] == rid:
+            raise RegistryError("a follow-on is another raid, not the raid itself")
+    return later or None
 
 
 def follow_of_op(reg: Registry, rid: str, text: str | None) -> dict | None:
@@ -1123,6 +1182,8 @@ def _merge_key(op: ConfigOp):
             return None
     if op.op in ("aura_set", "family_set") and op.target:
         return (op.op, op.target.strip().lower())
+    if op.op == "run_reschedule" and op.target:
+        return ("run_reschedule", op.target.strip())  # one run's start and timing: one RaidMixin.reschedule_event
     if op.op == "plain":
         return ("plain",)
     if op.op == "loot_weights":
@@ -1252,11 +1313,11 @@ def _test_answer_run(reg: Registry, rs, run: str | None):
     if run:
         ev = _live_event(reg, run, rs)[1]
         if not rc.is_test_run(reg, ev):
-            raise RegistryError(f"{ev.key} is a real run: test members answer test runs only")
+            raise RegistryError(f"{run_words(reg, ev)} is a real run: test members answer test runs only")
         return ev
     tests = [e for e in rs.live() if rc.is_test_run(reg, e)]
     if len(tests) != 1:
-        raise RegistryError(f"{len(tests)} live test runs — say which ({', '.join(e.key for e in tests) or 'none: open one first'})")
+        raise RegistryError(f"{len(tests)} live test runs — say which ({', '.join(run_words(reg, e) for e in tests) or 'none: open one first'})")
     return tests[0]
 
 
@@ -1495,6 +1556,12 @@ def _pin_value(value: str | None) -> str | None:
     return PIN_VALUES[v]
 
 
+def run_words(reg: Registry, ev) -> str:
+    """A run as a person reads it in a plain-text line or refusal: its raid and its start in 12-hour words ('Barrow
+    Deeps Tue 8 Dec 7:30 PM') — never its key (random letters since phase 3; ops lines and MCP fields keep the key)."""
+    return f"{reg.raid_def(ev.instance).get('name', ev.instance) if ev.instance else 'The run'} {reg.local12(ev.start)}"
+
+
 def _live_event(reg: Registry, target: str | None, raids=None):
     """The live sheet a run key (or event key) names. `raids` is the bot's RaidStore when there is one (so the
     change lands on the event the scheduler holds); otherwise the store is read fresh from disk."""
@@ -1507,10 +1574,10 @@ def _live_event(reg: Registry, target: str | None, raids=None):
         k = key.lower()
         hits = [e for e in rs.live() if e.instance and (e.instance.lower() == k or reg.raid_def(e.instance).get("name", "").lower() == k)]
         if len(hits) > 1:
-            raise RegistryError(f"{key} has {len(hits)} live runs ({', '.join(e.key for e in hits)}) — give the run key")
+            raise RegistryError(f"{key} has {len(hits)} live runs: {', '.join(run_words(reg, e) for e in hits)}. Say which one.")
         ev = hits[0] if hits else None
     if ev is None or ev.state not in ("open", "locked"):
-        raise RegistryError(f"no live run {key or '?'} (give the run key, e.g. bd-1209-1930)")
+        raise RegistryError(f"There is no live run {key}." if key else "Name the run.")
     return rs, ev
 
 
@@ -1535,6 +1602,12 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
             except RegistryError:
                 continue
             out.setdefault(ev.key, rc.board_rev(reg, ev))
+        elif op.op in EVENT_OPS:  # a move / lineup edit carries the run as the diff showed it (rc.event_rev)
+            try:
+                rs, ev = _live_event(reg, op.target, raids)
+            except RegistryError:
+                continue
+            out.setdefault(EVENT_REV + ev.key, rc.event_rev(reg, rs, ev))
         elif op.op == "run_fill":  # a send carries the plan the diff showed (rc.plan_rev) — before and after lock
             try:
                 rs, ev = _live_event(reg, op.target, raids)
@@ -1550,6 +1623,7 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
 
 PLAN_REV = "plan:"  # board_revs key prefix for a run's plan fingerprint (never a run key: those hold no ':')
 CONFIG_REV = "config:"  # … and for a config section's fingerprint (Registry.config_rev; design §2.4)
+EVENT_REV = "event:"  # … and for a run's start, timing and lineup (rc.event_rev; run_reschedule / run_lineup)
 _SECTION_OF = {"set": "settings", "role_add": "settings", "role_remove": "settings", "recruit": "recruitment", "plain": "plain",
                "aura_set": "buffs", "family_set": "buffs", "aura_reset": "buffs", "loot_weights": "loot"}
 _RAID_SECTION_OPS = {"raid_set", "raid_reset", "schedule_set", "schedule_remove", "comp_target", "comp_target_clear"}
@@ -1586,6 +1660,8 @@ def op_rev(op: ConfigOp, key: str | None, revs: dict[str, str]) -> str | None:
         return revs.get(key)
     if op.op == "run_fill":
         return revs.get(PLAN_REV + key)
+    if op.op in EVENT_OPS:
+        return revs.get(EVENT_REV + key)
     return None
 
 
@@ -1598,6 +1674,7 @@ def snapshot_revs(reg: Registry, revs: dict[str, str], raids) -> dict[str, str]:
     if raids is None:
         return out
     out.update({k: rc.board_rev(reg, ev) for k in revs if not k.startswith(CONFIG_REV) and (ev := raids.events.get(k)) is not None})
+    out.update({k: rc.event_rev(reg, raids, ev) for k in revs if k.startswith(EVENT_REV) and (ev := raids.events.get(k[len(EVENT_REV):])) is not None})
     return out
 
 
@@ -1616,6 +1693,15 @@ def refresh_revs(reg: Registry, revs: dict[str, str], raids, stale: set, before:
                 stale.add(k)
             else:
                 revs[k] = reg.config_rev(k[len(CONFIG_REV):])
+            continue
+        if k.startswith(EVENT_REV):  # a run's start, timing and lineup: the same rule
+            ev = raids.events.get(k[len(EVENT_REV):]) if raids is not None else None
+            if ev is None:
+                continue
+            if before.get(k) != revs[k]:
+                stale.add(k)
+            else:
+                revs[k] = rc.event_rev(reg, raids, ev)
             continue
         ev = raids.events.get(k) if raids is not None else None
         if ev is None:
@@ -1734,11 +1820,11 @@ def _ended_event(reg: Registry, target: str | None, raids=None):
                        and (e.instance.lower() == k or reg.raid_def(e.instance).get("name", "").lower() == k)), key=lambda e: e.closed_at or "", reverse=True)
         ev = hits[0] if hits else None
     if ev is None:
-        raise RegistryError(f"no run {key or '?'} (give the run key, e.g. bd-1209-1930)")
+        raise RegistryError(f"There is no run {key}." if key else "Name the run.")
     if ev.state == "cancelled":
-        raise RegistryError(f"{ev.key} was cancelled — a cancelled run is never reopened; open a new one.")
+        raise RegistryError(f"{run_words(reg, ev)} was cancelled — a cancelled run is never reopened; open a new one.")
     if ev.state != "done":
-        raise RegistryError(f"{ev.key} is {ev.state} — only a run that ended can be reopened.")
+        raise RegistryError(f"{run_words(reg, ev)} is {ev.state} — only a run that ended can be reopened.")
     return rs, ev
 
 
@@ -1751,7 +1837,7 @@ def _pause_value(op: ConfigOp) -> bool:
     raise RegistryError("run_pause is pause | resume")
 
 
-RUN_VERBS_AUDITED = {"run_cancel", "run_remind", "run_pause", "run_withdraw", "run_reopen"}  # the RaidMixin verb writes ops.audited itself
+RUN_VERBS_AUDITED = {"run_cancel", "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_reschedule", "run_lineup"}  # the RaidMixin verb writes ops.audited itself
 CANCEL_QUIET = {"quiet", "silent", "no line", "no notice", "no announcement", "none", "false", "off", "no"}
 
 
@@ -1766,7 +1852,7 @@ def _propose_args(reg: Registry, ev, op: ConfigOp) -> tuple[str, str | None]:
     from .registry import SPLIT_POLICIES
 
     if ev.state != "open":
-        raise RegistryError(f"{ev.key} is {ev.state} — proposals shape an open run's board (move people instead)")
+        raise RegistryError(f"{run_words(reg, ev)} is {ev.state} — proposals shape an open run's board (move people instead)")
     f = (op.field or "").strip().lower().replace("fresh", "").replace("new", "")
     f = {"again": "another", "different": "another", "apply": "use", "use it": "use", "use this": "use"}.get(f, f)
     if f not in PROPOSE_FIELDS:
@@ -1797,7 +1883,7 @@ def propose_text(reg: Registry, ev, strategy: str, layout: list[list[str]], rost
     reason = rc.run_split_reason(reg, ev)
     another = rc.another_run_hint(reg, ev, rosters, reason) if left else None
     bench = [p.signup_name for p in (rosters[0].benched if rosters else []) if p.signup_name not in {x.signup_name for x in left}]
-    return (f"{ev.key}: {strategy} proposal{f' #{shown}' if shown > 1 else ''} — {groups}"
+    return (f"{run_words(reg, ev)}: {strategy} proposal{f' #{shown}' if shown > 1 else ''} — {groups}"
             + (f" · {balance}" if (balance := rc.balance_words(syn)) else "")
             + (f" · left out: {', '.join(p.signup_name for p in left)}" if left else "") + (f" · bench: {', '.join(bench)}" if bench else "")
             + (f" · {rc.split_reason_text(reason)}" if reason else "") + (f" · {another}" if another else "")
@@ -2278,7 +2364,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
             return _describe_schedule(reg, op) + " (saved together)"
         except RegistryError as e:
             return f"schedule {op.target or '?'}: {e}"
-    if isinstance(op, MergedOp):
+    if isinstance(op, MergedOp) and op.op not in EVENT_OPS:  # a run's merged start + timing is ONE action, described below
         return "; ".join(describe(reg, p, channel) for p in op.parts) + " (saved together)"
     if op.op in ("loot", "wishlist", "tier", "loot_weights"):  # the loot council, wishlists, item tiers, the scoring weights (loot_ops)
         from . import loot_ops
@@ -2449,7 +2535,7 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
     """'Barrow Deeps · Alt run: Saturdays 8:00 PM → Saturdays 9:00 PM' — the schedule's current value → the new one,
     in words (every part of a merged op). Raises RegistryError when the op can't apply (an id with ':', no such
     schedule and no raid named for a new one, a value that won't parse)."""
-    from .registry import ID_TAKEN, NO_SCHEDULE
+    from .registry import ID_TAKEN, NO_SCHEDULE, SCHEDULE_EXISTS
 
     if op.op == "schedule_remove":
         cur = reg.schedule_entry(_schedule_sid(op))
@@ -2467,14 +2553,18 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
         raise RegistryError(f"unknown raid {rid} (one of {', '.join(reg.profile.raids)})")
     name = reg.raid_def(rid).get("name", rid)
     cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
-    if cur is not None and raid:  # a named raid means create (Registry.schedule_raid): an id in use is taken
-        raise RegistryError(ID_TAKEN.format(sid=sid))
+    if cur is not None and raid:  # a named raid means create (Registry.schedule_raid): an id in use is taken — its own
+        raise RegistryError((SCHEDULE_EXISTS if raid == rid else ID_TAKEN).format(sid=sid))  # raid named: how to edit it instead
     new = _schedule_words(reg, rid, fields, sid)
     after = _runs_preview(reg, rid, schedule=sid, schedule_fields=fields) if any(f in PREVIEW_SCHEDULE_FIELDS for f in fields) else ""
     if cur is None:
         return f"{name}: new schedule {sid} — {new}{after}"
     own = reg.schedule_def(rid, sid)["schedule"]["own"]
     now = {f: (own.get(f) if f in own else "inherit") if f not in ("kind", "slots", "days", "time", "rosters", "active", "name", "follow") else cur.get(f) for f in fields}
+    if "lineup" in fields:  # an edit's whole lineup: the one it has now (its raid, its follow-on, the raids after it)
+        from .registry import row_lineup
+
+        now["lineup"] = row_lineup(rid, cur)
     if "rosters" in fields and not after:  # the rosters-per-run sentence (rc.rosters_copy): the next run, never the open one
         from . import raidcycle as rc
         from .registry import schedule_value
@@ -2500,17 +2590,18 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         have = rc.find_run(reg, rs, rid, start, sid)
         where = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "nowhere (no signup channel set — /raid sheet can place it)"
         sname = next((f" · {s['name']}" for s in reg.schedules(rid) if s["id"] == sid and len(reg.schedules(rid)) > 1), "")
-        fw = follow_of_op(reg, rid, op.text)
-        then = f", then {reg.follow_words(fw)} at {reg.local12(rc.follow_start(reg, rid, start))}" if fw else ""
+        fw = lineup_of_op(reg, rid, op.text)  # the later raids asked for (up to three), each at its start
+        then = "".join(f", then {reg.follow_words(e)} at {reg.local12(rc.after_minutes(start, at))}"
+                       for e, at in zip(fw, reg.lineup_offsets([{"raid": rid, "rosters": 1}, *fw])[1:])) if fw else ""
         if have and have.state in ("open", "locked"):  # rc.ensure_run returns it unchanged: a follow-on is never added to it
             head = f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}"
             if have.followed_by:  # its follow-on as it stands
                 then = f", then {rc.follow_words_of(reg, have)} at {reg.local12(rc.follow_start(reg, rid, have.start))}"
-                return f"{head}{then}: already {have.state} as {have.key} — nothing new is posted"
+                return f"{head}{then}: already {have.state} — nothing new is posted"
             if fw:
-                return (f"{head}: already {have.state} as {have.key}. A follow-on can't be added to a run that is already open."
+                return (f"{head}: already {have.state}. A follow-on can't be added to a run that is already open."
                         " Cancel it and open the night again.")
-            return f"{head}: already {have.state} as {have.key} — nothing new is posted"
+            return f"{head}: already {have.state} — nothing new is posted"
         if have is not None:  # that time's run is closed: open_run refuses it
             raise RegistryError(rc.closed_run_refusal(rs, have) or "That time's run can't be opened again. Pick another time.")
         return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then} now: sheet posted in {where}, absences pre-filled"
@@ -2533,7 +2624,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
 
                 held = len(SetupMixin.puppet_asks(reg, ev))
                 parts.append(f"{counts['yes']} Confirm, {counts['no']} Can't make it from the {held} puppet(s) holding an open ask")
-            return f"test bench: on {ev.key}, " + "; ".join(parts)
+            return f"test bench: on {run_words(reg, ev)}, " + "; ".join(parts)
         if kind in ("add", "remove"):
             rows = _test_specs(reg, arg)
             if kind == "remove":
@@ -2553,7 +2644,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
                     f"lock {lock_in}, confirm {confirm_in} min before; only the {n} puppet(s) and you are on it"
                     + ("; every puppet is DMed when it opens (the DMs reach you)" if dm else ""))
         rs = rc.RaidStore(reg.store, reg.key)
-        runs = [e.key for e in rs.live() if (cfg.roster(e.team) or {}).get("test")]
+        runs = [run_words(reg, e) for e in rs.live() if (cfg.roster(e.team) or {}).get("test")]
         return f"test bench: clear — cancel {len(runs)} test run(s){' (' + ', '.join(runs) + ')' if runs else ''} and delete {n} puppet member(s) and their placements"
     if op.op == "character":  # the change, then its ripple into sheets and seats in the words every surface prints
         from . import raidcycle as rc
@@ -2594,7 +2685,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
                 + (f" · warning: {c.label} is also a regular of {', '.join(twin)} (same lockout)" if twin else ""))
     if op.op == "run_reopen":  # a run that ENDED: not a live one
         rs, ev = _ended_event(reg, op.target)
-        label = f"{reg.raid_def(ev.instance).get('name', ev.instance)} {reg.local12(ev.start)} ({ev.key})"
+        label = run_words(reg, ev)
         why = rc.reopen_refusal(reg, ev)
         if why:
             raise RegistryError(why)
@@ -2602,7 +2693,25 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         return f"reopen {label} — " + ("locked again, the roster as it was" if back == "locked" else "the sheet is open again") + "; the loot council stays archived"
     # the run ops: resolve the live run first so the line names it
     rs, ev = _live_event(reg, op.target)
-    label = f"{reg.raid_def(ev.instance).get('name', ev.instance)} {reg.local12(ev.start)} ({ev.key})"
+    label = run_words(reg, ev)
+    if op.op == "run_reschedule":  # the confirm's own sentences (consequences.reschedule_consequence), refusals first
+        from .consequences import reschedule_consequence
+
+        start, timing = _reschedule_args(reg, op)
+        first = rc.first_part(rs, ev)
+        why = rc.reschedule_refusal(reg, rs, first, start, timing)
+        if why:
+            raise RegistryError(why)
+        return f"{run_words(reg, first)}: " + " ".join(reschedule_consequence(reg, rs, first, start, timing))
+    if op.op == "run_lineup":
+        from .consequences import lineup_consequence
+
+        first = rc.first_part(rs, ev)
+        lineup = _lineup_args(reg, rs, first, op)
+        why = rc.lineup_refusal(reg, rs, first, lineup)
+        if why:
+            raise RegistryError(why)
+        return f"{run_words(reg, first)}: " + " ".join(lineup_consequence(reg, rs, first, lineup))
     if op.op == "run_remind":
         why = rc.remind_refusal(reg, ev)
         if why:
@@ -2613,7 +2722,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
     if op.op == "run_pause":
         paused = _pause_value(op)
         if ev.state not in ("open", "locked"):
-            raise RegistryError(f"{ev.key} is {ev.state}")
+            raise RegistryError(f"{label} is {ev.state}")
         if bool(ev.autofill_paused) == paused:
             return f"{label}: automatic asks are already {'paused' if paused else 'on'} — nothing changes"
         return f"{label}: {'pause automatic asks — nothing goes out on its own; an officer’s Fill seats… still sends' if paused else 'resume automatic asks — open seats are asked for again on the next pass'}"
@@ -2621,7 +2730,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         m = _need_member(reg, op.member)
         ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.pending), None)
         if ask is None:
-            raise RegistryError(f"No ask is out for {m.display_name} on {ev.key}.")
+            raise RegistryError(f"No ask is out for {m.display_name} on {label}.")
         return f"{label}: withdraw the {'suggestion' if ask.phase == 'prelock' else 'fill'} ask to {m.display_name} — their card says never mind (no DM)" + (", and the tied half of the swap is released" if ask.pair else "")
     if op.op == "run_answer":
         m = _need_member(reg, op.member)
@@ -2664,17 +2773,18 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         return f"{label}: post the sheet in {where} — an officer's re-post moves the live sheet there, anyone else's is a read-only copy"
     if op.op == "run_lock":
         if ev.state != "open":
-            raise RegistryError(f"{ev.key} is already {ev.state}")
+            raise RegistryError(f"{label} is already {ev.state}")
         return f"lock {label} now: roster built from {len(ev.by_status('in'))} joined ({rc.pin_summary(ev)}), cards in the roster channel, confirmation DMs to everyone rostered"
     if op.op == "run_cancel":
         from .consequences import consequence
 
         if ev.state in ("done", "cancelled"):
-            raise RegistryError(f"{ev.key} is already {ev.state}")
+            raise RegistryError(f"{label} is already {ev.state}")
         quiet = not _cancel_notify(op)
         lines = consequence("cancel", reg, ev, rs=rs)  # who it touches and how they hear, from code (the confirm screen's own sentences)
-        return (f"cancel {label}" + (f": {op.reason}" if op.reason else "") + ". " + " ".join(lines)
-                + (" No line goes to the signup channel." if quiet else " One fixed line goes to the signup channel, never the reason."))
+        tail = ("" if not rc.cancel_tells_channel(rs, ev)  # a later raid once the first has finished: no sheet, no channel line
+                else " No line goes to the signup channel." if quiet else " One fixed line goes to the signup channel, never the reason.")
+        return f"cancel {label}" + (f": {op.reason}" if op.reason else "") + ". " + " ".join(lines) + tail
     if op.op == "run_fill":
         v = (op.value or "preview").strip().lower()
         if v not in ("preview", "send"):
@@ -2686,7 +2796,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
             head = f"{label}: {'suggestions before lock (nothing sent)' if v == 'preview' else 'ask these by DM (a yes changes their signup, seats nobody; unanswered asks close at lock)'}"
             return head + " — " + " | ".join(rc.plan_lines(reg, plan))
         if ev.state != "locked":
-            raise RegistryError(f"{ev.key} is {ev.state}")
+            raise RegistryError(f"{label} is {ev.state}")
         nd = rc.needs(reg, ev, rc.run_team(reg, ev))
         parts = ([f"{nd['headcount']} seat(s)"] if nd["headcount"] else []) + [f"{n} {r}" for r, n in nd["roles"].items()]
         short = ("short " + ", ".join(parts)) if parts else "every seat and role is filled"
@@ -2915,7 +3025,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         rs, ev = _live_event(reg, op.target, raids)
         ev.split_strategy = v
         rs.save(ev, f"split strategy {v} (by {by})")
-        return f"{ev.key}: split strategy {v}"
+        return f"{run_words(reg, ev)}: split strategy {v}"
     if op.op == "run_autofill":
         from . import raidcycle as rc
 
@@ -2929,7 +3039,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         ev.layout = layout
         ev.log.append(f"{by}: auto-filled the board")
         rs.save(ev, "board auto-filled")
-        return f"{ev.key}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
+        return f"{run_words(reg, ev)}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
     if op.op == "run_fill" and (op.value or "preview").strip().lower() == "preview":
         from . import raidcycle as rc
 
@@ -2937,13 +3047,13 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         if ev.state == "open":  # before lock: the suggestions, code-written (Claude may rephrase, never invent)
             plan = rc.role_plan(reg, rs, ev)
             if not plan.seats:
-                return f"{ev.key}: nothing to suggest — the tank/healer minimums are covered"
-            return f"{ev.key}: suggestions before lock (nothing sent): " + " | ".join(rc.plan_lines(reg, plan))
+                return f"{run_words(reg, ev)}: nothing to suggest — the tank/healer minimums are covered"
+            return f"{run_words(reg, ev)}: suggestions before lock (nothing sent): " + " | ".join(rc.plan_lines(reg, plan))
         team = rc.run_team(reg, ev)
         nd = rc.needs(reg, ev, team)
         waiting = [a.display_name for a in ev.fill_asks if a.pending]
         batch = rc.batch_preview(rc.role_plan(reg, rs, ev, team)) if (nd["headcount"] or nd["roles"]) else ["nobody"]
-        return (f"{ev.key}: short {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else "") + (f"; waiting on {', '.join(waiting)}" if waiting else "")
+        return (f"{run_words(reg, ev)}: short {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else "") + (f"; waiting on {', '.join(waiting)}" if waiting else "")
                 + "; a send would ask (nothing sent): " + " | ".join(batch))
     if op.op == "run_board":
         rs, ev = _live_event(reg, op.target, raids)
@@ -2957,7 +3067,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         ev.layout = layout if any(layout) else None
         ev.log.append(f"{by}: board set")
         rs.save(ev, f"board (by {by})")
-        return f"{ev.key}: board = " + (" | ".join(", ".join(g) for g in layout) or "cleared")
+        return f"{run_words(reg, ev)}: board = " + (" | ".join(", ".join(g) for g in layout) or "cleared")
     if op.op in RUN_OPS:
         raise RegistryError(f"{op.op} {NEEDS_BOT}")
     raise RegistryError(f"unsupported op {op.op}")
@@ -3323,8 +3433,10 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_open":
         rid = op.target or ""
         start, sid = _open_time(reg, rid, op.value, op.field)
-        ev = await bot.open_run_and_post(reg, rs, rid, start, by, follow=follow_of_op(reg, rid, op.text), schedule=sid)
-        return f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted; /raid sheet places it)")
+        later = lineup_of_op(reg, rid, op.text) or []  # one later raid travels as `follow` (the verb's older keyword), more as `lineup`
+        ev = await bot.open_run_and_post(reg, rs, rid, start, by, follow=later[0] if len(later) == 1 else None, schedule=sid,
+                                         **({"lineup": later} if len(later) > 1 else {}))
+        return f"opened {run_words(reg, ev)}" + ("" if ev.message_id else " (no signup channel set — sheet not posted; /raid sheet places it)")
     if op.op == "absence_clear":  # THE "I'm back" verb (discord_people.im_back): the absence goes, its sheets re-open
         from . import discord_people
 
@@ -3343,7 +3455,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             ev = _test_answer_run(reg, rs, run)
             done = await bot.test_answer(reg, rs, ev, join=counts["join"], bench=counts["bench"], out=counts["out"], yes=counts["yes"], no=counts["no"],
                                          by=by, by_id=by_id, via=via)
-            return f"test bench on {ev.key}: " + ("; ".join(done) if done else "nobody left to answer (seed more, or they've all answered)")
+            return f"test bench on {run_words(reg, ev)}: " + ("; ".join(done) if done else "nobody left to answer (seed more, or they've all answered)")
         if kind in ("add", "remove"):
             rows = _test_specs(reg, arg)
             add, remove = (rows, []) if kind == "add" else ([], _test_removals(reg, rows))
@@ -3352,7 +3464,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             if arg not in reg.profile.raids:
                 raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
             ev = await bot.test_comp(reg, rs, arg, by, by_id, via=via)
-            return f"comp sandbox {ev.key}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp"
+            return f"comp sandbox {run_words(reg, ev)}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp"
         from .presets import TEMPOS
 
         raid, tempo, dm = _test_run_args(reg, arg)  # the /gm test run recipe: a real sheet with minute-level cadence, the pool = puppets + the tester
@@ -3360,12 +3472,18 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         here = bot.get_channel(int(channel_id)) if channel_id not in (None, PLAIN_WEB) else None  # no signup channel: the sheet lands where it was asked for
         ev, posted = await bot.open_test_run(reg, rs, raid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in, dm=dm, by=by, by_id=by_id, channel=here,
                                              via=via)
-        return (f"test run {ev.key} open ({tempo}): starts {reg.local12(ev.start, '%I:%M %p')}, nudge {nudge_in}, lock {lock_in} min before, confirm by {confirm_in} min before"
+        return (f"test run {run_words(reg, ev)} open ({tempo}): starts {reg.local12(ev.start, '%I:%M %p')}, nudge {nudge_in}, lock {lock_in} min before, confirm by {confirm_in} min before"
                 + (", every puppet DMed (to you)" if dm else "") + (f" — sheet in <#{posted.id}>" if posted is not None and getattr(posted, "id", None) else ""))
     if op.op == "run_reopen":  # RaidMixin.reopen_run: the closed card's Reopen, the site and MCP share it
         rs, ev = _ended_event(reg, op.target, rs)
         return await bot.reopen_run(reg, rs, ev, by=by, by_id=by_id, via=via)
     rs, ev = _live_event(reg, op.target, rs)
+    if op.op == "run_reschedule":  # RaidMixin.reschedule_event: the site's Reschedule and MCP's reschedule_run share it
+        start, timing = _reschedule_args(reg, op)
+        return " ".join(await bot.reschedule_event(reg, rs, ev, start=start, timing=timing or None, by=by, by_id=by_id, via=via, rev=rev))
+    if op.op == "run_lineup":  # RaidMixin.edit_lineup: POST /api/run/{key}/lineup and MCP's edit_lineup share it
+        lineup = _lineup_args(reg, rs, rc.first_part(rs, ev), op)
+        return " ".join(await bot.edit_lineup(reg, rs, ev, lineup, by=by, by_id=by_id, via=via, rev=rev))
     if op.op == "run_remind":  # RaidMixin.remind: the lock card's Remind and POST /api/run/{key}/remind
         return await bot.remind(reg, rs, ev, by=by, by_id=by_id, via=via)
     if op.op == "run_pause":  # RaidMixin.set_autofill_paused: the card's toggle and POST /api/run/{key}/pause
@@ -3407,7 +3525,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             raise  # kept as itself: Apply marks the run stale so the rest of the request can't overwrite that change
         except ValueError as e:
             raise RegistryError(str(e))
-        return f"{ev.key}: {line}"
+        return f"{run_words(reg, ev)}: {line}"
     if op.op == "run_sheet":
         if channel_id is None or channel_id == PLAIN_WEB:
             raise RegistryError("a sheet is re-posted in the channel you ask in — ask in a server channel (from the site or MCP: repost_sheet)")
@@ -3420,7 +3538,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         return await _propose(reg, rs, ev, op, by, bot, by_id, rev, via)
     if op.op == "run_lock":
         if ev.state != "open":
-            raise RegistryError(f"{ev.key} is already {ev.state}")
+            raise RegistryError(f"{run_words(reg, ev)} is already {ev.state}")
         line = await bot.lock_run(reg, rs, ev, by=by)
         if ev.lock_error:
             raise RegistryError(ev.lock_error)
@@ -3436,8 +3554,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         prelock = ev.state == "open"
         sent, plan = await bot.send_plan(reg, rs, ev, rev=rev, by=by)
         if not sent and not plan.asks:
-            return f"{ev.key}: nothing to ask"
-        return f"{ev.key}: asked " + (", ".join(f"{a.display_name} ({a.kind})" for a in sent) or "nobody (DMs off)") + (" — a yes changes their signup; the lock builds the roster" if prelock else rc.held_back_words(plan))
+            return f"{run_words(reg, ev)}: nothing to ask"
+        return f"{run_words(reg, ev)}: asked " + (", ".join(f"{a.display_name} ({a.kind})" for a in sent) or "nobody (DMs off)") + (" — a yes changes their signup; the lock builds the roster" if prelock else rc.held_back_words(plan))
     if op.op == "run_board":  # the whole board (RaidMixin.save_board, the site's and MCP's write): refused when it changed
         layout = _layout(op.value)
         names = {s.display_name for s in ev.signups.values() if s.status == "in"}
@@ -3446,7 +3564,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             raise RegistryError(f"not joined on this sheet: {', '.join(unknown)}")
         was_open = ev.state == "open"
         line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via)
-        return line if was_open else f"{ev.key}: {line}"  # before lock the line names the run itself
+        return line if was_open else f"{run_words(reg, ev)}: {line}"  # before lock the line names the run itself
     if op.op == "run_autofill":
         if ev.state != "open":
             raise RegistryError("already locked — move people on the board instead")
@@ -3462,7 +3580,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             except RegistryError:
                 ev.log.pop()
                 raise
-        return f"{ev.key}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
+        return f"{run_words(reg, ev)}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
     # run_strategy, run_fill preview: registry/store only
     if op.op == "run_fill":
         return await asyncio.to_thread(apply, reg, op, by, True, None, rs)
@@ -3493,7 +3611,7 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
             raise rc.BoardChanged("The board changed since that proposal (someone moved people) — ask for a fresh one.")
         line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via, strategy=strategy)
         seen.pop(key, None)
-        return f"{ev.key}: {strategy or 'the last'} proposal used — {line}"
+        return f"{run_words(reg, ev)}: {strategy or 'the last'} proposal used — {line}"
     strategy = v or ((last or {}).get("strategy") if f == "another" else None) or ev.split_strategy or reg.raid_def(ev.instance).get("split_policy", "balanced")
     avoid = list((last or {}).get("layouts") or []) if f == "another" else []
     try:
@@ -3802,6 +3920,18 @@ def _schedule_ops(reg: Registry, target: str | None, fields: dict) -> list[Confi
     fields = dict(fields)
     lineup, raid = fields.pop("lineup", None), fields.pop("raid", None)
     head: list[ConfigOp] = []
+    try:
+        exists = reg.schedule_entry(sid) is not None
+    except RegistryError:
+        exists = False
+    if lineup is not None and exists and not raid and "kind" not in fields:
+        # an EDIT of an existing schedule's lineup (the site's editor, MCP): the whole lineup in one field, no raid named —
+        # Registry.set_schedule keeps its first raid the schedule's own. A create names its kind (the site) or its raid
+        rows = parse_lineup(lineup)
+        import json
+
+        fields["lineup"] = json.dumps(rows)
+        lineup = None
     if lineup is not None:
         rows = parse_lineup(lineup)
         if raid and str(raid).strip().lower() != rows[0]["raid"]:
@@ -4233,6 +4363,7 @@ WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
     "recruit": lambda reg, op: (op.field or "").strip().lower() == "open" and (op.value or "").strip().lower() in ("false", "no", "off", "closed"),
     "plain": _warn_plain_or_memory,  # plain text on the ops channel or in DMs, a channel's memory turned Off, an officers' channel shared
     "run_lock": _always, "run_cancel": _always, "proposal": _always,
+    "run_reschedule": _always, "run_lineup": _always,  # everyone who answered sees a notice; a removed raid takes its board
     "test": lambda reg, op: (op.value or "").strip().lower().startswith("clear"),
     "loot_weights": _always,  # every future award's score (phase 4, §5.48): reviewed with the profile default beside each number
 }

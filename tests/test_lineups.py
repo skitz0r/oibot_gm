@@ -121,8 +121,8 @@ def test_a_schedules_four_raid_lineup_round_trips_and_opens(reg, rs):
     row = next(r for r in reg.raid_rows(H) if r["id"] == "tue")
     assert row["follow"] == {"raid": BD, "rosters": 2} and row["then"] == [{"raid": "extra_a", "rosters": 1}, {"raid": "extra_b", "rosters": 1}]
     assert reg.schedule_label(H, reg.schedule_entry("tue")).endswith("· then Barrow Deeps ×2, then Extra A, then Extra B")
-    with pytest.raises(RegistryError, match="Another schedule is already called tue"):
-        reg.set_schedule("tue", {"lineup": [{"raid": H}, {"raid": BD}]}, "t", raid=H)  # naming a raid means create
+    with pytest.raises(RegistryError, match="The schedule called tue already exists"):
+        reg.set_schedule("tue", {"lineup": [{"raid": H}, {"raid": BD}]}, "t", raid=H)  # naming a raid means create (its own: how to edit)
     reg.set_schedule("tue", {"follow": "none"}, "t")  # the second raid cleared: the third moves up, the order kept
     assert [e["raid"] for e in reg.schedule_entry("tue")["lineup"]] == [H, "extra_a", "extra_b"]
     now = reg.now_local()
@@ -151,7 +151,7 @@ def test_four_raids_lock_in_order_and_a_short_role_never_stops_one(bot, reg, rs,
     parts = rc.event_parts(rs, first)
     assert [p.state for p in parts] == ["locked"] * 4 and all(p.all_rosters for p in parts)
     assert all(any(x.startswith("locked short") for x in p.log) for p in parts), "short of a tank, every raid still locks"
-    assert all(p.key in line for p in parts)
+    assert all(p.key not in line for p in parts) and line.startswith(f"Hyjal Summit {reg.local12(first.start)}: locked")  # a name, never a key
     # a fresh run whose third raid's solve fails: the first two lock, the third stays open with its error, the fourth waits
     first = open_four(reg, rs, days=4)
     join(reg, rs, first, reg.test_members())
@@ -361,9 +361,13 @@ def test_a_structured_four_raid_lineup_creates_the_whole_schedule(reg):
     assert "then Barrow Deeps ×2, then Extra A, then Extra B" in configops.describe_ops(reg, ops).as_text(reg)
     configops.apply(reg, op, "Officer", False)
     assert [e["raid"] for e in reg.schedule_entry("late")["lineup"]] == [H, BD, "extra_a", "extra_b"]
-    again = configops.coalesce(configops.ops_from_fields(reg, "schedule", "late", {"lineup": [{"raid": H, "rosters": 1}, *LINEUP]}))[0]
-    with pytest.raises(RegistryError, match="Another schedule is already called late"):
+    again = configops.coalesce(configops.ops_from_fields(reg, "schedule", "late", {"lineup": [{"raid": H, "rosters": 1}, *LINEUP], "kind": "weekly"}))[0]
+    with pytest.raises(RegistryError, match="The schedule called late already exists"):  # a create (its kind named) on an id in use
         configops.apply(reg, again, "Officer", False)
+    # the site's editor on that schedule (no raid, no kind): the lineup is an EDIT (phase 3, Task 7)
+    edit = configops.coalesce(configops.ops_from_fields(reg, "schedule", "late", {"lineup": [{"raid": H, "rosters": 2}, *LINEUP[:1]]}))[0]
+    configops.apply(reg, edit, "Officer", False)
+    assert [(e["raid"], e["rosters"]) for e in reg.schedule_entry("late")["lineup"]] == [(H, 2), (BD, 2)]
 
 
 # ---------------------------------------------------------------- fix round 1

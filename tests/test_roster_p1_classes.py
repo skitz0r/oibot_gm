@@ -139,7 +139,7 @@ def test_web_open_stamps_the_class(reg, rs, monkeypatch):
     c = TestClient(web.create_app(bot))
     nxt = c.post(f"/api/raid/{RID}/open", json={}, headers=bearer())
     assert nxt.status_code == 200, nxt.text
-    assert rs.events[nxt.json()["message"].split()[1]].kind == "recurring"
+    assert rs.events[nxt.json()["key"]].kind == "recurring" and nxt.json()["key"] not in nxt.json()["message"]
     when = soon(reg, 5, 22)
     one = c.post(f"/api/raid/{RID}/open", json={"when": when.strftime("%Y-%m-%d %H:%M")}, headers=bearer())
     assert bot.opened[-1][2] == ADHOC_SCHEDULE and rs.events[one.json()["key"]].kind == "adhoc"

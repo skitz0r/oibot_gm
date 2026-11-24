@@ -375,7 +375,16 @@ export interface Sheet {
    *  `leaving` = who leaves after the lead (names); `when` is words from the server */
   follows?: string | null; followed_by?: string | null; follow?: { raid: string; rosters: number; key: string; when: string; at?: string } | null;
   lead?: { raid: string; key: string } | null; leaving?: string[];
+  /** the run's identity (phase 3): which raid of its run this is (0 = the first), the run it belongs to (its first raid's key),
+   *  the schedule night it stands for, and the raids it plays (`starts` = minutes after the first raid) */
+  part?: number; event?: string; occurrence?: string | null; lineup?: { raid: string; rosters: number; starts: number }[];
+  /** its start in guild wall time, 'YYYY-MM-DDTHH:MM' — the Reschedule picker's machine value, never shown as text */
+  start_local?: string;
+  /** false for a later raid whose first raid has finished: a cancel posts nothing in the signup channel then */
+  cancel_tells_channel?: boolean;
 }
+/** POST /api/run/{key}/reschedule and /lineup with preview — the confirm's sentences (from the server) and the run's rev a write carries back. */
+export interface RunPreview { sentences: string[]; rev: string }
 /** A raid's run open or locked now (never a test run), in words — the "When it runs" block on Raids and Rosters. */
 export interface LiveRun { key: string; when: string; state: string; state_word?: string; schedule: string }
 /** The next run an active schedule opens that has no sheet yet; `opens` = when its sheet opens on its own. */
@@ -424,6 +433,8 @@ export interface Schedule {
   pause_sentence?: string; resume_sentence?: string; removal_sentence?: string; rosters_copy?: Record<string, string>;
   /** the raid run the same night from this schedule's signup (its id and rosters), and that in words ("Barrow Deeps ×2") */
   follow?: { raid: string; rosters: number } | null; follow_words?: string;
+  /** the whole lineup, the first raid first ([{raid, rosters, starts?}]; `starts` = minutes after the first raid, absent = when the raid before it ends) */
+  lineup?: { raid: string; rosters: number; starts?: number }[];
 }
 export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; people?: Person[]; tz: string }
 export interface RaidRule {

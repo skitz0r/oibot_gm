@@ -888,7 +888,7 @@ class RaidMixin:
         team = rc.run_team(reg, ev)
         async with self.solving(reg, ev.key), self.board_lock(reg, ev.key):
             if ev.state != "open":
-                raise RegistryError(f"{ev.key} is already {ev.state}")
+                raise RegistryError(f"{run_title(reg, ev)} is already {ev.state}.")
             # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
             # mid-way) leaves the sheet open rather than a locked run with no roster
             for _ in range(rc.LOCK_SOLVES):
@@ -915,9 +915,9 @@ class RaidMixin:
                     await self.post_run_update(reg, ev, f"⚠️ lock by {by} failed — {why}. The sheet stays open; fix the board or the raid rules and lock again.")
                     await self.refresh_sheet(reg, ev)  # the sheet's footer says so too: the signup channel's truth matches the thread's
                 await self.ops.emit(reg.config, "warn", f"{ev.key}: lock failed — {why}")
-                return f"{ev.key}: lock failed — {why}"
+                return f"{run_title(reg, ev)}: lock failed — {why}"
             if ev.state != "open":  # cancelled while the roster was being built
-                raise RegistryError(f"{ev.key} was {ev.state} before the roster was ready — not locked")
+                raise RegistryError(f"{run_title(reg, ev)} was {ev.state} before the roster was ready, so it was not locked.")
             _, _, confirm = run_times(reg, ev, team)
             confirms = rc.run_confirms(reg, ev)  # off (ad hoc): no confirmation DMs and no deadline — no seat ever expires
             ev.rosters = trial.rosters
@@ -955,7 +955,7 @@ class RaidMixin:
         if ev.state == "locked":  # joiners left off: one notice each (D26), never a DM — a seat offered later is the DM
             rc.leftover_notices(reg, ev)  # on the loop: member files are mutated where the buttons mutate them
         if ev.state != "locked":  # cancelled during the fan-out: the cancel carried its own lines; no "is locked" line now
-            return f"{ev.key}: locked by {by}, then {ev.state} before the confirmations finished ({sent} sent)"
+            return f"{run_title(reg, ev)}: locked by {by}, then {ev.state} before the confirmations finished ({sent} sent)"
         if confirms and ev.state == "locked":
             await self.refresh_cards(reg, ev)  # the lock card's "confirmations not yet sent" line goes
         sig = self.get_channel(ev.channel_id) if ev.channel_id else None
@@ -969,7 +969,7 @@ class RaidMixin:
         first = rc.first_part(rs, ev)
         chaining: set = self.__dict__.setdefault("_parts_locking", set())
         tail = None if (reg.key, first.key) in chaining else await self.lock_parts(reg, rs, first, by)
-        return f"{ev.key}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)" + (f" · {tail}" if tail else "")
+        return f"{run_title(reg, ev)}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)" + (f" · {tail}" if tail else "")
 
     async def lock_parts(self, reg, rs, first, by: str) -> str | None:
         """The first raid's lock builds every later raid of the run (design §5.62), in order: each solves from the run's
@@ -1489,9 +1489,12 @@ class RaidMixin:
         tail = (f" and its follow-on {gone[0]}" if len(gone) == 1 else f" and its follow-ons {', '.join(gone)}") if gone else ""
         if audit:
             await ops_mod.audited(self.ops, reg, by, f"cancelled {ev.key}{tail}" + (f": {reason}" if reason else ""), via=via, level="warn", by_id=by_id)
-        told = [f"{len(cards) + len(fills)} open ask card(s) now say Cancelled"] if cards or fills else []
-        told.append("a line went to the signup channel" if posted else "no line in the signup channel")
-        return f"Cancelled {run_title(reg, ev)}. Nobody was DMed: the sheet shows it, " + ", ".join(told) + "."
+        sheet = not rc.is_follow(ev)  # a later raid reached here once its first raid has closed: no sheet, no channel of its own
+        told = ["the sheet shows it"] if sheet else []
+        told += [f"{len(cards) + len(fills)} open ask card(s) now say Cancelled"] if cards or fills else []
+        if sheet:
+            told.append("a line went to the signup channel" if posted else "no line in the signup channel")
+        return f"Cancelled {run_title(reg, ev)}. Nobody was DMed" + (": " + ", ".join(told) if told else "") + "."
 
     async def reopen_run(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
         """Undo an end by mistake, within the hour (design B6; never a cancelled run, D19): rc.reopen_run restores the
@@ -1506,7 +1509,7 @@ class RaidMixin:
         return f"Reopened {run_title(reg, ev)} — {'locked, roster as it was' if back == 'locked' else 'the sheet is open again'}."
 
     async def reschedule_event(self, reg, rs, ev, *, start: datetime | None = None, timing: dict | None = None, by: str,
-                               by_id: int | None = None, via: str = "discord", preview: bool = False) -> list[str]:
+                               by_id: int | None = None, via: str = "discord", preview: bool = False, rev: str | None = None) -> list[str]:
         """THE move of a run to another start and / or its own sheet timing (phase 3, Task 5) — any raid of it stands for
         its first. Officers, decided live (PRIV_LIVE; `by_id` None = code acting on the guild's own behalf). Refused →
         RegistryError with rc.reschedule_refusal's sentence, nothing written. `preview` → the confirm's sentences
@@ -1514,7 +1517,8 @@ class RaidMixin:
         rc.reschedule; then the sheet is edited in place (same message), every raid's officer cards, and every card
         still in play — an open Confirm / Can't ask and an open fill ask — is edited to the new time with its buttons
         (edit_live_card: the ask stands, nobody answers again); a moved start gives everyone who answered a `moved`
-        notice (Me page, /me view). One line in the run's thread, one audit line. Nobody is DMed. → the done line."""
+        notice (Me page, /me view). One line in the run's thread, one audit line. Nobody is DMed. → the done line.
+        `rev` (rc.event_rev, what the preview showed): a run changed since is refused (rc.RUN_CHANGED) under the locks."""
         from .consequences import reschedule_consequence
 
         if by_id is not None and (await guild_routing.resolve_role(self, reg, int(by_id), max_age=guild_routing.PRIV_LIVE)).role not in ("owner", "officer"):
@@ -1532,6 +1536,8 @@ class RaidMixin:
             why = rc.reschedule_refusal(reg, rs, first, start, timing)  # again, now that nothing else writes the run
             if why:
                 raise RegistryError(why)
+            if rev and rev != rc.event_rev(reg, rs, first):  # changed since the confirm was shown: never overwritten unseen
+                raise RegistryError(rc.RUN_CHANGED)
             old = first.start
             mv = rc.reschedule(reg, rs, first, start=start, timing=timing, by=by)
         name = reg.raid_def(first.instance).get("name", first.instance)
@@ -1565,7 +1571,7 @@ class RaidMixin:
         return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own sheet timing is saved."]
 
     async def edit_lineup(self, reg, rs, ev, lineup: list[dict], *, by: str, by_id: int | None = None, via: str = "discord",
-                          preview: bool = False) -> list[str]:
+                          preview: bool = False, rev: str | None = None) -> list[str]:
         """THE edit of a run's lineup before the lock (phase 3, Task 6): add, remove or reorder its later raids, or
         change a raid's roster count — any raid of it stands for its first. Officers, decided live (PRIV_LIVE; `by_id`
         None = code acting on the guild's own behalf). Refused → RegistryError with rc.lineup_refusal's sentence,
@@ -1575,7 +1581,8 @@ class RaidMixin:
         plan_lock (every writer of ev.fill_asks holds it — a fan-out in flight sees the cancelled run before its next DM,
         as with cancel_run) and their cards are edited to say so; its officer cards go to their final state. When a kept
         raid's start changes, everyone who answered gets reschedule's `moved` notice (Me page, /me view). The sheet is
-        edited in place (same message), one line in the run's thread, one audit line. Nobody is DMed. → the done line."""
+        edited in place (same message), one line in the run's thread, one audit line. Nobody is DMed. → the done line.
+        `rev` (rc.event_rev, what the preview showed): a run changed since is refused (rc.RUN_CHANGED) under the locks."""
         from .consequences import lineup_consequence, lineup_words
 
         if by_id is not None and (await guild_routing.resolve_role(self, reg, int(by_id), max_age=guild_routing.PRIV_LIVE)).role not in ("owner", "officer"):
@@ -1593,6 +1600,8 @@ class RaidMixin:
             why = rc.lineup_refusal(reg, rs, first, lineup)  # again, now that nothing else writes the run
             if why:
                 raise RegistryError(why)
+            if rev and rev != rc.event_rev(reg, rs, first):  # changed since the confirm was shown: never overwritten unseen
+                raise RegistryError(rc.RUN_CHANGED)
             change = rc.plan_lineup(reg, rs, first, lineup)
             removed = [rs.events[k] for k in change.removed]
             rc.apply_lineup(reg, rs, first, change, by)

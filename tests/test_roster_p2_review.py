@@ -209,7 +209,7 @@ def test_plain_text_fill_after_lock_lists_the_batch_and_sends_exactly_it(reg, rs
         run(configops.apply_async(reg, send, "Officer", False, bot=bot))
     assert not bot.dms and not ev.fill_asks, "no blind send after lock"
     line = run(configops.apply_async(reg, send, "Officer", False, bot=bot, rev=rev))
-    assert line.startswith(f"{ev.key}: asked Offy (offspec)") and _shape(ev.fill_asks) == _shape(shown)
+    assert line.startswith(f"{configops.run_words(reg, ev)}: asked Offy (offspec)") and _shape(ev.fill_asks) == _shape(shown)
 
 
 def test_plain_text_fill_after_lock_refuses_a_changed_plan(reg, rs):

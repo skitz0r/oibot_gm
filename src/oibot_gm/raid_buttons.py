@@ -257,12 +257,12 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
         await wiz.finish(si, line)
 
     def form() -> Form:
-        return Form(f"Cancel {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", [
-            Field("reason", "Why? (optional)", required=False, paragraph=True, max_length=300,
-                  description="Officers only: the run's thread and the ops feed.", placeholder="never posted in the signup channel"),
-            Field("notify", "Tell the channel?", [Opt("post", "Post a line in the signup channel", "fixed text, no reason", default=True),
-                                                  Opt("quiet", "No line — the sheet and the thread show it")]),
-        ], submitted)
+        fields = [Field("reason", "Why? (optional)", required=False, paragraph=True, max_length=300,
+                        description="Officers only: the run's thread and the ops feed.", placeholder="never posted in the signup channel")]
+        if rc.cancel_tells_channel(rs, rs.events.get(key) or ev):  # a later raid once its first has finished: no sheet, no channel line
+            fields.append(Field("notify", "Tell the channel?", [Opt("post", "Post a line in the signup channel", "fixed text, no reason", default=True),
+                                                                Opt("quiet", "No line — the sheet and the thread show it")]))
+        return Form(f"Cancel {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", fields, submitted)
 
     async def open_box(i: discord.Interaction) -> None:
         cur = rs.events.get(key)

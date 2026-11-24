@@ -553,9 +553,10 @@ def test_me_page_sheet_rows_take_the_sheet_title_deep_link():
 
 def test_follow_on_surfaces_exist():
     """Design §5.62 (D2): the site sets a follow-on — the schedule editor's
-    Then row and the ad hoc Open's Then field — and the Me row offers leaving early and I'm staying with the server's sentence only."""
+    Then row and the ad hoc Open's Then field — and the Me row offers leaving early and I'm staying with the server's sentence only.
+    Phase 3: the schedule editor's Then block holds up to three later raids and sends the whole lineup (never `follow_raid`)."""
     sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
-    assert "follow_raid" in sched and 'label="then, the same night"' in sched and "f.follow =" in sched
+    assert "follow_raid" not in sched and "Then, the same night" in sched and "f.lineup =" in sched and "LATER_MAX = 3" in sched
     rosters = (SRC / "pages" / "Rosters.tsx").read_text()
     assert "follow_line" in rosters and "follow:" in rosters[rosters.index("function StartAdhoc"):]
     me = (SRC / "pages" / "Me.tsx").read_text()
@@ -845,8 +846,21 @@ def test_the_schedule_editor_names_a_schedule_by_its_id():
     src = (SRC / "components" / "ScheduleCard.tsx").read_text()
     assert "target: `${r.id}:" not in src and 'target: s.id' in src and "target: id" in src
     assert "config:schedule:${s.id}" in src and "...raidRevs(r)" not in src
-    assert "lineup: [{ raid: r.id, rosters }" in src and "is_default" not in src
+    assert "f.lineup = [{ raid: r.id, rosters: Number(x.rosters) }" in src and "is_default" not in src
     assert "slug(d.name, d.kind, taken)" in src
     rosters = (SRC / "pages" / "Rosters.tsx").read_text()
     assert 'split(":")' not in rosters and '|| "default"' not in rosters
     assert "schedule: s.key" in rosters and "schedule: o.key" in rosters
+
+
+def test_the_run_card_reschedules_and_the_schedule_editor_sends_a_lineup():
+    """Phase 3, Task 7: the run card's Reschedule… picks the new start in a datetime-local input (the Clock rule's machine
+    input), POSTs a preview to /reschedule and prints ONLY the server's `sentences` before Move, which sends the preview's
+    rev back; the schedule editor sends `lineup` (up to three later raids, 30-minute start steps) and no `follow_raid`.
+    The picker is the site's DateTimePicker (the Clock rule's lint refuses a typed datetime field)."""
+    card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
+    assert "/reschedule`" in card and "<DateTimePicker" in card and "pv.sentences.join" in card and "rev: pv.rev" in card
+    assert 'confirmLabel: "Move"' in card and "Reschedule…" in card
+    assert "e.cancel_tells_channel !== false" in card  # a later raid whose first finished: no channel line to offer
+    sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
+    assert "f.lineup" in sched and "follow_raid" not in sched and "30 * (k + 1)" in sched

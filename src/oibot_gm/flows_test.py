@@ -203,9 +203,11 @@ class TestCompWizard(Wizard):
         except (RegistryError, ValueError) as e:
             await self.refuse(interaction, str(e), self.start, "Back")
             return
+        from .raid_views import run_title
+
         url = board_url(self.reg, ev)
         where = f"Open its board: {url}" if url else "Open it on the site: Rosters › the raid › Test."
-        await self.finish(interaction, f"🧪 Comp sandbox {ev.key}: {len(self.reg.test_members())} test members joined. {where}")
+        await self.finish(interaction, f"🧪 Comp sandbox {run_title(self.reg, ev)}: {len(self.reg.test_members())} test members joined. {where}")
 
 
 @flow("test_comp")

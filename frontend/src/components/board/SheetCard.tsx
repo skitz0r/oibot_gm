@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Text, Textarea, Tooltip } from "@mantine/core";
-import { IconBell, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
+import { DateTimePicker } from "@mantine/dates";
+import { IconBell, IconCalendarTime, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
-import { api, type Meta, type Person, type Sheet, type Signup } from "../../api";
+import { api, type Meta, type Person, type RunPreview, type Sheet, type Signup } from "../../api";
 import { MemberMenu, RepostSheetModal, SomeoneElse } from "./MemberMenu";
 import { classColour } from "../../theme";
 import { GameIcon } from "../Icons";
@@ -62,6 +63,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   // the row ⋮ menu (design B5): the member's filtered on-behalf list from the server — the same one /raid set offers
   const menu = (s: Signup) => <MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload} />;
   const [repostOpen, setRepostOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const [tellOpen, setTellOpen] = useState(false);  // the officers' Tell the bot box, about this run (design §3.4 OFF-20)
 
   // Remind and End print ONLY the server's sentence (consequences.py "remind"; End = LootMixin.end_consequence, the
@@ -77,6 +79,15 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
     await onAct(`end${e.key}`, `/api/loot/${e.key}/end`);
   }
   const pause = (paused: boolean) => onAct(`pause${e.key}`, `/api/run/${e.key}/pause`, { paused });
+  /** Reschedule: the picked start → the server's preview (consequences.reschedule_consequence, printed as it comes) →
+   *  Move sends it back with the run's rev, so a run someone changed meanwhile is refused (409), never overwritten */
+  async function reschedule(start: string) {
+    let pv: RunPreview;
+    try { pv = await api.post<RunPreview>(`/api/run/${e.key}/reschedule`, { start, preview: true }); } catch (err) { fail(err); return; }
+    setMoveOpen(false);
+    if (!(await ask({ title: `Move ${name}?`, message: pv.sentences.join(" "), confirmLabel: "Move", cancelLabel: "Back" }))) return;
+    await onAct(`move${e.key}`, `/api/run/${e.key}/reschedule`, { start, rev: pv.rev });
+  }
   // one button in every state (design B7), named as on Discord: Suggest… before the lock (the planner's suggestions),
   // Fill seats… after it (the seats to fill)
   const fillTip = !locked
@@ -105,7 +116,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
         <Group gap={8} wrap="wrap">
           <RunLinks e={e} />
           {e.live && <Button size="compact-xs" variant="subtle" color="gray" leftSection={<IconMessageCircle size={12} />} onClick={() => setTellOpen((x) => !x)}>Tell the bot about this run</Button>}
-          <RunMenu e={e} busy={busy} onRepost={() => setRepostOpen(true)} />
+          <RunMenu e={e} busy={busy} onRepost={() => setRepostOpen(true)} onReschedule={() => setMoveOpen(true)} />
         </Group>
       </Group>
 
@@ -212,7 +223,8 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       <FillModal e={e as unknown as Sheet} meta={meta} opened={fillOpen} onClose={() => setFillOpen(false)} onSent={onReload} />
       <LockModal e={e} meta={meta} opened={lockOpen} preview={lockPreview} onClose={() => setLockOpen(false)} onLock={() => onAct(`lock${e.key}`, `/api/run/${e.key}/lock`)} />
       <RepostSheetModal run={e.key} opened={repostOpen} onClose={() => setRepostOpen(false)} onDone={onReload} />
-      <CancelModal e={e} opened={cancelOpen} onClose={() => setCancelOpen(false)} onCancel={(reason, notify) => onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`, { reason, notify })} />
+      <RescheduleModal e={e} opened={moveOpen} onClose={() => setMoveOpen(false)} onPick={reschedule} />
+      <CancelModal e={e} opened={cancelOpen} onClose={() => setCancelOpen(false)} onCancel={(reason, notify) => onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`, { reason, notify: notify && e.cancel_tells_channel !== false })} />
       {confirmDialog}
     </Box>
   );
@@ -238,14 +250,15 @@ function RunLinks({ e }: { e: NightSheet }) {
   );
 }
 
-/** The header menu: what isn't a raid-night lever — Re-post sheet… (Remind the unanswered, Pause automatic asks and End
- *  the run are buttons on a locked card, as on the Discord lock card's second row). */
-function RunMenu({ e, busy, onRepost }: { e: NightSheet; busy: string | null; onRepost: () => void }) {
+/** The header menu: what isn't a raid-night lever — Reschedule… and Re-post sheet… (Remind the unanswered, Pause
+ *  automatic asks and End the run are buttons on a locked card, as on the Discord lock card's second row). */
+function RunMenu({ e, busy, onRepost, onReschedule }: { e: NightSheet; busy: string | null; onRepost: () => void; onReschedule: () => void }) {
   if (!e.live) return null;
   return (
     <Menu shadow="md" width={260} position="bottom-end" classNames={{ item: css.menuItem }}>
       <Menu.Target><ActionIcon variant="subtle" color="gray" aria-label={`run actions for ${e.when}`} loading={busy === `repost${e.key}`}><IconDotsVertical size={16} /></ActionIcon></Menu.Target>
       <Menu.Dropdown>
+        <Menu.Item leftSection={<IconCalendarTime size={14} />} onClick={onReschedule}>Reschedule…</Menu.Item>
         <Menu.Item leftSection={<IconSend size={14} />} onClick={onRepost}>Re-post sheet…</Menu.Item>
       </Menu.Dropdown>
     </Menu>
@@ -326,6 +339,29 @@ function LockModal({ e, meta, opened, preview: startWithPreview = false, onClose
   );
 }
 
+/** Reschedule: the new day and time, picked from a widget (the Clock rule: never typed), prefilled with the run's start
+ *  in guild time and sent as guild wall time 'YYYY-MM-DD HH:MM'; Next asks the server what the move does — the card
+ *  prints only its sentences before Move. */
+function RescheduleModal({ e, opened, onClose, onPick }: { e: NightSheet; opened: boolean; onClose: () => void; onPick: (start: string) => Promise<void> }) {
+  const initial = e.start_local ? `${e.start_local.replace("T", " ")}:00` : null;
+  const [when, setWhen] = useState<string | null>(initial);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (opened) setWhen(initial); }, [opened, initial]);
+  return (
+    <Modal opened={opened} onClose={onClose} title={`Reschedule ${runName(e as unknown as Sheet)}`} centered>
+      <Stack gap="md">
+        <DateTimePicker label="New start" description="guild time — every raid of the run moves with it" value={when} onChange={setWhen}
+          minDate={new Date().toISOString().slice(0, 10)} valueFormat="ddd D MMM YYYY h:mm A"
+          timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }} popoverProps={{ withinPortal: true }} aria-label="the run's new start" />
+        <Group justify="flex-end" gap="sm">
+          <Button variant="default" size="sm" onClick={onClose}>Back</Button>
+          <Button size="sm" loading={busy} disabled={!when} onClick={async () => { if (!when) return; setBusy(true); try { await onPick(when.slice(0, 16)); } finally { setBusy(false); } }}>Next</Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
 /** Cancel: one screen on every surface — the server's consequence, the optional reason (officers only: the run's thread
  *  and the ops feed), and whether a fixed line goes to the signup channel. Nobody is DMed (the DM rule). */
 function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: boolean; onClose: () => void; onCancel: (reason: string, notify: boolean) => Promise<void> }) {
@@ -337,7 +373,7 @@ function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: 
       <Stack gap="md">
         <Text size="sm" style={{ whiteSpace: "pre-line" }}>{e.consequences?.cancel}</Text>
         <Textarea label="Why? (optional)" description={`officers only: the run's thread and the ops feed — never the signup channel · ${reason.length}/300`} value={reason} maxLength={300} autosize minRows={2} onChange={(ev) => setReason(ev.currentTarget.value)} />
-        <Checkbox label="Tell the channel — a fixed line, no reason" checked={notify} onChange={(ev) => setNotify(ev.currentTarget.checked)} />
+        {e.cancel_tells_channel !== false && <Checkbox label="Tell the channel — a fixed line, no reason" checked={notify} onChange={(ev) => setNotify(ev.currentTarget.checked)} />}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={close}>Back</Button>
           <Button color="red" size="sm" onClick={async () => { const r = reason.trim(), nf = notify; close(); await onCancel(r, nf); }}>Cancel the run</Button>

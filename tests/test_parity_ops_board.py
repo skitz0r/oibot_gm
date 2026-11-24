@@ -45,7 +45,7 @@ def test_run_move_describes_and_moves_through_board_move(reg, rs):
     d = configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=names[4], value="g2"))
     assert f"move {names[4]}: the bench → group 2" in d and "the layout the lock will use" in d
     out = apply(reg, bot, ConfigOp(op="run_move", target=ev.key, member=names[4], value="g2"))
-    assert out.startswith(ev.key) and ev.layout[1] == names[2:4] + [names[4]]
+    assert out.startswith(configops.run_words(reg, ev)) and ev.layout[1] == names[2:4] + [names[4]]
     apply(reg, bot, ConfigOp(op="run_move", target=ev.key, member=names[4], value="1.1"))  # roster.group
     assert names[4] in ev.layout[0]
     apply(reg, bot, ConfigOp(op="run_move", target=ev.key, member=names[4], value="bench"))
@@ -109,7 +109,7 @@ def test_run_autofill_saves_through_save_board(reg, rs, monkeypatch):
         apply(reg, bot, ConfigOp(op="run_autofill", target=ev.key), rev=stale)
     assert not any("auto-filled" in line for line in ev.log)
     out = apply(reg, bot, ConfigOp(op="run_autofill", target=ev.key), rev=rc.board_rev(reg, ev))
-    assert out == f"{ev.key}: board auto-filled (6 rostered in 2 groups)" and ev.layout == [names[:3], names[3:]]
+    assert out == f"{configops.run_words(reg, ev)}: board auto-filled (6 rostered in 2 groups)" and ev.layout == [names[:3], names[3:]]
 
 
 # ---------------------------------------------------------------- Apply: the preview's fingerprint, updated by the request's own writes
@@ -175,7 +175,7 @@ def test_run_propose_previews_remembers_and_uses(reg, rs, monkeypatch):
     with pytest.raises(RegistryError, match="no proposal to use yet"):
         apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, field="use"))
     out = apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, value="first"))
-    assert out.startswith(f"{ev.key}: first proposal — g1 {', '.join(names[:3])} | g2 {', '.join(names[3:])} · "), "one roster: no numbers, no comparison (rc.balance_words)"
+    assert out.startswith(f"{configops.run_words(reg, ev)}: first proposal — g1 {', '.join(names[:3])} | g2 {', '.join(names[3:])} · "), "one roster: no numbers, no comparison (rc.balance_words)"
     assert "nothing is saved" in out and "remembered until the bot restarts" in out and ev.layout is None and "synergy" not in out
     again = apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, field="another"))
     assert calls[-1] == ("first", [[names[:3], names[3:]]]), "another keeps the strategy and avoids what was shown"

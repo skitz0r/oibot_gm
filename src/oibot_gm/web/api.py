@@ -43,7 +43,7 @@ APP_DIR = HERE / "static" / "app"
 STARTED = time.time()  # fallback when the bot has no start stamp
 from ..constants import LEVEL_WORDS, MARK, MARK_WORDS, ROLES  # noqa: E402 — the order role counts are shown in; the run vocabulary (meta)
 from ..raid_buttons import RUN_WORDS  # noqa: E402 — the run verbs' labels, the Discord buttons' own
-from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE, SCHEDULE_TIMING  # noqa: E402
+from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE, SCHEDULE_TIMING, row_lineup  # noqa: E402
 
 ASK_MAX = 1500  # help.answer reads this much of a question
 ASK_DOWN = "The bot can't read sentences right now — use the controls on this page."  # dual interfaces §2.7, LLM down
@@ -862,8 +862,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "days": list(s.get("days") or []), "time": s.get("time") or "", "time_label": reg.time_label(s.get("time")) if s.get("time") else "",
                 "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]),
                 # its lineup's raids (the first is `rid`) and the rev an edit sends back as revs["config:schedule:<id>"]
-                "raids": [rid] + ([s["follow"]["raid"]] if s.get("follow") else []), "rev": reg.config_rev(f"schedule:{s['id']}"),
+                "raids": [e["raid"] for e in row_lineup(rid, s)], "rev": reg.config_rev(f"schedule:{s['id']}"),
                 "effective": {k: sd[k] for k in SCHEDULE_CADENCE}, "follow": s.get("follow"), "follow_words": reg.follow_words(s.get("follow")),
+                "lineup": row_lineup(rid, s),  # the whole lineup for the editor's later-raid rows (a later `starts` only when its own)
                 **schedule_words(reg, rid, s)}
 
     def schedule_words(reg, rid: str, s: dict) -> dict:
@@ -967,6 +968,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                            if (ft := rc.follow_dict(reg, ev)) else None),
                 "lead": ({"raid": rc.lead_name_of(reg, ev), "key": ev.follows} if ev.follows else None),
                 "leaving": [reg.members[u].display_name for u in ev.leaving if u in reg.members],
+                # the run's identity (phase 3): which raid of its run this is, the run it belongs to (its first raid's
+                # key), the schedule night it stands for, and the raids it plays ([{raid, rosters, starts}], minutes after
+                # the first raid); `start_local` = its start in guild wall time for the Reschedule picker (a machine field)
+                "part": rc.part_no(ev), "event": rc.event_id(ev), "occurrence": ev.occurrence,
+                "lineup": rc.run_lineup(reg, rs, ev), "start_local": reg.local(ev.start, "%Y-%m-%dT%H:%M"),
+                "cancel_tells_channel": rc.cancel_tells_channel(rs, ev),
                 "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state)}  # the state in words (meta.run_states), History and the drawer print it
         if not full:
             return base
@@ -1632,6 +1639,60 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line}
 
+    def event_of(reg, rs, key: str):
+        """A run a reschedule / lineup route names: any raid of it (its key), a live one; closed → the verb's own refusal."""
+        ev = rs.events.get(key)
+        return ev if ev is not None else find_live(reg, rs, key)
+
+    @app.post("/api/run/{key}/reschedule")
+    async def run_reschedule(request: Request, key: str):
+        """Move a run and / or give it its own sheet timing (RaidMixin.reschedule_event — plain text's run_reschedule and
+        MCP's reschedule_run share it): {start?: aware ISO or guild wall time 'YYYY-MM-DD HH:MM' (the datetime-local
+        picker; DST-safe, a skipped or doubled wall time refused), timing?: {setting: value} (rc.EVENT_TIMING), preview?,
+        rev?}. Officers, decided live by the verb. `preview` → {sentences (consequences.reschedule_consequence), rev
+        (rc.event_rev)}; nothing written. A write carrying `rev` is refused (409, with the fresh sentences and rev) when
+        the run changed since. A refusal → 400 {error}."""
+        v, d = await body(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = event_of(v.reg, rs, key)
+        timing = d.get("timing") or None
+        if timing is not None and not isinstance(timing, dict):
+            return JSONResponse({"error": rc.TIMING_UNKNOWN}, status_code=400)
+        try:
+            start = rc.move_start(v.reg, d["start"]) if d.get("start") not in (None, "") else None
+            if d.get("preview"):
+                lines = await bot.reschedule_event(v.reg, rs, ev, start=start, timing=timing, by=v.name, by_id=v.uid, via=v.via, preview=True)
+                return {"sentences": lines, "rev": rc.event_rev(v.reg, rs, ev)}
+            lines = await bot.reschedule_event(v.reg, rs, ev, start=start, timing=timing, by=v.name, by_id=v.uid, via=v.via, rev=str(d.get("rev") or "") or None)
+        except RegistryError as e:
+            if str(e) == rc.RUN_CHANGED:
+                return JSONResponse({"error": str(e), "rev": rc.event_rev(v.reg, rs, ev)}, status_code=409)
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": " ".join(lines)}
+
+    @app.post("/api/run/{key}/lineup")
+    async def run_lineup_edit(request: Request, key: str):
+        """Change a run's raids before the lock (RaidMixin.edit_lineup — plain text's run_lineup and MCP's edit_lineup
+        share it): {lineup: [{raid, rosters, starts?}] — the WHOLE lineup, its first raid first; preview?, rev?}.
+        Officers, decided live by the verb. `preview` → {sentences (consequences.lineup_consequence), rev}; nothing
+        written. A write carrying `rev` is refused (409) when the run changed since. A refusal → 400 {error}."""
+        v, d = await body(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = event_of(v.reg, rs, key)
+        lineup = d.get("lineup")
+        if not isinstance(lineup, list):
+            return JSONResponse({"error": "Name the run's raids, its first raid first."}, status_code=400)
+        try:
+            if d.get("preview"):
+                lines = await bot.edit_lineup(v.reg, rs, ev, lineup, by=v.name, by_id=v.uid, via=v.via, preview=True)
+                return {"sentences": lines, "rev": rc.event_rev(v.reg, rs, ev)}
+            lines = await bot.edit_lineup(v.reg, rs, ev, lineup, by=v.name, by_id=v.uid, via=v.via, rev=str(d.get("rev") or "") or None)
+        except RegistryError as e:
+            if str(e) == rc.RUN_CHANGED:
+                return JSONResponse({"error": str(e), "rev": rc.event_rev(v.reg, rs, ev)}, status_code=409)
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": " ".join(lines)}
+
     @app.post("/api/run/{key}/reopen")
     async def run_reopen(request: Request, key: str):
         """Reopen a run ENDED by mistake, within the hour (design B6; RaidMixin.reopen_run). A cancelled run is refused
@@ -1698,6 +1759,23 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         return follow_of_op(reg, rid, d.get("follow")) if d.get("follow") not in (None, "") else None
 
+    def lineup_arg(reg, rid: str, d: dict) -> list[dict] | None:
+        """The open / preview body's `lineup` (the LATER raids, [{raid, rosters, starts?}]; None / [] = none, `follow`
+        or the schedule's own) → checked in code: each raid known and not the first raid itself (design §5.62); the
+        whole lineup's rules (at most four, a raid once, the starts in order) are rc.open_run's."""
+        later = d.get("lineup")
+        if later in (None, "", []):
+            return None
+        if not isinstance(later, list) or not all(isinstance(e, dict) for e in later):
+            raise RegistryError("Name the later raids, each with its rosters.")
+        for e in later:
+            r = str(e.get("raid") or "").strip().lower()
+            if r not in reg.profile.raids:
+                raise RegistryError(f"unknown raid {r or '?'} for the follow-on (one of {', '.join(reg.profile.raids)})")
+            if r == rid:
+                raise RegistryError("a follow-on is another raid, not the raid itself")
+        return [dict(e) for e in later]
+
     @app.post("/api/raid/{rid}/open/preview")
     async def raid_open_preview(request: Request, rid: str):
         """What Open would do, nothing written (design B4; rc.open_preview — the /raid open wizard says the same):
@@ -1710,7 +1788,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         when, sid = open_args(v.reg, rid, d)
         try:
             fw = follow_arg(v.reg, rid, d)
-            p = rc.open_preview(v.reg, bot.raids.store(v.reg), rid, when, sid, follow=fw)
+            p = rc.open_preview(v.reg, bot.raids.store(v.reg), rid, when, sid, follow=fw, lineup=lineup_arg(v.reg, rid, d))
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         ch = bot.get_channel(int(p["channel"])) if p.get("channel") else None
@@ -1735,6 +1813,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         when, sid = open_args(reg, rid, d)
         try:
             fw = follow_arg(reg, rid, d)
+            later = lineup_arg(reg, rid, d)
             start, sid, _note = rc.open_when(reg, rid, when, sid)
             rc.refuse_past_start(reg, start, reg.now_local())  # a mistyped year would open a run the scheduler may close at once
         except RegistryError as e:
@@ -1747,10 +1826,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                                      "preview": rc.open_preview(reg, bot.raids.store(reg), rid, start.isoformat(), sid)}, status_code=409)
         rs = bot.raids.store(reg)
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
-            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, follow=fw, schedule=sid))
+            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, follow=later[0] if later and len(later) == 1 else (None if later else fw),
+                                                         schedule=sid, **({"lineup": later} if later and len(later) > 1 else {})))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")
+        return {"message": f"Opened {dr.run_title(reg, ev)}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")
                 + (f", then {words}" if (words := rc.follow_words_of(reg, ev)) else ""), "key": ev.key}  # the run's own follow-on, never the request's
 
     @app.post("/api/admin/confirm")
@@ -1860,7 +1940,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if ref not in (None, ""):
             ev = find_live(reg, rs, str(ref))
             if not rc.is_test_run(reg, ev):
-                raise HTTPException(400, f"{ev.key} is a real run: test members answer test runs only")
+                raise HTTPException(400, f"{dr.run_title(reg, ev)} is a real run: test members answer test runs only")
             return ev
         live = test_runs(reg, rs)
         if not live:
@@ -1929,7 +2009,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             ev = await bot.test_comp(reg, rs, str(d.get("raid") or ""), v.name, v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"comp sandbox {ev.key}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp", "key": ev.key}
+        return {"message": f"Comp sandbox {dr.run_title(reg, ev)}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp", "key": ev.key}
 
     TEST_ACTIONS = {"seed": test_seed_do, "run": test_run_do, "answer": test_answer_do, "clear": test_clear_do, "compose": test_compose_do, "comp": test_comp_do}
 

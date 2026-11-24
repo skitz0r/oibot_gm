@@ -200,7 +200,7 @@ def test_the_leads_lock_locks_the_follow_on_too(reg, rs, monkeypatch):
     monkeypatch.setattr(rc, "propose", seat_by_name({LEAD: names[:20], FOLLOW: names[:20]}))
     line = run(bot.lock_run(reg, rs, lead, by="Jon"))
     fev = rs.events[fev.key]
-    assert lead.state == "locked" and fev.state == "locked" and fev.key in line
+    assert lead.state == "locked" and fev.state == "locked" and configops.run_words(reg, fev) in line and fev.key not in line  # names, never keys
     assert len(fev.all_rosters) == 2 and sorted(p.signup_name for r in fev.all_rosters for p in r.selected) == sorted(names[:20])
     assert fev.confirm_by is None and not bot.dms  # a follow-on never confirms (its lead is ad hoc here: no DMs either)
     assert "lock:0" in fev.cards or bot.officer_channel(reg, fev) is None  # cards post when there is a channel
@@ -225,7 +225,7 @@ def test_a_follow_on_whose_lock_raises_leaves_the_lead_locked(reg, rs, monkeypat
     monkeypatch.setattr(bot, "lock_run", lock_run)
     line = run(bot.lock_run(reg, rs, lead, by="Jon"))
     assert lead.state == "locked" and rs.events[fev.key].state == "open"
-    assert line.startswith(f"{lead.key}: locked by Jon") and line.endswith(f"follow-on not locked: {err}")
+    assert line.startswith(f"{configops.run_words(reg, lead)}: locked by Jon") and line.endswith(f"follow-on not locked: {err}")
     assert [x for lvl, x in bot.ops.lines if lvl == "warn" and "follow-on not locked" in x]
 
 
@@ -647,7 +647,7 @@ def test_run_open_applies_with_the_follow_on(reg, rs, monkeypatch):
     op = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="barrow_deeps x2")
     line = run(configops.apply_async(reg, op, by="Jon", is_owner=True, bot=bot))
     lead = next(e for e in rs.live() if e.instance == LEAD)
-    assert lead.followed_by and rc.follow_of(rs, lead).instance == FOLLOW and lead.key in line
+    assert lead.followed_by and rc.follow_of(rs, lead).instance == FOLLOW and configops.run_words(reg, lead) in line and lead.key not in line
 
 
 def test_run_open_on_an_open_run_says_the_follow_on_is_not_added(reg, rs):

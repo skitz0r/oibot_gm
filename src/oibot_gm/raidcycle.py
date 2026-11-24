@@ -1318,6 +1318,57 @@ MOVE_OFFICER_ONLY = "Only an officer moves a run or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
 
+MOVE_GAP = "That time doesn't exist that night because the clocks go forward. Pick another time."
+MOVE_TWICE = "That time happens twice that night because the clocks go back. Pick another time."
+MOVE_WHEN = "Pick the new day and time with the picker."
+RUN_CHANGED = "Someone changed this run a moment ago, so nothing was saved. Check it and try again."
+
+
+def move_start(reg: Registry, value) -> datetime:
+    """A reschedule's new start from a surface: an aware ISO instant (MCP, a preview carried back) as it is, or the guild
+    WALL time 'YYYY-MM-DD HH:MM' (the site's datetime-local, the plain-text parser's machine field) resolved DST-safely
+    by wizard.resolve_local — a wall time the clocks skip (MOVE_GAP) or pass twice (MOVE_TWICE) is refused, never guessed
+    (open_when's opening takes the shifted time; a move names one exact minute). Anything else: MOVE_WHEN."""
+    from .wizard import resolve_local
+
+    raw = str(value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(raw.replace(" ", "T", 1))
+    except ValueError:
+        raise RegistryError(MOVE_WHEN) from None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(reg.tz)
+    start, note = resolve_local(parsed.replace(second=0, microsecond=0), reg.tz)
+    if note == "gap":
+        raise RegistryError(MOVE_GAP)
+    if note == "ambiguous":
+        raise RegistryError(MOVE_TWICE)
+    return start
+
+
+def event_rev(reg: Registry, rs: "RaidStore", ev: "RaidEvent") -> str:
+    """The fingerprint of what a reschedule or a lineup edit acts on (any raid of a run stands for its first): the first
+    raid's start and state, the lineup it plays now and its own sheet timing. A preview hands it out; a write carrying an
+    older one is refused (RUN_CHANGED) — a change made meanwhile is never overwritten unseen."""
+    import hashlib
+
+    first = first_part(rs, ev)
+    team = run_team(reg, first)
+    timing = {k: (team.get(k) if k in team else team_setting(team, k)) for k in sorted(set(EVENT_TIMING.values()))}
+    raw = json.dumps([first.starts_at, first.state, run_lineup(reg, rs, first), timing], sort_keys=True, default=str)
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def cancel_tells_channel(rs: "RaidStore", ev: "RaidEvent") -> bool:
+    """Whether a cancel pressed on `ev` can post its fixed line in the signup channel: the run's first raid owns the
+    sheet and its channel, so a later raid whose first raid has already finished has neither (its cancel takes the raids
+    still to play, and nothing posts)."""
+    if not is_follow(ev):
+        return True
+    first = first_part(rs, ev)
+    return first is not ev and first.state not in ("done", "cancelled")
+
+
 def answered_ids(first: "RaidEvent") -> list[int]:
     """Who a change to a run's start times tells (the `moved` notice: reschedule and a lineup edit alike): everyone with
     a row on the first raid — Join, Bench or No thanks, a test puppet's included — but an away row, which nobody

@@ -874,6 +874,9 @@ _OLD_DEFAULT = "default"  # an older file's `default` schedule (the raid's own r
 RUN_TIMES_ON_SCHEDULE = "Run times belong to a schedule now. Add or change a schedule for this raid."
 NO_SCHEDULE = "There is no schedule called {sid}."
 ID_TAKEN = "Another schedule is already called {sid}. Pick another id."
+# a schedule's own raid named again while editing it (the parser named the raid of the very schedule asked about): naming a
+# raid means create, so the write stays refused, but in words that say how to edit it instead (never ID_TAKEN's "another")
+SCHEDULE_EXISTS = "The schedule called {sid} already exists. To change it, name the schedule without a raid."
 SCHEDULE_KINDS = ("weekly", "lockout", "pickup")  # weekly slots · day N of each lockout · a template opened on demand
 SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours",
                     "nudge", "autofill", "open_dm", "confirm", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
@@ -1001,6 +1004,21 @@ def parse_follow(value) -> dict | None:
     if not 1 <= n <= MAX_SCHEDULE_ROSTERS:
         raise RegistryError(f"a follow-on's rosters is 1 to {MAX_SCHEDULE_ROSTERS}")
     return {"raid": rid, "rosters": n, **({"starts": starts} if starts is not None else {})}
+
+
+def parse_lineup_text(text) -> list[dict]:
+    """A run's later raids typed as text — "barrow_deeps x2, onyxias_lair" — as lineup entries [{raid, rosters}], one
+    parse_follow per comma part, in order (the plain-text run_lineup / run_open value, read in code, never by the model);
+    "none" / "" = no later raid ([])."""
+    raw = str(text or "").strip()
+    if raw.lower() in FOLLOW_WORDS:
+        return []
+    out = []
+    for part in raw.split(","):
+        fw = parse_follow(part.strip())
+        if fw is not None:
+            out.append(fw)
+    return out
 
 
 LINEUP_MAX = 4  # a run's raids in one night: the first and up to three after it, all from one signup
@@ -5327,6 +5345,8 @@ class Registry:
         if have is not None:
             rid = _lead_raid(have)
             if raid:
+                if raid == rid:  # its own raid named again: an edit asked as a create — say how to edit it
+                    raise RegistryError(SCHEDULE_EXISTS.format(sid=sid))
                 raise RegistryError(ID_TAKEN.format(sid=sid))
             if unread_schedule(have) is not None:
                 raise RegistryError(f"The schedule called {sid} can't be read. Correct it by hand in guild.yaml first.")

@@ -239,7 +239,7 @@ def test_plain_text_run_open_applies_with_the_right_class(reg, rs):
     t0 = rc.upcoming(reg, RID, reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)[0][1]
     line = apply(ConfigOp(op="run_open", target=RID))
     ev = rc.event_of_occurrence(rs, "barrow-deeps", rc.occurrence_stamp(reg, t0))
-    assert line.startswith(f"opened {ev.key}") and (ev.kind, ev.series) == ("recurring", "barrow-deeps")
+    assert line.startswith(f"opened {configops.run_words(reg, ev)}") and (ev.kind, ev.series) == ("recurring", "barrow-deeps")
     when = soon(reg, 9, 22)
     apply(ConfigOp(op="run_open", target=RID, value=when.strftime("%Y-%m-%d %H:%M")))
     one = rc.live_at(rs, RID, when)

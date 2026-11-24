@@ -85,7 +85,7 @@ def test_rosters_carry_coverage_level_and_forecast(reg, rs, client_bot):
 def test_plain_text_previews_and_sends_with_the_fingerprint(reg, rs):
     ev, p = worked_example(reg, rs)
     preview = configops.apply(reg, ConfigOp(op="run_fill", target=ev.key, value="preview"), "Officer", is_owner=False, raids=rs)
-    assert preview.startswith(f"{ev.key}: suggestions before lock (nothing sent): 1. Kael → Protection (offspec)") and "alternates: Wren brings Fern" in preview
+    assert preview.startswith(f"{configops.run_words(reg, ev)}: suggestions before lock (nothing sent): 1. Kael → Protection (offspec)") and "alternates: Wren brings Fern" in preview
     send = ConfigOp(op="run_fill", target=ev.key, value="send")
     said = configops.describe(reg, send)
     assert "ask these by DM" in said and "Ana → Holy (flex)" in said
@@ -96,7 +96,7 @@ def test_plain_text_previews_and_sends_with_the_fingerprint(reg, rs):
     with pytest.raises(RegistryError, match="preview the suggestions first"):
         run(configops.apply_async(reg, send, "Officer", True, bot=bot))
     line = run(configops.apply_async(reg, send, "Officer", True, bot=bot, rev=configops.op_rev(send, ev.key, revs)))
-    assert line.startswith(f"{ev.key}: asked Kael (offspec), Ana (flex)")
+    assert line.startswith(f"{configops.run_words(reg, ev)}: asked Kael (offspec), Ana (flex)")
     with pytest.raises(rc.PlanChanged):  # the same diff applied twice: the plan moved (they are asked now)
         run(configops.apply_async(reg, send, "Officer", True, bot=bot, rev=revs[configops.PLAN_REV + ev.key]))
 

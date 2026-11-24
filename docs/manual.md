@@ -871,9 +871,15 @@ already be filled, and nobody puts you back by hand. A *Can't make it* on the le
 (*"Your Barrow Deeps place goes too."*). Once a follow-on has started and its loot council is open, the companion's
 drops go there, even while the council before it is still open; until then the earlier council takes them. Cancelling
 any raid of the run cancels the whole run in the same press, its sheet and every follow-on (*"The whole Hyjal Summit
-run is cancelled, with Barrow Deeps."*). A cancelled run is never reopened. If the bot restarts while a run is opening,
+run is cancelled, with Barrow Deeps."*). Once the first raid has finished, a cancel takes only the raids still to play:
+the finished raid stays done, and nothing goes to the signup channel — the sheet and its channel line belong to the
+first raid — so the cancel screen has no *Tell the channel?* choice then. A cancelled run is never reopened. If the bot restarts while a run is opening,
 the next minute adds the follow-ons that didn't open yet, once, with no second sheet. The Discord `/raid open` and
-schedule wizards show follow-ons but don't set them — the site, plain text and MCP do.
+schedule wizards show follow-ons but don't set them — the site, plain text and MCP do. On the site's schedule editor the
+block **Then, the same night** holds up to three later raids, a row each: the raid, its rosters (1–4) and its start, in
+30-minute steps from when the raid before it ends (the default); saving the schedule sends the whole lineup. Plain text
+lists them in one line (*"open Hyjal Thursday 6:30 PM with barrow deeps x2, onyxia"*), and MCP's `open_run` takes
+`lineup`.
 
 **Regulars** (recurring schedules only). Officers keep, per recurring schedule, a list of **regulars**: one member and
 the one character they raid on there. Regulars are the people the bot *expects* on every sheet of that schedule:
@@ -1213,7 +1219,13 @@ second run, and the next one opens at the new time; a new time that falls in the
 time that was only taken away stands for nothing new, a run already finished or cancelled is never changed, a
 cancelled run gives back the night it stood for (it opens after all), and a schedule with two run times keeps both:
 editing one never stops the other opening. Lockouts, the alt filter and *also on another run* read the new
-start. The verb is the bot's own today (MCP and the site's run card get it with the run pages).
+start. **Where:** on the Rosters page, the run card's ⋮ menu has **Reschedule…** for an open or locked run: pick the new day and
+time, the dialog prints the bot's own confirm, and **Move** saves it. Plain text says it (*"move tonight's Barrow Deeps
+to Wednesday 8 PM"*, *"lock Thursday's run 12 hours before"*; the diff prints the same confirm, and a time the clocks
+skip or pass twice that night is refused: *"That time doesn't exist that night because the clocks go forward. Pick
+another time."*). MCP's `reschedule_run` previews first and sends the preview's `rev` back. If someone changed the run
+between the confirm and the press, nothing is saved (*"Someone changed this run a moment ago, so nothing was saved.
+Check it and try again."*). Discord gets a Reschedule wizard later; until then `/gm change` takes it as plain text.
 
 **Changing the raids of an open run (officers).** Until the roster locks, one run's lineup can change: a raid added
 after the first, one taken out, the later raids put in another order, or a raid's number of rosters changed. The first
@@ -1232,8 +1244,10 @@ the confirm (*"Barrow Deeps is taken out with its 3 board places, 1 pin and 1 pl
 it closes and its card says so. A raid taken out answers as itself afterwards: cancelling it again says it is already
 cancelled and never touches the run. Nobody gets a DM: the sheet is edited in place to the new lineup (*Hyjal Summit,
 then Onyxia's Lair*), and the run's thread hears it. Once the roster locks the lineup is fixed (*"The lineup is fixed
-once the roster locks."*). Like moving a run, this is the bot's own verb today; the site and Discord get it with the run
-pages.
+once the roster locks."*). **Where:** plain text (*"add onyxia after tonight's Barrow Deeps"*, *"take onyxia out of
+Thursday's run"* — the later raids are named in order, *"barrow deeps x2, onyxia"*, or *"none"* for the first raid alone)
+and MCP's `edit_lineup` (the whole lineup, previewed first, its `rev` sent back); a run changed meanwhile is refused as
+when it moves. The site's run card and a Discord wizard get it with the run pages.
 
 Seat selection at lock is deterministic: the raid's minimums (filled first, never a stop), buff synergy, the comp policy's
 standing instructions, officer pins, and the schedule's **weights** (the raid's unless the schedule sets its own) —
@@ -2236,7 +2250,8 @@ news post says can make the review read or write another server.
 | `import_batches` · `undo_import` | the ledger's imports, newest first (batch id, who, when, rows still live, what an undo does) · void every award of one import (`batch`, an optional `reason`; needs the actor) — the rows stay, a fixed file imports again |
 | `loot_weights` · `set_loot_weights` | the scoring weights with the game's default beside each · change some (`fields` = {path: number or null for the default}; the owner's; `preview=True` first — weights are reviewed) |
 | `distil` | Claude's draft of up to five loot-policy sentences from the active precedents, each with the precedents it rests on — nothing written; add the ones the person wants with `policy_append` |
-| `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`; `follow` ('barrow_deeps x2') = a follow-on the same night from the same signup, §4) |
+| `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`; `follow` ('barrow_deeps x2') = a follow-on the same night from the same signup, §4); `lineup` [{raid, rosters, starts?}] = up to three later raids instead) |
+| `reschedule_run` · `edit_lineup` | move a run (`when`, guild time) and / or give it its own sheet timing (`timing`), or change an open run's raids (`lineup`, the whole lineup, first raid first) — always `preview=true` first (`sentences` = the confirm to read out, `rev`), then again with that `rev`: a run changed meanwhile is refused; nobody is DMed, everyone who answered sees a notice (§4) |
 | `schedule_set` · `schedule_remove` | `schedule` = the schedule's id alone (never with its raid). A schedule's settings, one or several as `fields` in one write — its sheet timing (`cadence` = a preset, or each hour and switch; null = the game's suggestion), kind, slots or lockout days, rosters, `follow` = 'barrow_deeps x2' or none; a NEW schedule names its first raid with `raid` · drop a schedule by its id (schedules come back in `list_raids` / `get_raid`, each with its id and its own sheet timing; runs already open keep their times) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
 | `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |

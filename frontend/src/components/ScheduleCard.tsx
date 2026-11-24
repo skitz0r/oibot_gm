@@ -52,7 +52,7 @@ export function scheduleRevs(s: Schedule | null): { revs?: Record<string, string
  *  demand, with the rosters a run expects and its own week (sheet timing is each schedule's, C7). The editor opens IN
  *  PLACE of the row it edits (a new one under the list) — the card's one edit mode at a time (design §5.54); `editable`
  *  is false while another edit mode is open, so the buttons wait. Every officer edits (D8). */
-export function Schedules({ r, meta, editable, policies, maxRosters, others, taken, onSaved, onEditing }: { r: RaidRule; meta?: Meta; editable: boolean; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; taken: string[]; onSaved: () => void; onEditing?: (on: boolean) => void }) {
+export function Schedules({ r, meta, editable, policies, maxRosters, others, taken, onSaved, onEditing }: { r: RaidRule; meta?: Meta; editable: boolean; policies: string[]; maxRosters: number; others: OtherRaid[]; taken: string[]; onSaved: () => void; onEditing?: (on: boolean) => void }) {
   const [edit, setEditState] = useState<Schedule | "new" | null>(null);
   const setEdit = (v: Schedule | "new" | null) => { if ((v === null) !== (edit === null)) onEditing?.(v !== null); setEditState(v); };
   const [ask, confirmDialog] = useConfirm();
@@ -118,7 +118,19 @@ export function Schedules({ r, meta, editable, policies, maxRosters, others, tak
   );
 }
 
-type Draft = { name: string; kind: string; active: boolean; rosters: string; slots: string[]; days: string[]; time: string; cadence: Record<string, string>; weights: Record<string, string>; follow_raid: string; follow_rosters: string };
+/** Another raid of the game, for a later-raid row: its id, name and how long it lasts (C12: the next raid's default start). */
+export type OtherRaid = { id: string; name: string; duration?: number };
+/** One later raid of the lineup: its raid, rosters and start ("" = when the raid before it ends; else minutes after the first raid). */
+type Later = { raid: string; rosters: string; starts: string };
+const LATER_MAX = 3;  // registry.LINEUP_MAX − the schedule's own raid
+const START_STEPS = 8;  // the start select: when the raid before ends, then 30-minute steps up to four hours later
+type Draft = { name: string; kind: string; active: boolean; rosters: string; slots: string[]; days: string[]; time: string; cadence: Record<string, string>; weights: Record<string, string>; later: Later[] };
+
+/** "1 h 30 min" — a gap of minutes in words (never a clock: a schedule's run times differ, the gap doesn't). */
+function gapWords(min: number): string {
+  const h = Math.floor(min / 60), m = min % 60;
+  return [h ? `${h} h` : "", m ? `${m} min` : ""].filter(Boolean).join(" ") || "0 min";
+}
 
 /** The editor's draft: every timing field holds the schedule's own value (a new schedule's are empty: the Save seeds
  *  the game's suggestion); the split and the weights only what the schedule sets itself (empty = the same as the raid). */
@@ -130,7 +142,8 @@ function toDraft(s: Schedule | null): Draft {
   const weights: Record<string, string> = {};
   for (const [k, v] of Object.entries(s?.own_weights || {})) weights[k] = String(v);
   return { name: s?.name || "", kind: s?.kind || "weekly", active: s ? s.active : true, rosters: String(s?.rosters || 1), slots: s?.slots || [], days: (s?.days || []).map(String),
-    time: s?.time || "20:00", cadence, weights, follow_raid: s?.follow?.raid || "", follow_rosters: String(s?.follow?.rosters || 1) };
+    time: s?.time || "20:00", cadence, weights,
+    later: (s?.lineup || []).slice(1).map((e) => ({ raid: e.raid, rosters: String(e.rosters || 1), starts: e.starts != null ? String(e.starts) : "" })) };
 }
 
 /** registry.ADHOC_WEIGHTS, for a NEW pickup's weight placeholders (an existing schedule reads them from the server). */
@@ -153,7 +166,7 @@ function slug(name: string, kind: string, taken: string[]): string {
  *  default) when it is saved. The timeline above the fields is the draft's week as it stands (an empty step isn't
  *  drawn) and a preset lights up while the hours match it. One POST, one registry write: a refusal comes back as a
  *  toast and nothing is saved. */
-function ScheduleEditor({ r, meta, s, policies, maxRosters, others, taken, onClose, onSaved, onStale }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; taken: string[]; onClose: () => void; onSaved: () => void; onStale?: () => void }) {
+function ScheduleEditor({ r, meta, s, policies, maxRosters, others, taken, onClose, onSaved, onStale }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; others: OtherRaid[]; taken: string[]; onClose: () => void; onSaved: () => void; onStale?: () => void }) {
   const [d, setD] = useState<Draft>(() => toDraft(s));
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<OpsReply | null>(null);
@@ -188,18 +201,15 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, taken, onClo
       for (const k of HOURS) f[k] = x.cadence[k] === undefined || x.cadence[k] === "" ? null : Number(x.cadence[k]);
       for (const k of BOOLS) f[k] = x.cadence[k] ? x.cadence[k] === "on" : null;
       f.split_policy = x.cadence.split_policy || null;
-      // the follow-on (design §5.62): another raid the same night from this signup
-      f.follow = x.follow_raid ? { raid: x.follow_raid, rosters: Number(x.follow_rosters) } : null;
+      // the whole lineup (design §5.62, phase 3): this raid with its rosters, then up to three later raids from this signup
+      f.lineup = [{ raid: r.id, rosters: Number(x.rosters) }, ...x.later.filter((e) => e.raid).map((e) => ({ raid: e.raid, rosters: Number(e.rosters), ...(e.starts ? { starts: Number(e.starts) } : {}) }))];
+      delete f.rosters;  // the lineup's first entry carries them
       f.weights = Object.fromEntries(WEIGHTS.map((k) => [k, x.weights[k] === undefined || x.weights[k] === "" ? null : Number(x.weights[k])]));
       if (x.kind === "pickup") for (const k of ADHOC_HIDDEN) delete f[k];
       return f;
     };
     const want = all(dd);
-    if (!s) {  // a new schedule names its raids: its lineup = this raid (with its rosters), then the follow-on
-      const { rosters, follow, ...rest } = want;
-      const fw = follow as { raid: string; rosters: number } | null;
-      return { ...rest, lineup: [{ raid: r.id, rosters }, ...(fw ? [fw] : [])] };
-    }
+    if (!s) return want;  // a new schedule names its raids: its lineup
     const base = all(toDraft(s));
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(want)) {
@@ -252,14 +262,11 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, taken, onClo
           <TextInput label="name" placeholder={d.kind === "pickup" ? "Pickup" : "Main night, Alt run…"} value={d.name} onChange={(e) => setD({ ...d, name: e.currentTarget.value })} maxLength={40} w={220} />
           <Select label="rosters per run" description={(s?.rosters_copy && s.rosters_copy[d.rosters]) || `the sheet advertises ${d.rosters} × ${r.size} seats`} data={Array.from({ length: maxRosters }, (_, i) => ({ value: String(i + 1), label: `${i + 1} roster${i ? "s" : ""}` }))}
             value={d.rosters} onChange={(v) => setD({ ...d, rosters: v || "1" })} allowDeselect={false} w={260} />
-          <Select label="then, the same night" description="a second raid from the same signup, starting when this one ends" w={260} allowDeselect={false}
-            value={d.follow_raid} onChange={(v) => setD({ ...d, follow_raid: v || "" })}
-            data={[{ value: "", label: "No follow-on" }, ...others.map((o) => ({ value: o.id, label: o.name }))]} />
-          {d.follow_raid && <Select label="its rosters" description="how many groups of that raid" w={130} allowDeselect={false} value={d.follow_rosters}
-            onChange={(v) => setD({ ...d, follow_rosters: v || "1" })} data={Array.from({ length: maxRosters }, (_x, i) => ({ value: String(i + 1), label: String(i + 1) }))} />}
+
           {!s && <Switch label="active" description="paused: nothing opens from it" checked={d.active} onChange={(e) => setD({ ...d, active: e.currentTarget.checked })} />}
           {s && <Text size="xs" c="dimmed" maw={200}>{s.active ? "Active — pause it from the schedule row." : "Paused — resume it from the schedule row."}</Text>}
         </Group>
+        <LaterRaids r={r} others={others} maxRosters={maxRosters} later={d.later} onChange={(later) => setD({ ...d, later })} />
         {!s && <SegmentedControl data={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))} value={d.kind} onChange={(v) => setD({ ...d, kind: v })} />}
         {d.kind === "weekly" && <SlotEditor label="run times" description="one sheet per run time per week, guild time" value={d.slots} onChange={(v) => setD({ ...d, slots: v })} />}
         {d.kind === "lockout" && (
@@ -317,5 +324,50 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, others, taken, onClo
         </Group>
       </Stack>
     </div>
+  );
+}
+
+/** Then, the same night: up to three later raids from this schedule's signup, a row each — the raid, its rosters and its
+ *  start, in 30-minute steps from when the raid before it ends (C12's default). The Save sends the whole lineup; the
+ *  server's preview says whether it holds (a raid twice, the starts out of order). */
+function LaterRaids({ r, others, maxRosters, later, onChange }: { r: RaidRule; others: OtherRaid[]; maxRosters: number; later: Later[]; onChange: (v: Later[]) => void }) {
+  const dur = (id: string) => Math.round(60 * (id === r.id ? r.duration_hours : (others.find((o) => o.id === id)?.duration ?? r.duration_hours)));
+  const nameOf = (id: string) => (id === r.id ? r.name : others.find((o) => o.id === id)?.name || id);
+  // each row's start in minutes after the first raid: its own, else when the raid before it ends
+  const at: number[] = [];
+  later.forEach((e, i) => {
+    const prevAt = i === 0 ? 0 : at[i - 1], prevRaid = i === 0 ? r.id : later[i - 1].raid;
+    at.push(e.starts ? Number(e.starts) : prevAt + dur(prevRaid));
+  });
+  const set = (i: number, patch: Partial<Later>) => onChange(later.map((e, k) => (k === i ? { ...e, ...patch } : e)));
+  const free = (i: number) => others.filter((o) => o.id === later[i].raid || !later.some((e) => e.raid === o.id));
+  return (
+    <Box>
+      <Text size="sm" fw={500}>Then, the same night <Text span size="xs" c="dimmed">— more raids from the same signup, each after the one before it</Text></Text>
+      <Stack gap={6} mt={4}>
+        {later.length === 0 && <Text size="xs" c="dimmed">This schedule runs {r.name} alone. Add a raid to play another one after it.</Text>}
+        {later.map((e, i) => {
+          const prev = i === 0 ? r.id : later[i - 1].raid;
+          const base = (i === 0 ? 0 : at[i - 1]) + dur(prev);
+          const steps = [{ value: "", label: `When ${nameOf(prev)} ends` },
+            ...Array.from({ length: START_STEPS }, (_x, k) => ({ value: String(base + 30 * (k + 1)), label: `${gapWords(30 * (k + 1))} after ${nameOf(prev)} ends` }))];
+          if (e.starts && !steps.some((o) => o.value === e.starts)) steps.push({ value: e.starts, label: `${gapWords(Number(e.starts))} after ${r.name} starts` });
+          return (
+            <Group key={i} gap="sm" align="flex-end" wrap="wrap">
+              <Select label={`raid ${i + 2}`} w={220} allowDeselect={false} value={e.raid} onChange={(v) => set(i, { raid: v || "", starts: "" })}
+                data={free(i).map((o) => ({ value: o.id, label: o.name }))} />
+              <Select label="rosters" w={110} allowDeselect={false} value={e.rosters} onChange={(v) => set(i, { rosters: v || "1" })}
+                data={Array.from({ length: maxRosters }, (_x, k) => ({ value: String(k + 1), label: String(k + 1) }))} />
+              <Select label="starts" w={260} allowDeselect={false} value={e.starts} onChange={(v) => set(i, { starts: v || "" })} data={steps} />
+              <Tooltip label={`Take ${nameOf(e.raid)} out of the lineup`}><Button size="sm" variant="subtle" color="red" px={8} aria-label={`remove raid ${i + 2}`} onClick={() => onChange(later.filter((_x, k) => k !== i))}><IconTrash size={15} /></Button></Tooltip>
+            </Group>
+          );
+        })}
+        {later.length < LATER_MAX && others.some((o) => !later.some((e) => e.raid === o.id)) && (
+          <Box><Button size="compact-sm" variant="default" leftSection={<IconPlus size={13} />}
+            onClick={() => { const o = others.find((x) => !later.some((e) => e.raid === x.id)); if (o) onChange([...later, { raid: o.id, rosters: "1", starts: "" }]); }}>Add a raid</Button></Box>
+        )}
+      </Stack>
+    </Box>
   );
 }

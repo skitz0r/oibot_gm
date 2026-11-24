@@ -280,9 +280,9 @@ def test_test_answer_mix_and_seed_all(reg, rs):
     bot = SetupBot(reg, rs)
     ev = open_test_run(reg, rs, test_by=OWNER)
     d = configops.describe(reg, ConfigOp(op="test", value="answer join 3 bench 2 out 1"))
-    assert d.startswith(f"test bench: on {ev.key}, 3 Join, 2 Bench, 1 No thanks from the 16 puppet(s)")
+    assert d.startswith(f"test bench: on {configops.run_words(reg, ev)}, 3 Join, 2 Bench, 1 No thanks from the 16 puppet(s)")
     out = owner_apply(reg, ConfigOp(op="test", value=f"answer {ev.key} join 3 bench 2 out 1"), bot)
-    assert out.startswith(f"test bench on {ev.key}: ") and out.count(";") == 5
+    assert out.startswith(f"test bench on {configops.run_words(reg, ev)}: ") and out.count(";") == 5
     assert (len(ev.by_status("in")), len(ev.by_status("sub")), len(ev.by_status("out"))) == (3, 2, 1)
     assert "say how many" in configops.describe(reg, ConfigOp(op="test", value="answer"))
     with pytest.raises(RegistryError, match="needs the bot"):

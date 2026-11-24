@@ -52,6 +52,9 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_pause": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/pause", "mcp": "pause_autofill"},
     "run_withdraw": {"discord": "flow:raid_suggest", "web": "POST /api/run/{key}/withdraw", "mcp": "withdraw_ask"},
     "run_reopen": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/reopen", "mcp": "reopen_run"},
+    # phase 3: move / re-time a run and change its raids — plain text and the site / MCP; Discord's wizards are phase 5 (PARITY_PENDING)
+    "run_reschedule": {"web": "POST /api/run/{key}/reschedule", "mcp": "reschedule_run"},
+    "run_lineup": {"web": "POST /api/run/{key}/lineup", "mcp": "edit_lineup"},
     # comp targets (phase 3, RD-12): /roster comp, the Readiness page + the Raids page's Desired comp (typed `comp` changes), MCP;
     # comp_groups is plain text only on every surface (D48): /gm change, the officer pages' Tell the bot box, plain_change
     "comp_target": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_minimum"},

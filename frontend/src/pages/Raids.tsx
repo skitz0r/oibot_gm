@@ -28,7 +28,7 @@ export function RaidsPage({ meta }: { meta: Meta }) {
   return (
     <Stack gap="lg">
       <PageTitle title="Raids" intro={`Each raid: when it runs, its rules — the group make-up and who gets a seat — and its schedules, each with its own week. Amber marks a value changed from the game's default. Times in ${zone}.`} />
-      {data.raids.map((r) => <RuleCard key={r.id} r={r} meta={meta} slots={slots} weightKeys={data.weight_keys} policies={data.split_policies} maxRosters={data.max_rosters} others={data.raids.filter((x) => x.id !== r.id).map((x) => ({ id: x.id, name: x.name }))} taken={data.raids.flatMap((x) => x.schedules.map((sc) => sc.id))} onSaved={load} onEditing={onEditing} />)}
+      {data.raids.map((r) => <RuleCard key={r.id} r={r} meta={meta} slots={slots} weightKeys={data.weight_keys} policies={data.split_policies} maxRosters={data.max_rosters} others={data.raids.filter((x) => x.id !== r.id).map((x) => ({ id: x.id, name: x.name, duration: x.duration_hours }))} taken={data.raids.flatMap((x) => x.schedules.map((sc) => sc.id))} onSaved={load} onEditing={onEditing} />)}
     </Stack>
   );
 }
@@ -52,7 +52,7 @@ function settingWords(k: string): string {
 type Mode = "rules" | "minimums" | "schedule" | null;
 
 /** One raid's card. Every officer on the page edits (D8): the route is officers-only. */
-function RuleCard({ r, meta, slots, weightKeys, policies, maxRosters, others, taken, onSaved, onEditing }: { r: RaidRule; meta: Meta; slots: CompSlot[] | null; weightKeys: string[]; policies: string[]; maxRosters: number; others: { id: string; name: string }[]; taken: string[]; onSaved: () => void; onEditing: (on: boolean) => void }) {
+function RuleCard({ r, meta, slots, weightKeys, policies, maxRosters, others, taken, onSaved, onEditing }: { r: RaidRule; meta: Meta; slots: CompSlot[] | null; weightKeys: string[]; policies: string[]; maxRosters: number; others: { id: string; name: string; duration?: number }[]; taken: string[]; onSaved: () => void; onEditing: (on: boolean) => void }) {
   const [mode, setModeState] = useState<Mode>(null);
   const editing = mode === "rules";
   const setMode = (m: Mode) => { if ((m !== null) !== (mode !== null)) onEditing(m !== null); setModeState(m); };

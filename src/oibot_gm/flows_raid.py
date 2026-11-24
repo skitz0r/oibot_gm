@@ -538,14 +538,29 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
             await wiz.finish(si, line)
 
         held = rc.held_later(rs, ev, uid)  # a first raid's Can't is the whole night (design §5.62): every later seat goes too
-        desc = (f"Submitting marks you out of the night. {later_places_sentence(reg, held)}" if held
-                else "Submitting marks you out (and frees your seat if you're rostered).")
+        desc = out_form_hint(reg, held)
         form = Form(f"Out · {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", [
             Field("note", "Note for the officers (optional)", required=False, paragraph=True, max_length=300,
-                  description=desc[:100], placeholder="only officers see this"),
+                  description=desc, placeholder="only officers see this"),
         ], submitted)
         await wiz.open_form(i, form)
     await with_run(interaction, reg, title="Can't make it", then=body, prefer=mine)
+
+
+FORM_HINT_MAX = 100  # Discord's limit on a form field's description
+
+
+def out_form_hint(reg: Registry, held: list) -> str:
+    """The Can't make it form's hint: what Submit does, in whole sentences that fit Discord's 100 characters — never a
+    sentence cut mid-word. With later places it frees: the full form, else the places sentence alone (it names every
+    raid), else a short form that names none."""
+    if not held:
+        return "Submitting marks you out (and frees your seat if you're rostered)."
+    places = later_places_sentence(reg, held)
+    for text in (f"Submitting marks you out of the night. {places}", places, "Submitting marks you out of every raid of the night."):
+        if len(text) <= FORM_HINT_MAX:
+            return text
+    return "You're out of every raid tonight."
 
 
 # ---------------------------------------------------------------- suggestions: the card's Suggest…, /raid fill on an open run

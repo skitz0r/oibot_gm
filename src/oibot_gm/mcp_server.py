@@ -464,15 +464,57 @@ def ops_log(limit: int = 40, precedents_limit: int = 10, ledger_limit: int = 10,
 # ---------------------------------------------------------------- writes: runs
 
 @mcp.tool()
-def open_run(raid: str, when: str | None = None, schedule: str | None = None, follow: str | None = None, guild: Guild = None) -> str:
+def open_run(raid: str, when: str | None = None, schedule: str | None = None, follow: str | None = None, lineup: list[dict] | None = None,
+             guild: Guild = None) -> str:
     """Open a signup sheet now for `raid` (id or name): its next scheduled run, or a start `when` as 'YYYY-MM-DD
     HH:MM' in guild time — one of its upcoming runs at that exact time opens as that run, any other time is a one-off
     AD HOC run (first come, no regulars, no reminder, no confirmations, locks 2 h before). `schedule` (an id from
     get_raid's schedules) picks that schedule's next run, or with `when` its settings — a pickup template (ad hoc)
     always needs `when`. `follow` ('<raid id> x<N>', e.g. 'barrow_deeps x2'): a second raid the same night from the same
-    signup, starting when the first ends. Posts the sheet in the signup channel (and DMs members if the schedule says so)."""
+    signup, starting when the first ends. `lineup` ([{raid, rosters, starts?}], up to three): the raids after the first
+    one instead of `follow` — each starts when the one before it ends unless `starts` (minutes after the first raid's
+    start) says otherwise. Posts the sheet in the signup channel (and DMs members if the schedule says so)."""
     rid = get_raid(raid, guild)["id"]
-    return msg(api(guild).post(f"/api/raid/{rid}/open", {"when": when or "", "schedule": schedule or "", "follow": follow or ""}))
+    payload: dict[str, Any] = {"when": when or "", "schedule": schedule or "", "follow": follow or ""}
+    if lineup:
+        payload["lineup"] = lineup
+    return msg(api(guild).post(f"/api/raid/{rid}/open", payload))
+
+
+@mcp.tool()
+def reschedule_run(run: str, when: str | None = None, timing: dict | None = None, preview: bool = False, rev: str | None = None,
+                   guild: Guild = None) -> dict:
+    """Move a live run to another start and / or give it its own sheet timing, before it starts. Any raid of a run moves
+    the whole run (each later raid keeps its offset). `when` = the new start as 'YYYY-MM-DD HH:MM' in guild time (or an
+    aware ISO instant); a wall time the clocks skip or pass twice is refused. `timing` = {setting: value} from
+    nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours (hours) | nudge | autofill (on/off) —
+    an open run only; its schedule keeps its own. ALWAYS preview first (preview=true: `sentences` = the confirm, read
+    them to the person, and `rev`), then call again without preview and with that `rev`: a run someone changed
+    meanwhile is refused instead of overwritten. Answers stand; nobody is DMed; everyone who answered sees a notice on
+    their Me page; the sheet and open cards are edited in place."""
+    body: dict[str, Any] = {"preview": bool(preview)}
+    if when:
+        body["start"] = when
+    if timing:
+        body["timing"] = timing
+    if preview:
+        return api(guild).post(f"/api/run/{run}/reschedule", body)
+    if rev:
+        body["rev"] = rev
+    return {"message": msg(api(guild).post(f"/api/run/{run}/reschedule", body))}
+
+
+@mcp.tool()
+def edit_lineup(run: str, lineup: list[dict], preview: bool = False, rev: str | None = None, guild: Guild = None) -> dict:
+    """Change the raids of an OPEN run (before its lock): `lineup` = the WHOLE lineup, [{raid, rosters, starts?}], its
+    first raid first (the first raid never changes; up to four raids, each once). A later raid without `starts` begins
+    when the one before it ends. Read the run's current `lineup` from get_run first. ALWAYS preview first
+    (preview=true: `sentences` = the confirm, with what a removed raid takes with it — read them to the person — and
+    `rev`), then call again without preview and with that `rev`: a run someone changed meanwhile is refused. Its schedule keeps its own
+    lineup; nobody is DMed; when a raid's start changes, everyone who answered sees a notice on their Me page."""
+    if preview:
+        return api(guild).post(f"/api/run/{run}/lineup", {"lineup": lineup, "preview": True})
+    return {"message": msg(api(guild).post(f"/api/run/{run}/lineup", {"lineup": lineup, **({"rev": rev} if rev else {})}))}
 
 
 @mcp.tool()

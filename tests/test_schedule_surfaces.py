@@ -213,14 +213,18 @@ def test_naming_a_raid_creates_and_never_rewrites_an_existing_schedule(reg):
     first = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": RID, "kind": "weekly", "slots": "Sat 20:00"}))[0]
     configops.apply(reg, first, "Ana", False)
     again = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": RID, "kind": "weekly", "slots": "Sun 21:00"}))[0]
-    assert "Another schedule is already called alt." in configops.describe(reg, again)
-    with pytest.raises(RegistryError, match="Another schedule is already called alt"):
+    exists = "The schedule called alt already exists. To change it, name the schedule without a raid."  # its own raid named
+    assert exists in configops.describe(reg, again)
+    with pytest.raises(RegistryError, match=exists):
         configops.apply(reg, again, "Bo", False)
-    lineup = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"lineup": [{"raid": RID, "rosters": 1}]}))[0]
-    with pytest.raises(RegistryError, match="Another schedule is already called alt"):
+    lineup = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"lineup": [{"raid": RID, "rosters": 1}], "kind": "weekly"}))[0]
+    with pytest.raises(RegistryError, match=exists):  # a create (its kind named) never rewrites the schedule
         configops.apply(reg, lineup, "Bo", False)
-    with pytest.raises(RegistryError, match="Another schedule is already called alt"):
+    with pytest.raises(RegistryError, match=exists):
         reg.set_schedule("alt", {"slots": "Sun 21:00"}, "Bo", raid=RID)
+    other = configops.coalesce(configops.ops_from_fields(reg, "schedule", "alt", {"raid": "hyjal_summit_forever", "kind": "weekly", "slots": "Sun 21:00"}))[0]
+    with pytest.raises(RegistryError, match="Another schedule is already called alt"):  # another raid: a real clash
+        configops.apply(reg, other, "Bo", False)
     assert reg.schedule_entry("alt")["slots"] == ["Sat 20:00"]
     configops.apply(reg, ConfigOp(op="schedule_set", target="alt", field="slots", value="Sun 21:00"), "Bo", False)  # an edit names no raid
     assert reg.schedule_entry("alt")["slots"] == ["Sun 21:00"]

@@ -1485,7 +1485,9 @@ class LootMixin:
             return f"held after {ended}'s council ended"
         t = _utc(row.get("at"))
         if t is None or t < ev.start - timedelta(seconds=FEED_LEAD_S) or t > rc.run_close_at(reg, ev):
-            return f"outside {ev.key}'s run window"
+            from .raid_views import run_title
+
+            return f"outside {run_title(reg, ev)}'s run window"
         return None
 
     async def feed_replay(self, reg, ev=None) -> int:
