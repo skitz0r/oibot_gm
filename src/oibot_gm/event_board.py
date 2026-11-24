@@ -114,7 +114,6 @@ class BoardCache:
         self.waiting: dict[tuple[str, str], tuple] = {}  # events whose picture waits for a lock-side solve to end
         self.stops: dict[tuple[str, str], solver.Stop] = {}
         self.tasks: dict[tuple[str, str], asyncio.Task] = {}
-        self.drawn: dict[tuple[str, str], str] = {}  # what the last page view drew: "ready" (the picture) | "working" (overlaid)
         self.solves = 0  # solves started (tests, the Host's curiosity)
         self._pool: ThreadPoolExecutor | None = None
 
@@ -141,7 +140,8 @@ class BoardCache:
         waiting, self.waiting = self.waiting, {}
         loop = asyncio.get_running_loop()
         for key, (reg, rs) in waiting.items():
-            self.tasks.setdefault(key, loop.create_task(self._again(reg, rs, key[1])))
+            if key not in self.tasks:  # a task already working on the event re-reads it itself
+                self.tasks[key] = loop.create_task(self._again(reg, rs, key[1]))
 
     async def _again(self, reg: Registry, rs: "rc.RaidStore", fkey: str) -> None:
         key = (reg.key, fkey)
@@ -188,15 +188,12 @@ class BoardCache:
         have = self.entries.get(key)
         if have is not None and have.fp == fp:
             self.entries.move_to_end(key)
-            self.drawn[key] = "ready"
             return "ready", have.previews
         if not needs_solve(parts):  # nobody joined: empty groups, no solve, nothing to wait for
             previews = await asyncio.to_thread(rc.event_board_preview, reg, view, first, parts)  # board_rosters reads attendance
             self._keep(key, fp, previews)
-            self.drawn[key] = "ready"
             return "ready", previews
         self.start(reg, rs, first.key, fp, parts, view)
-        self.drawn[key] = "working"
         return "working", (have.previews if have is not None else None)
 
     def start(self, reg: Registry, rs: "rc.RaidStore", fkey: str, fp: str, parts: list["rc.RaidEvent"], view=None) -> None:
@@ -255,7 +252,7 @@ class BoardCache:
 
     def shown_layout(self, reg: Registry, ev: "rc.RaidEvent") -> list[list[str]] | None:
         """The flat groups (padded to whole rosters) of the picture the server holds for raid `ev` — the latest one,
-        current or being placed again (then with the officers' moves on top, rc.overlay_board, as the page drew it):
+        current or being placed again, always with the officers' current moves on top (rc.overlay_board, as the page drew it):
         what a drag is applied to. None when there is none (the page drew the officers' layout) or that raid's solve
         failed. `ev` = the live raid."""
         key = (reg.key, rc.event_id(ev) or ev.key)
@@ -263,10 +260,17 @@ class BoardCache:
         rosters = e.previews.get(ev.key) if e is not None else None
         if not isinstance(rosters, list):
             return None
-        if self.drawn.get(key) == "working":
-            rosters = rc.overlay_board(reg, ev, rosters)
         k = rc.groups_per_roster(reg, rc.run_size(reg, ev))
-        return [list(g) for r in rosters for g in (list(r.groups) + [[] for _ in range(k - len(r.groups))])]
+
+        def flat(rr: list) -> list[list[str]]:
+            return [list(g) for r in rr for g in (list(r.groups) + [[] for _ in range(k - len(r.groups))])]
+
+        raw, over = flat(rosters), flat(rc.overlay_board(reg, ev, rosters))
+        # always overlaid (the picture may predate the last drag); on a current picture the overlay moves nobody — the
+        # officers' placements are hard pins there — so the picture is returned in its own order, as the page drew it
+        if len(raw) == len(over) and all(set(a) == set(b) for a, b in zip(raw, over)):
+            return raw
+        return over
 
 
 def cache_of(bot) -> BoardCache:

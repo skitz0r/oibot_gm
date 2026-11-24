@@ -683,3 +683,47 @@ def test_the_fingerprint_ignores_what_the_solve_never_reads(reg, rs):
     reg.save_config("a card", notify=False)
     rs.save(ev, "a card")
     assert _fp(reg, rs, ev) == a, "a card id is no input of the solve"
+
+
+def test_two_drags_in_a_row_without_a_reload_read_the_first(reg, rs, monkeypatch, web_bot):
+    """The page drew a current picture, then two drags land before any reload (the new picture never comes): the second
+    is read on the picture WITH the first on top — never on the stale one, which would undo it."""
+    monkeypatch.setattr(rc, "_solve_run", in_order())
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    bot = web_bot.bot
+    cache = eb.cache_of(bot)
+    settle(cache, reg, rs, ev)
+    assert web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]["board_state"] == "ready"
+    monkeypatch.setattr(eb.BoardCache, "start", lambda self, *a, **k: None)  # no reload, no new picture
+    asyncio.run(bot.board_move(reg, rs, ev, n[0], None, "Jon", by_id=OWNER, shown=True))  # group 1's first to Not placed
+    asyncio.run(bot.board_move(reg, rs, ev, n[5], (0, 0), "Jon", by_id=OWNER, shown=True))  # then a drop at group 1's top
+    assert ev.pins.get(str(ms[0].discord_id)) == "out" and n[0] not in {x for g in ev.layout for x in g}, \
+        "the first drag stands: the second never swapped with who the stale picture showed there"
+    assert n[5] in ev.layout[0]
+
+
+def test_a_board_bug_never_reaches_the_solve(reg, rs, monkeypatch, caplog):
+    bot = NightBot(reg, rs)
+    ev = one_off(reg, rs, lineup=[])
+
+    def boom(self):
+        raise RuntimeError("board bug")
+
+    async def solve_twice():
+        out = []
+        async with bot.solving(reg, ev.key):
+            out.append("solved")
+        with pytest.raises(ValueError):  # the wrapped block's own failure stays its own
+            async with bot.solving(reg, ev.key):
+                raise ValueError("the lock's")
+        return out
+
+    monkeypatch.setattr(eb.BoardCache, "pause", boom)
+    assert asyncio.run(solve_twice()) == ["solved"], "pause raising: the solve still runs and returns"
+    monkeypatch.undo()
+    monkeypatch.setattr(eb.BoardCache, "resume", boom)
+    assert asyncio.run(solve_twice()) == ["solved"], "resume raising: the result is unaffected"
+    assert len([r for r in caplog.records if "board cache" in r.getMessage()]) == 4

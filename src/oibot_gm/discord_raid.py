@@ -872,10 +872,16 @@ class RaidMixin:
         boards = cache_of(self)  # the Events board's pictures give way: a running one is abandoned, none starts meanwhile
         try:
             async with lock:
-                boards.pause()
+                try:
+                    boards.pause()
+                except Exception:  # noqa: BLE001 — a board bug never touches the lock / fill it wraps
+                    log.exception("board cache pause failed (%s %s)", reg.key, key)
                 yield
         finally:
-            boards.resume()  # starts the pictures that waited, once no solve holds a run
+            try:
+                boards.resume()  # starts the pictures that waited, once no solve holds a run
+            except Exception:  # noqa: BLE001 — never reaches the lock / fill it wraps
+                log.exception("board cache resume failed (%s %s)", reg.key, key)
 
     async def lock_preview(self, reg, rs, ev, *, by: str, by_id: int | None = None) -> list:
         """The roster(s) the lock would build NOW (rc.split_preview with the run's strategy, honouring the board and the
