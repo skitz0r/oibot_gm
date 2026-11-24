@@ -184,7 +184,7 @@ class TestCompWizard(Wizard):
             items.append(self.select("Which raid", wizard_opts.raids(self.reg, current=rid), self.raid_picked))
         items += [self.button("Try a comp", self.go, discord.ButtonStyle.success, disabled=not rid), self.button("Cancel", self.cancel)]
         await self.show(interaction, f"**{name}** — all {n} test members join a sandbox run two weeks out. It is never posted in Discord; "
-                                     "Propose roster on its board builds the best comp from them.", *items)
+                                     "Its event page draws the board as the lock would place them: the best comp from them.", *items)
 
     async def raid_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         self.draft["raid"] = values[0]
@@ -206,7 +206,7 @@ class TestCompWizard(Wizard):
         from .raid_views import run_title
 
         url = board_url(self.reg, ev)
-        where = f"Open its board: {url}" if url else "Open it on the site: Rosters › the raid › Test."
+        where = f"Open its event page: {url}" if url else "Open it on the site: Members › Test bench › Test runs."
         await self.finish(interaction, f"🧪 Comp sandbox {run_title(self.reg, ev)}: {len(self.reg.test_members())} test members joined. {where}")
 
 

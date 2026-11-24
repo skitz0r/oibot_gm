@@ -918,9 +918,9 @@ def create_app(bot) -> FastAPI:
             return HTMLResponse(landing_page(guild_infos()))
         return RedirectResponse("/app/me?" + urlencode({"g": g}) if g else "/app/me", status_code=302)
 
-    # old short addresses; the Rosters page is the Events page now (phase 4) — /app/rosters itself is the SPA's to carry
-    # on (RostersRedirect keeps a #run-<key> link's run)
-    for _old, _new in (("/admin", "/app/members"), ("/admin/build", "/app/events"), ("/bank", "/app/members"), ("/rosters", "/app/events"), ("/raids", "/app/raids"), ("/config", "/app/config"), ("/ops", "/app/ops")):
+    # old short addresses; the Rosters page is the Events page now (phase 4): /rosters goes to /app/rosters, where the
+    # SPA's RostersRedirect reads the #run-<key> the browser keeps across this redirect and opens that run's event
+    for _old, _new in (("/admin", "/app/members"), ("/admin/build", "/app/rosters"), ("/bank", "/app/members"), ("/rosters", "/app/rosters"), ("/raids", "/app/raids"), ("/config", "/app/config"), ("/ops", "/app/ops")):
         app.add_api_route(_old, (lambda new: (lambda: RedirectResponse(new, status_code=301)))(_new), methods=["GET"])
 
     from .api import install_api

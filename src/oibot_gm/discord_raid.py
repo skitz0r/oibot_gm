@@ -1254,7 +1254,7 @@ class RaidMixin:
     async def undo_moves(self, reg, rs, ev, by_id: int, by: str, *, rev: str | None = None, via: str = "web") -> str:
         """Undo my moves (the Events board, before the lock): exactly what the officer `by_id`'s drags did and still
         stands is reversed — the names they placed leave the officers' layout, and each pin their drag changed goes back
-        to what it was (rc.own_pins: only while the pin is still as the drag left it; a pin set on the Rosters page or in
+        to what it was (rc.own_pins: only while the pin is still as the drag left it; a pin set on a run card's board or in
         plain text is never touched). Everyone else's moves stay, and the lock places those people again. `rev` =
         rc.undo_rev the officer saw (the board and their moves): a changed one raises rc.BoardChanged, nothing written."""
         async with self.board_lock(reg, ev.key):

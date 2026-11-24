@@ -17,7 +17,7 @@ export const HOUR_HINT: Record<string, string> = {
 /** A step of a run's week once it has happened (the run card's strip); the rest read HOUR_WORDS. */
 export const DONE_WORDS: Record<string, string> = { signup_lead_hours: "sheet opened", nudge_hours_before: "reminder", lock_hours_before: "locked", confirm_hours_before: "confirm by" };
 
-/** One run's week as a strip (the Rosters card, design §5.56): the steps it takes in time order, evenly spaced, done in
+/** One run's week as a strip (a run card on the Test bench, design §5.56): the steps it takes in time order, evenly spaced, done in
  *  teal and the rest grey, the raid a square at the end, and a "now" mark between the steps it falls between. Every
  *  date comes in words from the server (ev_json `week`); the browser only places the mark. `still` = a week that hasn't
  *  started (the test bench's tempo, /api/test `tempos[].week`): the mark stays on the first step, nothing drawn as done. */

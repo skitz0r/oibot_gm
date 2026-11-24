@@ -2712,7 +2712,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         if kind == "comp":
             if arg not in reg.profile.raids:
                 raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
-            return f"test bench: a {reg.raid_def(arg).get('name', arg)} comp sandbox two weeks out with all {n} test members joined (not posted); Propose roster on its board builds the comp"
+            return f"test bench: a {reg.raid_def(arg).get('name', arg)} comp sandbox two weeks out with all {n} test members joined (not posted); its event page draws the board as the lock would place them"
         if kind == "run":
             from .presets import TEMPOS
 
@@ -3546,7 +3546,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             if arg not in reg.profile.raids:
                 raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
             ev = await bot.test_comp(reg, rs, arg, by, by_id, via=via)
-            return f"comp sandbox {run_words(reg, ev)}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp"
+            return f"comp sandbox {run_words(reg, ev)}: {len(reg.test_members())} test members joined; its event page draws the board as the lock would place them"
         from .presets import TEMPOS
 
         raid, tempo, dm = _test_run_args(reg, arg)  # the /gm test run recipe: a real sheet with minute-level cadence, the pool = puppets + the tester
@@ -4393,7 +4393,7 @@ def ops_from_changes(reg: Registry, changes, raw_ops=None, *, channels: list[dic
 # ---- who may: by privilege (the chat policy governs chat, not a UI table)
 
 GROUP_WHERE = {
-    "members": "on the site's Members page or with /roster", "runs": "on the site's Rosters page or with /raid",
+    "members": "on the site's Members page or with /roster", "runs": "on the site's Events page or with /raid",
     "comp": "on the site's Raids and Policy pages or with /gm config raid, /roster comp and /gm policy", "raids": "on the site's Auras page or with /gm config aura",
     "setup": "on the site's Config page or with /gm config", "test": "on the Members page's Test bench or with /gm test",
     "loot": "on the site's Loot page or in the council thread",

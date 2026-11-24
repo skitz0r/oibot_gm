@@ -54,7 +54,7 @@ export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?
  *  and Not placed / Not rostered — the board's tap-and-keyboard path (a drag needs a mouse; design §5.56 phase 3).
  *  `onAnswer` (the Events page): Join / Join as… / Bench / No thanks open the SERVER's answer box (useAnswerBox, the member
  *  fixed) instead of the page-made confirm below. Callouts, pins and the confirm / fill answers keep useRecord's confirm
- *  for now — deferred to the Discord-confirms phase (phase 5), as are the Rosters page and the Test bench, which pass no
+ *  for now — deferred to the Discord-confirms phase (phase 5), as is the Test bench, which passes no
  *  `onAnswer`. */
 export function MemberMenu({ run, uid, name, onDone, moves, onAnswer }: {
   run: string; uid: string | null | undefined; name: string; onDone: () => Promise<void> | void; moves?: MoveTarget[];

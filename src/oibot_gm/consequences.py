@@ -769,6 +769,51 @@ def regular_remove_box(reg: Registry, m, key: str, *, rs=None) -> dict:
     return box(f"Take {m.display_name} off the regulars?", regular_remove(reg, m, key, rs=rs), "Remove")
 
 
+# Split strategy (the Events page's More › Split strategy…): what each strategy does to a raid's rosters, said of that
+# raid, and the box's other words. The names are the Discord wizards' (flows_config.SPLIT_WORDS).
+STRATEGY_DOES = {"balanced": "The rosters of {raid} are made equally strong.",
+                 "first": "Roster 1 of {raid} gets the best players, and the next roster the rest.",
+                 "rotation": "Whoever sat out or played the weaker roster last time moves up on {raid}."}
+STRATEGY_PICK = "Pick how the rosters of {raid} are split."
+STRATEGY_SAME = "That is already how {raid} is split."
+STRATEGY_LOCKED = "The roster is locked, so its split can't change."
+STRATEGY_AFTER = ["The board is placed again this way, and the lock uses it.", "You can change it until the lock."]
+
+
+def strategy_name(strategy: str) -> str:
+    from .flows_config import SPLIT_WORDS
+
+    return SPLIT_WORDS.get(strategy, (strategy,))[0]
+
+
+def strategy_choices() -> list[dict]:
+    """[{id, label, words}]: the split strategies in the Discord wizards' words (flows_config.SPLIT_WORDS)."""
+    from .flows_config import SPLIT_WORDS
+    from .registry import SPLIT_POLICIES
+
+    return [{"id": s, "label": SPLIT_WORDS[s][0], "words": SPLIT_WORDS[s][1]} for s in SPLIT_POLICIES]
+
+
+def strategy_refusal(reg: Registry, ev: rc.RaidEvent) -> str | None:
+    """Why a raid's split can't change: once its roster is locked (or the event is over), STRATEGY_LOCKED."""
+    return STRATEGY_LOCKED if ev.state != "open" else None
+
+
+def strategy_box(reg: Registry, ev: rc.RaidEvent, strategy: str | None) -> dict:
+    """More › Split strategy… for one raid of an event: no pick yet (or the strategy it already has) → the pick box,
+    Back only; locked → the refusal; else 'Split {raid} by {name}?' with what the strategy does, that the board is
+    placed again and the lock uses it, and that it can change until the lock. Its fp carries the run's rev."""
+    raid = reg.raid_def(ev.instance).get("name", ev.instance)
+    title = f"Split {raid} by {strategy_name(strategy)}?" if strategy in STRATEGY_DOES else f"Split {raid}?"
+    if (why := strategy_refusal(reg, ev)):
+        return refusal_box(title, why)
+    if strategy not in STRATEGY_DOES:
+        return box(title, [STRATEGY_PICK.format(raid=raid)], None)
+    if strategy == rc.run_strategy(reg, ev):
+        return box(title, [STRATEGY_SAME.format(raid=raid)], None)
+    return box(title, [STRATEGY_DOES[strategy].format(raid=raid), *STRATEGY_AFTER], "Use this split", rev=rc.board_rev(reg, ev))
+
+
 def undo_box(n: int, rev: str = "") -> dict:
     """Box 9: Undo my moves (`rev`: the board's fingerprint, rc.board_rev)."""
     head = "Your one move on this board is dropped." if n == 1 else f"Your {n} moves on this board are dropped."

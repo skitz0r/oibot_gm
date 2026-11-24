@@ -863,6 +863,10 @@ def box_cases(reg, rs, runs, ms, dump):
     add("answer_box", "bench after the lock", cq.answer_box(reg, lk, ms[1], "bench", by_id=OFFICER_ID))
     for n in (1, 4):
         add("undo_box", f"{n} moves", cq.undo_box(n))
+    add("strategy_box", "nothing picked yet", cq.strategy_box(reg, quiet, None))
+    for st in ("balanced", "first", "rotation"):
+        add("strategy_box", f"to {st}", cq.strategy_box(reg, quiet, st))
+    add("strategy_box", "locked", cq.strategy_box(reg, lk, "rotation"))
     start = reg.now_local() + timedelta(days=6)
     for case, opens, kw in (("three days early", reg.now_local() + timedelta(days=3, minutes=5), {}),
                             ("one day early", reg.now_local() + timedelta(days=1, minutes=5), {}),

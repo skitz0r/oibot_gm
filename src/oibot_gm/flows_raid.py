@@ -660,7 +660,7 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
         from .raid_buttons import sent_words
 
         await wiz.finish(si, sent_words(sent) + (" A yes changes their signup; the lock still builds the roster." if plan.phase == "prelock" and sent else "")
-                         + rc.held_back_words(sent_plan) + (" The rest of the plan is on the site's Rosters page (Fill)." if limit else ""))
+                         + rc.held_back_words(sent_plan) + (" The rest of the plan is on the site's Events page (More › Fill seats…)." if limit else ""))
 
     try:
         n_send = len(rc.send_batch(plan, picks, limit)[0]) if chosen else 0
@@ -712,11 +712,11 @@ def fit_partial(lines: list[str], plan: rc.Plan, picks: dict, limit: int | None 
         body = [f"{n + 1}. {ln}" for n, ln in enumerate(rc.batch_lines(asks))]
         rest = n_seats - k
         text = "\n".join(lines + ["", f"**Send DMs exactly these {len(asks)}:**"] + body
-                         + ([f"-# {rest} more seat{'s' if rest != 1 else ''} wait — the site's Rosters page (Fill) lists them all"] if rest else [])
+                         + ([f"-# {rest} more seat{'s' if rest != 1 else ''} wait — the site's Events page (More › Fill seats…) lists them all"] if rest else [])
                          + ([f"-# {held} more wait — at most {rc.FILL_MAX_OPEN} asks out at once"] if held else []))
         if len(text) <= limit:
             return k, text
-    return None, "\n".join(lines) + "\n⚠️ Too many asks to show here, so Send stays off — send them from the site's Rosters page (Fill)."
+    return None, "\n".join(lines) + "\n⚠️ Too many asks to show here, so Send stays off — send them from the site's Events page (More › Fill seats…)."
 
 
 SUGGEST_TEXT_MAX = 1900  # what a wizard screen holds (Discord's 2000 less room for the wizard's own lines)

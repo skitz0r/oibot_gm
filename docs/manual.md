@@ -57,8 +57,10 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   among the first asked.
 - **The board** — a run's groups on the Events page, the one name for them (never "builder" or "bank"): before the lock
   it is the layout the lock will use (officers drag names into groups; the lock places everyone else), after the lock it
-  *is* the roster. Officers shape it with **Place the rest** (the bot fills the empty places around their own, nothing
-  sent), **Propose roster / splits…** and **Clear**. Its ⓘ legend says what the marks mean.
+  *is* the roster. On the Events page it is drawn as the lock would place everyone now; officers shape it by dragging
+  names (or a name's **⋮ › Move to…**), take their own moves back with **Undo my moves**, and pick how a split is made
+  with **More › Split strategy…**. A test run's card on the Test bench keeps the older tools — **Place the rest**,
+  **Propose roster / splits…**, **Clear** and its ⓘ legend; plain text and MCP keep them too.
 - **Not placed / Not rostered** — the board's list of joiners who hold no place: *Not placed* before the lock (still
   joined — the lock seats them, or leaves them out), *Not rostered* after it (joined, but not on the roster; dragging one
   into a group asks them to confirm). A pin icon on a name is an officer's pin: *pinned* (the lock keeps them where they
@@ -1020,8 +1022,14 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    (*open for signup*, *locked — the roster stands*), **Reschedule**, **Edit lineup** and **Lock now** (open only)
    and **More** (below). **Details** has
    the lineup, where it comes from (*One-off, no schedule* or the schedule, a link), the priority, the confirmation,
-   when the sheet opened, when it locks and the signup sheet (*Open in Discord*); a locked event adds the
-   confirmations and the open seats. **Signups** has four counts — *Joined*, *Bench*, *No thanks*, *No answer yet*
+   when the sheet opened, the *Reminder* (before the lock), when it locks, *Confirm by* (when the rostered are asked to
+   confirm) and the signup sheet (*Open in Discord*), with *In Discord* beside it: the officer card, the updates thread
+   and the loot thread, those that exist. A locked event adds the confirmations (*Not sent yet. The bot sends them
+   within a minute.* while they go out), each raid's open seats (*Open seats · Barrow Deeps* on an evening of several)
+   and *Reminded* (when, and by whom). Any time it says *Automatic asks: Paused by Jon* for a raid whose asks are
+   paused, *Also on another event* (who joined another event that night) and *Away that day* (each with the reason
+   recorded). The list says once which time zone every time on the page is in (*Times in Berlin.*), and a test run's
+   page carries a *test run* chip beside its state. **Signups** has four counts — *Joined*, *Bench*, *No thanks*, *No answer yet*
    — and each count unfolds its names, one per line, each with its spec icon and the row **⋮** (the same on-behalf
    list the Test bench's cards have). **Answer for someone** opens the bot's box with *Member* (someone with no answer yet),
    *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays, *Tavi, Holy*); every pick
@@ -1058,9 +1066,13 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    ask still out with **Withdraw**, callouts with their notes) and **End the run** once locked. What can't be pressed
    yet is greyed with the bot's reason under it. Remind and End show the bot's own sentence first; on a finished event
    **More** has **Reopen** for an end made by mistake, within the hour. A scheduled lock that failed shows its
-   sentence in red under the header. Not here, by design: the split philosophies (**Propose splits**, a raid's split
-   policy), **Place the rest** and **Clear** — the board is already drawn as the lock would place everyone; plain text,
-   MCP (`propose_split`, `set_strategy`, `set_layout`) and a test run's card on the Test bench keep them.
+   sentence in red under the header. **Split strategy…** (before the lock, per raid) picks how the raid's rosters are
+   split — *Balanced*, *Raid one first* or *Rotation*; the bot's box says what the pick does, that the board is placed
+   again this way and that the lock uses it (*Use this split*), and the board then redraws by it. Once locked it says
+   *The roster is locked, so its split can't change.* Not here, by design: another layout (*Propose roster* /
+   *another split like this*), **Place the rest** and **Clear** of everyone's moves — the board is already drawn as the
+   lock would place everyone; plain text, MCP (`propose_split`, `set_layout`) and a test run's card on the Test bench
+   keep them.
    **Edit lineup** (until the roster locks) opens the lineup builder on the event, `/events/<event>/lineup`: its first
    raid is fixed, every later raid has **Move earlier** / **Move later** / **Remove**, the palette adds a raid, and each
    step's **Starts** and **Rosters** change as on New event — a raid that stays keeps its start unless the change moves
@@ -1182,7 +1194,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    yourself. After lock the leftovers are simply the bench — the first people Fill seats… asks when a seat frees up; each
    gets one notice on the Me page (*"You weren't rostered (20 seats, 23 joined). You're in line for a freed seat"*),
    never a DM until a seat is actually offered.
-   **Cancel run** is one screen everywhere: first the sentences from the event as it stands — how many of its raids
+   **Cancel** shows the same sentences everywhere: first the sentences from the event as it stands — how many of its raids
    go, who sees it and where (*"Both raids of this event are cancelled. The 18 who joined see it on the sheet, and
    nobody gets a DM. A cancelled event cannot be reopened."*; after the lock *"The 10 rostered see it on their cards…"*)
    — then an optional **reason** (officers only: it goes to the
@@ -1190,9 +1202,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    signup channel — "🛑 Barrow Deeps … is cancelled. Rostered seats are released — nothing to do." — on by default, or
    no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
    the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel run** and `/raid cancel` show
-   the sentence with *Cancel the run…* (the box with the reason and the channel choice) and *Back*; the site's dialog
-   has the same three parts; plain text takes the reason and "…, no announcement" for no channel line, MCP takes
-   `reason` and `notify`. A cancel waits for a lock that is being built and then cancels the locked run — the lock
+   the sentence with *Cancel the run…* (the box with the reason and the channel choice) and *Back*; a test run's card
+   on the Test bench has the same three parts; plain text takes the reason and "…, no announcement" for no channel
+   line, MCP takes `reason` and `notify`. The Events page's **Cancel event** is the box alone: no reason and no channel
+   line (use Discord, plain text or MCP for either). A cancel waits for a lock that is being built and then cancels the locked run — the lock
    stops asking people the moment the run is cancelled, and so do fill asks, suggestions and a Remind that are going
    out: nobody after the cancel is DMed, and a card that arrived just as it happened is edited to *Cancelled* at once.
    Clearing the test bench cancels its test runs without a line in the signup channel. A cancelled run is final: it
@@ -1217,7 +1230,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    card marks them *(site)*. **Preview lock**: the lock's confirm screen (the card's *Lock now* and `/raid lock`) has a
    *Preview lock* button that draws the roster(s) the lock would build right now — every group, one member per line
    with the spec icon, then the leftovers (the first 15) — without saving anything; *Lock now* or *Back* from there.
-   The site's run card has the same **Preview lock** button beside **Lock now**. If the bot stops half way through the confirmation DMs (a restart, a
+   On the Events page the board itself is the preview (drawn as the lock would place everyone now); a test run's
+   card on the Test bench has the same **Preview lock** button beside **Lock now**. If the bot stops half way through the confirmation DMs (a restart, a
    Discord outage), the lock card says *confirmations not yet sent* and within a minute the bot asks exactly the
    rostered who weren't asked — nobody twice. If a lock fails (the bot couldn't find a roster in time), the sheet's footer says
    *Lock failed <time> — the sheet stays open, retrying* and so does the site. With confirmations off (the ad hoc default) nobody is asked and
@@ -2316,8 +2330,9 @@ is a callout. Puppets answer test runs only — naming a real run is refused on 
 
 **Try a comp.** `/gm test comp` (pick the raid, then **Try a comp**) or **Try a comp** on the site opens a *comp
 sandbox*: a test run two weeks out with every puppet joined, never posted in Discord; Discord answers with a link to
-its board and the site takes you there, where **Propose roster** builds the best comp from that mix (Leftovers and
-"what a second run would need" included). Change the mix and try again; the old sandbox goes with the next clear.
+its event page and the site takes you there, where the board is drawn as the lock would place them — the best comp
+from that mix (its card under the Test bench's *Test runs* keeps **Propose roster**, with Leftovers and "what a second
+run would need"). Change the mix and try again; the old sandbox goes with the next clear.
 
 **Clearing.** `/gm test clear` shows what it does — "Cancels 1 test run, deletes 12 puppets, analytics cards
 resume." — then *Clear the test bench* / *Back*; the site's **Clear the test bench** asks with the same words.

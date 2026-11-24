@@ -291,7 +291,7 @@ def test_the_event_confirms_print_only_the_servers_sentence():
         assert not re.search(r"consequences?\??\.\w+\s*\|\|\s*[`\"']", code), f"{name}: a browser sentence standing in for the server's"
         assert not re.search(r"sentences:\s*\[\s*[`\"']", code), f"{name}: a box sentence written in the browser"
     assert "e.consequences?.remind" in files["SheetCard"] and "message: preview," in files["SheetCard"]
-    assert "s.consequences?.remind" in files["EventMore"] and "boxOf(`End ${name}?`, preview, L.end, true)" in files["EventMore"]
+    assert "s.consequences?.remind" in files["EventMore"] and "boxOf(`End ${s.run_title}?`, preview, L.end, true)" in files["EventMore"]
     assert "useConfirm(" not in files["EventMore"], "the event page's box, never the older modal"
     assert "Reopen works for an hour" not in files["SheetCard"] + files["EventMore"] and "gets a confirmation DM" not in files["BoardView"]
     # the regulars (phase 4, Task 11): each row's and each leftover's Remove prints its server box and sends the record's rev
@@ -1284,7 +1284,7 @@ def test_edit_lineup_prints_the_servers_box_and_guards_its_draft():
     assert "x.lineup.map((s) => `${s.raid}:${s.starts}`).join() === lineup.map((e) => `${e.raid}:${e.starts}`).join()" in page
     assert "box: first.box" in page and "seen: fp" in page and "refresh:" in page
     assert "edit.refusal_box" in page and "guardNav(back)" in page
-    assert "navigate(`/events/${evKey}`" in page or "navigate(back" in page
+    assert "navigate(`/events/${encodeURIComponent(evKey)}`" in page
     app = _code_only((SRC / "App.tsx").read_text())
     assert 'mode="edit-lineup"' in app
     events = _code_only((SRC / "pages" / "Events.tsx").read_text())
@@ -1309,3 +1309,46 @@ def test_every_link_to_a_run_lands_on_its_event():
             hits.append(f.name)
     assert not hits, hits
     assert '{ to: "/rosters"' not in app, "no rail entry points at a page that is gone"
+
+
+GONE = re.compile(r"Rosters (page|tab|card|strip)|Rosters ›|on Rosters\b|Propose roster", re.I)
+# a line that tells the history (the page BECAME the Events page) may name it
+HISTORY = re.compile(r"became the Events page|is the Events page now|Rosters page became|replaced the Rosters page|was the Rosters")
+
+
+def test_nothing_points_a_reader_at_a_page_or_control_that_is_gone():
+    """Fix round 1: the Rosters page, its tabs and the event board's Propose roster are gone, so no word a person reads —
+    a page, a tooltip, a toast, a Discord reply, a tool docstring a model reads — and no comment points at them. The
+    only Propose roster left is the Test bench card's board (BoardView / SplitModal) and the manual's account of it."""
+    hits = []
+    for f in sorted(SRC.rglob("*.ts*")):
+        if f.name in ("BoardView.tsx", "SplitModal.tsx"):
+            continue
+        for n, line in enumerate(f.read_text().splitlines(), 1):
+            if GONE.search(line) and not HISTORY.search(line):
+                hits.append(f"{f.relative_to(SRC)}:{n}: {line.strip()[:120]}")
+    py = SRC.parents[1] / "src" / "oibot_gm"
+    for f in sorted(py.rglob("*.py")):
+        for n, line in enumerate(f.read_text().splitlines(), 1):
+            if GONE.search(line) and not HISTORY.search(line):
+                hits.append(f"{f.relative_to(py)}:{n}: {line.strip()[:120]}")
+    assert not hits, "\n".join(hits)
+
+
+def test_the_event_page_shows_its_raid_night_facts_and_split_strategy():
+    """Fix round 1: the restored raid-night facts are the server's Details (the page adds none), the time zone line and
+    the test run chip are the server's words; More's Split strategy… asks through the server's box with the choices it
+    sends and presses with the box's fp; Withdraw spins on its own key; Remind and End name the run as the server does;
+    Edit lineup's draft counts against the event's own lineup and lands on the encoded key."""
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert "intro={list.tz_words}" in page and "tag={ev.test_chip}" in page
+    assert "tag={ev.test_chip}" in _code_only((SRC / "components" / "events" / "HistoryView.tsx").read_text())
+    more = _code_only((SRC / "components" / "events" / "EventMore.tsx").read_text())
+    assert "/strategy`" in more and "preview: true" in more and "seen: fp" in more and "ev.strategies" in more and "replaceSplit" in more
+    assert 's.state === "open" && p.strategy' in more and "Split strategy…" in more
+    assert "busy={busy}" in more and 'busy ? "withdraw" : null' not in more and "post(path, payload, k)" in more
+    assert "${L.remind} for ${s.run_title}?" in more and "End ${s.run_title}?" in more and " on ${name}?" not in more
+    lineup = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    edit = lineup[lineup.index("function EditLineup"):]
+    assert "navigate(`/events/${encodeURIComponent(evKey)}`" in edit and "setChanges" not in edit
+    assert "JSON.stringify(lineup[k] ?? null) !== JSON.stringify(seed[k] ?? null)" in edit

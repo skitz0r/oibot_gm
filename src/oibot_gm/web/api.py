@@ -168,7 +168,7 @@ def application_json(reg, a) -> dict:
 
 # §2.9: an officer write while Discord can't confirm the roles (the last-known "yes" of the past 6 h keeps reads going)
 STALE_OFFICER = "Discord can't confirm your officer role right now — reading works, changes wait. Try again in a moment."
-HISTORY_PAGE = 8  # past runs per raid on the Rosters page; GET /api/runs pages the rest
+HISTORY_PAGE = 8  # past runs per raid in /api/rosters (the Test bench's cards); GET /api/runs pages the rest
 from .api_ops import PREVIEW_TTL  # noqa: E402,F401 — the preview tokens live in api_ops (the structured ops path)
 
 
@@ -815,7 +815,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def admin_regulars(request: Request):
         """Officers add or remove a regular of a recurring schedule: {schedule (its id; none = the raid's only recurring
         one), raid (only without `schedule`), member | uid, character (default their main), on (true = add, false =
-        remove), rev?, preview?, seen?}. The one path for the Schedules and Rosters pages, Discord's /roster add|remove
+        remove), rev?, preview?, seen?}. The one path for the Schedules page, Discord's /roster add|remove
         wizards (same verbs), plain text's op=regular and MCP set_regular. `rev` = the member record's characters_rev the
         page drew (the regulars' rows carry it): when their record changed since, nothing is written and the answer is
         409 (the page reloads and asks again). A removal's box (consequences.regular_remove_box, Task 1 #18): `preview` →
@@ -1013,6 +1013,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "part": rc.part_no(ev), "event": rc.event_id(ev), "occurrence": ev.occurrence,
                 "lineup": rc.run_lineup(reg, rs, ev), "start_local": reg.local(ev.start, "%Y-%m-%dT%H:%M"),
                 "cancel_tells_channel": rc.cancel_tells_channel(rs, ev),
+                "run_title": dr.run_title(reg, ev),  # the run named once, as Discord names it (a confirm's title)
                 "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state)}  # the state in words (meta.run_states), History and the drawer print it
         if not full:
             return base
@@ -1060,7 +1061,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 **night_json(reg, rs, ev, t, plan)}
 
     def week_json(reg, ev, t, soft, hard, confirm) -> list[dict]:
-        """The run's week as the Rosters card's strip (design §5.56): the steps it takes, in time order — sheet opens
+        """The run's week as a run card's strip (the Test bench's SheetCard, design §5.56): the steps it takes, in time order — sheet opens
         (when it did), reminder (when the run takes one), locks (when it did, once locked), confirm by (when the rostered
         are asked) and the raid — each {step (RaidCard.tsx's HOUR_WORDS key, or "raid"), when (words), at (ISO, for the
         strip's spacing and its now mark), done}. Nothing here is a sentence; the page names the steps."""
@@ -1189,7 +1190,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "past_total": len(closed),
                         "upcoming": upcoming, "signup_channel": bool(reg.config.signup_channel_id)})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
-        # who can be made a regular (the Rosters page's member and character pickers): real members with active characters
+        # who can be made a regular (the Schedules page's regulars pickers): real members with active characters
         people = [{"uid": str(m.discord_id), "display_name": m.display_name,
                    "characters": [{"label": c.label, "cls": c.cls, "spec": c.spec, "role": reg.profile.spec(c.cls, c.spec).role, "is_main": c.is_main}
                                   for c in sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower()))]}
@@ -1203,7 +1204,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.get("/api/runs")
     async def runs_history(request: Request, raid: str | None = None, offset: int = 0, limit: int = 20):
-        """Past runs (done / cancelled), newest first, paged beyond the Rosters page's first HISTORY_PAGE (officers):
+        """Past runs (done / cancelled), newest first, paged beyond /api/rosters' first HISTORY_PAGE (officers):
         `raid` = one raid id (default every raid), `offset` / `limit` (≤ 50). Rows are ev_json's short form; a row opens
         the read-only run drawer through GET /api/run/{key}."""
         v = await who(request, officer=True)
@@ -1463,7 +1464,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from ..loot import session as loot_session_mod
 
     def test_event(guild_key: str, run_key: str) -> None:
-        publish(f"test:{run_key}", guild_key, officers=True)  # the test feed (testfeed.FEED): the Test bench card and the Rosters Test tab reload
+        publish(f"test:{run_key}", guild_key, officers=True)  # the test feed (testfeed.FEED): the Test bench card and its test runs reload
 
     from .. import discord_bot as discord_bot_mod, memory as mem, testfeed
 
@@ -1547,16 +1548,30 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/strategy")
     async def run_strategy(request: Request, key: str):
-        """Remember the split philosophy on the run (Auto-fill and the scheduled lock use it)."""
+        """Remember the split philosophy on the run (Auto-fill, the board's picture and the lock use it — rc.run_strategy).
+        {strategy, preview?, seen?}: `preview` → {box} (consequences.strategy_box: the pick box, the change, or the
+        refusal), nothing written; `seen` = the fp of the box pressed (a changed board → 409 with the fresh box). Refused
+        once the roster is locked (STRATEGY_LOCKED, a refusal box)."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        b = parse(d, StrategyBody)
-        if b.strategy not in SPLIT_POLICIES:
+        strategy = str(d.get("strategy") or "")
+        if d.get("preview"):
+            return {"box": cq.strategy_box(v.reg, ev, strategy or None)}
+        if strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": "unknown strategy"}, status_code=400)
+        if (why := cq.strategy_refusal(v.reg, ev)):
+            return box_refused(why)
+        if d.get("seen"):
+            fresh = cq.strategy_box(v.reg, ev, strategy)
+            if fresh["verb"] is None:
+                return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+            if (r := box_stale(d, fresh)) is not None:
+                return r
         async with solving(v.reg, ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
-            ev.split_strategy = b.strategy
-            rs.save(ev, f"split strategy {b.strategy}")
-        return {"message": f"split strategy: {b.strategy}"}
+            ev.split_strategy = strategy
+            rs.save(ev, f"split strategy {strategy}")
+        publish(f"run:{ev.key}", v.reg.key)
+        return {"message": f"{v.reg.raid_def(ev.instance).get('name', ev.instance)} is split by {cq.strategy_name(strategy)} now."}
 
     @app.post("/api/run/{key}/autofill")
     async def run_autofill(request: Request, key: str):
@@ -2194,7 +2209,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             ev = await bot.test_comp(reg, rs, str(d.get("raid") or ""), v.name, v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"Comp sandbox {dr.run_title(reg, ev)}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp", "key": ev.key}
+        return {"message": f"Comp sandbox {dr.run_title(reg, ev)}: {len(reg.test_members())} test members joined; its event page draws the board as the lock would place them", "key": ev.key}
 
     TEST_ACTIONS = {"seed": test_seed_do, "run": test_run_do, "answer": test_answer_do, "clear": test_clear_do, "compose": test_compose_do, "comp": test_comp_do}
 
@@ -2236,7 +2251,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "runs": [test_run_row(reg, e) for e in test_runs(reg, rs)],
                 "signup_channel": {"set": bool(sid), "name": getattr(ch, "name", None)},
                 "open_refusal": bench_channel_refusal(reg, get_channel),  # the same words open_test_run refuses with
-                # each tempo's week in the Rosters strip's shape (RunStrip: {step, when, at, done}, week_json) — the bench draws the
+                # each tempo's week in the run strip's shape (RunStrip: {step, when, at, done}, week_json) — the bench draws the
                 # run's week in the server's words, never a line the browser assembles
                 "tempos": [{"id": k, "label": t[0], "start_in": t[1], "nudge_in": t[2], "lock_in": t[3], "confirm_in": t[4], "week": tempo_week(*t[1:], opened=False)}
                            for k, t in TEMPOS.items()],
@@ -2306,7 +2321,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     def live_runs_of(reg, rs, rid: str) -> list[dict]:
         """The raid's runs open or locked right now, soonest first, in words for the Raids card's "When it runs" block
-        (a test run never: it has its own tab on Rosters): {key, when, state, state_word, schedule} — `schedule` = the schedule's name,
+        (a test run never: its card is on the Members page's Test bench): {key, when, state, state_word, schedule} — `schedule` = the schedule's name,
         "ad hoc" for a one-off or a pickup."""
         out = []
         for ev in sorted((e for e in rs.live() if e.instance == rid and not e.test), key=lambda e: e.starts_at):

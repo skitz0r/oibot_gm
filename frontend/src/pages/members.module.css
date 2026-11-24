@@ -34,7 +34,7 @@
   .editRow { border-top: 1px solid var(--mantine-color-slate-5); padding-top: 8px; }
 }
 
-/* Phone: every control on the page is at least 44 px tall and wide (as on Rosters, design §5.56) — the ⋮ menus, the
+/* Phone: every control on the page is at least 44 px tall and wide (as on the Events page, design §5.56) — the ⋮ menus, the
    buttons, the count chips, the tabs, the inputs — one rule here, never per-element sizes. Menus render in a portal,
    so their items take .menuItem. */
 @media (max-width: 48em) {

@@ -28,7 +28,7 @@ type Filter = "away" | "confirm" | "left" | "bare" | null;
 const waits = (c: Character) => c.status === "active" && !!c.name && !c.confirmed;
 const BADGE = new Set(["owner", "officer"]);
 
-/** One ⋮ item: greyed with its reason under the label when it doesn't apply (design §5.58, as on Rosters). */
+/** One ⋮ item: greyed with its reason under the label when it doesn't apply (design §5.58, as on the board's menus). */
 function Item({ label, why, onClick, color }: { label: string; why?: string | null; onClick?: () => void; color?: string }) {
   return (
     <Menu.Item disabled={!!why} color={why ? undefined : color} onClick={why ? undefined : onClick}>

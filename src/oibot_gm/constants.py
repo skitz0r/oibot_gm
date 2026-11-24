@@ -59,6 +59,9 @@ PRIORITY_SHORT = {"regular": "Regulars", "rank": "rank", "main": "main character
 # `{…}` are filled by whoever prints them (the server, or the page with a count it already has).
 PAGE_WORDS = {
     "one_off": "One-off, no schedule", "first_to_join": "First to join", "not_asked": "Not asked",
+    # an event's raid-night facts (event_view._night_facts) and the page's time zone line (event_list `tz_words`)
+    "paused": "Paused", "paused_by": "Paused by {who}", "reminded_by": "{when}, by {who}", "away_reason": "{name} ({reason})",
+    "confirm_pending": "Not sent yet. The bot sends them within a minute.", "times_in": "Times in {zone}.", "test_run": "test run",
     "asked_at_lock": "Asked at the lock", "no_sheet_yet": "no sheet yet", "from": "From {when}",
     "open_in_discord": "Open in Discord", "no_answer_yet": "no answer yet", "answers_one": "One for the whole evening",
     "bot_asks": "The bot asks people", "officer_asks": "An officer asks", "every_main": "Every main",

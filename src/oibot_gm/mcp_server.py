@@ -901,7 +901,7 @@ def set_regular(raid: str, member: str, on: bool = True, schedule: str | None = 
     ad hoc and have no regulars), `member` (name, character or id), `character` = which of theirs raids there (default
     their main; one per member per schedule). Regulars are expected on every sheet of the schedule (get_run's
     not_answered lists the ones who haven't answered; the reminder goes to them) and weigh more at lock; nothing is
-    answered for them. Same route as the Rosters page."""
+    answered for them. Same route as the Schedules page's Regulars."""
     return msg(api(guild).post("/api/admin/raid/regulars", {"raid": raid, "schedule": schedule or "", "member": member, "character": character or "", "on": bool(on)}))
 
 

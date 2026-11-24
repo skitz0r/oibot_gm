@@ -366,7 +366,7 @@ def overview_embed(reg: Registry, ico, *, officer: bool) -> discord.Embed | None
             body = "\n".join([coverage_line(ico, cv)] + forecast_lines(ico, cv))
             e.add_field(name=f"Regulars · {cv['raid_name'] + ' · ' if many else ''}{cv['name']}"[:256], value=body[:1000] or "—", inline=False)
         if len(shown) < len(cover):
-            e.add_field(name="Regulars · more", value=f"{len(cover) - len(shown)} more schedule(s) — the Rosters page's Regulars tab has them all", inline=False)
+            e.add_field(name="Regulars · more", value=f"{len(cover) - len(shown)} more schedule(s) — the Schedules page has them all", inline=False)
     if s["alts"]:
         e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
     asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]

@@ -215,7 +215,7 @@ export interface ReadinessView {
 export interface EventRow { key: string; title: string; subtitle: string; state: "open" | "locked" | "done" | "cancelled"; chip: string }
 /** A schedule's night with no event yet: found again by (schedule, occurrence). */
 export interface ComingRow { schedule: string; occurrence: string; title: string; subtitle: string }
-export interface EventList { open: EventRow[]; coming: ComingRow[]; history: EventRow[]; history_more: boolean }
+export interface EventList { open: EventRow[]; coming: ComingRow[]; history: EventRow[]; history_more: boolean; /** "Times in Berlin." — the guild's time zone, once on the page */ tz_words: string }
 /** One raid of an event on the Board (event_view._part_view); `sheet` = the run's full JSON, BoardView's input. */
 export interface PartView {
   key: string; raid: string; raid_name: string; label: string; rosters_words: string;
@@ -227,6 +227,8 @@ export interface PartView {
   board_error: string | null; mine: string[]; undo_box: Box | null;
   /** the officers' own placements (open raids; null once locked). Undo my moves is POST /api/run/{key}/layout {undo, seen}. */
   layout: string[][] | null;
+  /** the split strategy this raid uses now (rc.run_strategy); null once locked — More › Split strategy… */
+  strategy: string | null;
 }
 export interface EventPerson { uid: string; display_name: string; character: string; cls: string; spec: string }
 /** GET /api/event/{key} (any raid's key answers as its event). */
@@ -251,6 +253,10 @@ export interface EventView {
   characters: Record<string, Person["characters"]>;
   /** the Role switches section (rc.event_switches): drawn only when `short` has a raid */
   switches: Switches;
+  /** the server's "test run" marker beside the state chip on a rehearsal, else null */
+  test_chip: string | null;
+  /** Split strategy…'s choices in the server's words */
+  strategies: { id: string; label: string; words: string }[];
 }
 /** One move a short raid could take (rc.event_switches): `from` / `to` in words ('Shadow', 'Nyx, Shadow', 'no answer yet'),
  *  `button` the server's word (Switch · Answer for them · Ask), `raids` the raids it helps, `box` its confirmation box;
@@ -482,7 +488,7 @@ export interface Confirmation { uid: string | null; display_name: string; charac
 /** A regular of the run's series and what they answered (status null = no answer). */
 export interface RegularAnswer { uid: string; display_name: string; character: string; cls: string; spec: string; role: string; status: string | null; source: string | null; signed_as: string | null }
 export interface Sheet {
-  key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; state_word?: string; live: boolean; fill_state: string;
+  key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; state_word?: string; run_title?: string; live: boolean; fill_state: string;
   counts: Record<string, number>; rostered: number; n_rosters: number; /** the rosters the run expects up front (its schedule's rosters per run): what the count and the board show before the lock */ rosters_expected?: number;
   /** recurring (has a series and regulars) or ad hoc (first come); `confirms` false = Join is the commitment */
   kind?: "recurring" | "adhoc"; series?: string | null; series_name?: string | null; confirms?: boolean; test?: boolean;

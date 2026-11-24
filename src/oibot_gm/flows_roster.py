@@ -836,7 +836,7 @@ class RegularListWizard(RegularsWizard):
         rd = self.reg.raid_def(rid)
         if not regs:
             text = (f"**{self.label()}** has no regulars yet — until it does, every registered main counts as expected on its sheets."
-                    "\n-# `/roster add` picks them (or the Rosters page).")
+                    "\n-# `/roster add` picks them (or the Schedules page).")
         else:
             by_role: dict[str, list[str]] = {}
             for m, c in regs:

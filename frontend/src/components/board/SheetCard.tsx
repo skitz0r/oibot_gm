@@ -25,7 +25,7 @@ import css from "./board.module.css";
  *  one line and the board collapsed to one line until it's opened; after the lock the board alone — it is the roster.
  *  Raid-night state (dual interfaces phase 2) comes as words from the server: the lock failure, the fill state, asks
  *  waiting on the site, the D3 banner, the spec switches and regulars left out — nothing here composes a sentence the
- *  bot didn't. `badge`: an extra badge beside the state (the Rosters page's Test tab passes the test badge). */
+ *  bot didn't. `badge`: an extra badge beside the state (a caller may pass a test badge). */
 export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badge, people }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void>; badge?: ReactNode; people?: Person[] }) {
   const e = sheet as unknown as NightSheet;
   const locked = e.state !== "open";

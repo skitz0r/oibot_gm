@@ -360,8 +360,9 @@ def test_a_card_links_the_event_page(reg, rs, monkeypatch):
 
 
 def test_old_rosters_addresses_land_on_the_events_page(c):
-    """The old server-side short addresses keep working: /rosters and /admin/build go to the Events page (the SPA's
-    RostersRedirect carries /app/rosters#run-<key> on to that event)."""
+    """The old server-side short addresses keep working: /rosters and /admin/build go to /app/rosters, the SPA's
+    RostersRedirect, which reads the #run-<key> the browser keeps across a redirect and opens that run's event (a
+    redirect straight to /app/events would drop the run — fix round 1)."""
     for old in ("/rosters", "/admin/build"):
         r = c.get(old, follow_redirects=False)
-        assert r.status_code == 301 and r.headers["location"] == "/app/events", old
+        assert r.status_code == 301 and r.headers["location"] == "/app/rosters", old

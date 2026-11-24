@@ -15,7 +15,7 @@ import { useLive } from "../hooks/useLive";
 
 type Key = string;  // "Class:Spec"
 interface TestRun { key: string; raid: string; title: string; state: string; when: string; joined: number; rostered: number; posted: boolean; asks: number }
-/** A tempo (presets.TEMPOS) with its week in the Rosters strip's shape — words from the server, never assembled here. */
+/** A tempo (presets.TEMPOS) with its week in the run strip's shape — words from the server, never assembled here. */
 interface Tempo { id: string; label: string; start_in: number; nudge_in: number; lock_in: number; confirm_in: number; week?: WeekStep[] }
 export interface TestState {
   members: number; max: number; roster: number; seed: { count: number; label: string }[]; runs: TestRun[];
@@ -201,7 +201,7 @@ function Rehearse({ meta, state, raid, raidName, setRaid, puppets, busy, onPost,
         <SegmentedControl size="sm" value={tempo} onChange={setTempo} data={state.tempos.map((x) => ({ value: x.id, label: x.label }))} />
         <Switch size="sm" label="DM every puppet when it opens" checked={dm} onChange={(e) => setDm(e.currentTarget.checked)} />
         <Group gap="sm" ml="auto" wrap="wrap">
-          <Tooltip label="Opens a test run two weeks out with every puppet joined, never posted in Discord. Propose roster on its board builds the best comp from them.">
+          <Tooltip label="Opens a test run two weeks out with every puppet joined, never posted in Discord. Its event page draws the board as the lock would place them: the best comp from them.">
             <Button size="sm" variant="default" leftSection={<IconFlask size={15} />} disabled={!puppets || !raid} loading={busy === "comp"} onClick={onComp}>Try a comp</Button>
           </Tooltip>
           <Button size="sm" disabled={!raid || !!state.open_refusal || !puppets} loading={busy === "run"}
@@ -264,7 +264,7 @@ function roleOrder(meta: Meta, k: Key): number {
   return i < 0 ? 99 : i;
 }
 
-/** The live test runs' cards (the Rosters page's per-raid Test tab, moved here when that page became the Events page):
+/** The live test runs' cards (once on a per-raid Test tab, moved here when the Rosters page became the Events page):
  *  each the whole SheetCard — lock, fill, remind, the board — over the run's JSON from GET /api/rosters (`e.test`),
  *  never in the Events list (event_view.listed); each links its event page, where the board is drawn as the lock would
  *  place it. Reloads on its own runs' saves. */

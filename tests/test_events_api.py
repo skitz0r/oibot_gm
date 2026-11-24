@@ -3,6 +3,7 @@ History), one event in sections, a coming-up event, and the page words on /api/m
 readers; a run key travels only as an id, never in a word."""
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 import pytest
@@ -227,12 +228,67 @@ def test_a_locked_event_adds_its_confirmations_and_open_seats(officer_client, re
     ms = people(reg, 10)
     join(reg, rs, ev, ms)
     lock_with_board(reg, rs, ev, [m.display_name for m in ms])
+    later = rc.event_parts(rs, ev)[1]
+    lock_with_board(reg, rs, later, [])  # the evening's second raid locks too (lock_run locks every raid)
     j = officer_client.get(f"/api/event/{ev.key}").json()
     facts = {f["label"]: f["value"] for f in j["details"]}
-    assert facts["Open seats"] == rc.fill_state_text(reg, ev)
+    # the Tuesday night plays Hyjal Summit then Barrow Deeps: EVERY raid's open seats, each named (fix round 1)
+    assert facts["Open seats · Hyjal Summit"] == rc.fill_state_text(reg, ev)
+    assert facts["Open seats · Barrow Deeps"] == rc.fill_state_text(reg, later)
     assert j["state"] == "locked" and j["parts"][0]["board_state"] == "locked" and j["parts"][0]["placed_words"] is None and j["parts"][0]["rostered_words"] == "10 of 20 seats"
     assert j["actions"]["lock"] is False and j["actions"]["edit_lineup"] is False and j["boxes"]["lock"] is None
-    assert facts["Confirmed"] == "10 waiting" and [f["label"] for f in j["details"]][-3:] == ["Confirmed", "Open seats", "Signup sheet"]
+    labels = [f["label"] for f in j["details"]]
+    assert facts["Confirmed"] == "10 waiting" and labels[-3:] == ["Open seats · Hyjal Summit", "Open seats · Barrow Deeps", "Signup sheet"]
+    assert "Confirm by" in facts
+    assert "Reminder" not in facts, "after the lock the reminder is past; Reminded says when one was sent"
+
+
+def test_an_events_raid_night_facts_come_from_its_runs(officer_client, reg, rs, monkeypatch):
+    """Fix round 1 (the Rosters card's raid-night lines, kept): automatic asks paused and by whom, who is double-booked,
+    who is away with the reason the sheet shows, the reminder and confirm-by times, the last reminder and who sent it,
+    confirmations not yet sent, the Discord links beside the Signup sheet, the time zone once on the list, and a test
+    run's marker — each in the server's words, read from the runs (ev_json), nothing composed on the page."""
+    from oibot_gm.raid_views import run_times
+
+    sid = tuesday(reg)
+    night = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
+    ev = rc.open_run(reg, rs, HYJAL, night, by="t", schedule=sid)
+    ms = people(reg, 12)
+    join(reg, rs, ev, ms[:10])
+    day = ev.start.astimezone(reg.tz).date().isoformat()
+    reg.add_absence(ms[11].discord_id, day, day, "work trip", "t")
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    facts = {f["label"]: f["value"] for f in j["details"]}
+    soft, _hard, confirm = run_times(reg, ev, rc.run_team(reg, ev))
+    assert facts["Reminder"] == reg.local12(soft) and facts["Confirm by"] == reg.local12(confirm)
+    assert facts["Away that day"] == f"{ms[11].display_name} (work trip)"
+    other = rc.open_run(reg, rs, RID, night, by="t")  # another event that same night, one of ours joined there too
+    join(reg, rs, other, [ms[0]])
+    facts = {f["label"]: f["value"] for f in officer_client.get(f"/api/event/{ev.key}").json()["details"]}
+    assert ms[0].display_name in facts["Also on another event"]
+    assert j["test_chip"] is None
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms[:10]])
+    ev.autofill_paused, ev.autofill_paused_by = True, "Jon"
+    ev.reminded_at, ev.reminded_by = reg.now_local().isoformat(), "Jon"
+    ev.cards, ev.cards_channel_id, ev.updates_thread_id = {"lock:0": 42}, 77, 88
+    ev.confirmations_sent_at = None  # the Confirm / Can't fan-out not finished yet
+    rs.save(ev, "t")
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    facts = {f["label"]: f for f in j["details"]}
+    assert facts["Automatic asks · Hyjal Summit"]["value"] == PAGE_WORDS["paused_by"].format(who="Jon")
+    assert facts["Reminded"]["value"].endswith(", by Jon") and not re.search(r"\d{4}-\d\d", facts["Reminded"]["value"]), "words, never ISO"
+    assert facts["Confirmations"]["value"] == PAGE_WORDS["confirm_pending"]
+    links = facts["In Discord"]
+    assert [x["name"] for x in links["links"]] == ["Officer card", "Updates thread"] and all(x["href"].startswith("https://discord.com/") for x in links["links"])
+    assert [f["label"] for f in j["details"]].index("In Discord") == [f["label"] for f in j["details"]].index("Signup sheet") + 1
+    lst = officer_client.get("/api/event-list").json()
+    assert lst["tz_words"].startswith("Times in ") and lst["tz_words"].endswith(".")
+
+
+def test_a_test_runs_event_page_says_it_is_one(officer_client, reg, rs):
+    ev = open_test_run(reg, rs, RID)
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    assert j["test_chip"] == PAGE_WORDS["test_run"]
 
 
 def test_a_finished_event_reads_as_history(officer_client, reg, rs):
@@ -689,3 +745,54 @@ def test_edit_lineups_save_box_goes_stale_and_the_fresh_one_goes_through(web_bot
     ok = c.post(f"/api/run/{ev.key}/lineup", json={"lineup": draft, "seen": stale.json()["box"]["fp"]}, headers=h)
     assert ok.status_code == 200, ok.text
     assert [e["rosters"] for e in rc.run_lineup(reg, rs, ev)] == [1, 1]
+
+
+def test_the_lock_rule_of_edit_lineup_is_one_function(reg, rs):
+    """Fix round 1: the Edit lineup page's refusal and lineup_refusal read ONE rule (rc.lineup_fixed)."""
+    ev = rc.open_run(reg, rs, RID, start_in(reg, 1), by="t")
+    assert rc.lineup_fixed(rs, ev) is None and event_view.lineup_edit_json(reg, rs, ev)["refusal_box"] is None
+    lock_with_board(reg, rs, ev, [])
+    assert rc.lineup_fixed(rs, ev) == rc.LINEUP_LOCKED == rc.lineup_refusal(reg, rs, ev, rc.run_lineup(reg, rs, ev))
+    assert event_view.lineup_edit_json(reg, rs, ev)["refusal_box"] == cq.refusal_box_for(rc.LINEUP_LOCKED)
+
+
+# ---------------------------------------------------------------- More › Split strategy… (fix round 1)
+
+def test_split_strategy_asks_with_the_servers_box_and_the_picture_and_lock_follow_it(web_bot, reg, rs, monkeypatch):
+    """One raid's split strategy through the existing route: the pick box (Back only), the strategy it already has
+    (Back only), another one (its box, `seen`), stale → 409; the write moves the board's fingerprint (the picture is
+    placed again) and the lock's own solve (_solve_run, no strategy passed) uses it; refused once locked."""
+    from oibot_gm import event_board as eb
+
+    c, h = web_bot.c, H()
+    ev = rc.open_run(reg, rs, RID, start_in(reg, 3), by="t")
+    join(reg, rs, ev, people(reg, 12))
+    now = rc.run_strategy(reg, ev)
+    other = next(s for s in ("rotation", "first", "balanced") if s != now)
+    url = f"/api/run/{ev.key}/strategy"
+    pick = c.post(url, json={"preview": True}, headers=h).json()["box"]
+    assert pick["verb"] is None and pick["sentences"] == [cq.STRATEGY_PICK.format(raid="Barrow Deeps")]
+    same = c.post(url, json={"preview": True, "strategy": now}, headers=h).json()["box"]
+    assert same["verb"] is None and same["sentences"] == [cq.STRATEGY_SAME.format(raid="Barrow Deeps")]
+    b = c.post(url, json={"preview": True, "strategy": other}, headers=h).json()["box"]
+    assert b["verb"] == "Use this split" and b == cq.strategy_box(reg, ev, other) and len(b["sentences"]) == 3
+    assert [x["id"] for x in c.get(f"/api/event/{ev.key}", headers=h).json()["strategies"]] == list(registry.SPLIT_POLICIES)
+    before = eb.fingerprint(reg, eb.frozen(rs), eb.snapshot(rs, ev))
+    assert c.post(url, json={"strategy": other, "seen": "stale"}, headers=h).status_code == 409 and rs.events[ev.key].split_strategy != other
+    r = c.post(url, json={"strategy": other, "seen": b["fp"]}, headers=h)
+    assert r.status_code == 200, r.text
+    ev = rs.events[ev.key]
+    assert rc.run_strategy(reg, ev) == other and c.get(f"/api/event/{ev.key}", headers=h).json()["parts"][0]["strategy"] == other
+    assert eb.fingerprint(reg, eb.frozen(rs), eb.snapshot(rs, ev)) != before, "the picture is placed again by the new strategy"
+    seen: list = []
+    real = rc.solver.solve_rosters
+
+    def spy(*a, **k):
+        seen.append(k.get("strategy"))
+        return real(*a, **k)
+    monkeypatch.setattr(rc.solver, "solve_rosters", spy)
+    rc._solve_run(reg, rs, ev, time_limit=1, whatif=False)
+    assert seen == [other], "the lock solves by the run's own strategy"
+    lock_with_board(reg, rs, ev, [])
+    r = c.post(url, json={"strategy": now}, headers=h)
+    assert r.status_code == 400 and r.json()["box"]["sentences"] == [cq.STRATEGY_LOCKED]

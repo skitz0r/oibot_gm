@@ -6816,7 +6816,7 @@ class Registry:
     @_member_write
     def regular_remove(self, discord_id: int, key: str, by: str) -> Member:
         """Take a member off a series' regulars (an officer, or the member stepping down). Works on any series key they
-        hold — a removed schedule's leftovers too (the Rosters page lists those as orphaned)."""
+        hold — a removed schedule's leftovers too (the Schedules page lists those as orphaned)."""
         m = self.members.get(discord_id)
         key = str(key or "").strip()
         hit = [c for c in (m.characters if m else []) if key in c.rosters]
@@ -6837,7 +6837,7 @@ class Registry:
 
     def series_coverage(self, rid: str | None = None) -> list[dict]:
         """Regulars coverage (no run needed): per recurring series (of `rid`, or every raid) its regulars and their role
-        counts against the raid's tank/healer minimums times the schedule's rosters. ONE computation for the Rosters
+        counts against the raid's tank/healer minimums times the schedule's rosters. ONE computation for the Schedules
         page, /roster overview, the analytics card, readiness (MCP / help) — computed in code, never by the model.
         [{key, raid, raid_name, id, name, label, active, size, rosters, seats, regulars: [{uid, display_name, character,
         cls, spec, role}], counts: {role: n}, need: {tank: n, healer: n}, short: {role: n}, level, no_spare: [role], cover,
@@ -6908,7 +6908,7 @@ class Registry:
 
     def orphan_regulars(self) -> list[tuple[str, Member, RegisteredCharacter]]:
         """(key, member, character) for every regular of a series whose schedule no longer exists (or is ad hoc now):
-        never stripped silently — the Rosters page lists them with a remove button."""
+        never stripped silently — the Schedules page lists them with a remove button."""
         known = dict(self.series("recurring"))
         return [(k, m, c) for m in self.members.values() for c in m.active() for k in c.rosters if k not in known]
 

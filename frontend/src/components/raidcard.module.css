@@ -1,6 +1,6 @@
 /* One run's week as a strip (components/RaidCard.tsx RunStrip — the test bench and SheetCard). */
 
-/* ---- one run's week as a strip (the Rosters card): steps evenly spaced, done teal, the rest grey, a now mark */
+/* ---- one run's week as a strip (a run card on the Test bench): steps evenly spaced, done teal, the rest grey, a now mark */
 .strip { position: relative; height: 62px; margin: 0 8px; padding-top: 14px; }
 .stripLine, .stripDone { position: absolute; left: 0; top: 20px; height: 2px; }
 .stripLine { right: 0; background: var(--mantine-color-slate-5); }

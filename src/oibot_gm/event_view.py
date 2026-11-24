@@ -112,7 +112,7 @@ def _row(reg: Registry, rs, first, *, history: bool) -> dict:
 
 
 def event_list(reg: Registry, rs: "rc.RaidStore", now: datetime, offset: int = 0) -> dict:
-    """{open: [Row], coming: [ComingRow], history: [Row], history_more}. Row = {key (part 0's), title (its start),
+    """{open: [Row], coming: [ComingRow], history: [Row], history_more, tz_words}. Row = {key (part 0's), title (its start),
     subtitle, state, chip}; open = live events (open and locked) soonest first; history = HISTORY_PAGE finished or
     cancelled events from `offset`, newest first. ComingRow = {schedule, occurrence, title, subtitle} = each active
     schedule's next COMING_PER_SCHEDULE nights with no event (coming_nights). Never solves; the run store is read once
@@ -127,7 +127,15 @@ def event_list(reg: Registry, rs: "rc.RaidStore", now: datetime, offset: int = 0
     coming = [{"schedule": s["id"], "occurrence": occ, "title": reg.local12(t), "subtitle": s.get("name") or reg.series_label(s["id"])}
               for s, t, occ in coming_nights(reg, rs, now, rc.occurrence_index(reg, rs))]
     return {"open": [_row(reg, rs, e, history=False) for e in live], "coming": coming,
-            "history": [_row(reg, rs, e, history=True) for e in page], "history_more": offset + HISTORY_PAGE < len(closed)}
+            "history": [_row(reg, rs, e, history=True) for e in page], "history_more": offset + HISTORY_PAGE < len(closed),
+            "tz_words": tz_words(reg)}
+
+
+def tz_words(reg: Registry) -> str:
+    """'Times in Berlin.' — the guild's time zone once on the Events page (every time it prints is the guild's)."""
+    from .flows_config import city_words
+
+    return PAGE_WORDS["times_in"].format(zone=city_words(str(reg.config.timezone or reg.tz)))
 
 
 # ---------------------------------------------------------------- one event
@@ -209,7 +217,56 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
             "board_state": state, "board_error": error, "mine": mine,
             "undo_box": cq.undo_box_for(reg, p, viewer) if mine else None,
             "undo_why": PAGE_WORDS["no_moves"] if live and not mine else None,
-            "layout": rc.board_layout(reg, p) if live else None}
+            "layout": rc.board_layout(reg, p) if live else None,
+            # More › Split strategy… (before the lock): the strategy this raid splits by now (rc.run_strategy)
+            "strategy": rc.run_strategy(reg, p) if p.state == "open" else None}
+
+
+def _night_facts(reg: Registry, parts: list, sheets: list[dict], state: str) -> list[dict]:
+    """Raid-night facts from each raid's own run JSON (ev_json, the read model's `part.sheet`) — nothing computed here:
+    once locked, the confirmations not yet sent, each raid's open seats (every raid of an evening, the raid named when
+    there are several) and its automatic asks while paused (and by whom), the last reminder and who sent it, who is
+    double-booked that night and who is away (with the reason the sheet shows)."""
+    out: list[dict] = []
+    several = len(sheets) > 1
+    by_key = {s.get("key"): s for s in sheets}
+    first = sheets[0] if sheets else {}
+    named = lambda label, s: f"{label} · {s.get('raid')}" if several else label  # noqa: E731
+    if state == "locked":
+        if first.get("confirmations_pending"):
+            out.append(_fact("Confirmations", PAGE_WORDS["confirm_pending"]))
+        for p in parts:
+            s = by_key.get(p.key)
+            if s and p.state == "locked":
+                out.append(_fact(named("Open seats", s), s.get("fill_state_text") or rc.fill_state_text(reg, p)))
+        if first.get("reminded_at"):
+            out.append(_fact("Reminded", PAGE_WORDS["reminded_by"].format(when=first["reminded_at"], who=first["reminded_by"])
+                             if first.get("reminded_by") else first["reminded_at"]))
+    for s in sheets:
+        if s.get("autofill_paused"):
+            who = s.get("autofill_paused_by")
+            out.append(_fact(named("Automatic asks", s), PAGE_WORDS["paused_by"].format(who=who) if who else PAGE_WORDS["paused"]))
+    if first.get("double_booked"):
+        out.append(_fact("Also on another event", ", ".join(first["double_booked"])))
+    away = first.get("absences") or []
+    if away:
+        out.append(_fact("Away that day", ", ".join(PAGE_WORDS["away_reason"].format(name=a["display_name"], reason=a["reason"]) if a.get("reason")
+                                                    else a["display_name"] for a in away)))
+    return out
+
+
+def _discord_links(sheet: dict | None) -> list[dict]:
+    """The event's other places in Discord, from its first raid's run JSON (ev_json `links`): the officer card, the
+    updates thread, the loot thread — one fact beside the Signup sheet, only the ones that exist."""
+    links = (sheet or {}).get("links") or {}
+    have = [{"name": name, "href": links[k]} for k, name in (("card", "Officer card"), ("updates", "Updates thread"), ("loot", "Loot thread")) if links.get(k)]
+    if not have:
+        return []
+    fact = _fact("In Discord", have[0]["name"], have[0]["href"])
+    if len(have) > 1:
+        fact["links"] = have
+        fact["value"] = ", ".join(h["name"] for h in have)
+    return [fact]
 
 
 def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: int, *, sheet: Callable | None = None,
@@ -222,7 +279,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     today (the guild's date: Reschedule's lower bound), locks (Reschedule's Locks choices, the event's own among them)}.
     Any part's key answers as its event. `viewer` = the officer looking (their own board
     moves: each part's `mine` and Undo box). `board` = event_board.BoardCache.get's (state, previews): the open raids'
-    boards as the lock would place them (None: the officers' layout, as the Rosters page draws it)."""
+    boards as the lock would place them (None: the officers' layout alone)."""
     first = rc.first_part(rs, ev)
     parts = rc.event_parts(rs, first)
     state = _state(parts)
@@ -232,23 +289,30 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     lineup = _lineup(reg, rs, first, parts)
     came = _fact("Comes from", sname, f"/schedules/{sid}" if exists else None) if sid else _fact("Comes from", PAGE_WORDS["one_off"])
     url = _sheet_url(reg, first)
+    part_views = [_part_view(reg, rs, p, sheet, viewer, board) for p in parts]
+    sheets = [pv["sheet"] for pv in part_views if pv.get("sheet")]  # each raid's ev_json: the raid-night facts below read it
     if live:
         from .raid_views import run_times
 
-        _soft, hard, _confirm = run_times(reg, first, team)
+        soft, hard, confirm = run_times(reg, first, team)
         opened = (datetime.fromisoformat(first.created_at) if first.created_at
                   else first.start - timedelta(hours=float(reg.raid_def(first.instance)["signup_lead_hours"])))
         details = [_fact("Lineup", rc.lineup_words(reg, lineup)), came, _fact("Priority", rc.priority_words(reg, first)),
                    _fact("Confirmation", rc.confirmation_words(rc.run_confirms(reg, first))),
-                   _fact("Sheet opened", reg.local12(opened)), _fact("Locks", reg.local12(first.locked_at or hard))]
-        if state == "locked":
-            if rc.run_confirms(reg, first):
+                   _fact("Sheet opened", reg.local12(opened))]
+        if rc.team_setting(team, "reminders") != "none" and first.state == "open":  # the run's own timing (ev_json's timeline)
+            details.append(_fact("Reminder", reg.local12(soft)))
+        details.append(_fact("Locks", reg.local12(first.locked_at or hard)))
+        if rc.run_confirms(reg, first):
+            details.append(_fact("Confirm by", reg.local12(confirm)))
+            if state == "locked":
                 details.append(_fact("Confirmed", _confirmed_words(reg, first)))
-            details.append(_fact("Open seats", rc.fill_state_text(reg, first)))
+        details += _night_facts(reg, parts, sheets, state)
         if url:
             details.append(_fact("Signup sheet", PAGE_WORDS["open_in_discord"], url))
         else:
             details.append(_fact("Signup sheet", PAGE_WORDS["sheet_not_posted"] if reg.config.signup_channel_id else PAGE_WORDS["sheet_waits"]))
+        details += _discord_links(sheets[0] if sheets else None)
     else:
         rostered = {rc.player_uid(part, p) or p.signup_name for part in parts for p in part.seated()}  # a person once, whatever they played
         details = [_fact("Lineup", rc.lineup_words(reg, lineup)), came, _fact("Rostered", str(len(rostered)))]
@@ -268,10 +332,13 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     timing = rc.run_timing(reg, first)
     can_move = live and not started
     return {"key": first.key, "title": reg.local12(first.start), "state": state, "chip": rc.RUN_STATE_WORDS[state],
+            # a rehearsal (the Test bench's run) says so beside its state, in the server's word
+            "test_chip": PAGE_WORDS["test_run"] if rc.rehearsal_run(reg, first) else None,
+            "strategies": cq.strategy_choices(),  # More › Split strategy…'s choices, in the Discord wizards' words
             "kind": "scheduled" if sid else "one_off", "schedule": {"id": sid, "name": sname} if sid else None,
             "details": details,
             "signups": {"joined": len(rows["in"]), "bench": len(rows["sub"]), "no_thanks": len(rows["out"]), "no_answer": len(rows["none"]), "rows": rows},
-            "parts": [_part_view(reg, rs, p, sheet, viewer, board) for p in parts],
+            "parts": part_views,
             "activity": [{"when": r["when"], "line": r["text"]} for r in activity],
             "boxes": {"lock": cq.lock_box(reg, first, rs) if state == "open" else None, "cancel": cq.cancel_box(reg, first, rs) if live else None,
                       "reschedule": cq.reschedule_pick_box(reg, rs, first) if can_move else None},
@@ -383,8 +450,7 @@ def lineup_edit_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent") -> d
     LINEUP_CLOSED box, Back only — else None)}."""
     first = rc.first_part(rs, ev)
     opts = new_event_options(reg)
-    why = (rc.LINEUP_CLOSED if first.state in ("done", "cancelled")
-           else rc.LINEUP_LOCKED if first.state != "open" or any(p.state == "locked" for p in rc.later_parts(rs, first)) else None)
+    why = rc.lineup_fixed(rs, first)  # THE lock rule lineup_refusal reads first
     return {"key": first.key, "title": reg.local12(first.start), "start_time": first.start.astimezone(reg.tz).strftime("%H:%M"),
             "lineup": rc.run_lineup(reg, rs, first), "raids": opts["raids"], "lineup_max": opts["lineup_max"],
             "lineup_full": opts["lineup_full"], "refusal_box": cq.refusal_box_for(why) if why else None}
@@ -399,7 +465,7 @@ def lineup_draft_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", lin
     box = cq.lineup_box(reg, rs, first, lineup)
     steps: list[dict] = []
     try:
-        full = rc._parse_run_lineup(lineup)
+        full = rc.parse_run_lineup(lineup)
         offsets = reg.lineup_offsets(full) if all(e["raid"] in reg.profile.raids for e in full) else []
     except RegistryError:
         full, offsets = [], []

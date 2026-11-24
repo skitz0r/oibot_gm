@@ -1,6 +1,6 @@
 """The test bench's event feed (dual interfaces phase 2, B9 / owner decision D20): every card, puppet DM, scheduler
 step and answer of a TEST run as one stream, so a rehearsal can be followed on the site (the Members page's test card,
-the Rosters page's Test tab) while its cards post in the channel the command ran in and the puppets' DMs reach the
+the Test bench's test runs) while its cards post in the channel the command ran in and the puppets' DMs reach the
 tester as one digest per batch.
 
 Nothing here is written to the data repo: a ring of events per (guild key, run key) in this process, gone at a

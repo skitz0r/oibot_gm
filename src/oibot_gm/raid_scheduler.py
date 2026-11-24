@@ -104,7 +104,7 @@ class RaidSchedulerMixin:
     async def _warn_unopened(self, reg, now) -> None:
         """No signup channel: the scheduler opens nothing (design B4 "scheduler visibility"). Each run that is due to open
         gets ONE ops warn ("Barrow Deeps Tue 7:30 PM did not open: no signup channel") — never repeated every minute, and
-        no DM beyond the ops feed's own error path; the Rosters page's Upcoming row says "needs a signup channel". Keyed
+        no DM beyond the ops feed's own error path; the Events page's Signup sheet fact says what it waits for. Keyed
         by (guild, schedule id, occurrence): a run is found by its stamps, never by a key."""
         warned: set = self.__dict__.setdefault("_unopened_warned", set())
         rs = self.raids.store(reg)

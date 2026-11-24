@@ -63,7 +63,7 @@ export function EventsPage({ meta }: { meta: Meta }) {
     <Button variant="subtle" size="sm" mt={4} onClick={() => { const n = pages + 1; setPages(n); loadList(n).catch(fail); }}>Show older</Button>
   ) : null;
   return (
-    <ListPage title="Events" selected={selected} back="/events" groups={groups} more={more}
+    <ListPage title="Events" selected={selected} back="/events" groups={groups} more={more} intro={list.tz_words}
       action={<Button component={Link} to="/events/new">New event</Button>}
       empty={<Text size="sm" c="dimmed">No event yet. Make one with New event, or add a schedule on the Schedules page.</Text>}>
       {pick && "key" in pick && <EventPane key={pick.key} evKey={pick.key!} meta={meta} tick={tick} onChanged={load} />}
@@ -141,7 +141,7 @@ function LiveEvent({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChang
 
   return (
     <section className={css.view} aria-label={ev.title}>
-      <EventHead title={ev.title} chip={ev.chip} open={ev.state === "open"}>
+      <EventHead title={ev.title} chip={ev.chip} open={ev.state === "open"} tag={ev.test_chip}>
         <Group gap="xs" wrap="wrap">
           {ev.actions.reschedule && ev.boxes.reschedule && <Button variant="default" onClick={reschedule}>Reschedule</Button>}
           {/* Edit lineup: the builder with the first raid fixed (LineupPage mode="edit-lineup"); gone once the roster locks */}

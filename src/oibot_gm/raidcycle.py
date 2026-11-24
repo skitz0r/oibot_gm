@@ -1075,7 +1075,7 @@ def series_forecast(reg: Registry, key: str, now: datetime | None = None, *, if_
 
 def series_outlook(reg: Registry, rid: str | None = None) -> list[dict]:
     """Registry.series_coverage (regulars against the minimums, green / amber / red) with each series' forecast
-    attached — what the Rosters page, the analytics card, /roster overview, readiness (MCP, /ask) all show."""
+    attached — what the Schedules page, the analytics card, /roster overview, readiness (MCP, /ask) all show."""
     return [{**cv, "forecast": series_forecast(reg, cv["key"])} for cv in reg.series_coverage(rid)]
 
 
@@ -1303,8 +1303,8 @@ def forget_test_members(reg: Registry, rs: "RaidStore", uids: list[int], by: str
 
 
 def open_comp_sandbox(reg: Registry, rs: "RaidStore", instance: str, by: str, test_by) -> "RaidEvent":
-    """A test run two weeks out with every puppet joined, never posted: the board's Propose roster then builds the best
-    comp from whatever mix the bench holds. Cleared with the rest of the test bench."""
+    """A test run two weeks out with every puppet joined, never posted: its event page draws the board as the lock
+    would place them — the best comp from whatever mix the bench holds. Cleared with the rest of the test bench."""
     if instance not in reg.profile.raids:
         raise RegistryError(f"unknown raid {instance or '?'} (one of {', '.join(reg.profile.raids)})")
     puppets = reg.test_members()
@@ -1800,7 +1800,7 @@ def run_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent") -> list[dict]:
     return out
 
 
-def _parse_run_lineup(lineup) -> list[dict]:
+def parse_run_lineup(lineup) -> list[dict]:
     """An edited lineup validated as a run's (parse_lineup's words said of a run, not a schedule): entry 0's own start
     (0) dropped, then parse_lineup."""
     from .registry import parse_lineup
@@ -1817,6 +1817,18 @@ def _parse_run_lineup(lineup) -> list[dict]:
     return full
 
 
+def lineup_fixed(rs: "RaidStore", ev: "RaidEvent") -> str | None:
+    """Why `ev`'s run can't change its lineup at all, whatever the lineup: finished or cancelled (LINEUP_CLOSED), or its
+    roster locked — the first raid or any later one (LINEUP_LOCKED); None while it can. THE rule lineup_refusal and
+    the Edit lineup page (event_view.lineup_edit_json) share."""
+    first = first_part(rs, ev)
+    if first.state in ("done", "cancelled"):
+        return LINEUP_CLOSED
+    if first.state != "open" or any(p.state == "locked" for p in later_parts(rs, first)):
+        return LINEUP_LOCKED
+    return None
+
+
 def lineup_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[dict]) -> str | None:
     """Why `ev`'s run can't take `lineup` ([{raid, rosters[, starts]}], its first raid first), in one sentence, else
     None — in this order: finished or cancelled (LINEUP_CLOSED), locked (LINEUP_LOCKED), parse_lineup's refusals
@@ -1824,12 +1836,10 @@ def lineup_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list
     lacks (LINEUP_GONE), the starts out of order (LINEUP_ORDER), nothing that changes (LINEUP_SAME). Any raid of a run
     answers for its first."""
     first = first_part(rs, ev)
-    if first.state in ("done", "cancelled"):
-        return LINEUP_CLOSED
-    if first.state != "open" or any(p.state == "locked" for p in later_parts(rs, first)):
-        return LINEUP_LOCKED
+    if (why := lineup_fixed(rs, first)):
+        return why
     try:
-        full = _parse_run_lineup(lineup)
+        full = parse_run_lineup(lineup)
     except RegistryError as e:
         return str(e)
     if full[0]["raid"] != first.instance:
@@ -1872,7 +1882,7 @@ def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[di
     entry's start is its own `starts`, else the C12 default (Registry.lineup_offsets). The caller checks lineup_refusal
     first."""
     first = first_part(rs, ev)
-    full = _parse_run_lineup(lineup)
+    full = parse_run_lineup(lineup)
     offsets = reg.lineup_offsets(full)
     live = _live_later(rs, first)
     by_raid = {p.instance: p for p in live}
@@ -5140,11 +5150,11 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
             "closed": ev.state if refusal else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
 
-UPCOMING_PER_SCHEDULE = 3  # the Rosters page lists each active schedule's next three runs, whatever the horizon
+UPCOMING_PER_SCHEDULE = 3  # the Events page's Coming up lists each active schedule's next three nights, whatever the horizon
 
 
 def open_row_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datetime, sid: str, opens: datetime, now: datetime | None = None) -> str | None:
-    """Why an upcoming run's row can't be opened by hand yet, in words (the Rosters page prints it under the row), or None.
+    """Why an upcoming run's row can't be opened by hand yet, in words (the Events page's Coming up prints it under Open the sheet now), or None.
     A closed run at that time is never opened again (closed_run_refusal); a run more than OPEN_HORIZON_DAYS out isn't
     "the next run" the open paths reach (open_when), so the row says when Open works and when the sheet opens on its own."""
     why = closed_run_refusal(rs, event_of_occurrence(rs, sid, occurrence_stamp(reg, start), reg=reg))
@@ -5160,7 +5170,7 @@ def open_row_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datet
 
 def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime | None = None, n: int = UPCOMING_PER_SCHEDULE) -> list[dict]:
     """Each ACTIVE recurring schedule's next `n` runs that aren't live yet, soonest first, whatever the horizon (the
-    Rosters page's "When it runs" block and its Open buttons; a pickup template opens nothing on its own): {schedule,
+    Events page's Coming up and its Open the sheet now; a pickup template opens nothing on its own): {schedule,
     schedule_name, start (words), start_iso (the exact instant Open carries back), occurrence, open_key (the live run's
     key: always None here, a live run has its own card), closed (that occurrence's run is finished or cancelled), opens
     (words), opens_iso,
@@ -5192,7 +5202,7 @@ def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime |
 
 
 def short_why(reg: Registry, ev: RaidEvent) -> str | None:
-    """Why a short run is short, as the clause after the role icons on the Rosters card ("short ⛨1 — 2 asks out, 1 on
+    """Why a short run is short, as the clause after the role icons on a run card (the Test bench's) ("short ⛨1 — 2 asks out, 1 on
     the bench could fill it"): after the lock the fill asks out and who could take a seat; before it the expected people
     who haven't answered. None when there is nothing to add (or the run is over)."""
     if ev.state in ("done", "cancelled"):

@@ -5,7 +5,7 @@ import type { Meta } from "../api";
 const COLOUR: Record<string, string> = { green: "teal", amber: "gray", red: "red" };
 
 /** A coverage level as a word — ready / thin / short (constants.LEVEL_WORDS through /api/meta.level_words) — with why in
- *  its tooltip. The one chip for Readiness (who could play against the raid) and the Rosters page's Regulars (the
+ *  its tooltip. The one chip for Readiness (who could play against the raid) and the Schedules page's Regulars (the
  *  schedule's regulars against the minimums): design §5.56 phase 2. */
 export function LevelChip({ meta, level, why, size }: { meta: Meta; level: string; why?: string; size?: "xs" | "sm" | "md" }) {
   return (

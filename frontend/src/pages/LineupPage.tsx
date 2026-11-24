@@ -216,12 +216,16 @@ function EditLineup() {
   const [edit, setEdit] = useState<EditStart | null>(null);
   const [gone, setGone] = useState<string | null>(null);
   const [lineup, setLineup] = useState<LineupEntry[]>([]);
-  const [changes, setChanges] = useState(0);
+  const [seed, setSeed] = useState<LineupEntry[]>([]);  // the event's own lineup as last read: the draft's edits count against it
   const [x, setX] = useState<Draft | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
   const seq = useRef(0);
+  // how many steps the draft changes against the event's own lineup (added, removed, moved, its rosters or its start):
+  // an officer who edits back to the original holds nothing to lose
+  const changes = Array.from({ length: Math.max(lineup.length, seed.length) }, (_, k) => k)
+    .filter((k) => JSON.stringify(lineup[k] ?? null) !== JSON.stringify(seed[k] ?? null)).length;
   const changed = useRef(0);
   changed.current = changes;
   const [ask, dialog] = useConfirmBox(["run:"]);
@@ -234,7 +238,9 @@ function EditLineup() {
   /** the event's start: its lineup seeds the builder while no edit is made (a live reload never resets a draft) */
   const load = () => api.get<EditStart>(`/api/event/${encodeURIComponent(key)}/lineup`).then((e) => {
     setEdit(e); setGone(null);
-    if (!changed.current) setLineup(e.lineup.map((s) => ({ raid: s.raid, rosters: s.rosters, starts: s.starts })));
+    const own = e.lineup.map((s) => ({ raid: s.raid, rosters: s.rosters, starts: s.starts }));
+    setSeed(own);
+    if (!changed.current) setLineup(own);
     setTick((n) => n + 1);
   }).catch((e) => {
     if (e instanceof ApiError && e.status === 404) setGone((e.body as { error?: string } | undefined)?.error || e.message);
@@ -278,9 +284,9 @@ function EditLineup() {
     } });
     if (done && said.text) {
       clearDirty();
-      setChanges(0);
+      setSeed(lineup);
       ok(said.text);
-      navigate(`/events/${evKey}`);
+      navigate(`/events/${encodeURIComponent(evKey)}`);
     }
   }
 
@@ -306,7 +312,7 @@ function EditLineup() {
             <ViewSection title="Lineup">
               <LineupBuilder raids={edit.raids} value={lineup} max={edit.lineup_max} fullWords={edit.lineup_full} startClock={edit.start_time} fixedFirst
                 times={own ? x!.lineup.map((s) => s.time_words) : undefined}
-                onChange={(next) => { setLineup(next); setChanges((n) => n + 1); }} />
+                onChange={(next) => setLineup(next)} />
             </ViewSection>
             <ViewSection title="What this makes">
               <Stack gap="sm">
