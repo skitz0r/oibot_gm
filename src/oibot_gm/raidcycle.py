@@ -4439,6 +4439,35 @@ def apply_move(reg: Registry, ev: RaidEvent, name: str, to: tuple[int, int] | No
     return layout
 
 
+def group_words(reg: Registry, ev: RaidEvent, gi: int, layout: list[list[str]] | None = None) -> str:
+    """A flat group index in words: 'Group 2', or 'Group 2 of roster 1' when the board holds several rosters."""
+    k = groups_per_roster(reg, run_size(reg, ev))
+    n = len(layout if layout is not None else board_layout(reg, ev))
+    return f"Group {gi % k + 1}" + (f" of roster {gi // k + 1}" if n > k else "")
+
+
+def board_move_kind(reg: Registry, ev: RaidEvent, name: str, to: tuple[int, int] | None) -> tuple[str | None, str | None, str | None]:
+    """What one board move is (consequences.board_move_box's words), read on the board as it stands with apply_move's
+    own rules: ('move', None, where) to another group while rostered, ('swap', other, where) dropped on someone while
+    rostered, ('roster', None, where) from Not rostered into a free place, ('substitute', other, where) from Not rostered
+    onto someone, ('release', None, None) back to Not rostered; (None, None, None) when nothing would change. ValueError
+    as apply_move raises it (not joined, a full group). PURE."""
+    apply_move(reg, ev, name, to)  # its refusals, nothing kept
+    layout = board_layout(reg, ev)
+    origin = next((gi for gi, g in enumerate(layout) if name in g), None)
+    if to is None:
+        return ("release", None, None) if origin is not None else (None, None, None)
+    gi, pos = to
+    g = layout[gi] if gi < len(layout) else []
+    other = g[pos] if 0 <= pos < len(g) and origin != gi else None
+    where = group_words(reg, ev, gi, layout)
+    if origin is not None:
+        if other:
+            return "swap", other, where
+        return ("move", None, where) if origin != gi else (None, None, None)
+    return ("substitute", other, where) if other else ("roster", None, where)
+
+
 def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: int) -> list[RosterResult]:
     """RosterResults straight from a layout (no solver): one per `groups_per_roster` groups. Unplaced joiners are bench."""
     players = {p.signup_name: p for p in players_for(reg, ev)}

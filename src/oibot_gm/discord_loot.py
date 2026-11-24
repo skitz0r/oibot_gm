@@ -1083,6 +1083,24 @@ class LootMixin:
         return True
 
     def end_consequence(self, reg, rs, ev) -> str:
+        """THE End sentence as one line (end_sentences joined): /raid end, the lock card's End, plain text, MCP."""
+        return " ".join(self.end_sentences(reg, rs, ev))
+
+    def end_box(self, reg, rs, ev) -> dict:
+        """More › End the run's box (consequences.end_box): end_sentences, the fp over the run's state and its councils'
+        summaries (awards, overrides, what was never distributed or confirmed, reasons pending) — a drop distributed or
+        an award confirmed while the box is open is a fresh box. Refused (END_REFUSAL) when the run can't end."""
+        import json
+
+        from .consequences import END_REFUSAL, end_box, refusal_box_for
+
+        sessions = [s for s in self.events.values() if s.guild == reg.key and s.run_key == ev.key]
+        if ev.state != "locked" and not sessions and ev.state not in ("done", "cancelled"):
+            return refusal_box_for(END_REFUSAL)
+        rev = json.dumps([ev.state, [self.loot_summary(reg, s) for s in sessions]], sort_keys=True, default=str)
+        return end_box(reg, ev, self.end_sentences(reg, rs, ev), rev=rev)
+
+    def end_sentences(self, reg, rs, ev) -> list[str]:
         """THE End sentence, every surface (the lock card's End, /raid end, the site's End the run and Loot › Tonight's
         End, MCP), in at most three sentences (the Confirm rule, design §5.57), the run named (/raid end may pick one of
         several). No council: the run's own (consequences.consequence("end")). A council: 'Barrow Deeps on Tue 9 Dec is
@@ -1097,7 +1115,7 @@ class LootMixin:
         run = rc.run_on(reg, ev)  # the run is named: /raid end may pick one of several
         if not sessions or ev.state in ("done", "cancelled"):
             lines = consequence("end", reg, ev)
-            return " ".join([f"{run} is finished."] + lines[1:] if lines[:1] == ["The run is finished."] else lines)
+            return [f"{run} is finished."] + lines[1:] if lines[:1] == ["The run is finished."] else lines
 
         def n_of(n: int, one: str, many: str) -> str:
             return f"{n} {one if n == 1 else many}"
@@ -1117,7 +1135,7 @@ class LootMixin:
         lines.append(f"The summary in its thread lists {join_words(loose)}."
                      if loose else "The summary posts in the council's thread.")
         lines.append(reopen_sentence())
-        return " ".join(lines)
+        return lines
 
     async def end_run(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord", refresh: bool = True) -> str:
         """The run is over: every session of it is archived with its summary (pending proposals and overrides kept

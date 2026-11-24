@@ -397,13 +397,22 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
     @app.post("/api/loot/{run}/end")
     async def loot_end(request: Request, run: str):
         """End the run and its council(s): archived with the summary (what was never confirmed stays inside it), the
-        run marked done. `preview`: the End sentence ("End …: 6 awards, 1 override, 2 drops never distributed")."""
+        run marked done. `preview`: {preview: the End sentence as one line, box: the §7b box (LootMixin.end_box)};
+        `seen` = that box's fp → 409 {error, box} with the fresh box when the run or its council changed while it was
+        open (a drop distributed, an award confirmed) — nothing ended."""
+        from ..constants import CONFIRM_WORDS
+
         v, d = await writer(request)
         rs, ev, sessions = run_of(v.reg, run)
         if ev.state != "locked" and not sessions:  # the verb's rule, shown at the preview too (Discord: "No locked run to end.")
-            return JSONResponse({"error": "No locked run to end." if ev.state not in ("done", "cancelled") else f"That run is already {ev.state}."}, status_code=400)
+            return JSONResponse({"error": "No locked run to end." if ev.state not in ("done", "cancelled") else f"That run is already {ev.state}.",
+                                 "box": bot.end_box(v.reg, rs, ev)}, status_code=400)
         if d.get("preview"):
-            return {"preview": bot.end_consequence(v.reg, rs, ev)}
+            return {"preview": bot.end_consequence(v.reg, rs, ev), "box": bot.end_box(v.reg, rs, ev)}
+        if d.get("seen"):
+            fresh = bot.end_box(v.reg, rs, ev)
+            if str(d["seen"]) != fresh["fp"]:
+                return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
 
         async def go():
             text = await bot.end_run(v.reg, rs, ev, by=by_of(v), by_id=v.uid, via=v.via)

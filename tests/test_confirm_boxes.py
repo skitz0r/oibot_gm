@@ -7,7 +7,7 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from conftest import OWNER, join, weekly
+from conftest import OWNER, join, lock_with_board, weekly
 from test_raid_night import H, web_bot  # noqa: F401 — the routes' fixture
 
 from oibot_gm import configops
@@ -518,3 +518,60 @@ def test_the_lock_box_never_counts_a_joiner_kept_off(reg, rs):
         ev.pins[str(m.discord_id)] = "out"
     b = cq.lock_box(reg, ev)
     assert b["verb"] is None and b["sentences"] == [rc.SOLVER_WORDS["all_off"]]
+
+
+# ---------------------------------------------------------------- the final review: Remind and a locked board's moves
+
+def test_remind_asks_with_the_servers_box_and_an_answer_meanwhile_is_a_fresh_box(reg, rs, web_bot):
+    from test_raid_night import locked_ten
+
+    c = web_bot.c
+    ev, seated = locked_ten(reg, rs, asks=True)
+    url = f"/api/run/{ev.key}/remind"
+    b = c.post(url, json={"preview": True}, headers=H()).json()["box"]
+    assert b == cq.remind_box(reg, ev, rs) and b["verb"] == "Send reminder" and not b["danger"]
+    assert b["sentences"] == cq.consequence("remind", reg, ev) and b["title"] == f"Send the reminder for {cq.event_title(reg, ev)}?"
+    ask = next(a for a in reg.members[seated[0].discord_id].placement_asks if a["roster"] == ev.team)
+    ask["answer"] = "yes"  # someone answered while the box was open
+    r = c.post(url, json={"seen": b["fp"]}, headers=H())
+    assert r.status_code == 409 and r.json()["error"] == CONFIRM_WORDS["changed"] and not ev.reminded_at
+    r = c.post(url, json={"seen": r.json()["box"]["fp"]}, headers=H())
+    assert r.status_code == 200 and ev.reminded_at, r.text
+    again = c.post(url, json={"preview": True}, headers=H()).json()["box"]
+    assert again["verb"] is None and "once an hour" in again["sentences"][0], "within the hour: the refusal"
+
+
+def test_a_locked_boards_moves_ask_with_the_servers_box(reg, rs, web_bot):
+    """Move to a group, take off the roster, swap, substitute and put on the roster on a LOCKED event: preview →
+    {box} with consequence()'s sentences for that move (rc.board_move_kind reads which one it is on the board as it
+    stands); a full group is the refusal; `seen` → 409 with the fresh box when the board changed while it was open."""
+    from conftest import open_test_run
+
+    c = web_bot.c
+    ev = open_test_run(reg, rs)
+    pool = reg.test_members()[:10]
+    join(reg, rs, ev, pool)
+    lock_with_board(reg, rs, ev, [m.display_name for m in pool[:8]])  # groups of 5 and 3: room in group 2
+    url = f"/api/run/{ev.key}/move"
+    lay = rc.board_layout(reg, ev)
+    a, b0, bench = lay[0][0], lay[1][0], pool[9].display_name
+    cases = {"move": (a, {"r": 0, "g": 1, "i": 99}), "swap": (a, {"r": 0, "g": 1, "i": 0}), "release": (a, None),
+             "roster": (bench, {"r": 0, "g": 1, "i": 99}), "substitute": (bench, {"r": 0, "g": 1, "i": 0})}
+    for kind, (name, to) in cases.items():
+        box = c.post(url, json={"member": name, "to": to, "preview": True, "state": "locked"}, headers=H()).json()["box"]
+        assert box["verb"] == cq.BOARD_MOVE_VERBS[kind], (kind, box)
+        assert box["title"] == cq.BOARD_MOVE_TITLES[kind].format(name=name, other=b0), (kind, box)
+        kind_, other, where = rc.board_move_kind(reg, ev, name, (to["g"], to["i"]) if to else None)
+        want = (cq.consequence("release", reg, ev, name=name) if kind == "release"
+                else cq.consequence(kind, reg, ev, name=name, other=other, to=where))
+        assert kind_ == kind and box["sentences"] == want, (kind, box)
+    full = c.post(url, json={"member": bench, "to": {"r": 0, "g": 0, "i": 99}, "preview": True, "state": "locked"}, headers=H()).json()["box"]
+    assert full["verb"] is None and full["sentences"] == ["Group 1 is full."], full
+    assert rc.board_layout(reg, ev) == lay, "a preview writes nothing"
+    b = c.post(url, json={"member": a, "to": {"r": 0, "g": 1, "i": 0}, "preview": True, "state": "locked"}, headers=H()).json()["box"]
+    asyncio.run(web_bot.bot.board_move(reg, rs, ev, b0, None, "Other officer", by_id=OWNER))  # the board changed while it was open
+    r = c.post(url, json={"member": a, "to": {"r": 0, "g": 1, "i": 0}, "seen": b["fp"], "state": "locked"}, headers=H())
+    assert r.status_code == 409 and r.json()["box"]["fp"] != b["fp"] and r.json()["error"] == CONFIRM_WORDS["changed"]
+    fresh = r.json()["box"]
+    r = c.post(url, json={"member": a, "to": {"r": 0, "g": 1, "i": 0}, "seen": fresh["fp"], "state": "locked"}, headers=H())
+    assert r.status_code == 200 and a in rc.board_layout(reg, ev)[1], r.text

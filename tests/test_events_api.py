@@ -847,3 +847,19 @@ def test_no_answer_lists_who_the_run_is_for_with_the_character_it_gives_them(reg
     assert [x.discord_id for x, _c in got] == sorted((x.discord_id for x in ms[3:]), key=lambda u: reg.members[u].display_name.lower())
     assert all(c is x.main for x, c in got) and rc.not_answered(reg, ev) == [], "a one-off expects nobody; who it is for is listed"
     assert m.discord_id not in {x.discord_id for x, _c in got}, "no active main: not listed, though an alt plays"
+
+
+def test_the_sentences_the_pages_wrote_are_the_servers_now(officer_client):
+    """The final review: empty states and hints the pages composed come from PAGE_WORDS (carried by /api/meta) under the
+    Copy rule — whole sentences that name what is missing and how to fill it; the schedule editor's reminder switch and
+    its select no longer both read "Reminder"."""
+    words = officer_client.get("/api/meta").json()["page_words"]
+    for k in ("events_empty", "schedules_empty", "raids_empty", "raid_missing", "new_event_no_lineup", "new_event_no_time",
+              "schedule_no_lineup", "activity_empty", "repost_sheet", "nothing_applies"):
+        s = words[k]
+        assert s == PAGE_WORDS[k] and s[0].isupper() and s.endswith(".") and ":" not in s and "—" not in s, (k, s)
+        assert all(len(x.split()) <= 20 for x in s.split(". ")), (k, s)
+    assert "event" in words["nothing_applies"] and "run" not in words["nothing_applies"]
+    assert words["weight_same"].format(n=3) == "Same as the raid (3)"
+    f = words["schedule_fields"]
+    assert f["nudge"] != f["nudge_hours_before"], "the switch and the select are told apart"

@@ -421,10 +421,11 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
 
     ev = runs["locked recurring, autofill on"]
     bot = SimpleNamespace(events={})
+    bot.end_sentences = lambda r, s, e: LootMixin.end_sentences(bot, r, s, e)
     dump.add("end_consequence", "no council", LootMixin.end_consequence(bot, reg, rs, ev))
     sess = SimpleNamespace(guild=reg.key, run_key=ev.key)
-    bot = SimpleNamespace(events={"s": sess}, loot_summary=lambda reg, s: {"awards": 6, "overrides": 1, "never_confirmed": [1], "undistributed": [1, 2],
-                                                                           "reasons_pending": [1]})
+    bot.events = {"s": sess}
+    bot.loot_summary = lambda reg, s: {"awards": 6, "overrides": 1, "never_confirmed": [1], "undistributed": [1, 2], "reasons_pending": [1]}
     dump.add("end_consequence", "a council with loose ends", LootMixin.end_consequence(bot, reg, rs, ev))
     bot.loot_summary = lambda reg, s: {"awards": 1, "overrides": 0, "never_confirmed": [], "undistributed": [], "reasons_pending": []}
     dump.add("end_consequence", "a tidy council", LootMixin.end_consequence(bot, reg, rs, ev))
@@ -867,6 +868,7 @@ def box_cases(reg, rs, runs, ms, dump):
     for st in ("balanced", "first", "rotation"):
         add("strategy_box", f"to {st}", cq.strategy_box(reg, quiet, st))
     add("strategy_box", "locked", cq.strategy_box(reg, lk, "rotation"))
+    final_review_boxes(reg, rs, lk, add)
     start = reg.now_local() + timedelta(days=6)
     for case, opens, kw in (("three days early", reg.now_local() + timedelta(days=3, minutes=5), {}),
                             ("one day early", reg.now_local() + timedelta(days=1, minutes=5), {}),
@@ -1373,3 +1375,47 @@ def test_a_save_boxs_diff_lines_are_the_pages_words(reg):
     ops = configops.ops_from_changes(reg, [{"kind": "raid", "target": hy, "fields": {"first_open": "2026-12-20T19:00"}}])
     line = configops.describe_ops(reg, ops).box["diff"][0]
     assert line.startswith("First opens: ") and not code.search(line), line
+
+
+def final_review_boxes(reg, rs, lk, add):
+    """The final fix wave's boxes (§7b, built on the server): Remind, End the run, a locked board's moves."""
+    from conftest import open_test_run
+
+    from oibot_gm.discord_loot import LootMixin
+
+    rows = rc.open_placement_rows(reg, lk)
+    saved = [(a, dict(a)) for _m, a in rows]
+    for _m, a in rows:
+        a["answer"], a["channel"] = None, "dm"
+    add("remind_box", "the unanswered get the DM again", cq.remind_box(reg, lk, rs))
+    if rows:
+        rows[0][1]["channel"] = "web"
+        add("remind_box", "one waits on the site", cq.remind_box(reg, lk, rs))
+    lk.reminded_at, lk.reminded_by = rc.now(), "Officer"
+    add("remind_box", "reminded within the hour", cq.remind_box(reg, lk, rs))
+    lk.reminded_at = lk.reminded_by = None
+    for a, was in saved:
+        a.clear()
+        a.update(was)
+    open_ = next(e for e in rs.events.values() if e.state == "open")
+    add("remind_box", "an open sheet", cq.remind_box(reg, open_, rs))
+    bot = SimpleNamespace(events={})
+    bot.end_sentences = lambda r, s, e: LootMixin.end_sentences(bot, r, s, e)
+    add("end_box", "no council", LootMixin.end_box(bot, reg, rs, lk))
+    sess = SimpleNamespace(guild=reg.key, run_key=lk.key)
+    bot.events = {"s": sess}
+    bot.loot_summary = lambda r, s: {"awards": 6, "overrides": 1, "never_confirmed": [1], "undistributed": [1, 2], "reasons_pending": [1]}
+    add("end_box", "a council with loose ends", LootMixin.end_box(bot, reg, rs, lk))
+    bot.events = {}
+    add("end_box", "an open sheet", LootMixin.end_box(bot, reg, rs, open_))
+    ev = open_test_run(reg, rs, days=9)
+    pool = reg.test_members()[:10]
+    join(reg, rs, ev, pool)
+    lock_with_board(reg, rs, ev, [m.display_name for m in pool[:8]])
+    lay = rc.board_layout(reg, ev)
+    a, bench = lay[0][0], pool[9].display_name
+    for case, name, to in (("move to another group", a, (1, 99)), ("swap", a, (1, 0)), ("take off the roster", a, None),
+                           ("put on the roster", bench, (1, 99)), ("put in someone's seat", bench, (1, 0)),
+                           ("a full group", bench, (0, 99)), ("where they already are", a, (0, 0))):
+        add("board_move_box", case, cq.board_move_box(reg, ev, name, to))
+    add("board_move_box", "before the lock", cq.board_move_box(reg, open_, next(iter(open_.by_status("in")), SimpleNamespace(display_name="Nobody")).display_name, (0, 99)))

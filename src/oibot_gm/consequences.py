@@ -816,6 +816,58 @@ def strategy_box(reg: Registry, ev: rc.RaidEvent, strategy: str | None) -> dict:
                rev=f"{rc.board_rev(reg, ev)}:{rc.run_strategy(reg, ev)}")
 
 
+def remind_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
+    """More › Remind (RaidMixin.remind) asked first (§7b): consequence("remind")'s sentences — who gets the Confirm or
+    Can't make it DM again, who waits on the site. Refused (rc.remind_refusal, one sentence, only Back) when it can't go.
+    Its fp carries the run's rev; the counts are in the sentences, so an answer meanwhile changes it too."""
+    if (closed := _closed(ev)):
+        return refusal_box_for(closed[0])
+    why = rc.remind_refusal(reg, ev)
+    if why:
+        return refusal_box_for(why)
+    return box(f"Send the reminder for {event_title(reg, ev)}?", _remind(reg, ev), "Send reminder",
+               rev=rc.event_rev(reg, rs, ev) if rs is not None else "")
+
+
+END_REFUSAL = "No locked run to end."
+
+
+def end_box(reg: Registry, ev: rc.RaidEvent, sentences: list[str], rev: str = "") -> dict:
+    """More › End the run asked first (§7b): LootMixin.end_sentences (the run's own, or its loot council's awards and
+    what its summary still lists) — not red, Reopen works for an hour. `rev` = the council's state (LootMixin.end_box):
+    a council that changed while the box was open answers 409 with the fresh box. A run that can't end: the refusal."""
+    if (closed := _closed(ev)):
+        return refusal_box_for(closed[0])
+    return box(f"End {event_title(reg, ev)}?", sentences, "End the run", rev=rev)
+
+
+BOARD_MOVE_TITLES = {"move": "Move {name}?", "roster": "Put {name} on the roster?", "swap": "Swap {name} and {other}?",
+                     "substitute": "Put {name} in {other}'s seat?", "release": "Take {name} off the roster?"}
+BOARD_MOVE_VERBS = {"move": "Move", "roster": "Put on the roster", "swap": "Swap", "substitute": "Put in the seat",
+                    "release": "Take off the roster"}
+BOARD_NO_CHANGE = "{name} is already there, so nothing changes."
+
+
+def board_move_box(reg: Registry, ev: rc.RaidEvent, name: str, to: tuple[int, int] | None) -> dict:
+    """A move on a LOCKED event's board asked first (§7b; the Events page's Move to…, a drag, Take off the roster):
+    which move it is on the board as it stands (rc.board_move_kind) with consequence()'s sentences for it — move,
+    roster, swap, substitute, release. Its fp carries the board's rev (rc.board_rev): a board that changed while the box
+    was open answers 409 with the fresh box. A move that can't be made: its refusal, one sentence. Before the lock the
+    same box says nothing is sent before the lock."""
+    if (closed := _closed(ev)):
+        return refusal_box_for(closed[0])
+    try:
+        kind, other, where = rc.board_move_kind(reg, ev, name, to)
+    except ValueError as e:
+        why = str(e)
+        return refusal_box_for(why[:1].upper() + why[1:] + ("" if why.endswith(".") else "."))
+    if kind is None:
+        return refusal_box_for(BOARD_NO_CHANGE.format(name=name))
+    said = (consequence("release", reg, ev, name=name) if kind == "release"
+            else consequence(kind, reg, ev, name=name, other=other, to=where))
+    return box(BOARD_MOVE_TITLES[kind].format(name=name, other=other), said, BOARD_MOVE_VERBS[kind], rev=rc.board_rev(reg, ev))
+
+
 def undo_box(n: int, rev: str = "") -> dict:
     """Box 9: Undo my moves (`rev`: the board's fingerprint, rc.board_rev)."""
     head = "Your one move on this board is dropped." if n == 1 else f"Your {n} moves on this board are dropped."

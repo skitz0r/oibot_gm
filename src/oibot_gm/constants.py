@@ -107,11 +107,25 @@ PAGE_WORDS = {
     "played_nowhere": "No schedule plays this raid yet. Add one on the Schedules page.",
     # Readiness' Standing when it is not "ready": the printed row that makes it so (raid_page.readiness_view)
     "standing_mains": "Fewer mains than seats.", "standing_under": "{slot} are under the minimum.",
+    # the sentences the pages wrote themselves until the final review (the Copy rule: an empty list names what is
+    # missing and how to fill it) — the Events, Schedules and Raids lists, New event and the schedule editor's hints,
+    # an event's empty Activity, Re-post the sheet, a member menu with nothing to do, a priority left to the raid
+    "events_empty": "No event yet. Make one with New event, or add a schedule on the Schedules page.",
+    "schedules_empty": "No schedule yet. New schedule makes one, with what it repeats, its lineup and its sheet timing.",
+    "raids_empty": "This game has no raids yet, so there is nothing to set up here.",
+    "raid_missing": "That raid isn't in this game. Pick one from the list.",
+    "new_event_no_lineup": "Add a raid to the lineup to see what this event makes.",
+    "new_event_no_time": "Pick the day and the start time to see what this event makes.",
+    "schedule_no_lineup": "Add a raid to the lineup to make the schedule.",
+    "activity_empty": "Nothing has happened on this event yet. A line appears here each time someone answers or an officer acts.",
+    "repost_sheet": "The live sheet moves to this channel. Its buttons and later updates follow it, and the old message says where it went.",
+    "nothing_applies": "Nothing can be done for them on this event.",
+    "weight_same": "Same as the raid ({n})",
     # a schedule's settings by name: the Schedules page's editor labels AND the Save box's "label: old → new" lines
     # (configops._schedule_part) — one word per setting, so the two never drift
     "schedule_fields": {"name": "Name", "kind": "Repeats", "slots": "Run times", "days": "Days of each lockout", "time": "Starts",
                         "lineup": "Lineup", "rosters": "Rosters", "active": "Active", "signup_lead_hours": "Sheet opens",
-                        "nudge": "Reminder", "nudge_hours_before": "Reminder", "lock_hours_before": "Locks",
+                        "nudge": "Send a reminder", "nudge_hours_before": "Reminder", "lock_hours_before": "Locks",
                         "confirm": "Ask the rostered to confirm", "confirm_hours_before": "Confirm by",
                         "autofill": "The bot asks people for open seats", "fill_ask_hours": "An ask waits",
                         "open_dm": "DM the regulars when the sheet opens", "split_policy": "When one night fills two rosters",

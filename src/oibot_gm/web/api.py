@@ -1408,7 +1408,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         scheduler locked it mid-drag) the move is refused with 409 + the current board, never applied as a post-lock
         roster edit (design B6). `shown: true` (the Events page): the board drawn is the lock's placement, so the move is
         read on the picture the server holds NOW and pins only the mover (and a swapped partner) — RaidMixin.board_move.
-        The officer is recorded per name moved, for Undo my moves."""
+        The officer is recorded per name moved, for Undo my moves. A LOCKED event's moves ask first (§7b): `preview` →
+        {box} (consequences.board_move_box: move, roster, swap, substitute or release, nothing written); `seen` = that
+        box's fp → 409 {error, box (the fresh one), board…} when the board changed while it was open, 400 with the
+        refusal box when the move can't be made."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         name, to = str(d.get("member") or ""), d.get("to")
@@ -1417,6 +1420,16 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": "state is open or locked (the state the board was drawn in)"}, status_code=400)
         n = rc.groups_per_roster(v.reg, rc.run_size(v.reg, ev))
         target = None if not to else (as_int(to.get("r"), "to.r") * n + as_int(to.get("g"), "to.g"), as_int(to.get("i", 99), "to.i"))
+        if d.get("preview") or d.get("seen"):
+            fresh = cq.board_move_box(v.reg, ev, name, target)
+            if d.get("preview"):
+                return {"box": fresh}
+            if fresh["verb"] is None:
+                return JSONResponse({"error": fresh["sentences"][0], "box": fresh, **board_reply(v.reg, ev)}, status_code=400)
+            if str(d["seen"]) != fresh["fp"]:
+                from ..constants import CONFIRM_WORDS
+
+                return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh, **board_reply(v.reg, ev)}, status_code=409)
         was_open = ev.state == "open"
         try:
             line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name, via=v.via, expect_state=seen, by_id=v.uid, shown=bool(d.get("shown")))
@@ -1842,9 +1855,19 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     @app.post("/api/run/{key}/remind")
     async def run_remind(request: Request, key: str):
         """Remind the unconfirmed (D15; RaidMixin.remind): the Confirm / Can't DM again for every unanswered ask, against
-        the EXISTING ask; once per hour per run (409 with the time it may go again)."""
-        v, _ = await body(request, officer=True)
+        the EXISTING ask; once per hour per run (409 with the time it may go again). Asks first (§7b): `preview` → {box}
+        (consequences.remind_box, nothing sent); `seen` = its fp → 409 with the fresh box when it changed while open
+        (someone answered, another officer reminded), 400 with the refusal box when it can't go."""
+        v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
+        if d.get("preview") or d.get("seen"):
+            fresh = cq.remind_box(v.reg, ev, rs)
+            if d.get("preview"):
+                return {"box": fresh}
+            if fresh["verb"] is None:
+                return box_refused(fresh["sentences"][0])
+            if (r := box_stale(d, fresh)) is not None:
+                return r
         try:
             line = await bot.remind(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
