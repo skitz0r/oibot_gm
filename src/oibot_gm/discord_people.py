@@ -156,38 +156,115 @@ async def after_character_change(bot, reg: Registry, rs, m: Member, changes: lis
 
 # ---------------------------------------------------------------- absences
 
+LINEUP_NAME_WORDS = 7
+"""An event's lineup names it in an absence sentence ('Hyjal Summit, then Barrow Deeps × 2') up to this many words;
+a longer lineup is 'the <first raid> event', so every sentence stays within the Confirm rule's twenty words."""
+
+
+def _event_names(reg: Registry, evs: list) -> dict[str, str]:
+    """Each event (by its first raid's key) as an absence sentence names it, once: its lineup's words or 'the <first
+    raid> event', then ' on <day>'; two events that would read the same name their start time too."""
+    names = {}
+    for ev in evs:
+        lineup = rc.event_lineup(reg, ev) or [{"raid": ev.instance}]
+        first = rc.lineup_words(reg, [{"raid": lineup[0].get("raid")}])
+        whole = rc.lineup_words(reg, lineup)
+        short = first if len(lineup) == 1 else f"the {first} event"
+        names[ev.key] = (whole if len(lineup) > 1 and len(whole.split()) <= LINEUP_NAME_WORDS else short, short, ev)
+    seen: dict[tuple, int] = {}
+    for words, _s, ev in names.values():
+        seen[(words, rc.run_day(reg, ev))] = seen.get((words, rc.run_day(reg, ev)), 0) + 1
+    out = {}
+    for key, (words, short, ev) in names.items():
+        day = reg.day_label(rc.run_day(reg, ev))
+        if seen[(words, rc.run_day(reg, ev))] > 1:  # two events that would read the same: the short name and the time
+            out[key] = f"{short} at {reg.local12(ev.start, '%I:%M %p')} on {day}"
+        else:
+            out[key] = f"{words} on {day}"
+    return out
+
+
+def _span_words(reg: Registry, start: str, end: str) -> str:
+    return "that day" if start == end else "in those days"
+
+
 def absence_lines(reg: Registry, rs, m: Member | None, start: str, end: str) -> list[str]:
-    """What recording an absence does to each live sheet, one sentence per run ('The sheet for Barrow Deeps on Tue 6 Oct
-    is answered No thanks.') — the Confirm rule's words (design §5.57)."""
+    """What recording an absence does to each live event, one sentence per EVENT (a first raid and its later raids are
+    one event, named once: 'The sheet for Barrow Deeps on Tue 6 Oct is answered No thanks.') — the Confirm rule's words
+    (design §5.57). When those pass three sentences in all, they are summed: a released seat is always said (a loss),
+    then the answers that become No thanks as one count."""
     if rs is None:
         return []
+    hits = [(ev, what) for ev, what in rc.absence_effects(reg, rs, m, start, end) if not rc.is_follow(ev)]
+    names = _event_names(reg, [ev for ev, _w in hits])
     out = []
-    for ev, what in rc.absence_effects(reg, rs, m, start, end):
-        run = rc.run_on(reg, ev)
+    for ev, what in hits:
+        run = names[ev.key]
         if what == "seat freed":
             out.append(f"The seat for {run} is released. {rc.refill_sentence(reg, ev)}")
         elif what == "already No thanks":
             out.append(f"The sheet for {run} already says No thanks.")
         else:
             out.append(f"The sheet for {run} is answered No thanks.")
+    if len(hits) + sum(1 for _e, w in hits if w == "seat freed") <= 3:
+        return out
+    return _absence_sum(reg, names, hits, _span_words(reg, start, end))
+
+
+def _absence_sum(reg: Registry, names: dict[str, str], hits: list, span: str) -> list[str]:
+    """Four events or more: at most three sentences. A released seat first (one event by name, several as a count) with
+    who fills it, then the sheets answered No thanks as a count; the sheets that already said so only when room is left."""
+    from .consequences import count_words
+
+    freed = [ev for ev, w in hits if w == "seat freed"]
+    answered = sum(1 for _e, w in hits if w == "No thanks")
+    already = sum(1 for _e, w in hits if w == "already No thanks")
+    out = []
+    if len(freed) == 1:
+        out.append(f"The seat for {names[freed[0].key]} is released. {rc.refill_sentence(reg, freed[0])}")
+    elif freed:
+        fills = {rc.refill_sentence(reg, ev, "them") for ev in freed}
+        tail = fills.pop() if len(fills) == 1 else "Each event fills its seat the way its own asks are set."
+        out.append(f"The seats for {count_words(len(freed))} events {span} are released. {tail}")
+    other = "other " if freed else ""
+    if answered:
+        out.append(f"The sheets for {count_words(answered)} {other}event{'s' if answered != 1 else ''} {span} are answered No thanks."
+                   if answered != 1 else f"The sheet for one {other}event {span} is answered No thanks.")
+    if already and len(out) + (1 if freed else 0) < 3:
+        out.append(f"The sheets for {count_words(already)} more events already say No thanks." if already != 1 else "The sheet for one more event already says No thanks.")
     return out
 
 
 def absence_clear_lines(reg: Registry, rs, m: Member, a) -> list[str]:
     """What "I'm back" does, without doing it (RaidMixin.after_absence_cleared does it): an open sheet the absence had
-    answered No thanks re-opens for them; a seat it handed back stays handed back."""
+    answered No thanks re-opens for them; a seat it handed back stays handed back. One sentence per EVENT (its first
+    raid holds the sheet); more than three are summed into two counts."""
     if rs is None:
         return []
-    out = []
+    hits = []
     for ev in rs.live():
+        if rc.is_follow(ev):  # a later raid's answers are its first raid's
+            continue
         day = rc.run_day(reg, ev)
         if not (a.start <= day <= a.end) or any(x is not a and x.start <= day <= x.end for x in m.absences):
             continue
         sg = ev.signups.get(str(m.discord_id))
         if not sg or sg.status != "out" or sg.source != "absence":
             continue
-        run = rc.run_on(reg, ev)
-        out.append(f"The sheet for {run} opens again for an answer." if ev.state == "open" else f"The seat for {run} that the absence released stays released.")
+        hits.append(ev)
+    names = _event_names(reg, hits)
+    if len(hits) <= 3:
+        return [f"The sheet for {names[ev.key]} opens again for an answer." if ev.state == "open"
+                else f"The seat for {names[ev.key]} that the absence released stays released." for ev in hits]
+    from .consequences import count_words
+
+    opens = sum(1 for ev in hits if ev.state == "open")
+    stays = len(hits) - opens
+    out = []
+    if opens:
+        out.append(f"The sheets for {count_words(opens)} events open again for an answer." if opens != 1 else "The sheet for one event opens again for an answer.")
+    if stays:
+        out.append(f"The seats the absence released on {count_words(stays)} events stay released." if stays != 1 else "The seat the absence released on one event stays released.")
     return out
 
 

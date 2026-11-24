@@ -1389,7 +1389,7 @@ def dm_consequence(reg: Registry, m, on: bool, *, by_id: int | None = None) -> l
 
 def back_consequence(reg: Registry, rs, m, start: str, *, by_id: int | None = None) -> list[str]:
     """I'm back (discord_people.im_back): the absence goes, an open sheet it had answered No thanks opens again, a seat
-    it released stays released (discord_people.absence_clear_lines — one sentence per run)."""
+    it released stays released (discord_people.absence_clear_lines — one sentence per event, summed past three)."""
     from . import discord_people
 
     v = _Voice(reg, m, by_id)
@@ -1406,7 +1406,7 @@ NO_SHEET_IN_DAYS = "No live sheet falls in those days."
 
 def absence_consequence(reg: Registry, rs, m, start: str, end: str, *, by_id: int | None = None) -> list[str]:
     """An absence before it is recorded (the Me page's and the Members page's Add the absence, design §5.58 phase 3):
-    what is recorded, one sentence per live sheet it answers (discord_people.absence_lines) and how to undo it."""
+    what is recorded, one sentence per live event it answers (discord_people.absence_lines, summed past three) and how to undo it."""
     from . import discord_people
 
     v = _Voice(reg, m, by_id)

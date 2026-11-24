@@ -14,6 +14,7 @@ from oibot_gm import flows_raid  # noqa: F401 — registers the flows
 from oibot_gm import raidcycle as rc
 from oibot_gm.discord_loot import LootMixin
 from oibot_gm.discord_raid import RaidMixin
+from oibot_gm.registry import RegistryError
 from oibot_gm.wizard import FLOWS
 from wizard_harness import Harness
 
@@ -483,6 +484,24 @@ def test_lock_with_one_run_needs_no_picker(reg, rs, officer, channel):
         await h.press("Lock now")
         assert bot.calls[0] == ("lock_run", ev.key, "Tester") and bot.calls[1][0] == "emit"
         assert h.text.endswith(f"{ev.key}: locked")
+    asyncio.run(go())
+
+
+def test_preview_lock_says_how_long_without_a_number_that_goes_stale(reg, rs, officer, channel):
+    """A later raid previewed while its first raid is open solves both raids (about 25 s): the working line says up to
+    half a minute, never a count of seconds."""
+    open_test_run(reg, rs)
+    h, bot = harness(reg, rs)
+
+    async def busy(*a, **kw):
+        raise RegistryError("The solver is busy on this run.")
+    bot.lock_preview = busy
+
+    async def go():
+        await FLOWS["raid_lock"](h.command(), reg)
+        await h.press("Preview lock")
+        working = [ln for s in h.screens for ln in s["text"].splitlines() if ln.startswith("Building the preview")]
+        assert working == ["Building the preview. It can take up to half a minute…"], working
     asyncio.run(go())
 
 

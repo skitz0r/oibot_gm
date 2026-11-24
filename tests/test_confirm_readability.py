@@ -1421,3 +1421,64 @@ def final_review_boxes(reg, rs, lk, add):
                            ("a full group", bench, (0, 99)), ("where they already are", a, (0, 0))):
         add("board_move_box", case, cq.board_move_box(reg, ev, name, to))
     add("board_move_box", "before the lock", cq.board_move_box(reg, open_, next(iter(open_.by_status("in")), SimpleNamespace(display_name="Nobody")).display_name, (0, 99)))
+
+
+def _one_day_of_events(reg, rs, ms, n_adhoc: int, locked_too: bool):
+    """A day five days out holding a three-raid event and `n_adhoc` more ad hoc events of Barrow Deeps (the second one
+    locked with ms[0] rostered when `locked_too`), every one joined by ms."""
+    weekly(reg)
+    reg.set_raid_overrides("hyjal_summit_forever", {"first_open": "2026-01-01T00:00"}, "t")
+    base = (reg.now_local() + timedelta(days=5)).replace(hour=12, minute=0, second=0, microsecond=0)
+    three = rc.open_run(reg, rs, "hyjal_summit_forever", base, by="t", schedule=rc.ADHOC_SCHEDULE,
+                        lineup=[{"raid": RID, "rosters": 2}, {"raid": "onyxias_lair", "rosters": 1}])
+    join(reg, rs, three, ms)
+    evs = [three]
+    for i in range(n_adhoc):
+        ev = rc.open_run(reg, rs, RID, base.replace(hour=14 + 2 * i), by="t", schedule=rc.ADHOC_SCHEDULE)
+        if locked_too and i == 1:
+            locked(reg, rs, ev, ms)
+        else:
+            join(reg, rs, ev, ms)
+        evs.append(ev)
+    return evs, rc.run_day(reg, three)
+
+
+def test_an_absence_names_each_event_once(reg, rs):
+    """A three-raid event is one event: its sheet is named once, by its lineup (the fix of 2026-11-24)."""
+    ms = people(reg)
+    _evs, day = _one_day_of_events(reg, rs, ms, 1, False)
+    lines = discord_people.absence_lines(reg, rs, ms[11], day, day)
+    assert len(lines) == 2 and not lint(lines, names_of(reg))
+    assert lines[0] == f"The sheet for the Hyjal Summit event on {reg.day_label(day)} is answered No thanks."
+    lineup = [{"raid": "hyjal_summit_forever", "rosters": 1}, {"raid": RID, "rosters": 2}]
+    later = (reg.now_local() + timedelta(days=9)).replace(hour=12, minute=0, second=0, microsecond=0)
+    two = rc.open_run(reg, rs, "hyjal_summit_forever", later, by="t", schedule=rc.ADHOC_SCHEDULE, lineup=lineup[1:])
+    join(reg, rs, two, ms)
+    d2 = rc.run_day(reg, two)
+    assert discord_people.absence_lines(reg, rs, ms[11], d2, d2) == [
+        f"The sheet for Hyjal Summit, then Barrow Deeps × 2 on {reg.day_label(d2)} is answered No thanks."]
+
+
+def test_an_absence_over_many_events_sums_up_and_keeps_the_freed_seat(reg, rs):
+    """Four events or more on the absent day: at most three sentences in all, the freed seat said (a loss is never
+    dropped), the rest summed; every confirm that prints them lints on any date."""
+    ms = people(reg)
+    evs, day = _one_day_of_events(reg, rs, ms, 4, True)
+    dump = Dump(names_of(reg))
+    rostered, bench = ms[0], ms[11]
+    for who, m in (("rostered on one", rostered), ("not rostered", bench)):
+        lines = discord_people.absence_lines(reg, rs, m, day, day)
+        dump.add("absence_lines", f"five events one day, {who}", lines)
+        assert 1 <= len(sentences(lines)) <= 3
+        out = cq.absence_consequence(reg, rs, m, day, day, by_id=OFFICER_ID)
+        dump.add("absence_consequence", f"five events one day, {who}", out, fates=lines)
+    seat = discord_people.absence_lines(reg, rs, rostered, day, day)
+    assert any("released" in s for s in seat) and any("No thanks" in s for s in seat)
+    assert all("released" not in s for s in discord_people.absence_lines(reg, rs, bench, day, day))
+    # I'm back over the same day: the answers the absence wrote
+    for ev in evs:
+        rc.set_signup(reg, rs, ev, bench, None, "out", source="absence")
+    back = discord_people.absence_clear_lines(reg, rs, bench, SimpleNamespace(start=day, end=day))
+    dump.add("absence_clear_lines", "five events one day", back)
+    assert 1 <= len(sentences(back)) <= 3 and len(set(back)) == len(back)
+    assert not dump.problems, "\n".join(dump.problems)
