@@ -282,7 +282,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise HTTPException(400, f"{reg.raid_def(raids[0]).get('name', raids[0])} has several live runs: " + ", ".join(dr.run_title(reg, e) for e in evs) + ". Say which one.")
         if len(raids) > 1:
             raise HTTPException(400, f"{key}: which raid? " + ", ".join(raids))
-        raise HTTPException(404, "That run is closed." if key in rs.events else f"There is no live run {key or '?'}." + (" Live now: " + ", ".join(dr.run_title(reg, e) for e in rs.live()) + "." if rs.live() else ""))
+        raise HTTPException(404, "That run is closed." if key in rs.events else "There is no live run by that name." + (" Live now: " + ", ".join(dr.run_title(reg, e) for e in rs.live()) + "." if rs.live() else ""))
 
     async def body(request: Request, officer: bool = False):
         if request.headers.get("x-requested-with") != "oibot":

@@ -1965,14 +1965,15 @@ def lift_schedule_ids(cfg: "GuildConfig", raids: dict) -> tuple[list[str], bool]
     return lines, owed
 
 
-def schedule_ids_line(lines: list[str]) -> str:
+def schedule_ids_line(lines: list[str], regulars: bool = False) -> str:
     """The start's one ops line for lift_schedule_ids' and Registry.remap_regulars' lines (migrate_schedules → ids_saved),
     in a raid leader's words (the Copy rule: no id): the schedules that now stand on their own, named, then any regular
-    spot that could not follow. The commit message keeps the ids (lift_schedule_ids' own lines)."""
+    spot that could not follow. `regulars` = some schedule has regulars (only then "its regulars came with it"). The
+    commit message keeps the ids (lift_schedule_ids' own lines)."""
     moved = [ln.rsplit(" is now ", 1)[0] for ln in lines if " is now " in ln]
     rest = [ln for ln in lines if " is now " not in ln]
-    head = ["Each schedule now stands on its own instead of under one raid, and its regulars came with it: "
-            + " · ".join(moved) + "."] if moved else []
+    head = ["Each schedule now stands on its own instead of under one raid"
+            + (", and its regulars came with it: " if regulars else ": ") + " · ".join(moved) + "."] if moved else []
     return " ".join(head + [f"{ln}." for ln in rest])
 
 

@@ -84,3 +84,73 @@ def test_the_schedulers_open_and_lock_lines_name_the_run(bot, reg, rs, monkeypat
     run(bot.scheduler_tick_guild(reg))
     assert any("lock failed" in x for x in lines(bot)), lines(bot)
     assert_no_key(bot, ev, other)
+
+
+# ---------------------------------------------------------------- the loot audit lines (phase 3 leftovers)
+
+def council_on(reg, rs):
+    """A locked real run with its council open, on test_loot_verbs' LootBot (it records its ops lines)."""
+    from test_loot_verbs import LootBot, real_run
+
+    ev, ms = real_run(reg, rs)
+    lb = LootBot(reg, rs)
+    s, _created = run(lb.open_loot(reg, rs, ev, by="Officer", by_id=1))
+    lb.ops.lines.clear()
+    return lb, ev, ms, s
+
+
+def loot_lines(lb) -> list[str]:
+    return [text for _key, _level, text in lb.ops.lines]
+
+
+def test_the_companions_recorded_lines_name_the_run(reg, rs):
+    from test_loot_verbs import char, scribe
+
+    lb, ev, ms, s = council_on(reg, rs)
+    run(lb.tick(reg, s, add=[{"name": "Shard of Doom", "boss": "Gatekeeper", "copies": 1}], by="Officer", by_id=1))
+    (p,) = run(lb.distribute(reg, s, by="Officer"))["proposals"]
+    other = next(char(m) for m in ms if char(m) != p.to)
+    out = run(lb.handle_feed_event({"type": "loot", "recipient": other, "item_name": "Shard of Doom", "idem": "m1"}, scribe()))
+    assert out["result"] == "recorded_reason_pending"
+    run(lb.handle_feed_event({"type": "drop", "boss": "Gatekeeper", "items": [{"id": 123456, "name": "Mystery Blade"}], "idem": "d1"}, scribe()))
+    out = run(lb.handle_feed_event({"type": "loot", "recipient": char(ms[3]), "item_id": 123456, "item_name": "Mystery Blade", "idem": "l1"}, scribe()))
+    assert out["result"] == "manual"
+    got = [x for x in loot_lines(lb) if "recorded" in x and "in game" in x]
+    assert len(got) == 2 and all(f"loot {rc.run_words(reg, ev)}: recorded" in x for x in got), got
+    assert not any(ev.key in x for x in loot_lines(lb)), loot_lines(lb)
+
+
+def test_a_silent_companion_names_the_run(reg, rs):
+    import types
+
+    from oibot_gm.raid_scheduler import RaidSchedulerMixin
+
+    lb, ev, _ms, s = council_on(reg, rs)
+    lb.feed = types.SimpleNamespace(companions={1: types.SimpleNamespace(character="Scribe", silent_for=600, warned=False)})
+    lb.active_raid = lambda c: s
+    run(RaidSchedulerMixin.companion_check(lb))
+    (line,) = [x for x in loot_lines(lb) if "silent" in x]
+    assert f"during {rc.run_words(reg, ev)} —" in line and ev.key not in line, line
+
+
+def test_a_split_runs_council_names_its_roster(reg, rs):
+    lb, ev, _ms, s = council_on(reg, rs)
+    lb.events.pop(s.key)
+    s.id = f"{ev.key}-r2"  # the second roster's council of a split run
+    lb.events[s.key] = s
+    run(lb.set_scores_only(reg, s, True, by="Officer", by_id=1))
+    (line,) = [x for x in loot_lines(lb) if "scores only" in x]
+    assert f"loot {rc.run_words(reg, ev)} roster 2: scores only on" in line and ev.key not in line, line
+
+
+def test_a_gone_run_is_not_echoed_by_key(reg, rs, monkeypatch):
+    """The site's 404 for a run key that is not live never repeats the key (random letters, the Copy rule)."""
+    from fastapi.testclient import TestClient
+    from test_mcp import TOKEN, FakeBot
+
+    from oibot_gm.web import app as web
+
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    c = TestClient(web.create_app(FakeBot(reg, rs)))
+    r = c.get("/api/run/zz-qq7x2k", headers={"Authorization": f"Bearer {TOKEN}"})
+    assert r.status_code == 404 and "zz-qq7x2k" not in r.text and "no live run by that name" in r.text, r.text

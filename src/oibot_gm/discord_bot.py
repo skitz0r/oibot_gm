@@ -559,7 +559,8 @@ class ListenMixin:
                 await self.ops.emit(reg.config, "info", line)
             ids, reg.ids_saved = list(getattr(reg, "ids_saved", None) or []), []
             if ids:  # phase 3: schedule ids made unique, `default` named, regulars keyed by id (registry.lift_schedule_ids)
-                await self.ops.emit(reg.config, "info", schedule_ids_line(ids))
+                regulars = any(reg.regulars(s["id"]) for s in reg.all_schedules())
+                await self.ops.emit(reg.config, "info", schedule_ids_line(ids, regulars=regulars))
             refused, reg.schedules_refused = list(getattr(reg, "schedules_refused", None) or []), []
             for line in refused:  # one per raid left under its raid (it still reads as before)
                 await self.ops.emit(reg.config, "warn", line)

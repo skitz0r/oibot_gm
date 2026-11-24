@@ -84,8 +84,10 @@ def test_the_oi_shape_keeps_its_confirm_by_and_its_start_line_names_the_schedule
     assert (s["raid"], s["name"], s["slots"], s["confirm_hours_before"]) == (RID, "Raid nights", ["Tue 04:00"], 12)
     assert reg.schedule_def(RID, "barrow-deeps")["confirm_hours_before"] == 12
     said = _start(reg)
-    assert ("info", "Each schedule now stands on its own instead of under one raid, and its regulars came with it: "
-                    "Barrow Deeps · Raid nights.") in said
+    assert ("info", "Each schedule now stands on its own instead of under one raid: Barrow Deeps · Raid nights.") in said, \
+        "no regulars here: the line doesn't say they came with it"
+    assert R.schedule_ids_line(["Barrow Deeps · Raid nights is now barrow-deeps"], regulars=True) == (
+        "Each schedule now stands on its own instead of under one raid, and its regulars came with it: Barrow Deeps · Raid nights.")
     assert R.schedule_ids_line(["Kestrel: dropped a regular spot on a removed Barrow Deeps schedule"]) == (
         "Kestrel: dropped a regular spot on a removed Barrow Deeps schedule."), "a spot that could not follow, said alone"
     assert not any("default" in text for _lvl, text in said)

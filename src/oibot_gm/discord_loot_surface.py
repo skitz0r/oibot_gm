@@ -207,7 +207,7 @@ class LootSurfaceMixin:
             raise RegistryError(f"{character}'s companion isn't waiting to be bound any more.")
         self._surface().setdefault("unrouted_shown", set()).discard((reg.key, character.lower()))
         line = f"🔌 {character}'s companion now feeds this council (bound by {by})"
-        await opsmod.audited(self.ops, reg, by, f"loot {self.loot_where(reg, session.run_key or session.id)}: {character}'s companion bound to {loot_label(session) or 'its council'}", via="discord", by_id=by_id)
+        await opsmod.audited(self.ops, reg, by, f"loot {self.loot_where(reg, session.id)}: {character}'s companion bound to {loot_label(session) or 'its council'}", via="discord", by_id=by_id)
         await self.loot_notify(reg, session, line, kind="presence")
         await self.loot_unrouted_changed(reg)
         return line

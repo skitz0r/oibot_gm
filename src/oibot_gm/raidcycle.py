@@ -2085,15 +2085,23 @@ def stamp_runs(reg: Registry, rs: "RaidStore", commit: bool = True) -> list[str]
     lead's start, `schedule` = its run dict's schedule_id when that is a real schedule id (else None: adhoc, after, test),
     `occurrence` = its start in guild wall time when it has a schedule. Its run dict gets the same `occurrence` / `event`
     / `part` / `starts`. Only those keys are added to a run file (written from its own JSON, every other value as it
-    was); finished and cancelled runs are never touched. Idempotent: nothing to stamp = nothing written. The writes are
+    was); finished and cancelled runs are never touched. A live run whose FILE carries the stamps but whose run dict
+    lacks `event` (a start whose config save failed) heals: the dict takes the file's stamps, the file is not rewritten.
+    Idempotent: nothing to stamp = nothing written. The writes are
     the caller's batch; `commit=False` (migrate_at_start) leaves the run dicts' save and the commit message to the caller,
     so the schedules lift and the stamps land in one commit saying each once. → the run keys stamped."""
     if getattr(reg, "_shadow", False):
         return []
     todo = [e for e in rs.live() if not e.event]
-    if not todo:
+    # a run file stamped whose run dict is not (the start's config save failed): the dict takes the file's stamps
+    heal = [(e, t) for e in rs.live() if e.event and (t := reg.config.roster(e.team)) is not None and not t.get("event")]
+    if not todo and not heal:
         return []
     done, dicts = [], False
+    for ev, team in heal:
+        team.update({k: getattr(ev, k) for k in STAMP_FIELDS if k != "schedule"})
+        dicts = True
+        done.append(ev.key)
     for ev in todo:
         stamps = _run_stamps(reg, rs, ev)
         path = reg.store.root / ev.rel_path(rs.key)

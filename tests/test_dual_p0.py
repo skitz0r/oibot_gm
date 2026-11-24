@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from itsdangerous import URLSafeSerializer
 from test_mcp import TOKEN, FakeBot
 
-from oibot_gm import configops, guild_routing, ops as ops_mod, raidcycle as rc
+from oibot_gm import configops, guild_routing, ops as ops_mod, raid_views as rv, raidcycle as rc
 from oibot_gm.configops import ConfigOp
 from oibot_gm.discord_bot import OibotGM
 from oibot_gm.discord_help import asker_identity
@@ -731,11 +731,11 @@ def test_no_surface_prefix_is_written_by_hand_and_the_board_line_carries_via(reg
     bot = Bot(reg, rs)
     team = rc.run_team(reg, ev)
     run(bot.after_board_change(reg, rs, ev, team, [], [seated[0].display_name], "Jon", via="mcp"))
-    assert bot.lines[-1] == ("info", f"[mcp] Jon: edited the {ev.key} board -1")
+    assert bot.lines[-1] == ("info", f"[mcp] Jon: edited the {rv.run_title(reg, ev)} board -1")
     run(bot.after_board_change(reg, rs, ev, team, [], [seated[1].display_name], "Jon"))
-    assert bot.lines[-1] == ("info", f"[web] Jon: edited the {ev.key} board -1"), "the board is the web's by default"
+    assert bot.lines[-1] == ("info", f"[web] Jon: edited the {rv.run_title(reg, ev)} board -1"), "the board is the web's by default"
     run(bot.after_board_change(reg, rs, ev, team, [], [seated[2].display_name], "Jon", via="discord"))
-    assert bot.lines[-1] == ("info", f"Jon: edited the {ev.key} board -1")
+    assert bot.lines[-1] == ("info", f"Jon: edited the {rv.run_title(reg, ev)} board -1")
     # a web route reached with the MCP bearer: the pin line is the owner's, prefixed [mcp]
     monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
     fb = FakeBot(reg, rs)
@@ -745,4 +745,4 @@ def test_no_surface_prefix_is_written_by_hand_and_the_board_line_carries_via(reg
     join(reg, rs, ev2, pool[:3])
     r = c.post(f"/api/run/{ev2.key}/pin", json={"member": pool[0].display_name, "pin": "in"}, headers={"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot"})
     assert r.status_code == 200, r.text
-    assert fb.ops.lines[-1] == ("info", f"[mcp] the owner: {ev2.key} {pool[0].display_name} pinned in"), fb.ops.lines
+    assert fb.ops.lines[-1] == ("info", f"[mcp] the owner: {rc.run_words(reg, ev2)} {pool[0].display_name} pinned in"), fb.ops.lines

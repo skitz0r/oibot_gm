@@ -495,10 +495,10 @@ class FeedMixin:
             await self.loot_notify(reg, raid, f"⚠ **{d.item_name}**: in game it went to **{who}**, recorded earlier to **{out['recorded']}** — Correct?", kind="conflict", drop_id=d.drop_id)
         elif res == "recorded_reason_pending":
             bot = out["bot"]
-            await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} in game (bot picked {bot}); reason pending", "companion", None)
+            await self._audit(reg, by, f"loot {self.loot_where(reg, raid.id)}: recorded {d.item_name} → {who} in game (bot picked {bot}); reason pending", "companion", None)
             await self.loot_notify(reg, raid, f"⚠ **{d.item_name}** → **{who}** in game, but the bot proposed **{bot}**. Recorded — give the reason so it becomes a precedent (or correct it if it was a mistake).", kind="mismatch", drop_id=d.drop_id)
         elif res == "manual":
-            await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} (in game, no proposal)", "companion", None)
+            await self._audit(reg, by, f"loot {self.loot_where(reg, raid.id)}: recorded {d.item_name} → {who} (in game, no proposal)", "companion", None)
             await self.loot_notify(reg, raid, f"📒 **{d.item_name}** → **{who}** · recorded — wrong? Correct…", kind="manual", drop_id=d.drop_id)
         return {"result": res}
 

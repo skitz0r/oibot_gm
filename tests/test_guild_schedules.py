@@ -328,7 +328,7 @@ def test_the_start_lifts_each_guild_and_says_so_once(data_root, open_registry):
 
 
 TIMING_MOVED = "Sheet timing now belongs to each schedule. Moved: Barrow Deeps · Raid nights: confirm-by 12 hours before."
-IDS_LINE = ("Each schedule now stands on its own instead of under one raid, and its regulars came with it: "
+IDS_LINE = ("Each schedule now stands on its own instead of under one raid: "  # the fixture has no regulars
             "Barrow Deeps · Raid nights · Onyxia's Lair · Raid nights.")
 
 

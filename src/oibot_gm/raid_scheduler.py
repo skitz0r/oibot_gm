@@ -96,7 +96,8 @@ class RaidSchedulerMixin:
                 c.warned = True
                 cfg = self.registries.cfg_for(raid.guild)
                 if cfg:
-                    await self.ops.emit(cfg, "warn", f"companion {c.character} silent for {int(c.silent_for // 60)} min during {raid.id} — is /chatlog on?")
+                    where = self.loot_where(self.loot_reg(raid), raid.id)
+                    await self.ops.emit(cfg, "warn", f"companion {c.character} silent for {int(c.silent_for // 60)} min during {where} — is /chatlog on?")
             elif c.silent_for <= 300:
                 c.warned = False
 

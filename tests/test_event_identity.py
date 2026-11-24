@@ -256,6 +256,32 @@ def test_stamping_twice_changes_nothing(data_root, old_store_with):
     assert rc.run_kind(reg, again.events[lk]) == "adhoc" and rc.run_series(reg, again.events[lk]) is None
 
 
+def test_a_run_dict_without_stamps_heals_from_its_run_file(data_root, old_store_with):
+    """The files were stamped but the config save failed (twice): the next stamp_runs gives the dicts the files' stamps
+    and leaves the files as they are; a third run writes nothing."""
+    t = _soon(48).replace(hour=18, minute=30)
+    cfg, _dicts, files = _big_guys_pair(t)
+    reg, rs, store = _old_guild(data_root, old_store_with, cfg, files)
+    lk, fk = files[0]["key"], files[1]["key"]
+    rc.stamp_runs(reg, rs)
+    store.flush()
+    on_disk = {k: (data_root / GUILD / "raids" / f"{k}.json").read_text() for k in (lk, fk)}
+    for raw in files:  # the dicts as an unsaved config left them
+        d = reg.config.roster(raw["team"])
+        for k in ("occurrence", "event", "part", "starts"):
+            d.pop(k, None)
+    reg.save_config("t: the dicts without their stamps", notify=False)
+    store.flush()
+    n0 = commit_count(store)
+    assert sorted(rc.stamp_runs(reg, rs)) == sorted([lk, fk])
+    store.flush()
+    lead_dict, follow_dict = reg.config.roster(files[0]["team"]), reg.config.roster(files[1]["team"])
+    assert (lead_dict["event"], lead_dict["part"], follow_dict["event"], follow_dict["part"], follow_dict["starts"]) == (lk, 0, lk, 1, 180)
+    assert {k: (data_root / GUILD / "raids" / f"{k}.json").read_text() for k in (lk, fk)} == on_disk, "the files are not rewritten"
+    assert commit_count(store) == n0 + 1
+    assert rc.stamp_runs(reg, rs) == []
+
+
 def test_the_start_saves_the_lift_and_the_stamps_in_one_commit(data_root, old_store_with):
     t = _soon(48).replace(hour=18, minute=30)
     cfg, _dicts, files = _big_guys_pair(t)
