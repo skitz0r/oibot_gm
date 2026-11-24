@@ -84,10 +84,11 @@ export const HEAD_STYLE = { "--head-h": `${HEAD_H}px` } as React.CSSProperties;
  *  between steps, Move earlier / Move later / Remove per step, the empty slot while fewer than `max` steps. Dragging is
  *  an enhancement on a desktop (a raid onto the slot or a step, a step onto another to reorder); every action has its
  *  button, and below sm the steps stack with no drag and no sideways scroll. Pure: it never fetches; `onChange` gets
- *  the whole new lineup (a new step starts when the one before it ends — C12). */
-export function LineupBuilder({ raids, value, onChange, startClock, fixedFirst, max, times }: {
+ *  the whole new lineup (a new step starts when the one before it ends — C12). `fullWords` = the server's sentence
+ *  shown in the slot's place once the lineup holds `max` raids (registry.LINEUP_MAX_WORDS). */
+export function LineupBuilder({ raids, value, onChange, startClock, fixedFirst, max, fullWords, times }: {
   raids: PaletteRaid[]; value: LineupEntry[]; onChange: (next: LineupEntry[]) => void; startClock: string | null;
-  fixedFirst?: boolean; max: number; times?: (string | undefined)[];
+  fixedFirst?: boolean; max: number; fullWords?: string; times?: (string | undefined)[];
 }) {
   const phone = !!useMediaQuery("(max-width: 48em)");
   const [over, setOver] = useState<number | "slot" | null>(null);
@@ -185,9 +186,9 @@ export function LineupBuilder({ raids, value, onChange, startClock, fixedFirst, 
                     <div>
                       <Text size="sm" fw={600} c="dimmed" mb={4}>Rosters</Text>
                       <span className={css.stepper}>
-                        <ActionIcon variant="default" size={36} aria-label="one roster fewer" disabled={e.rosters <= 1} onClick={() => setRosters(i, e.rosters - 1)}><IconMinus size={16} /></ActionIcon>
+                        <ActionIcon variant="default" size={36} aria-label={`one roster fewer for ${name}`} disabled={e.rosters <= 1} onClick={() => setRosters(i, e.rosters - 1)}><IconMinus size={16} /></ActionIcon>
                         <b aria-live="polite">{e.rosters}</b>
-                        <ActionIcon variant="default" size={36} aria-label="one roster more" disabled={e.rosters >= MAX_ROSTERS} onClick={() => setRosters(i, e.rosters + 1)}><IconPlus size={16} /></ActionIcon>
+                        <ActionIcon variant="default" size={36} aria-label={`one roster more for ${name}`} disabled={e.rosters >= MAX_ROSTERS} onClick={() => setRosters(i, e.rosters + 1)}><IconPlus size={16} /></ActionIcon>
                       </span>
                     </div>
                   </div>
@@ -196,6 +197,7 @@ export function LineupBuilder({ raids, value, onChange, startClock, fixedFirst, 
               </div>
             );
           })}
+          {full && fullWords && <Text size="sm" c="dimmed" className={css.full} role="status">{fullWords}</Text>}
           {!full && (
             <div style={{ display: phone ? "block" : "flex" }}>
               {value.length > 0 && <Link from={value[value.length - 1].rosters} to={1} height={height} phone={phone} dashed />}

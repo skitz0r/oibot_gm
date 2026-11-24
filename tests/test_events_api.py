@@ -12,6 +12,7 @@ from test_raid_night import H, web_bot  # noqa: F401 — the routes' fixture
 from oibot_gm import consequences as cq
 from oibot_gm import event_view
 from oibot_gm import raidcycle as rc
+from oibot_gm import registry
 from oibot_gm.constants import CONFIRM_WORDS, PAGE_WORDS
 
 HYJAL, RID = "hyjal_summit_forever", "barrow_deeps"
@@ -466,6 +467,29 @@ def test_the_new_event_page_reads_its_choices_from_the_server(officer_client, re
     assert j["lineups"] == [{"id": sid, "name": "Tuesday raid night", "lineup": [{"raid": HYJAL, "rosters": 1, "starts": 0}, {"raid": RID, "rosters": 2, "starts": 180}]}]
     assert [x["words"] for x in j["locks"]] == ["2 hours before", "24 hours before"] and [x["hours"] for x in j["locks"]] == [2, 24]
     assert j["lineup_max"] == 4
+
+
+def test_copy_a_lineup_leaves_pickup_templates_out(officer_client, reg):
+    """A pickup template's lineup copied without its timing would open something else than the template (the New event
+    review, P3): "Copy a lineup" offers schedules only."""
+    sid = tuesday(reg)
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup"}, "t", raid=HYJAL)
+    j = officer_client.get("/api/event-new").json()
+    assert [x["id"] for x in j["lineups"]] == [sid]
+    assert j["lineup_max"] == 4 and j["lineup_full"] == registry.LINEUP_MAX_WORDS
+
+
+def test_a_preview_without_a_lineup_never_builds_the_new_event_view(web_bot, reg, monkeypatch):
+    """Only the New event page sends `lineup`: every other preview caller (the old Open wizard on Rosters) answers without
+    event_view.new_event_view, so a refusal raised there never turns a working preview into a 500 (P3)."""
+    def boom(*a, **k):
+        raise registry.RegistryError("not for this caller")
+    monkeypatch.setattr(event_view, "new_event_view", boom)
+    c, h = web_bot.c, H()
+    day = (reg.now_local() + timedelta(days=3)).strftime("%Y-%m-%d")
+    r = c.post(f"/api/raid/{HYJAL}/open/preview", json={"when": f"{day} 19:00", "schedule": ""}, headers=h)
+    assert r.status_code == 200, r.text
+    assert "facts" not in r.json()
 
 
 def test_a_four_step_lineup_opens_on_a_four_raid_profile(store, profile, monkeypatch):

@@ -12,7 +12,7 @@ from typing import Callable
 from . import consequences as cq
 from . import raidcycle as rc
 from .constants import MARK_WORDS, PAGE_WORDS
-from .registry import LINEUP_MAX, Registry, RegistryError
+from .registry import LINEUP_MAX, LINEUP_MAX_WORDS, Registry, RegistryError
 
 CLOSED = ("done", "cancelled")
 HISTORY_PAGE = 20  # history rows per page, newest first
@@ -311,14 +311,15 @@ def lock_choices() -> list[dict]:
 def new_event_options(reg: Registry) -> dict:
     """What the New event page picks from (GET /api/event-new): {today (the GUILD's date, the Day picker's lower bound —
     never the browser's), raids [{id, name, size, hours}] (the palette), lineups [{id, name, lineup [{raid, rosters,
-    starts}]}] (Start from › Copy a lineup: each active schedule whose raids are all in the game, starts in minutes after
-    the first — Registry.lineup_offsets), locks (lock_choices), lineup_max (registry.LINEUP_MAX: the builder holds no copy)}."""
+    starts}]}] (Start from › Copy a lineup: each active schedule — never a pickup template — whose raids are all in the game, starts in minutes after
+    the first — Registry.lineup_offsets), locks (lock_choices), lineup_max (registry.LINEUP_MAX: the builder holds no copy), lineup_full (LINEUP_MAX_WORDS: the builder's
+    line at a full lineup)}."""
     raids = [{"id": rid, "name": reg.raid_def(rid).get("name", rid), "size": int(reg.raid_def(rid).get("size") or 0),
               "hours": float(reg.raid_def(rid).get("duration_hours") or 0)} for rid in reg.profile.raids]
     lineups = []
     for s in reg.all_schedules():
-        if not s.get("active", True):
-            continue
+        if not s.get("active", True) or s.get("kind") == "pickup":
+            continue  # a pickup template's lineup without its timing would open something else than the template
         lineup = [{"raid": str(e.get("raid") or ""), "rosters": int(e.get("rosters") or 1), **({"starts": e["starts"]} if e.get("starts") is not None else {})}
                   for e in (s.get("lineup") or rc.schedule_lineup(s["raid"], s))]
         if not lineup or any(e["raid"] not in reg.profile.raids for e in lineup):
@@ -329,7 +330,8 @@ def new_event_options(reg: Registry) -> dict:
             continue
         lineups.append({"id": s["id"], "name": s.get("name") or s["id"],
                         "lineup": [{"raid": e["raid"], "rosters": e["rosters"], "starts": off} for e, off in zip(lineup, offsets)]})
-    return {"today": reg.now_local().date().isoformat(), "raids": raids, "lineups": lineups, "locks": lock_choices(), "lineup_max": LINEUP_MAX}
+    return {"today": reg.now_local().date().isoformat(), "raids": raids, "lineups": lineups, "locks": lock_choices(), "lineup_max": LINEUP_MAX,
+            "lineup_full": LINEUP_MAX_WORDS}
 
 
 def seats_words(reg: Registry, lineup: list[dict]) -> str:

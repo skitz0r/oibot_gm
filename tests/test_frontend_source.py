@@ -965,15 +965,28 @@ def test_schedule_editing_stays_reachable_until_the_schedules_page():
 
 def test_the_builder_works_without_a_drag():
     b = _code_only((SRC / "components" / "lineup" / "LineupBuilder.tsx").read_text())
-    for needle in ("draggable", "onDrop", '"Add"', "Move earlier", "Move later", '"Remove"', "one roster fewer", "one roster more", "fixedFirst"):
+    for needle in ("draggable", "onDrop", '"Add"', "Move earlier", "Move later", '"Remove"', "aria-label={`one roster fewer for ${name}`}",
+                   "aria-label={`one roster more for ${name}`}", "fixedFirst"):
         assert needle in b, needle
-    assert "max" in b and 'useMediaQuery("(max-width: 48em)")' in b, "steps stack below sm"
+    assert "const full = value.length >= max" in b and 'useMediaQuery("(max-width: 48em)")' in b, "steps stack below sm"
 
 
 def test_new_event_picks_a_time_never_types_one():
     page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text()); when = _code_only((SRC / "components" / "WhenPicker.tsx").read_text())
     assert "<WhenPicker" in page and "<DatePickerInput" in when and "clock12" in when and "TextInput" not in when + page
     assert 'useDirty("lineup:new"' in page and "guardNav(" in page and "StartAdhoc" not in (SRC / "pages" / "Rosters.tsx").read_text()
+
+
+def test_a_taken_time_shows_no_borrowed_times():
+    """The New event review (P1, P4): under a refusal the server answers the LIVE event's lineup, so the builder takes the
+    preview's step times only when there is no refusal and the preview's raids are the builder's, and the facts hide
+    behind the refusal box; at a full lineup the builder says so in the server's sentence (/api/event-new lineup_full)."""
+    page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    b = _code_only((SRC / "components" / "lineup" / "LineupBuilder.tsx").read_text())
+    assert "times={p && !checking ? p.lineup.map" not in page
+    assert "p.lineup.map((s) => s.raid).join() === lineup.map((e) => e.raid).join()" in page and "!refusal" in page
+    assert "{p && !refusal && <Facts items={p.facts}" in page
+    assert "fullWords={opts.lineup_full}" in page and "{full && fullWords" in b
 
 
 def test_new_event_prints_only_the_servers_words():
@@ -988,11 +1001,11 @@ def test_new_event_prints_only_the_servers_words():
     assert "minDate={minDate}" in when and "opts.today" in page and "toISOString" not in when + page
     assert "max={opts.lineup_max}" in page and '"/api/event-new"' in page
     assert "useConfirmBox(" in page and "seen: fp" in page and 'p.kind === "scheduled" ? p.schedule :' in page
-    assert 'valueFormat="ddd D MMM"' in when and "15" in when
+    assert 'valueFormat="ddd D MMM"' in when and "Array.from({ length: 96 }, (_, i) => ({ value: hhmm(i * 15), label: clock12(i * 15) }))" in when
     b = _code_only((SRC / "components" / "lineup" / "LineupBuilder.tsx").read_text())
     assert "Drop a raid here for step" in b and "-player · about" in b and "aria-label={`Move ${" in b
     assert "fetch(" not in b and "api." not in b, "the builder is pure: it never fetches"
-    assert "<LineupPicture" in page or (SRC / "components" / "lineup" / "LineupPicture.tsx").exists()
+    assert "<LineupPicture lineup={p.lineup}" in page, "a schedule's night is drawn as its own lineup"
     rosters = _code_only((SRC / "pages" / "Rosters.tsx").read_text())
     assert 'to="/events/new"' in rosters and "New event" in rosters
     assert 'path="/events/new"' in _code_only((SRC / "App.tsx").read_text())

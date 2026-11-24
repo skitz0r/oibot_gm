@@ -1934,7 +1934,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """What Open would do, nothing written (design B4; rc.open_preview — the /raid open wizard says the same):
         {kind: scheduled | adhoc, schedule, schedule_name, occurrence, start (ISO: carry it back to Open), label (12-hour guild
         time), when_note (the DST line), exists, channel, rules, past, follow, follow_line} + the New event page's "What this
-        makes" (event_view.new_event_view: facts, lineup, notes, refusal_box). Body as Open's: {when? | start?, schedule?,
+        makes" (event_view.new_event_view: facts, lineup, notes, refusal_box — only when `lineup` was sent). Body as Open's: {when? | start?, schedule?,
         follow?, lineup?, rosters?, timing?}. A time that is a schedule's night answers with THAT schedule's lineup when
         `lineup` was sent (the New event page's builder is not used for it). A refusal answers with its box (400)."""
         v, d = await body(request, officer=True)
@@ -1960,7 +1960,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             p["box"] = open_box(v.reg, rid, p)
         except (RegistryError, KeyError, ValueError, TypeError):
             p["box"] = None
-        p.update(event_view.new_event_view(v.reg, rs, rid, p, first_n or 1))
+        if "lineup" in d:  # only the New event page sends a lineup: every other caller's preview stays as it was
+            p.update(event_view.new_event_view(v.reg, rs, rid, p, first_n or 1))
         return p
 
     @app.post("/api/raid/{rid}/open")

@@ -18,7 +18,7 @@ import css from "./listpage.module.css";
  *  picker's lower bound); `lineup_max` = registry.LINEUP_MAX (the builder holds no copy). */
 type Options = {
   today: string; raids: PaletteRaid[]; lineups: { id: string; name: string; lineup: LineupEntry[] }[];
-  locks: { hours: number; words: string }[]; lineup_max: number;
+  locks: { hours: number; words: string }[]; lineup_max: number; lineup_full: string;
 };
 /** POST /api/raid/{rid}/open/preview with the New event fields (event_view.new_event_view): "What this makes" in the
  *  server's words — facts, each step's start, notes, the refusal box (a night already open, a past time) and, for a
@@ -90,6 +90,9 @@ export function LineupPage({ mode }: { meta: Meta; mode: "new-event" }) {
   const scheduled = p?.kind === "scheduled";
   const refusal = refused || (p ? p.refusal_box : null);
   const ready = !!p && !refusal && !checking;
+  // the server's step times are the builder's only when nothing is refused and the preview's raids ARE the builder's:
+  // a taken time answers with the LIVE event's lineup (the refusal box names it), never times to borrow
+  const own = !!p && !refusal && !checking && p.lineup.map((s) => s.raid).join() === lineup.map((e) => e.raid).join();
 
   const opened = (r: Opened) => {
     clearDirty();
@@ -138,8 +141,8 @@ export function LineupPage({ mode }: { meta: Meta; mode: "new-event" }) {
         </ViewSection>
         <ViewSection title="Lineup">
           {scheduled && p ? <LineupPicture lineup={p.lineup} /> : (
-            <LineupBuilder raids={opts.raids} value={lineup} max={opts.lineup_max} startClock={time}
-              times={p && !checking ? p.lineup.map((s) => s.time_words) : undefined}
+            <LineupBuilder raids={opts.raids} value={lineup} max={opts.lineup_max} fullWords={opts.lineup_full} startClock={time}
+              times={own ? p.lineup.map((s) => s.time_words) : undefined}
               onChange={(next) => { setLineup(next); edit(); }} />
           )}
         </ViewSection>
@@ -162,8 +165,8 @@ export function LineupPage({ mode }: { meta: Meta; mode: "new-event" }) {
                 {refusal.sentences.map((s) => <Text key={s} size="sm">{s}</Text>)}
               </MBox>
             )}
-            {p && <Facts items={p.facts} />}
-            {p && p.notes.map((s) => <Text key={s} size="sm" c="dimmed">{s}</Text>)}
+            {p && !refusal && <Facts items={p.facts} />}
+            {p && !refusal && p.notes.map((s) => <Text key={s} size="sm" c="dimmed">{s}</Text>)}
             <Group justify="flex-end" gap="sm" mt="xs">
               <Button variant="default" onClick={() => guardNav(EVENTS)}>Back</Button>
               <Button disabled={!ready} loading={busy} onClick={open}>Open the sheet</Button>

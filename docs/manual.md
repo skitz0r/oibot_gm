@@ -842,7 +842,8 @@ follow-ons, in order (a fifth is refused: *"A run holds at most 4 raids."*). Eac
 run, and each starts after the one before it (*"Each raid starts after the one before it."*). Today a NEW schedule of
 three or four raids is made over MCP (`schedule_set` with `fields = {lineup: [{raid, rosters}, …]}`, the first raid
 first) or another structured change; the site's schedule editor, Discord and plain text set the second raid only, and an
-ad hoc Open takes one follow-on at most — the site gets the full lineup builder later. Editing a schedule there changes
+ad hoc Open there takes one follow-on at most. The site's **New event** page takes the whole lineup, up to four raids, and
+at four it says *"A run holds at most 4 raids."* in place of the empty step. Editing a schedule there changes
 the lead and the second raid; the raids after them stay as they are, and clearing the second raid moves the third up
 into its place. Two runs at the same time each keep their
 own follow-ons. A schedule never opens a night on which a follow-on would start before that raid first opens: the
@@ -1012,7 +1013,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    has **Open now** (one press, then the same confirm) and one that can't yet says why in the bot's words (more than
    three weeks out: when Open works and when its sheet opens on its own; a time whose run was cancelled or ended).
    **New event and the lineup builder.** The page has four sections. *Start from* › *Copy a lineup* fills the builder
-   with an active schedule's lineup (the first schedule is picked to begin with) or *An empty lineup*. *Lineup* is the
+   with an active schedule's lineup (the first schedule is picked to begin with; a pickup template is not offered) or
+   *An empty lineup*. *Lineup* is the
    builder: the raids on the left (each with its size and about how long it runs, and an **Add** button — a raid
    already in the lineup is greyed), the steps on the track (up to four, one raid each, never the same raid twice).
    Each step has **Starts** (step 1 starts when the event does; a later step starts when the raid before it ends, or
@@ -1027,7 +1029,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    **Confirmation** (*Not asked*), and any note — the daylight-saving line, a raid that first opens after the event
    starts, no signup channel. That section is the confirmation: **Open the sheet** opens the event at once and takes
    you to its card on the Rosters page. A time that already has an open event of that first raid says *That time is
-   taken* and Open waits; a time in the past says so too. A time that **is** one of a schedule's nights shows that
+   taken* and Open waits — the facts and the steps' times stay hidden until you pick another time; a time in the past
+   says so too. A time that **is** one of a schedule's nights shows that
    schedule's lineup (*Comes from* names it), opens that schedule's event — not the builder's lineup, rosters or lock —
    and asks first with the *Open the sheet for …?* box. **Back** and *Back to Events* (and a rail link) ask *Leave
    without saving?* with how many edits you made. With **no signup channel set** the scheduler opens nothing: each run that was due
