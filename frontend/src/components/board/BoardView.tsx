@@ -26,13 +26,15 @@ type Verb = "move" | "roster" | "swap" | "substitute" | "release";
  *  One ⓘ legend says what the marks mean and how dragging works (never repeated under every card); an open seat is a
  *  dashed slot with no word. After the lock only the groups with someone in them show, plus one empty group to drop
  *  into. `onHide`: before the lock the card collapses it back to one line.
- *  `variant="event"` (the Events page): the board is the SERVER's picture of where the lock would place everyone — no
- *  Clear, Place the rest or split control; each roster's `open` roles (the server's) are drawn as dashed slots, role
- *  icon + "open seat"; a drop or Move to… sends ONE move with `shown: true` (read on the picture the server holds) and
- *  the page draws what the server answers, never a place of its own. Before the lock a move goes at once; a locked
- *  event takes no drag, and its Move to… asks through the server-worded box (useConfirmBox); a finished event is read
- *  only. Not placed says a name dropped there stays off the roster. Without `variant` (the Test bench) as before. */
-export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: Sheet; meta: Meta; onBoard: OnBoard; onHide?: () => void; onReload?: () => Promise<void> | void; variant?: "event" }) {
+ *  `variant="event"` (the Events page): before the lock the board is the OFFICERS' layout (nothing solved) — no Clear,
+ *  Place the rest or split control here (Clear the board is in the event's More menu); `bankAction` (Auto-fill groups)
+ *  sits beside Not placed, under it the server's note that a name there is only not placed yet, and a name kept off
+ *  through the ⋮ menu carries the server's word `kept_off` on its line. A locked roster's `open` roles (the server's)
+ *  are drawn as dashed slots, role icon + "open seat". A drop or Move to… sends ONE move and the page draws what the
+ *  server answers, never a place of its own. Before the lock a move goes at once; a locked event takes no drag, and its
+ *  Move to… asks through the server-worded box (useConfirmBox); a finished event is read only. Without `variant` (the
+ *  Test bench) as before. */
+export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAction }: { e: Sheet; meta: Meta; onBoard: OnBoard; onHide?: () => void; onReload?: () => Promise<void> | void; variant?: "event"; bankAction?: React.ReactNode }) {
   const board = e.board!;
   const locked = e.state !== "open";
   const event = variant === "event";
@@ -78,7 +80,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
   const commit = (groups: string[][][], strategy?: string) => send("layout", { groups: groups.flat(), rev: e.rev, ...(strategy ? { strategy } : {}) });
   /** A drag is sent as one move and applied server-side to the board as it is now, so two officers merge. `state` = the
    *  state this board was drawn in: a drag dropped after the scheduler locked the run is refused (409 + the board). */
-  const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to, state: e.state === "open" ? "open" : "locked", ...(event ? { shown: true } : {}) });
+  const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to, state: e.state === "open" ? "open" : "locked" });
 
   async function clear() {
     // the sentence comes from the server (consequences.py "clear"); the browser prints it, never composes one
@@ -110,7 +112,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
    *  board, drawn at once); a move that can't be made, its refusal box (Back alone). */
   async function serverMove(name: string, target: Target) {
     const url = `/api/run/${encodeURIComponent(e.key)}/move`;
-    const base = { member: name, to: target, state: "locked", shown: true };
+    const base = { member: name, to: target, state: "locked" };
     const boxOfErr = (err: unknown): BoxT | undefined => (err instanceof ApiError ? (err.body as { box?: BoxT } | undefined)?.box : undefined);
     const preview = async (): Promise<BoxT> => {
       try { return (await api.post<{ box: BoxT }>(url, { ...base, preview: true })).box; } catch (err) { const b = boxOfErr(err); if (b) return b; throw err; }
@@ -188,8 +190,8 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
     onPick: () => place(name, from, { r: ri, g: gi, i: oi }, "menu"),
   });
   const onDragStart = (name: string, from: Drag["from"]) => (ev: React.DragEvent) => { drag.current = { name, from }; ev.dataTransfer.effectAllowed = "move"; live.dragging = true; };
-  /** Each roster's open seats as the server sends them (`open`: a role per empty seat a minimum still wants; null while the
-   *  board is placed again = none drawn), put in that roster's drawn empty slots in order — the Events page only. */
+  /** Each roster's open seats as the server sends them (`open`: a role per empty seat a minimum still wants; null before the
+   *  lock = none drawn), put in that roster's drawn empty slots in order — the Events page only. */
   const openAt = (ri: number): Record<string, string> => {
     const r = board.rosters[ri];
     const roles = event && r.open ? [...r.open] : [];
@@ -208,7 +210,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
   });
   const chip = (s: Seat, from: Drag["from"], mark?: string | null) => (
     <Box key={s.display_name} draggable={drags && !readOnly} onDragStart={drags && !readOnly ? onDragStart(s.display_name, from) : undefined} style={{ cursor: drags && !readOnly ? "grab" : undefined, padding: "2px 6px", borderRadius: 6, background: from ? "transparent" : "var(--mantine-color-slate-6)", border: from ? "1px solid transparent" : "1px solid var(--mantine-color-slate-5)" }}>
-      <SeatLine meta={meta} s={s} mark={locked && !readOnly && (!event || e.confirms !== false) ? (mark ?? null) : undefined} right={<><PinMark meta={meta} pin={pins[s.display_name]} />{!readOnly && <Box ml="auto" onClick={(ev) => ev.stopPropagation()}><MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload || (() => undefined)} moves={movesFor(s.display_name, from)} /></Box>}</>} />
+      <SeatLine meta={meta} s={s} mark={locked && !readOnly && (!event || e.confirms !== false) ? (mark ?? null) : undefined} right={<>{event && !locked && !from && pins[s.display_name] === "out" && <Text span size="xs" c="red.4" style={{ whiteSpace: "nowrap" }}>{meta.page_words.kept_off}</Text>}<PinMark meta={meta} pin={pins[s.display_name]} />{!readOnly && <Box ml="auto" onClick={(ev) => ev.stopPropagation()}><MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload || (() => undefined)} moves={movesFor(s.display_name, from)} /></Box>}</>} />
     </Box>
   );
   const groupSummary = (sm: GroupSummary, gi: number) => sm.groups[gi];
@@ -238,7 +240,8 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant }: { e: 
             <Eyebrow plain>{bankWord} · {board.bank.length}</Eyebrow>
             <SegmentedControl size="xs" value={bankSort} onChange={pickSort} data={[{ value: "signup", label: "signup" }, { value: "spec", label: "spec" }, { value: "role", label: "role" }]} />
           </Group>
-          {event && !locked && <Text size="xs" c="dimmed" mt={4}>{meta.page_words.not_placed_off}</Text>}
+          {event && !locked && bankAction}
+          {event && !locked && <Text size="xs" c="dimmed" mt={4}>{meta.page_words.not_placed_note}</Text>}
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
             {board.bank.length === 0 && !event && <Text size="xs" c="dimmed">{!placed ? "Nobody has joined yet — the sheet is in Discord." : locked ? "Everyone who joined is rostered. A name dragged here frees their seat." : "Everyone who joined is placed. A name dragged here goes back to not placed — still joined, the lock seats them."}</Text>}
             {board.bank.length === 0 && event && <Text size="xs" c="dimmed">{meta.page_words.bank_empty[!placed ? "nobody" : locked ? "rostered" : "placed"]}</Text>}

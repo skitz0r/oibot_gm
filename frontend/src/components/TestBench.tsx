@@ -201,7 +201,7 @@ function Rehearse({ meta, state, raid, raidName, setRaid, puppets, busy, onPost,
         <SegmentedControl size="sm" value={tempo} onChange={setTempo} data={state.tempos.map((x) => ({ value: x.id, label: x.label }))} />
         <Switch size="sm" label="DM every puppet when it opens" checked={dm} onChange={(e) => setDm(e.currentTarget.checked)} />
         <Group gap="sm" ml="auto" wrap="wrap">
-          <Tooltip label="Opens a test run two weeks out with every puppet joined, never posted in Discord. Its event page draws the board as the lock would place them: the best comp from them.">
+          <Tooltip label="Opens a test run two weeks out with every puppet joined, never posted in Discord. On its event page, Auto-fill groups shows the best comp from them.">
             <Button size="sm" variant="default" leftSection={<IconFlask size={15} />} disabled={!puppets || !raid} loading={busy === "comp"} onClick={onComp}>Try a comp</Button>
           </Tooltip>
           <Button size="sm" disabled={!raid || !!state.open_refusal || !puppets} loading={busy === "run"}

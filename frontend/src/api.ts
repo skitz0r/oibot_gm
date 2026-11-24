@@ -147,8 +147,11 @@ export interface PageWords {
   open_in_discord: string; no_answer_yet: string; answers_one: string; bot_asks: string; officer_asks: string; every_main: string;
   used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
   rosters_of: string; placed_of: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string;
-  sheet_waits: string; sheet_not_posted: string; open_seat: string; not_placed_off: string; seats_of: string; no_moves: string;
-  bank_empty: Record<"nobody" | "placed" | "rostered", string>; board_working: string; board_failed: string;
+  sheet_waits: string; sheet_not_posted: string; open_seat: string; not_placed_note: string; kept_off: string; seats_of: string; no_moves: string;
+  bank_empty: Record<"nobody" | "placed" | "rostered", string>;
+  /** Auto-fill groups (event_board.AutoFill): the button, its working line and its outcomes */
+  autofill_button: string; autofill_working: string; autofill_done: string; autofill_changed: string; autofill_stopped: string;
+  autofill_busy: string; autofill_locked: string; autofill_nobody: string;
   by_an_officer: string; no_times: string; no_reminder: string; for_seats: string; short_every_week: string;
   ready_every_week: string; short_weeks: string; paused_next: string; open_now: string; no_minimums: string; played_nowhere: string;
   /** a setting's name: the schedule editor's labels and the Save box's lines (configops) say the same */
@@ -236,8 +239,13 @@ export interface PartView {
   placed_words: string | null; rostered_words: string | null;
   /** why Undo my moves is greyed (the officer moved nobody here), the server's sentence; null with an undo box or once locked */
   undo_why: string | null;
-  short: Record<string, number>; sheet: Sheet | null; board_state: "ready" | "working" | "failed" | "locked";
-  board_error: string | null; mine: string[]; undo_box: Box | null;
+  short: Record<string, number>; sheet: Sheet | null;
+  /** open = the officers' board before the lock (nothing solved); locked = the roster as it stands (also a finished raid) */
+  board_state: "open" | "locked";
+  /** Auto-fill groups beside Not placed (open raids; null once locked): working while it runs (the server's words), else the
+   *  sentence of an auto-fill that wrote nothing (`failed`), shown while the board is the one it was about */
+  autofill: { working: boolean; words: string | null; failed: boolean } | null;
+  mine: string[]; undo_box: Box | null;
   /** the officers' own placements (open raids; null once locked). Undo my moves is POST /api/run/{key}/layout {undo, seen}. */
   layout: string[][] | null;
   /** the split strategy this raid uses now (rc.run_strategy); null once locked — More › Split strategy… */
@@ -252,7 +260,9 @@ export interface EventView {
   parts: PartView[]; activity: { when: string; line: string }[];
   /** `reschedule` = the box Reschedule opens on before anything is picked (consequences.reschedule_pick_box) */
   boxes: { lock: Box | null; cancel: Box | null; reschedule: Box | null };
-  actions: { reschedule: boolean; edit: boolean; edit_lineup: boolean; lock: boolean; cancel: boolean; open_now: boolean };
+  actions: { reschedule: boolean; edit: boolean; edit_lineup: boolean; lock: boolean; cancel: boolean; open_now: boolean;
+    /** More › Clear the board: a raid of the event is still open (its box from POST /api/event/{key}/clear) */
+    clear: boolean };
   lineup: { raid: string; rosters: number; starts: number }[]; start_iso: string;
   /** the event's own sheet timing by setting (rc.EVENT_TIMING), what POST /api/run/{key}/reschedule takes back */
   timing: Record<string, number | boolean>;
@@ -500,7 +510,7 @@ export interface GroupSummary {
 }
 export interface Signup { uid: string; display_name: string; character: string; cls: string; spec: string; offspec: string | null; role: string; status: string; label: string; source: string; note: string | null; pin: "in" | "out" | null }
 export interface Seat { display_name: string; character: string; cls: string; spec: string; role: string; uid?: string | null; answer?: string | null; signed_at?: string | null }
-/** `open` = the roster's empty seats a minimum still wants, as roles (tank first): the page draws the role icon + "open seat"; null while the board is being placed again. */
+/** `open` = the roster's empty seats a minimum still wants, as roles (tank first): the page draws the role icon + "open seat"; null on the Events page's board before the lock. */
 export interface BoardRoster { n: number; rostered: number; synergy: number | null; advisories: string[]; groups: Seat[][]; summary: GroupSummary; open?: string[] | null }
 /** `leftovers` = joiners the full roster(s) left out (names, also in `bank`); `another` = one line when leftovers + bench + pool could make another run. */
 export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[]; leftovers?: string[]; another?: string | null; balance?: string | null }

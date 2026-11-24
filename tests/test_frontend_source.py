@@ -1202,20 +1202,23 @@ def test_role_switches_are_one_line_moves():
 
 
 def test_the_event_board_draws_the_servers_picture_and_never_fights_a_drag():
-    """Phase 4, Task 9 (Review Focus 3 on the page): the board is the server's picture — a drop sends ONE move with
-    `shown: true` and the page draws what the server answers (no optimistic place); a reload that lands mid-drag waits
-    for the drop; working / failed print the server's words over the board it sends; open seats are the server's roles
-    (role icon + page_words.open_seat); Not placed says a name dropped there stays off the roster; Undo is the server's
-    box and verb; the history shows the board as it was locked. Role switches print the server's rows, why sentences and
-    button words, send the plan rev and `seen`, and keep their fold per viewer."""
+    """Phase 4, Task 9 (Review Focus 3 on the page), as the owner's tweaks C left it: a drop sends ONE move and the page
+    draws what the server answers (no optimistic place); a reload that lands mid-drag waits for the drop; open seats are
+    the server's roles (role icon + page_words.open_seat); Not placed carries the server's note (a name there is only not
+    placed yet) and a kept-off name the server's word; Auto-fill groups sits beside Not placed with the server's label,
+    working line and outcome sentence; Undo is the server's box and verb; the history shows the board as it was locked.
+    Role switches print the server's rows, why sentences and button words, send the plan rev and `seen`, and keep their
+    fold per viewer."""
     board = _code_only((SRC / "components" / "events" / "EventBoard.tsx").read_text())
     view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
     page = _code_only((SRC / "pages" / "Events.tsx").read_text())
     hist = _code_only((SRC / "components" / "events" / "HistoryView.tsx").read_text())
     sw = _code_only((SRC / "components" / "events" / "RoleSwitches.tsx").read_text())
-    assert view.count('send("move"') == 1 and "shown: true" in view, "a drop is one move on the server's picture"
-    assert "page_words.open_seat" in view and "r.open" in view and "page_words.not_placed_off" in view
-    assert "board_working" in board and "board_error" in board and "<Loader" in board and 'board_state === "working"' in board
+    assert view.count('send("move"') == 1 and "shown" not in view, "a drop is one move on the board as the server holds it"
+    assert "page_words.open_seat" in view and "r.open" in view and "page_words.not_placed_note" in view and "page_words.kept_off" in view
+    assert "not_placed_off" not in view and "board_working" not in board and "board_error" not in board
+    assert "bankAction={af ?" in board and "words.autofill_button" in board and "af.words" in board and "<Loader" in board
+    assert "/autofill`" in board and "af.working" in board
     assert "undo: true" in board and "seen: fp" in board and "preview: true" in board and "useConfirmBox(" in board
     assert '"Board, as it was locked"' in board and "<EventBoard" in hist
     assert "afterDrag(" in page, "a reload answered mid-drag is drawn after the drop"
