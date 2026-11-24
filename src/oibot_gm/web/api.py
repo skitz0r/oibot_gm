@@ -1583,7 +1583,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             if note or (status == "out" and d.get("callout")):  # a callout (/raid out's verb): with a reason (officers only), or MCP's No thanks
                 line = await bot.call_out(v.reg, rs, ev, m, note, v.name, by_id=v.uid)
             else:
-                line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name, by_id=v.uid))
+                spec = str(d.get("spec") or "").strip() if status != "out" else ""  # a role switch (MCP set_answer's spec)
+                line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name, by_id=v.uid,
+                                                        **({"spec": spec} if spec else {})))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line.replace("**", "").removeprefix("✅ ")}
@@ -1670,7 +1672,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             if not rev:
                 return JSONResponse({"error": "preview the suggestions first — a send carries the plan's rev"}, status_code=400)
             try:
-                sent, plan = await bot.send_plan(v.reg, rs, ev, rev=rev, by=v.name, picks=d.get("picks") or None)
+                seats = [int(i) for i in d["seats"]] if isinstance(d.get("seats"), list) else None  # only those seats (MCP fill_seats)
+                sent, plan = await bot.send_plan(v.reg, rs, ev, rev=rev, by=v.name, picks=d.get("picks") or None, **({"seats": seats} if seats is not None else {}))
             except rc.PlanChanged as e:
                 return JSONResponse({"error": str(e), "plan": plan_json(v.reg, e.plan)}, status_code=409)
             except (RegistryError, ValueError) as e:
@@ -2838,7 +2841,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     from .api_events import install_events_api  # the Events page's read model (phase 4: the list, one event, a coming-up night)
 
-    install_events_api(app, bot, who=who, ev_json=ev_json)
+    install_events_api(app, bot, who=who, body=body, ev_json=ev_json)
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")

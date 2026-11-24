@@ -833,6 +833,7 @@ def box_cases(reg, rs, runs, ms, dump):
     m.dm_opt_out = True
     add("switch_box", "after the lock, DMs off", cq.switch_box(reg, lk, m, None, "Shadow", [RID], locked=True))
     m.dm_opt_out = False
+    add("switch_box", "after the lock, someone without a seat", cq.switch_box(reg, lk, m, None, "Holy", [RID], locked=True, swap=False))
     add("answer_box", "join before the lock", cq.answer_box(reg, quiet, ms[4], "join", ms[4].main.label, "Fire", by_id=OFFICER_ID))
     add("answer_box", "join on their own record", cq.answer_box(reg, quiet, ms[4], "join", by_id=ms[4].discord_id))
     add("answer_box", "bench after the lock", cq.answer_box(reg, lk, ms[1], "bench", by_id=OFFICER_ID))

@@ -191,7 +191,8 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     [Fact], signups {joined, bench, no_thanks, no_answer, rows {in, sub, out, none}}, parts [PartView], activity [{when,
     line}] (every part's log, newest first), boxes {lock, cancel}, actions, lineup, start_iso, timing {setting: value}
     (rc.EVENT_TIMING's settings, what POST /api/run/{key}/reschedule takes back), people (members with no answer:
-    Answer for someone), sheet_url}. Any part's key answers as its event. `viewer` = the officer looking (their own board
+    Answer for someone), switches (rc.event_switches: the Role switches section; empty `short` = not drawn), sheet_url}.
+    Any part's key answers as its event. `viewer` = the officer looking (their own board
     moves: each part's `mine` and Undo box). `board` = event_board.BoardCache.get's (state, previews): the open raids'
     boards as the lock would place them (None: the officers' layout, as the Rosters page draws it)."""
     first = rc.first_part(rs, ev)
@@ -248,6 +249,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "boxes": {"lock": cq.lock_box(reg, first, rs) if state == "open" else None, "cancel": cq.cancel_box(reg, first, rs) if live else None},
             "actions": {"reschedule": live and not started, "edit_lineup": state == "open" and first.state == "open",
                         "lock": state == "open" and first.state == "open", "cancel": live, "open_now": False},
+            "switches": rc.event_switches(reg, rs, first, viewer=viewer) if live else {"short": [], "rows": [], "revs": {}},
             "lineup": lineup, "start_iso": first.start.isoformat(), "timing": timing, "people": people, "sheet_url": url}
 
 

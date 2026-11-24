@@ -2468,7 +2468,20 @@ def carry_joined(old: Signup | None, s: Signup) -> Signup:
     return s
 
 
-def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None) -> Signup:
+def spec_role(reg: Registry, c: RegisteredCharacter, spec: str) -> str:
+    """The role `c` plays as `spec` — its spec, its offspec, or the spec one of its declared flex roles means
+    (spec_for_role) — else RegistryError("Nyx doesn't play Holy.")."""
+    plays = {c.spec, c.offspec} | {spec_for_role(reg, c.cls, c.offspec, r) for r in (c.flex or [])}
+    if spec not in plays - {None}:
+        raise RegistryError(f"{c.label} doesn't play {spec}.")
+    return reg.profile.spec(c.cls, spec).role
+
+
+def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None,
+               *, spec: str | None = None) -> Signup:
+    """THE answer write on a first part. `spec` (an officer's role switch): the spec the character plays tonight — its
+    own, its offspec or a flex role's (spec_role, refused otherwise); the signup's spec and role follow, its own spec
+    becomes the offspec (as a yes to a switch ask leaves it)."""
     if ev.follows:  # D1: one Join for the night — the follow-on is never answered on its own
         lead = rs.events.get(ev.follows)
         raise RegistryError(FOLLOW_ANSWER_REFUSAL.format(lead=reg.raid_def(lead.instance if lead else None).get("name", "first raid")))
@@ -2480,9 +2493,12 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
         raise ValueError("no such active character")
     # no curated-roster demotion here (roster redesign Phase 0): it keyed on the run key, which lock used to fill with
     # the seated, so a member's own Join after lock was stored as Bench and then seated anyway
+    role = spec_role(reg, c, spec) if spec else None
     s = carry_joined(ev.signups.get(str(m.discord_id)), _signup(reg, m, c, status, source, note))
+    if spec and spec != c.spec:
+        s.spec, s.offspec, s.role = spec, c.spec, role
     ev.signups[str(m.discord_id)] = s
-    ev.log.append(f"{m.display_name} {status} as {c.label} ({source})")
+    ev.log.append(f"{m.display_name} {status} as {c.label}" + (f", {s.spec}" if spec else "") + f" ({source})")
     rs.save(ev, f"{m.display_name} {status}")
     return s
 
@@ -3109,15 +3125,17 @@ def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = 
     return add_parallel_twins(reg, ev, plan, batch)
 
 
-def pick_asks(plan: Plan, picks: dict | None = None, limit: int | None = None) -> list[FillAsk]:
+def pick_asks(plan: Plan, picks: dict | None = None, limit: int | None = None, seats: list[int] | None = None) -> list[FillAsk]:
     """The asks an officer sends: each seat's suggestion, or the alternate they picked (`picks` = {seat index: option
     index}, 0 = the suggestion). `limit`: only the first that many seats someone can cover (a card's Ask sends the
-    seats the card draws, raid_views.SUGGEST_LINES). Refuses a pick that asks one person for two seats."""
+    seats the card draws, raid_views.SUGGEST_LINES). `seats`: only those seat indexes (the Events page's Switch on one
+    row). Refuses a pick that asks one person for two seats."""
     out: list[FillAsk] = []
     seen: set[int] = set()
     shown = 0
+    only = {int(i) for i in seats} if seats is not None else None
     for i, st in enumerate(plan.seats):
-        if not st.options:
+        if not st.options or (only is not None and i not in only):
             continue
         if limit is not None and shown >= limit:
             break
@@ -3133,13 +3151,14 @@ def pick_asks(plan: Plan, picks: dict | None = None, limit: int | None = None) -
     return out
 
 
-def send_batch(plan: Plan, picks: dict | None = None, limit: int | None = None) -> tuple[list[FillAsk], int]:
+def send_batch(plan: Plan, picks: dict | None = None, limit: int | None = None, seats: list[int] | None = None) -> tuple[list[FillAsk], int]:
     """Exactly what an officer's send of this plan (with `picks`, pick_asks) DMs now, and how many of the picked asks
     wait: before lock all of them; after lock at most `plan.room` (FILL_MAX_OPEN out at once), never a swap without
     its tied backfill. The preview screens (the wizard, the plain-text diff, the site and MCP) show this list and
     RaidMixin.send_plan sends it — the cap is part of the plan's rev, so what was shown is what goes. RegistryError
-    when nothing can go out now. `limit`: only the first that many seats (pick_asks — a card's Ask)."""
-    asks = pick_asks(plan, picks, limit)
+    when nothing can go out now. `limit`: only the first that many seats (pick_asks — a card's Ask); `seats`: only those
+    seat indexes (pick_asks — the Events page's Switch)."""
+    asks = pick_asks(plan, picks, limit, seats)
     if plan.phase == "prelock" or not asks:
         return asks, 0
     if plan.room == 0:
@@ -3150,6 +3169,98 @@ def send_batch(plan: Plan, picks: dict | None = None, limit: int | None = None) 
     if not keep:
         raise RegistryError(f"That swap and its backfill are two asks and only {plan.room} more can go out now (at most {FILL_MAX_OPEN}); ask again once some are answered.")
     return keep, len(asks) - len(keep)
+
+
+# ---------------------------------------------------------------- role switches for the whole event (phase 4, §7a)
+
+def switch_box_for(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, character: str, spec: str, *, plan_rev: str = "",
+                   viewer: int | None = None, swap: bool = True) -> dict:
+    """The box one Role switches row opens (and the /switch route re-builds for `seen`). Before the lock the answer is
+    one for the whole evening (sync_parts copies the first raid's to every later one), so the box names every open raid
+    of the event: someone who joined → Switch (consequences.switch_box, a notice); anyone else, and the officer's own
+    row → Record answer (answer_box: Join as that spec). After the lock it is an ask on `part` alone (switch_box with
+    locked, its rev the part's plan rev)."""
+    from . import consequences as cq
+
+    first = first_part(rs, part)
+    if first.state == "open":
+        rev = event_rev(reg, rs, first) + member_state_rev(first, m)
+        sg = first.signups.get(str(m.discord_id))
+        raids = [p.instance for p in event_parts(rs, first) if p.state == "open"]
+        if sg is None or sg.status != "in" or (viewer is not None and int(viewer) == m.discord_id):
+            return cq.answer_box(reg, first, m, "join", character, spec, by_id=viewer, rev=rev)
+        return cq.switch_box(reg, first, m, character, spec, raids, rev=rev)
+    return cq.switch_box(reg, part, m, character, spec, [part.instance], locked=True, swap=swap, rev=plan_rev + member_state_rev(part, m))
+
+
+def _plays_words(character: str, spec: str, base: str | None) -> str:
+    """'Holy', or 'Nyxbear, Guardian' when the character is not the one they answered with (or their main)."""
+    return spec if character == base else f"{character}, {spec}"
+
+
+def event_switches(reg: Registry, rs: "RaidStore", first: RaidEvent, *, viewer: int | None = None) -> dict:
+    """The Events page's Role switches: {short [{raid, roles {role: n}}] (each live raid short of a tank / healer
+    minimum, rc.needs — the Board's own numbers), rows [Switch], revs {part key: plan rev}}. Composed from each live
+    raid's planner (role_plan: suggestions before the lock, the fill plan after it) — no second ranking. A row is one
+    option of a role seat (a plain seat after the lock is the fill engine's, not a role switch; a swap tied to a
+    backfill is two asks and is left to the Fill screen): {uid, display_name, role, from, to, answered, raids, part,
+    seat, option, character, spec, box}. Before the lock one answer serves the whole evening, so a person's same move
+    on several raids is ONE row (`raids` = every raid it helps; part/seat/option = the first); after the lock each ask is
+    a raid's own (sent on that raid alone), so a row is per raid. Ordered by role, then suggestions before alternates.
+    `from` / `to`: 'Shadow', 'Nyx, Shadow' when the character changes, PAGE_WORDS no_answer_yet (or Bench) without a
+    Join; `answered` = they joined (Switch); otherwise Answer for them."""
+    from .constants import PAGE_WORDS
+
+    first = first_part(rs, first)
+    out: dict = {"short": [], "rows": [], "revs": {}}
+    if first.state not in ("open", "locked"):
+        return out
+    prelock = first.state == "open"
+    parts = [p for p in event_parts(rs, first) if p.state in ("open", "locked")]
+    rows: dict[tuple, dict] = {}
+    for pi, p in enumerate(parts):
+        name = _raid_name(reg, p.instance)
+        short = dict(needs(reg, p)["roles"])
+        if short:
+            out["short"].append({"raid": name, "roles": short})
+        plan = role_plan(reg, rs, p)
+        out["revs"][p.key] = plan.rev
+        for si, st in enumerate(plan.seats):
+            if not st.role:
+                continue
+            for oi, opt in enumerate(st.options):
+                if len(opt) != 1:  # a swap tied to its backfill: two people asked together — the Fill screen's
+                    continue
+                a = opt[0]
+                k = (a.discord_id, a.character, a.spec) + (() if prelock else (p.key,))
+                if k in rows:
+                    if name not in rows[k]["raids"]:
+                        rows[k]["raids"].append(name)
+                    continue
+                m = reg.members.get(a.discord_id)
+                if m is None:
+                    continue
+                sg = first.signups.get(str(m.discord_id))
+                seat = next((x for x in p.seated() if player_uid(p, x) == m.discord_id), None) if not prelock else None
+                joined = sg is not None and sg.status == "in"
+                if seat is not None:
+                    base = seat.character or a.character
+                    frm = _plays_words(base, seat.spec, a.character)
+                elif joined:
+                    base = sg.character
+                    frm = _plays_words(sg.character, sg.spec, a.character)
+                else:
+                    base = m.main.label if m.main else a.character
+                    frm = LABELS["sub"] if sg is not None and sg.status == "sub" else PAGE_WORDS["no_answer_yet"]
+                rows[k] = {"uid": str(m.discord_id), "display_name": m.display_name, "role": a.role, "from": frm,
+                           "to": _plays_words(a.character, a.spec, base), "answered": joined, "raids": [name], "part": p.key,
+                           "seat": si, "option": oi, "character": a.character, "spec": a.spec,
+                           "box": switch_box_for(reg, rs, p, m, a.character, a.spec, plan_rev=plan.rev, viewer=viewer, swap=a.swap),
+                           "_rank": (ROLES.index(a.role) if a.role in ROLES else len(ROLES), oi, pi, si)}
+    out["rows"] = sorted(rows.values(), key=lambda r: r["_rank"])
+    for r in out["rows"]:
+        del r["_rank"]
+    return out
 
 
 # THE words for how an ask (or a would-be cover) reaches someone (FillAsk.kind): the fill screens on both surfaces, the

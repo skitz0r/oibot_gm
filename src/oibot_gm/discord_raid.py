@@ -329,12 +329,16 @@ class RaidMixin:
             return
         await interaction.followup.send(line, ephemeral=True)
 
-    async def set_answer(self, reg, rs, ev, m, status: str, character: str | None, by: str, by_id: int | None = None) -> str:
+    async def set_answer(self, reg, rs, ev, m, status: str, character: str | None, by: str, by_id: int | None = None, *,
+                         spec: str | None = None) -> str:
         """The one path for setting someone's answer on a sheet — the member themself or an officer. `by` is a display
         name people read; `by_id` is the Discord id of whoever acts and DECIDES whose answer it is: the member's own when
         `by_id == m.discord_id` (never a name compare — nicks change, design §2.2). No `by_id` = an officer acting.
         Open sheet: the signup + sheet refresh. Locked: Join seats them (if not already) and asks them to confirm;
-        No thanks frees a rostered seat (drop_seated: DM, thread line, fill); Bench is the signup only. Returns a line."""
+        No thanks frees a rostered seat (drop_seated: DM, thread line, fill); Bench is the signup only. `spec` (Join /
+        Bench: an officer's role switch, the Events page's Switch) = the spec the character plays — its spec, offspec or
+        a flex role's (rc.spec_role: "Nyx doesn't play Holy." otherwise); the signup's spec and role follow. Answers live
+        on the first raid: sync_parts carries them to the later raids. Returns a line."""
         if status not in rc.STATUSES:
             raise ValueError(f"status must be one of {rc.STATUSES}")
         mine = by_id is not None and int(by_id) == int(m.discord_id)
@@ -347,7 +351,7 @@ class RaidMixin:
         who = "" if mine else f"{m.display_name}: "
         released = status == "out" and await self.release_asks_of(reg, rs, ev, m, "answered No thanks")  # their ask covers nothing now
         if sheet_state(ev) == "open":
-            s = rc.set_signup(reg, rs, ev, m, character, status, source=source)
+            s = rc.set_signup(reg, rs, ev, m, character, status, source=source, spec=spec if status != "out" else None)
             await self.refresh_sheet(reg, ev)
             if "health" in ev.cards:  # the officer card's counts and Suggested block follow the answers
                 await self.refresh_cards(reg, ev)
@@ -367,7 +371,7 @@ class RaidMixin:
                 await self.refill_after_release(reg, rs, ev, released)
                 line = f"✅ {who}No thanks for {label} (wasn't rostered)"
         elif status == "in":
-            s = rc.set_signup(reg, rs, ev, m, character, "in", source=source)
+            s = rc.set_signup(reg, rs, ev, m, character, "in", source=source, spec=spec)
             seat = ev.seat_of(m)
             if seat:
                 rc._reseat(ev, s, reg.key)  # a character swap keeps the seat
@@ -388,7 +392,7 @@ class RaidMixin:
             await self.refresh_sheet(reg, ev)
             await self.refresh_cards(reg, ev)
         else:  # sub after lock: the signup only; a rostered member keeps the seat until set out
-            s = rc.set_signup(reg, rs, ev, m, character, "sub", source=source)
+            s = rc.set_signup(reg, rs, ev, m, character, "sub", source=source, spec=spec)
             await self.refresh_sheet(reg, ev)
             line = f"✅ {who}{s.character} Bench for {label}" + (" — still rostered; set No thanks to free the seat" if ev.seat_of(m) else "")
         if status == "in":  # Join while away: Join stays pure, the absence stands for the other sheets — the receipt says so
@@ -398,7 +402,8 @@ class RaidMixin:
         if not mine:
             await self.ops.emit(reg.config, "info", f"{by} set {m.display_name} {status} on {run_title(reg, ev)}")
             s = ev.signups.get(str(m.discord_id))  # B5: the member's notice (never a DM)
-            rc.on_behalf_notice(reg, ev, m.discord_id, f"set you to {rc.LABELS[status]}" + (f" as {s.character}" if s and status != "out" else ""), by)
+            rc.on_behalf_notice(reg, ev, m.discord_id, f"set you to {rc.LABELS[status]}" + (f" as {s.character}" if s and status != "out" else "")
+                                + (f", playing {s.spec}" if spec and s and status != "out" else ""), by)
         return line
 
     async def refresh_sheet(self, reg, ev) -> None:
@@ -629,14 +634,16 @@ class RaidMixin:
         guilds can hold runs with the same key."""
         return self.__dict__.setdefault("_plan_locks", {}).setdefault((reg.key, key), asyncio.Lock())
 
-    async def send_plan(self, reg, rs, ev, *, rev: str, by: str, picks: dict | None = None, limit: int | None = None) -> tuple[list, "rc.Plan"]:
+    async def send_plan(self, reg, rs, ev, *, rev: str, by: str, picks: dict | None = None, limit: int | None = None,
+                        seats: list[int] | None = None) -> tuple[list, "rc.Plan"]:
         """An officer's Ask: send the planner's suggestions (each seat's suggestion, or the alternate in `picks` =
         {seat index: option index}) as DMs — the one path for the health / lock card's Ask, the Suggest wizard,
         /raid fill on an open run, the site's Suggest, plain text and MCP. `rev` = the plan fingerprint the officer was
         shown (rc.plan_rev): when the plan is different now, rc.PlanChanged is raised carrying the current plan and
         nothing is sent. Before lock: pre-lock asks (one per member per run, expire at lock; a yes changes the signup
         and seats nobody). After lock: fill asks the officer approved — role swaps included (D3). `limit`: only the first
-        that many seats (the card's Ask: the seats the card draws, never one it left under "+N more"). Returns (sent, plan)."""
+        that many seats (the card's Ask: the seats the card draws, never one it left under "+N more"). `seats`: only those
+        seat indexes (the Events page's Switch on one row, with its `picks`). Returns (sent, plan)."""
         async with self.plan_lock(reg, ev.key):
             if ev.state not in ("open", "locked"):
                 raise RegistryError(f"{run_title(reg, ev)} is {ev.state}")
@@ -651,7 +658,7 @@ class RaidMixin:
                 raise rc.PlanChanged(plan)
             # exactly the batch the officer was shown (rc.send_batch: after lock the FILL_MAX_OPEN cap, which is part of
             # the rev, so the preview listed these same asks)
-            asks, plan.held_back = rc.send_batch(plan, picks, limit)
+            asks, plan.held_back = rc.send_batch(plan, picks, limit, seats)
             if not asks:
                 return [], plan
             team = rc.run_team(reg, ev)

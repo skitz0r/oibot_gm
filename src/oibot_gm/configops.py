@@ -163,7 +163,8 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
   run_lineup: target, value=<the raids after the first one, in order: "<raid id> x<N>, <raid id>" ("barrow_deeps x2, onyxias_lair");
     "none" = the first raid alone> — before lock only: adds, removes or reorders the raids that follow the first one the same
     night (each starts when the one before it ends); the first raid never changes. Its schedule keeps its own lineup.
-  run_answer: target, member, value=join|bench|no thanks, character=<optional: which of their characters>, reason=<optional, with
+  run_answer: target, member, value=join|bench|no thanks, character=<optional: which of their characters>, field=<optional, with
+    join or bench: the spec they play, e.g. Holy — their spec, offspec or an extra role's>, reason=<optional, with
     no thanks: why, a note only the officers see> — an officer sets someone's answer, or someone answers for themselves
     (after lock: join seats them and asks them to confirm, no thanks frees their seat and the fill engine looks for cover).
   run_lock: target — lock now: roster(s) built from the signups (pins honoured), confirmation DMs to everyone rostered.
@@ -246,7 +247,7 @@ class ConfigOp(BaseModel):
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, regular, comp_target*, comp_groups), schedule id alone (schedule_set, schedule_remove), run key (run_*, pin, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
-    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set/schedule_set: the setting name from the schema (schedule_set: raid = a new schedule's first raid); run_open / regular: a schedule id; run_reschedule: start or a timing setting; comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
+    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set/schedule_set: the setting name from the schema (schedule_set: raid = a new schedule's first raid); run_open / regular: a schedule id; run_reschedule: start or a timing setting; run_answer: the spec they play (optional); comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: the minimum as a whole number; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_reschedule start: 'YYYY-MM-DD HH:MM'; run_lineup: 'barrow_deeps x2, onyxias_lair'|'none'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
@@ -2809,7 +2810,8 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         want = _answer_value(op.value)
         cur = ev.signups.get(str(m.discord_id))
         now = f"now {rc.LABELS[cur.status]} as {cur.character}" if cur else "hasn't answered"
-        char = f" as {op.character}" if op.character else ""
+        spec = (op.field or "").strip() if want != "out" else ""
+        char = (f" as {op.character}" if op.character else "") + (f", playing {spec}" if spec else "")
         effect = {"in": " — rostered and asked to confirm" if ev.state == "locked" else "", "sub": " — keeps the seat until set No thanks" if ev.state == "locked" and ev.seat_of(m) else "",
                   "out": " — seat freed, the fill engine looks for cover" if ev.state == "locked" and ev.seat_of(m) else ""}[want]
         note = (op.reason or "").strip()
@@ -3575,7 +3577,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         if want == "out" and (note or own):  # a callout (/raid out's verb): anyone's with a reason, and every "I can't make it" of one's own
             return await bot.call_out(reg, rs, ev, m, note or None, by, by_id=by_id)
         try:
-            line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id)
+            spec = (op.field or "").strip() if want != "out" else ""
+            line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id, **({"spec": spec} if spec else {}))
         except ValueError as e:
             raise RegistryError(str(e))
         return str(line).replace("**", "").removeprefix("✅ ")

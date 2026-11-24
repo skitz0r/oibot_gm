@@ -519,19 +519,25 @@ def edit_lineup(run: str, lineup: list[dict], preview: bool = False, rev: str | 
 
 @mcp.tool()
 def set_answer(run: str, member: str, status: str, character: str | None = None, note: str | None = None, callout: bool = True,
-               guild: Guild = None) -> str:
+               spec: str | None = None, guild: Guild = None) -> str:
     """Answer a sheet for someone: status in (Join) / sub (Bench) / out (No thanks); `character` swaps which character
     they play. After lock, `in` seats them and asks them to confirm, `out` frees the seat and starts filling it.
     `out` with `callout` true (the default) is "Can't make it": a callout like /raid out (hours before, late after the
     lock cutoff, the updates-thread line); `callout=False` is a plain No thanks — an answer change, no callout record
     (the same split as the site's menu and /raid set). `note` (a callout only) is its reason: officers see it (get_run
-    callouts, the run's updates thread), the public sheet never does. The member gets a notice on their Me page (never
-    a DM); their open DM card is edited."""
+    callouts, the run's updates thread), the public sheet never does. `spec` (status in / sub) is a role switch: the
+    spec the character plays — its spec, offspec or an extra role's ("Nyx doesn't play Holy." otherwise); before the
+    lock it is the answer for the whole evening (the Events page's Switch; get_run's spec_switches / the event's
+    switches list who could). The member gets a notice on their Me page (never a DM); their open DM card is edited."""
     if status not in STATUSES:
         raise ToolError(f"status must be one of {', '.join(STATUSES)} (in = Join, sub = Bench, out = No thanks)")
     if note and (status != "out" or not callout):
         raise ToolError("a note goes with a callout only (status out, callout true): it is the reason they can't make it")
     body: dict[str, Any] = {"member": member, "status": status, "character": character}
+    if spec:
+        if status == "out":
+            raise ToolError("a spec goes with Join or Bench (status in or sub): the spec they play")
+        body["spec"] = spec
     if note:
         body["note"] = note
     if status == "out" and callout:
@@ -605,7 +611,8 @@ def lock_run(run: str, guild: Guild = None) -> str:
 
 
 @mcp.tool()
-def fill_seats(run: str, send: bool = False, rev: str = "", picks: dict | None = None, guild: Guild = None) -> dict:
+def fill_seats(run: str, send: bool = False, rev: str = "", picks: dict | None = None, seats: list[int] | None = None,
+               guild: Guild = None) -> dict:
     """Who to ask to cover a run's shortfall. ALWAYS preview first (send=false, nothing sent), show the person the
     batch, then send with the returned `plan.rev`. The preview: before lock the planner's SUGGESTIONS for the
     tank/healer minimums, after lock the seats to fill — `plan.seats[i].options[0]` is the suggestion, the rest are
@@ -616,7 +623,8 @@ def fill_seats(run: str, send: bool = False, rev: str = "", picks: dict | None =
     index} asks an alternate); a plan that changed since (board or answers) is refused and the current plan returned —
     show it and preview again. Every ask is a DM Yes/No; before lock a yes changes the member's signup and seats
     nobody, and unanswered asks close at lock. Without `rev` a send is refused before lock, and after lock refused
-    ("preview first") whenever the batch holds a role swap — only a same-role batch goes out without one."""
+    ("preview first") whenever the batch holds a role swap — only a same-role batch goes out without one. `seats`
+    (with `rev`) sends only those seat indexes — one role switch after the lock, as the Events page's Switch does."""
     if not send:
         return api(guild).post(f"/api/run/{run}/fill/preview")
     payload: dict = {}
@@ -624,6 +632,8 @@ def fill_seats(run: str, send: bool = False, rev: str = "", picks: dict | None =
         payload["rev"] = rev
     if picks:
         payload["picks"] = {str(k): int(v) for k, v in picks.items()}
+    if seats is not None:
+        payload["seats"] = [int(i) for i in seats]
     return {"message": msg(api(guild).post(f"/api/run/{run}/fill", payload))}
 
 

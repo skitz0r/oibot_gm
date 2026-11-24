@@ -428,3 +428,29 @@ def test_auction_prices_have_web_routes_mcp_tools_and_written_gaps(mcp_tools, we
     assert not missing, "\n".join(missing)
     assert not {"set_market", "market_set", "clear_market"} & mcp_tools, "MCP never picks or clears the auction house"
     assert not PRICES_DISCORD_PENDING, "every price action has its Discord path (price watch Task 5)"
+
+
+# role switches for the whole event (phase 4 Task 4): a feature, not an op — the Events page's Switch / Answer for them.
+# Plain text reaches it through `run_answer` (its `field` = the spec); MCP through set_answer(spec=) before the lock and
+# fill_seats(seats=) after it. Discord's spec select in the SetWizard is phase 5's, dated here until it lands (configops'
+# op tables hold ops only, so the gap sits beside the row as ARMORY_ / PRICES_DISCORD_PENDING do).
+RUN_SWITCH: dict[str, dict] = {
+    "run_switch": {"web": "POST /api/run/{key}/switch", "mcp": ["set_answer", "fill_seats"]},
+}
+RUN_SWITCH_DISCORD_PENDING = {
+    "run_switch": "phase 5: the spec select in the SetWizard; until then /gm change reaches it as plain text (run_answer's spec)",
+}
+
+
+def test_role_switches_have_the_web_route_mcp_tools_and_a_dated_discord_gap(mcp_tools, web_routes, slash_paths):
+    import inspect
+
+    for action, row in RUN_SWITCH.items():
+        assert row["web"] in web_routes, f"run switch {action}/web: {row['web']!r}"
+        assert set(row["mcp"]) <= set(mcp_tools), f"run switch {action}/mcp: {row['mcp']!r}"
+        if "discord" in row:
+            assert action not in RUN_SWITCH_DISCORD_PENDING and discord_path_exists(row["discord"], slash_paths), action
+        else:
+            assert "phase" in RUN_SWITCH_DISCORD_PENDING.get(action, ""), f"run switch {action}: no Discord path — name the phase that lands it"
+    assert "spec" in inspect.signature(ms.set_answer).parameters and "seats" in inspect.signature(ms.fill_seats).parameters
+    assert "run_answer: the spec they play" in configops.ConfigOp.model_fields["field"].description

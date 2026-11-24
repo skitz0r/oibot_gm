@@ -64,7 +64,7 @@ def tuesday(reg) -> str:
 
 def words_of(obj) -> list[str]:
     """Every string a person could read in a JSON answer (ids and machine fields left out)."""
-    skip = {"key", "schedule", "occurrence", "start_iso", "href", "fp", "uid", "raid", "id", "sheet", "sheet_url", "timing", "lineup", "open"}
+    skip = {"key", "schedule", "occurrence", "start_iso", "href", "fp", "uid", "raid", "id", "sheet", "sheet_url", "timing", "lineup", "open", "part", "revs"}
     out = []
     if isinstance(obj, dict):
         for k, v in obj.items():

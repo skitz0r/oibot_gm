@@ -199,7 +199,7 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
 
     @app.post("/api/admin/action")
     async def admin_action(request: Request):
-        """Record one on-behalf action {run, member, action, character?, note?, rev?} — inbox.do_member_action, the verbs
+        """Record one on-behalf action {run, member, action, character?, spec?, note?, rev?} — inbox.do_member_action, the verbs
         the SetWizard and every other surface call. A `rev` that no longer matches the member's state is a 409 saying
         what they changed to ('Kestrel is now Bench as Kestrel (since 5:12 PM)'), nothing written."""
         v, d = await body(request, officer=True)
@@ -210,7 +210,7 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
             return JSONResponse({"error": rc.member_change_words(v.reg, ev, m) + ".", "rev": rc.member_state_rev(ev, m)}, status_code=409)
         try:
             line = await inbox.do_member_action(bot, v.reg, rs, ev, m, key, character=(d.get("character") or None), note=d.get("note"),
-                                                by=v.name, by_id=v.uid, via=v.via)
+                                                spec=(str(d.get("spec") or "").strip() or None), by=v.name, by_id=v.uid, via=v.via)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line}

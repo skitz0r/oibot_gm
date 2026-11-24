@@ -759,15 +759,18 @@ def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | 
     return undo_box(n, rev=rc.undo_rev(reg, ev, viewer)) if n else None
 
 
-def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: str, raids, *, locked: bool = False, rev: str = "") -> dict:
+def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: str, raids, *, locked: bool = False, swap: bool = True,
+               rev: str = "") -> dict:
     """Boxes 6 and 7: a role switch. Before the lock it changes the answer (a notice); after it, it sends an ask (a DM
-    with Yes and No, or on the Me page with DMs off) and the seat changes only on a yes."""
+    with Yes and No, or on the Me page with DMs off) and the seat changes only on a yes. `swap=False` (after the lock):
+    the ask is for someone without a seat on the roster, who takes one only on a yes."""
     name = m.display_name
     where = rc.join_words([_raid(reg, r) for r in raids]) or _raid(reg, ev.instance)
     if locked:
         told = "They get a DM with Yes and No." if rc.reachable(m) else "It waits on their Me page."
         return box(f"Ask {name} to play {spec}?", [f"{name} is asked to play {spec} for {where}.", told,
-                                                  "Their seat changes only when they say yes."], "Ask", rev=rev)
+                                                  "Their seat changes only when they say yes." if swap else
+                                                  "They take a seat only when they say yes."], "Ask", rev=rev)
     sg = ev.signups.get(str(m.discord_id))
     old_char = sg.character if sg else (m.main.label if m.main else None)
     old_spec = sg.spec if sg else (m.main.spec if m.main else None)

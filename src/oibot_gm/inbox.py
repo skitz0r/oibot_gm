@@ -223,11 +223,12 @@ ON_BEHALF_WORDS = {"join": "set you to Join", "bench": "set you to Bench", "no_t
 
 
 async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, character: str | None = None, note: str | None = None,
-                           by: str, by_id: int | None, via: str = "discord") -> str:
+                           spec: str | None = None, by: str, by_id: int | None, via: str = "discord") -> str:
     """Record one on-behalf action — the SetWizard's Confirm and POST /api/admin/action — through the SAME verbs every
     surface uses: set_answer (Join / Bench / No thanks: an answer change), call_out (Record a callout: the record + an
     optional note, before and after lock), answer_placement_for, answer_fill_for, pin_member. Refuses an action that no
-    longer applies (rc.member_actions re-read). The verbs write the notice, edit cards and write the audit line."""
+    longer applies (rc.member_actions re-read). The verbs write the notice, edit cards and write the audit line. `spec`
+    (Join / Bench): the spec the character plays (set_answer's role switch; Answer for someone's pick)."""
     if not rc.on_bench_side(reg, ev, m):  # a puppet on a real run, a real member on a test run: never
         raise RegistryError(f"{m.display_name} isn't on this run's side of the test bench — a test run takes its puppets and its tester only.")
     allowed = {a["key"] for a in rc.member_actions(reg, ev, m)}
@@ -235,7 +236,7 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
         raise RegistryError(f"That no longer applies to {m.display_name} on {rc.run_words(reg, ev)} any more.")
     if key in ("join", "bench", "no_thanks"):
         status = {"join": "in", "bench": "sub", "no_thanks": "out"}[key]
-        line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id)
+        line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id, **({"spec": spec} if spec and status != "out" else {}))
     elif key == "callout":
         line = await bot.call_out(reg, rs, ev, m, (note or "").strip()[:300] or None, by, by_id=by_id)
     elif key in ("confirm_yes", "confirm_no"):
