@@ -1459,14 +1459,15 @@ class RaidMixin:
 
     # ---- opening and cancelling runs (commands, the web and plain-text ops share these)
     async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None, follow: dict | None = None,
-                                lineup: list[dict] | None = None) -> rc.RaidEvent:
+                                lineup: list[dict] | None = None, lock_hours: float | None = None, first_rosters: int | None = None) -> rc.RaidEvent:
         """Open (or find) the run for `instance` at `start` (from `schedule`, None = the schedule with a run at exactly
         that start, else a one-off — rc.open_run), post its
         sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
         place it), and say so on the ops feed. A start more than a few minutes in the past is refused
-        (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts."""
+        (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts.
+        `lock_hours` / `first_rosters`: the New event page's Locks choice and first raid's rosters for a one-off."""
         rc.refuse_past_start(reg, start)
-        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow, lineup=lineup)
+        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters)
         channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel and not ev.message_id:
             await self.post_sheet(reg, rs, ev, channel)

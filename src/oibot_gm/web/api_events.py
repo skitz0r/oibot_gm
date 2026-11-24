@@ -3,6 +3,8 @@ officer page, as /api/rosters is), each run in a thread. GET /api/events stays t
 existing topics `run:` (any run saved), `member` and `config` (a schedule edited).
 
 - GET /api/event-list?history_offset=0 → event_view.event_list
+- GET /api/event-new → event_view.new_event_options (the New event page's raids, lineups to copy, lock choices, the
+  guild's date)
 - GET /api/event/{key} → event_view.event_json (any part's key answers as its event; finished and cancelled too), its
   open raids' boards from event_board's cache (the lock's placement; `board_state` working while it is solved, and the
   page hears `run:<event key>` when it is ready)
@@ -47,6 +49,13 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         v = await who(request, officer=True)
         rs = bot.raids.store(v.reg)
         return await asyncio.to_thread(event_view.event_list, v.reg, rs, v.reg.now_local(), history_offset)
+
+    @app.get("/api/event-new")
+    async def event_new(request: Request):
+        """The New event page's choices (event_view.new_event_options): the guild's date, the raids, the lineups to copy,
+        the lock choices. Its preview and Open are POST /api/raid/{rid}/open(/preview)."""
+        v = await who(request, officer=True)
+        return await asyncio.to_thread(event_view.new_event_options, v.reg)
 
     @app.get("/api/event/coming/{sid}/{occurrence}")
     async def event_coming(request: Request, sid: str, occurrence: str):

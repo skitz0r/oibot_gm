@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { DateTimePicker } from "@mantine/dates";
-import { ActionIcon, Anchor, Badge, Box, Button, Card, Drawer, Group, Modal, Select, Stack, Tabs, Text, Tooltip, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Anchor, Badge, Box, Button, Card, Drawer, Group, Select, Stack, Tabs, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { IconCalendarPlus, IconFlask, IconPlus, IconUserPlus, IconX } from "@tabler/icons-react";
 import { api, type Board, type Meta, type Person, type RaidRuns, type Rosters, type Series, type Sheet, type UpcomingRun } from "../api";
 import { GameIcon } from "../components/Icons";
@@ -50,8 +49,8 @@ export function RostersPage({ meta }: { meta: Meta }) {
     <Stack gap="lg" className={rosterCss.touch}>  {/* phone: every control 44 px (rosters.module.css) */}
       <PageTitle title="Rosters" intro={`Every run with a sheet is a card, soonest first: answer for someone, shape the board, lock, fill. Under them, each raid's schedule, regulars and history. Times in ${zone}.`} />
       {nights.map((n) => <NightCard key={n[0].e.key} runs={n} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
-      {nights.length === 0 && <Card><Box p="md"><Text size="sm" c="dimmed">No run has a sheet right now. Open the next run or start an ad hoc run on a raid's card below.</Text></Box></Card>}
-      {data.raids.map((r) => <RaidCard key={r.id} r={r} others={data.raids.filter((x) => x.id !== r.id).map((x) => ({ id: x.id, name: x.name }))} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
+      {nights.length === 0 && <Card><Box p="md"><Text size="sm" c="dimmed">No run has a sheet right now. Open the next run on a raid's card below, or make a New event.</Text></Box></Card>}
+      {data.raids.map((r) => <RaidCard key={r.id} r={r} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
       {data.orphans.length > 0 && (
         <Card><Box p="md"><Eyebrow plain>Sheets not tied to a raid</Eyebrow>{data.orphans.map((e) => <Text key={e.key} size="sm">{runName(e)} · {e.state_word || meta.run_states[e.state] || e.state}</Text>)}</Box></Card>
       )}
@@ -85,82 +84,6 @@ function OpenNext({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct:
       </Group>
       {!next && <Text size="xs" c="dimmed" ta="right">Nothing to open on this schedule yet — pick another, or see When it runs below.</Text>}
     </Stack>
-  );
-}
-
-/** Start an ad hoc run: a button opening one screen — a pickup template (its own settings) or a one-off, at a date and
- *  time picked (nobody types a timestamp). Every change asks the server what Open would do (POST
- *  /api/raid/{rid}/open/preview, rc.open_preview): a time that IS an upcoming recurring run relabels the button "Open the
- *  … run — scheduled, with confirmations"; the screen shows both clocks (guild time and yours), the run's rules, the DST
- *  note and where the sheet posts, and why Start waits when it does. Start carries the preview's exact instant and key
- *  back, so a stale match is refused rather than opening another run. */
-function StartAdhoc({ r, others, busy, onAct }: { r: RaidRuns; others: { id: string; name: string }[]; busy: string | null; onAct: Act }) {
-  const [opened, setOpened] = useState(false);
-  const [tpl, setTpl] = useState<string>("adhoc");  // "adhoc" = a one-off
-  const [when, setWhen] = useState<string | null>(null);
-  const [p, setP] = useState<OpenPreview | null>(null);
-  // the follow-on (design §5.62): another raid the same night from this signup
-  const [follow, setFollow] = useState<string>("");
-  const [followN, setFollowN] = useState<string>("2");
-  const followBody = follow ? { raid: follow, rosters: Number(followN) } : "";
-  const templates = (r.schedules || []).filter((s) => s.active && (s.class === "adhoc" || s.kind === "pickup"));
-  const picked = (when || "").trim();
-  useEffect(() => {
-    if (!picked) { setP(null); return; }
-    let live = true;
-    // a one-off sends no schedule: the server matches an upcoming recurring run at that minute (which_run)
-    api.post<OpenPreview>(`/api/raid/${r.id}/open/preview`, { when: picked.slice(0, 16), schedule: tpl === "adhoc" ? "" : tpl, follow: followBody })
-      .then((x) => { if (live) setP(x); }).catch(() => { if (live) setP(null); });
-    return () => { live = false; };
-  }, [picked, tpl, r.id, follow, followN]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const scheduled = p?.kind === "scheduled";
-  const label = scheduled ? `Open the ${p!.schedule_name} run — scheduled, with confirmations` : "Start the ad hoc run";
-  const waits = !picked ? "Pick the day and time it starts." : !p ? "Checking that time…" : p.refusal ? p.refusal : p.past ? "That time has passed — pick a later one." : null;
-  const close = () => { setOpened(false); setWhen(null); setP(null); setFollow(""); };
-  async function start() {
-    if (!p || waits) return;
-    close();
-    await onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { start: p.start, occurrence: p.occurrence, follow: followBody,
-      // a time that IS a scheduled run opens as that schedule's run (the preview names its id);
-      // sending "adhoc" there would resolve to a one-off and the server would refuse the stale preview (409)
-      schedule: p.kind === "scheduled" ? p.schedule : (p.schedule || (tpl === "adhoc" ? "adhoc" : tpl)) });
-  }
-  return (
-    <>
-      <Button size="sm" variant="default" leftSection={<IconCalendarPlus size={15} />} loading={busy === `adhoc${r.id}`} onClick={() => setOpened(true)}>Start an ad hoc run…</Button>
-      <Modal opened={opened} onClose={close} title={`Start an ad hoc ${r.name} run`} centered>
-        <Stack gap="sm">
-          {templates.length > 0 && (
-            <Select label="Settings" allowDeselect={false} value={tpl} onChange={(v) => setTpl(v || "adhoc")}
-              data={[{ value: "adhoc", label: "One-off" }, ...templates.map((s) => ({ value: s.id, label: s.name }))]} />
-          )}
-          <Select label="Then, the same night" description="a second raid from the same signup, starting when this one ends" allowDeselect={false} value={follow} onChange={(v) => setFollow(v || "")}
-            data={[{ value: "", label: "No follow-on" }, ...others.map((o) => ({ value: o.id, label: o.name }))]} />
-          {follow && <Select label="Its rosters" allowDeselect={false} value={followN} onChange={(v) => setFollowN(v || "1")} data={["1", "2", "3", "4"].map((n) => ({ value: n, label: n }))} w={120} />}
-          <DateTimePicker
-            label="When it starts" clearable value={when} onChange={setWhen} placeholder="pick a date and time"
-            valueFormat="ddd D MMM YYYY h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }}
-            popoverProps={{ withinPortal: true }} aria-label="when the ad hoc run starts"
-          />
-          {p && (
-            <Stack gap={2}>
-              <Text size="sm"><b>{p.label}</b> guild time · {yourClock(p.start)} your time</Text>
-              <Text size="sm" c="dimmed">{p.rules}</Text>
-              {p.when_note && <Text size="sm" c="dimmed">{p.when_note}</Text>}
-              {p.follow_line && <Text size="sm">{p.follow_line}</Text>}
-              {p.before_open && <Text size="sm">{p.before_open}</Text>}
-              {p.exists && <Text size="sm" c="dimmed">A run for that time already exists ({p.exists}); Open points you at it instead of making a second.</Text>}
-              <Text size="sm" c="dimmed">{p.posts}</Text>
-            </Stack>
-          )}
-          <Group justify="flex-end" gap="sm">
-            <Button variant="default" onClick={close}>Back</Button>
-            <Button disabled={!!waits} onClick={start}>{label}</Button>
-          </Group>
-          {waits && <Text size="xs" c={p?.refusal ? "red" : "dimmed"} ta="right">{waits}</Text>}
-        </Stack>
-      </Modal>
-    </>
   );
 }
 
@@ -414,11 +337,11 @@ function NightCard({ runs, meta, people, busy, onAct, onBoard, onReload }: { run
   );
 }
 
-/** One raid's standing card, under the nights: its header (the schedules in words, Open next run, Start an ad hoc run…),
+/** One raid's standing card, under the nights: its header (the schedules in words, Open next run, New event),
  *  "When it runs" (the Raids card's block from the same server fields, with the upcoming runs and their Open), and the
  *  tabs for what isn't live: Regulars · History · Test (only once a test run exists). Its live runs are the night cards
  *  above (NightCard). Design §5.56. */
-function RaidCard({ r, others, meta, people, busy, onAct, onBoard, onReload }: { r: RaidRuns; others: { id: string; name: string }[]; meta: Meta; people: Person[]; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
+function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: RaidRuns; meta: Meta; people: Person[]; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
   const scheds = (r.schedules || []).filter((s) => s.active && s.kind !== "pickup");
   const recurring = scheds.filter((s) => s.class !== "adhoc");
   // test runs (the test bench's rehearsals and comp sandboxes) live on their own Test tab, never among the real sheets (B9)
@@ -432,14 +355,15 @@ function RaidCard({ r, others, meta, people, busy, onAct, onBoard, onReload }: {
     <Card>
       <RaidHeader id={r.id} name={r.name} meta={metaLine} right={
         <Group gap="xs" align="flex-start" wrap="wrap" justify="flex-end">
-          <StartAdhoc r={r} others={others} busy={busy} onAct={onAct} />
+          {/* a one-off (or a lineup of raids) is made on the New event page */}
+          <Button component={Link} to="/events/new" size="sm" variant="default" leftSection={<IconCalendarPlus size={15} />}>New event</Button>
           {recurring.length > 0 && <OpenNext r={r} busy={busy} onAct={onAct} />}
         </Group>} />
       <Stack gap="md" p="md">
         <Box>
           <Box mb={6}><Eyebrow plain>When it runs</Eyebrow></Box>
           <WhenItRuns r={r} owner={false} here upcoming={r.upcoming.length ? <UpcomingRows r={r} busy={busy} onAct={onAct} /> : undefined}
-            nothing={<>No run coming up: no schedule opens a sheet for this raid. Add one on the <Anchor component={Link} to="/raids" size="sm">Raids page</Anchor>, or start an ad hoc run here.</>} />
+            nothing={<>No run coming up: no schedule opens a sheet for this raid. Add one on the <Anchor component={Link} to="/schedules" size="sm">Schedules page</Anchor>, or make a New event.</>} />
         </Box>
         <Tabs defaultValue={first}>
           <Tabs.List>

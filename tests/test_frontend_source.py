@@ -557,8 +557,9 @@ def test_follow_on_surfaces_exist():
     Phase 3: the schedule editor's Then block holds up to three later raids and sends the whole lineup (never `follow_raid`)."""
     sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
     assert "follow_raid" not in sched and "Then, the same night" in sched and "f.lineup =" in sched and "LATER_MAX = 3" in sched
-    rosters = (SRC / "pages" / "Rosters.tsx").read_text()
-    assert "follow_line" in rosters and "follow:" in rosters[rosters.index("function StartAdhoc"):]
+    # phase 4, Task 7: the ad hoc Open's Then field became the New event page's lineup builder (later raids as `lineup`)
+    lineup = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    assert "lineup: later" in lineup and "<LineupBuilder" in lineup
     me = (SRC / "pages" / "Me.tsx").read_text()
     assert "s.may_leave" in me and "s.may_stay" in me and "/stay`" in me and "s.leave_consequence" in me
     card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
@@ -923,3 +924,38 @@ def test_schedule_editing_stays_reachable_until_the_schedules_page():
     assert 'path="/schedules"' in app and 'path="/schedules/:id"' in app and "<RaidSchedulesPage" in app
     assert 'path="/raids/:id"' in app and "?view=readiness" in app and 'path="/readiness"' in app
     assert "<Schedules " in (SRC / "pages" / "RaidSchedules.tsx").read_text()
+
+
+def test_the_builder_works_without_a_drag():
+    b = _code_only((SRC / "components" / "lineup" / "LineupBuilder.tsx").read_text())
+    for needle in ("draggable", "onDrop", '"Add"', "Move earlier", "Move later", '"Remove"', "one roster fewer", "one roster more", "fixedFirst"):
+        assert needle in b, needle
+    assert "max" in b and 'useMediaQuery("(max-width: 48em)")' in b, "steps stack below sm"
+
+
+def test_new_event_picks_a_time_never_types_one():
+    page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text()); when = _code_only((SRC / "components" / "WhenPicker.tsx").read_text())
+    assert "<WhenPicker" in page and "<DatePickerInput" in when and "clock12" in when and "TextInput" not in when + page
+    assert 'useDirty("lineup:new"' in page and "guardNav(" in page and "StartAdhoc" not in (SRC / "pages" / "Rosters.tsx").read_text()
+
+
+def test_new_event_prints_only_the_servers_words():
+    """Carried 7, 8, 9 (phase 4, Task 7): every change re-asks the preview (the latest answer wins) and the page prints its
+    facts, step times, notes and refusal box — never its own; the Day's lower bound is the GUILD's date (/api/event-new
+    `today`), never the browser's; the four-step limit is the server's (lineup_max); a schedule's night opens through
+    the server's box with `seen`; a one-off opens with no box and lands on the run."""
+    page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    when = _code_only((SRC / "components" / "WhenPicker.tsx").read_text())
+    assert "/open/preview`" in page and "seq.current" in page, "the latest answer wins"
+    assert "<Facts items={p.facts}" in page and "p.notes" in page and "p.refusal_box" in page and "p.lineup" in page
+    assert "minDate={minDate}" in when and "opts.today" in page and "toISOString" not in when + page
+    assert "max={opts.lineup_max}" in page and '"/api/event-new"' in page
+    assert "useConfirmBox(" in page and "seen: fp" in page and 'p.kind === "scheduled" ? p.schedule :' in page
+    assert 'valueFormat="ddd D MMM"' in when and "15" in when
+    b = _code_only((SRC / "components" / "lineup" / "LineupBuilder.tsx").read_text())
+    assert "Drop a raid here for step" in b and "-player · about" in b and "aria-label={`Move ${" in b
+    assert "fetch(" not in b and "api." not in b, "the builder is pure: it never fetches"
+    assert "<LineupPicture" in page or (SRC / "components" / "lineup" / "LineupPicture.tsx").exists()
+    rosters = _code_only((SRC / "pages" / "Rosters.tsx").read_text())
+    assert 'to="/events/new"' in rosters and "New event" in rosters
+    assert 'path="/events/new"' in _code_only((SRC / "App.tsx").read_text())

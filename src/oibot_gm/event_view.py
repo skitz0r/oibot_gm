@@ -12,7 +12,7 @@ from typing import Callable
 from . import consequences as cq
 from . import raidcycle as rc
 from .constants import MARK_WORDS, PAGE_WORDS
-from .registry import Registry, RegistryError
+from .registry import LINEUP_MAX, Registry, RegistryError
 
 CLOSED = ("done", "cancelled")
 HISTORY_PAGE = 20  # history rows per page, newest first
@@ -294,3 +294,85 @@ def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, no
     box = None if why else cq.open_now_box(reg, t, opens, lock_at, lineup=lineup, channel=bool(reg.config.signup_channel_id))
     return {"title": reg.local12(t), "chip": PAGE_WORDS["no_sheet_yet"], "schedule": {"id": sid, "name": name}, "details": details,
             "can_open": why is None, "why": why, "open": {"start_iso": t.isoformat(), "schedule": sid, "occurrence": occurrence}, "box": box}
+
+
+# ---------------------------------------------------------------- New event (phase 4, Task 7)
+
+NEW_EVENT_LOCKS = (2, 24)  # the New event page's Locks choice for a one-off: hours before the start
+LOCK_CHOICE_REFUSAL = "Pick when the sheet locks from the list."
+SCHEDULED_NIGHT = "That time is an event of {name}, so it opens with that schedule's lineup and timing."
+
+
+def lock_choices() -> list[dict]:
+    """[{hours, words}]: the Locks select ('2 hours before', '24 hours before'), in the words the page prints."""
+    return [{"hours": h, "words": f"{h} hours before"} for h in NEW_EVENT_LOCKS]
+
+
+def new_event_options(reg: Registry) -> dict:
+    """What the New event page picks from (GET /api/event-new): {today (the GUILD's date, the Day picker's lower bound —
+    never the browser's), raids [{id, name, size, hours}] (the palette), lineups [{id, name, lineup [{raid, rosters,
+    starts}]}] (Start from › Copy a lineup: each active schedule whose raids are all in the game, starts in minutes after
+    the first — Registry.lineup_offsets), locks (lock_choices), lineup_max (registry.LINEUP_MAX: the builder holds no copy)}."""
+    raids = [{"id": rid, "name": reg.raid_def(rid).get("name", rid), "size": int(reg.raid_def(rid).get("size") or 0),
+              "hours": float(reg.raid_def(rid).get("duration_hours") or 0)} for rid in reg.profile.raids]
+    lineups = []
+    for s in reg.all_schedules():
+        if not s.get("active", True):
+            continue
+        lineup = [{"raid": str(e.get("raid") or ""), "rosters": int(e.get("rosters") or 1), **({"starts": e["starts"]} if e.get("starts") is not None else {})}
+                  for e in (s.get("lineup") or rc.schedule_lineup(s["raid"], s))]
+        if not lineup or any(e["raid"] not in reg.profile.raids for e in lineup):
+            continue  # a raid the game no longer has: nothing to copy (the Schedules page says so)
+        try:
+            offsets = reg.lineup_offsets(lineup)
+        except RegistryError:
+            continue
+        lineups.append({"id": s["id"], "name": s.get("name") or s["id"],
+                        "lineup": [{"raid": e["raid"], "rosters": e["rosters"], "starts": off} for e, off in zip(lineup, offsets)]})
+    return {"today": reg.now_local().date().isoformat(), "raids": raids, "lineups": lineups, "locks": lock_choices(), "lineup_max": LINEUP_MAX}
+
+
+def seats_words(reg: Registry, lineup: list[dict]) -> str:
+    """'20, then 10 + 10' — each raid's seats, a roster each, in lineup order."""
+    def one(e: dict) -> str:
+        size = int(reg.raid_def(e["raid"]).get("size") or 0) if e.get("raid") in reg.profile.raids else 0
+        return " + ".join([str(size)] * int(e.get("rosters") or 1))
+    return ", then ".join(one(e) for e in lineup)
+
+
+def new_event_view(reg: Registry, rs: "rc.RaidStore", rid: str, p: dict, first_rosters: int) -> dict:
+    """The New event page's "What this makes" from rc.open_preview's answer `p` (nothing written): {facts [One signup
+    sheet, Comes from (a schedule's night), Seats, Priority, Confirmation], lineup [{raid, name, rosters, starts,
+    time_words, seats}] (each step as the open would make it — a schedule's night: ITS lineup), notes (the DST line, the
+    schedule's night, a raid that first opens later, no signup channel — sentences), refusal_box (a closed run at that
+    time, an event already open then, a past time — else None)}."""
+    scheduled = p.get("kind") == "scheduled" or (p.get("schedule") not in (None, rc.ADHOC_SCHEDULE))
+    sd = reg.schedule_def(rid, p.get("schedule") if scheduled else None)
+    start = datetime.fromisoformat(p["start"])
+    live = rc.find_run(reg, rs, rid, start, p.get("schedule")) if p.get("exists") else None
+    if live is not None:
+        first_n = int((reg.config.team(live.team) or {}).get("rosters") or 1)
+    else:
+        first_n = int(sd.get("rosters") or 1) if scheduled else int(first_rosters or 1)
+    steps = [{"raid": rid, "rosters": first_n, "starts": 0}] + [{"raid": e["raid"], "rosters": int(e.get("rosters") or 1), "starts": int(e.get("starts") or 0)}
+                                                                  for e in p.get("later") or []]
+    times = [reg.local12(start, "%I:%M %p")] + [e.get("time") or "" for e in p.get("later") or []]
+    lineup = [{**e, "name": reg.raid_def(e["raid"]).get("name", e["raid"]), "time_words": t,
+               "seats": int(reg.raid_def(e["raid"]).get("size") or 0)} for e, t in zip(steps, times)]
+    facts = [_fact("One signup sheet", rc.lineup_words(reg, steps))]
+    if scheduled:
+        name = p.get("schedule_name") or p.get("schedule")
+        facts.append(_fact("Comes from", name, f"/schedules/{p['schedule']}"))
+    priority = rc.priority_words(reg, {"kind": (sd.get("schedule") or {}).get("kind"), "weights": sd.get("weights")})  # a one-off: first to join
+    facts += [_fact("Seats", seats_words(reg, steps)), _fact("Priority", priority),
+              _fact("Confirmation", rc.confirmation_words(bool(sd.get("confirm", True))))]  # what ensure_run freezes on the run
+    notes = [p.get("when_note") or "", SCHEDULED_NIGHT.format(name=p.get("schedule_name") or "its schedule") if scheduled else "",
+             p.get("before_open") or "", "" if p.get("channel") else (p.get("posts") or "")]
+    refusal = None
+    if p.get("refusal"):
+        refusal = cq.refusal_box_for(p["refusal"])
+    elif live is not None:
+        refusal = cq.refusal_box_for(cq.already_open_sentence(reg, live))
+    elif p.get("past"):
+        refusal = cq.refusal_box_for(cq.new_event_past_sentence(reg, start))
+    return {"facts": facts, "lineup": lineup, "notes": [n for n in notes if n], "refusal_box": refusal}

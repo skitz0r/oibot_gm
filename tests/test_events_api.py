@@ -368,3 +368,138 @@ def test_meta_carries_the_page_words(officer_client):
     assert m["page_words"]["one_off"] == "One-off, no schedule" and m["confirm_words"]["discard"] == "Discard edits"
     assert m["page_words"] == PAGE_WORDS and m["confirm_words"] == CONFIRM_WORDS and m["leave"] == cq.LEAVE_TEMPLATE
     assert rc.confirmation_words(False) == PAGE_WORDS["not_asked"] and rc.confirmation_words(True) == PAGE_WORDS["asked_at_lock"]
+
+
+# ---------------------------------------------------------------- New event (Task 7): the lineup builder's open
+
+def wall(reg, t) -> str:
+    return t.astimezone(reg.tz).strftime("%Y-%m-%d %H:%M")
+
+
+def test_open_with_a_lineup_and_a_lock_choice(web_bot, reg, rs):
+    """The New event page's preview answers "What this makes" as facts in the server's words, every step's start as a
+    12-hour time, and no refusal; Open with the lock choice makes a one-off that locks 24 hours before."""
+    c, h = web_bot.c, H()
+    start = start_in(reg, 4)
+    body = {"when": wall(reg, start), "schedule": "", "lineup": EVENING, "timing": {"lock_hours_before": 24}}
+    r = c.post(f"/api/raid/{HYJAL}/open/preview", json=body, headers=h)
+    assert r.status_code == 200, r.text
+    p = r.json()
+    assert [f["label"] for f in p["facts"]] == ["One signup sheet", "Seats", "Priority", "Confirmation"]
+    facts = {f["label"]: f["value"] for f in p["facts"]}
+    assert facts["Seats"] == "20, then 10 + 10" and facts["One signup sheet"] == "Hyjal Summit, then Barrow Deeps × 2"
+    assert facts["Priority"] == PAGE_WORDS["first_to_join"] and facts["Confirmation"] == PAGE_WORDS["not_asked"]
+    assert [(s["name"], s["rosters"], s["time_words"], s["seats"]) for s in p["lineup"]] == [("Hyjal Summit", 1, "6:30 PM", 20), ("Barrow Deeps", 2, "9:30 PM", 10)]
+    assert p["refusal_box"] is None and p["kind"] == "adhoc"
+    r = c.post(f"/api/raid/{HYJAL}/open", json={**body, "start": p["start"], "occurrence": p["occurrence"]}, headers=h)
+    assert r.status_code == 200, r.text
+    key = r.json()["key"]
+    assert reg.config.team(key)["cutoff_hard_hours"] == 24
+    assert [(e["raid"], e["rosters"]) for e in rc.run_lineup(reg, rs, rs.events[key])] == [(HYJAL, 1), (RID, 2)]
+    # the same night again: already open — a refusal box, the run named by its time, never its key
+    again = c.post(f"/api/raid/{HYJAL}/open/preview", json=body, headers=h).json()
+    assert again["refusal_box"]["verb"] is None and again["refusal_box"]["title"] == cq.REFUSAL_TITLES["clash"]
+    assert key not in str(again["refusal_box"]) and reg.local12(start) in again["refusal_box"]["sentences"][0]
+
+
+def test_a_new_events_first_step_takes_its_rosters_and_a_custom_start(web_bot, reg, rs):
+    c, h = web_bot.c, H()
+    start = start_in(reg, 5)
+    later = [{"raid": RID, "rosters": 1, "starts": 240}]
+    body = {"when": wall(reg, start), "schedule": "", "rosters": 2, "lineup": later}
+    p = c.post(f"/api/raid/{HYJAL}/open/preview", json=body, headers=h).json()
+    facts = {f["label"]: f["value"] for f in p["facts"]}
+    assert facts["Seats"] == "20 + 20, then 10" and facts["One signup sheet"] == "Hyjal Summit × 2, then Barrow Deeps"
+    assert [s["time_words"] for s in p["lineup"]] == ["6:30 PM", "10:30 PM"]
+    r = c.post(f"/api/raid/{HYJAL}/open", json={**body, "start": p["start"], "occurrence": p["occurrence"]}, headers=h)
+    assert r.status_code == 200, r.text
+    assert [(e["raid"], e["rosters"]) for e in rc.run_lineup(reg, rs, rs.events[r.json()["key"]])] == [(HYJAL, 2), (RID, 1)]
+
+
+@pytest.mark.parametrize("bad", [
+    [{"raid": "molten_core", "rosters": 1}],
+    [{"raid": RID, "rosters": 1}, {"raid": RID, "rosters": 1}],
+    [{"raid": RID, "rosters": 1, "starts": 240}, {"raid": "onyxias_lair", "rosters": 1, "starts": 120}],
+    [{"raid": RID, "rosters": 1}],  # with a lock choice the New event page never offers
+])
+def test_a_refused_lineup_is_a_refusal_box(web_bot, reg, rs, bad):
+    c, h = web_bot.c, H()
+    body = {"when": wall(reg, start_in(reg, 4)), "schedule": "", "lineup": bad}
+    if len(bad) == 1 and bad[0]["raid"] == RID:
+        body["timing"] = {"lock_hours_before": 5}
+    for path in ("open/preview", "open"):
+        r = c.post(f"/api/raid/{HYJAL}/{path}", json=body, headers=h)
+        assert r.status_code == 400, r.text
+        box = r.json()["box"]
+        assert box["verb"] is None and box["sentences"] == [r.json()["error"]]
+    assert not rs.events
+
+
+def test_a_scheduled_night_opens_as_its_schedule_whatever_the_builder_held(web_bot, reg, rs):
+    """A picked time that is a schedule's night of the same first raid: the preview shows that schedule's lineup and
+    Comes from, and Open opens the schedule's event — the builder's lineup, rosters and lock choice are not used."""
+    c, h = web_bot.c, H()
+    sid = tuesday(reg)
+    night = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
+    body = {"when": wall(reg, night), "schedule": "", "rosters": 3, "lineup": [{"raid": "onyxias_lair", "rosters": 1}], "timing": {"lock_hours_before": 2}}
+    p = c.post(f"/api/raid/{HYJAL}/open/preview", json=body, headers=h).json()
+    assert p["kind"] == "scheduled" and p["schedule"] == sid and p["box"]["verb"] == "Open the sheet"
+    facts = {f["label"]: f for f in p["facts"]}
+    assert list(facts) == ["One signup sheet", "Comes from", "Seats", "Priority", "Confirmation"]
+    assert facts["One signup sheet"]["value"] == "Hyjal Summit, then Barrow Deeps × 2" and facts["Comes from"]["href"] == f"/schedules/{sid}"
+    assert facts["Seats"]["value"] == "20, then 10 + 10" and any("Tuesday raid night" in n for n in p["notes"])
+    # what the page sends for a schedule's night: no lineup (the schedule's own); the rosters and the lock choice are never applied to it
+    sent = {"start": p["start"], "schedule": p["schedule"], "occurrence": p["occurrence"], "seen": p["box"]["fp"], "rosters": 3, "timing": {"lock_hours_before": 2}}
+    r = c.post(f"/api/raid/{HYJAL}/open", json=sent, headers=h)
+    assert r.status_code == 200, r.text
+    ev = rs.events[r.json()["key"]]
+    assert ev.occurrence == p["occurrence"] and [(e["raid"], e["rosters"]) for e in rc.run_lineup(reg, rs, ev)] == [(HYJAL, 1), (RID, 2)]
+    assert reg.config.team(ev.team)["cutoff_hard_hours"] != 2
+
+
+def test_the_new_event_page_reads_its_choices_from_the_server(officer_client, reg):
+    sid = tuesday(reg)
+    j = officer_client.get("/api/event-new").json()
+    assert j["today"] == reg.now_local().date().isoformat()
+    assert [(x["id"], x["name"], x["size"], x["hours"]) for x in j["raids"]] == [
+        (rid, reg.raid_def(rid)["name"], int(reg.raid_def(rid)["size"]), float(reg.raid_def(rid)["duration_hours"])) for rid in reg.profile.raids]
+    assert j["lineups"] == [{"id": sid, "name": "Tuesday raid night", "lineup": [{"raid": HYJAL, "rosters": 1, "starts": 0}, {"raid": RID, "rosters": 2, "starts": 180}]}]
+    assert [x["words"] for x in j["locks"]] == ["2 hours before", "24 hours before"] and [x["hours"] for x in j["locks"]] == [2, 24]
+    assert j["lineup_max"] == 4
+
+
+def test_a_four_step_lineup_opens_on_a_four_raid_profile(store, profile, monkeypatch):
+    """profiles/forever has three raids: the four-step lineup runs on a profile COPY with one more (tests/test_lineups.py's
+    way) — the preview reads all four steps and Open makes four parts from one signup; a fifth is a refusal box."""
+    import copy
+
+    from conftest import GUILD, TEST_MEMBERS
+    from fastapi.testclient import TestClient
+    from test_mcp import TOKEN
+    from test_raid_night import NightBot
+
+    from oibot_gm.registry import Registry
+    from oibot_gm.web import app as web
+
+    p = copy.deepcopy(profile)
+    for rid, name in (("extra_a", "Extra A"), ("extra_b", "Extra B")):
+        p.raids[rid] = {**copy.deepcopy(p.raids[RID]), "id": rid, "name": name, "duration_hours": 2}
+    reg = Registry(store, GUILD, p)
+    reg.seed_test_members(TEST_MEMBERS, "t")
+    for rid in reg.profile.raids:
+        reg.set_raid_overrides(rid, {"first_open": "2026-01-01T00:00"}, "t")
+    rs = rc.RaidStore(store, GUILD)
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    c = TestClient(web.create_app(NightBot(reg, rs)))
+    later = [{"raid": RID, "rosters": 2}, {"raid": "onyxias_lair", "rosters": 1}, {"raid": "extra_a", "rosters": 1}]
+    body = {"when": wall(reg, start_in(reg, 4)), "schedule": "", "lineup": later}
+    p = c.post(f"/api/raid/{HYJAL}/open/preview", json=body, headers=H()).json()
+    assert [s["time_words"] for s in p["lineup"]] == ["6:30 PM", "9:30 PM", "12:00 AM", "1:30 AM"]
+    assert {f["label"]: f["value"] for f in p["facts"]}["Seats"] == "20, then 10 + 10, then 40, then 10"
+    r = c.post(f"/api/raid/{HYJAL}/open", json={**body, "start": p["start"], "occurrence": p["occurrence"]}, headers=H())
+    assert r.status_code == 200, r.text
+    assert [pt.instance for pt in rc.event_parts(rs, rs.events[r.json()["key"]])] == [HYJAL, RID, "onyxias_lair", "extra_a"]
+    five = body | {"when": wall(reg, start_in(reg, 6)), "lineup": later + [{"raid": "extra_b", "rosters": 1}]}
+    r = c.post(f"/api/raid/{HYJAL}/open/preview", json=five, headers=H())
+    assert r.status_code == 400 and r.json()["box"]["verb"] is None

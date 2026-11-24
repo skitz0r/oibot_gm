@@ -818,6 +818,18 @@ def open_now_box(reg: Registry, start, opens, lock_at, *, lineup: list[dict] | N
                "Open the sheet", rev=rev)
 
 
+def already_open_sentence(reg: Registry, ev) -> "rc.Refusal":
+    """New event at a time that already has a live event of that raid (a 'clash' refusal): the event named by its own
+    title, never its key — 'Hyjal Summit Thu 10 Dec 6:30 PM is already open. Pick another time.'"""
+    name = reg.raid_def(ev.instance).get("name", ev.instance)
+    return rc.Refusal(f"{name} {reg.local12(ev.start)} is already open. Pick another time.", "clash")
+
+
+def new_event_past_sentence(reg: Registry, start) -> "rc.Refusal":
+    """New event at a time already past (a 'past' refusal): 'Fri 20 Nov 7:00 PM is in the past. Pick a later time.'"""
+    return rc.Refusal(f"{reg.local12(start)} is in the past. Pick a later time.", "past")
+
+
 def _schedule_rev(reg: Registry, sid: str) -> str:
     try:
         return reg.config_rev(f"schedule:{sid}")

@@ -1123,7 +1123,7 @@ def test_a_test_run_opened_after_clearing_one_the_same_minute_is_a_live_run(reg,
 
 
 def test_rosters_page_open_of_the_raids_own_scheduled_run_from_the_adhoc_picker(reg, rs, web_bot):
-    """Rosters.tsx StartAdhoc: a one-off time that IS the raid's own (default) run previews as 'scheduled' with schedule
+    """The New event page (was Rosters.tsx StartAdhoc): a one-off time that IS the raid's own (default) run previews as 'scheduled' with schedule
     null; the page then sends schedule 'default' (it used to send 'adhoc' → 409, the run never matched)."""
     c = web_bot.c
     wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)
@@ -1137,7 +1137,7 @@ def test_rosters_page_open_of_the_raids_own_scheduled_run_from_the_adhoc_picker(
     r = c.post("/api/raid/barrow_deeps/open", json=sent, headers=H())
     assert r.status_code == 200 and rs.events[r.json()["key"]].occurrence == p["occurrence"], r.text
     from pathlib import Path
-    page = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Rosters.tsx").read_text()
+    page = (Path(__file__).resolve().parents[1] / "frontend/src/pages/LineupPage.tsx").read_text()
     assert 'p.kind === "scheduled" ? p.schedule :' in page, "the page sends what this test sends"
     old = {**sent, "schedule": "adhoc"}  # what the page sent before the fix
     assert c.post("/api/raid/barrow_deeps/open", json=old, headers=H()).status_code == 409

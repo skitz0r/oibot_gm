@@ -23,7 +23,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from .. import consequences as cq
-from .. import raid_page
+from .. import event_view, raid_page
 from .. import armory as armory_mod
 from .api_prices import prices_meta
 from .api_armory import char_extras as armory_extras
@@ -1895,6 +1895,26 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise RegistryError(why)
         return [dict(e) for e in later]
 
+    ROSTERS_RANGE = "A raid in an event holds 1 to 4 rosters."
+
+    def one_off_args(d: dict) -> tuple[float | None, int | None]:
+        """The New event page's one-off choices (Task 7): `timing.lock_hours_before` (one of event_view.NEW_EVENT_LOCKS)
+        and `rosters` (the first raid's, 1 to 4) → (lock hours, rosters), None each when not sent. Applied to a one-off
+        only: a schedule's night keeps its schedule's own (the route decides)."""
+        t = d.get("timing")
+        lock = None
+        if t not in (None, "", {}):
+            h = t.get("lock_hours_before") if isinstance(t, dict) else None
+            if isinstance(h, bool) or not isinstance(h, (int, float)) or h not in event_view.NEW_EVENT_LOCKS:
+                raise RegistryError(event_view.LOCK_CHOICE_REFUSAL)
+            lock = float(h)
+        n = d.get("rosters")
+        if n in (None, ""):
+            return lock, None
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= MAX_SCHEDULE_ROSTERS:
+            raise RegistryError(ROSTERS_RANGE)
+        return lock, n
+
     OPEN_UNREAD = "The bot couldn't read when this sheet opens and locks, so nothing was opened and the event stays coming up."
 
     def open_box(reg, rid: str, p: dict) -> dict:
@@ -1913,17 +1933,24 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def raid_open_preview(request: Request, rid: str):
         """What Open would do, nothing written (design B4; rc.open_preview — the /raid open wizard says the same):
         {kind: scheduled | adhoc, schedule, schedule_name, occurrence, start (ISO: carry it back to Open), label (12-hour guild
-        time), when_note (the DST line), exists, channel, rules, past, follow, follow_line}. Body as Open's: {when? | start?,
-        schedule?, follow?}."""
+        time), when_note (the DST line), exists, channel, rules, past, follow, follow_line} + the New event page's "What this
+        makes" (event_view.new_event_view: facts, lineup, notes, refusal_box). Body as Open's: {when? | start?, schedule?,
+        follow?, lineup?, rosters?, timing?}. A time that is a schedule's night answers with THAT schedule's lineup when
+        `lineup` was sent (the New event page's builder is not used for it). A refusal answers with its box (400)."""
         v, d = await body(request, officer=True)
         if rid not in v.reg.profile.raids:
             return JSONResponse({"error": "unknown raid"}, status_code=400)
         when, sid = open_args(v.reg, rid, d)
+        rs = bot.raids.store(v.reg)
         try:
             fw = follow_arg(v.reg, rid, d)
-            p = rc.open_preview(v.reg, bot.raids.store(v.reg), rid, when, sid, follow=fw, lineup=lineup_arg(v.reg, rid, d))
+            later = lineup_arg(v.reg, rid, d)
+            _lock, first_n = one_off_args(d)
+            p = rc.open_preview(v.reg, rs, rid, when, sid, follow=fw, lineup=later, first_rosters=first_n)
+            if "lineup" in d and p.get("schedule") not in (None, rc.ADHOC_SCHEDULE):  # a schedule's night: its own lineup
+                p = rc.open_preview(v.reg, rs, rid, p["start"], p["schedule"])
         except RegistryError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+            return box_refused(e)
         ch = bot.get_channel(int(p["channel"])) if p.get("channel") else None
         p["channel_name"] = getattr(ch, "name", None)
         # where the sheet goes, in one sentence from code (the confirm prints it; the page composes none)
@@ -1933,6 +1960,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             p["box"] = open_box(v.reg, rid, p)
         except (RegistryError, KeyError, ValueError, TypeError):
             p["box"] = None
+        p.update(event_view.new_event_view(v.reg, rs, rid, p, first_n or 1))
         return p
 
     @app.post("/api/raid/{rid}/open")
@@ -1942,7 +1970,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rc.open_when / wizard.resolve_local, never replace(tzinfo=)). With `schedule`: that schedule's settings (a pickup
         template); without: the upcoming run at exactly that time if there is one, else a one-off (ad hoc). `occurrence`
         (from the preview; None for a one-off): the schedule's run Open is expected to make — refused (409) with a fresh
-        preview when the time now resolves to another."""
+        preview when the time now resolves to another. `rosters` / `timing.lock_hours_before` (the New event page): the first
+        raid's rosters and the lock of a ONE-OFF; a schedule's night keeps its schedule's own. A refusal answers with its
+        box (400)."""
         v, d = await body(request, officer=True)
         reg = v.reg
         if rid not in reg.profile.raids:
@@ -1951,10 +1981,16 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         try:
             fw = follow_arg(reg, rid, d)
             later = lineup_arg(reg, rid, d)
+            lock_h, first_n = one_off_args(d)
             start, sid, _note = rc.open_when(reg, rid, when, sid)
             rc.refuse_past_start(reg, start, reg.now_local())  # a mistyped year would open a run the scheduler may close at once
+            if later:  # the whole lineup's rules (a raid twice, more than four, starts in order) before anything is written
+                reg.lineup_offsets([{"raid": rid, "rosters": 1}, *later])
         except RegistryError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+            return box_refused(e)
+        one_off = {k: x for k, x in (("lock_hours", lock_h), ("first_rosters", first_n)) if x is not None}
+        if one_off and rc.which_run(reg, rid, start, sid)["schedule"] != rc.ADHOC_SCHEDULE:
+            one_off = {}  # a schedule's night (or a pickup template) opens with its schedule's own rosters and timing
         if "occurrence" in d:
             w = rc.which_run(reg, rid, start, sid)  # the run is (schedule, occurrence): both must be the preview's
             asked = (str(d.get("schedule") or "").strip().lower() or None, (d.get("occurrence") or "").strip() or None)
@@ -1973,9 +2009,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 return r
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
             ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, follow=later[0] if later and len(later) == 1 else (None if later else fw),
-                                                         schedule=sid, **({"lineup": later} if later and len(later) > 1 else {})))
+                                                         schedule=sid, **({"lineup": later} if later and len(later) > 1 else {}), **one_off))
         except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+            return box_refused(e)
         return {"message": f"Opened {dr.run_title(reg, ev)}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")
                 + (f", then {words}" if (words := rc.follow_words_of(reg, ev)) else ""), "key": ev.key}  # the run's own follow-on, never the request's
 

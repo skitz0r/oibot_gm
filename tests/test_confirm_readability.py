@@ -333,6 +333,12 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     lineup3 = [{"raid": "hyjal_summit_forever", "rosters": 1}, {"raid": RID, "rosters": 2}, {"raid": "onyxias_lair", "rosters": 1}]
     dump.add("before_first_open_sentence", "the third raid opens later", [cq.before_first_open_sentence(reg, lineup3, when) or ""])
     assert cq.before_first_open_sentence(reg, lineup3[:2], when) is None  # every raid open by its start: no line
+    # New event (phase 4, Task 7): the refusals and the schedule's-night line its "What this makes" prints
+    from oibot_gm import event_view
+    dump.add("already_open_sentence", "a night already open", [cq.already_open_sentence(reg, runs["three raids, first"])])
+    dump.add("new_event_past_sentence", "a time already past", [cq.new_event_past_sentence(reg, when - timedelta(days=30))])
+    dump.add("SCHEDULED_NIGHT", "a schedule's night", [event_view.SCHEDULED_NIGHT.format(name="Tuesday raid night")])
+    dump.add("LOCK_CHOICE_REFUSAL", "a lock not on the list", [event_view.LOCK_CHOICE_REFUSAL])
     # a cancel on a later raid once the first raid has finished (fix round 1): only the raids still to play, no "whole"
     later = (reg.now_local() + timedelta(days=6)).replace(hour=18, minute=30, second=0, microsecond=0)
     first = rc.open_run(reg, rs, "hyjal_summit_forever", later, by="t", schedule=rc.ADHOC_SCHEDULE,

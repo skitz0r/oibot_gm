@@ -793,9 +793,9 @@ schedule sets its own. Three kinds:
 - **Days of each lockout** — "Day 1 of each 3-day lockout, 8:00 PM": day 1 is the day the lockout resets, counted
   from the raid's first opening every `lockout_days`, so a 3- or 5-day reset is followed exactly (and daylight saving
   never moves the wall-clock time; a time the clocks skip that night moves past the gap).
-- **Pickup template** — never opens by itself. `/raid open` → *Ad hoc run…* offers it (*Pickup — pick a time*), the
-  Rosters page has it in *Start an ad hoc run…*'s template picker above the date and time; the run gets the template's
-  settings.
+- **Pickup template** — never opens by itself. `/raid open` → *Ad hoc run…* offers it (*Pickup — pick a time*); the
+  run gets the template's settings. (The site's **New event** page makes one-offs; a pickup template opens from
+  Discord, plain text or MCP.)
 Each schedule also says how many **rosters** a run expects (1–4). With 2, the sheet advertises 2 × the raid's size
 (20 seats for a 10-player raid), the health check and the fill engine measure against two rosters, and the lock builds
 two. The board on the Rosters page shows every roster the run expects before the lock (a 10-player ×2 run has 20
@@ -817,7 +817,7 @@ removed, the ops feed says so once an hour, naming the schedule and the raid; bo
 - **Recurring** — weekly nights and days of each lockout. Opens by itself on its
   week, has **regulars**, and its lock weighs being a regular (below). Confirmations on by default.
 - **Ad hoc** — a pickup template, or a **one-off** run at a time an officer picks (*Ad hoc run…* in `/raid open`,
-  *Start an ad hoc run…* on the Rosters page, or plain text / MCP with a time that is none of the raid's upcoming runs).
+  **New event** on the site, or plain text / MCP with a time that is none of the raid's upcoming runs).
   It takes the raid's size, comp, lockout and length but none of its recurring timing — its own lighter defaults: no
   reminder, no DM on open, **no confirmations** (Join is the commitment; *Can't make it* frees your seat), locks
   **2 h** before, fill asks wait **1 h**, and seats go **first come, first rostered** (the joiners in the order they
@@ -833,8 +833,8 @@ removed, the ops feed says so once an hour, naming the schedule and the raid; bo
   (*Schedules* › a schedule › *Switches and split* → *Change a switch*: the game's suggestion, on or off).
 
 **More raids the same night (follow-ons).** A schedule (Raids page › *then, the same night* and *its rosters* in the
-schedule's editor; plain text `<schedule>.follow = barrow_deeps x2`) or an ad hoc Open (*Then, the same night* and *Its
-rosters* on the Rosters page's *Start an ad hoc run…*; plain text *"set up an ad hoc Hyjal raid for 6:30 on Dec 10 with
+schedule's editor; plain text `<schedule>.follow = barrow_deeps x2`) or a one-off (the lineup on the site's **New
+event** page; plain text *"set up an ad hoc Hyjal raid for 6:30 on Dec 10 with
 10-man Barrow Deeps splits afterwards"*) names a follow-on: another raid with its own rosters per run, starting when the
 one before it ends (that raid's length: a 6:30 PM Hyjal Summit of 3 hours is followed at 9:30 PM, and a Barrow Deeps of
 2½ hours after it at midnight). A run holds up to four raids, all from one signup: the lead and up to three
@@ -998,7 +998,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    the sheet is for (the schedule's regulars, or every main while it has none) is also DMed when it opens. Officers can
    open a sheet early from the Rosters page: **Open next run** takes the raid's next scheduled run (with several
    recurring schedules, a picker beside it chooses which; when no run can open yet, why is written under it), and
-   **Start an ad hoc run…** opens one screen for a one-off (or a pickup template, picked there) at the date and time you pick. `/raid open` does the same in Discord: pick the raid,
+   **New event** (on the Rosters page; the page is `/events/new`) makes a one-off — see *New event and the lineup
+   builder* below. `/raid open` does the same in Discord: pick the raid,
    then **Next run — <time>**, **Another upcoming run…** (each labelled with its schedule's name when there are several)
    or **Ad hoc run…** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes from lists; nothing
    typed; ad hoc defaults; more than three pickup templates come as one *Pick a template* select). **Another upcoming
@@ -1010,10 +1011,26 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    raid's **When it runs** block lists each active schedule's next three runs however far ahead; a run that can open
    has **Open now** (one press, then the same confirm) and one that can't yet says why in the bot's words (more than
    three weeks out: when Open works and when its sheet opens on its own; a time whose run was cancelled or ended).
-   *Start an ad hoc run…* asks the bot what the picked time would open as you pick: when it is a scheduled run the button reads *Open the … run —
-   scheduled, with confirmations*; the same screen shows both clocks, the run's rules, the daylight-saving note and the
-   channel the sheet posts in, and why Start waits when it does, and opens exactly the run it showed (if the time now means another run, nothing opens
-   and the preview is shown again). With **no signup channel set** the scheduler opens nothing: each run that was due
+   **New event and the lineup builder.** The page has four sections. *Start from* › *Copy a lineup* fills the builder
+   with an active schedule's lineup (the first schedule is picked to begin with) or *An empty lineup*. *Lineup* is the
+   builder: the raids on the left (each with its size and about how long it runs, and an **Add** button — a raid
+   already in the lineup is greyed), the steps on the track (up to four, one raid each, never the same raid twice).
+   Each step has **Starts** (step 1 starts when the event does; a later step starts when the raid before it ends, or
+   pick a later time from a list of quarter hours, up to 12 hours after the step before it — the steps after it keep
+   their gaps), **Rosters** − / + (1 to 4: a node per roster, *Barrow Deeps · roster 2*, 10 seats each), and **Move
+   earlier** / **Move later** / **Remove** (removing or moving a step puts every later step back at "when the raid
+   before it ends", and the times shown are the bot's at once). On a desktop you can also drag a raid onto the track
+   and drag a step onto another to reorder; on a phone the steps stack and the buttons do it all. *When* is the
+   **Day** (a calendar, from the guild's today), **Starts** (quarter hours, 12-hour clock) and **Locks** (*2 hours
+   before* or *24 hours before*). *What this makes* is the bot's answer, asked again on every change: **One signup
+   sheet** (the whole lineup), **Seats** (*20, then 10 + 10*), **Priority** (*First to join* for a one-off),
+   **Confirmation** (*Not asked*), and any note — the daylight-saving line, a raid that first opens after the event
+   starts, no signup channel. That section is the confirmation: **Open the sheet** opens the event at once and takes
+   you to its card on the Rosters page. A time that already has an open event of that first raid says *That time is
+   taken* and Open waits; a time in the past says so too. A time that **is** one of a schedule's nights shows that
+   schedule's lineup (*Comes from* names it), opens that schedule's event — not the builder's lineup, rosters or lock —
+   and asks first with the *Open the sheet for …?* box. **Back** and *Back to Events* (and a rail link) ask *Leave
+   without saving?* with how many edits you made. With **no signup channel set** the scheduler opens nothing: each run that was due
    gets one warning on the ops feed ("Barrow Deeps Tue 7:30 PM did not open: no signup channel is set") and its
    row in *When it runs* says *needs a signup channel* in red. A raid with no run times offers *Set this raid's run times →*. A run opened closer
    than its week assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
