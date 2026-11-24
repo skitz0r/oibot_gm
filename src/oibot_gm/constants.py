@@ -129,7 +129,11 @@ PAGE_WORDS = {
                         "confirm": "Ask the rostered to confirm", "confirm_hours_before": "Confirm by",
                         "autofill": "The bot asks people for open seats", "fill_ask_hours": "An ask waits",
                         "open_dm": "DM the regulars when the sheet opens", "split_policy": "When one night fills two rosters",
-                        "weights": "Priority"},
+                        "weights": "Priority",
+                        # an event's own (Edit event, the owner's tweaks B): first to join or by priority
+                        "first_come": "Who gets a seat"},
+    # Edit event's seating choice beside PAGE_WORDS["first_to_join"]
+    "by_priority": "By priority",
     # a raid's settings by name: the Raids page's Details labels and its Save box's lines
     "raid_fields": {"lockout_days": "Lockout", "duration_hours": "Length", "first_open": "First opens"},
     # how one night's joiners are split into two rosters (registry.SPLIT_POLICIES)

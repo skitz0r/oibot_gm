@@ -307,6 +307,8 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
         if rc.team_setting(team, "reminders") != "none" and first.state == "open":  # the run's own timing (ev_json's timeline)
             details.append(_fact("Reminder", reg.local12(soft)))
         details.append(_fact("Locks", reg.local12(first.locked_at or hard)))
+        if state == "open":  # the event's own (Edit event): who asks for an open seat once it locks
+            details.append(_fact("Open seats after the lock", PAGE_WORDS["bot_asks" if rc.team_setting(team, "autofill") else "officer_asks"]))
         if rc.run_confirms(reg, first):
             details.append(_fact("Confirm by", reg.local12(confirm)))
             if state == "locked":
@@ -346,7 +348,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "activity": [{"when": r["when"], "line": r["text"]} for r in activity],
             "boxes": {"lock": cq.lock_box(reg, first, rs) if state == "open" else None, "cancel": cq.cancel_box(reg, first, rs) if live else None,
                       "reschedule": cq.reschedule_pick_box(reg, rs, first) if can_move else None},
-            "actions": {"reschedule": can_move, "edit_lineup": state == "open" and first.state == "open",
+            "actions": {"reschedule": can_move, "edit": can_move, "edit_lineup": state == "open" and first.state == "open",
                         "lock": state == "open" and first.state == "open", "cancel": live, "open_now": False},
             "switches": rc.event_switches(reg, rs, first, viewer=viewer) if live else {"short": [], "rows": [], "revs": {}},
             "lineup": lineup, "start_iso": first.start.isoformat(), "timing": timing, "people": people, "sheet_url": url,
@@ -357,7 +359,39 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             # each answered member's characters (the row ⋮'s answer box, the member fixed)
             "characters": {uid: character_rows(reg, m) for uid in {r["uid"] for rows_ in rows.values() for r in rows_}
                            if (m := reg.members.get(int(uid))) is not None} if live else {},
-            "locks": lock_choices(float(timing["lock_hours_before"])) if can_move and timing.get("lock_hours_before") is not None else []}
+            "locks": lock_choices(float(timing["lock_hours_before"])) if can_move and timing.get("lock_hours_before") is not None else [],
+            "edit": edit_options(reg, rs, first, timing) if can_move else None}
+
+
+# what Edit event offers once the roster is locked (rc.AFTER_LOCK, in the settings' names): automatic asks and an ask's wait
+EDIT_AFTER_LOCK = ("autofill", "fill_ask_hours")
+EDIT_FIELDS = ("lock_hours_before", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before", "autofill",
+               "fill_ask_hours", "first_come", "weights", "split_policy")
+
+
+def edit_options(reg: Registry, rs, first: "rc.RaidEvent", timing: dict) -> dict:
+    """What the Events page's Edit event starts from and picks from (the owner's tweaks, B): {fields (the settings it
+    may change NOW: every one before the lock, EDIT_AFTER_LOCK after it), values (rc.run_timing: the event's own),
+    splits [{key, raid, value}] (each live raid's split — rc.run_strategy), hours {setting: [{value, words}]} (the
+    schedule editor's choices, the event's own value among them), max_weight, split_policies}. Nothing here writes; the
+    Save is POST /api/run/{key}/reschedule with `edit`."""
+    from .constants import hours_words
+    from .registry import SPLIT_POLICIES
+    from .schedule_view import MAX_WEIGHT, editor_options
+
+    hours = editor_options(reg)["hours"]
+    for f in ("lock_hours_before", "nudge_hours_before", "confirm_hours_before", "fill_ask_hours"):
+        own = timing.get(f)
+        if own is not None and all(float(c["value"]) != float(own) for c in hours.get(f, [])):
+            h = int(own) if float(own).is_integer() else float(own)
+            hours[f] = sorted([*hours.get(f, []), {"value": h, "words": hours_words(h) if f == "fill_ask_hours" else f"{hours_words(h)} before"}],
+                              key=lambda c: float(c["value"]))
+    parts = [p for p in rc.event_parts(rs, first) if p.state not in CLOSED]
+    locked = first.state != "open"
+    return {"fields": list(EDIT_AFTER_LOCK if locked else EDIT_FIELDS), "values": timing,
+            "splits": [{"key": p.key, "raid": reg.raid_def(p.instance).get("name", p.instance), "value": rc.run_strategy(reg, p)} for p in parts],
+            "hours": {f: hours[f] for f in ("lock_hours_before", "nudge_hours_before", "confirm_hours_before", "fill_ask_hours")},
+            "max_weight": MAX_WEIGHT, "split_policies": list(SPLIT_POLICIES)}
 
 
 # ---------------------------------------------------------------- a coming-up event

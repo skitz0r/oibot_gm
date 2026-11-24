@@ -63,7 +63,7 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
   it is the layout the lock will use (officers drag names into groups; the lock places everyone else), after the lock it
   *is* the roster. On the Events page it is drawn as the lock would place everyone now; officers shape it by dragging
   names (or a name's **⋮ › Move to…**), take their own moves back with **Undo my moves**, and pick how a split is made
-  with **More › Split strategy…**. A test run's card on the Test bench keeps the older tools — **Place the rest**,
+  in **Edit event** (each raid's split). A test run's card on the Test bench keeps the older tools — **Place the rest**,
   **Propose roster / splits…**, **Clear** and its ⓘ legend; plain text and MCP keep them too.
 - **Not placed / Not rostered** — the board's list of joiners who hold no place: *Not placed* before the lock (still
   joined — the lock seats them, or leaves them out), *Not rostered* after it (joined, but not on the roster; dragging one
@@ -1039,10 +1039,11 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    sheet yet) and **History** (finished and cancelled events, newest first, 20 at a time; **Show older** adds the next
    20). On a desktop the first open event is shown (else the first night coming up); on a phone the list comes first
    and an event opens under *Back to Events*. An event reads in sections. The header has its start, its state
-   (*open for signup*, *locked — the roster stands*), **Reschedule**, **Edit lineup** and **Lock now** (open only)
-   and **More** (below). **Details** has
-   the lineup, where it comes from (*One-off, no schedule* or the schedule, a link), the priority, the confirmation,
-   when the sheet opened, the *Reminder* (before the lock), when it locks, *Confirm by* (when the rostered are asked to
+   (*open for signup*, *locked — the roster stands*), **Reschedule**, **Edit event** (the event's own settings, see *Moving
+   a run, and its own sheet timing* below), **Edit lineup** and **Lock now** (open only) and **More** (below). **Details** has
+   the lineup, where it comes from (*One-off, no schedule* or the schedule, a link), the event's own priority and
+   confirmation, when the sheet opened, the *Reminder* (before the lock), when it locks, *Open seats after the lock*
+   (before the lock: *The bot asks people* or *An officer asks*), *Confirm by* (when the rostered are asked to
    confirm) and the signup sheet (*Open in Discord*), with *In Discord* beside it: the officer card, the updates thread
    and the loot thread, those that exist. A locked event adds the confirmations (*Not sent yet. The bot sends them
    within a minute.* while they go out), each raid's open seats (*Open seats · Barrow Deeps* on an evening of several)
@@ -1090,10 +1091,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    yet is greyed with the bot's reason under it. Remind and End show the bot's own box first; when it changed while open
    (someone answered, a drop was distributed) the new box comes back and waits again, and nothing is sent or ended; on a finished event
    **More** has **Reopen** for an end made by mistake, within the hour. A scheduled lock that failed shows its
-   sentence in red under the header. **Split strategy…** (before the lock, per raid) picks how the raid's rosters are
-   split — *Balanced*, *Raid one first* or *Rotation*; the bot's box says what the pick does, that the board is placed
-   again this way and that the lock uses it (*Use this split*), and the board then redraws by it. Once locked it says
-   *The roster is locked, so its split can't change.* Not here, by design: another layout (*Propose roster* /
+   sentence in red under the header. How each raid's rosters are split — *Balanced*, *Raid one first* or *Rotation* —
+   is picked in **Edit event** (before the lock), with the event's other own settings; once locked it says *The roster
+   is locked, so its split can't change.* Not here, by design: another layout (*Propose roster* /
    *another split like this*), **Place the rest** and **Clear** of everyone's moves — the board is already drawn as the
    lock would place everyone; plain text, MCP (`propose_split`, `set_layout`) and a test run's card on the Test bench
    keep them.
@@ -1355,9 +1355,17 @@ in `/me view` (*"Barrow Deeps now starts Wed 2 Dec 8:00 PM."*); nobody gets a DM
 message), the officer cards follow, and every card still waiting for an answer — a Confirm / Can't make it card, a fill
 ask — is edited to show the new time with its buttons, so the ask they hold still works. A confirm-by moves with the run;
 one the move would leave in the past is set to within the hour. A fill ask keeps its own deadline. Moving a run whose
-lock time is then past locks it at the scheduler's next minute, and the confirm says so first. Before the lock a run can
-also take its own **sheet timing** — the reminder, the lock, confirm-by, how long a fill ask waits and automatic asks —
-kept on that run alone (its schedule is never changed); once the roster locks only the start can move. The confirm
+lock time is then past locks it at the scheduler's next minute, and the confirm says so first. Before the lock an event
+can also take its own settings, kept on that event alone (its schedule is never changed): the **sheet timing** — the
+reminder (on or off, and when), the lock, confirm-by, how long a fill ask waits and automatic asks —, whether the
+rostered are **asked to confirm**, the **priority** (first to join, or the five weights: Regular, Rank, Main character,
+Sat out last time, Signed up early — a one-off can switch to priority and back) and each raid's **split**. An event
+carries its own priority from the moment it opens, so a later change to its schedule or its raid no longer changes it
+(an event already open when this came in keeps the priority it had). Once the roster locks only the start, the
+automatic asks and how long an ask waits can change; the rest is refused in one sentence each (*"Whether the rostered
+confirm is fixed once the roster locks."*, *"The priority is fixed once the roster locks, because the roster is already
+chosen."*). A new lock time is told to everyone who answered, as a new start is; a change to the confirmation, the
+priority or the split tells nobody. The confirm
 reads, for example, *"The event moves to Wed 2 Dec 8:00 PM. All 7 answers stand, and each person gets a notice. The
 sheet in Discord shows the new time."*; it names people also on another run that night when there are any. The first
 sentence says only what really changes: the move, this run's own settings (*"For this run, automatic asks are off."*),
@@ -1377,7 +1385,14 @@ cancelled run gives back the night it stood for (it opens after all), and a sche
 editing one never stops the other opening. An edit that gives the run's own time back — Tuesday moved to Wednesday, then
 both Tuesday and Wednesday set — makes the run answer for its Tuesday alone, and that Wednesday opens a sheet of its own. Lockouts, the alt filter and *also on another run* read the new
 start. **Where:** on the Events page, an open or locked event's **Reschedule** (§4 *The Events page*): pick the new day and
-time, the box prints the bot's own confirm, and **Move** saves it. Plain text says it (*"move tonight's Barrow Deeps
+time, the box prints the bot's own confirm, and **Move** saves it. **Edit event** beside it opens every one of the
+event's own settings in one editor — *Sheet timing* (Locks, Send a reminder and Reminder, An ask waits), *Confirmation*
+(Ask the rostered to confirm and Confirm by), *Open seats after the lock* (The bot asks people for open seats),
+*Priority* (Who gets a seat: First to join or By priority, the five weights from 0 to 6, and each raid's split) — all
+picked from lists, the same labels as the Schedules page's editor. **Save** shows the bot's box first: each change as
+*label: old → new* (*Locks: 24 hours before → 12 hours before*), then what changes, who is told and what can still be
+undone; if the event changed meanwhile the box comes back with the new facts and waits again. After the lock the
+editor shows only the automatic asks and how long an ask waits. The split moved here from **More**. Plain text says it (*"move tonight's Barrow Deeps
 to Wednesday 8 PM"*, *"lock Thursday's run 12 hours before"*; the diff prints the same confirm, and a time the clocks
 skip or pass twice that night is refused: *"That time doesn't exist that night because the clocks go forward. Pick
 another time."*). MCP's `reschedule_run` previews first and sends the preview's `rev` back. If someone changed the run
@@ -1489,7 +1504,7 @@ the next person a DM can reach, at the same time: the first yes takes the seat a
 — someone else took the seat first"*).
 
 **Where the buttons are (site and Discord).** One label per verb, the same on the site and on the Discord cards. On
-the Events page an event's header holds **Reschedule** · **Edit lineup** · **Lock now** · **More** (the rest of the verbs
+the Events page an event's header holds **Reschedule** · **Edit event** · **Edit lineup** · **Lock now** · **More** (the rest of the verbs
 below, §4 *The Events page*), with **Cancel event** at Activity's right. A test run's card on the Test bench keeps the
 older layout: its actions sit in one bar under its board and never move: *Cancel run…* far left (and, once locked, *End the run*),
 then on the right — before the lock **Suggest…** · **Preview lock** · **Lock now**; after it **Remind the unanswered** ·

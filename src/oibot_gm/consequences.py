@@ -291,7 +291,9 @@ def before_first_open_sentence(reg: Registry, lineup: list[dict], start, only: s
 
 
 TIMING_NAMES = {"cutoff_hard_hours": "lock time", "cutoff_soft_hours": "reminder time", "confirm_hours": "confirm-by",
-                "reminders": "reminder", "autofill": "automatic asks", "fill_ask_hours": "fill ask wait"}
+                "reminders": "reminder", "autofill": "automatic asks", "fill_ask_hours": "fill ask wait",
+                # the owner's tweaks (B): an event's other own settings, named the same way
+                "confirm": "confirmation", "first_come": "seating", "weights": "priority", "split": "split"}
 TIMING_ORDER_OF = tuple(TIMING_NAMES)
 
 
@@ -323,6 +325,14 @@ def _timing_phrases(reg: Registry, start, changed: dict, team: dict) -> list[str
                 out.append(f"the reminder goes out {reg.local12(start - timedelta(hours=soft))}")
         elif k == "autofill":
             out.append("automatic asks are on" if v else "automatic asks are off")
+        elif k == "confirm":
+            out.append("the rostered are asked to confirm" if v else "nobody is asked to confirm")
+        elif k == "first_come":
+            out.append("seats go to the first to join" if v else "seats go by priority")
+        elif k == "weights":
+            out.append("the priority changes")
+        elif k == "split":
+            out.append(f"{_and(list(v))} {'is' if len(v) == 1 else 'are'} split another way")
         else:
             out.append(f"a fill ask waits {rc.hours_words(float(v))}")
     return out
@@ -332,21 +342,26 @@ def _and(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
+_SHEET_TIMING = {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours"}
+
+
 def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: bool, changed: dict) -> str:
-    """The confirm's first sentence, built from what actually changes: the move, this run's own settings, or both."""
+    """The confirm's first sentence, built from what actually changes: the move, this run's own settings, or both.
+    `changed` = the run dict's changes (rc.timing_changes), with `split` = the names of the raids whose split changes."""
     names = [TIMING_NAMES[k] for k in TIMING_ORDER_OF if k in changed
              and not (k == "cutoff_soft_hours" and "reminders" in changed)]  # the reminder's time and switch: "reminder"
+    whole = "sheet timing" if set(changed) <= _SHEET_TIMING else "settings"
     if moves:
         head = f"The event moves to {reg.local12(start)}"
         if not names:
             return head + "."
         full = f"{head} with its own {_and(names)}."
-        return full if _words(full) <= 20 else f"{head} with its own sheet timing."
+        return full if _words(full) <= 20 else f"{head} with its own {whole}."
     detail = "For this run, " + _and(_timing_phrases(reg, first.start, changed, rc.run_team(reg, first))) + "."
     if _words(detail) <= 20:
         return detail
     listed = f"This run takes its own {_and(names)}."
-    return listed if _words(listed) <= 20 else "This run takes its own sheet timing."
+    return listed if _words(listed) <= 20 else f"This run takes its own {whole}."
 
 
 def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None) -> list[str]:
@@ -356,15 +371,20 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     not-yet-opened run of that start being this one, people also on another run that night, away answers worked out
     again, or that it can move again. A refusal is rc.reschedule_refusal's own sentence, not this."""
     first = rc.first_part(rs, ev)
+    timing = rc.named_split(rs, ev, timing)
     mv = rc.reschedule(reg, rs, first, start=start, timing=timing, by="preview", save=False)
     name = reg.raid_def(first.instance).get("name", first.instance)
     moves = start is not None and start != first.start
-    out = [_what_changes(reg, name, first, start, moves, mv.timing)]
+    changed = {**mv.timing, **({"split": [_raid(reg, rs.events[k].instance) for k in mv.splits]} if mv.splits else {})}
+    out = [_what_changes(reg, name, first, start, moves, changed)]
     n = len(mv.told)
     if first.state == "locked":
         out.append("The roster stands." if n == 0 else "The roster stands, and the one who answered gets a notice." if n == 1
                    else f"The roster stands, and the {n} who answered each get a notice.")
-    elif not moves:  # the start stays: nobody's night changes, so nobody is told
+    elif not moves and mv.lock_moved and n:  # the night stays, the lock moves: who answered is told the new lock
+        out.append("The one answer stands, and that person gets a notice." if n == 1
+                   else f"All {n} answers stand, and each person gets a notice.")
+    elif not moves:  # the start and the lock stay: nobody's night changes, so nobody is told
         out.append("Answers stand.")
     else:
         out.append("Nobody has answered yet." if n == 0 else "The one answer stands, and that person gets a notice." if n == 1
@@ -374,6 +394,8 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
         out.append("It locks within a minute, because its lock time has passed.")
     elif absorbed:
         out.append(f"That night's {absorbed} run is this one.")
+    elif not moves and first.state == "locked":  # only the automatic asks and an ask's wait change after the lock
+        out.append("You can change it again until the event starts.")
     elif not moves:  # the start stays: nobody's night changes, and the timing is fixed at the lock
         out.append("You can change it again until the roster locks.")
     elif mv.conflicts:
@@ -397,13 +419,81 @@ def reschedule_pick_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
     return box(f"Move {event_title(reg, rc.first_part(rs, ev))}?", [rc.MOVE_WHEN], None)
 
 
-def reschedule_box(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None = None) -> dict:
-    """Box 3: Move an event (reschedule_consequence's sentences); a refusal is refusal_box_for(rc.reschedule_refusal)."""
+def reschedule_box(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None = None, *, edit: bool = False) -> dict:
+    """Box 3: Move an event (reschedule_consequence's sentences); a refusal is refusal_box_for(rc.reschedule_refusal).
+    `edit` = the Events page's Edit event (the owner's tweaks, B): the same verb and sentences, titled 'Change <event>?'
+    with Save, and the diff lines in the schedule editor's words (event_edit_lines). Its fp carries rc.event_rev."""
+    timing = rc.named_split(rs, ev, timing)
     why = rc.reschedule_refusal(reg, rs, ev, start, timing)
+    title = event_title(reg, rc.first_part(rs, ev))
     if why:
-        return refusal_box_for(why)
-    return box(f"Move {event_title(reg, rc.first_part(rs, ev))}?", reschedule_consequence(reg, rs, ev, start, timing), "Move",
-               rev=rc.event_rev(reg, rs, ev))
+        return refusal_box(f"Change {title}?", str(why)) if edit and refusal_kind(why) == "other" else refusal_box_for(why)
+    said = reschedule_consequence(reg, rs, ev, start, timing)
+    if edit:
+        return box(f"Change {title}?", said, "Save", diff=event_edit_lines(reg, rs, ev, start, timing), rev=rc.event_rev(reg, rs, ev))
+    return box(f"Move {title}?", said, "Move", rev=rc.event_rev(reg, rs, ev))
+
+
+# the order Edit event's diff lines follow (the editor's sections: when, sheet timing, confirmation, open seats, priority)
+EDIT_LINE_ORDER = ("start", "lock_hours_before", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before",
+                   "autofill", "fill_ask_hours", "first_come", "weights", "split_policy")
+
+
+def event_value_words(setting: str, v) -> str:
+    """One of an event's own settings in the schedule editor's words (PAGE_WORDS): hours '12 hours before' (an ask's
+    wait '2 hours'), a switch 'on' / 'off', seating 'First to join' / 'By priority', a split 'Rotation'."""
+    from .constants import PAGE_WORDS, hours_words
+
+    if setting in ("lock_hours_before", "nudge_hours_before", "confirm_hours_before"):
+        return f"{hours_words(v)} before"
+    if setting == "fill_ask_hours":
+        return hours_words(v)
+    if setting == "first_come":
+        return PAGE_WORDS["first_to_join"] if v else PAGE_WORDS["by_priority"]
+    if setting == "split_policy":
+        return PAGE_WORDS["split"].get(str(v), str(v))
+    return PAGE_WORDS["on" if v else "off"]
+
+
+def event_edit_lines(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None) -> list[str]:
+    """Edit event's 'label: old → new' lines, one per setting that changes, in the SAME words the schedule editor's
+    labels and its Save box use (PAGE_WORDS['schedule_fields'], 'priority', 'split'): the start, the sheet timing, the
+    confirmation, the open seats, the seating, each changed weight and each raid's split (the raid named when the event
+    has several). Nothing is written."""
+    from .constants import PAGE_WORDS
+
+    F = PAGE_WORDS["schedule_fields"]
+    first = rc.first_part(rs, ev)
+    timing = rc.named_split(rs, ev, timing)
+    now = rc.run_timing(reg, first)
+    values = rc.timing_changes(reg, first, timing)
+    back = {v: k for k, v in rc.EVENT_TIMING.items()}
+    out = {}
+    if start is not None and start != first.start:
+        out["start"] = f"{F['time']}: {reg.local12(first.start)} → {reg.local12(start)}"
+    for key, v in values.items():
+        setting = back.get(key)
+        if setting == "weights":
+            P = PAGE_WORDS["priority"]
+            diff = [k for k in P if now["weights"].get(k) != v.get(k)]
+            out[setting] = (f"{F['weights']}: " + ", ".join(f"{P[k]} {now['weights'].get(k)}" for k in diff) + " → "
+                            + ", ".join(f"{P[k]} {v.get(k)}" for k in diff))
+        elif setting == "nudge":
+            out[setting] = f"{F['nudge']}: {event_value_words('nudge', now['nudge'])} → {event_value_words('nudge', v != rc.OFF)}"
+        elif setting:
+            label = F.get(setting, setting)
+            out[setting] = f"{label}: {event_value_words(setting, now[setting])} → {event_value_words(setting, v)}"
+    parts = [p for p in rc.event_parts(rs, first) if p.state not in ("done", "cancelled")]
+    for k, v in rc.split_changes(reg, rs, ev, timing).items():
+        p = rs.events[k]
+        label = (f"{_raid(reg, p.instance)} · " if len(parts) > 1 else "") + F["split_policy"]
+        out.setdefault("split_policy", [])
+        out["split_policy"].append(f"{label}: {event_value_words('split_policy', rc.run_strategy(reg, p))} → {event_value_words('split_policy', v)}")
+    lines = []
+    for k in EDIT_LINE_ORDER:
+        if k in out:
+            lines += out[k] if isinstance(out[k], list) else [out[k]]
+    return lines
 
 
 def _clock_on(reg: Registry, day_of, t) -> str:

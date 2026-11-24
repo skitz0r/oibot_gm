@@ -184,7 +184,8 @@ def test_an_open_event_reads_by_its_sections(officer_client, reg, rs):
     ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
     join(reg, rs, ev, people(reg)[:18])
     j = officer_client.get(f"/api/event/{rc.event_parts(rs, ev)[1].key}").json()
-    assert j["key"] == ev.key and [f["label"] for f in j["details"]] == ["Lineup", "Comes from", "Priority", "Confirmation", "Sheet opened", "Locks", "Signup sheet"]
+    assert j["key"] == ev.key and [f["label"] for f in j["details"]] == ["Lineup", "Comes from", "Priority", "Confirmation", "Sheet opened", "Locks",
+                                                                        "Open seats after the lock", "Signup sheet"]
     facts = {f["label"]: f["value"] for f in j["details"]}
     assert facts["Comes from"] == "One-off, no schedule" and facts["Lineup"] == "Hyjal Summit, then Barrow Deeps × 2"
     assert (facts["Priority"], facts["Confirmation"]) == ("First to join", "Not asked")
@@ -193,7 +194,7 @@ def test_an_open_event_reads_by_its_sections(officer_client, reg, rs):
     assert j["boxes"]["lock"]["verb"] == "Lock" and j["actions"]["edit_lineup"] is True
     assert j["boxes"]["lock"] == cq.lock_box(reg, ev, rs) and j["boxes"]["cancel"] == cq.cancel_box(reg, ev, rs)
     assert (j["kind"], j["schedule"], j["state"], j["chip"], j["title"]) == ("one_off", None, "open", rc.RUN_STATE_WORDS["open"], reg.local12(ev.start))
-    assert j["actions"] == {"reschedule": True, "edit_lineup": True, "lock": True, "cancel": True, "open_now": False}
+    assert j["actions"] == {"reschedule": True, "edit": True, "edit_lineup": True, "lock": True, "cancel": True, "open_now": False}
     assert [p["key"] for p in j["parts"]] == [p.key for p in rc.event_parts(rs, ev)]
     hy, bd = j["parts"]
     assert hy["label"] == f"6:30 PM · Hyjal Summit" and bd["raid_name"] == "Barrow Deeps"
@@ -202,7 +203,7 @@ def test_an_open_event_reads_by_its_sections(officer_client, reg, rs):
         "18 joined: the lock's placement is being worked out, the officers' (empty) layout drawn meanwhile"
     assert hy["short"] == rc.needs(reg, ev)["roles"]
     assert j["lineup"] == rc.run_lineup(reg, rs, ev) and j["start_iso"] == ev.start.isoformat()
-    assert set(j["timing"]) == set(rc.EVENT_TIMING) and rc.timing_changes(reg, ev, j["timing"]) == {}, "sent back as it is, it changes nothing"
+    assert set(j["timing"]) == set(rc.EVENT_TIMING) - {"split_policy"} and rc.timing_changes(reg, ev, j["timing"]) == {}, "sent back as it is, it changes nothing"
     assert len(j["signups"]["rows"]["in"]) == 18 and {"uid", "display_name", "character", "cls", "spec"} <= set(j["signups"]["rows"]["in"][0])
     assert {p["uid"] for p in j["people"]} == {str(REAL + i) for i in range(18, 24)}, "Answer for someone: the members with no answer"
     assert j["activity"] and all(set(a) == {"when", "line"} for a in j["activity"])

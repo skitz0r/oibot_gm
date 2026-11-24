@@ -340,8 +340,8 @@ def test_the_fingerprint_moves_with_every_input_of_the_solve(reg, rs):
     changed("a raid's roster count")
     reg.set_minimums(BD, {"healer": {"min": 3}}, "t")
     changed("a raid's minimums")
-    reg.set_schedule(sid, {"weights": {"rank": 9}}, "t")
-    changed("the schedule's priority")
+    rc.reschedule(reg, rs, ev, timing={"weights": {"rank": 0 if rc.run_weights(reg, ev)["rank"] else 6}}, by="t")
+    changed("the event's own priority (a schedule edit no longer reaches an open event: the owner's tweaks, B)")
     was = rc.run_strategy(reg, ev)
     reg.config.team(ev.team)["split_policy"] = "first" if was != "first" else "rotation"
     reg.save_config("the run's split", notify=False)

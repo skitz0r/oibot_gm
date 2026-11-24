@@ -1607,6 +1607,7 @@ class RaidMixin:
 
         if by_id is not None and (await guild_routing.resolve_role(self, reg, int(by_id), max_age=guild_routing.PRIV_LIVE)).role not in ("owner", "officer"):
             raise RegistryError(rc.MOVE_OFFICER_ONLY)
+        timing = rc.named_split(rs, ev, timing)  # a bare split is the raid the caller named (any raid of the run)
         first = rc.first_part(rs, ev)
         why = rc.reschedule_refusal(reg, rs, first, start, timing)
         if why:
@@ -1643,17 +1644,20 @@ class RaidMixin:
             for a in p.fill_asks:
                 if a.open and a.dm_message_id:
                     edited += await self.edit_live_card(reg, a.dm_channel_id, a.dm_message_id, fill_layout(reg, p, team, self.ico, a))
-        for uid in mv.told:  # an outcome, never a DM (the DM rule): the Me page and /me view say it — one member save each
-            reg.notify(uid, "moved", f"{name} now starts {when}.", run=first.key)
         moved = first.start != old
+        locks = reg.local12(first.start - timedelta(hours=float(rc.team_setting(rc.run_team(reg, first), "cutoff_hard_hours"))))
+        for uid in mv.told:  # an outcome, never a DM (the DM rule): the Me page and /me view say it — one member save each
+            reg.notify(uid, "moved", f"{name} now starts {when}." if moved else f"{name} now locks {locks}.", run=first.key)
         cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
-        line = (f"🕒 {name} moved by {by} to {when}" if moved else f"🕒 {name}: its own sheet timing set by {by}") + cards
+        timing_only = set(mv.timing) <= {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours"} and not mv.splits
+        own = "sheet timing" if timing_only else "settings"
+        line = (f"🕒 {name} moved by {by} to {when}" if moved else f"🕒 {name}: its own {own} set by {by}") + cards
         await self.post_run_update(reg, first, line)
-        what = f"moved {name} from {reg.local12(old)} to {when}" if moved else f"set {name}'s own sheet timing for {when}"
-        if moved and mv.timing:
-            what += " and set its own sheet timing"
+        what = f"moved {name} from {reg.local12(old)} to {when}" if moved else f"set {name}'s own {own} for {when}"
+        if moved and (mv.timing or mv.splits):
+            what += f" and set its own {own}"
         await ops_mod.audited(self.ops, reg, by, what, via=via, by_id=by_id)
-        return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own sheet timing is saved."]
+        return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own {own} {'is' if timing_only else 'are'} saved."]
 
     async def edit_lineup(self, reg, rs, ev, lineup: list[dict], *, by: str, by_id: int | None = None, via: str = "discord",
                           preview: bool = False, rev: str | None = None) -> list[str]:

@@ -6037,6 +6037,29 @@ opens it again when its own sheet time comes, and its lock, reminder and confirm
 as for any run. Box 11 says the sheet stays up until the event and that the schedule won't open that night again; the
 coming-up Details lose *Opening by hand*. `OPEN_HORIZON_DAYS` stays only as the length of the "next three weeks" lists.
 Tests: `tests/test_schedule_night_open.py` (six weeks early, the scheduler opens no second run).
+*One event, every field (B).* `rc.EVENT_TIMING` grows from the six timing settings to the event's every own setting:
+`confirm`, `first_come`, `weights` (and plain text's `weight_<key>`), and `split_policy` (a raid's run FILE
+`split_strategy`; a bare value is the raid the request names — `rc.named_split` —, a map names raids by key —
+`rc.split_changes`). One verb (`RaidMixin.reschedule_event` over `rc.reschedule`), one route (`POST /api/run/{key}/reschedule`,
+`edit: true` for the page's box), plain text's `run_reschedule`, MCP's `reschedule_run(timing=)`; the strategy route stays
+for More's old callers. What the lock read for an open run, before and now: the sheet timing, `autofill`, `fill_ask_hours`,
+`confirm` and `split_policy` were already the run dict's own (stamped at open); `first_come` was the run's stamped kind
+(`run_kind`) and is now `rc.run_first_come` (the first raid's `first_come`, else its kind; a later raid never); the
+**weights were read live from the schedule** (`run_weights` → `schedule_def`), so a schedule edit changed an open event's
+priority — now ensure_run stamps them (`weights`), `_part_dict` stamps a later raid's (`fallback_weights`, what it always
+read), and the start's migration (`rc.stamp_weights` in `migrate_at_start`'s batch, its own commit-message clause) gives
+every live run the value it reads today, so nothing about an open event changes at the upgrade
+(`tests/test_edit_event.py`, the live two-raid first-come shape). `rc.event_rev` covers the weights, seating, confirmation
+and every live raid's split. After the lock only `AFTER_LOCK` (`fill_ask_hours`, `autofill`) and the start change; the rest is
+one sentence each: `TIMING_LOCKED`, `CONFIRM_LOCKED`, `PRIORITY_LOCKED`, `consequences.STRATEGY_LOCKED`. A start or a lock-time
+change tells who answered (`rc.answered_ids`, the `moved` notice: "<raid> now locks …" when only the lock moves —
+`Moved.lock_moved`); confirmation, priority and split tell nobody. The box is `consequences.reschedule_box(…, edit=True)`:
+"Change <event>?", Save, the sentences of `reschedule_consequence` (its first sentence names confirmation, seating,
+priority and split too; after the lock the undo line reads "until the event starts") and `event_edit_lines` — "label: old
+→ new" in `PAGE_WORDS['schedule_fields']` (plus `first_come` "Who gets a seat" / `by_priority`), `priority` and `split`, the
+schedule Save's map; fp over `rc.event_rev`. `event_json` carries `actions.edit` and `edit` (`edit_options`: the fields
+editable NOW, the values, each raid's split, the schedule editor's hour choices with the event's own among them); Details
+read the event's own values and add *Open seats after the lock* while open. Tests: `tests/test_edit_event.py`.
 
 **Later phases** (spec §9): the Discord wizards (phase 5, closing the two `PARITY_PENDING` rows and the role switch's
 `RUN_SWITCH_DISCORD_PENDING`) and the words (phase 6). Phases 1 and 2's tests:

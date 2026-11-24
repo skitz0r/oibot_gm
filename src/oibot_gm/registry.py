@@ -2899,7 +2899,7 @@ class Registry:
                                else set(raids) - left - unread_raids)
         return cfg
 
-    def migration_message(self, stamped: list[str] = ()) -> str:
+    def migration_message(self, stamped: list[str] = (), weighed: list[str] = ()) -> str:
         """The start's commit message: what this start's save actually changes, each clause once — the schedules lift,
         the sheet timing, the make-up, the schedule ids (with their aliases), the regular spots and applications re-keyed
         to them, the regular spots dropped, and the live runs stamped (rc.stamp_runs, `stamped`)."""
@@ -2921,9 +2921,11 @@ class Registry:
             parts.append(f"dropped: {'; '.join(dropped)}")
         if stamped:
             parts.append(f"live runs stamped with their schedule and occurrence: {', '.join(stamped)}")
+        if weighed:
+            parts.append(f"live runs keep the priority they read today: {', '.join(weighed)}")
         return "; ".join(parts) or "schedules saved"
 
-    def migrate_schedules(self, by: str = "migration", stamped: list[str] = ()) -> list[str]:
+    def migrate_schedules(self, by: str = "migration", stamped: list[str] = (), weighed: list[str] = ()) -> list[str]:
         """Save an older file's lifted schedules (load_config) and the regulars translated to schedule ids
         (remap_regulars) once: ONE commit (a store.batch) holding guild.yaml and every member or applicant file that
         changed, then nothing on later calls. → the schedules lift's lines, [] when nothing was saved or no raid had a
@@ -2933,17 +2935,17 @@ class Registry:
         rc.stamp_runs stamped just before (migrate_at_start): their run dicts are saved here too. The commit message is
         migration_message — what the save changes, each clause once. A preview copy never writes."""
         regs_owed = getattr(self, "_regulars_owed", False)
-        stamped = list(stamped or [])
+        stamped, weighed = list(stamped or []), list(weighed or [])
         owed = self.schedules_lifted or getattr(self, "_schedules_owed", False) or regs_owed
-        if getattr(self, "_shadow", False) or not (owed or stamped):
+        if getattr(self, "_shadow", False) or not (owed or stamped or weighed):
             return []
         with self.config_lock:
             lines = self.schedules_lifted
             moved, dropped = list(getattr(self, "timing_moved", [])), list(getattr(self, "timing_dropped", []))
             mins = list(getattr(self, "minimums_lifted", []))
             ids = list(getattr(self, "ids_lifted", [])) + list(getattr(self, "regulars_dropped", []))
-            message = f"{self.migration_message(stamped)} (by {by})"
-            saved = getattr(self, "_schedules_owed", False) or bool(self.schedules_lifted) or bool(stamped)
+            message = f"{self.migration_message(stamped, weighed)} (by {by})"
+            saved = getattr(self, "_schedules_owed", False) or bool(self.schedules_lifted) or bool(stamped) or bool(weighed)
             with self.store.batch():  # ONE inner message, so the commit says it once; a failure keeps the lines for the next start
                 if saved:
                     self.save_config(message, notify=False)

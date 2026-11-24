@@ -1778,25 +1778,33 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/reschedule")
     async def run_reschedule(request: Request, key: str):
-        """Move a run and / or give it its own sheet timing (RaidMixin.reschedule_event — plain text's run_reschedule and
+        """Move a run and / or give it its own settings (RaidMixin.reschedule_event — plain text's run_reschedule and
         MCP's reschedule_run share it): {start?: aware ISO or guild wall time 'YYYY-MM-DD HH:MM' (the datetime-local
-        picker; DST-safe, a skipped or doubled wall time refused), timing?: {setting: value} (rc.EVENT_TIMING), preview?,
-        rev?}. Officers, decided live by the verb. `preview` → {sentences (consequences.reschedule_consequence), rev
-        (rc.event_rev)}; nothing written. A write carrying `rev` is refused (409, with the fresh sentences and rev) when
-        the run changed since. A refusal → 400 {error}."""
+        picker; DST-safe, a skipped or doubled wall time refused), timing?: {setting: value} (rc.EVENT_TIMING: the sheet
+        timing, confirm, first_come, weights {key: 0-6}, split_policy — a strategy for the raid `key` names, or {raid key:
+        strategy}), edit? (the Events page's Edit event: the box is titled Change … with Save and its diff lines), preview?,
+        seen?, rev?}. Officers, decided live by the verb. `preview` → {sentences (consequences.reschedule_consequence), rev
+        (rc.event_rev), box}; nothing written. `seen` = the fp of the box pressed: a box built now with another fp → 409
+        with the fresh box. A write carrying `rev` is refused (409, with the fresh rev) when the run changed since. A
+        refusal → 400 {error, box}."""
         v, d = await body(request, officer=True)
         rs = bot.raids.store(v.reg)
         ev = event_of(v.reg, rs, key)
         timing = d.get("timing") or None
         if timing is not None and not isinstance(timing, dict):
             return JSONResponse({"error": rc.TIMING_UNKNOWN}, status_code=400)
+        timing = rc.named_split(rs, ev, timing)  # a bare split names the raid of the route's key
+        edit = bool(d.get("edit"))
         try:
             start = rc.move_start(v.reg, d["start"]) if d.get("start") not in (None, "") else None
             if d.get("preview"):
+                fresh = cq.reschedule_box(v.reg, rs, ev, start, timing, edit=edit)
+                if fresh["verb"] is None:  # the verb's refusal, as its box (Edit event's titled as the event)
+                    return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
                 lines = await bot.reschedule_event(v.reg, rs, ev, start=start, timing=timing, by=v.name, by_id=v.uid, via=v.via, preview=True)
-                return {"sentences": lines, "rev": rc.event_rev(v.reg, rs, ev), "box": cq.reschedule_box(v.reg, rs, ev, start, timing)}
+                return {"sentences": lines, "rev": rc.event_rev(v.reg, rs, ev), "box": fresh}
             if d.get("seen"):
-                fresh = cq.reschedule_box(v.reg, rs, ev, start, timing)
+                fresh = cq.reschedule_box(v.reg, rs, ev, start, timing, edit=edit)
                 if fresh["verb"] is None:
                     return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
                 if (r := box_stale(d, fresh)) is not None:

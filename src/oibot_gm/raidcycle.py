@@ -550,7 +550,7 @@ def priority_words(reg: Registry, ev_or_schedule_def) -> str:
     x = ev_or_schedule_def
     first = PAGE_WORDS["first_to_join"]
     if isinstance(x, RaidEvent):
-        if run_kind(reg, x) == "adhoc":
+        if run_first_come(reg, x) or (is_follow(x) and run_kind(reg, x) == "adhoc"):
             return first
         weights = run_weights(reg, x)
     else:
@@ -1161,6 +1161,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
               "confirm": True if cutoffs else bool(rd.get("confirm", True))})  # a test run rehearses the confirmations
     # the run carries its schedule's settings
     t.update({"rosters": first_n, "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced"})
+    t["weights"] = {k: int(v) for k, v in dict(rd["weights"]).items()}  # its own priority (the owner's tweaks): never read live
     occ = (occurrence or occurrence_stamp(reg, start)) if schedule_stamp(sched["id"]) else None
     t.update({"occurrence": occ, "event": key, "part": 0, "starts": 0})
     if not test and (sched.get("virtual") or len(reg.schedules(instance)) > 1):  # the raid's only schedule needs no name on the run
@@ -1203,8 +1204,10 @@ def _part_dict(reg: Registry, first: dict, entry: dict, k: int, offset: int, *, 
           "schedule": after_minutes(start, offset).astimezone(reg.tz).strftime("%a %H:%M"), "schedule_id": FOLLOW_SCHEDULE, "series": None,
           "confirm": False, "rosters": int(entry.get("rosters") or 1), "follows": first["key"], "reminders": OFF, "open_dm": False,
           "cutoff_soft_hours": first["cutoff_soft_hours"] + hours, "cutoff_hard_hours": first["cutoff_hard_hours"] + hours,
-          "confirm_hours": first.get("confirm_hours", first["cutoff_hard_hours"]) + hours, "part": k, "starts": offset}
-    for f in ("lineup", "follow", "followed_by", "message_id", "channel_id", "thread_id"):  # never part 0's sheet nor its chain
+          "confirm_hours": first.get("confirm_hours", first["cutoff_hard_hours"]) + hours, "part": k, "starts": offset,
+          # its own priority: what a later raid always read (no schedule of its own: by class), carried from now on
+          "weights": fallback_weights(reg, entry["raid"], str(first.get("kind") or "recurring"))}
+    for f in ("lineup", "follow", "followed_by", "message_id", "channel_id", "thread_id", "first_come"):  # never part 0's sheet nor its chain
         pt.pop(f, None)
     return pt
 
@@ -1462,7 +1465,14 @@ def place_run(reg: Registry, ev: "RaidEvent", start: datetime, team: dict | None
 # run dict key it lives under. `nudge` stores "dm" / OFF there; the rest are hours, or a switch for autofill
 EVENT_TIMING = {"nudge_hours_before": "cutoff_soft_hours", "lock_hours_before": "cutoff_hard_hours",
                 "confirm_hours_before": "confirm_hours", "fill_ask_hours": "fill_ask_hours", "nudge": "reminders",
-                "autofill": "autofill"}
+                "autofill": "autofill",
+                # the owner's tweaks (2026-11-24, B: one event, every field): whether the rostered confirm, the priority
+                # (first to join or by the weights, and the five weights) — on the first raid's dict, the weights on every
+                # live raid's — and `split_policy`, each raid's split (the run FILE's split_strategy: a value for the raid
+                # the request names, or {raid key: strategy}; named_split)
+                "confirm": "confirm", "first_come": "first_come", "weights": "weights", "split_policy": "split_strategy"}
+# what still means something once the roster is locked: who asks for open seats and how long an ask waits (the start too)
+AFTER_LOCK = ("fill_ask_hours", "autofill")
 class Refusal(str):
     """A refusal sentence that knows which kind it is (consequences.REFUSAL_TITLES: past · clash · …) — for the
     sentences built from parts (a past start, a clash), whose words can't be compared with a constant."""
@@ -1481,8 +1491,10 @@ TIMING_SAME = "The run already has that timing."
 MOVE_CLASH = "{raid} already has a run at {when}. Pick another time."
 MOVE_SAME = "The run already starts then."
 TIMING_LOCKED = "The sheet timing is fixed once the roster locks. Move the start instead."
+CONFIRM_LOCKED = "Whether the rostered confirm is fixed once the roster locks."
+PRIORITY_LOCKED = "The priority is fixed once the roster locks, because the roster is already chosen."
 TIMING_ORDER = "The reminder has to come before the lock, and confirm-by after it."
-TIMING_UNKNOWN = "A run's timing is its reminder, lock, confirm-by, fill asks and automatic asks."
+TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, confirm-by, asks, confirmation, priority and split.")
 MOVE_OFFICER_ONLY = "Only an officer moves a run or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
@@ -1523,9 +1535,14 @@ def event_rev(reg: Registry, rs: "RaidStore", ev: "RaidEvent") -> str:
 
     first = first_part(rs, ev)
     team = run_team(reg, first)
-    timing = {k: (team.get(k) if k in team else team_setting(team, k)) for k in sorted(set(EVENT_TIMING.values()))}
-    raw = json.dumps([first.starts_at, first.state, run_lineup(reg, rs, first), timing], sort_keys=True, default=str)
+    timing = {k: (team.get(k) if k in team else team_setting(team, k)) for k in sorted(set(EVENT_TIMING.values()) - _OWN_READ)}
+    own = [run_weights(reg, first), run_first_come(reg, first), run_confirms(reg, first),
+           [(p.key, run_strategy(reg, p)) for p in event_parts(rs, first) if p.state not in ("done", "cancelled")]]
+    raw = json.dumps([first.starts_at, first.state, run_lineup(reg, rs, first), timing, own], sort_keys=True, default=str)
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+_OWN_READ = {"confirm", "first_come", "weights", "split_strategy"}  # read through their readers (run_weights …), not the dict
 
 
 def cancel_tells_channel(rs: "RaidStore", ev: "RaidEvent") -> bool:
@@ -1559,30 +1576,95 @@ class Moved(BaseModel):
     absence_written: list[int] = Field(default_factory=list)
     locks_now: bool = False
     conflicts: dict[int, str] = Field(default_factory=dict)
+    splits: dict[str, str] = Field(default_factory=dict)  # raid key → its new split (EVENT_TIMING's split_policy)
+    lock_moved: bool = False  # the lock time changes while the start stays: who answered gets a notice of the new lock
 
 
 def run_timing(reg: Registry, first: "RaidEvent") -> dict:
     """A run's own sheet timing as {setting: value} (EVENT_TIMING's keys, _timing_values' inverse): hours as numbers,
     `nudge` and `autofill` as switches — what a surface shows and sends back to the reschedule verb unchanged."""
     team = run_team(reg, first)
-    out = {k: team_setting(team, v) for k, v in EVENT_TIMING.items()}
+    out = {k: team_setting(team, v) for k, v in EVENT_TIMING.items() if v not in _OWN_READ}
     out["nudge"] = out["nudge"] not in (None, OFF, False)
     out["autofill"] = bool(out["autofill"])
+    out.update({"confirm": run_confirms(reg, first), "first_come": run_first_come(reg, first), "weights": run_weights(reg, first)})
+    return out
+
+
+def _switch(v) -> bool:
+    return v not in (False, None, "off", "false", "no", 0, "0", OFF)
+
+
+def _weights_value(v) -> dict:
+    """An event's weights from a surface: {key: 0..MAX_WEIGHT} (a JSON text from plain text too); RegistryError otherwise."""
+    from .schedule_view import MAX_WEIGHT
+
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            raise RegistryError(TIMING_UNKNOWN) from None
+    if not isinstance(v, dict) or not v:
+        raise RegistryError(TIMING_UNKNOWN)
+    out = {}
+    for k, x in v.items():
+        k = str(k).removeprefix("weight_")
+        try:
+            n = int(float(x))
+        except (TypeError, ValueError):
+            raise RegistryError(TIMING_UNKNOWN) from None
+        if k not in RAID_WEIGHT_DEFAULTS or not 0 <= n <= MAX_WEIGHT:
+            raise RegistryError(TIMING_UNKNOWN)
+        out[k] = n
+    return out
+
+
+def named_split(rs: "RaidStore", ev: "RaidEvent", timing: dict | None) -> dict | None:
+    """`timing` with its `split_policy` as {raid key: strategy}: a bare strategy is the split of the raid the request
+    names (`ev`, any raid of the run — plain text's target, a route's key), never another's. Everything else as it is."""
+    if not timing or "split_policy" not in timing or isinstance(timing["split_policy"], dict):
+        return timing
+    return {**timing, "split_policy": {ev.key: str(timing["split_policy"] or "").strip().lower()}}
+
+
+def split_changes(reg: Registry, rs: "RaidStore", ev: "RaidEvent", timing: dict | None) -> dict[str, str]:
+    """The raids whose split `timing` changes ({raid key: strategy}, a value equal to the raid's split now dropped).
+    A key that is no live raid of the run, or a strategy that isn't one: RegistryError(TIMING_UNKNOWN)."""
+    from .registry import SPLIT_POLICIES
+
+    want = (named_split(rs, ev, timing) or {}).get("split_policy")
+    if not want:
+        return {}
+    parts = {p.key: p for p in event_parts(rs, first_part(rs, ev)) if p.state not in ("done", "cancelled")}
+    out = {}
+    for key, v in dict(want).items():
+        p = parts.get(str(key))
+        if p is None or v not in SPLIT_POLICIES:
+            raise RegistryError(TIMING_UNKNOWN)
+        if run_strategy(reg, p) != v:
+            out[p.key] = v
     return out
 
 
 def _timing_values(timing: dict | None) -> dict:
-    """`timing` {setting: value} (EVENT_TIMING's keys) → {run dict key: value}; RegistryError(TIMING_UNKNOWN) for any other
-    setting or a value that isn't one."""
+    """`timing` {setting: value} (EVENT_TIMING's keys; a `weight_<key>` setting is one weight) → {run dict key: value}
+    (`split_policy` left to split_changes); RegistryError(TIMING_UNKNOWN) for any other setting or a value that isn't one."""
     out: dict = {}
     for k, v in (timing or {}).items():
+        if k == "split_policy":
+            continue
+        if k.startswith("weight_"):
+            out["weights"] = {**out.get("weights", {}), **_weights_value({k: v})}
+            continue
         key = EVENT_TIMING.get(k)
         if key is None:
             raise RegistryError(TIMING_UNKNOWN)
         if k == "nudge":
-            out[key] = OFF if v in (False, None, OFF, "off", "false", 0) else "dm"
-        elif k == "autofill":
-            out[key] = v not in (False, None, "off", "false", 0)
+            out[key] = OFF if not _switch(v) else "dm"
+        elif k in ("autofill", "confirm", "first_come"):
+            out[key] = _switch(v)
+        elif k == "weights":
+            out[key] = {**out.get(key, {}), **_weights_value(v)}
         else:
             try:
                 h = float(v)
@@ -1598,7 +1680,18 @@ def timing_changes(reg: Registry, first: "RaidEvent", timing: dict | None) -> di
     """The part of `timing` that changes the run (run dict keys → new values): a value equal to the run's own now is
     dropped. RegistryError(TIMING_UNKNOWN) as _timing_values."""
     team = run_team(reg, first)
-    return {k: v for k, v in _timing_values(timing).items() if (team.get(k) if k in team else team_setting(team, k)) != v}
+    values = _timing_values(timing)
+    out = {k: v for k, v in values.items() if k not in _OWN_READ and (team.get(k) if k in team else team_setting(team, k)) != v}
+    if "confirm" in values and values["confirm"] != run_confirms(reg, first):
+        out["confirm"] = values["confirm"]
+    if "first_come" in values and values["first_come"] != run_first_come(reg, first):
+        out["first_come"] = values["first_come"]
+    if "weights" in values:
+        now_w = run_weights(reg, first)
+        new_w = {**now_w, **values["weights"]}
+        if new_w != now_w:
+            out["weights"] = new_w
+    return out
 
 
 def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: datetime | None, timing: dict | None,
@@ -1616,21 +1709,32 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
         return MOVE_STARTED
     try:
         values = timing_changes(reg, first, timing)
+        splits = split_changes(reg, rs, ev, timing)
     except RegistryError as e:
         return str(e)
     if start is not None and start < now - timedelta(minutes=PAST_GRACE_MINUTES):
         from .consequences import move_past_sentence
 
         return move_past_sentence(reg, start, first.start)
-    if (start is None or start == first.start) and not values:
+    if (start is None or start == first.start) and not values and not splits:
         return TIMING_SAME if timing else MOVE_SAME
     if start is not None and start != first.start:
         other = live_at(rs, first.instance, start, test=bool(first.test))
         if other is not None and not same_event(other, first):
             return Refusal(MOVE_CLASH.format(raid=reg.raid_def(first.instance).get("name", first.instance), when=reg.local12(start)), "clash")
-    if values:
-        if first.state != "open":
+    if first.state != "open" or any(p.state == "locked" for p in splits_parts(rs, splits)):
+        from .consequences import STRATEGY_LOCKED
+
+        fixed = [k for k in values if k not in AFTER_LOCK]
+        if any(k in fixed for k in ("cutoff_soft_hours", "cutoff_hard_hours", "confirm_hours", "reminders")):
             return TIMING_LOCKED
+        if "confirm" in fixed:
+            return CONFIRM_LOCKED
+        if fixed:  # the priority: first come or the weights
+            return PRIORITY_LOCKED
+        if splits:
+            return STRATEGY_LOCKED
+    if values:
         team = run_team(reg, first)
         soft = float(values.get("cutoff_soft_hours", team_setting(team, "cutoff_soft_hours")))
         hard = float(values.get("cutoff_hard_hours", team_setting(team, "cutoff_hard_hours")))
@@ -1638,6 +1742,10 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
         if soft < hard or confirm > hard:
             return TIMING_ORDER
     return None
+
+
+def splits_parts(rs: "RaidStore", splits: dict[str, str]) -> list["RaidEvent"]:
+    return [rs.events[k] for k in splits if k in rs.events]
 
 
 def absorbed_schedule_run(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: datetime | None) -> str | None:
@@ -1715,9 +1823,13 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     delta = new - old
     now_ = reg.now_local()
     values = timing_changes(reg, first, timing)
+    splits = split_changes(reg, rs, ev, timing)
     t0 = teams.get(first.key)
     if t0 is not None and values:
         t0.update(values)
+    for p in parts:
+        if p.key in splits:
+            p.split_strategy = splits[p.key]
     for p in parts:
         at = new if p is first else after_minutes(new, p.starts)
         was = p.start
@@ -1730,7 +1842,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
                 for k in ("cutoff_soft_hours", "cutoff_hard_hours", "confirm_hours"):
                     if k in t0:
                         t[k] = t0[k] + hours
-                for k in ("fill_ask_hours", "autofill"):
+                for k in ("fill_ask_hours", "autofill", "weights"):
                     if k in values:
                         t[k] = values[k]
         if p.confirm_by and at != was:
@@ -1739,18 +1851,23 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
                 cb = min(at, now_ + MOVE_CONFIRM_GRACE)
             p.confirm_by = cb.isoformat()
     cleared, written = recompute_absences(reg, first) if delta else ([], [])
-    told = answered_ids(first) if delta else []
+    lock_moved = not delta and "cutoff_hard_hours" in values  # the night stays, the lock moves: who answered is told too
+    told = answered_ids(first) if delta or lock_moved else []
     team = t0 or run_team(reg, first)
     hard = first.start - timedelta(hours=float(team_setting(team, "cutoff_hard_hours")))
     ins = {sg.discord_id for sg in first.signups.values() if sg.status == "in"}
     clash = {uid: key for uid, key in conflicts(rs, first).items() if uid in ins}
     moved = Moved(parts=[p.key for p in parts], old=old.isoformat(), new=new.isoformat(), timing=values, told=told,
-                  absence_cleared=cleared, absence_written=written, locks_now=first.state == "open" and hard <= now_, conflicts=clash)
+                  absence_cleared=cleared, absence_written=written, locks_now=first.state == "open" and hard <= now_, conflicts=clash,
+                  splits=splits, lock_moved=lock_moved)
     if not save:
         return moved
     what = [f"moved from {reg.local12(old)} to {reg.local12(new)} by {by}"] if delta else []
     if values:
         what.append(f"own timing set by {by}: " + ", ".join(f"{k} {v}" for k, v in values.items()))
+    for k, v in splits.items():
+        p = next(x for x in parts if x.key == k)
+        what.append(f"{reg.raid_def(p.instance).get('name', p.instance)} split by {v}, set by {by}")
     first.log.extend(what)
     line = "; ".join(what) or f"saved by {by}"
     with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
@@ -2296,14 +2413,31 @@ def stamp_before_change(reg: Registry, rs: "RaidStore", parts: list["RaidEvent"]
     return [p.key for p in todo]
 
 
+def stamp_weights(reg: Registry, rs: "RaidStore") -> list[str]:
+    """At the start (the owner's tweaks, 2026-11-24): every LIVE run whose dict carries no `weights` of its own gets the
+    weights it reads TODAY (live_weights: its schedule's, else by class), in memory — the caller's save writes them — so
+    its lock places exactly as before and a later schedule or raid edit no longer reaches it. Idempotent. → the run keys."""
+    if getattr(reg, "_shadow", False):
+        return []
+    done = []
+    for ev in rs.live():
+        team = reg.config.roster(ev.team)
+        if team is not None and not isinstance(team.get("weights"), dict):
+            team["weights"] = live_weights(reg, ev)
+            done.append(ev.key)
+    return done
+
+
 def migrate_at_start(reg: Registry, rs: "RaidStore", by: str = "migration") -> list[str]:
-    """The start's one save per guild (discord_bot._schedules_save, else _schedules_migrate): Registry.migrate_schedules
-    and stamp_runs in ONE store.batch, so the schedule lift and the live runs' stamps land in one commit; a second start
-    writes nothing. The live runs are stamped first (in memory and on their files, from the lifted config already in
-    memory), then migrate_schedules saves guild.yaml once with ONE message naming both. → the schedules lift's lines."""
+    """The start's one save per guild (discord_bot._schedules_save, else _schedules_migrate): Registry.migrate_schedules,
+    stamp_runs and stamp_weights in ONE store.batch, so the schedule lift, the live runs' stamps and their own priority
+    land in one commit; a second start writes nothing. The live runs are stamped first (in memory and on their files,
+    from the lifted config already in memory), then migrate_schedules saves guild.yaml once with ONE message naming
+    each. → the schedules lift's lines."""
     with reg.store.batch():
         stamped = stamp_runs(reg, rs, commit=False)
-        lines = reg.migrate_schedules(by, stamped=stamped)
+        weighed = stamp_weights(reg, rs)
+        lines = reg.migrate_schedules(by, stamped=stamped, weighed=weighed)
     return lines
 
 
@@ -3817,15 +3951,43 @@ def sat_out_last_window(reg: Registry, rs: RaidStore, ev: RaidEvent, first_only:
 
 
 def run_weights(reg: Registry, ev: RaidEvent) -> dict[str, int]:
-    """The seat weights a run's lock uses: its schedule's (own weights over the raid's — ad hoc: over ADHOC_WEIGHTS),
-    read live like the raid's always were. A schedule removed since falls back by class."""
+    """The seat weights a run's lock uses: the run's OWN (its dict's `weights`, stamped at open — ensure_run, a later raid
+    by _part_dict — or by the start's migration, stamp_weights; an Edit event changes them), so a schedule or raid edit
+    never changes an open event. A dict without them (a bare stand-in) reads them live: live_weights."""
+    team = reg.config.team(ev.team) or {}
+    if isinstance(team.get("weights"), dict):
+        return {**RAID_WEIGHT_DEFAULTS, **{k: int(v) for k, v in team["weights"].items()}}
+    return live_weights(reg, ev)
+
+
+def live_weights(reg: Registry, ev: RaidEvent) -> dict[str, int]:
+    """What a run's weights were read as before it carried its own (the owner's tweaks, 2026-11-24): its schedule's (own
+    weights over the raid's — ad hoc: over ADHOC_WEIGHTS), live; a schedule removed since, or a later raid's reserved
+    id, falls back by class. Read once, by the start's migration (stamp_weights) and a bare stand-in."""
     team = reg.config.team(ev.team) or {}
     sid = team.get("schedule_id") or ev.schedule
     try:
         return dict(reg.schedule_def(ev.instance, sid)["weights"])
     except RegistryError:
-        base = ADHOC_WEIGHTS if run_kind(reg, ev) == "adhoc" else reg.raid_def(ev.instance)["weights"]
-        return {**RAID_WEIGHT_DEFAULTS, **base}
+        return fallback_weights(reg, ev.instance, run_kind(reg, ev))
+
+
+def fallback_weights(reg: Registry, instance: str, kind: str) -> dict[str, int]:
+    """A raid's weights with no schedule to read: ADHOC_WEIGHTS for an ad hoc run, else the raid's, over the defaults."""
+    base = ADHOC_WEIGHTS if kind == "adhoc" else reg.raid_def(instance)["weights"]
+    return {**RAID_WEIGHT_DEFAULTS, **base}
+
+
+def run_first_come(reg: Registry, ev: RaidEvent) -> bool:
+    """Are this run's seats first come, first rostered (D4) rather than by priority? Its first raid's dict `first_come`
+    when an Edit event set it, else as its kind says (ad hoc = first come). A later raid of a run is never first come:
+    the earlier raids' rostered come first there (design §5.62)."""
+    if is_follow(ev):
+        return False
+    team = reg.config.team(ev.team) or {}
+    if "first_come" in team:
+        return bool(team["first_come"])
+    return run_kind(reg, ev) == "adhoc"
 
 
 def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player]) -> dict[str, int]:
@@ -3837,6 +3999,7 @@ def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player
     Keyed by this run's signup names (the solver's handle); sat-out and regulars match discord ids, so a rename keeps them."""
     w = run_weights(reg, ev)
     adhoc = run_kind(reg, ev) == "adhoc"
+    first_come = run_first_come(reg, ev) if not is_follow(ev) else adhoc  # a later raid keeps its kind's rule, as before
     sat = sat_out_last_window(reg, rs, ev) if int(w.get("sat_out", 0)) else set()
     regs = {} if adhoc or is_test_run(reg, ev) else {m.discord_id: c.label for m, c in run_regulars(reg, ev)}
     n = max(1, len(players))
@@ -3853,7 +4016,7 @@ def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player
             b += int(w.get("sat_out", 0))
         if uid in regs and (regs[uid] == p.character or asked):
             b += int(w.get("regular", 0))
-        b += int(w.get("signup_order", 0)) * (n - p.pos) if adhoc else round(int(w.get("signup_order", 0)) * (n - p.pos) / n)
+        b += int(w.get("signup_order", 0)) * (n - p.pos) if first_come else round(int(w.get("signup_order", 0)) * (n - p.pos) / n)
         out[p.signup_name] = b
     return out
 
@@ -4147,7 +4310,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     late: set[str] = set()
     benched = set(forces.kept_off)
     kept = set(forces.kept_on)
-    if run_kind(reg, ev) == "adhoc" and not is_follow(ev):  # first come, first rostered (a follow-on: the lead's roster comes first instead): the late joiners are benched before the solve
+    if run_first_come(reg, ev):  # first come, first rostered (a follow-on: the lead's roster comes first instead): the late joiners are benched before the solve
         # a joiner benched by a pin / always_bench takes no first-come seat, and a never_bench joiner keeps one —
         # otherwise the same name lands in force_in and force_out, or a seat goes unfilled (INFEASIBLE)
         late = first_come_out([p for p in players if p.signup_name not in benched], size * n_rosters,

@@ -484,14 +484,17 @@ def open_run(raid: str, when: str | None = None, schedule: str | None = None, fo
 @mcp.tool()
 def reschedule_run(run: str, when: str | None = None, timing: dict | None = None, preview: bool = False, rev: str | None = None,
                    guild: Guild = None) -> dict:
-    """Move a live run to another start and / or give it its own sheet timing, before it starts. Any raid of a run moves
-    the whole run (each later raid keeps its offset). `when` = the new start as 'YYYY-MM-DD HH:MM' in guild time (or an
-    aware ISO instant); a wall time the clocks skip or pass twice is refused. `timing` = {setting: value} from
-    nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours (hours) | nudge | autofill (on/off) —
-    an open run only; its schedule keeps its own. ALWAYS preview first (preview=true: `sentences` = the confirm, read
-    them to the person, and `rev`), then call again without preview and with that `rev`: a run someone changed
-    meanwhile is refused instead of overwritten. Answers stand; nobody is DMed; everyone who answered sees a notice on
-    their Me page; the sheet and open cards are edited in place."""
+    """Move a live run to another start and / or change its own settings (one event, every field), before it starts.
+    Any raid of a run moves the whole run (each later raid keeps its offset). `when` = the new start as 'YYYY-MM-DD
+    HH:MM' in guild time (or an aware ISO instant); a wall time the clocks skip or pass twice is refused. `timing` =
+    {setting: value} from nudge_hours_before | lock_hours_before | confirm_hours_before (hours before the start) |
+    nudge | confirm (on/off) | first_come (on = first to join, off = by priority) | weights ({regular, rank, main,
+    sat_out, signup_order: 0-6}, the ones to change) | split_policy (balanced | first | rotation for the raid `run`
+    names, or {run key: strategy}) — before the lock only — and fill_ask_hours (hours) | autofill (on/off), which still
+    change after the lock; its schedule keeps its own. ALWAYS preview first (preview=true: `sentences` = the confirm,
+    read them to the person, and `rev`), then call again without preview and with that `rev`: a run someone changed
+    meanwhile is refused instead of overwritten. Answers stand; nobody is DMed; a new start or lock time gives everyone
+    who answered a notice on their Me page; the sheet and open cards are edited in place."""
     body: dict[str, Any] = {"preview": bool(preview)}
     if when:
         body["start"] = when

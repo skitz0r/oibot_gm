@@ -109,7 +109,9 @@ src/oibot_gm/
                        danger, diff, fp} (fp = sha1 of title + diff + sentences + rev, 12 hex; verb None = a refusal, Back alone; red only when it can't
                        be undone); refusal_box / refusal_kind (the kind a built refusal carries — rc.Refusal past | clash — or the constant it equals,
                        never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box (1–2; counts joiners minus rc.lock_forces'
-                       kept_off, lock_refusal = everyone kept off), reschedule_box (3) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
+                       kept_off, lock_refusal = everyone kept off), reschedule_box (3; `edit=True` = Edit event's box, the owner's tweaks B:
+                       "Change <event>?" + Save + event_edit_lines = 'label: old → new' in PAGE_WORDS schedule_fields / priority / split words,
+                       event_value_words; TIMING_NAMES carries confirmation, seating, priority, split) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
                        cancel_box (5, red), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines), undo_box / undo_box_for (9),
                        the board's consequence("swap") after the lock (10), open_now_box (11), move_past_sentence / PAST_TAIL (12),
                        schedule_create_box / schedule_save_box / schedule_pause_box / schedule_resume_box / schedule_remove_box (13–17; 14 says
@@ -571,7 +573,9 @@ src/oibot_gm/
                        open_preview, the wizard, the plain-text describe); which_run / open_preview / upcoming_rows carry `occurrence`, never a key.
                        run_schedule_id(reg, ev) = the run dict's schedule_id, else a stamped file's `schedule` as is, else an old stamp through the
                        aliases; run_series / run_kind read it. stamp_runs(reg, rs, commit=) stamps every LIVE unstamped run file (its own JSON, only the
-                       new keys) and dict; migrate_at_start = stamp_runs(commit=False) then migrate_schedules(stamped=) in ONE store.batch (one commit
+                       new keys) and dict; stamp_weights(reg, rs) = every LIVE run dict without its own `weights` gets what it reads today
+                       (live_weights; the owner's tweaks B); migrate_at_start = stamp_runs(commit=False), stamp_weights, then
+                       migrate_schedules(stamped=, weighed=) in ONE store.batch (one commit
                        per guild with one message; a second start writes nothing); stamp_before_change(reg, rs, parts) = the same stamps in memory for
                        a live run the start missed, at reschedule_event / edit_lineup, written in their batch (never found by its new start). ensure_run always CREATES (stamps `created_at`; a first part's dict with no run file after
                        DICT_WITHOUT_RUN_HOURS is dropped by cleanup_ephemeral).
@@ -588,7 +592,12 @@ src/oibot_gm/
                        Reschedule (§5.67 phase 3, C11): reschedule_refusal (MOVE_CLOSED, MOVE_STARTED, MOVE_PAST, MOVE_SAME / TIMING_SAME,
                        MOVE_CLASH via live_at, TIMING_LOCKED, TIMING_ORDER, TIMING_UNKNOWN), reschedule(reg, rs, ev, start=, timing=, by, save=) →
                        Moved = every part keeps its offset (after_minutes), `occurrence` / `schedule` NEVER change, confirm_by moves by the delta (or
-                       within MOVE_CONFIRM_GRACE when past), EVENT_TIMING = the six settings a run may take as its own; place_run (shared with
+                       within MOVE_CONFIRM_GRACE when past), EVENT_TIMING = the settings an event takes as its own (the owner's tweaks B, 2026-11-24:
+                       the sheet timing, confirm, first_come, weights, split_policy — named_split / split_changes, a raid's run FILE split_strategy);
+                       AFTER_LOCK (fill_ask_hours, autofill) still change once locked, the rest is refused: TIMING_LOCKED, CONFIRM_LOCKED,
+                       PRIORITY_LOCKED, consequences.STRATEGY_LOCKED; a lock-time change tells who answered (Moved.lock_moved, "<raid> now locks …");
+                       run_weights = the run dict's own `weights` (stamped at open by ensure_run / _part_dict: fallback_weights; live_weights only
+                       for a dict without them), run_first_come = the first raid's `first_come`, else its kind (a later raid never); place_run (shared with
                        move_runs_with_clock); timing_changes; answered_ids(first) = who a `moved` notice reaches (every row but away);
                        absorbed_schedule_run; move_start (an ISO instant, or guild wall time — MOVE_GAP / MOVE_TWICE / MOVE_WHEN); event_rev = the
                        fingerprint a preview hands out (RUN_CHANGED when stale). plan_stands_for(reg, raid, before, after) = THE decision, made once at
@@ -674,7 +683,9 @@ src/oibot_gm/
                        that day, the officer card / updates thread / loot thread links), signups (counts + rows; none = rc.pool_unanswered), parts
                        (_part_view: label, rosters_of, placed_of, short, sheet = ev_json, board_state ready | working | failed | locked, board_error,
                        mine, undo_box, layout, strategy), activity, boxes {lock, cancel, reschedule}, actions, switches (rc.event_switches), lineup,
-                       timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks; coming_json (Details: Sheet
+                       timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks, edit (edit_options: Edit
+                       event's fields NOW — every one before the lock, EDIT_AFTER_LOCK after —, values, splits per raid, hours, max_weight; Details
+                       read the event's own: Priority, Confirmation, Open seats after the lock, Reminder, Confirm by); coming_json (Details: Sheet
                        opens, Locks — no horizon, so can_open unless the night closed —, why, open, box 11 (says the sheet stays up and the schedule won't open it again); ComingGone COMING_OPENED (with the key) |
                        COMING_GONE); new_event_options (raids, lineups to copy — no pickup templates —, NEW_EVENT_LOCKS (2, 24), lock_choices, the
                        guild's date), new_event_view (What this makes; SCHEDULED_NIGHT), lineup_edit_json (refused through rc.lineup_fixed) /
@@ -881,7 +892,7 @@ src/oibot_gm/
                        carries no rev), another first raid → ID_TAKEN; else it creates (3–4 raids travel as one `lineup` field); a plain-text lineup
                        edit keeps a kept raid's start while the raid before it is unchanged; the C10 sentence is box 14's (op_box). Runs:
                        run_reschedule (target = run key; field `start` = 'YYYY-MM-DD HH:MM' guild time through rc.move_start, or an rc.EVENT_TIMING
-                       setting; several on one run coalesce into one reschedule_event) and run_lineup (value = the later raids, parse_lineup_text;
+                       setting, or weight_<key> (one priority weight); split_policy = the target raid's; several on one run coalesce into one reschedule_event) and run_lineup (value = the later raids, parse_lineup_text;
                        "none" = the first raid alone) — RUN_OPS / group `runs`, EVENT_OPS (Apply passes the `event:<key>` rev = rc.event_rev),
                        RUN_VERBS_AUDITED, WARN_OPS (always reviewed); run_open's text takes the same later-raid list (lineup_of_op); PARITY_PENDING =
                        their Discord rows (phase 5 wizards; /gm change reaches them meanwhile); run_words(reg, ev) = a run as a person reads it in a

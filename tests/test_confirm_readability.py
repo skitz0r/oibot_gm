@@ -819,6 +819,24 @@ def box_cases(reg, rs, runs, ms, dump):
     add("reschedule_box", "into the past", cq.reschedule_box(reg, rs, ev, reg.now_local() - timedelta(days=2)))
     lk = runs["locked recurring, autofill on"]
     add("reschedule_box", "locked", cq.reschedule_box(reg, rs, lk, lk.start + timedelta(hours=2)))
+    # Edit event (the owner's tweaks, B): the same verb's box, titled as the event, with the schedule editor's diff lines
+    for case, start, timing in (("confirmation off", None, {"confirm": False}),
+                                ("the priority", None, {"weights": {"rank": 1, "regular": 6}}),
+                                ("first to join", None, {"first_come": True}),
+                                ("the split", None, {"split_policy": "rotation"}),
+                                ("the lock, answers told", None, {"lock_hours_before": 6}),
+                                ("a move and every field", ev.start + timedelta(hours=1),
+                                 {"lock_hours_before": 6, "nudge": False, "confirm": False, "autofill": False, "fill_ask_hours": 2,
+                                  "first_come": True, "weights": {"rank": 1}, "split_policy": "rotation"})):
+        b = cq.reschedule_box(reg, rs, ev, start, timing, edit=True)
+        assert b["verb"] == "Save" and b["diff"], (case, b)
+        add("reschedule_box edit", case, b)
+    add("reschedule_box edit", "locked: the automatic asks", cq.reschedule_box(reg, rs, lk, None, {"autofill": False}, edit=True))
+    for case, timing in (("locked: confirmation", {"confirm": False}), ("locked: the priority", {"weights": {"rank": 1}}),
+                         ("locked: the split", {"split_policy": "rotation"}), ("locked: the lock", {"lock_hours_before": 6})):
+        b = cq.reschedule_box(reg, rs, lk, None, timing, edit=True)
+        assert b["verb"] is None, (case, b)
+        add("reschedule_box edit", case, b)
     three = runs["three raids, first"]
     L = lambda *raids: [{"raid": r, "rosters": 1} if isinstance(r, str) else {"raid": r[0], "rosters": r[1]} for r in raids]  # noqa: E731
     for case, lineup in (("a roster count", L(hy, (RID, 1), ony)), ("remove", L(hy, ony)), ("reorder", L(hy, ony, (RID, 2))),
@@ -999,6 +1017,16 @@ def reschedule_cases(reg, rs, runs, ms, dump):
         dump.add("reschedule_refusal", case, rc.reschedule_refusal(reg, rs, one, start, timing) or "")
     dump.add("reschedule_refusal", "closed", rc.reschedule_refusal(reg, rs, runs["cancelled"], one.start, None) or "")
     dump.add("reschedule_refusal", "timing on a locked run", rc.reschedule_refusal(reg, rs, runs["locked recurring, autofill on"], None, {"lock_hours_before": 6}) or "")
+    for case, timing in (("confirmation on a locked run", {"confirm": False}), ("priority on a locked run", {"first_come": True}),
+                         ("split on a locked run", {"split_policy": "rotation"})):
+        dump.add("reschedule_refusal", case, rc.reschedule_refusal(reg, rs, runs["locked recurring, autofill on"], None, timing) or "")
+    add("an event's own confirmation", one, None, {"confirm": False})
+    add("an event's own priority", one, None, {"weights": {"rank": 1}})
+    add("an event's own seating", one, None, {"first_come": True})
+    add("an event's own split", one, None, {"split_policy": "rotation"})
+    add("an event's every own setting", one, None, {"confirm": False, "first_come": True, "weights": {"rank": 1},
+                                                    "split_policy": "rotation", "lock_hours_before": 6, "autofill": False})
+    add("locked: the automatic asks", runs["locked recurring, autofill on"], None, {"autofill": False})
     dump.add("reschedule_event refusal", "a member", rc.MOVE_OFFICER_ONLY)
     dump.add("reschedule_refusal", "started", rc.MOVE_STARTED)
 

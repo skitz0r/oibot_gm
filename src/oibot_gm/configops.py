@@ -157,9 +157,12 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
     — opens the sheet now and posts it in the signup channel.
   run_reschedule: target, field=start with value=<"YYYY-MM-DD HH:MM" in guild time: the run's new start> — moves the whole run
     (every raid of it keeps its offset), answers stand, everyone who answered sees a notice, nobody is DMed; or field=<one of this
-    run's own sheet timing settings, before lock only: nudge_hours_before|lock_hours_before|confirm_hours_before|fill_ask_hours
-    (value = hours before the start; fill_ask_hours = hours a fill ask waits) | nudge|autofill (value on|off)>, value. Its schedule
-    keeps its own. Several run_reschedule ops on one run in a row are saved together ("move it to 9 PM and lock 12 h before").
+    run's own settings, before lock only: nudge_hours_before|lock_hours_before|confirm_hours_before (value = hours before the
+    start) | nudge|confirm (value on|off: a reminder, the rostered asked to confirm) | first_come (on = first to join, off = by
+    priority) | weight_regular|weight_rank|weight_main|weight_sat_out|weight_signup_order (value 0-6) | split_policy
+    (balanced|first|rotation: the target raid's split); and before or after the lock: fill_ask_hours (hours a fill ask waits) |
+    autofill (on|off: the bot asks people for open seats)>, value. Its schedule keeps its own. Several run_reschedule ops on one
+    run in a row are saved together ("move it to 9 PM and lock 12 h before").
   run_lineup: target, value=<the raids after the first one, in order: "<raid id> x<N>, <raid id>" ("barrow_deeps x2, onyxias_lair");
     "none" = the first raid alone> — before lock only: adds, removes or reorders the raids that follow the first one the same
     night (each starts when the one before it ends); the first raid never changes. Its schedule keeps its own lineup.
@@ -858,7 +861,8 @@ def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None 
 def _reschedule_args(reg: Registry, op: ConfigOp) -> tuple:
     """run_reschedule (one op or several merged on one run) → (the new start or None, {timing setting: value}): field
     `start` = guild wall time 'YYYY-MM-DD HH:MM' (rc.move_start: DST-safe, a skipped or doubled wall time refused), any
-    other field one of rc.EVENT_TIMING's settings (rc.TIMING_UNKNOWN otherwise)."""
+    other field one of rc.EVENT_TIMING's settings or `weight_<key>` (one priority weight; rc.TIMING_UNKNOWN otherwise).
+    `split_policy` is the split of the raid the op's target names (rc.named_split, in the verb)."""
     from . import raidcycle as rc
 
     start, timing = None, {}
@@ -866,6 +870,8 @@ def _reschedule_args(reg: Registry, op: ConfigOp) -> tuple:
         f = (p.field or "").strip().lower()
         if f in ("start", "when", "time"):
             start = rc.move_start(reg, p.value)
+        elif f.startswith("weight_"):
+            timing.setdefault("weights", {})[f.removeprefix("weight_")] = (p.value or "").strip()
         elif f in rc.EVENT_TIMING:
             timing[f] = (p.value or "").strip().lower()
         else:
@@ -2779,6 +2785,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         from .consequences import reschedule_consequence
 
         start, timing = _reschedule_args(reg, op)
+        timing = rc.named_split(rs, ev, timing)  # a bare split is the target raid's
         first = rc.first_part(rs, ev)
         why = rc.reschedule_refusal(reg, rs, first, start, timing)
         if why:
