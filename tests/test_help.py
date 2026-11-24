@@ -77,6 +77,9 @@ def test_about_recruitment_channels_and_raid_lines(reg, rs):
     reg.set_recruitment("t", note="looking for healers", questions=[{"label": "Why us?", "required": True}, {"label": "Raid experience"}], member_role_ids=[777])
     reg.role_names[777] = "Veteran"
     cfg.ops_channel_id, cfg.signup_channel_id = 55, 56
+    ahead = (reg.now_local() + timedelta(days=30)).replace(microsecond=0).isoformat()
+    for rid in reg.profile.raids:  # not yet open, whatever today is (the profile's 2026-12-09 passes)
+        reg.set_raid_override(rid, "first_open", ahead, "t")
     member = state(reg, rs, reg.test_members()[0].discord_id, False)
     assert "about: “We raid on Tuesdays.” · invite https://discord.gg/abc · news keywords hotfix" in member
     assert "recruitment: applications open · note “looking for healers” · 2 question(s) (1. Why us?* 2. Raid experience; * = required)" in member

@@ -811,13 +811,17 @@ def test_a_rehearsal_at_a_real_slots_minute_never_holds_the_real_run_up(reg, rs)
     bot = NightBot(reg, rs)
     reg.config.signup_channel_id = bot.signup.id
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
-    weekly(reg, "barrow_deeps", "Wed 20:00")
+    # never tonight's night (on a Wednesday evening a "Wed 20:00" run was already past its lock: the scheduler locked it
+    # and warned) — the weekday is picked from today, so the test reads the same every day of the week
+    day = (reg.now_local() + timedelta(days=4)).strftime("%a")
+    weekly(reg, "barrow_deeps", f"{day} 20:00")
     reg.set_schedule("barrow-deeps", {"signup_lead_hours": 24 * 14}, "t")  # sheet timing is the schedule's
     due = rc.upcoming(reg, "barrow_deeps", reg.now_local(), lead=True)
     (sched, start) = due[0]
+    assert start - reg.now_local() > timedelta(days=3)
     test = rc.open_run(reg, rs, "barrow_deeps", start, by="t", cutoffs={"soft": 2, "hard": 1, "confirm": 0.5, "test_by": OWNER})
     run(bot.scheduler_tick_guild(reg))
     run(bot.scheduler_tick_guild(reg))
-    assert not any(lvl in ("warn", "error") for lvl, _t in bot.ops.lines)
+    assert not any(lvl in ("warn", "error") for lvl, _t in bot.ops.lines), bot.ops.lines
     opened = [rc.event_of_occurrence(rs, sc["id"], rc.occurrence_stamp(reg, s)) for sc, s in due]
     assert all(e is not None and not e.test for e in opened) and test not in opened, "every due run opens, the rehearsal stays its own"
