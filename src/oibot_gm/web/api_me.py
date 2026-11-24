@@ -16,8 +16,10 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from .. import consequences as cq
 from .. import inbox
 from .. import raidcycle as rc
+from ..constants import CONFIRM_WORDS
 from ..consequences import later_places_sentence, leave_follow_consequence
 from ..registry import RegistryError
 
@@ -199,13 +201,28 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
 
     @app.post("/api/admin/action")
     async def admin_action(request: Request):
-        """Record one on-behalf action {run, member, action, character?, spec?, note?, rev?} — inbox.do_member_action, the verbs
-        the SetWizard and every other surface call. A `rev` that no longer matches the member's state is a 409 saying
-        what they changed to ('Kestrel is now Bench as Kestrel (since 5:12 PM)'), nothing written."""
+        """Record one on-behalf action {run, member, action, character?, spec?, note?, rev?, preview?, seen?} —
+        inbox.do_member_action, the verbs the SetWizard and every other surface call. A `rev` that no longer matches the
+        member's state is a 409 saying what they changed to ('Kestrel is now Bench as Kestrel (since 5:12 PM)'), nothing
+        written. The Events page's Answer for someone asks first (design §7b): `preview` → {box} (consequences.answer_box,
+        its fp covering the member's state), nothing written; `seen` = the box's fp → 409 with the fresh box when it
+        changed while open."""
         v, d = await body(request, officer=True)
         m = resolve_member(v.reg, d.get("member") if d.get("member") not in (None, "") else d.get("uid"))
         rs, ev = run_of(v, str(d.get("run") or ""))
         key = str(d.get("action") or "")
+        if d.get("preview") or d.get("seen"):
+            spec = str(d.get("spec") or "").strip() or None
+            try:
+                if key not in {a["key"] for a in rc.member_actions(v.reg, ev, m)}:
+                    raise RegistryError(f"That no longer applies to {m.display_name} on {rc.run_words(v.reg, ev)} any more.")
+                fresh = cq.answer_box(v.reg, ev, m, key, d.get("character") or None, spec, by_id=v.uid, rev=rc.member_state_rev(ev, m))
+            except RegistryError as e:
+                return JSONResponse({"error": str(e), "box": cq.refusal_box_for(str(e))}, status_code=400)
+            if d.get("preview"):
+                return {"box": fresh}
+            if str(d["seen"]) != fresh["fp"]:
+                return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
         if d.get("rev") and d["rev"] != rc.member_state_rev(ev, m):
             return JSONResponse({"error": rc.member_change_words(v.reg, ev, m) + ".", "rev": rc.member_state_rev(ev, m)}, status_code=409)
         try:

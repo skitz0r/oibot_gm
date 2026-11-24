@@ -48,6 +48,7 @@ export function RostersPage({ meta }: { meta: Meta }) {
   return (
     <Stack gap="lg" className={rosterCss.touch}>  {/* phone: every control 44 px (rosters.module.css) */}
       <PageTitle title="Rosters" intro={`Every run with a sheet is a card, soonest first: answer for someone, shape the board, lock, fill. Under them, each raid's schedule, regulars and history. Times in ${zone}.`} />
+      <Text size="sm">Each event in its own sections, with what is coming up and what is past, is on the <Anchor component={Link} to="/events" size="sm">Events page</Anchor>.</Text>
       {nights.map((n) => <NightCard key={n[0].e.key} runs={n} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
       {nights.length === 0 && <Card><Box p="md"><Text size="sm" c="dimmed">No run has a sheet right now. Open the next run on a raid's card below, or make a New event.</Text></Box></Card>}
       {data.raids.map((r) => <RaidCard key={r.id} r={r} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}

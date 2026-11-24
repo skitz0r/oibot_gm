@@ -57,8 +57,10 @@ type Open = AskBox & { resolve: (done: boolean) => void };
 
 /** `const [ask, dialog] = useConfirmBox(["config"]); if (await ask({ box, act })) …` — render `dialog` once. Resolves
  *  true when the verb was pressed and `act` finished (or there is no `act`), false on Back. `topics` = the live topics
- *  (/api/events prefixes) that make an open box ask `refresh` again; the stream is opened only while a box is open. */
-export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<boolean>, React.ReactNode] {
+ *  (/api/events prefixes) that make an open box ask `refresh` again; the stream is opened only while a box is open.
+ *  The third value, `replace(box)`, swaps the open box for the server's answer to the box's OWN fields (Reschedule's
+ *  picker, Answer for someone's member) — no "changed" line: the officer changed it, not someone else. */
+export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<boolean>, React.ReactNode, (b: Box) => void] {
   const [open, setOpen] = useState<Open | null>(null);
   const [box, setBox] = useState<Box | null>(null);
   const [changed, setChanged] = useState(false);
@@ -69,6 +71,8 @@ export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<bo
   const ask = useCallback((o: AskBox) => new Promise<boolean>((resolve) => {
     setBox(o.box); setChanged(false); setBusy(false); setOpen({ ...o, resolve });
   }), []);
+
+  const replace = useCallback((fresh: Box) => { current.current = fresh; setBox(fresh); setChanged(false); }, []);
 
   const swap = (fresh: Box) => {
     if (current.current && fresh.fp === current.current.fp) return;
@@ -113,5 +117,5 @@ export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<bo
       )}
     </Modal>
   );
-  return [ask, dialog];
+  return [ask, dialog, replace];
 }

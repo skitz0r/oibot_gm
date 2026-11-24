@@ -9,10 +9,11 @@ export type ListGroup = { label: string; items: ListItem[] };
 /** A list page (phase 4 — Raids, Events, Schedules; design §7a): the title with its one action, the list (≤ 290 px,
  *  grouped) beside the chosen item's detail. Below sm the list alone while nothing is chosen, else the detail under a
  *  "Back to …" link. Every pick and the Back link go through the leave guard, so a draft is never dropped unasked.
- *  A group's label is printed only when the page has more than one group. `empty` stands in for an empty list. */
-export function ListPage({ title, action, groups, selected, back, children, empty }: {
+ *  A group's label is printed only when the page has more than one group. `empty` stands in for an empty list; `more`
+ *  closes the list (the Events page's Show older). */
+export function ListPage({ title, action, groups, selected, back, children, empty, more }: {
   title: string; action?: React.ReactNode; groups: ListGroup[]; selected: string | null; back: string;
-  children?: React.ReactNode; empty?: React.ReactNode;
+  children?: React.ReactNode; empty?: React.ReactNode; more?: React.ReactNode;
 }) {
   const none = groups.every((g) => !g.items.length);
   return (
@@ -35,6 +36,7 @@ export function ListPage({ title, action, groups, selected, back, children, empt
               ))}
             </div>
           ))}
+          {!none && more}
         </nav>
         <div className={css.detail}>
           {selected !== null && (

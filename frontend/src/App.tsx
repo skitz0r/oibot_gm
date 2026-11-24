@@ -24,6 +24,7 @@ import { ProfessionsPage } from "./pages/Professions";
 import { PricesPage } from "./pages/Prices";
 import { RaidSchedulesPage } from "./pages/RaidSchedules";
 import { LineupPage } from "./pages/LineupPage";
+import { EventsPage } from "./pages/Events";
 import { TellTheBot } from "./components/TellTheBot";
 import { PolicyPage } from "./pages/Policy";
 import { HelpPage } from "./pages/Help";
@@ -194,7 +195,9 @@ export default function App() {
             {/* the schedule editor, until the Schedules page (Task 11) replaces this page */}
             {/* New event (the lineup builder); /events itself is the Events page's (Task 8) — until then the Rosters page */}
             <Route path="/events/new" element={officer(<LineupPage meta={meta} mode="new-event" />)} />
-            <Route path="/events" element={<Navigate to="/rosters" replace />} />
+            <Route path="/events" element={officer(<EventsPage meta={meta} />)} />
+            <Route path="/events/:key" element={officer(<EventsPage meta={meta} />)} />
+            <Route path="/events/coming/:sid/:occurrence" element={officer(<EventsPage meta={meta} />)} />
             <Route path="/schedules" element={officer(<RaidSchedulesPage meta={meta} />)} />
             <Route path="/schedules/:id" element={officer(<RaidSchedulesPage meta={meta} />)} />
             <Route path="/members" element={officer(<MembersPage meta={meta} />)} />

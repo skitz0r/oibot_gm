@@ -245,7 +245,7 @@ def test_a_finished_event_reads_as_history(officer_client, reg, rs):
     assert [f["label"] for f in j["details"]] == ["Lineup", "Comes from", "Rostered", "Ended"]
     facts = {f["label"]: f["value"] for f in j["details"]}
     assert (facts["Lineup"], facts["Rostered"], facts["Ended"]) == ("Barrow Deeps", "10", reg.local12(ev.closed_at))
-    assert j["chip"] == "finished" and j["boxes"] == {"lock": None, "cancel": None}
+    assert j["chip"] == "finished" and j["boxes"] == {"lock": None, "cancel": None, "reschedule": None}
     assert not any(v for k, v in j["actions"].items())
 
 
@@ -343,7 +343,7 @@ def test_a_coming_up_event_says_when_it_opens_by_hand(officer_client, reg, rs):
     assert facts["Locks"] == reg.local12(far - timedelta(hours=float(sd["lock_hours_before"])))
     assert j["can_open"] is False and j["why"] == rc.open_row_refusal(reg, rs, HYJAL, far, sid, far - timedelta(hours=float(sd["signup_lead_hours"])))
     assert j["box"] is None and (j["title"], j["chip"]) == (reg.local12(far), PAGE_WORDS["no_sheet_yet"])
-    assert j["open"] == {"start_iso": far.isoformat(), "schedule": sid, "occurrence": rc.occurrence_stamp(reg, far)}
+    assert j["open"] == {"start_iso": far.isoformat(), "schedule": sid, "occurrence": rc.occurrence_stamp(reg, far), "raid": HYJAL}
     assert j["schedule"] == {"id": sid, "name": "Tuesday raid night"}
     for x in coming:  # every listed night opens its coming-up view
         assert officer_client.get(f"/api/event/coming/{sid}/{x['occurrence']}").status_code == 200
@@ -360,6 +360,58 @@ def test_a_coming_up_night_no_longer_on_the_schedule_is_404(officer_client, reg,
     ev = rc.open_run(reg, rs, HYJAL, near, by="t", schedule=sid)
     r = officer_client.get(f"/api/event/coming/{sid}/{occ}")
     assert r.status_code == 404 and r.json()["key"] == ev.key, "opened since: the page goes to the event"
+
+
+# ---------------------------------------------------------------- the Events page's actions (Task 8)
+
+def test_a_coming_up_nights_box_opens_on_the_first_press(web_bot, reg, rs):
+    """Open the sheet now posts to its first raid (`open.raid`) with the box's fp as `seen`: the box the coming-up view
+    printed is the one the open route builds, so the first press opens (no "changed" box) and answers the new key."""
+    c, h = web_bot.c, H()
+    sid = tuesday(reg)
+    near = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
+    j = c.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, near)}", headers=h).json()
+    o = j["open"]
+    r = c.post(f"/api/raid/{o['raid']}/open", json={"start": o["start_iso"], "schedule": o["schedule"], "occurrence": o["occurrence"],
+                                                     "seen": j["box"]["fp"]}, headers=h)
+    assert r.status_code == 200, r.text
+    ev = rs.events[r.json()["key"]]
+    assert ev.occurrence == o["occurrence"] and rc.schedule_stamp(rc.run_schedule_id(reg, ev)) == sid
+
+
+def test_reschedule_starts_from_the_pick_box_with_the_guilds_date(officer_client, reg, rs):
+    """Reschedule opens on the server's own box before anything is picked (its title names the event, one sentence,
+    only Back); the Day picker's lower bound is the GUILD's date and the Locks choices carry the event's own lock."""
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    j = officer_client.get(f"/api/event/{ev.key}").json()
+    assert j["boxes"]["reschedule"] == cq.reschedule_pick_box(reg, rs, ev)
+    b = j["boxes"]["reschedule"]
+    assert b["title"] == f"Move {reg.local12(ev.start)}?" and b["sentences"] == [rc.MOVE_WHEN] and b["verb"] is None
+    assert j["today"] == reg.now_local().date().isoformat()
+    own = j["timing"]["lock_hours_before"]
+    assert any(x["hours"] == own for x in j["locks"])
+    assert {x["hours"] for x in j["locks"]} >= set(event_view.NEW_EVENT_LOCKS)
+    assert all(x["words"].endswith(" before") for x in j["locks"])
+
+
+def test_answer_for_someone_previews_the_servers_box(web_bot, reg, rs):
+    """Answer for someone prints consequences.answer_box: `preview` answers the box and writes nothing; a press whose box
+    changed meanwhile (`seen` stale) is refused with the fresh box (409); the box's own fp records the answer."""
+    c, h = web_bot.c, H()
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
+    m = people(reg, 2)[1]
+    ch = m.main
+    body = {"run": ev.key, "member": str(m.discord_id), "action": "join", "character": ch.label, "spec": ch.spec}
+    r = c.post("/api/admin/action", json={**body, "preview": True}, headers=h)
+    assert r.status_code == 200, r.text
+    box = r.json()["box"]
+    assert (box["title"], box["verb"]) == ("Answer for someone", "Record answer")
+    assert box["sentences"][0].startswith(f"{m.display_name} is marked as joined") and str(m.discord_id) not in ev.signups
+    r = c.post("/api/admin/action", json={**body, "seen": "stale"}, headers=h)
+    assert r.status_code == 409 and r.json()["box"] == box and str(m.discord_id) not in ev.signups
+    r = c.post("/api/admin/action", json={**body, "seen": box["fp"]}, headers=h)
+    assert r.status_code == 200, r.text
+    assert ev.signups[str(m.discord_id)].status == "in"
 
 
 # ---------------------------------------------------------------- the page words

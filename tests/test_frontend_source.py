@@ -1009,3 +1009,56 @@ def test_new_event_prints_only_the_servers_words():
     rosters = _code_only((SRC / "pages" / "Rosters.tsx").read_text())
     assert 'to="/events/new"' in rosters and "New event" in rosters
     assert 'path="/events/new"' in _code_only((SRC / "App.tsx").read_text())
+
+
+def test_events_page_reads_by_its_sections():
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert "<ListPage" in page and "/api/event-list" in page and all(g in page for g in ('"Open"', '"Coming up"', '"History"'))
+    order = [page.index(s) for s in ("<EventDetails", "<SignupsSection", "<ActivitySection")]
+    assert order == sorted(order)
+    for f in (SRC / "components" / "events").glob("*.tsx"):
+        code = _code_only(f.read_text())
+        assert "useConfirm(" not in code and not re.search(r"message:\s*[`\"']", code), f.name
+        assert not re.search(r"[\"'`](First to join|Not asked|Asked at the lock|One-off, no schedule)[\"'`]", code), f.name
+
+
+def test_reschedule_picks_never_types():
+    box = _code_only((SRC / "components" / "events" / "RescheduleBox.tsx").read_text())
+    assert "<WhenPicker" in box and "preview: true" in box and "seen" in box and "datetime-local" not in box
+
+
+def test_the_events_page_asks_with_the_servers_box_and_lives():
+    """Phase 4, Task 8: every action prints the SERVER's box and sends the fp of the box on screen as `seen` (a 409 brings
+    the fresh box — ConfirmBox passes the fp, never a closure over a stale prop); Reschedule opens on the server's pick
+    box and re-asks the preview on each pick (New day from a calendar whose lower bound is the guild's date, Starts from
+    quarter hours, Locks only while the event is open); a coming-up night has no Reschedule and opens through its first
+    raid; the page lives on run: / member / config and keeps an open box over a reload; the routes are the read model's."""
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert 'useLive(load, ["run:", "member", "config"])' in page and "usePoll(load)" in page
+    assert "ev.boxes.lock" in page and "`/api/run/${encodeURIComponent(ev.key)}/lock`" in page and "{ seen: fp }" in page
+    assert "ev.boxes.cancel" in page and "{ seen: fp, notify: false }" in page and "{ preview: true }" in page
+    assert "Edit lineup" not in page, "Edit lineup arrives with Task 10"
+    assert "Show older" in page and "history_offset=" in page and 'to="/events/new"' in page
+    assert "<HistoryView" in page and "<ComingUpView" in page
+    box = _code_only((SRC / "components" / "events" / "RescheduleBox.tsx").read_text())
+    assert "ev.boxes.reschedule" in box and 'dayLabel="New day"' in box and "minDate={ev.today}" in box and "replace(" in box
+    assert 'ev.state === "open"' in box and 'label="Locks"' in box and "toISOString" not in box
+    coming = _code_only((SRC / "components" / "events" / "ComingUpView.tsx").read_text())
+    assert "Reschedule" not in coming and "view.open.raid" in coming and "seen: fp" in coming and "navigate(`/events/${" in coming
+    assert "disabled={!view.can_open}" in coming and "view.why" in coming
+    hist = _code_only((SRC / "components" / "events" / "HistoryView.tsx").read_text())
+    assert "<EventDetails" in hist and "<ActivitySection" in hist
+    app = _code_only((SRC / "App.tsx").read_text())
+    for r in ('path="/events"', 'path="/events/:key"', 'path="/events/coming/:sid/:occurrence"', 'path="/events/new"'):
+        assert r in app, r
+    assert '<Navigate to="/rosters"' not in app
+    assert "navigate(`/events/${r.key}`)" in _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
+    some = menu[menu.index("type AnswerPick"):menu.index("export function RepostSheetModal")]
+    assert "useConfirmBox(" in some and "preview: true" in some and "seen: fp" in some and "useConfirm(" not in some
+    assert "spec" in some and 'label="Character"' in some and 'label="Answer"' in some and 'label="Member"' in some
+    sign = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
+    assert all(w in sign for w in ('"Joined"', '"Bench"', '"No thanks"', '"No answer yet"')) and "<MemberMenu" in sign and "<SomeoneElse" in sign
+    assert "aria-expanded" in sign and 'kind="spec"' in sign
+    act = _code_only((SRC / "components" / "events" / "ActivitySection.tsx").read_text())
+    assert "Activity · " in act and "aria-expanded" in act

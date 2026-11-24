@@ -23,14 +23,14 @@ export const wallTime = (day: string, time: string) => `${day} ${time}`;
 /** When something starts (the Clock rule): the Day from a calendar (`DatePickerInput`, 'Thu 10 Dec'), the time from a
  *  select of 15-minute steps labelled with clock12 — nobody types a timestamp. `minDate` is the GUILD's date from the
  *  server ('YYYY-MM-DD'), never the browser's (west of UTC the browser's evening is already tomorrow). `children` sit on
- *  the same row (the New event page's Locks). */
-export function WhenPicker({ day, time, onDay, onTime, minDate, label, children }: {
+ *  the same row (the New event page's Locks). `dayLabel`: Reschedule's "New day". */
+export function WhenPicker({ day, time, onDay, onTime, minDate, label, dayLabel = "Day", children }: {
   day: string | null; time: string | null; onDay: (d: string | null) => void; onTime: (t: string | null) => void;
-  minDate: string; label: string; children?: React.ReactNode;
+  minDate: string; label: string; dayLabel?: string; children?: React.ReactNode;
 }) {
   return (
     <Group gap="md" align="flex-end" wrap="wrap" role="group" aria-label={label}>
-      <DatePickerInput label="Day" value={day} onChange={(d) => onDay(d ? String(d).slice(0, 10) : null)} minDate={minDate}
+      <DatePickerInput label={dayLabel} value={day} onChange={(d) => onDay(d ? String(d).slice(0, 10) : null)} minDate={minDate}
         valueFormat="ddd D MMM" placeholder="Pick a day" w={170} popoverProps={{ withinPortal: true }} />
       <Select label="Starts" value={time} onChange={onTime} data={QUARTER_HOURS} placeholder="Pick a time" w={140}
         allowDeselect={false} searchable={false} maxDropdownHeight={260} comboboxProps={{ withinPortal: true }} />

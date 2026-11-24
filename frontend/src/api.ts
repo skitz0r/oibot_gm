@@ -212,18 +212,21 @@ export interface EventView {
   details: Fact[];
   signups: { joined: number; bench: number; no_thanks: number; no_answer: number; rows: { in: EventPerson[]; sub: EventPerson[]; out: EventPerson[]; none: EventPerson[] } };
   parts: PartView[]; activity: { when: string; line: string }[];
-  boxes: { lock: Box | null; cancel: Box | null };
+  /** `reschedule` = the box Reschedule opens on before anything is picked (consequences.reschedule_pick_box) */
+  boxes: { lock: Box | null; cancel: Box | null; reschedule: Box | null };
   actions: { reschedule: boolean; edit_lineup: boolean; lock: boolean; cancel: boolean; open_now: boolean };
   lineup: { raid: string; rosters: number; starts: number }[]; start_iso: string;
   /** the event's own sheet timing by setting (rc.EVENT_TIMING), what POST /api/run/{key}/reschedule takes back */
   timing: Record<string, number | boolean>;
   people: { uid: string; display_name: string; characters: { label: string; cls: string; spec: string; role: string; is_main: boolean }[] }[];
   sheet_url: string | null;
+  /** Reschedule's picker: the GUILD's date (the New day's lower bound) and the Locks choices, the event's own among them */
+  today: string; locks: { hours: number; words: string }[];
 }
 /** GET /api/event/coming/{sid}/{occurrence}: `open` is what Open the sheet now carries back; `box` null while it can't. */
 export interface ComingView {
   title: string; chip: string; schedule: { id: string; name: string }; details: Fact[]; can_open: boolean; why: string | null;
-  open: { start_iso: string; schedule: string; occurrence: string }; box: Box | null;
+  open: { start_iso: string; schedule: string; occurrence: string; raid: string }; box: Box | null;
 }
 /** The Me page's Leveling guide tab (GET /api/me/guide, design §5.55): what the member has built from their own RestedXP
  *  import string. `files` = the downloads in order with their words; `groups` = one row per guide group; `built_when` is

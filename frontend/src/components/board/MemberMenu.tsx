@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { ActionIcon, Button, Group, Loader, Menu, Modal, Select, Stack, Text } from "@mantine/core";
 import { IconArrowsMove, IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, IconUserPlus } from "@tabler/icons-react";
-import { api, type MemberAction, type MemberActions, type Person } from "../../api";
+import { api, type Box, type MemberAction, type MemberActions, type Meta, type Person } from "../../api";
 import { fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
+import { useConfirmBox } from "../ConfirmBox";
+import { boxOf } from "../events/shared";
 import css from "../../pages/rosters.module.css";
 
 /** Officers record anything a member can do on a run, for them (design B5) — the SAME filtered list the Discord SetWizard
@@ -27,7 +29,7 @@ function items(acts: MemberAction[]): Item[] {
 const DANGER = new Set(["callout", "confirm_no", "fill_no", "no_thanks"]);
 const ICON: Record<string, React.ReactNode> = { pin_in: <IconPin size={14} />, pin_out: <IconUserOff size={14} />, unpin: <IconPinnedOff size={14} />, join: <IconUserPlus size={14} /> };
 
-/** Pick → the consequence (+ the note box for a callout) → the write. Shared by the row menu and "Answer for someone…". */
+/** Pick → the consequence (+ the note box for a callout) → the write: the row ⋮ menu. */
 function useRecord(run: string, onDone: () => Promise<void> | void) {
   const [ask, dialog] = useConfirm();
   async function record(uid: string, name: string, list: MemberActions, it: Item) {
@@ -82,39 +84,107 @@ export function MemberMenu({ run, uid, name, onDone, moves }: { run: string; uid
   );
 }
 
-/** "Answer for someone…" beside the joiners: a member with NO answer on the sheet yet (the owner, 2026-11-22: someone who
- *  answered is changed from their row's ⋮, never offered here — SheetCard filters `people`) → the same filtered list as buttons. */
-export function SomeoneElse({ run, people, onDone }: { run: string; people: Person[]; onDone: () => Promise<void> | void }) {
-  const [open, setOpen] = useState(false);
-  const [uid, setUid] = useState<string | null>(null);
-  const [list, setList] = useState<MemberActions | null>(null);
-  const close = () => { setOpen(false); setUid(null); setList(null); };
-  const [record, dialog] = useRecord(run, async () => { close(); await onDone(); });
-  useEffect(() => {
-    if (!uid) { setList(null); return; }
-    api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`).then(setList).catch(fail);
-  }, [uid, run]);
-  const person = people.find((p) => p.uid === uid);
+/** Answer for someone (box 8, design §7b): a member with NO answer on the sheet yet (the owner, 2026-11-22: someone who
+ *  answered is changed from their row's ⋮, never offered here — SheetCard filters `people`). The SERVER's box
+ *  (consequences.answer_box through POST /api/admin/action `preview`) with its fields — Member, Answer, Character (a
+ *  character and the spec it plays) —; each pick asks the server again and the box takes its answer; Record answer
+ *  sends the fp of the box on screen as `seen`, so a member who answered meanwhile brings the fresh box back. */
+type AnswerPick = { uid: string; action: string; character: string | null; spec: string | null };
+const ANSWERS = new Set(["join", "bench", "no_thanks"]);
+const answersOf = (list: MemberActions | null) => (list?.actions || []).filter((a) => ANSWERS.has(a.key));
+const actionsOf = (run: string, uid: string) => api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`);
+
+/** The character choices for one answer: each character the server allows with each spec its class plays ("Tavi, Holy"). */
+function playsOf(person: Person | undefined, a: MemberAction | undefined, meta?: Meta) {
+  if (!person || !a || a.key === "no_thanks") return [];
+  const allowed = new Set(a.characters && a.characters.length ? a.characters : person.characters.map((c) => c.label));
+  return person.characters.filter((c) => allowed.has(c.label)).flatMap((c) => {
+    const specs = meta?.classes[c.cls] ? Object.keys(meta.classes[c.cls]) : [c.spec];
+    return [c.spec, ...specs.filter((x) => x !== c.spec)].map((sp) => ({ value: `${c.label}|${sp}`, label: `${c.label}, ${sp}` }));
+  });
+}
+
+function defaultPick(person: Person, list: MemberActions): AnswerPick {
+  const a = answersOf(list).find((x) => x.key === "join") || answersOf(list)[0];
+  const main = person.characters.find((c) => c.is_main) || person.characters[0];
+  const plays = a && a.key !== "no_thanks" && main ? { character: main.label, spec: main.spec } : { character: null, spec: null };
+  return { uid: person.uid, action: a?.key || "", ...plays };
+}
+
+function AnswerFields({ run, people, meta, first, firstList, onPick }: {
+  run: string; people: Person[]; meta?: Meta; first: AnswerPick; firstList: MemberActions; onPick: (p: AnswerPick) => void;
+}) {
+  const [pick, setPick] = useState(first);
+  const [list, setList] = useState<MemberActions | null>(firstList);
+  const person = people.find((p) => p.uid === pick.uid);
+  const answer = answersOf(list).find((a) => a.key === pick.action);
+  const plays = playsOf(person, answer, meta);
+  const set = (p: AnswerPick) => { setPick(p); onPick(p); };
+  async function member(uid: string | null) {
+    const who = people.find((p) => p.uid === uid);
+    if (!who) return;
+    setList(null);
+    try {
+      const l = await actionsOf(run, who.uid);
+      setList(l);
+      set(defaultPick(who, l));
+    } catch (e) { fail(e); }
+  }
+  return (
+    <Stack gap="xs">
+      <Select label="Member" searchable allowDeselect={false} value={pick.uid} onChange={member} comboboxProps={{ withinPortal: true }}
+        data={people.map((p) => ({ value: p.uid, label: p.display_name }))} nothingFoundMessage="Nobody without an answer has that name." />
+      <Select label="Answer" allowDeselect={false} disabled={!list} value={pick.action || null} comboboxProps={{ withinPortal: true }}
+        data={answersOf(list).map((a) => ({ value: a.key, label: a.label }))}
+        onChange={(k) => {
+          if (!k || !person || !list) return;
+          const a = answersOf(list).find((x) => x.key === k);
+          const keep = playsOf(person, a, meta).some((o) => o.value === `${pick.character}|${pick.spec}`);
+          const base = defaultPick(person, list);
+          set({ ...pick, action: k, ...(k === "no_thanks" ? { character: null, spec: null } : keep ? {} : { character: base.character, spec: base.spec }) });
+        }} />
+      {plays.length > 0 && (
+        <Select label="Character" allowDeselect={false} value={`${pick.character}|${pick.spec}`} data={plays} comboboxProps={{ withinPortal: true }}
+          onChange={(v) => { if (v) { const [character, spec] = v.split("|"); set({ ...pick, character, spec }); } }} />
+      )}
+    </Stack>
+  );
+}
+
+export function SomeoneElse({ run, people, meta, onDone }: { run: string; people: Person[]; meta?: Meta; onDone: () => Promise<void> | void }) {
+  const [ask, dialog, replace] = useConfirmBox(["run:", "member"]);
+  const [busy, setBusy] = useState(false);
+  async function start() {
+    const person = people[0];
+    if (!person) return;
+    setBusy(true);
+    try {
+      const list = await actionsOf(run, person.uid);
+      const now: AnswerPick = defaultPick(person, list);  // the fields' current pick: the preview, the refresh and the write read it
+      let seq = 0;
+      const bodyOf = (p: AnswerPick) => ({ run, member: p.uid, action: p.action, character: p.character, ...(p.spec && p.action !== "no_thanks" ? { spec: p.spec } : {}) });
+      const preview = async (p: AnswerPick): Promise<Box> => {
+        try { return (await api.post<{ box: Box }>("/api/admin/action", { ...bodyOf(p), preview: true })).box; } catch (e) { const b = boxOf(e); if (b) return b; throw e; }
+      };
+      const first = await preview(now);
+      setBusy(false);  // the box is open now: the button behind it is not busy
+      let said = "";
+      const done = await ask({
+        box: first,
+        fields: <AnswerFields run={run} people={people} meta={meta} first={now} firstList={list}
+          onPick={(p) => { Object.assign(now, p); const n = ++seq; preview(p).then((b) => { if (n === seq) replace(b); }).catch(fail); }} />,
+        refresh: () => preview(now),
+        act: async (fp) => {
+          try { said = (await api.post<{ message: string }>("/api/admin/action", { ...bodyOf(now), seen: fp })).message; return null; }
+          catch (e) { const b = boxOf(e); if (b) return b; throw e; }
+        },
+      });
+      if (done) { ok(said); await onDone(); }
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  }
   return (
     <>
-      <Button size="xs" variant="default" onClick={() => setOpen(true)}>Answer for someone…</Button>
-      <Modal opened={open} onClose={close} title="Answer for someone" centered>
-        <Stack gap="sm">
-          <Select label="Member" placeholder="Pick a member" searchable value={uid} onChange={setUid}
-            data={people.map((p) => ({ value: p.uid, label: p.display_name }))} nothingFoundMessage={people.length ? "Nobody without an answer has that name." : "Everyone has an answer on this sheet. Change one from the menu on their row."} />
-          {uid && !list && <Loader size="xs" />}
-          {list && <Text size="xs" c="dimmed">Now: {list.now}</Text>}
-          {list && list.actions.length === 0 && <Text size="sm" c="dimmed">Nothing applies to them on this run.</Text>}
-          {list && (
-            <Group gap="xs">
-              {items(list.actions).map((it) => (
-                <Button key={`${it.a.key}:${it.character || ""}`} size="xs" variant={DANGER.has(it.a.key) ? "light" : "default"} color={DANGER.has(it.a.key) ? "red" : undefined}
-                  onClick={() => record(uid!, person?.display_name || list.display_name, list, it)}>{it.label}</Button>
-              ))}
-            </Group>
-          )}
-        </Stack>
-      </Modal>
+      <Button size="xs" variant="default" loading={busy} disabled={!people.length} onClick={start}>Answer for someone</Button>
       {dialog}
     </>
   );

@@ -29,7 +29,7 @@ type Preview = OpenPreview & {
 type Opened = { message: string; key: string };
 
 const boxOf = (e: unknown): Box | undefined => (e instanceof ApiError ? (e.body as { box?: Box } | undefined)?.box : undefined);
-/** Where Back goes: the Events list (App sends /events to the Rosters page until the Events page exists). */
+/** Where Back goes: the Events list. */
 const EVENTS = "/events";
 
 /** The New event page (design §7a, NewEvent.dc.html; `mode` "new-event" — Edit lineup and the schedule editor reuse
@@ -98,7 +98,7 @@ export function LineupPage({ mode }: { meta: Meta; mode: "new-event" }) {
     clearDirty();
     setChanges(0);
     ok(r.message);
-    navigate(`/rosters#run-${r.key}`);  // the event's own page arrives with the Events page; until then its card on Rosters
+    navigate(`/events/${r.key}`);
   };
   async function open() {
     if (!p || !ready) return;

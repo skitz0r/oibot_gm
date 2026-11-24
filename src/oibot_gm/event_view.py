@@ -193,9 +193,10 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
                board: tuple[str, dict | None] | None = None) -> dict:
     """EventView: {key (part 0's), title, state, chip, kind (one_off | scheduled), schedule {id, name} | null, details
     [Fact], signups {joined, bench, no_thanks, no_answer, rows {in, sub, out, none}}, parts [PartView], activity [{when,
-    line}] (every part's log, newest first), boxes {lock, cancel}, actions, lineup, start_iso, timing {setting: value}
+    line}] (every part's log, newest first), boxes {lock, cancel, reschedule (the pick box)}, actions, lineup, start_iso, timing {setting: value}
     (rc.EVENT_TIMING's settings, what POST /api/run/{key}/reschedule takes back), people (members with no answer:
-    Answer for someone), switches (rc.event_switches: the Role switches section; empty `short` = not drawn), sheet_url}.
+    Answer for someone), switches (rc.event_switches: the Role switches section; empty `short` = not drawn), sheet_url,
+    today (the guild's date: Reschedule's lower bound), locks (Reschedule's Locks choices, the event's own among them)}.
     Any part's key answers as its event. `viewer` = the officer looking (their own board
     moves: each part's `mine` and Undo box). `board` = event_board.BoardCache.get's (state, previews): the open raids'
     boards as the lock would place them (None: the officers' layout, as the Rosters page draws it)."""
@@ -244,17 +245,22 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
               if not m.test and m.active() and str(m.discord_id) not in first.signups] if live else []
     started = first.start <= reg.now_local()
     timing = rc.run_timing(reg, first)
+    can_move = live and not started
     return {"key": first.key, "title": reg.local12(first.start), "state": state, "chip": rc.RUN_STATE_WORDS[state],
             "kind": "scheduled" if sid else "one_off", "schedule": {"id": sid, "name": sname} if sid else None,
             "details": details,
             "signups": {"joined": len(rows["in"]), "bench": len(rows["sub"]), "no_thanks": len(rows["out"]), "no_answer": len(rows["none"]), "rows": rows},
             "parts": [_part_view(reg, rs, p, sheet, viewer, board) for p in parts],
             "activity": [{"when": r["when"], "line": r["text"]} for r in activity],
-            "boxes": {"lock": cq.lock_box(reg, first, rs) if state == "open" else None, "cancel": cq.cancel_box(reg, first, rs) if live else None},
-            "actions": {"reschedule": live and not started, "edit_lineup": state == "open" and first.state == "open",
+            "boxes": {"lock": cq.lock_box(reg, first, rs) if state == "open" else None, "cancel": cq.cancel_box(reg, first, rs) if live else None,
+                      "reschedule": cq.reschedule_pick_box(reg, rs, first) if can_move else None},
+            "actions": {"reschedule": can_move, "edit_lineup": state == "open" and first.state == "open",
                         "lock": state == "open" and first.state == "open", "cancel": live, "open_now": False},
             "switches": rc.event_switches(reg, rs, first, viewer=viewer) if live else {"short": [], "rows": [], "revs": {}},
-            "lineup": lineup, "start_iso": first.start.isoformat(), "timing": timing, "people": people, "sheet_url": url}
+            "lineup": lineup, "start_iso": first.start.isoformat(), "timing": timing, "people": people, "sheet_url": url,
+            # Reschedule's picker: the Day's lower bound is the GUILD's date; Locks offers the event's own lock among the choices
+            "today": reg.now_local().date().isoformat(),
+            "locks": lock_choices(float(timing["lock_hours_before"])) if can_move and timing.get("lock_hours_before") is not None else []}
 
 
 # ---------------------------------------------------------------- a coming-up event
@@ -270,7 +276,7 @@ class ComingGone(RegistryError):
 def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, now: datetime) -> dict:
     """ComingView: {title, chip, schedule {id, name}, details [Lineup, Comes from, Priority, Confirmation, Sheet opens,
     Opening by hand, Locks], can_open, why (rc.open_row_refusal's sentence | None), open {start_iso, schedule,
-    occurrence} (what POST /api/raid/{rid}/open carries back), box (consequences.open_now_box | None)}. ComingGone when
+    occurrence, raid (the first raid: the route's {rid})} (what POST /api/raid/{rid}/open carries back), box (consequences.open_now_box | None)}. ComingGone when
     the night has an event now (its key) or is not one of coming_nights any more."""
     find = rc.occurrence_index(reg, rs)
     hit = find(sid, occurrence)
@@ -293,7 +299,8 @@ def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, no
                _fact("Locks", reg.local12(lock_at))]
     box = None if why else cq.open_now_box(reg, t, opens, lock_at, lineup=lineup, channel=bool(reg.config.signup_channel_id))
     return {"title": reg.local12(t), "chip": PAGE_WORDS["no_sheet_yet"], "schedule": {"id": sid, "name": name}, "details": details,
-            "can_open": why is None, "why": why, "open": {"start_iso": t.isoformat(), "schedule": sid, "occurrence": occurrence}, "box": box}
+            "can_open": why is None, "why": why, "open": {"start_iso": t.isoformat(), "schedule": sid, "occurrence": occurrence, "raid": raid},
+            "box": box}
 
 
 # ---------------------------------------------------------------- New event (phase 4, Task 7)
@@ -303,9 +310,17 @@ LOCK_CHOICE_REFUSAL = "Pick when the sheet locks from the list."
 SCHEDULED_NIGHT = "That time is an event of {name}, so it opens with that schedule's lineup and timing."
 
 
-def lock_choices() -> list[dict]:
-    """[{hours, words}]: the Locks select ('2 hours before', '24 hours before'), in the words the page prints."""
-    return [{"hours": h, "words": f"{h} hours before"} for h in NEW_EVENT_LOCKS]
+def lock_words(hours: float) -> str:
+    """'2 hours before', '1 hour before', '1.5 hours before' — a Locks choice in the words the page prints."""
+    h = int(hours) if float(hours).is_integer() else float(hours)
+    return f"{h} hour before" if h == 1 else f"{h} hours before"
+
+
+def lock_choices(own: float | None = None) -> list[dict]:
+    """[{hours, words}]: the Locks select ('2 hours before', '24 hours before'), in the words the page prints; `own` =
+    an event's own lock (the Events page's Reschedule), added in its place when it is not one of them."""
+    hours = sorted({*NEW_EVENT_LOCKS, *([own] if own is not None else [])})
+    return [{"hours": int(h) if float(h).is_integer() else h, "words": lock_words(h)} for h in hours]
 
 
 def new_event_options(reg: Registry) -> dict:

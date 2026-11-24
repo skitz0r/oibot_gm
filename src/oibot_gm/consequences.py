@@ -379,6 +379,12 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     return out
 
 
+def reschedule_pick_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
+    """Box 3 before anything is picked (the Events page's Reschedule opens on it): the title naming the event and one
+    sentence asking for the new day and time, only Back — the picker's first change brings reschedule_box."""
+    return box(f"Move {event_title(reg, rc.first_part(rs, ev))}?", [rc.MOVE_WHEN], None)
+
+
 def reschedule_box(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None = None) -> dict:
     """Box 3: Move an event (reschedule_consequence's sentences); a refusal is refusal_box_for(rc.reschedule_refusal)."""
     why = rc.reschedule_refusal(reg, rs, ev, start, timing)

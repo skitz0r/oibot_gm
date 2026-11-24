@@ -798,6 +798,7 @@ def box_cases(reg, rs, runs, ms, dump):
     add("cancel_box", "four raids", b)
     ev = runs["open recurring"]
     add("reschedule_box", "open, answers", cq.reschedule_box(reg, rs, ev, ev.start + timedelta(hours=1)))
+    add("reschedule_pick_box", "nothing picked yet", cq.reschedule_pick_box(reg, rs, ev))
     quiet = runs["open recurring, nobody joined"]
     add("reschedule_box", "nobody answered", cq.reschedule_box(reg, rs, quiet, quiet.start + timedelta(hours=1)))
     add("reschedule_box", "into the past", cq.reschedule_box(reg, rs, ev, reg.now_local() - timedelta(days=2)))
