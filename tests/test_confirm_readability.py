@@ -985,6 +985,8 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     # away answers worked out again: someone away on the new day, with no answer on the sheet
     reg.add_character(REAL + 61, "Quillamere", "Zephyrine", "Mage", "Fire", None, True)
     away = ev.start + timedelta(days=18)
+    while rc.open_schedule(reg, ev.instance, away, None) != rc.ADHOC_SCHEDULE:  # never one of the schedule's own nights
+        away += timedelta(days=1)  # (the calendar decided: on some days +18 landed on one and that sentence won)
     reg.add_absence(REAL + 61, away.astimezone(reg.tz).date().isoformat(), None, None, "t")
     add("away answers worked out again", ev, away)
     assert {"It", "Bramble", "Away", "You"} <= seen, seen

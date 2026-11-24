@@ -84,9 +84,14 @@ def test_forget_is_the_writers_own_or_an_officers_and_leaves_recall(store):
 
 
 def test_the_citation_names_who_when_and_the_reply_context():
+    from datetime import datetime, timezone
+
+    year = datetime.now(timezone.utc).year  # this year's date carries no year, whatever year the suite runs in
     m = mem.Memory(id="m-00000001", guild="g", channel=1, channel_name="c", scope="shared", author_id=1, author="Mara",
-                   at="2026-09-25T15:52:00+00:00", text="Our only jc is Ysolde", context="Elin: who cuts gems?")
-    assert m.citation() == "Mara said on 25 Sep: Our only jc is Ysolde (replying to Elin: who cuts gems?)"
+                   at=f"{year}-01-01T15:52:00+00:00", text="Our only jc is Ysolde", context="Elin: who cuts gems?")
+    assert m.citation() == "Mara said on 1 Jan: Our only jc is Ysolde (replying to Elin: who cuts gems?)"
+    m.at = f"{year - 1}-09-25T15:52:00+00:00"  # an earlier year's says it
+    assert m.citation() == f"Mara said on 25 Sep {year - 1}: Our only jc is Ysolde (replying to Elin: who cuts gems?)"
     assert mem.index_text("Mara", "Our only jc is Ysolde", "Elin: who cuts gems?") == "Mara: Our only jc is Ysolde (replying to Elin: who cuts gems?)"
     assert mem.index_text("Mara", "hi") == "Mara: hi"
 
