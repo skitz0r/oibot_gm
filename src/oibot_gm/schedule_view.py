@@ -7,7 +7,7 @@ word; every time is Registry.local12 words; "5 days before" is constants.hours_w
 (web/api_schedules.py) run these in a thread."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from . import consequences as cq
 from . import raidcycle as rc
@@ -114,20 +114,24 @@ def _lineup(reg: Registry, s: dict, first: datetime | None) -> list[dict]:
 
 def _regulars(reg: Registry, rs, s: dict, sd: dict) -> dict | None:
     """The Regulars section of a recurring schedule (None for a pickup: first come): the count against the first raid's
-    seats, who they are with Remove's box (Task 1 #18) and the record's rev, the coverage short (Registry.series_coverage
-    through rc.series_outlook, None with no regulars) and the next four weeks (its forecast; absent while it has none)."""
+    seats, who they are with Remove's box (Task 1 #18) and the record's rev, the coverage short (Registry.series_coverage,
+    None with no regulars) and the next four weeks (rc.series_forecast — a paused schedule's as if resumed; absent while
+    it has none)."""
     if schedule_class(s.get("kind")) != "recurring":
         return None
     sid = s["id"]
     regs = reg.regulars(sid)
-    seats = int(sd.get("size") or 0) * int(s.get("rosters") or 1)
+    row = next((r for r in (reg.series_coverage(s["raid"]) if s["raid"] in reg.profile.raids else []) if r["id"] == sid), None)
+    # the seats the coverage counts against (series_coverage); a schedule whose first raid left the game has no row
+    seats = row["seats"] if row is not None else int(sd.get("size") or 0) * int(s.get("rosters") or 1)
     out: dict = {"count": len(regs), "words": PAGE_WORDS["for_seats"].format(n=len(regs), seats=seats), "short": None}
     if not regs:
         out["expected"] = PAGE_WORDS["every_main"]
-    row = next((r for r in (rc.series_outlook(reg, s["raid"]) if s["raid"] in reg.profile.raids else []) if r["id"] == sid), None)
     if row is not None and regs:
         out["short"] = dict(row["short"]) or None
-        forecast = row.get("forecast") or []
+        # the forecast (rc.series_forecast, as series_outlook attaches it); a paused schedule's as if resumed, shown
+        # beside "Next event if resumed"
+        forecast = rc.series_forecast(reg, sid, if_resumed=not s.get("active", True))
         if forecast:
             n = sum(1 for f in forecast if f["short"])
             out["outlook"] = (PAGE_WORDS["ready_every_week"] if n == 0 else PAGE_WORDS["short_every_week"] if n == len(forecast)
@@ -200,10 +204,10 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
         next_empty = PAGE_WORDS["no_times"]
     else:
         find = rc.occurrence_index(reg, rs)  # one pass over the run store for the three nights
-        lead, lock = float(sd["signup_lead_hours"]), float(sd["lock_hours_before"])
         for t in starts:
             hit = find(sid, rc.occurrence_stamp(reg, t))
-            nxt.append({"starts": reg.local12(t), "opens": reg.local12(t - timedelta(hours=lead)), "locks": reg.local12(t - timedelta(hours=lock)),
+            opens, locks = rc.sheet_times(t, sd)
+            nxt.append({"starts": reg.local12(t), "opens": reg.local12(opens), "locks": reg.local12(locks),
                         "start_iso": t.isoformat(), "key": hit.key if hit is not None and not hit.dropped else None})
 
     boxes = {("pause" if active else "resume"): (cq.schedule_pause_box if active else cq.schedule_resume_box)(reg, rs, sid),

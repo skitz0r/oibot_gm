@@ -1717,22 +1717,26 @@ def pool_health_data(reg: "Registry", roster: dict, placed: set[int] | None = No
     for r in ROLES:
         have, n = counts[r], need[r]
         cover = {"offspec": [], "flex": [], "alt": []}
+        ids = {"offspec": [], "flex": [], "alt": []}  # the same people by Discord id (two members may share a display name)
         if n and have < n:
             for m, c in mains:
                 if role_of(m, c) == r:
                     continue
                 if c.offspec and profile.spec(c.cls, c.offspec).role == r:
                     cover["offspec"].append(f"{m.display_name} ({c.offspec})")
+                    ids["offspec"].append(m.discord_id)
                 elif r in reg.roles_of(m)[1]:
                     cover["flex"].append(m.display_name)
+                    ids["flex"].append(m.discord_id)
                 elif any(not a.is_main and profile.spec(a.cls, a.spec).role == r for a in m.active()):
                     cover["alt"].append(m.display_name)
+                    ids["alt"].append(m.discord_id)
         coverable = sum(len(v) for v in cover.values())
         level = "green" if not n or have >= n else ("amber" if have + coverable >= n else "red")
         hint = " · ".join(f"+{len(v)} {k}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
         if n and have < n and not coverable:
             hint = f"short {n - have} → recruit"
-        roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover})
+        roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover, "cover_ids": ids})
     buffs = []
     seen_slots: set[str] = set()
     for b in profile.party_buffs():
@@ -1757,6 +1761,9 @@ COMP_NOTE_MAX = 200  # an officer's reason for a minimum (prose, shown on the re
 COMP_ROLE_WORDS = {"tank": ("tank", "tanks"), "healer": ("healer", "healers"), "melee": ("melee", "melee"), "ranged": ("ranged", "ranged"), "dps": ("damage dealer", "damage dealers")}
 # a raid's make-up is one minimum per role or class (design D16): the refusals every surface shows
 NO_UPPER_LIMIT = "A minimum has no upper limit. Give only the minimum."
+# what a slot reads once the guild's own minimum is gone (a clear, or a 0 — never saved): the game's, else none at all
+GAME_MINIMUM_WORDS = "the game's minimum"
+NO_MINIMUM_WORDS = "no minimum of its own"
 MINIMUM_ON_RAID = "Minimums belong to the raid. Set them on the raid, not on one run."
 
 
@@ -5334,8 +5341,36 @@ class Registry:
         out = {r: n for r, n in scaled_role_minimums(self.profile.comp_rules, size).items() if r in ("tank", "healer")}
         for slot, e in (rd.get("minimums") or {}).items():
             n = min_entry(e)["min"]
-            out[slot] = n if size == full or n <= 0 else max(1, math.floor(n * size / full + 0.5))
+            if n <= 0:
+                # a stored 0 (a file written before 0 meant "clear") is read as ABSENT: the game's minimum applies. Nothing
+                # migrates it — the next write of the raid's minimums drops it (set_minimums never keeps a 0)
+                continue
+            out[slot] = n if size == full else max(1, math.floor(n * size / full + 0.5))
         return {slot: n for slot, n in out.items() if n}
+
+    def game_minimum(self, instance: str | None, slot: str) -> int | None:
+        """What `slot` reads at the raid's full size without the guild's own minimum: the profile raid's entry, else the
+        game's tank / healer minimum; None when the game gives it none (a stored 0 counts as none, as minimums reads it)."""
+        from .roster.solver import scaled_role_minimums
+
+        prof = self.profile.raids.get(instance or "") or {}
+        size = int(self.raid_def(instance).get("size") or DEFAULT_RAID_SIZE)
+        e = (prof.get("minimums") or {}).get(slot)
+        n = min_entry(e)["min"] if e is not None else int(scaled_role_minimums(self.profile.comp_rules, size).get(slot, 0)) if slot in ("tank", "healer") else 0
+        return n if n > 0 else None
+
+    def cleared_words(self, instance: str | None, slot: str) -> str:
+        """What a slot reads once the guild's own minimum goes: "back to the game's minimum", or "no minimum of its own"
+        when the game gives it none."""
+        return f"back to {GAME_MINIMUM_WORDS}" if self.game_minimum(instance, slot) is not None else NO_MINIMUM_WORDS
+
+    def minimum_words(self, instance: str | None, slot: str, entry: dict | None) -> str:
+        """A slot's minimum as a preview and a card say it: 'at least 3' for the guild's own (a 0 is no minimum: it
+        clears), else what applies without it — GAME_MINIMUM_WORDS, or NO_MINIMUM_WORDS when the game gives none."""
+        n = int((entry or {}).get("min") or 0)
+        if n > 0:
+            return f"at least {n}"
+        return GAME_MINIMUM_WORDS if self.game_minimum(instance, slot) is not None else NO_MINIMUM_WORDS
 
     def role_bounds(self, instance: str | None, size: int) -> dict[str, dict[str, int]]:
         """{tank: {min}, healer: {min}, dps: {min: 0}} for a run of `size` (Registry.minimums): no role has an upper limit."""
@@ -5659,7 +5694,7 @@ class Registry:
             if t is None:
                 if slot in cur:
                     cur.pop(slot)
-                    lines.append(f"{words}: back to the game's minimum")
+                    lines.append(f"{words}: {self.cleared_words(key, slot)}")
                 continue
             if not isinstance(t, dict):
                 raise RegistryError(f"{words}: a minimum is a number and an optional reason.")

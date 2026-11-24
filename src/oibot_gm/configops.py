@@ -1549,19 +1549,24 @@ def _comp_entry(reg: Registry, op: ConfigOp) -> dict | None:
     if isinstance(v, dict):
         if v.get("max") not in (None, ""):
             raise RegistryError(NO_UPPER_LIMIT)
-        return {"min": v.get("min") or 0, "note": v.get("note")}
-    cur = _comp_current(reg, _key(reg, op)).get((op.field or op.path or "").strip()) or {}
-    lo, hi = _range(op.value)
-    if hi is not None:
-        raise RegistryError(NO_UPPER_LIMIT)
-    return {"min": lo if lo is not None else cur.get("min", 0), "note": (op.reason or op.text or cur.get("note") or "").strip() or None}
+        entry = {"min": v.get("min") or 0, "note": v.get("note")}
+    else:
+        cur = _comp_current(reg, _key(reg, op)).get((op.field or op.path or "").strip()) or {}
+        lo, hi = _range(op.value)
+        if hi is not None:
+            raise RegistryError(NO_UPPER_LIMIT)
+        entry = {"min": lo if lo is not None else cur.get("min", 0), "note": (op.reason or op.text or cur.get("note") or "").strip() or None}
+    try:
+        zero = int(entry["min"]) == 0
+    except (TypeError, ValueError):
+        return entry  # not a number: the verb refuses it in its own words
+    return None if zero else entry  # a 0 clears (never saved): the preview says what applies instead, as the write does
 
 
-def _target_words(t: dict | None) -> str:
-    """A minimum in words: 'at least 2' / "the game's minimum" (the guild set none: the game's rules give it)."""
-    if not t:
-        return "the game's minimum"
-    return f"at least {t.get('min', 0)}"
+def _target_words(reg: Registry, raid: str, slot: str, t: dict | None) -> str:
+    """A minimum in words (Registry.minimum_words): 'at least 2', else what applies without the guild's own — the
+    game's minimum, or no minimum of its own (a 0 is never 'at least 0': it clears)."""
+    return reg.minimum_words(raid, slot, t)
 
 
 def _clear_word(value: str | None) -> bool:
@@ -2593,7 +2598,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET, *, strict: bool = Fals
             new = _comp_entry(reg, op)
         except RegistryError as e:
             return f"{key} minimum {slot}: {e}"
-        return f"{key} minimum {slot}: {_target_words(cur)} → {_target_words(new)}" + (f" ({new['note']})" if new and new.get("note") else "")
+        return f"{key} minimum {slot}: {_target_words(reg, key, slot, cur)} → {_target_words(reg, key, slot, new)}" + (f" ({new['note']})" if new and new.get("note") else "")
     if op.op in RUN_OPS or op.op in ("character", "absence_clear", "dm", "regular", "test"):
         try:
             return _describe_action(reg, op, channel, by_id=by_id)
@@ -3025,7 +3030,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         key = _minimum_raid(reg, _key(reg, op))
         slot = reg.comp_slot(op.field or op.path or "")
         lines = reg.set_minimums(key, {slot: _comp_entry(reg, op)}, by, rev=rev)
-        return "; ".join(lines) or f"{reg.comp_slot_words(slot)} is already {_target_words(_comp_current(reg, key).get(slot))}, so nothing changed."
+        return "; ".join(lines) or f"{reg.comp_slot_words(slot)} is already {_target_words(reg, key, slot, _comp_current(reg, key).get(slot))}, so nothing changed."
     if op.op in ("policy_append", "policy"):
         from . import policy as policy_mod
 
@@ -4944,8 +4949,8 @@ def _part(reg: Registry, op: ConfigOp, by_id: int | None = None, *, raid: str | 
             name = (run or {}).get("name") or (reg.raid_def(key).get("name", key) if key in reg.profile.raids else key)
             slot = reg.comp_slot(op.field or op.path or "")
             new = _comp_entry(reg, op)
-            return f"{name} · Minimums", DescribedPart(label=reg.comp_slot_words(slot), before=_target_words(_comp_current(reg, key).get(slot)),
-                                                           after=_target_words(new)), ([f"Why: {new['note']}"] if new and new.get("note") else [])
+            return f"{name} · Minimums", DescribedPart(label=reg.comp_slot_words(slot), before=_target_words(reg, key, slot, _comp_current(reg, key).get(slot)),
+                                                           after=_target_words(reg, key, slot, new)), ([f"Why: {new['note']}"] if new and new.get("note") else [])
         if op.op == "loot_weights":
             from . import loot_ops
 

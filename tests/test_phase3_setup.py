@@ -602,7 +602,7 @@ def test_the_raid_wizards_minimums_section_is_the_minimums_block(reg, rs, office
         assert "Limits" not in h.text and "Aims" not in h.text and "at most" not in h.text
         await h.pick("Remove a minimum", "Mage")
         await h.press("Save minimums")
-        assert "✅" in h.text and "Mages: back to the game's minimum" in h.text and "Set a minimum for…" in h.selects()
+        assert "✅" in h.text and "Mages: no minimum of its own" in h.text  # the game gives Mages none and "Set a minimum for…" in h.selects()
         await h.press("Back")
         assert "Pick a section" in h.selects()  # the raid's hub
     run(go())
@@ -662,7 +662,7 @@ def test_mcp_comp_and_summary_tools(owner_client, reg, monkeypatch):
     out = ms.set_minimum("Barrow Deeps", "Mage", min=1, note="Intellect")
     assert "Mages: at least 1 (Intellect)" in out and reg.config.raids["barrow_deeps"]["minimums"]["Mage"] == {"min": 1, "note": "Intellect"}
     pv = ms.set_minimum("barrow_deeps", "Mage", clear=True, preview=True)
-    assert pv["preview"][0]["parts"][0]["after"] == "the game's minimum" and "Mage" in reg.config.raids["barrow_deeps"]["minimums"]
+    assert pv["preview"][0]["parts"][0]["after"] == "no minimum of its own" and "Mage" in reg.config.raids["barrow_deeps"]["minimums"]
     import inspect
 
     assert "max" not in inspect.signature(ms.set_minimum).parameters  # a minimum has no upper limit (D16)

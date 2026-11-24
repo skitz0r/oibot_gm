@@ -26,7 +26,8 @@ def test_a_minimum_is_one_number_per_slot(reg):
     assert reg.minimums(RID)["healer"] == 3 and reg.role_bounds(RID, 10)["healer"] == {"min": 3}
     assert lines == ["Barrow Deeps · Healers: at least 3", "Barrow Deeps · Paladins: at least 2 (blessings)"]
     assert not {"comp", "comp_targets"} & set(reg.config.raids[RID])
-    assert reg.set_minimums(RID, {"Paladin": None}, "t") == ["Barrow Deeps · Paladins: back to the game's minimum"]
+    # the game gives Paladins no minimum: clearing the guild's own says so (fix round 1 of phase 4 Task 5)
+    assert reg.set_minimums(RID, {"Paladin": None}, "t") == ["Barrow Deeps · Paladins: no minimum of its own"]
     assert reg.minimums(RID) == {"tank": 2, "healer": 3}
 
 

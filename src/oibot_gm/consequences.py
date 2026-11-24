@@ -988,7 +988,7 @@ def schedule_remove_box(reg: Registry, rs, sid: str) -> dict:
 LOCKOUT_FIELDS = {"lockout_days", "first_open", "duration_hours"}
 
 
-def _open_events_of_raid(reg: Registry, rs, rid: str) -> int:
+def open_events_of_raid(reg: Registry, rs, rid: str) -> int:
     """How many live events (test runs left out) play raid `rid` in any part."""
     return len({rc.event_id(ev) for ev in reg._live_runs(rs) if ev.instance == rid and not ev.test})
 
@@ -1003,7 +1003,7 @@ def raid_save_box(reg: Registry, rs, rid: str, changed, diff=()) -> dict:
     lockout = changed & LOCKOUT_FIELDS
     rest = changed - mins - weights - lockout
     kinds = [x for x in (mins, weights, lockout, rest) if x]
-    n = _open_events_of_raid(reg, rs, rid)
+    n = open_events_of_raid(reg, rs, rid)
     reaches = "That includes the event open now." if n == 1 else f"That includes the {n} events open now." if n else None
     if len(kinds) > 1:
         head = "The changes apply at the next lock."

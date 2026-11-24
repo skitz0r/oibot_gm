@@ -806,6 +806,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise RegistryError(f"name the schedule: {', '.join(mine)}" if mine else f"{reg.raid_def(rid).get('name', rid)} has no recurring schedule")
         return mine[0]
 
+    ADD_NO_PREVIEW = "Adding a regular asks nothing first, so there is nothing to preview."
+
     def is_removal(d) -> bool:
         return d.get("on", True) in (False, "false", "off", "remove", 0)
 
@@ -819,6 +821,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         409 (the page reloads and asks again). A removal's box (consequences.regular_remove_box, Task 1 #18): `preview` →
         {box}; `seen` = the box's fp → 409 with the fresh box when it changed, nothing written."""
         v, d = await body(request, officer=True)
+        if d.get("preview") and not is_removal(d):  # a preview never writes: an add asks nothing first, so it has no box
+            return JSONResponse({"error": ADD_NO_PREVIEW, "box": cq.refusal_box_for(ADD_NO_PREVIEW)}, status_code=400)
         if is_removal(d) and (d.get("preview") or d.get("seen")):
             def fresh():
                 reg = v.reg

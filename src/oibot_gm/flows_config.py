@@ -289,7 +289,7 @@ class CompTargetsBlock:
                   self.reads_line()]
         for slot in sorted(cur, key=lambda s: (s not in ("tank", "healer", "melee", "ranged"), s)):
             t = cur[slot]
-            lines.append(f"• {self.reg.comp_slot_words(slot)}: {_target_words(t)}" + (f" — {t['note']}" if t.get("note") else ""))
+            lines.append(f"• {self.reg.comp_slot_words(slot)}: {_target_words(self.reg, self.raid, slot, t)}" + (f" — {t['note']}" if t.get("note") else ""))
         if not cur:
             lines.append("The guild has set no minimum of its own, so the game's minimums apply. Pick a role, class or spec below to set one.")
         n = len(self.tdraft)
@@ -299,7 +299,7 @@ class CompTargetsBlock:
         slots.append(Opt("__spec", "A particular spec…", "pick the class, then the spec"))
         items: list = [self.select("Set a minimum for…", slots[:MAX_OPTIONS], self.t_slot_picked)]
         if cur:
-            items.append(self.select("Remove a minimum", [Opt(s, self.reg.comp_slot_words(s), _target_words(cur[s])) for s in sorted(cur)][:MAX_OPTIONS], self.t_removed))
+            items.append(self.select("Remove a minimum", [Opt(s, self.reg.comp_slot_words(s), _target_words(self.reg, self.raid, s, cur[s])) for s in sorted(cur)][:MAX_OPTIONS], self.t_removed))
         items.append(self.button("Save minimums", self.t_save, discord.ButtonStyle.success, disabled=not n))
         if n:
             items.append(self.button("Discard changes", self.t_discard))
@@ -337,6 +337,9 @@ class CompTargetsBlock:
         async def submitted(it: discord.Interaction, v: dict[str, str]) -> None:
             entry = {"min": int(v.get("min") or 0), "note": (v.get("note") or "").strip() or None}
             raid = self.raid
+            if entry["min"] == 0:  # 0 = the guild's own goes (never saved as 0): drafted as the clear it is
+                await self.t_removed(it, [slot])
+                return
             try:  # the registry's own rules on a throw-away copy (the run size, the reason's cap)
                 self.reg.preview(lambda sh: sh.set_minimums(raid, {slot: {k: v for k, v in entry.items() if v is not None}}, "preview"))
             except RegistryError as e:
@@ -347,7 +350,8 @@ class CompTargetsBlock:
             self.tdraft[slot] = entry
             await self.targets(it, f"{words}: at least {entry['min']} — not saved yet.")
         await self.open_form(i, Form(f"Minimum · {words}"[:45], [
-            Field("min", "At least", [Opt(str(n), str(n), default=n == lo) for n in target_numbers(top, lo)], description="the fewest a run should hold"),
+            Field("min", "At least", [Opt(str(n), str(n) if n else self.reg.minimum_words(self.raid, slot, None)[:100], default=n == lo)
+                                      for n in target_numbers(top, lo)], description="the fewest a run should hold"),
             Field("note", "Why", required=False, default=cur.get("note") or None, max_length=COMP_NOTE_MAX, placeholder="e.g. Windfury for every melee group",
                   description="shown beside the minimum (optional)"),
         ], submitted))
@@ -357,11 +361,12 @@ class CompTargetsBlock:
 
         slot = values[0]
         self._tinit()
-        if self.tdraft.get(slot) is not None and slot not in _comp_current(self.reg, self.raid):
-            self.tdraft.pop(slot)  # a minimum drafted here and never saved: just drop it
-        else:
-            self.tdraft[slot] = None
-        await self.targets(i, f"{self.reg.comp_slot_words(slot)}: back to the game's minimum — not saved yet.")
+        if slot not in _comp_current(self.reg, self.raid):
+            self.tdraft.pop(slot, None)  # none of the guild's own saved: a draft here is just dropped, nothing to clear
+            await self.targets(i, f"{self.reg.comp_slot_words(slot)}: {self.reg.minimum_words(self.raid, slot, None)}.")
+            return
+        self.tdraft[slot] = None
+        await self.targets(i, f"{self.reg.comp_slot_words(slot)}: {self.reg.cleared_words(self.raid, slot)} — not saved yet.")
 
     async def t_discard(self, i: discord.Interaction) -> None:
         self.tdraft = {}

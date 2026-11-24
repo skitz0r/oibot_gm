@@ -70,7 +70,7 @@ def raid_row(reg: Registry, rs: "rc.RaidStore", rid: str) -> dict:
     rows = minimum_rows(reg, rid)
     return {"details": details, "make_up": rows, "make_up_empty": None if rows else PAGE_WORDS["no_minimums"],
             "priority": priority, "used_when": PAGE_WORDS["used_when"], "one_off_rule": PAGE_WORDS["one_off_rule"],
-            "open_events": cq._open_events_of_raid(reg, rs, rid), "boxes": {"reset": cq.raid_reset_box(reg, rid)}}
+            "open_events": cq.open_events_of_raid(reg, rs, rid), "boxes": {"reset": cq.raid_reset_box(reg, rid)}}
 
 
 def readiness_view(reg: Registry, rid: str, r: dict, players=None) -> dict:
@@ -80,10 +80,11 @@ def readiness_view(reg: Registry, rid: str, r: dict, players=None) -> dict:
     pool). `players` = comp.pool_players, read once per request."""
     players = comp.pool_players(reg) if players is None else players
     hc = r["headcount"]
-    switch = {x.split(" (")[0] for ro in r.get("roles") or [] for k in ("offspec", "flex") for x in (ro.get("cover") or {}).get(k) or []}
+    # who could switch role: comp's cover data by Discord id (an offspec or a declared extra role), each person once
+    switch = {u for ro in r.get("roles") or [] for k in ("offspec", "flex") for u in (ro.get("cover_ids") or {}).get(k) or []}
     who = [_fact("Standing", LEVEL_WORDS.get(r.get("level"), r.get("level") or ""), level=r.get("level")),
            _fact("Mains", PAGE_WORDS["for_seats"].format(n=hc["mains"], seats=hc["size"])),
            _fact("Alts", str(hc["alts"])), _fact("Could switch role", str(len(switch)))]
-    rows = [{**row, "have": comp._count(players, row["slot"], reg.profile)} for row in minimum_rows(reg, rid)]
+    rows = [{**row, "have": comp.slot_count(players, row["slot"], reg.profile)} for row in minimum_rows(reg, rid)]
     return {"who_could_play": who, "make_up": [{k: x[k] for k in ("slot", "label", "have", "min")} for x in rows],
             "make_up_empty": None if rows else PAGE_WORDS["no_minimums"]}

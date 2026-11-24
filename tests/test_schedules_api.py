@@ -304,3 +304,100 @@ def test_the_priority_and_rules_words(officer_client, reg):
     assert vals == sorted(vals, reverse=True) and {p["label"] for p in page["priority"]} == set(PAGE_WORDS["priority"].values())
     assert [x["label"] for x in page["make_up"]] == ["Tanks", "Healers"] and page["open_events"] == 0
     assert next(f for f in page["details"] if f["label"] == "Played in")["value"] == PAGE_WORDS["played_nowhere"]
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def test_a_zero_minimum_reads_as_what_applies_on_every_preview(reg):
+    """A 0 clears, so no preview says 'at least 0': plain text and the structured describe say the game's minimum
+    (a slot the game gives one) or no minimum of its own (one it gives none) — before the press."""
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+    from oibot_gm.registry import GAME_MINIMUM_WORDS, NO_MINIMUM_WORDS
+
+    reg.set_minimums(HYJAL, {"tank": {"min": 3}, "Paladin": {"min": 4}}, "t")
+    for value in ("0", '{"min": 0}'):
+        tank = configops.describe(reg, ConfigOp(op="comp_target", target=HYJAL, field="tank", value=value))
+        pal = configops.describe(reg, ConfigOp(op="comp_target", target=HYJAL, field="Paladin", value=value))
+        assert tank.endswith(f"at least 3 → {GAME_MINIMUM_WORDS}") and "at least 0" not in tank, tank
+        assert pal.endswith(f"at least 4 → {NO_MINIMUM_WORDS}") and "at least 0" not in pal, pal
+    d = configops.describe_ops(reg, [ConfigOp(op="comp_target", target=HYJAL, field="Paladin", value='{"min": 0}')])
+    assert [(p.before, p.after) for p in d.lines[0].parts] == [("at least 4", NO_MINIMUM_WORDS)]
+    line = configops.apply(reg, ConfigOp(op="comp_target", target=HYJAL, field="tank", value="0"), "t", True)
+    assert line.endswith(f"Tanks: back to {GAME_MINIMUM_WORDS}") and reg.minimums(HYJAL)["tank"] == 2
+
+
+def test_a_stored_zero_is_read_as_absent(reg):
+    """A {min: 0} written before 0 meant clear is read as absent — the game's minimum applies — with no write."""
+    reg.config.raids.setdefault(HYJAL, {})["minimums"] = {"tank": {"min": 0}, "Druid": {"min": 0}}
+    reg.save_config("t: an older file's zeros")
+    before = reg.store.root.joinpath(reg.key, "guild.yaml").read_text()
+    assert reg.minimums(HYJAL)["tank"] == 2 and "Druid" not in reg.minimums(HYJAL)
+    assert reg.minimum_words(HYJAL, "tank", {"min": 0}) == "the game's minimum"
+    assert reg.store.root.joinpath(reg.key, "guild.yaml").read_text() == before, "no migration write"
+
+
+def test_the_discord_minimums_block_offers_0_as_what_applies(reg, monkeypatch):
+    import asyncio
+
+    from wizard_harness import Harness
+
+    from oibot_gm import discord_registry
+    from oibot_gm import flows_config  # noqa: F401 — registers the flows
+    from oibot_gm.wizard import FLOWS
+
+    monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: True)
+    monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
+    reg.set_minimums(ONY, {"healer": {"min": 10}}, "t")
+    h = Harness(reg)
+
+    async def go():
+        await FLOWS["raid_config"](h.command(), reg)
+        await h.pick("Pick a raid", ONY)
+        await h.pick("Pick a section", "comp")
+        await h.pick("Set a minimum for…", "healer")
+        zero = next(o for o in h.modal._items["min"].options if o.value == "0")
+        assert zero.label == "the game's minimum"
+        await h.submit(h.modal, min="0", note="")
+        assert "Healers: back to the game's minimum — not saved yet." in h.text and "at least 0" not in h.text
+        await h.pick("Set a minimum for…", "Druid")
+        zero = next(o for o in h.modal._items["min"].options if o.value == "0")
+        assert zero.label == "no minimum of its own"
+        await h.submit(h.modal, min="0", note="")
+        assert "Druids: no minimum of its own." in h.text
+        await h.press("Save minimums")
+    asyncio.run(go())
+    assert "healer" not in (reg.config.raids.get(ONY) or {}).get("minimums", {}), "saved as a clear, never a 0"
+
+
+def test_a_regulars_preview_never_writes(web_bot, reg):
+    sid = tuesday(reg)
+    ms = people(reg, 1)
+    r = post(web_bot, "/api/admin/raid/regulars", {"schedule": sid, "uid": str(ms[0].discord_id), "on": True, "preview": True})
+    assert r.status_code == 400 and r.json()["box"]["verb"] is None and len(r.json()["box"]["sentences"]) == 1
+    assert not reg.regulars(sid), "a preview of an add added nobody"
+
+
+def test_a_paused_schedule_shows_its_outlook_if_resumed(officer_client, reg):
+    sid = onyxia(reg)
+    for m in people(reg, 2):
+        reg.regular_add(m.discord_id, sid, "t")
+    r = officer_client.get(f"/api/schedules/{sid}").json()["regulars"]
+    assert rc.series_forecast(reg, sid) == [], "every other surface: a paused series has no forecast"
+    assert rc.series_forecast(reg, sid, if_resumed=True), "the same computation, the pause not counted"
+    assert r["words"] == "2 for 40 seats" and r["outlook"] == PAGE_WORDS["short_every_week"]
+
+
+def test_could_switch_role_counts_people_not_names(web_bot, reg):
+    """Two members with one display name who could each switch role count twice (by Discord id)."""
+    base = 481_000_000_000_000_000
+    for i in range(2):
+        reg.add_character(base + i, "Twin", f"Twin{chr(97 + i)}", "Druid", "Feral", None, True)
+        m = reg.members[base + i]
+        m.main.offspec = "Restoration"
+        reg.save(m, "t: offspec")
+    reg.set_minimums(ONY, {"healer": {"min": 40}}, "t")  # healers short: the cover data lists who could switch to it
+    row = next(r for r in web_bot.c.get("/api/readiness", headers=H()).json()["raids"] if r["raid"] == ONY)
+    ids = {u for ro in row["roles"] for k in ("offspec", "flex") for u in ro["cover_ids"].get(k, [])}
+    assert {str(base), str(base + 1)} <= ids
+    assert next(f for f in row["view"]["who_could_play"] if f["label"] == "Could switch role")["value"] == str(len(ids))

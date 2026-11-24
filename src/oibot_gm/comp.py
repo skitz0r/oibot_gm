@@ -245,7 +245,8 @@ class IdealComp:
     notes: list[str] = field(default_factory=list)
 
 
-def _count(players: list[Player], key: str, profile: GameProfile) -> int:
+def slot_count(players: list[Player], key: str, profile: GameProfile) -> int:
+    """How many of `players` fill a minimum's slot (a role, "dps", a class or Class:Spec) as they play now."""
     if key == "dps":
         return sum(1 for p in players if p.role in ("melee", "ranged"))
     if key in ROLES:
@@ -340,7 +341,7 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
             ic.lines.append(CompLine(key, want, 0, why, source="officer"))
     # fill have + level
     for l in ic.lines:
-        l.have = _count(players, l.key, profile)
+        l.have = slot_count(players, l.key, profile)
         l.flex_who = _flex(players, l.key, profile)
         l.flex = len(l.flex_who)
         if l.have >= l.want:
@@ -375,7 +376,7 @@ def readiness(reg: Registry, rid: str, rs=None) -> dict:
 
     {raid, name, size, level (green|amber|red),
      headcount: {mains, size, alts, on_roster, unnamed, level},
-     roles: [{role, have, need, level, hint, cover: {offspec: [..], flex: [..], alt: [..]}}],
+     roles: [{role, have, need, level, hint, cover: {offspec: [..], flex: [..], alt: [..]}, cover_ids: the same by Discord id}],
      buffs: [{id, name, providers: [names]}], missing_buffs: [{id, name}],
      comp: [{key, want, min, have, level, why, note, source, flex, flex_who}],
      short: [{key, have, want, why}], notes: [str],
@@ -395,7 +396,8 @@ def readiness(reg: Registry, rid: str, rs=None) -> dict:
     short = [{"key": c["key"], "have": c["have"], "want": c["want"], "why": c["why"]} for c in comp if c["have"] < c["want"]]
     missing = [{"id": b["id"], "name": b["name"]} for b in h["buffs"] if not b["providers"]]
     roles = [{"role": r["role"], "have": r["have"], "need": r["need"], "level": r["level"], "hint": r["hint"],
-              "cover": {k: list(v) for k, v in r["cover"].items()}} for r in h["roles"]]
+              "cover": {k: list(v) for k, v in r["cover"].items()},
+              "cover_ids": {k: [str(u) for u in v] for k, v in (r.get("cover_ids") or {}).items()}} for r in h["roles"]]
     plan = reg.plan_summary()
     levels = [h["headcount_level"]] + [r["level"] for r in roles if r["need"]] + (["red"] if any(c["level"] == "red" and c["key"] not in ROLES for c in comp) else [])
     level = "red" if "red" in levels else ("amber" if "amber" in levels else "green")

@@ -283,8 +283,7 @@ def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, no
     raid = entry["raid"]
     sd = reg.schedule_def(raid, sid)
     lineup = entry.get("lineup") or rc.schedule_lineup(raid, entry)
-    opens = t - timedelta(hours=float(sd["signup_lead_hours"]))
-    lock_at = t - timedelta(hours=float(sd["lock_hours_before"]))
+    opens, lock_at = rc.sheet_times(t, sd)
     name = entry.get("name") or reg.series_label(sid)
     why = rc.open_row_refusal(reg, rs, raid, t, sid, opens, now)
     details = [_fact("Lineup", rc.lineup_words(reg, lineup)), _fact("Comes from", name, f"/schedules/{sid}"),

@@ -1022,16 +1022,23 @@ def next_runs_of(reg: Registry, instance: str, sched: dict, n: int = 3, now: dat
     return schedule_starts(reg, instance, sched, base, horizon, rd)[:n]
 
 
+def sheet_times(start: datetime, sd: dict) -> tuple[datetime, datetime]:
+    """(when the sheet opens, when it locks) for a night of a schedule starting at `start` — `sd` = its schedule_def
+    (signup_lead_hours, lock_hours_before). The Schedules page's Next events and a coming-up event read it."""
+    return start - timedelta(hours=float(sd["signup_lead_hours"])), start - timedelta(hours=float(sd["lock_hours_before"]))
+
+
 FORECAST_DAYS = 28  # the regulars forecast looks this far ahead (from today, or from the raid's first opening before then)
 FORECAST_MAX = 8  # and never lists more starts than this
 
 
-def series_forecast(reg: Registry, key: str, now: datetime | None = None) -> list[dict]:
+def series_forecast(reg: Registry, key: str, now: datetime | None = None, *, if_resumed: bool = False) -> list[dict]:
     """A recurring series' 4-week forecast: each upcoming start in the next FORECAST_DAYS (counted from the raid's
     first opening while it hasn't opened) with what its regulars minus recorded absences leave short of the tank /
     healer minimums. [{start (ISO), day ('Tue 15 Dec'), when (12-hour), expected, seats, short {role: n}, away
     [names]}]. Empty while the series has no regulars or is paused. Computed in code; officers see a hole a week
-    ahead instead of at reminder time."""
+    ahead instead of at reminder time. `if_resumed`: a paused series' forecast as if it ran again (the Schedules page's
+    paused schedule, beside "Next event if resumed") — the same computation, the pause alone not counted."""
     regs = reg.regulars(key)
     try:
         entry = reg.schedule_entry(key)
@@ -1041,7 +1048,7 @@ def series_forecast(reg: Registry, key: str, now: datetime | None = None) -> lis
     if not regs or rid not in reg.profile.raids:
         return []
     sched = next((x for x in reg.schedules(rid) if x["id"] == sid), None)
-    if sched is None or not sched.get("active", True) or schedule_class(sched["kind"]) != "recurring":
+    if sched is None or (not sched.get("active", True) and not if_resumed) or schedule_class(sched["kind"]) != "recurring":
         return []
     rd = reg.raid_def(rid)
     starts = next_runs_of(reg, rid, sched, n=FORECAST_MAX, now=now, rd=rd, min_days=2 * FORECAST_DAYS)  # the first start, then 4 weeks from it
