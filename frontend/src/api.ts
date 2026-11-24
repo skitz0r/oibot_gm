@@ -159,7 +159,22 @@ export interface Box { title: string; sentences: string[]; verb: string | null; 
 export interface Fact { label: string; value: string; href?: string; links?: { name: string; href: string }[]; level?: string }
 /** A row of the Schedules list (GET /api/schedules): `repeats` = when its events start, in words. */
 export interface ScheduleRow { id: string; name: string; repeats: string }
-export interface ScheduleList { active: ScheduleRow[]; paused: ScheduleRow[]; reserved_ids: string[] }
+/** A removed schedule's leftover regular (schedule_view.orphans): `key` = the series key the Remove sends back, `label`
+ *  its words (never the key), `box` Remove's box, `rev` the record's. */
+export interface OrphanRegular { key: string; label: string; uid: string; display_name: string; character: string; cls: string; spec: string; box: Box; rev: string }
+/** What the schedule editor picks from (schedule_view.editor_options): the palette (each raid's lockout, its own weights
+ *  and the game's suggested timing), a pickup's, Copy a lineup, the lineup limit, the sheet-timing choices in words
+ *  ("5 days before"), the presets, the split policies and the highest weight. */
+export interface ScheduleEditorOptions {
+  raids: { id: string; name: string; size: number; hours: number; lockout_days: number; weights: Record<string, number>; timing: Record<string, number | boolean> }[];
+  adhoc: { timing: Record<string, number | boolean>; weights: Record<string, number> };
+  lineups: { id: string; name: string; lineup: { raid: string; rosters: number; starts: number }[] }[];
+  lineup_max: number; lineup_full: string;
+  hours: Record<string, { value: number; words: string }[]>;
+  presets: { name: string; values: Record<string, number> }[];
+  split_policies: string[]; max_weight: number;
+}
+export interface ScheduleList { active: ScheduleRow[]; paused: ScheduleRow[]; reserved_ids: string[]; orphans: OrphanRegular[]; editor: ScheduleEditorOptions }
 /** GET /api/schedules/{id} (schedule_view.schedule_json). `next` is empty while paused or gone (`next_empty` says why);
  *  `regulars` null for a pickup (first come); `stored` = the schedule in machine form — the editor sends it back whole as
  *  a `schedule` change (an unchanged one is no edit) with `rev` as revs["config:schedule:<id>"] (a stale one → 409). */
@@ -168,9 +183,12 @@ export interface ScheduleView {
   details: Fact[];
   lineup: { raid: string; name: string; rosters: number; starts: number; time_words: string; seats: number }[];
   timing: Fact[];
-  next: { starts: string; opens: string; locks: string; start_iso: string; key: string | null }[]; next_empty: string | null;
+  next: { starts: string; opens: string; locks: string; start_iso: string; occurrence: string; key: string | null }[]; next_empty: string | null;
   regulars: {
     count: number; words: string; expected?: string; short: Record<string, number> | null; outlook?: string;
+    /** the next four weeks, a row per night (`can_open`: Open this run early works now; `why` the server's sentence when not) */
+    forecast?: { day: string; when: string; short: Record<string, number>; away: string[]; expected: number; start_iso: string; occurrence: string;
+      key: string | null; can_open: boolean; why: string | null }[];
     /** `box` = Remove's box (POST /api/admin/raid/regulars {schedule, uid, on: false, rev, seen: box.fp}) */
     rows: { uid: string; display_name: string; character: string; cls: string; spec: string; box: Box; rev: string }[];
   } | null;

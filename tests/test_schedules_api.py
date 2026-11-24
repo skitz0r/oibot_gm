@@ -95,6 +95,7 @@ def test_a_stale_schedule_save_is_refused(web_bot, reg):
     assert a.status_code == 200 and a.json()["applied"], a.text
     b = change(web_bot, [{"kind": "schedule", "target": "tue", "fields": {"lock_hours_before": 12}}], apply=True, confirmed=True, revs=revs)
     assert b.status_code == 409, b.text
+    assert b.json()["error"] == "The schedule's settings changed since you looked — check them and try again.", "no id in the words"
     assert float(reg.schedule_def(HYJAL, "tue")["lock_hours_before"]) == 30, "nothing overwritten"
 
 
@@ -459,3 +460,82 @@ def test_help_links_readiness_on_the_raids_page(reg, monkeypatch):
     assert "readiness" not in help_mod.PAGES
     assert help_mod.page_link(reg, "readiness", True) == f"-# See it all on the [Raids page](<https://gm.example/app/raids?g={reg.key}>)."
     assert help_mod.site_url(reg, "/app/me") == f"https://gm.example/app/me?g={reg.key}"
+
+
+# ---------------------------------------------------------------- Task 11: what the Schedules page needs beside the sections
+
+def test_the_regulars_four_weeks_carry_open_this_run_early(web_bot, reg):
+    """Carried from Task 6's review: the regulars' Next four weeks are a row per week (when, short by role, who is away)
+    and a short week with no sheet yet can be opened early from the Schedules page — the row carries the night's
+    occurrence and whether it can open now (the server's why when not); once open the row carries the event's key.
+    Next events rows carry the occurrence too (a row without an event links its coming-up page)."""
+    sid = tuesday(reg)
+    m = people(reg, 1)[0]
+    reg.regular_add(m.discord_id, sid, "t")
+    j = web_bot.c.get(f"/api/schedules/{sid}", headers=H()).json()
+    assert all(n["occurrence"] for n in j["next"])
+    rows = j["regulars"]["forecast"]
+    assert len(rows) >= 4 and all(set(r) >= {"day", "when", "short", "away", "occurrence", "key", "can_open", "why"} for r in rows)
+    assert rows[0]["short"] and rows[0]["key"] is None and rows[0]["can_open"] is True and rows[0]["why"] is None
+    later = rows[-1]
+    assert later["can_open"] is False and later["why"], "past the opening horizon: the server's sentence why"
+    t = rc.next_runs_of(reg, HYJAL, reg.schedule_entry(sid), 1)[0]
+    res = post(web_bot, f"/api/raid/{HYJAL}/open", {"start": t.isoformat(), "schedule": sid, "occurrence": rows[0]["occurrence"]})
+    assert res.status_code == 200, res.text
+    again = web_bot.c.get(f"/api/schedules/{sid}", headers=H()).json()["regulars"]["forecast"][0]
+    assert again["key"] == res.json()["key"] and again["can_open"] is False
+    no_ids_in_words(reg, j, sid)
+
+
+def test_the_list_carries_the_editor_and_a_removed_schedules_regulars(officer_client, reg):
+    """The editor's choices come from the server (the palette with each raid's lockout, weights and suggested timing;
+    the sheet-timing hours as "5 days before" words; the lineup limit; the reserved ids), and a removed schedule's
+    leftover regulars are listed with Clear's box and the record's rev (the Rosters page's orphans, kept)."""
+    tuesday(reg)
+    m = people(reg, 1)[0]
+    m.main.rosters.append("oldnight")
+    reg.save(m, "t: an older file's regular")
+    j = officer_client.get("/api/schedules").json()
+    ed = j["editor"]
+    hy = next(r for r in ed["raids"] if r["id"] == HYJAL)
+    assert hy["size"] == 20 and hy["lockout_days"] and set(hy["timing"]) == set(SCHEDULE_TIMING) and set(hy["weights"]) == set(PAGE_WORDS["priority"])
+    assert ed["lineup_max"] == 4 and ed["lineup_full"]
+    lead = {c["value"]: c["words"] for c in ed["hours"]["signup_lead_hours"]}
+    assert lead[120] == "5 days before" and lead[24] == "24 hours before"
+    assert {c["value"]: c["words"] for c in ed["hours"]["fill_ask_hours"]}[2] == "2 hours"
+    assert [x["id"] for x in ed["lineups"]] == ["tue"]
+    assert ed["split_policies"] and ed["max_weight"] == 6
+    o = j["orphans"]
+    assert len(o) == 1 and o[0]["uid"] == str(m.discord_id) and o[0]["label"] == "A removed schedule" and o[0]["key"] == "oldnight"
+    assert o[0]["box"]["verb"] == "Remove" and o[0]["rev"] == reg.characters_rev(m)
+    for w in words_of({k: v for k, v in j.items() if k != "reserved_ids"}):
+        assert "oldnight" not in w
+
+
+def test_a_pickup_template_says_truly_how_it_opens(officer_client, reg):
+    """New event no longer opens a pickup template (Task 7): its Repeats and Next events say where it opens instead."""
+    reg.set_schedule("pug", {"kind": "pickup", "name": "Pickup night"}, "t", raid=RID)
+    j = officer_client.get("/api/schedules/pug").json()
+    assert j["details"][0]["value"] == PAGE_WORDS["by_an_officer"] == j["next_empty"]
+    assert "Events page" not in PAGE_WORDS["by_an_officer"] and "/raid open" in PAGE_WORDS["by_an_officer"]
+
+
+def test_a_press_previews_the_very_box_the_page_shows_then_applies_its_token(web_bot, reg):
+    """The Schedules page's Pause / Resume / Remove: the page prints the read model's box, and the press previews the
+    change — the SAME box (its fp) unless something moved — then applies that preview's token (never `confirmed`). A
+    stale rev answers 409 and writes nothing."""
+    tuesday(reg)
+    onyxia(reg)
+    for sid, verb in (("tue", "pause"), ("ony", "resume")):
+        j = web_bot.c.get(f"/api/schedules/{sid}", headers=H()).json()
+        revs = {f"config:schedule:{sid}": j["rev"]}
+        changes = [{"kind": "schedule", "target": sid, "fields": {"active": not j["active"]}}]
+        pv = change(web_bot, changes, revs=revs).json()
+        assert pv["described"]["box"]["fp"] == j["boxes"][verb]["fp"], verb
+        rm = change(web_bot, [{"kind": "schedule_remove", "target": sid}], revs=revs).json()
+        assert rm["described"]["box"]["fp"] == j["boxes"]["remove"]["fp"]
+        done = post(web_bot, "/api/ops/change", {"token": pv["token"], "apply": True, "changes": changes, "seen": pv["fingerprint"], "revs": revs})
+        assert done.status_code == 200 and done.json()["applied"], done.text
+        assert reg.schedule_entry(sid).get("active", True) is (verb == "resume")
+        stale = change(web_bot, [{"kind": "schedule_remove", "target": sid}], revs=revs)
+        assert stale.status_code == 409 and sid in {x["id"] for x in reg.all_schedules()}, "the rev the page held is stale now"

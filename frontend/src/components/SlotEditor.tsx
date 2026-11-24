@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Box, Button, Group, Pill, Select, Text } from "@mantine/core";
-import { TimePicker } from "@mantine/dates";
+import { QUARTER_HOURS } from "./WhenPicker";
 import { IconPlus } from "@tabler/icons-react";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -21,10 +21,11 @@ function slotKey(slot: string): number {
 }
 
 /** Weekly run slots, picked — never typed. The value is the machine form the API stores ('Tue 19:30'); every label is
- *  12-hour ('Tue 7:30 PM'). Chips carry an × to remove; the add row is a weekday and a 12-hour time picker. */
-export function SlotEditor({ value, onChange, label = "run slots", description }: { value: string[]; onChange: (v: string[]) => void; label?: string; description?: string }) {
+ *  12-hour ('Tue 7:30 PM'). Chips carry an × to remove; the add row is a weekday select and a select of 15-minute steps
+ *  (the Clock rule: QUARTER_HOURS, labelled with clock12). `empty` = what the list says while it holds no slot. */
+export function SlotEditor({ value, onChange, label = "Run times", description, empty = "No run times yet. Pick a day and a time, then Add." }: { value: string[]; onChange: (v: string[]) => void; label?: string; description?: string; empty?: string }) {
   const [day, setDay] = useState<string | null>("Tue");
-  const [time, setTime] = useState<string>("19:30");
+  const [time, setTime] = useState<string | null>("19:30");
   const hm = /^(\d{1,2}):(\d{2})/.exec(time || "");
   const candidate = day && hm ? `${day} ${hm[1].padStart(2, "0")}:${hm[2]}` : null;
   const dup = candidate !== null && value.includes(candidate);
@@ -37,7 +38,7 @@ export function SlotEditor({ value, onChange, label = "run slots", description }
       <Text size="sm" fw={500}>{label}</Text>
       {description && <Text size="xs" c="dimmed" mb={6}>{description}</Text>}
       <Group gap={6} mb="xs" wrap="wrap">
-        {value.length === 0 && <Text size="sm" c="dimmed">No slots — no sheets open for this raid.</Text>}
+        {value.length === 0 && <Text size="sm" c="dimmed">{empty}</Text>}
         {value.map((s) => (
           <Pill key={s} size="md" withRemoveButton onRemove={() => onChange(value.filter((x) => x !== s))} removeButtonProps={{ "aria-label": `remove ${slotLabel(s)}` }}>
             {slotLabel(s)}
@@ -45,8 +46,8 @@ export function SlotEditor({ value, onChange, label = "run slots", description }
         ))}
       </Group>
       <Group gap="xs" align="flex-end" wrap="wrap">
-        <Select aria-label="weekday" data={DAYS} value={day} onChange={setDay} allowDeselect={false} w={100} size="sm" />
-        <TimePicker aria-label="time" format="12h" withDropdown minutesStep={5} value={time} onChange={setTime} w={140} size="sm" />
+        <Select aria-label="weekday" data={DAYS} value={day} onChange={setDay} allowDeselect={false} w={100} size="sm" comboboxProps={{ withinPortal: true }} />
+        <Select aria-label="time" data={QUARTER_HOURS} value={time} onChange={setTime} allowDeselect={false} w={130} size="sm" maxDropdownHeight={260} comboboxProps={{ withinPortal: true }} />
         <Button size="sm" variant="default" leftSection={<IconPlus size={15} />} onClick={add} disabled={!candidate || dup}>
           {dup ? "Already added" : "Add"}
         </Button>

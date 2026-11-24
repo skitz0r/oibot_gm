@@ -21,7 +21,7 @@ import { LootPage } from "./pages/Loot";
 import { LootLogPage } from "./pages/LootLog";
 import { ProfessionsPage } from "./pages/Professions";
 import { PricesPage } from "./pages/Prices";
-import { RaidSchedulesPage } from "./pages/RaidSchedules";
+import { SchedulesPage } from "./pages/Schedules";
 import { LineupPage } from "./pages/LineupPage";
 import { EventsPage } from "./pages/Events";
 import { TellTheBot } from "./components/TellTheBot";
@@ -108,6 +108,13 @@ function RostersRedirect() {
 function EditLineupRoute({ meta }: { meta: Meta }) {
   const { key } = useParams();
   return <LineupPage key={key} meta={meta} mode="edit-lineup" />;
+}
+
+/** /schedules/:id/edit: the schedule editor, a fresh one per visit (its Reload after a 409 comes back here through the
+ *  leave guard, so the draft is dropped only after "Leave without saving?"). */
+function ScheduleEditRoute({ meta }: { meta: Meta }) {
+  const { key } = useLocation();
+  return <LineupPage key={key} meta={meta} mode="edit-schedule" />;
 }
 
 /** /readiness (and ?raid=x) → the Raids page's Readiness view of that raid. */
@@ -206,15 +213,17 @@ export default function App() {
             <Route path="/raids/:id" element={officer(<RaidsPage meta={meta} />)} />
             {/* Readiness is the Raids page's third view now; an old link keeps its raid */}
             <Route path="/readiness" element={<ReadinessRedirect />} />
-            {/* the schedule editor, until the Schedules page (Task 11) replaces this page */}
             {/* New event and Edit lineup: the lineup builder (pages/LineupPage); the Events page lists and shows events */}
             <Route path="/events/new" element={officer(<LineupPage meta={meta} mode="new-event" />)} />
             <Route path="/events/:key/lineup" element={officer(<EditLineupRoute meta={meta} />)} />
             <Route path="/events" element={officer(<EventsPage meta={meta} />)} />
             <Route path="/events/:key" element={officer(<EventsPage meta={meta} />)} />
             <Route path="/events/coming/:sid/:occurrence" element={officer(<EventsPage meta={meta} />)} />
-            <Route path="/schedules" element={officer(<RaidSchedulesPage meta={meta} />)} />
-            <Route path="/schedules/:id" element={officer(<RaidSchedulesPage meta={meta} />)} />
+            {/* Schedules: the list and one schedule (pages/Schedules); New schedule and Edit are the lineup builder's page */}
+            <Route path="/schedules" element={officer(<SchedulesPage meta={meta} />)} />
+            <Route path="/schedules/new" element={officer(<LineupPage meta={meta} mode="new-schedule" />)} />
+            <Route path="/schedules/:id" element={officer(<SchedulesPage meta={meta} />)} />
+            <Route path="/schedules/:id/edit" element={officer(<ScheduleEditRoute meta={meta} />)} />
             <Route path="/members" element={officer(<MembersPage meta={meta} />)} />
             <Route path="/applications" element={officer(<ApplicationsPage meta={meta} />)} />
             <Route path="/bank" element={<Navigate to="/members" replace />} />

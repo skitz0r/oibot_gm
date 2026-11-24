@@ -12,9 +12,15 @@ from datetime import datetime
 from . import consequences as cq
 from . import raidcycle as rc
 from .constants import PAGE_WORDS, hours_words
+from .presets import CADENCE_FIELDS, PRESETS
 from .registry import (
+    ADHOC_DEFAULTS,
+    ADHOC_WEIGHTS,
+    RAID_WEIGHT_DEFAULTS,
     RESERVED_SCHEDULE_IDS,
     SCHEDULE_CADENCE,
+    SCHEDULE_TIMING,
+    SPLIT_POLICIES,
     Registry,
     RegistryError,
     parse_lineup,
@@ -29,6 +35,12 @@ CHIPS = {True: "active", False: "paused"}
 GONE_TAIL = ", so this schedule opens no events"  # after rc.gone_sentence's raids: the one sentence the page shows
 # what the editor sends back (`stored`): every setting set_schedule takes, the lineup in place of rosters / follow / then
 STORED_FIELDS = ("name", "kind", "active", "slots", "days", "time", "weights", "lineup") + SCHEDULE_CADENCE
+# the editor's sheet-timing choices (hours before the start; a fill ask's wait in hours), each in the words the page
+# prints — a value a schedule, a raid's suggestion or a preset holds is added in its place, so a stored value is never
+# missing from its select
+HOUR_CHOICES = (1, 2, 3, 4, 6, 8, 12, 18, 24, 36, 48, 60, 72, 96, 120, 144, 168)
+ASK_CHOICES = (1, 2, 3, 4, 6, 8, 12, 24)
+MAX_WEIGHT = 6  # a priority weight's highest choice (the Raids page's Priority selects too)
 
 
 def _fact(label: str, value: str, href: str | None = None) -> dict:
@@ -64,7 +76,59 @@ def schedule_list(reg: Registry) -> dict:
     rows = reg.all_schedules()
     return {"active": [_row(reg, s) for s in rows if s.get("active", True)],
             "paused": [_row(reg, s) for s in rows if not s.get("active", True)],
-            "reserved_ids": list(RESERVED_SCHEDULE_IDS)}
+            "reserved_ids": list(RESERVED_SCHEDULE_IDS), "orphans": orphans(reg), "editor": editor_options(reg)}
+
+
+def orphans(reg: Registry) -> list[dict]:
+    """A removed schedule's leftover regulars (Registry.orphan_regulars — an older file's; a removal today takes its
+    regulars off): {key (the series key the clear sends back), label (Registry.series_label: never the key), uid,
+    display_name, character, cls, spec, box (Remove's box, consequences.regular_remove_box), rev (the record's)}."""
+    return [{"key": k, "label": reg.series_label(k), "uid": str(m.discord_id), "display_name": m.display_name, "character": c.label,
+             "cls": c.cls, "spec": c.spec, "box": cq.regular_remove_box(reg, m, k), "rev": reg.characters_rev(m)}
+            for k, m, c in reg.orphan_regulars()]
+
+
+def _num(h):
+    return int(h) if float(h).is_integer() else float(h)
+
+
+def editor_options(reg: Registry) -> dict:
+    """What the schedule editor picks from (New schedule and Edit): {raids (the palette — New event's — with each raid's
+    lockout_days, weights (the raid's own, what "Use the raid's" falls back to) and timing (the game's suggestion a new
+    schedule starts from)), adhoc {timing, weights} (a pickup's), lineups (Start from › Copy a lineup: New event's),
+    lineup_max, lineup_full, hours {field: [{value, words}]} ("5 days before"; a fill ask's wait "2 hours"), presets
+    [{name, values}] (presets.PRESETS), split_policies, max_weight}. Every word the editor's selects show is here."""
+    from .event_view import new_event_options
+
+    base = new_event_options(reg)
+    raids = []
+    for r in base["raids"]:
+        rd = reg.raid_def(r["id"])
+        raids.append({**r, "lockout_days": int(rd.get("lockout_days") or 7),
+                      "weights": {k: _num((rd.get("weights") or {}).get(k, v)) for k, v in RAID_WEIGHT_DEFAULTS.items()},
+                      "timing": reg.timing_suggestion(r["id"])})
+    seen: dict[str, set] = {f: set() for f in ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours")}
+    timings = [r["timing"] for r in raids] + [ADHOC_DEFAULTS]
+    for s in reg.all_schedules():
+        try:
+            timings.append(reg.schedule_def(s["raid"], s["id"]))
+        except (RegistryError, KeyError):
+            continue
+    for t in timings:
+        for f in seen:
+            if t.get(f) is not None:
+                seen[f].add(float(t[f]))
+    for p in PRESETS:
+        for f, v in zip(CADENCE_FIELDS, p[2:]):
+            seen[f].add(float(v))
+    hours = {f: [{"value": _num(h), "words": hours_words(h) if f == "fill_ask_hours" else f"{hours_words(h)} before"}
+                 for h in sorted(set(map(float, ASK_CHOICES if f == "fill_ask_hours" else HOUR_CHOICES)) | v)]
+             for f, v in seen.items()}
+    return {"raids": raids, "adhoc": {"timing": {k: ADHOC_DEFAULTS[k] for k in SCHEDULE_TIMING if k in ADHOC_DEFAULTS},
+                                      "weights": dict(ADHOC_WEIGHTS)},
+            "lineups": base["lineups"], "lineup_max": base["lineup_max"], "lineup_full": base["lineup_full"], "hours": hours,
+            "presets": [{"name": p[1], "values": dict(zip(CADENCE_FIELDS, p[2:]))} for p in PRESETS],
+            "split_policies": list(SPLIT_POLICIES), "max_weight": MAX_WEIGHT}
 
 
 def stored_entry(s: dict) -> dict:
@@ -132,12 +196,38 @@ def _regulars(reg: Registry, rs, s: dict, sd: dict) -> dict | None:
         # the forecast (rc.series_forecast, as series_outlook attaches it); a paused schedule's as if resumed, shown
         # beside "Next event if resumed"
         forecast = rc.series_forecast(reg, sid, if_resumed=not s.get("active", True))
+        out["forecast"] = _forecast_rows(reg, rs, s, sd, forecast) if forecast else []
         if forecast:
             n = sum(1 for f in forecast if f["short"])
             out["outlook"] = (PAGE_WORDS["ready_every_week"] if n == 0 else PAGE_WORDS["short_every_week"] if n == len(forecast)
                               else PAGE_WORDS["short_weeks"].format(n=n))
     out["rows"] = [{"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec,
                     "box": cq.regular_remove_box(reg, m, sid, rs=rs), "rev": reg.characters_rev(m)} for m, c in regs]
+    return out
+
+
+def _forecast_rows(reg: Registry, rs, s: dict, sd: dict, forecast: list[dict]) -> list[dict]:
+    """The regulars' next four weeks, a row per night (rc.series_forecast): {day, when, short {role: n}, away [names],
+    expected, occurrence, key (the event open at that night | null), can_open, why} — Open this run early opens a short
+    night's sheet by hand (POST /api/raid/{first raid}/open with the occurrence) while `can_open`; `why` is
+    rc.open_row_refusal's sentence otherwise (past the opening horizon, a closed night). A paused schedule's rows (as if
+    resumed) never open."""
+    find = rc.occurrence_index(reg, rs)
+    now = reg.now_local()
+    active = bool(s.get("active", True))
+    out = []
+    for f in forecast:
+        t = datetime.fromisoformat(f["start"])
+        occ = rc.occurrence_stamp(reg, t)
+        hit = find(s["id"], occ)
+        key = hit.key if hit is not None and not hit.dropped else None
+        why = None
+        if key is None and active:
+            opens, _locks = rc.sheet_times(t, sd)
+            why = rc.open_row_refusal(reg, rs, s["raid"], t, s["id"], opens, now)
+        out.append({"day": f["day"], "when": f["when"], "short": f["short"], "away": f["away"], "expected": f["expected"],
+                    "start_iso": f["start"], "occurrence": occ, "key": key, "can_open": key is None and active and why is None,
+                    "why": why})
     return out
 
 
@@ -205,10 +295,11 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
     else:
         find = rc.occurrence_index(reg, rs)  # one pass over the run store for the three nights
         for t in starts:
-            hit = find(sid, rc.occurrence_stamp(reg, t))
             opens, locks = rc.sheet_times(t, sd)
+            occ = rc.occurrence_stamp(reg, t)
+            hit = find(sid, occ)
             nxt.append({"starts": reg.local12(t), "opens": reg.local12(opens), "locks": reg.local12(locks),
-                        "start_iso": t.isoformat(), "key": hit.key if hit is not None and not hit.dropped else None})
+                        "start_iso": t.isoformat(), "occurrence": occ, "key": hit.key if hit is not None and not hit.dropped else None})
 
     boxes = {("pause" if active else "resume"): (cq.schedule_pause_box if active else cq.schedule_resume_box)(reg, rs, sid),
              "remove": cq.schedule_remove_box(reg, rs, sid)}

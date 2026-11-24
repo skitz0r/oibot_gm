@@ -20,8 +20,8 @@ def test_no_code_hidden_in_a_line_comment():
 
 
 def test_schedule_editor_save_always_clears_busy():
-    page = (SRC / "components" / "ScheduleCard.tsx").read_text()
-    body = page[page.index("async function save()"):]
+    page = (SRC / "pages" / "LineupPage.tsx").read_text()
+    body = page[page.index("async function saveSchedule()"):]
     body = body[:body.index("\n  }\n")]
     code = "\n".join(line.split("//")[0] for line in body.splitlines())
     assert re.search(r"finally\s*\{\s*setBusy\(false\);\s*\}", code), "a refused save must leave the button usable"
@@ -90,7 +90,7 @@ def test_every_edit_mode_registers_with_the_guild_switchers_guard():
         if EDIT_MODE.search(text) and "useDirty(" not in text:
             missing.append(rel)
     assert not missing, "edit modes that don't call useDirty (the server switch would drop their draft):\n" + "\n".join(missing)
-    for rel in ("pages/Config.tsx", "components/ChannelsCard.tsx", "pages/Raids.tsx", "components/ScheduleCard.tsx", "pages/Auras.tsx",
+    for rel in ("pages/Config.tsx", "components/ChannelsCard.tsx", "pages/Raids.tsx", "pages/LineupPage.tsx", "pages/Auras.tsx",
                 "components/Recruitment.tsx", "components/PlainPermissions.tsx", "pages/Members.tsx", "components/CharacterTable.tsx"):
         assert "useDirty(" in (SRC / rel).read_text(), rel
     me = (SRC / "pages" / "Me.tsx").read_text()
@@ -233,7 +233,7 @@ def test_the_run_vocabulary_has_no_copy_in_the_frontend():
 
     # the Rosters page's place is the Events page's (phase 4, Task 10): the page, its sections, the lineup editor
     files = [SRC / "pages" / "Events.tsx", SRC / "pages" / "LineupPage.tsx", SRC / "pages" / "Me.tsx", SRC / "components" / "RaidCard.tsx",
-             SRC / "components" / "RegularsBlock.tsx", *sorted((SRC / "components" / "events").glob("*.tsx")), *sorted((SRC / "components" / "board").glob("*.tsx"))]
+             *sorted((SRC / "components" / "schedules").glob("*.tsx")), SRC / "pages" / "Schedules.tsx", *sorted((SRC / "components" / "events").glob("*.tsx")), *sorted((SRC / "components" / "board").glob("*.tsx"))]
     words = ([w for k, w in RUN_WORDS.items() if k not in ("ask", "loot", "lock", "locked", "reopen")]  # short verbs other screens share
              + [w for w in rc.RUN_STATE_WORDS.values() if " " in w] + ["finished"]
              + [w for w in rc.ASK_HOW.values() if " " in w] + [w for k, w in rc.ASK_ANSWER_WORDS.items() if k in ("yes", "no", "expired")]
@@ -254,7 +254,7 @@ def test_the_run_vocabulary_has_no_copy_in_the_frontend():
     for field in ("meta.run_states", "markOf(meta", "run_labels", "run_words", "ask_kinds", "ask_answers"):
         assert field in card or field in (SRC / "components" / "board" / "shared.tsx").read_text(), field
     assert "s.badge" in (SRC / "pages" / "Me.tsx").read_text(), "Me's badge is the server's words (rc.answer_word)"
-    assert "<LevelChip" in (SRC / "components" / "RegularsBlock.tsx").read_text() and "<LevelChip" in (SRC / "components" / "raids" / "ReadinessView.tsx").read_text()
+    assert "r.words" in (SRC / "components" / "schedules" / "RegularsSection.tsx").read_text() and "<LevelChip" in (SRC / "components" / "raids" / "ReadinessView.tsx").read_text()
     more = (SRC / "components" / "events" / "EventMore.tsx").read_text()
     assert "meta.run_labels" in more, "the event's More menu names each verb as Discord's buttons do"
 
@@ -283,7 +283,8 @@ def test_the_event_confirms_print_only_the_servers_sentence():
     / the event's More menu / the regulars, and no literal stands in when the server's is missing. The board's sentences
     only get the names put in (shared.fillNames)."""
     files = {n: _code_only((SRC / p).read_text()) for n, p in (("BoardView", "components/board/BoardView.tsx"), ("SheetCard", "components/board/SheetCard.tsx"),
-                                                                ("EventMore", "components/events/EventMore.tsx"), ("Regulars", "components/RegularsBlock.tsx"),
+                                                                ("EventMore", "components/events/EventMore.tsx"), ("Regulars", "components/schedules/RegularsSection.tsx"),
+                                                                ("Schedules", "pages/Schedules.tsx"),
                                                                 ("Events", "pages/Events.tsx"), ("LineupPage", "pages/LineupPage.tsx"))}
     for name, code in files.items():
         assert not re.search(r"message:\s*[`\"']", code), f"{name}: a confirm message written in the browser"
@@ -293,7 +294,8 @@ def test_the_event_confirms_print_only_the_servers_sentence():
     assert "s.consequences?.remind" in files["EventMore"] and "boxOf(`End ${name}?`, preview, L.end, true)" in files["EventMore"]
     assert "useConfirm(" not in files["EventMore"], "the event page's box, never the older modal"
     assert "Reopen works for an hour" not in files["SheetCard"] + files["EventMore"] and "gets a confirmation DM" not in files["BoardView"]
-    assert "message: x.remove" in files["Regulars"] and "message: o.clear" in files["Regulars"] and "rev: o.rev" in files["Regulars"] and "rev: x.rev" in files["Regulars"]
+    # the regulars (phase 4, Task 11): each row's and each leftover's Remove prints its server box and sends the record's rev
+    assert "box: x.box" in files["Regulars"] and "box: o.box" in files["Regulars"] and "rev: shown.rev" in files["Regulars"] and "seen: fp" in files["Regulars"]
     shared = _code_only((SRC / "components" / "board" / "shared.tsx").read_text())
     assert 'split("{name}").join(names.name)' in shared
 
@@ -598,8 +600,9 @@ def test_follow_on_surfaces_exist():
     """Design §5.62 (D2): the site sets a follow-on — the schedule editor's
     Then row and the ad hoc Open's Then field — and the Me row offers leaving early and I'm staying with the server's sentence only.
     Phase 3: the schedule editor's Then block holds up to three later raids and sends the whole lineup (never `follow_raid`)."""
-    sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
-    assert "follow_raid" not in sched and "Then, the same night" in sched and "f.lineup =" in sched and "LATER_MAX = 3" in sched
+    sched = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    editor = sched[sched.index("function ScheduleEditor("):]
+    assert "follow_raid" not in sched and "<LineupBuilder" in editor and "fields.lineup = " in editor and "max={opts.lineup_max}" in editor
     # phase 4, Task 7: the ad hoc Open's Then field became the New event page's lineup builder (later raids as `lineup`)
     lineup = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
     assert "lineup: later" in lineup and "<LineupBuilder" in lineup
@@ -879,25 +882,22 @@ def test_raids_and_readiness_have_no_raid_timing_and_one_minimum():
         assert "Add one for a role or class below" not in f.read_text(), f"{f.name}: an empty sentence pointing below at a button (carried 3)"
     ready = views["components/raids/ReadinessView.tsx"]
     assert "Against the make-up" in ready and "on the Raids page</Anchor>" not in ready
-    sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
-    assert "the raid's" not in sched
+    sched = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
     for gone in ("SOURCE_WORDS", "inherited(", "ADHOC_DEFAULT"):
-        assert gone not in sched, f"ScheduleCard.tsx still has {gone}"
-    assert "the game's suggestion" in sched
+        assert gone not in sched, f"LineupPage.tsx still has {gone}"
+    assert ".timing" in sched and "opts.adhoc" in sched, "a new schedule's sheet timing starts from the server's suggestion"
 
 
 def test_the_schedule_editor_names_a_schedule_by_its_id():
     """Phase 3 (Task 2): every schedule write targets the schedule's id alone and carries its own rev
     (config:schedule:<id>); a new schedule sends its lineup (this raid, then the follow-on) and takes an id no schedule in
     the guild holds — there is no `default` schedule any more."""
-    src = (SRC / "components" / "ScheduleCard.tsx").read_text()
-    assert "target: `${r.id}:" not in src and 'target: s.id' in src and "target: id" in src
-    assert "config:schedule:${s.id}" in src and "...raidRevs(r)" not in src
-    assert "f.lineup = [{ raid: r.id, rosters: Number(x.rosters) }" in src and "is_default" not in src
-    assert "slug(d.name, d.kind, taken, meta?.reserved_schedule_ids || [])" in src  # phase 4: the reserved ids are the server's
-    regs = (SRC / "components" / "RegularsBlock.tsx").read_text()  # the Rosters page's Regulars tab, on Schedules until Task 11
+    src = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    assert "target: `${" not in src and "target: id" in src and "config:schedule:${" in src and "is_default" not in src
+    assert "slug(d.name, taken, list?.reserved_ids || [])" in src  # phase 4: the reserved ids are the server's
+    regs = _code_only((SRC / "components" / "schedules" / "RegularsSection.tsx").read_text())
     assert 'split(":")' not in regs and '|| "default"' not in regs
-    assert "schedule: s.key" in regs and "schedule: o.key" in regs
+    assert "schedule: sid" in regs and "schedule: o.key" in regs
 
 
 def test_the_run_card_reschedules_and_the_schedule_editor_sends_a_lineup():
@@ -909,8 +909,8 @@ def test_the_run_card_reschedules_and_the_schedule_editor_sends_a_lineup():
     assert "/reschedule`" in card and "<DateTimePicker" in card and "pv.sentences.join" in card and "rev: pv.rev" in card
     assert 'confirmLabel: "Move"' in card and "Reschedule…" in card
     assert "e.cancel_tells_channel !== false" in card  # a later raid whose first finished: no channel line to offer
-    sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
-    assert "f.lineup" in sched and "follow_raid" not in sched and "30 * (k + 1)" in sched
+    sched = (SRC / "pages" / "LineupPage.tsx").read_text()
+    assert "fields.lineup" in sched and "follow_raid" not in sched
     assert "Back" in card and card.index("setMoveOpen(false)") > card.index("confirmLabel: \"Move\""), "Back keeps the picked time"
     assert "useDirty(`reschedule:" in card
     # a picker's minDate from the browser's UTC date is tomorrow west of UTC in the evening, and Mantine clamps tonight's
@@ -996,14 +996,81 @@ def test_the_raids_page_fix_round_one():
     assert cq.leave_unsaved_sentence(0, "") == cq.LEAVE_TEMPLATE["page"] == "Your edits on this page are not saved yet."
 
 
-def test_schedule_editing_stays_reachable_until_the_schedules_page():
-    """Phase 4, Task 6 drops the schedules from the Raids page: the old schedule editor stays mounted at /schedules (the
-    rail's Schedules and the Raids page's Played in link there) until Task 11's Schedules page replaces it; /readiness
-    keeps its raid."""
+def test_the_schedules_page_replaces_the_interim_one():
+    """Phase 4, Task 11: /schedules is the Schedules page (list · one schedule · its editor); the interim page, the old
+    editor, its raid header and the regulars block are gone, and RaidCard keeps only the run's week strip (SheetCard and
+    the test bench); /readiness keeps its raid."""
     app = _code_only((SRC / "App.tsx").read_text())
-    assert 'path="/schedules"' in app and 'path="/schedules/:id"' in app and "<RaidSchedulesPage" in app
+    for path in ('path="/schedules"', 'path="/schedules/new"', 'path="/schedules/:id"', 'path="/schedules/:id/edit"'):
+        assert path in app, path
+    assert "<SchedulesPage" in app and 'mode="new-schedule"' in app and 'mode="edit-schedule"' in app and "RaidSchedulesPage" not in app
     assert 'path="/raids/:id"' in app and "?view=readiness" in app and 'path="/readiness"' in app
-    assert "<Schedules " in (SRC / "pages" / "RaidSchedules.tsx").read_text()
+    for gone in ("pages/RaidSchedules.tsx", "components/ScheduleCard.tsx", "components/RaidHeader.tsx", "components/RegularsBlock.tsx"):
+        assert not (SRC / gone).exists(), gone
+    card = _code_only((SRC / "components" / "RaidCard.tsx").read_text())
+    assert "export function RunStrip(" in card
+    for gone in ("WhenItRuns", "RunWeek", "SeatWeights", "function Section(", "function Panel(", "function Pair("):
+        assert gone not in card, gone
+    for f in SRC.rglob("*.ts*"):
+        text = f.read_text()
+        for name in ("ScheduleCard", "RaidHeader", "RegularsBlock", "RaidSchedules"):
+            assert f'/{name}"' not in text, f"{f.name} imports {name}"
+
+
+def test_schedules_page_reads_by_its_sections():
+    page = _code_only((SRC / "pages" / "Schedules.tsx").read_text())
+    assert "<ListPage" in page and '"Active"' in page and '"Paused"' in page and "<LineupPicture" in page and "<RegularsSection" in page
+    assert not (SRC / "components" / "ScheduleCard.tsx").exists()
+
+
+def test_the_schedule_editor_is_the_builder_with_repeats():
+    page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    assert '"edit-schedule"' in page and "<SlotEditor" in page and "always: true" in page and "config:schedule:" in page
+    assert 'useDirty(`schedule:' in page and "status === 409" in page
+
+
+def test_the_schedules_page_keeps_every_old_lever():
+    """Task 11's inventory: Pause / Resume / Remove print the read model's box and press through the TOKEN path (a
+    preview whose box must be the one on screen, then the token) — never `confirmed`; a 409 brings the fresh box and its
+    rev; a schedule whose raid left the game says so and still has Remove; Next events link each night (an event's
+    page, else its coming-up page); the regulars' next four weeks with Open this run early; a removed schedule's
+    leftover regulars with their Remove; members added from the server's `people` by a search."""
+    page = _code_only((SRC / "pages" / "Schedules.tsx").read_text())
+    details = _code_only((SRC / "components" / "schedules" / "ScheduleDetails.tsx").read_text())
+    regs = _code_only((SRC / "components" / "schedules" / "RegularsSection.tsx").read_text())
+    for needle in ("boxes.pause", "boxes.resume", "boxes.remove", "opsApi.preview(", "opsApi.apply(", "b.fp !== fp", "shown.rev = v.rev",
+                   "view.gone", "useConfirmBox(", "list.orphans"):
+        assert needle in page, needle
+    for f, code in (("Schedules", page), ("ScheduleDetails", details), ("RegularsSection", regs)):
+        assert "confirmed" not in code and "opsApi.confirm(" not in code, f"{f}: a press never writes unseen"
+        assert "useConfirm(" not in code and "toISOString" not in code, f
+        assert not re.search(r">\s*(Yes|No|OK|Cancel|Confirm)\s*<", code), f
+    assert "view.next_empty" in details and "/events/coming/" in details and "/events/${" in details
+    for needle in ("Open this run early", "r.forecast", "f.can_open", "f.why", "/api/event/coming/", "searchable", "view.people",
+                   "Add a member", "search members", "/api/admin/raid/regulars", "r.outlook", "r.expected"):
+        assert needle in regs, needle
+    assert "<LevelChip" not in regs, "the mockup's Regulars: facts, no chip (spec §7)"
+
+
+def test_the_schedule_editor_keeps_every_setting():
+    """Task 11's inventory, the editor: name (and a new schedule's id, the reserved ids from the API), what kind (weekly
+    run times · days of each lockout · opened by an officer), the lineup (the ONE builder; the first raid fixed on an
+    edit — the server refuses a change), run times picked, the four hours plus a fill ask's wait from the server's
+    choices, the four switches, a preset, the split, the five weights with Use the raid's; one Save through the token
+    path (never `confirmed`), create-shaped for a new one; a 409 keeps the draft and offers Reload through the guard."""
+    page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    editor = page[page.index("function ScheduleEditor("):]
+    for needle in ("fixedFirst={!!sid}", "opts.hours", "opts.presets", "opts.split_policies", "opts.max_weight", "Use the raid's",
+                   '"Reminder"', '"The bot asks people for open seats"', '"DM the regulars when the sheet opens"', '"Ask the rostered to confirm"',
+                   "kind: d.kind", "QUARTER_HOURS", "guardNav(", "Reload", 'useDirty(`schedule:${sid ?? "new"}`', 'verb: sid ? "Save" : "Create schedule"'):
+        assert needle in editor, needle
+    assert "confirmed" not in editor and "opsApi.confirm(" not in editor
+    assert "<NameFields" in editor and "TimePicker" not in editor and "<NumberInput" not in editor, "a time is picked, a number is a select"
+    names = _code_only((SRC / "components" / "schedules" / "NameFields.tsx").read_text())
+    assert names.count("<TextInput") == 2 and 'label="Name"' in names and 'label="Id"' in names, "prose is typed: the name and a new id"
+    slots = _code_only((SRC / "components" / "SlotEditor.tsx").read_text())
+    assert "TimePicker" not in slots and "QUARTER_HOURS" in slots, "a run time is a 15-minute select (the Clock rule)"
+
 
 
 def test_the_builder_works_without_a_drag():

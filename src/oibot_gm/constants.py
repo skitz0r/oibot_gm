@@ -95,7 +95,7 @@ PAGE_WORDS = {
     "board_failed": "The bot couldn't work out where the lock would place everyone. The board shows the officers' moves.",
     # Schedules (schedule_view): a pickup's Repeats, a schedule with no run times, no reminder, the regulars' words and
     # the next four weeks, and the empty Next events of a paused schedule
-    "by_an_officer": "Opened by an officer from the Events page", "no_times": "No run times yet. Edit the schedule to add them.",
+    "by_an_officer": "An officer opens each event with /raid open in Discord", "no_times": "No run times yet. Edit the schedule to add them.",
     "no_reminder": "No reminder", "for_seats": "{n} for {seats} seats", "short_every_week": "Short every week",
     "ready_every_week": "Ready every week", "short_weeks": "Short {n} of the next four weeks",
     "paused_next": "Paused, so no event opens. Resume it to open events again.",

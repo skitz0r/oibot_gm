@@ -592,6 +592,10 @@ def readable_config(cfg: "GuildConfig") -> dict:
 def section_words(section: str) -> str:
     if section.startswith("raids:"):
         return f"{section[6:]} raid settings"
+    if section.startswith("schedule:"):  # a person reads it (the Schedules page's stale Save): never the schedule's id
+        return "schedule's settings"
+    if section.startswith("raid_all:"):
+        return "raid's settings"
     return {"settings": "guild settings", "buffs": "aura settings", "recruitment": "recruitment settings", "plain": "plain-text permissions",
             "loot": "loot scoring weights"}.get(section, section)
 

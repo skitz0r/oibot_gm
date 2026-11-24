@@ -450,9 +450,10 @@ def test_schedule_writes_from_the_raids_page_carry_the_raid_rev(owner_client, re
         r = owner_client.post(path, json={**body, "revs": {"config:schedule:alt": rev}}, headers=bearer())
         assert r.status_code == 409 and r.json()["changed"] == ["schedule:alt"], r.text
     assert any(x["id"] == "alt" and x["active"] for x in reg.schedules("barrow_deeps"))
-    src = (FRONT / "components" / "ScheduleCard.tsx").read_text()
-    saves = [ln for ln in src.splitlines() if re.search(r'saveOps\(\[\{ kind: "schedule(?:_remove)?"', ln)]  # useOpsSave (D51)
-    assert len(saves) == 3 and all("...scheduleRevs(s)" in p for p in saves), saves
+    # phase 4 (Task 11): the Schedules page's Pause / Resume / Remove send the schedule's own rev (the box's, kept fresh)
+    src = (FRONT / "pages" / "Schedules.tsx").read_text()
+    assert src.count("[`config:schedule:${view.id}`]: shown.rev") == 1 and 'kind: "schedule_remove", target: view.id' in src
+    assert 'kind: "schedule", target: view.id, fields: { active: !view.active }' in src
 
 
 def test_mcp_guild_overview_carries_the_summary(owner_client, reg, monkeypatch):
