@@ -536,22 +536,23 @@ def event_lineup(reg: Registry, ev: "RaidEvent") -> list[dict]:
 def priority_words(reg: Registry, ev_or_schedule_def) -> str:
     """Who gets a seat first when more join than there are seats (D17), short: 'First to join' for a one-off, else the
     two heaviest weights — 'Regulars first, then rank' (constants.PRIORITY_SHORT)."""
-    from .constants import PRIORITY_SHORT
+    from .constants import PAGE_WORDS, PRIORITY_SHORT
     from .registry import schedule_class
 
     x = ev_or_schedule_def
+    first = PAGE_WORDS["first_to_join"]
     if isinstance(x, RaidEvent):
         if run_kind(reg, x) == "adhoc":
-            return "First to join"
+            return first
         weights = run_weights(reg, x)
     else:
         if schedule_class((x or {}).get("kind")) == "adhoc":
-            return "First to join"
+            return first
         weights = dict((x or {}).get("weights") or {})
     order = list(PRIORITY_SHORT)
     top = sorted((k for k in order if float(weights.get(k) or 0) > 0), key=lambda k: (-float(weights.get(k) or 0), order.index(k)))[:2]
     if not top:
-        return "First to join"
+        return first
     a = PRIORITY_SHORT[top[0]]
     a = a[:1].upper() + a[1:]
     if len(top) == 1:
@@ -561,8 +562,10 @@ def priority_words(reg: Registry, ev_or_schedule_def) -> str:
 
 
 def confirmation_words(confirm: bool) -> str:
-    """Whether the rostered are asked to confirm, as the Details label's value reads."""
-    return "Asked at the lock" if confirm else "Not asked"
+    """Whether the rostered are asked to confirm, as the Details label's value reads (constants.PAGE_WORDS)."""
+    from .constants import PAGE_WORDS
+
+    return PAGE_WORDS["asked_at_lock"] if confirm else PAGE_WORDS["not_asked"]
 
 
 def lead_name_of(reg: Registry, ev: "RaidEvent") -> str:

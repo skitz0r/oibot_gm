@@ -132,6 +132,55 @@ export interface Meta {
   ask_answers: Record<string, string>;
   level_words: Record<string, string>;
   run_words: { no_confirmations: string; first_come: string; bank: Record<string, string>; not_answered: Record<string, string>; auto_asks_paused: string; pins: Record<string, string>; leftovers: string };
+  /** phase 4's pages: their value words (constants.PAGE_WORDS), the confirmation box's fixed words (CONFIRM_WORDS) and the
+   *  leave guard's sentence templates ({name}, {n}) — a page prints these, never its own copy */
+  page_words?: PageWords;
+  confirm_words?: { back: string; keep: string; discard: string; leave_title: string; changed: string };
+  leave?: { one: string; many: string };
+}
+/** constants.PAGE_WORDS: `{…}` are filled by whoever prints them. */
+export interface PageWords {
+  one_off: string; first_to_join: string; not_asked: string; asked_at_lock: string; no_sheet_yet: string; from: string;
+  open_in_discord: string; no_answer_yet: string; answers_one: string; bot_asks: string; officer_asks: string; every_main: string;
+  used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
+  rosters_of: string; placed_of: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string;
+  sheet_waits: string; sheet_not_posted: string;
+}
+/** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
+ *  (only Back); `fp` goes back as `seen` with the press. */
+export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string }
+/** A Details line (event_view): the label, its value in words, and where it links (a site path or a Discord jump link). */
+export interface Fact { label: string; value: string; href?: string }
+/** A row of the Events list (GET /api/event-list): `key` = the event's first raid, `title` its start in words. */
+export interface EventRow { key: string; title: string; subtitle: string; state: "open" | "locked" | "done" | "cancelled"; chip: string }
+/** A schedule's night with no event yet: found again by (schedule, occurrence). */
+export interface ComingRow { schedule: string; occurrence: string; title: string; subtitle: string }
+export interface EventList { open: EventRow[]; coming: ComingRow[]; history: EventRow[]; history_more: boolean }
+/** One raid of an event on the Board (event_view._part_view); `sheet` = the run's full JSON, BoardView's input. */
+export interface PartView {
+  key: string; raid: string; raid_name: string; label: string; rosters_words: string; placed_words: string;
+  short: Record<string, number>; sheet: Sheet | null; board_state: "ready" | "working" | "failed" | "locked";
+  board_error: string | null; mine: string[]; undo_box: Box | null;
+}
+export interface EventPerson { uid: string; display_name: string; character: string; cls: string; spec: string }
+/** GET /api/event/{key} (any raid's key answers as its event). */
+export interface EventView {
+  key: string; title: string; state: EventRow["state"]; chip: string; kind: "one_off" | "scheduled"; schedule: { id: string; name: string } | null;
+  details: Fact[];
+  signups: { joined: number; bench: number; no_thanks: number; no_answer: number; rows: { in: EventPerson[]; sub: EventPerson[]; out: EventPerson[]; none: EventPerson[] } };
+  parts: PartView[]; activity: { when: string; line: string }[];
+  boxes: { lock: Box | null; cancel: Box | null };
+  actions: { reschedule: boolean; edit_lineup: boolean; lock: boolean; cancel: boolean; open_now: boolean };
+  lineup: { raid: string; rosters: number; starts: number }[]; start_iso: string;
+  /** the event's own sheet timing by setting (rc.EVENT_TIMING), what POST /api/run/{key}/reschedule takes back */
+  timing: Record<string, number | boolean>;
+  people: { uid: string; display_name: string; characters: { label: string; cls: string; spec: string; role: string; is_main: boolean }[] }[];
+  sheet_url: string | null;
+}
+/** GET /api/event/coming/{sid}/{occurrence}: `open` is what Open the sheet now carries back; `box` null while it can't. */
+export interface ComingView {
+  title: string; chip: string; schedule: { id: string; name: string }; details: Fact[]; can_open: boolean; why: string | null;
+  open: { start_iso: string; schedule: string; occurrence: string }; box: Box | null;
 }
 /** The Me page's Leveling guide tab (GET /api/me/guide, design §5.55): what the member has built from their own RestedXP
  *  import string. `files` = the downloads in order with their words; `groups` = one row per guide group; `built_when` is

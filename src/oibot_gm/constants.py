@@ -53,3 +53,22 @@ CONFIRM_WORDS = {"back": "Back", "keep": "Keep editing", "discard": "Discard edi
 # a priority weight as a short phrase (rc.priority_words: "Regulars first, then rank")
 PRIORITY_SHORT = {"regular": "Regulars", "rank": "rank", "main": "main characters", "sat_out": "who sat out last time",
                   "signup_order": "who signed up first"}
+
+# the value words of the Events, New event, Schedules and Raids pages (phase 4, the approved mockups), ONCE here: the read
+# models (event_view.py …) print them and /api/meta.page_words carries them, so a page file never holds a value word.
+# `{…}` are filled by whoever prints them (the server, or the page with a count it already has).
+PAGE_WORDS = {
+    "one_off": "One-off, no schedule", "first_to_join": "First to join", "not_asked": "Not asked",
+    "asked_at_lock": "Asked at the lock", "no_sheet_yet": "no sheet yet", "from": "From {when}",
+    "open_in_discord": "Open in Discord", "no_answer_yet": "no answer yet", "answers_one": "One for the whole evening",
+    "bot_asks": "The bot asks people", "officer_asks": "An officer asks", "every_main": "Every main",
+    "used_when": "More people join than there are seats", "one_off_rule": "First to join, whatever the priority",
+    # the Priority bars, one per seat weight (the weights' keys)
+    "priority": {"regular": "Regular", "rank": "Rank", "main": "Main character", "sat_out": "Sat out last time",
+                 "signup_order": "Signed up early"},
+    "rosters_of": "{n} of {size}", "placed_of": "{n} of {m} joined",
+    "board_footer": "Placed as the lock would place them now. Drag a name to move it.",
+    "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
+    # the Signup sheet fact while the sheet is not in Discord: no signup channel to post to, or not posted yet
+    "sheet_waits": "Posts when a signup channel is set", "sheet_not_posted": "Not in Discord yet",
+}

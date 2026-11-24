@@ -41,7 +41,7 @@ from .app import GUILD_COOKIE, NotMember, login_href, owner_name, set_guild_cook
 HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
 STARTED = time.time()  # fallback when the bot has no start stamp
-from ..constants import LEVEL_WORDS, MARK, MARK_WORDS, ROLES  # noqa: E402 — the order role counts are shown in; the run vocabulary (meta)
+from ..constants import CONFIRM_WORDS, LEVEL_WORDS, MARK, MARK_WORDS, PAGE_WORDS, ROLES  # noqa: E402 — the order role counts are shown in; the run vocabulary (meta)
 from ..raid_buttons import RUN_WORDS  # noqa: E402 — the run verbs' labels, the Discord buttons' own
 from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE, SCHEDULE_TIMING, row_lineup  # noqa: E402
 
@@ -497,6 +497,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "run_words": {"no_confirmations": rc.NO_CONFIRMATIONS, "first_come": rc.FIRST_COME, "bank": dict(rc.BANK_WORDS),
                           "not_answered": dict(rc.NOT_ANSWERED_WORDS), "auto_asks_paused": rc.AUTO_ASKS_PAUSED,
                           "pins": dict(rc.PIN_WORDS), "leftovers": rc.LEFTOVERS},
+            # phase 4's pages (constants.PAGE_WORDS: the value words of Events, New event, Schedules, Raids), the confirmation
+            # box's fixed words (Back, Keep editing, Discard edits, the "changed" line) and the leave guard's sentence
+            # templates ({name}, {n}: the page fills them) — a page file never holds its own copy
+            "page_words": PAGE_WORDS, "confirm_words": dict(CONFIRM_WORDS), "leave": dict(cq.LEAVE_TEMPLATE),
             # the vocabulary the pages used to hard-code (C3): answer statuses in order, split philosophies, role order,
             # per-group role caps from the profile, class colours from render.py (tuned for dark surfaces)
             "statuses": list(rc.STATUSES), "split_policies": list(SPLIT_POLICIES), "roles": list(ROLES),
@@ -2798,6 +2802,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_loot import install_loot_api  # the loot council, history, precedents, the award log, items, wishlists (design §3.1)
 
     install_loot_api(app, bot, who=who, body=body, publish=publish, find_live=find_live, resolve_member=resolve_member, live_officer=live_officer)
+
+    from .api_events import install_events_api  # the Events page's read model (phase 4: the list, one event, a coming-up night)
+
+    install_events_api(app, bot, who=who, ev_json=ev_json)
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")

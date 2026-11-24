@@ -164,7 +164,9 @@ PY_FILES = ["raid_views.py", "wizard.py", "inbox.py", "consequences.py", "discor
             # the guild guide library: its refusals and the /guide commands (design §5.63)
             "guides/library.py", "discord_guides.py",
             # auction prices: the price table's states and every price sentence (spec §3)
-            "discord_auctions.py", "prices.py"]
+            "discord_auctions.py", "prices.py",
+            # the Events page's read model and its routes (phase 4)
+            "event_view.py", "web/api_events.py"]
 LOG_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical"}
 # calls whose string arguments are machine-facing (patterns, keys, ids), not words a person reads
 MACHINE_CALLS = {"compile", "match", "search", "fullmatch", "sub", "findall", "finditer", "split", "startswith", "endswith",
