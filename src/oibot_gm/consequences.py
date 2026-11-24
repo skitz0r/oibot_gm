@@ -450,14 +450,15 @@ def _first_change(reg: Registry, old: list[dict], new: list[dict]) -> str:
 
 def lineup_consequence(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) -> list[str]:
     """The confirm of editing a run's lineup before the lock (rc.plan_lineup — nothing written): at most three
-    sentences of twenty words or fewer, ranked so that a loss is NEVER dropped:
+    sentences of twenty words or fewer, ranked so that a loss is NEVER dropped, in the Confirm rule's order:
     1. the first change (_first_change; the box's diff lines list every change);
-    2. that every answer stands — and, when a kept raid's start changes, that each person who answered gets
-       reschedule's `moved` notice;
-    3. what a removed raid takes with it — its board places, pins, plans to leave early and open asks, counted apart
-       (falling back to "…taken out with everything on its board") — always there when a removed raid held anything;
-       else an ADDED raid starting before it first opens (C9: allowed, said); else the kept raids' new starts; else,
-       for a schedule's run, that its schedule keeps its own lineup.
+    2. the losses — what a removed raid takes with it (its board places, pins, plans to leave early and open asks,
+       counted apart, falling back to "…taken out with everything on its board") and the moves on a roster that goes;
+       a removed raid's loss can stand for the change itself, and when they don't fit the change sentence goes;
+    3. who is told: that every answer stands — and, when a kept raid's start changes, that each person who answered
+       gets reschedule's `moved` notice;
+    then, with room left: an ADDED raid starting before it first opens (C9: allowed, said); else the kept raids' new
+    starts; else, for a schedule's run, that its schedule keeps its own lineup.
     A refusal is rc.lineup_refusal's own sentence, not this."""
     first = rc.first_part(rs, ev)
     ch = rc.plan_lineup(reg, rs, first, lineup)
@@ -507,9 +508,10 @@ def lineup_consequence(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) 
     if loss and out[0] in {f"{_raid(reg, p.instance)} leaves the lineup." for p in held}:
         out[0] = loss  # the loss names the raid taken out: it says the change itself, with room for one more
         losses.remove(loss)
-    if len(out) + len(losses) > 3:
-        out = [out[1]]  # the losses say what changes; who is told stays
-    out += losses
+    # the Confirm rule's order: what changes (the change, then its losses) before who is told; when they don't all fit,
+    # the change sentence goes — the losses say it — and who is told stays last
+    change, told = out
+    out = [change, *losses, told] if 1 + len(losses) + 1 <= 3 else [*losses, told]
     if len(out) < 3:
         extra = early or times or ("Its schedule keeps its own lineup." if first.schedule else None)
         if extra:

@@ -1904,8 +1904,10 @@ def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: Lineup
     with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
         for key, (keep, pins, places, npins) in trims.items():
             p = first if key == first.key else later[key]
+            # always cut to the rosters that stay: the board saves PADDED layouts, so an empty roster that goes would
+            # survive, be drawn and (one drag into it) make the lock build the old count; the log line counts losses only
+            p.layout, p.pins = (keep if any(keep) else None), pins
             if places or npins:
-                p.layout, p.pins = keep, pins
                 p.log.append(f"{places} board place(s) and {npins} pin(s) on the removed roster dropped by {by}")
         for key in change.removed:  # first: a removed raid is a closed, dropped file before its dict goes
             p = later[key]

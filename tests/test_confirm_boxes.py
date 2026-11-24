@@ -346,7 +346,7 @@ def test_a_roster_that_goes_drops_its_board_places(reg, rs):
     ch = rc.plan_lineup(reg, rs, ev, want)
     assert ch.trimmed_places == {bd.key: 2} and ch.trimmed_pins == {bd.key: 1}
     b = cq.lineup_box(reg, rs, ev, want)
-    assert b["sentences"] == ["Barrow Deeps goes from two rosters to one.", "All 6 answers stand.", "Moves made on the removed roster are dropped."]
+    assert b["sentences"] == ["Barrow Deeps goes from two rosters to one.", "Moves made on the removed roster are dropped.", "All 6 answers stand."]
     bot = NightBot(reg, rs)
     asyncio.run(bot.edit_lineup(reg, rs, ev, want, by="Jon", by_id=None))
     bd = rs.events[bd.key]
@@ -374,7 +374,28 @@ def test_a_loss_is_never_cut_with_a_raid_and_a_roster_going(reg, rs):
     rs.save(bd, "b")
     rs.save(ony, "o")
     said = cq.lineup_consequence(reg, rs, ev, [{"raid": HYJAL, "rosters": 1}, {"raid": RID, "rosters": 1}])
-    assert len(said) <= 3 and "Onyxia's Lair is taken out with its board place." in said and "Moves made on the removed roster are dropped." in said
+    assert said == ["Onyxia's Lair is taken out with its board place.", "Moves made on the removed roster are dropped.", "All 6 answers stand."], \
+        "the losses (what changes) first, who is told last"
+
+
+def test_an_empty_roster_that_goes_leaves_the_board(reg, rs):
+    """The board saves PADDED layouts: an empty second roster survives a save. Going 2 → 1 cuts the layout to the roster
+    that stays anyway (else the board draws it and one drag into it makes the lock build two), with no loss sentence."""
+    from test_raid_night import NightBot
+
+    ms = people(reg, 3)
+    ev = one_off(reg, rs)
+    join(reg, rs, ev, ms)
+    bd = rc.event_parts(rs, ev)[1]
+    k = rc.groups_per_roster(reg, rc.run_size(reg, bd))
+    bd.layout = [[ms[0].display_name]] + [[] for _ in range(2 * k - 1)]
+    rs.save(bd, "a padded board")
+    want = [{"raid": HYJAL, "rosters": 1}, {"raid": RID, "rosters": 1}]
+    assert not any("Moves made" in x for x in cq.lineup_consequence(reg, rs, ev, want))
+    asyncio.run(NightBot(reg, rs).edit_lineup(reg, rs, ev, want, by="Jon", by_id=None))
+    bd = rs.events[bd.key]
+    assert len(bd.layout) == k and bd.layout[0] == [ms[0].display_name]
+    assert len(rc.board_layout(reg, bd)) == k and not any("board place" in x for x in bd.log)
 
 
 def test_a_cancel_after_the_lock_counts_fill_asks_to_people_not_rostered(reg, rs):
@@ -441,3 +462,40 @@ def test_seen_on_open_the_sheet_now(reg, rs, web_bot):
     assert r.status_code == 409 and r.json()["box"]["fp"] != p["box"]["fp"] and not rs.events
     r = c.post(f"/api/raid/{RID}/open", json=body, headers=h)
     assert r.status_code == 200 and rs.events, "no seen: as before"
+
+
+@pytest.mark.parametrize("gap", ["missing", "unset"])
+def test_open_refuses_when_its_times_cant_be_read(reg, rs, web_bot, monkeypatch, gap):
+    """Open the sheet now's box needs the schedule's opening and lock: when either can't be read the box is never made
+    with a made-up number (the sheet would 'lock at the start'): the preview has no box and a `seen` open is refused
+    with one sentence and only Back, nothing opened."""
+    from oibot_gm.registry import Registry
+
+    sid = weekly(reg, RID, "Tue 18:30")
+    t = next_tuesday(reg, sid)
+    c, h = web_bot.c, H()
+    p = c.post(f"/api/raid/{RID}/open/preview", json={"start": t.isoformat(), "schedule": sid}, headers=h).json()
+    real, real_preview, armed = Registry.schedule_def, rc.open_preview, []
+
+    def broken(self, instance, s=None):  # the schedule read right after open_preview (the box's) lacks a time
+        d = dict(real(self, instance, s))
+        if armed:
+            armed.clear()
+            if gap == "missing":
+                d.pop("lock_hours_before")
+            else:
+                d["signup_lead_hours"] = None
+        return d
+
+    def preview(*a, **k):
+        out = real_preview(*a, **k)
+        armed.append(1)
+        return out
+
+    monkeypatch.setattr(Registry, "schedule_def", broken)
+    monkeypatch.setattr(rc, "open_preview", preview)
+    assert c.post(f"/api/raid/{RID}/open/preview", json={"start": t.isoformat(), "schedule": sid}, headers=h).json().get("box") is None
+    r = c.post(f"/api/raid/{RID}/open", json={"start": t.isoformat(), "schedule": sid, "occurrence": p["occurrence"], "seen": p["box"]["fp"]}, headers=h)
+    assert r.status_code == 400 and not rs.events, r.json()
+    box = r.json()["box"]
+    assert box["verb"] is None and box["sentences"] == [r.json()["error"]] and "nothing was opened" in r.json()["error"]

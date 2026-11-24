@@ -1832,7 +1832,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise RegistryError(why)
         return [dict(e) for e in later]
 
-    OPEN_UNREAD = "This sheet's times can't be read right now, so nothing was opened. Open it again from the list."
+    OPEN_UNREAD = "The bot couldn't read when this sheet opens and locks, so nothing was opened and the event stays coming up."
 
     def open_box(reg, rid: str, p: dict) -> dict:
         """Open the sheet now's box (consequences.open_now_box) from rc.open_preview's answer `p`: how early against the
@@ -1840,7 +1840,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         start = datetime.fromisoformat(p["start"])
         sd = reg.schedule_def(rid, p.get("schedule"))
         lineup = [{"raid": rid, "rosters": int(sd.get("rosters") or 1)}] + [{"raid": e["raid"], "rosters": int(e.get("rosters") or 1)} for e in p.get("later") or []]
-        lead, lock = float(sd.get("signup_lead_hours") or 0), float(sd.get("lock_hours_before") or 0)  # a one-off without its own: now
+        # never a number the schedule doesn't hold: a missing lead or lock raises (KeyError / TypeError) and the route
+        # refuses with OPEN_UNREAD instead of saying the sheet locks at the start
+        lead, lock = float(sd["signup_lead_hours"]), float(sd["lock_hours_before"])
         return cq.open_now_box(reg, start, start - timedelta(hours=lead), start - timedelta(hours=lock), lineup=lineup,
                                channel=bool(p.get("channel")))
 
@@ -1866,7 +1868,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                       else "No signup channel is set, so the sheet waits until one is.")
         try:
             p["box"] = open_box(v.reg, rid, p)
-        except (RegistryError, KeyError, ValueError):
+        except (RegistryError, KeyError, ValueError, TypeError):
             p["box"] = None
         return p
 

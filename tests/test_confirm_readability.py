@@ -816,7 +816,11 @@ def box_cases(reg, rs, runs, ms, dump):
     b = cq.lineup_box(reg, rs, three, L(hy, (RID, 1), ony))
     assert "Moves made on the removed roster are dropped." in b["sentences"], b
     add("lineup_box", "a roster that goes with board places", b)
-    add("lineup_box", "a roster with places goes and a raid is taken out", cq.lineup_box(reg, rs, three, L(hy, (RID, 1))))
+    cut = cq.lineup_box(reg, rs, three, L(hy, (RID, 1)))
+    said = cut["sentences"]
+    assert "Moves made on the removed roster are dropped." in said[:-1] and said[-1].endswith("stand."), \
+        ("what changes first, who is told after", said)
+    add("lineup_box", "a roster with places goes and a raid is taken out", cut)
     bd3.layout = was
     lk.fill_asks.append(rc.FillAsk(discord_id=ms[11].discord_id, display_name=ms[11].display_name, kind="other", role="healer",
                                    character="X", spec="Holy", reason="short 1 healer"))
