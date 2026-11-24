@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMediaQuery } from "@mantine/hooks";
-import { Anchor, Box as MBox, Button, Group, MultiSelect, SegmentedControl, Select, Stack, Switch, Text, Title } from "@mantine/core";
+import { Anchor, Box as MBox, Button, Group, MultiSelect, SegmentedControl, Select, Stack, Text, Title } from "@mantine/core";
 import { api, ApiError, type Box, type Fact, type Meta, type ScheduleEditorOptions, type ScheduleList, type ScheduleView } from "../api";
 import { fail, ok } from "../components/Page";
 import { Facts, ViewSection } from "../components/Facts";
@@ -11,6 +11,7 @@ import { QUARTER_HOURS, WhenPicker, wallTime } from "../components/WhenPicker";
 import { SlotEditor } from "../components/SlotEditor";
 import { useOpsSave } from "../components/ReviewModal";
 import { NameFields } from "../components/schedules/NameFields";
+import { PRIORITY_KEYS, PriorityFields, TimingFields } from "../components/schedules/SettingsFields";
 import { LineupBuilder, type LineupEntry, type PaletteRaid } from "../components/lineup/LineupBuilder";
 import { LineupPicture, type PictureStep } from "../components/lineup/LineupPicture";
 import type { OpenPreview } from "../components/board/types";
@@ -349,12 +350,10 @@ type SchedDraft = {
 };
 const TIMING_HOURS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"] as const;
 const TIMING_SWITCHES = ["nudge", "autofill", "open_dm", "confirm"] as const;
-type TimingKey = (typeof TIMING_HOURS)[number] | (typeof TIMING_SWITCHES)[number];
 /** a pickup template opens when an officer opens it and reminds nobody: these mean nothing there */
 const PICKUP_HIDDEN = new Set<string>(["signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"]);
 const KINDS = [{ value: "weekly", label: "Weekly" }, { value: "lockout", label: "Day N of each lockout" }, { value: "pickup", label: "Opened by an officer" }];
 const SCHEDULES = "/schedules";
-const SAME = "same";  // a select's "Use the raid's": the draft holds "" (nothing of the schedule's own)
 
 /** A new schedule's id from its name: unique across the guild (`taken`), never one of the server's reserved ids. */
 function slug(name: string, taken: string[], reserved: string[]): string {
@@ -377,7 +376,7 @@ const suggested = (opts: Opts, kind: string, raid?: string): Record<string, numb
 function seedOf(opts: Opts, view: ScheduleView | null, from: string): SchedDraft {
   if (view) {
     const st = view.stored as Record<string, unknown> & { weights?: Record<string, number> | null };
-    const weights = Object.fromEntries(Object.keys(PRIORITY_KEYS).map((k) => [k, st.weights?.[k] != null ? String(st.weights[k]) : ""]));
+    const weights = Object.fromEntries(PRIORITY_KEYS.map((k) => [k, st.weights?.[k] != null ? String(st.weights[k]) : ""]));
     return {
       name: String(st.name || view.name), id: view.id, idTyped: true, kind: String(st.kind || "weekly"), slots: [...((st.slots as string[]) || [])],
       days: ((st.days as number[]) || []).map(String), time: String(st.time || "20:00"),
@@ -388,7 +387,7 @@ function seedOf(opts: Opts, view: ScheduleView | null, from: string): SchedDraft
   }
   const lineup = (opts.lineups.find((l) => l.id === from)?.lineup || []).map((e) => ({ ...e }));
   return { name: "", id: "", idTyped: false, kind: "weekly", slots: [], days: [], time: "20:00", lineup, timing: suggested(opts, "weekly", lineup[0]?.raid),
-    split: "", weights: Object.fromEntries(Object.keys(PRIORITY_KEYS).map((k) => [k, ""])) };
+    split: "", weights: Object.fromEntries(PRIORITY_KEYS.map((k) => [k, ""])) };
 }
 /** A new schedule's edits against its seed: one per field that differs (the weights one per key; `idTyped` is how the
  *  id came, not an edit). */
@@ -397,8 +396,6 @@ function newEdits(d: SchedDraft, seed: SchedDraft): number {
     .filter((k) => JSON.stringify(d[k]) !== JSON.stringify(seed[k])).length
     + Object.keys(d.weights).filter((k) => d.weights[k] !== seed.weights[k]).length;
 }
-/** the priority's five weights in the Priority view's order (constants.PAGE_WORDS["priority"]'s keys) */
-const PRIORITY_KEYS = { regular: 0, rank: 0, main: 0, sat_out: 0, signup_order: 0 };
 
 /** New schedule (`sid` undefined) and a schedule's Edit (`/schedules/<id>/edit`): Start from (new only: Copy a lineup),
  *  Details (Name; a new one's Id), Lineup (the ONE builder — its first raid fixed on an edit, as the server keeps it),
@@ -501,18 +498,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
   /** every label is the server's word for the setting (PAGE_WORDS schedule_fields): the Save box's diff lines say the same */
   const W = meta.page_words, F = W.schedule_fields;
   const useRaids = `Use ${W.raids_own}`;  // the Priority section's button: clears every weight back to the raid's
-  const hourSelect = (k: TimingKey) => (
-    <Select key={k} label={F[k]} w={200} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }} placeholder="Pick one"
-      value={d.timing[k] !== undefined ? String(d.timing[k]) : null} data={(opts.hours[k] || []).map((c) => ({ value: String(c.value), label: c.words }))}
-      onChange={(v) => v && setTiming(k, Number(v))} />
-  );
-  const toggle = (k: TimingKey) => (
-    <Switch key={k} label={F[k]} checked={d.timing[k] === true} onChange={(e) => setTiming(k, e.currentTarget.checked)} />
-  );
-  const preset = opts.presets.find((p) => Object.entries(p.values).every(([k, v]) => Number(d.timing[k]) === v));
   const raidWeights = pickup ? opts.adhoc.weights : firstRaid?.weights || {};
-  const weightData = (k: string) => [{ value: SAME, label: W.weight_same.replace("{n}", String(raidWeights[k] ?? 0)) },
-    ...Array.from({ length: opts.max_weight + 1 }, (_, i) => ({ value: String(i), label: String(i) }))];
 
   async function saveSchedule() {
     if (!Object.keys(fields).length) return;
@@ -580,45 +566,15 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
           </Stack>
         </ViewSection>
         <ViewSection title="Sheet timing">
-          <Stack gap="md">
-            {!pickup && (
-              <Select label="Start from a preset" w={260} maw="100%" placeholder="Pick a preset" value={preset?.name ?? null} comboboxProps={{ withinPortal: true }}
-                data={opts.presets.map((p) => p.name)} onChange={(v) => {
-                  const p = opts.presets.find((x) => x.name === v);
-                  if (p) { setTimingTyped(true); set({ timing: { ...d.timing, ...p.values } }); }
-                }} />
-            )}
-            <Group gap="md" align="flex-end" wrap="wrap">
-              {shown("signup_lead_hours") && hourSelect("signup_lead_hours")}
-              {hourSelect("lock_hours_before")}
-            </Group>
-            {shown("nudge") && (
-              <Group gap="md" align="flex-end" wrap="wrap">
-                {toggle("nudge")}
-                {d.timing.nudge === true && hourSelect("nudge_hours_before")}
-              </Group>
-            )}
-            <Group gap="md" align="flex-end" wrap="wrap">
-              {toggle("confirm")}
-              {d.timing.confirm === true && hourSelect("confirm_hours_before")}
-            </Group>
-            <Group gap="md" align="flex-end" wrap="wrap">
-              {toggle("autofill")}
-              {hourSelect("fill_ask_hours")}
-            </Group>
-            {shown("open_dm") && toggle("open_dm")}
-          </Stack>
+          {/* the ONE Sheet timing component Edit event uses too (components/schedules/SettingsFields) */}
+          <TimingFields words={W} values={d.timing} hours={opts.hours} shown={(k) => shown(k)} onChange={setTiming}
+            presets={pickup ? undefined : opts.presets} onPreset={(values) => { setTimingTyped(true); set({ timing: { ...d.timing, ...values } }); }} />
         </ViewSection>
         <ViewSection title={F.weights} action={<Button variant="subtle" size="sm" onClick={() => set({ weights: Object.fromEntries(Object.keys(d.weights).map((k) => [k, ""])), split: "" })}>{useRaids}</Button>}>
-          <Group gap="md" align="flex-end" wrap="wrap">
-            {(Object.keys(PRIORITY_KEYS) as (keyof typeof PRIORITY_KEYS)[]).map((k) => (
-              <Select key={k} label={meta.page_words.priority[k]} w={190} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }}
-                value={d.weights[k] || SAME} data={weightData(k)} onChange={(v) => set({ weights: { ...d.weights, [k]: !v || v === SAME ? "" : v } })} />
-            ))}
-            <Select label={F.split_policy} w={240} maw="100%" allowDeselect={false} comboboxProps={{ withinPortal: true }} value={d.split || SAME}
-              data={[{ value: SAME, label: useRaids }, ...opts.split_policies.map((p) => ({ value: p, label: W.split[p] || p }))]}
-              onChange={(v) => set({ split: !v || v === SAME ? "" : v })} />
-          </Group>
+          <PriorityFields words={W} weights={d.weights} maxWeight={opts.max_weight} policies={opts.split_policies}
+            same={(k) => W.weight_same.replace("{n}", String(raidWeights[k] ?? 0))}
+            onWeight={(k, v) => set({ weights: { ...d.weights, [k]: v } })}
+            splits={[{ key: "split", label: F.split_policy, value: d.split, same: useRaids, onChange: (v) => set({ split: v }) }]} />
         </ViewSection>
         <div className={css.sect}>
           <Stack gap="sm">

@@ -352,7 +352,8 @@ def test_timing_lives_on_the_run_alone(reg, rs):
     assert json.dumps(reg.config.schedules, sort_keys=True) == stored, "the schedule is untouched"
     assert ev.start == t and not [n for m in reg.members.values() for n in m.notices if n["kind"] == "moved"], "a timing change tells nobody"
     assert rc.reschedule_refusal(reg, rs, ev, None, {"lock_hours_before": 2, "confirm_hours_before": 4}) == rc.TIMING_ORDER
-    assert rc.reschedule_refusal(reg, rs, ev, None, {"nudge_hours_before": 1}) == rc.TIMING_ORDER
+    assert rc.reschedule_refusal(reg, rs, ev, None, {"nudge_hours_before": 1, "nudge": True}) == rc.TIMING_ORDER
+    assert rc.reschedule_refusal(reg, rs, ev, None, {"nudge_hours_before": 1}) is None, "a reminder that is off sets no order"
     lock_with_board(reg, rs, ev, [])
     assert rc.reschedule_refusal(reg, rs, ev, None, {"lock_hours_before": 8}) == rc.TIMING_LOCKED
 

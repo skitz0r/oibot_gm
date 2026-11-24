@@ -119,6 +119,8 @@ def test_a_one_off_switches_to_priority_and_back(reg, rs):
     rc.reschedule(reg, rs, ev, timing={"first_come": False, "weights": {"rank": 5}}, by="o")
     assert rc.run_first_come(reg, ev) is False and rc.priority_words(reg, ev).startswith("Signed up early first") is False
     assert rc.priority_words(reg, ev) != PAGE_WORDS["first_to_join"]
+    rc.reschedule(reg, rs, ev, timing={"weights": {"signup_order": 6, "rank": 5}}, by="o")
+    assert rc.priority_words(reg, ev) == "Early signups first, then rank", "never 'who signed up first first'"
     rc.reschedule(reg, rs, ev, timing={"first_come": True}, by="o")
     assert rc.run_first_come(reg, ev) is True and rc.priority_words(reg, ev) == PAGE_WORDS["first_to_join"]
 

@@ -1739,7 +1739,10 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
         soft = float(values.get("cutoff_soft_hours", team_setting(team, "cutoff_soft_hours")))
         hard = float(values.get("cutoff_hard_hours", team_setting(team, "cutoff_hard_hours")))
         confirm = float(values.get("confirm_hours", team.get("confirm_hours", hard)))
-        if soft < hard or confirm > hard:
+        # a reminder that is off, or a confirm-by nobody is asked for, sets no order (Edit event turns either off)
+        reminds = values.get("reminders", team_setting(team, "reminders")) not in (None, OFF, False)
+        confirms = bool(values.get("confirm", run_confirms(reg, first)))
+        if (reminds and soft < hard) or (confirms and confirm > hard):
             return TIMING_ORDER
     return None
 

@@ -154,13 +154,15 @@ export interface PageWords {
   /** a setting's name: the schedule editor's labels and the Save box's lines (configops) say the same */
   schedule_fields: Record<"name" | "kind" | "slots" | "days" | "time" | "lineup" | "rosters" | "active" | "signup_lead_hours" | "nudge"
     | "nudge_hours_before" | "lock_hours_before" | "confirm" | "confirm_hours_before" | "autofill" | "fill_ask_hours" | "open_dm"
-    | "split_policy" | "weights", string>;
+    | "split_policy" | "weights" | "first_come", string>;
   raid_fields: Record<string, string>; split: Record<string, string>; on: string; off: string; raids_own: string; suggested: string;
   regulars_one: string; regulars_n: string; away_n: string;
   /** the empty lists, hints and lines the pages wrote themselves until the final review */
   events_empty: string; schedules_empty: string; raids_empty: string; raid_missing: string; new_event_no_lineup: string;
   new_event_no_time: string; schedule_no_lineup: string; activity_empty: string; repost_sheet: string; nothing_applies: string;
   weight_same: string;
+  /** Edit event (the owner's tweaks, B): the seating choice beside first_to_join, and the editor's one-line states */
+  by_priority: string; edit_locked: string; edit_over: string;
 }
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */
@@ -250,7 +252,7 @@ export interface EventView {
   parts: PartView[]; activity: { when: string; line: string }[];
   /** `reschedule` = the box Reschedule opens on before anything is picked (consequences.reschedule_pick_box) */
   boxes: { lock: Box | null; cancel: Box | null; reschedule: Box | null };
-  actions: { reschedule: boolean; edit_lineup: boolean; lock: boolean; cancel: boolean; open_now: boolean };
+  actions: { reschedule: boolean; edit: boolean; edit_lineup: boolean; lock: boolean; cancel: boolean; open_now: boolean };
   lineup: { raid: string; rosters: number; starts: number }[]; start_iso: string;
   /** the event's own sheet timing by setting (rc.EVENT_TIMING), what POST /api/run/{key}/reschedule takes back */
   timing: Record<string, number | boolean>;
@@ -268,6 +270,15 @@ export interface EventView {
   test_chip: string | null;
   /** Split strategy…'s choices in the server's words */
   strategies: { id: string; label: string; words: string }[];
+  /** Edit event (event_view.edit_options), null once it has started or is over: the settings it may change NOW (every
+   *  one before the lock, the automatic asks and an ask's wait after it), its own values (rc.run_timing), each raid's
+   *  split, the schedule editor's hour choices (its own value among them), the highest weight and the split policies */
+  edit: EventEdit | null;
+}
+export interface EventEdit {
+  fields: string[]; values: Record<string, number | boolean | Record<string, number>>;
+  splits: { key: string; raid: string; value: string }[]; hours: Record<string, { value: number; words: string }[]>;
+  max_weight: number; split_policies: string[];
 }
 /** One move a short raid could take (rc.event_switches): `from` / `to` in words ('Shadow', 'Nyx, Shadow', 'no answer yet'),
  *  `button` the server's word (Switch · Answer for them · Ask), `raids` the raids it helps, `box` its confirmation box;

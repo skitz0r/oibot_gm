@@ -1068,9 +1068,13 @@ def test_the_schedule_editor_keeps_every_setting():
     page = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
     editor = page[page.index("function ScheduleEditor("):]
     for needle in ("fixedFirst={!!sid}", "opts.hours", "opts.presets", "opts.split_policies", "opts.max_weight", "W.raids_own",
-                   "F = W.schedule_fields", "label={F[k]}", 'toggle("nudge")', 'toggle("autofill")', 'toggle("open_dm")', 'toggle("confirm")',
-                   "W.split[p]", "kind: d.kind", "QUARTER_HOURS", "guardNav(", "Reload", 'useDirty(`schedule:${sid ?? "new"}`', "box: true"):
+                   "F = W.schedule_fields", "<TimingFields", "<PriorityFields", "kind: d.kind", "QUARTER_HOURS", "guardNav(", "Reload",
+                   'useDirty(`schedule:${sid ?? "new"}`', "box: true"):
         assert needle in editor, needle
+    # the Sheet timing and Priority pieces are ONE component the schedule editor and Edit event share (the owner's tweaks, B)
+    shared = _code_only((SRC / "components" / "schedules" / "SettingsFields.tsx").read_text())
+    for needle in ("label={F[k]}", 'toggle("nudge")', 'toggle("autofill")', 'toggle("open_dm")', 'toggle("confirm")', "words.split[p]"):
+        assert needle in shared, needle
     assert "confirmed" not in editor and "opsApi.confirm(" not in editor and "staleOnPage: true" in editor
     # fix round 1: the labels are the server's words (the Save box's diff lines say the same), none written here
     for literal in ('"Sheet opens"', '"Locks"', '"Reminder"', '"Confirm by"', '"An ask waits"', '"The bot asks people for open seats"', "SPLIT_LABEL"):
@@ -1354,8 +1358,10 @@ def test_the_event_page_shows_its_raid_night_facts_and_split_strategy():
     assert "intro={list.tz_words}" in page and "tag={ev.test_chip}" in page
     assert "tag={ev.test_chip}" in _code_only((SRC / "components" / "events" / "HistoryView.tsx").read_text())
     more = _code_only((SRC / "components" / "events" / "EventMore.tsx").read_text())
-    assert "/strategy`" in more and "preview: true" in more and "seen: fp" in more and "ev.strategies" in more and "replaceSplit" in more
-    assert 's.state === "open" && p.strategy' in more and "Split strategy…" in more
+    # each raid's split moved to Edit event (the owner's tweaks, B): one editor for the event's own settings
+    assert "Split strategy…" not in more and "/strategy`" not in more
+    edit = _code_only((SRC / "components" / "events" / "EditEvent.tsx").read_text())
+    assert "split_policy" in edit and "e.splits.map(" in edit
     assert "busy={busy}" in more and 'busy ? "withdraw" : null' not in more and "post(path, payload, k)" in more
     assert "${L.remind} for" not in more and "End ${s.run_title}?" not in more and " on ${name}?" not in more, "the run is named in the server's box"
     lineup = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
@@ -1446,7 +1452,6 @@ def test_the_final_review_pages_fixes():
     more = _code_only((SRC / "components" / "events" / "EventMore.tsx").read_text())
     boxed = more[more.index("async function boxed("):more.index("const remind")]
     assert "preview: true" in boxed and "seen: fp" in boxed and "boxOf_(e)" in boxed and "refresh: preview" in boxed
-    assert "splitSeq.current" in more and "if (n === splitSeq.current) replaceSplit(b)" in more
     board = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
     server = board[board.index("async function serverMove("):board.index("async function place(")]
     assert "preview: true" in server and "seen: fp" in server and 'state: "locked"' in server and "b?.board" in server
@@ -1491,3 +1496,25 @@ def test_the_final_review_pages_fixes():
     board_head = _code_only((SRC / "components" / "events" / "EventBoard.tsx").read_text())
     assert "!(finished && parts.length === 1)" in board_head, "a finished event says Rostered once"
     assert "minHeight: mobile ? 44 : undefined }}>log out</a>" in _code_only((SRC / "App.tsx").read_text())
+
+
+def test_edit_event_is_one_editor_on_the_schedule_editors_own_pieces():
+    """The owner's tweak B: Edit event (the header's third action) edits the event's every own setting with the SAME
+    Sheet timing and Priority components the schedule editor uses (one component, never a copy), pickers only; Save
+    previews the server's box (`edit: true, preview: true`), presses with the box's fp as `seen` (a 409's fresh box is
+    the next press's), and the draft is compared with its seed under the leave guard."""
+    shared = _code_only((SRC / "components" / "schedules" / "SettingsFields.tsx").read_text())
+    assert "export function TimingFields(" in shared and "export function PriorityFields(" in shared
+    sched = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
+    edit = _code_only((SRC / "components" / "events" / "EditEvent.tsx").read_text())
+    for f in (sched, edit):
+        assert "<TimingFields" in f and "<PriorityFields" in f
+    assert "hourSelect" not in sched and "weightData" not in sched, "the schedule editor keeps no copy of the pieces"
+    assert "edit: true" in edit and "preview: true" in edit and "seen: fp" in edit and "boxOf(x)" in edit and "refresh: preview" in edit
+    assert "useDirty(`event:${evKey}`" in edit and "changesOf(d, seed.current, fields)" in edit and "className={css.touch}" in edit
+    assert not re.search(r"\b(DateTimePicker|TimeInput|TimePicker|TextInput|NumberInput)\b", edit), "pickers only"
+    assert "W.edit_locked" in edit and "W.edit_over" in edit, "the editor's states are the server's words"
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert "ev.actions.edit" in page and "/edit`" in page and "Edit event" in page
+    app = _code_only((SRC / "App.tsx").read_text())
+    assert 'path="/events/:key/edit"' in app

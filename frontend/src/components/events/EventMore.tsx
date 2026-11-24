@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ActionIcon, Menu, Modal, Select, Text, Tooltip } from "@mantine/core";
-import { IconArrowsSplit, IconBell, IconDiamond, IconDots, IconFlagCheck, IconListCheck, IconPlayerPause, IconPlayerPlay, IconRotate, IconSend, IconUsersPlus } from "@tabler/icons-react";
-import { api, type Box, type EventView, type Meta, type PartView, type Sheet } from "../../api";
+import { ActionIcon, Menu, Modal, Text, Tooltip } from "@mantine/core";
+import { IconBell, IconDiamond, IconDots, IconFlagCheck, IconListCheck, IconPlayerPause, IconPlayerPlay, IconRotate, IconSend, IconUsersPlus } from "@tabler/icons-react";
+import { api, type Box, type EventView, type Meta, type Sheet } from "../../api";
 import { useConfirmBox } from "../ConfirmBox";
 import { boxOf as boxOf_ } from "./shared";
 import { fail, ok } from "../Page";
@@ -16,14 +16,13 @@ import css from "../board/board.module.css";
  *  had and the approved mockup does not draw, kept on the event so none is lost — per raid, from the run's own JSON
  *  (`part.sheet`, ev_json): Fill seats… after the lock / Suggest… before it (the fill screen), Remind the unanswered,
  *  Pause / Resume automatic asks, Re-post the sheet… (the first raid's: it holds the sheet), the loot council, End the
- *  run, the asks out (each with Withdraw) and, on a finished event, Reopen an end made by mistake. Each verb is named as
+ *  run, the asks out (each with Withdraw) and, on a finished event, Reopen an end made by mistake. Each raid's split
+ *  moved to Edit event (the owner's tweaks, B) with the event's other own settings. Each verb is named as
  *  on Discord (meta.run_labels); what can't be pressed is greyed with the server's reason under it; Remind and End ask
  *  first with the server's box (remind_box, end_box); the fill and
  *  re-post screens are the board's own. Nothing here composes a sentence. */
 export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChanged: () => void }) {
   const [ask, dialog] = useConfirmBox(["run:", "loot"]);
-  const [askSplit, splitDialog, replaceSplit] = useConfirmBox(["run:"]);
-  const splitSeq = useRef(0);  // the newest pick's preview wins: an older answer never replaces a newer pick's box
   const [fill, setFill] = useState<NightSheet | null>(null);
   const [repost, setRepost] = useState<string | null>(null);
   const [asks, setAsks] = useState<NightSheet | null>(null);
@@ -57,31 +56,6 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
   }
   const remind = (s: NightSheet) => boxed(`/api/run/${encodeURIComponent(s.key)}/remind`);
   const end = (s: NightSheet) => boxed(`/api/loot/${encodeURIComponent(s.key)}/end`);
-  /** Split strategy… for one raid before the lock (the existing POST /api/run/{key}/strategy): the server's pick box
-   *  first, every pick asks the server again (consequences.strategy_box: what the strategy does, that the board is
-   *  placed again and the lock uses it), the verb presses with the fp on screen. The board then redraws by it. */
-  async function split(p: PartView) {
-    const url = `/api/run/${encodeURIComponent(p.key)}/strategy`;
-    const preview = async (strategy: string | null): Promise<Box> => {
-      try { return (await api.post<{ box: Box }>(url, { strategy, preview: true })).box; } catch (e) { const b = boxOf_(e); if (b) return b; throw e; }
-    };
-    let picked: string | null = null;
-    let first: Box;
-    try { first = await preview(null); } catch (e) { fail(e); return; }
-    const said = { text: "" };
-    const pick = (v: string | null) => {
-      picked = v; const n = ++splitSeq.current;
-      preview(v).then((b) => { if (n === splitSeq.current) replaceSplit(b); }).catch((e) => { if (n === splitSeq.current) fail(e); });
-    };
-    const done = await askSplit({
-      box: first, refresh: () => preview(picked),
-      fields: <SplitPick choices={ev.strategies} now={p.strategy} onPick={pick} />,
-      act: async (fp) => {
-        try { said.text = (await api.post<{ message: string }>(url, { strategy: picked, seen: fp })).message; return null; } catch (e) { const b = boxOf_(e); if (b) return b; throw e; }
-      },
-    });
-    if (done && said.text) { ok(said.text); onChanged(); }
-  }
 
   /** one raid's items */
   const items = ({ p, s }: (typeof parts)[number], i: number) => {
@@ -96,7 +70,6 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
           ? <Menu.Item key={`${p.key}:pause`} leftSection={<IconPlayerPlay size={14} />} onClick={() => post(`/api/run/${encodeURIComponent(s.key)}/pause`, { paused: false })}>{L.resume}</Menu.Item>
           : <Menu.Item key={`${p.key}:pause`} leftSection={<IconPlayerPause size={14} />} onClick={() => post(`/api/run/${encodeURIComponent(s.key)}/pause`, { paused: true })}>{L.pause}</Menu.Item>);
       }
-      if (s.state === "open" && p.strategy) out.push(<Menu.Item key={`${p.key}:split`} leftSection={<IconArrowsSplit size={14} />} onClick={() => split(p)}>Split strategy…</Menu.Item>);
       if (i === 0) out.push(<Menu.Item key={`${p.key}:repost`} leftSection={<IconSend size={14} />} onClick={() => setRepost(s.key)}>Re-post the sheet…</Menu.Item>);
       if (s.loot?.may_open) out.push(<Menu.Item key={`${p.key}:loot`} leftSection={<IconDiamond size={14} />} onClick={() => post(`/api/loot/${encodeURIComponent(s.key)}/open`)}>{L.loot}</Menu.Item>);
       else if (s.loot?.open) out.push(<Menu.Item key={`${p.key}:loot`} leftSection={<IconDiamond size={14} />} component={Link} to="/loot">{L.loot}</Menu.Item>);
@@ -128,17 +101,6 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
           onAct={async (k, path, payload) => { if (busy) return; await post(path, payload, k); setAsks(null); }} />}
       </Modal>
       {dialog}
-      {splitDialog}
     </>
-  );
-}
-
-/** The box's one field: how the raid's rosters are split, in the server's words (event_json `strategies`); the
- *  strategy it splits by now is where the select starts. */
-function SplitPick({ choices, now, onPick }: { choices: EventView["strategies"]; now: string | null; onPick: (v: string | null) => void }) {
-  const [v, setV] = useState<string | null>(now);
-  return (
-    <Select label="Split by" allowDeselect={false} value={v} comboboxProps={{ withinPortal: true }}
-      data={choices.map((c) => ({ value: c.id, label: `${c.label}: ${c.words}` }))} onChange={(x) => { setV(x); onPick(x); }} />
   );
 }

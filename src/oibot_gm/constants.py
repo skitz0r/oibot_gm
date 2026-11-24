@@ -52,7 +52,7 @@ CONFIRM_WORDS = {"back": "Back", "keep": "Keep editing", "discard": "Discard edi
 
 # a priority weight as a short phrase (rc.priority_words: "Regulars first, then rank")
 PRIORITY_SHORT = {"regular": "Regulars", "rank": "rank", "main": "main characters", "sat_out": "who sat out last time",
-                  "signup_order": "who signed up first"}
+                  "signup_order": "early signups"}  # never "who signed up first first"
 
 # the value words of the Events, New event, Schedules and Raids pages (phase 4, the approved mockups), ONCE here: the read
 # models (event_view.py …) print them and /api/meta.page_words carries them, so a page file never holds a value word.
@@ -132,8 +132,11 @@ PAGE_WORDS = {
                         "weights": "Priority",
                         # an event's own (Edit event, the owner's tweaks B): first to join or by priority
                         "first_come": "Who gets a seat"},
-    # Edit event's seating choice beside PAGE_WORDS["first_to_join"]
+    # Edit event's seating choice beside PAGE_WORDS["first_to_join"], and its one-line states: after the lock, and once the
+    # event has started or is over (the page shows nothing to edit)
     "by_priority": "By priority",
+    "edit_locked": "The roster is locked, so only the automatic asks and how long an ask waits can change.",
+    "edit_over": "This event has started or is over, so its settings can't change.",
     # a raid's settings by name: the Raids page's Details labels and its Save box's lines
     "raid_fields": {"lockout_days": "Lockout", "duration_hours": "Length", "first_open": "First opens"},
     # how one night's joiners are split into two rosters (registry.SPLIT_POLICIES)

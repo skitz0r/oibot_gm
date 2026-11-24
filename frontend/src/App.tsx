@@ -24,6 +24,7 @@ import { PricesPage } from "./pages/Prices";
 import { SchedulesPage } from "./pages/Schedules";
 import { LineupPage } from "./pages/LineupPage";
 import { EventsPage } from "./pages/Events";
+import { EditEvent } from "./components/events/EditEvent";
 import { TellTheBot } from "./components/TellTheBot";
 import { PolicyPage } from "./pages/Policy";
 import { HelpPage } from "./pages/Help";
@@ -108,6 +109,12 @@ function RostersRedirect() {
 function EditLineupRoute({ meta }: { meta: Meta }) {
   const { key } = useParams();
   return <LineupPage key={key} meta={meta} mode="edit-lineup" />;
+}
+
+/** /events/:key/edit: Edit event (the event's own settings), a fresh editor per event. */
+function EditEventRoute({ meta }: { meta: Meta }) {
+  const { key } = useParams();
+  return <EditEvent key={key} evKey={key || ""} meta={meta} />;
 }
 
 /** /schedules/:id/edit: the schedule editor, a fresh one per visit (its Reload after a 409 comes back here through the
@@ -216,6 +223,7 @@ export default function App() {
             {/* New event and Edit lineup: the lineup builder (pages/LineupPage); the Events page lists and shows events */}
             <Route path="/events/new" element={officer(<LineupPage meta={meta} mode="new-event" />)} />
             <Route path="/events/:key/lineup" element={officer(<EditLineupRoute meta={meta} />)} />
+            <Route path="/events/:key/edit" element={officer(<EditEventRoute meta={meta} />)} />
             <Route path="/events" element={officer(<EventsPage meta={meta} />)} />
             <Route path="/events/:key" element={officer(<EventsPage meta={meta} />)} />
             <Route path="/events/coming/:sid/:occurrence" element={officer(<EventsPage meta={meta} />)} />
