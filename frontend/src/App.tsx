@@ -3,8 +3,10 @@ import { REFRESH_EVENT } from "./hooks/usePoll";
 import { Alert, AppShell, Avatar, Box, Burger, Button, Group, Menu, Modal, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconGauge, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus, IconCoin } from "@tabler/icons-react";
+import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconCalendarRepeat, IconMessageCircle, IconHelp, IconScale, IconTool, IconUserPlus, IconCoin } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { LeaveGuard, guardNav } from "./components/LeaveGuard";
+import { setBoxMeta } from "./components/ConfirmBox";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
 import { setItemUrl } from "./components/ItemName";
@@ -20,7 +22,7 @@ import { LootPage } from "./pages/Loot";
 import { LootLogPage } from "./pages/LootLog";
 import { ProfessionsPage } from "./pages/Professions";
 import { PricesPage } from "./pages/Prices";
-import { ReadinessPage } from "./pages/Readiness";
+import { RaidSchedulesPage } from "./pages/RaidSchedules";
 import { TellTheBot } from "./components/TellTheBot";
 import { PolicyPage } from "./pages/Policy";
 import { HelpPage } from "./pages/Help";
@@ -32,8 +34,8 @@ const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", labe
 const PRICES = { to: "/prices", label: "Prices", icon: IconCoin };
 const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
+  { to: "/schedules", label: "Schedules", icon: IconCalendarRepeat },
   { to: "/raids", label: "Raids", icon: IconMountain },
-  { to: "/readiness", label: "Readiness", icon: IconGauge },
   { to: "/members", label: "Members", icon: IconUsers },
   { to: "/applications", label: "Applications", icon: IconUserPlus },
   { to: "/loot", label: "Loot", icon: IconDiamond },
@@ -92,6 +94,12 @@ function GuildSelector({ meta }: { meta: Meta }) {
   );
 }
 
+/** /readiness (and ?raid=x) → the Raids page's Readiness view of that raid. */
+function ReadinessRedirect() {
+  const raid = new URLSearchParams(useLocation().search).get("raid");
+  return <Navigate to={raid ? `/raids/${encodeURIComponent(raid)}?view=readiness` : "/raids?view=readiness"} replace />;
+}
+
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [opened, { toggle, close }] = useDisclosure();
@@ -108,6 +116,7 @@ export default function App() {
     api.get<Meta>("/api/meta").then((m) => {
       setGuild(m.guild_key, m.guild);  // from here on every call, image and live stream names this guild
       setItemUrl(m.item_url);  // every item name links through this template (auction prices §4.6)
+      setBoxMeta(m);  // the confirmation box's fixed words (Back, the "changed" line)
       setMeta(m);
       // never change server without saying so: a selection this person lost, a tab that lost its server, a link to a
       // server they aren't in (K16)
@@ -140,7 +149,7 @@ export default function App() {
   const pricesTab = !!meta.prices?.market;  // absent on a version without auction houses (tbc)
   const nav = pricesTab ? [...NAV.slice(0, 3), PRICES, ...NAV.slice(3)] : NAV;
   const link = (n: { to: string; label: string; icon: React.ElementType }) => (
-    <NavLink key={n.to} component={Link} to={n.to} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7 }} />
+    <NavLink key={n.to} component={Link} to={n.to} onClick={(e: React.MouseEvent) => { e.preventDefault(); guardNav(n.to); }} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7 }} />
   );
   return (
     <AppShell navbar={{ width: 212, breakpoint: "sm", collapsed: { mobile: !opened } }} header={{ height: 52, collapsed: !mobile }} padding="lg">
@@ -178,7 +187,12 @@ export default function App() {
             <Route path="/me" element={<MePage meta={meta} />} />
             <Route path="/rosters" element={officer(<RostersPage meta={meta} />)} />
             <Route path="/raids" element={officer(<RaidsPage meta={meta} />)} />
-            <Route path="/readiness" element={officer(<ReadinessPage meta={meta} />)} />
+            <Route path="/raids/:id" element={officer(<RaidsPage meta={meta} />)} />
+            {/* Readiness is the Raids page's third view now; an old link keeps its raid */}
+            <Route path="/readiness" element={<ReadinessRedirect />} />
+            {/* the schedule editor, until the Schedules page (Task 11) replaces this page */}
+            <Route path="/schedules" element={officer(<RaidSchedulesPage meta={meta} />)} />
+            <Route path="/schedules/:id" element={officer(<RaidSchedulesPage meta={meta} />)} />
             <Route path="/members" element={officer(<MembersPage meta={meta} />)} />
             <Route path="/applications" element={officer(<ApplicationsPage meta={meta} />)} />
             <Route path="/bank" element={<Navigate to="/members" replace />} />
@@ -197,6 +211,7 @@ export default function App() {
           </Routes>
         </Box>
       </AppShell.Main>
+      <LeaveGuard meta={meta} />
       {officerPage && (
         <Modal opened={tellOpen} onClose={() => setTellOpen(false)} title="Ask or tell the bot" size="lg">
           <TellTheBot scope="rail" guild={meta.guild_key} autoFocus />

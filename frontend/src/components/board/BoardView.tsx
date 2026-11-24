@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActionIcon, Box, Button, Group, Popover, SegmentedControl, Stack, Text, Tooltip } from "@mantine/core";
 import { IconInfoCircle, IconRefresh, IconScale, IconUsers } from "@tabler/icons-react";
 import { api, type Board, type GroupSummary, type Meta, type Seat, type Sheet } from "../../api";
-import { SPLIT_LABEL } from "../../pages/Raids";
+import { SPLIT_LABEL } from "./shared";
 import { RaidWide } from "../GroupsBlock";
 import { Eyebrow, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";

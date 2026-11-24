@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { Alert, Badge, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { ApiError, opsApi, type Described, type OpsChange, type OpsReply } from "../api";
 import { fail, ok } from "./Page";
+import { BoxBody, BoxButtons } from "./ConfirmBox";
 
 /** The ONE review step of the site's edit modes (design §2.3, D51 tiered review): the server's Described preview as structure —
  *  one block per write (a buff, a raid, a schedule…), its settings current → new, the refusal its apply would give, the
@@ -20,6 +21,8 @@ export interface ReviewModalProps {
   notice?: string | null;
   onApply: () => void;
   onClose: () => void;
+  /** the phase 4 pages: the server's box (described.box) is printed instead of the lines, with this verb */
+  verb?: string;
 }
 
 export function DescribedView({ d }: { d: Described }) {
@@ -64,9 +67,26 @@ export function ResultSheet({ r }: { r: OpsReply }) {
   );
 }
 
-export function ReviewModal({ opened, title, preview, result, busy, notice, onApply, onClose }: ReviewModalProps) {
+export function ReviewModal({ opened, title, preview, result, busy, notice, onApply, onClose, verb }: ReviewModalProps) {
   const d = preview?.described;
   const n = d ? d.lines.filter((l) => !l.error).length : 0;
+  // the phase 4 pages (a `verb` given): the server's §7b box — its title, diff and sentences, Back then the verb; any
+  // line that can't apply (or a refusal) still shows under it, and then only Back
+  const box = verb && d?.box ? d.box : null;
+  if (box && d && !result) {
+    const errors = [...d.lines.filter((l) => l.error).map((l) => `${l.label}: ${l.error}`), ...d.refused];
+    const go = { ...box, verb: errors.length || !n || !preview?.token ? null : verb ?? null };
+    return (
+      <Modal opened={opened} onClose={onClose} title={box.title} centered>
+        <Stack gap="md">
+          {notice && <Alert color="blue" variant="light" p="xs"><Text size="sm">{notice}</Text></Alert>}
+          <BoxBody box={box} />
+          {errors.map((x, i) => <Text key={i} size="sm" c="red">⛔ {x}</Text>)}
+          <BoxButtons box={go} busy={busy} onBack={onClose} onGo={onApply} />
+        </Stack>
+      </Modal>
+    );
+  }
   return (
     <Modal opened={opened} onClose={onClose} title={result ? (result.summary ? `Saved — ${result.summary}` : "Result") : title || "Review your changes"} centered size="lg">
       <Stack gap="md">
@@ -99,13 +119,19 @@ type Waiter = (r: OpsReply | null) => void;
  *  the result sheet. A token that went stale re-previews: applied silently when the lines are the ones shown, otherwise shown
  *  again ("Updated since you looked"); a 400 for the token (the bot restarted) says so and shows the fresh preview.
  *  A 409 (someone else changed the section since the page loaded) resolves with `{ ...body, changed }` for the page to mark. */
-export function useOpsSave(): [(changes: OpsChange[], opts?: { revs?: Record<string, string>; title?: string }) => Promise<OpsReply | null>, React.ReactNode] {
+/** `verb` (the phase 4 pages): the server's box (described.box) is printed with this verb and Back in place of the lines,
+ *  Apply N changes and Back to edits; a write that went through closes the box with a toast (no result sheet).
+ *  `always`: the box shows even where the server would apply at once (a Save is a preview first). */
+export type OpsSaveOpts = { revs?: Record<string, string>; title?: string; verb?: string; always?: boolean };
+
+export function useOpsSave(): [(changes: OpsChange[], opts?: OpsSaveOpts) => Promise<OpsReply | null>, React.ReactNode] {
   const [preview, setPreview] = useState<OpsReply | null>(null);
   const [result, setResult] = useState<OpsReply | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState<string | undefined>();
-  const ctx = useRef<{ changes: OpsChange[]; revs?: Record<string, string>; done: Waiter } | null>(null);
+  const [verb, setVerb] = useState<string | undefined>();
+  const ctx = useRef<{ changes: OpsChange[]; revs?: Record<string, string>; done: Waiter; verb?: string } | null>(null);
 
   const close = () => {
     const c = ctx.current;
@@ -129,6 +155,11 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: { revs?: Record<str
       if (r.needs_review) {  // the token went stale and the lines moved (or the bot restarted): look again
         setNotice(r.restarted ? "The bot restarted — review again." : "Updated since you looked — check the changes again.");
         setPreview(r);
+      } else if (c.verb && !r.refused?.length) {  // the box's write went through: close it, say so
+        ctx.current = null;
+        setPreview(null); setResult(null); setNotice(null);
+        ok(r.summary || "saved");
+        c.done(r);
       } else showResult(r);
     } catch (e) {
       if (e instanceof ApiError && e.status === 400 && /apply needs the token/.test(e.message)) {
@@ -141,26 +172,31 @@ export function useOpsSave(): [(changes: OpsChange[], opts?: { revs?: Record<str
     } finally { setBusy(false); }
   };
 
-  const save = useCallback(async (changes: OpsChange[], opts?: { revs?: Record<string, string>; title?: string }): Promise<OpsReply | null> => {
+  const save = useCallback(async (changes: OpsChange[], opts?: OpsSaveOpts): Promise<OpsReply | null> => {
     if (!changes.length) { ok("nothing changed"); return null; }
     let r: OpsReply;
     try {
-      r = await opsApi.save(changes, opts?.revs);
+      r = await (opts?.always ? opsApi.preview(changes, opts?.revs) : opsApi.save(changes, opts?.revs));
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) { fail(e); return { ...(e.body as OpsReply), changed: (e.body as OpsReply).changed || [] }; }
       throw e;
     }
-    if (!r.needs_review && !(r.refused?.length)) {
+    if (opts?.always && !r.token && !(r.refused?.length) && !r.described?.lines.length) {  // nothing differs from what is stored
+      ok(r.summary || "nothing changed");
+      return null;
+    }
+    const review = r.needs_review || (opts?.always && !!r.token);
+    if (!review && !(r.refused?.length)) {
       ok(r.summary || "saved");
       return r;
     }
     return new Promise<OpsReply | null>((resolve) => {
-      ctx.current = { changes, revs: opts?.revs, done: resolve };
-      setTitle(opts?.title);
-      if (r.needs_review) { setResult(null); setPreview(r); } else showResult(r);
+      ctx.current = { changes, revs: opts?.revs, done: resolve, verb: opts?.verb };
+      setTitle(opts?.title); setVerb(opts?.verb);
+      if (review) { setResult(null); setPreview(r); } else showResult(r);
     });
   }, []);
 
-  const dialog = <ReviewModal opened={preview !== null || result !== null} title={title} preview={preview} result={result} busy={busy} notice={notice} onApply={apply} onClose={close} />;
+  const dialog = <ReviewModal opened={preview !== null || result !== null} title={title} preview={preview} result={result} busy={busy} notice={notice} onApply={apply} onClose={close} verb={verb} />;
   return [save, dialog];
 }

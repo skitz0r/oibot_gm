@@ -242,7 +242,7 @@ def test_the_run_vocabulary_has_no_copy_in_the_frontend():
     for field in ("meta.run_states", "markOf(meta", "run_labels", "run_words", "ask_kinds", "ask_answers"):
         assert field in card or field in (SRC / "components" / "board" / "shared.tsx").read_text(), field
     assert "s.badge" in (SRC / "pages" / "Me.tsx").read_text(), "Me's badge is the server's words (rc.answer_word)"
-    assert "<LevelChip" in (SRC / "pages" / "Rosters.tsx").read_text() and "<LevelChip" in (SRC / "pages" / "Readiness.tsx").read_text()
+    assert "<LevelChip" in (SRC / "pages" / "Rosters.tsx").read_text() and "<LevelChip" in (SRC / "components" / "raids" / "ReadinessView.tsx").read_text()
 
 
 def test_the_board_draws_no_text_beside_icons():
@@ -814,24 +814,27 @@ def test_raids_and_readiness_have_no_raid_timing_and_one_minimum():
     number); every officer on the page edits (no `owner` prop on RuleCard); the schedule editor shows the schedule's
     own values and never says what "the raid's" would be."""
     raids = (SRC / "pages" / "Raids.tsx").read_text()
-    card = raids[raids.index("function RuleCard("):]
-    assert "owner" not in card[:card.index(") {\n")], "RuleCard takes no owner prop: every officer edits"
-    use = raids[raids.index("<RuleCard"):]
+    card = raids[raids.index("function RaidDetail("):]
+    assert "owner" not in card[:card.index(") {\n")], "RaidDetail takes no owner prop: every officer edits"
+    use = raids[raids.index("<RaidDetail"):]
     assert "owner=" not in use[:use.index("/>")]
     assert "The owner edits the rules" not in raids
-    for key in ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"):
-        assert key not in raids, f"Raids.tsx still names the raid's {key}"
-    for rel in ("components/CompTargets.tsx", "pages/Readiness.tsx"):
-        text = (SRC / rel).read_text()
+    views = {rel: (SRC / rel).read_text() for rel in ("pages/Raids.tsx", "components/raids/RulesView.tsx", "components/raids/PriorityView.tsx",
+                                                     "components/raids/ReadinessView.tsx")}
+    for rel, text in views.items():
+        for key in ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"):
+            assert key not in text, f"{rel} still names the raid's {key}"
         for word in ("limits", "aims", "at most"):
-            assert word not in text.lower(), f"{rel} still says {word!r}"
+            assert word not in _code_only(text).lower(), f"{rel} still says {word!r}"
         assert "max:" not in text, f"{rel} still sends or reads an upper number"
-    comp = (SRC / "components" / "CompTargets.tsx").read_text()
-    assert "No minimums set. The lock uses the game's minimum for tanks and healers. Add one for a role or class below." in comp
-    assert "Save the minimums" in comp and 'kind: "comp"' in comp and "`config:raids:${rid}`" in comp
-    assert "(owner)" not in comp and "(officers)" not in comp
-    ready = (SRC / "pages" / "Readiness.tsx").read_text()
-    assert "Against the minimums" in ready and "on the Raids page</Anchor>" not in ready
+        assert "(owner)" not in text and "(officers)" not in text
+    # the make-up's minimums: one `comp` change with the raid's rev; the empty make-up is the server's sentence
+    assert 'kind: "comp"' in raids and "`config:raids:${r.id}`" in raids
+    assert "page.make_up_empty" in views["components/raids/RulesView.tsx"] and "view.make_up_empty" in views["components/raids/ReadinessView.tsx"]
+    for f in SRC.rglob("*.tsx"):
+        assert "Add one for a role or class below" not in f.read_text(), f"{f.name}: an empty sentence pointing below at a button (carried 3)"
+    ready = views["components/raids/ReadinessView.tsx"]
+    assert "Against the make-up" in ready and "on the Raids page</Anchor>" not in ready
     sched = (SRC / "components" / "ScheduleCard.tsx").read_text()
     assert "the raid's" not in sched
     for gone in ("SOURCE_WORDS", "inherited(", "ADHOC_DEFAULT"):
@@ -870,3 +873,53 @@ def test_the_run_card_reschedules_and_the_schedule_editor_sends_a_lineup():
     # start to it: never toISOString for a minDate (the server refuses a past start in words)
     for f in SRC.rglob("*.tsx"):
         assert "minDate={new Date().toISOString()" not in f.read_text(), f
+
+
+def test_confirm_box_prints_the_servers_box():
+    box = _code_only((SRC / "components" / "ConfirmBox.tsx").read_text())
+    assert "box.sentences" in box and "box.diff" in box and "box.verb" in box and 'box.danger ? "red"' in box
+    assert "confirm_words.changed" in box and not re.search(r">\s*(Yes|No|OK|Cancel|Confirm)\s*<", box)
+
+
+def test_leaving_asks_first():
+    app = _code_only((SRC / "App.tsx").read_text()); guard = _code_only((SRC / "components" / "LeaveGuard.tsx").read_text())
+    assert "<LeaveGuard" in app and "guardNav(" in app and "confirm_words.discard" in guard and "beforeunload" in guard
+
+
+def test_raids_page_is_a_list_with_three_views():
+    page = _code_only((SRC / "pages" / "Raids.tsx").read_text())
+    assert "<ListPage" in page and "<SegmentedControl" in page and all(v in page for v in ('"rules"', '"priority"', '"readiness"'))
+    assert not (SRC / "pages" / "Readiness.tsx").exists() and not (SRC / "components" / "CompTargets.tsx").exists()
+    for f in ("Raids.tsx", "raids/RulesView.tsx", "raids/PriorityView.tsx", "raids/ReadinessView.tsx"):
+        code = _code_only(((SRC / "pages") if f == "Raids.tsx" else (SRC / "components")).joinpath(f).read_text())
+        assert not re.search(r"slot_labels|signup_lead_hours|lock_hours_before|run_times|WhenItRuns", code), f
+        assert "useConfirm(" not in code, f"{f}: the §7b box only"
+
+
+def test_the_raids_page_carries_the_earlier_reviews():
+    """Carried 1, 2, 4 and the size rule (phase 4, Task 6): the Reset prints the server's box (page.boxes.reset) and is
+    sent with config:raid_all:<rid>; the Save is the server's box too (useOpsSave with `always` and the verb); a minimum
+    of 0 is sent as a clear, never as 0; Readiness prints one Minimum column from the server and never "the guild's";
+    the size is displayed, never edited; SlotIcon / RoleIcon live in components/Icons."""
+    page = _code_only((SRC / "pages" / "Raids.tsx").read_text())
+    assert "page.boxes.reset" in page and "`config:raid_all:${r.id}`" in page and "opsApi.confirm(" in page
+    assert "always: true" in page and 'verb: "Save"' in page and "useDirty(`raid:${r.id}`, editing, { n, name: r.name })" in page
+    assert 'm.min === "0" ? null' in page, "a minimum of 0 goes as a clear"
+    rules = _code_only((SRC / "components" / "raids" / "RulesView.tsx").read_text())
+    assert 'label === "Size"' not in rules, "the size is the game's: shown by the server's Details, never a field"
+    ready = _code_only((SRC / "components" / "raids" / "ReadinessView.tsx").read_text())
+    assert "the guild's" not in ready.lower() and len(re.findall(r"<Table\.Th\b", ready)) == 3 and "m.have < m.min" in ready
+    icons = (SRC / "components" / "Icons.tsx").read_text()
+    assert "export function SlotIcon(" in icons and "export function RoleIcon(" in icons
+    review = (SRC / "components" / "ReviewModal.tsx").read_text()
+    assert "d?.box" in review and "verb?: string" in review and "always?: boolean" in review
+
+
+def test_schedule_editing_stays_reachable_until_the_schedules_page():
+    """Phase 4, Task 6 drops the schedules from the Raids page: the old schedule editor stays mounted at /schedules (the
+    rail's Schedules and the Raids page's Played in link there) until Task 11's Schedules page replaces it; /readiness
+    keeps its raid."""
+    app = _code_only((SRC / "App.tsx").read_text())
+    assert 'path="/schedules"' in app and 'path="/schedules/:id"' in app and "<RaidSchedulesPage" in app
+    assert 'path="/raids/:id"' in app and "?view=readiness" in app and 'path="/readiness"' in app
+    assert "<Schedules " in (SRC / "pages" / "RaidSchedules.tsx").read_text()

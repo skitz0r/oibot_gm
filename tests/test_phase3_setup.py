@@ -434,8 +434,9 @@ def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypat
     assert res.status_code == 200, res.text
     key = res.json()["key"]
     assert rows()[1]["open_key"] == key and rows()[0]["open_key"] is None and rs.events[key].schedule == "alt"
-    src = (FRONT / "pages" / "Readiness.tsx").read_text()
-    assert "Open this run early" in src and "/api/raid/${r.raid}/open" in src and "start: f.start, schedule: s.id" in src and "useConfirm" in src
+    # phase 4 (Task 6): the Readiness page became the Raids page's Readiness view (who could play, the make-up); the
+    # regulars' four weeks and their rows move to the Schedules page (Task 11) — the route above is what it calls
+    assert not (FRONT / "pages" / "Readiness.tsx").exists()
 
 
 def test_schedule_writes_from_the_raids_page_carry_the_raid_rev(owner_client, reg, rs):

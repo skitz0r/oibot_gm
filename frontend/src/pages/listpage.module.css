@@ -1,0 +1,44 @@
+/* The list pages (phase 4: Raids, then Events and Schedules): a list column beside one item's detail; below sm
+   (48em) the list alone, or the detail alone under a "Back to …" link (design §7a, the plan's Phone constraint). */
+.split { display: flex; gap: 20px; align-items: flex-start; margin-top: 18px; min-width: 0; }
+.list { flex: 0 0 auto; width: 290px; max-width: 290px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.detail { flex: 1 1 auto; min-width: 0; }
+.back { display: none; }
+.group { font-size: 11px; letter-spacing: .08em; font-weight: 700; color: var(--mantine-color-dimmed); text-transform: uppercase; padding: 14px 12px 4px; }
+.group:first-child { padding-top: 0; }
+.item { display: block; width: 100%; text-align: left; font: inherit; padding: 10px 12px; min-height: 44px; border-radius: 9px;
+  border: 1px solid transparent; background: transparent; color: var(--mantine-color-dimmed); cursor: pointer; text-decoration: none; }
+.item:hover { background: var(--mantine-color-slate-7); }
+.item:focus-visible { outline: 2px solid var(--mantine-color-teal-5); outline-offset: 1px; }
+.item.on { background: var(--mantine-color-slate-7); border-color: var(--mantine-color-teal-6); }
+.itemTitle { display: block; color: var(--mantine-color-text); font-weight: 600; }
+.view { background: var(--mantine-color-slate-7); border: 1px solid var(--mantine-color-slate-5); border-radius: 12px; min-width: 0; }
+.sect { padding: 18px 20px; border-top: 1px solid var(--mantine-color-slate-5); min-width: 0; }
+.sect:first-child { border-top: 0; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px 24px; margin: 0; }
+.facts dt { font-size: 12px; color: var(--mantine-color-dimmed); font-weight: 600; margin-bottom: 2px; }
+.facts dd { margin: 0; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.scroll { overflow-x: auto; max-width: 100%; }
+.bar { display: grid; grid-template-columns: 140px minmax(0, 1fr) 28px; gap: 10px; align-items: center; padding: 4px 0; max-width: 560px; }
+.barEdit { grid-template-columns: 140px 110px; }
+@media (max-width: 48em) {
+  .split { display: block; margin-top: 12px; }
+  .list { width: auto; max-width: none; }
+  .split.chosen .list { display: none; }
+  .split:not(.chosen) .detail { display: none; }
+  .back { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: 4px; }
+  .sect { padding: 14px 14px; }
+  .bar { grid-template-columns: 110px minmax(0, 1fr) 28px; }
+  .barEdit { grid-template-columns: 110px 110px; }
+}
+/* Phone: every control on a list page is at least 44 px tall (the Rosters page's rule, one rule here). Menus render in a
+   portal, so their items take .menuItem. */
+@media (max-width: 48em) {
+  .touch :global(.mantine-ActionIcon-root),
+  .touch :global(.mantine-Button-root),
+  .touch :global(.mantine-CloseButton-root) { min-height: 44px; min-width: 44px; }
+  .touch :global(.mantine-SegmentedControl-label) { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+  .touch :global(.mantine-Tabs-tab),
+  .touch :global(.mantine-Input-input) { min-height: 44px; }
+  .menuItem { min-height: 44px; }
+}

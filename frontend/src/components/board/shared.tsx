@@ -9,6 +9,10 @@ export type OnBoard = (key: string, board: Board, needs?: Sheet["needs"], rev?: 
 /** Shared between the board and the page: a refresh must not re-render the board under a drag in progress. */
 export const live = { dragging: false };
 
+/** How one night's several rosters are made (the split strategies), in the board's words (moved here from the old Raids page). */
+export const SPLIT_LABEL: Record<string, string> = { balanced: "Balanced", first: "Raid one first", rotation: "Rotation" };
+export const SPLIT_BLURB: Record<string, string> = { balanced: "both made equally strong", first: "raid one is made as strong as it can be; raid two takes the rest", rotation: "whoever joined last lockout but wasn't in raid one moves into raid one" };
+
 /** A sentence from the server (ev_json.consequences: the board's move / roster / swap / substitute / release_named) with
  *  the names put where the server left its tokens — the ONLY thing the page does to it: it never composes a word. */
 export function fillNames(sentence: string | undefined, names: { name: string; other?: string; to?: string }): string {

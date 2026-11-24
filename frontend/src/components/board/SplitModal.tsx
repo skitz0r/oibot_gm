@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Box, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { IconRefresh } from "@tabler/icons-react";
 import { api, type Meta, type Sheet, type SplitPreview } from "../../api";
-import { SPLIT_BLURB, SPLIT_LABEL } from "../../pages/Raids";
+import { SPLIT_BLURB, SPLIT_LABEL } from "./shared";
 import { fail } from "../Page";
 import { BoardPreview } from "./BoardPreview";
 import { runName } from "./shared";

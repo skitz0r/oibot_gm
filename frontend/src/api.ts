@@ -134,9 +134,9 @@ export interface Meta {
   run_words: { no_confirmations: string; first_come: string; bank: Record<string, string>; not_answered: Record<string, string>; auto_asks_paused: string; pins: Record<string, string>; leftovers: string };
   /** phase 4's pages: their value words (constants.PAGE_WORDS), the confirmation box's fixed words (CONFIRM_WORDS) and the
    *  leave guard's sentence templates ({name}, {n}) — a page prints these, never its own copy */
-  page_words?: PageWords;
-  confirm_words?: { back: string; keep: string; discard: string; leave_title: string; changed: string };
-  leave?: { one: string; many: string };
+  page_words: PageWords;
+  confirm_words: { back: string; keep: string; discard: string; leave_title: string; changed: string };
+  leave: { one: string; many: string };
   /** registry.RESERVED_SCHEDULE_IDS: the ids no new schedule takes (a schedule editor never holds its own copy) */
   reserved_schedule_ids?: string[];
 }
@@ -732,7 +732,9 @@ export interface DescribedPart { label: string; before: string | null; after: st
 /** One WRITE (a buff, a family, a raid, a schedule, the guild settings): its parts, the refusal its apply would give, warn, consequences. */
 export interface DescribedLine { op: string; target: string | null; label: string; text: string; error: string | null; warn: boolean; parts: DescribedPart[]; notes: string[]; consequences: string[] }
 /** configops.Described as the site gets it: `review` = the batch must be reviewed before it is written (warn class or a consequence line). */
-export interface Described { lines: DescribedLine[]; refused: string[]; consequences: string[]; warn: boolean; review: boolean; fingerprint: string }
+export interface Described { lines: DescribedLine[]; refused: string[]; consequences: string[]; warn: boolean; review: boolean; fingerprint: string;
+  /** the confirmation box (design §7b) when the batch is one schedule's or one raid's write */
+  box?: Box | null }
 export interface OpsResult { label: string; ok: boolean; line: string }
 /** POST /api/ops/change's answer. Preview: described + token. A Save: applied directly (applied/results/summary) or `needs_review` + token.
  *  A stale token: `updated` (re-previewed, the lines moved) or `restarted` (from before a restart). 409: `changed` = config sections someone else changed. */
@@ -748,6 +750,8 @@ export const opsApi = {
   save: (changes: OpsChange[], revs?: Record<string, string>) => api.post<OpsReply>("/api/ops/change", { changes, revs, apply: true }),
   /** Apply a reviewed preview. With `changes` + `seen` (the fingerprint shown) an expired token re-previews and applies when nothing moved. */
   apply: (token: string, changes?: OpsChange[], seen?: string, revs?: Record<string, string>) => api.post<OpsReply>("/api/ops/change", { token, apply: true, changes, seen, revs }),
+  /** A press on a box the page already printed (a raid's Reset from /api/raids' `page.boxes.reset`): applied now; a stale rev is a 409. */
+  confirm: (changes: OpsChange[], revs?: Record<string, string>) => api.post<OpsReply>("/api/ops/change", { changes, revs, apply: true, confirmed: true }),
 };
 
 // ---- phase 3: minimums, readiness, the effective configuration, the Tell the bot box
