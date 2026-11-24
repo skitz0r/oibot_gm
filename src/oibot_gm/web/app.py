@@ -504,7 +504,13 @@ async def mcp_actor(request, bot, v: Viewer) -> Viewer:
     return Viewer(uid, name, v.reg, officer=True, owner=role == "owner", via="mcp", actor=uid)
 
 
-def create_app(bot) -> FastAPI:
+ICON_DIR = Path(__file__).resolve().parents[3] / "out" / "icons"  # the render-CDN icon cache of the bot's checkout
+ICON_CDN = "https://render.worldofwarcraft.com/us/icons/56/{name}.jpg"
+
+
+def create_app(bot, *, icon_dir: Path = ICON_DIR, icon_cdn: str | None = ICON_CDN) -> FastAPI:
+    """The site. `icon_dir` = where the CDN icons are cached; `icon_cdn` None = never fetch one (a missing icon is drawn
+    as a generated badge) — scripts/serve_scratch.py passes both, so a scratch server writes and fetches nothing real."""
     app = FastAPI(title="oibot_GM", docs_url=None, redoc_url=None)
     signer = URLSafeSerializer(os.environ.get("OIBOT_WEB_SECRET") or secrets.token_hex(32), salt="session")
     _, public_url = web_config()
@@ -790,9 +796,7 @@ def create_app(bot) -> FastAPI:
         return Response(thumb_cache[key], media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
     badge_cache: dict[str, bytes] = {}
-    ICON_DIR = Path(__file__).resolve().parents[3] / "out" / "icons"
-    ICON_DIR.mkdir(parents=True, exist_ok=True)
-    ICON_CDN = "https://render.worldofwarcraft.com/us/icons/56/{name}.jpg"
+    icon_dir.mkdir(parents=True, exist_ok=True)
 
     icon_miss: dict[str, float] = {}  # names the CDN answered 404 for → when that answer expires (1 h): scanners can't drive upstream fetches
     ICON_MISS_TTL = 3600
@@ -801,14 +805,19 @@ def create_app(bot) -> FastAPI:
     async def cdn_icon(name: str):
         if not re.fullmatch(r"[a-z0-9_]{3,64}", name):
             raise HTTPException(404)
-        f = ICON_DIR / f"{name}.jpg"
+        f = icon_dir / f"{name}.jpg"
+        if not f.exists() and icon_cdn is None:  # nothing is fetched here: the generated badge stands in
+            key = f"icon:{name}"
+            if key not in badge_cache:
+                badge_cache[key] = render.buff_badge_png(name.rsplit("_", 1)[-1][:2].upper(), "#8A93A6", 56)
+            return Response(badge_cache[key], media_type="image/png", headers={"Cache-Control": "no-store"})
         if not f.exists():
             now = time.time()
             if icon_miss.get(name, 0) > now:
                 raise HTTPException(404)
             try:
                 async with httpx.AsyncClient(timeout=10) as hc:
-                    r = await hc.get(ICON_CDN.format(name=name))
+                    r = await hc.get(icon_cdn.format(name=name))
                 if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
                     if len(icon_miss) > 2000:  # keep the negative cache bounded; drop what has expired
                         for k in [k for k, t in icon_miss.items() if t <= now]:

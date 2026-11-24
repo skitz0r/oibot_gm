@@ -3,7 +3,7 @@ import { Alert, Badge, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { ApiError, opsApi, type Box, type Described, type OpsChange, type OpsReply } from "../api";
 import touch from "../pages/listpage.module.css";
 import { fail, ok } from "./Page";
-import { BoxBody, BoxButtons } from "./ConfirmBox";
+import { BoxBody, BoxButtons, boxWords } from "./ConfirmBox";
 
 /** The ONE review step of the site's edit modes (design §2.3, D51 tiered review): the server's Described preview as structure —
  *  one block per write (a buff, a raid, a schedule…), its settings current → new, the refusal its apply would give, the
@@ -79,7 +79,9 @@ export function ReviewModal({ opened, title, preview, result, busy, notice, onAp
       ? [...(result.refused || []), ...(result.results || []).filter((x) => !x.ok).map((x) => `${x.label}: ${x.line}`)]
       : [...(d?.lines || []).filter((l) => l.error).map((l) => `${l.label}: ${l.error}`), ...(d?.refused || [])];
     const said = !result && d?.box ? d.box : null;
-    const box: Box = said || { title: title || "", sentences: errors.length ? [] : [(result || preview)?.summary || ""].filter(Boolean), verb: null, danger: false, diff: [], fp: "" };
+    // no box from the server = a refusal (line errors, `refused`, a write refused after the press): it never carries the
+    // question title ("Save Hyjal Summit?") — the server's refusal title stands above the server's words
+    const box: Box = said || { title: boxWords().refused, sentences: errors.length ? [] : [(result || preview)?.summary || ""].filter(Boolean), verb: null, danger: false, diff: [], fp: "" };
     const go: Box = { ...box, verb: said?.verb && !errors.length && n && preview?.token ? verb : null };
     return (
       <Modal opened={opened} onClose={onClose} title={box.title} centered classNames={{ content: touch.touch }}>

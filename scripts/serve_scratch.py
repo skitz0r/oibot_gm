@@ -20,8 +20,9 @@ Safety: it refuses to start when DISCORD_TOKEN is set (a real bot's environment)
 that is not strictly below the temp directory or that holds anything this script didn't write (MARKER). Before any of
 the bot's modules is imported, .env loading is switched off and every secret is taken out of the environment (again
 after the imports); every module-level output path (agents, armory, auctions, guides, pending views, the listen log,
-the LLM usage log) points into the scratch folder; the network reads the test suite refuses are refused here too and
-the launchd controls do nothing."""
+the LLM usage log, the icon cache) points into the scratch folder; the network reads the test suite refuses are refused
+here too, no game icon is fetched (a missing one is drawn as the generated badge) and the launchd controls do nothing.
+The live port is every port OIBOT_WEB_BIND names (the environment, or that one line of a .env in this checkout or above)."""
 from __future__ import annotations
 
 import argparse
@@ -40,7 +41,30 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "src"))
 
-LIVE_PORT = 8788  # the live bot's site: never served from here
+LIVE_PORT = 8788  # the live site's port when nothing says otherwise (web_config's default address): never served from here
+BIND_KEY = "OIBOT_WEB_BIND"  # the live site's host:port, in the environment or a checkout's .env
+
+
+def _bind_port(value: str | None) -> int | None:
+    port = (value or "").strip().strip("'\"").rpartition(":")[2]
+    return int(port) if port.isdigit() else None
+
+
+def live_ports(env=None, roots=None) -> set[int]:
+    """Every port the live site may be on: the default, the environment's OIBOT_WEB_BIND, and the OIBOT_WEB_BIND line of
+    the .env in this checkout and each folder above it (a worktree sits inside the bot's checkout). Only that one line
+    is read; nothing from .env enters the environment."""
+    env = os.environ if env is None else env
+    ports = {LIVE_PORT} | ({_bind_port(env.get(BIND_KEY))} - {None})
+    for root in (roots if roots is not None else [ROOT, *ROOT.parents]):
+        f = Path(root) / ".env"
+        if not f.is_file():
+            continue
+        for line in f.read_text(errors="replace").splitlines():
+            key, sep, value = line.removeprefix("export ").partition("=")
+            if sep and key.strip() == BIND_KEY and _bind_port(value):
+                ports.add(_bind_port(value))
+    return ports
 DEMO_IDS = 300_000_000_000_000_000  # made-up Discord ids for the demo characters (below Registry.TEST_BASE)
 MARKER = ".oibot-scratch"  # written into every data folder this script builds; nothing without it is ever deleted
 # environment variables that grant access to something real (.env.example and the code's os.environ reads): taken out
@@ -237,8 +261,8 @@ def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)
     if os.environ.get("DISCORD_TOKEN"):
         refuse("DISCORD_TOKEN is set: this is a real bot's environment. Run it from a plain shell.")
-    if args.port == LIVE_PORT:
-        refuse(f"port {LIVE_PORT} is the live bot's site.")
+    if args.port in live_ports():
+        refuse(f"port {args.port} is the live bot's site.")
     data = Path(args.data) if args.data else Path(tempfile.gettempdir()) / "oibot-scratch" / "data"
     why = data_refusal(data)
     if why:
@@ -274,7 +298,8 @@ def main() -> None:
 
     print(f"serve_scratch: http://127.0.0.1:{args.port}/app/raids  (data {data}, guild {args.guild})")
     bot = NightBot(reg, rs)
-    app = web.create_app(bot)
+    # the icon cache is the scratch folder's and nothing is fetched: a missing icon is the generated badge
+    app = web.create_app(bot, icon_dir=out / "icons", icon_cdn=None)
     attach_loop(app, bot)  # server-sent events: the page updates live when a second request changes something
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 

@@ -1389,3 +1389,15 @@ def test_shots_shoots_the_final_pages():
         assert f'"{p}"' in pages, p
     for gone in ("/app/rosters", "/app/readiness", "/app/bank"):
         assert f'"{gone}"' not in pages, gone
+
+
+def test_a_refusal_without_a_server_box_never_carries_the_question_title():
+    """Task 12 (Task 6's carried minor): with a verb, a refusal the server sent no box for (line errors, `refused`, a
+    write refused after the press) is titled with the server's refusal title (/api/meta.confirm_words.refused), never the
+    page's question ("Save Hyjal Summit?")."""
+    review = _code_only((SRC / "components" / "ReviewModal.tsx").read_text())
+    box_mode = review[review.index("if (verb) {"):review.index("title={result ?")]
+    fallback = box_mode[box_mode.index("const box: Box = said ||"):]
+    fallback = fallback[:fallback.index("\n")]
+    assert "title: boxWords().refused" in fallback and "title: title" not in fallback and "title ||" not in fallback
+    assert "refused: string" in (SRC / "api.ts").read_text()

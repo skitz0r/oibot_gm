@@ -135,7 +135,8 @@ export interface Meta {
   /** phase 4's pages: their value words (constants.PAGE_WORDS), the confirmation box's fixed words (CONFIRM_WORDS) and the
    *  leave guard's sentence templates ({name}, {n}) — a page prints these, never its own copy */
   page_words: PageWords;
-  confirm_words: { back: string; keep: string; discard: string; leave_title: string; changed: string };
+  /** `refused` = the title of a refusal the server sent no box for (consequences.REFUSAL_TITLES["other"]) */
+  confirm_words: { back: string; keep: string; discard: string; leave_title: string; changed: string; refused: string };
   leave: { one: string; many: string; page: string };
   /** registry.RESERVED_SCHEDULE_IDS: the ids no new schedule takes (a schedule editor never holds its own copy) */
   reserved_schedule_ids?: string[];

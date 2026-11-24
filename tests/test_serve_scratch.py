@@ -144,3 +144,83 @@ def test_the_scratch_bot_gets_the_servers_loop_so_live_updates_reach_pages():
         assert bot.loop is seen[0], "the loop requests run on is the one publish posts to"
     src = (ROOT / "scripts" / "serve_scratch.py").read_text()
     assert "attach_loop(app, bot)" in src[src.index("def main"):]
+
+
+DRIVER = r'''
+import importlib.util, json, os, sys
+from pathlib import Path
+
+ROOT, PLANTED, DATA, SECRETS = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], json.loads(sys.argv[4])
+spec = importlib.util.spec_from_file_location("serve_scratch", ROOT / "scripts" / "serve_scratch.py")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+assert "oibot_gm" not in sys.modules, "nothing of the bot is imported before main"
+import uvicorn
+
+
+def fake_run(app, **kw):
+    """Called where the real server would start: everything main set up is in place."""
+    import dotenv
+    from dotenv import load_dotenv
+
+    dotenv.load_dotenv(PLANTED)
+    load_dotenv(PLANTED)
+    import httpx
+
+    async def no_fetch(*a, **k):
+        raise AssertionError("an icon was fetched from the network")
+
+    httpx.AsyncClient.get = no_fetch
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as c:
+        r = c.get("/img/icon/spell_scratch_probe.jpg")
+    print("RESULT " + json.dumps({
+        "leaked": sorted(k for k, v in os.environ.items() if v in SECRETS.values()),
+        "names": sorted(k for k in SECRETS if k in os.environ and k != "OIBOT_MCP_TOKEN"),
+        "host": kw.get("host"), "icon": r.status_code, "icon_type": r.headers.get("content-type"),
+        "checkout_icon": (ROOT / "out" / "icons" / "spell_scratch_probe.jpg").exists(),
+    }))
+
+
+uvicorn.run = fake_run
+sys.argv = ["serve_scratch.py", "--data", DATA, "--port", "8799"]
+mod.main()
+'''
+
+
+def test_main_in_its_real_import_order_keeps_no_secret_and_fetches_nothing(tmp_path):
+    """The script's own main, in a fresh process, in its real import order (nothing of the bot imported before it runs):
+    a planted .env and the same secrets in the environment; uvicorn.run is the only stub. Where the server would start,
+    no planted value is in the environment (a load_dotenv of the planted file reads nothing), it binds this machine
+    only, and a game icon is the generated badge: never fetched, never cached outside the scratch folder."""
+    import json
+    import subprocess
+
+    secrets = {"ANTHROPIC_API_KEY": "sk-planted-a", "TYPESAFE_API_KEY": "planted-t", "BLIZZARD_CLIENT_SECRET": "planted-b",
+               "OIBOT_MCP_TOKEN": "planted-m", "OIBOT_FEED_TOKEN": "planted-f", "WCL_CLIENT_SECRET": "planted-w",
+               "DISCORD_CLIENT_SECRET": "planted-c", "OIBOT_WEB_SECRET": "planted-s", "OIBOT_SUPERUSERS": "4242"}
+    planted = tmp_path / ".env"
+    planted.write_text("DISCORD_TOKEN=planted-d\n" + "".join(f"{k}={v}\n" for k, v in secrets.items()))
+    env = {k: v for k, v in os.environ.items() if k != "DISCORD_TOKEN"} | secrets
+    driver = tmp_path / "driver.py"
+    driver.write_text(DRIVER)
+    every = secrets | {"DISCORD_TOKEN": "planted-d"}
+    r = subprocess.run([sys.executable, str(driver), str(ROOT), str(planted), str(tmp_path / "data"), json.dumps(every)],
+                       cwd=tmp_path, env=env, capture_output=True, text=True, timeout=300)
+    line = [x for x in r.stdout.splitlines() if x.startswith("RESULT ")]
+    assert r.returncode == 0 and line, r.stderr[-3000:]
+    out = json.loads(line[0][len("RESULT "):])
+    assert out["leaked"] == [] and out["names"] == [], out
+    assert out["host"] == "127.0.0.1"
+    assert out["icon"] == 200 and out["icon_type"] == "image/png" and not out["checkout_icon"], out
+    assert list((tmp_path / "data-out" / "icons").iterdir()) == [], "the scratch cache, and nothing fetched into it"
+
+
+def test_the_live_port_follows_the_bind_setting(tmp_path):
+    mod = _scratch()
+    assert mod.live_ports({}, []) == {mod.LIVE_PORT}
+    assert 9123 in mod.live_ports({"OIBOT_WEB_BIND": "127.0.0.1:9123"}, [])
+    (tmp_path / ".env").write_text("SOMETHING_SECRET=x\nexport OIBOT_WEB_BIND='0.0.0.0:9555'\n")
+    assert mod.live_ports({}, [tmp_path]) == {mod.LIVE_PORT, 9555}
+    assert "SOMETHING_SECRET" not in os.environ

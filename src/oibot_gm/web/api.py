@@ -71,10 +71,6 @@ class PlacementBody(BaseModel):
     answer: Optional[str] = None
 
 
-class StrategyBody(BaseModel):
-    strategy: str
-
-
 class InstanceBody(BaseModel):
     instance: str
 
@@ -501,7 +497,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             # phase 4's pages (constants.PAGE_WORDS: the value words of Events, New event, Schedules, Raids), the confirmation
             # box's fixed words (Back, Keep editing, Discard edits, the "changed" line) and the leave guard's sentence
             # templates ({name}, {n}: the page fills them) — a page file never holds its own copy
-            "page_words": PAGE_WORDS, "confirm_words": dict(CONFIRM_WORDS), "leave": dict(cq.LEAVE_TEMPLATE),
+            "page_words": PAGE_WORDS, "confirm_words": {**CONFIRM_WORDS, "refused": cq.REFUSAL_TITLES["other"]}, "leave": dict(cq.LEAVE_TEMPLATE),
             # the ids no new schedule takes (registry.RESERVED_SCHEDULE_IDS): a schedule editor never holds its own copy
             "reserved_schedule_ids": list(RESERVED_SCHEDULE_IDS),
             # the vocabulary the pages used to hard-code (C3): answer statuses in order, split philosophies, role order,

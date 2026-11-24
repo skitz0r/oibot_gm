@@ -232,18 +232,22 @@ def _night_facts(reg: Registry, parts: list, sheets: list[dict], state: str) -> 
     by_key = {s.get("key"): s for s in sheets}
     first = sheets[0] if sheets else {}
     named = lambda label, s: f"{label} · {s.get('raid')}" if several else label  # noqa: E731
+    said: set[str] = set()  # raids whose Open seats sentence already says their automatic asks are paused
     if state == "locked":
         if first.get("confirmations_pending"):
             out.append(_fact("Confirmations", PAGE_WORDS["confirm_pending"]))
         for p in parts:
             s = by_key.get(p.key)
             if s and p.state == "locked":
-                out.append(_fact(named("Open seats", s), s.get("fill_state_text") or rc.fill_state_text(reg, p)))
+                text = s.get("fill_state_text") or rc.fill_state_text(reg, p)
+                out.append(_fact(named("Open seats", s), text))
+                if rc.AUTO_ASKS_PAUSED in text:  # the sentence already says who paused them: one fact, not two
+                    said.add(p.key)
         if first.get("reminded_at"):
             out.append(_fact("Reminded", PAGE_WORDS["reminded_by"].format(when=first["reminded_at"], who=first["reminded_by"])
                              if first.get("reminded_by") else first["reminded_at"]))
     for s in sheets:
-        if s.get("autofill_paused"):
+        if s.get("autofill_paused") and s.get("key") not in said:
             who = s.get("autofill_paused_by")
             out.append(_fact(named("Automatic asks", s), PAGE_WORDS["paused_by"].format(who=who) if who else PAGE_WORDS["paused"]))
     if first.get("double_booked"):

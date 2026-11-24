@@ -267,6 +267,10 @@ def test_an_events_raid_night_facts_come_from_its_runs(officer_client, reg, rs, 
     facts = {f["label"]: f["value"] for f in officer_client.get(f"/api/event/{ev.key}").json()["details"]}
     assert ms[0].display_name in facts["Also on another event"]
     assert j["test_chip"] is None
+    ev.autofill_paused, ev.autofill_paused_by = True, "Jon"  # before the lock there is no Open seats sentence to say it
+    rs.save(ev, "t")
+    facts = {f["label"]: f["value"] for f in officer_client.get(f"/api/event/{ev.key}").json()["details"]}
+    assert facts["Automatic asks · Hyjal Summit"] == PAGE_WORDS["paused_by"].format(who="Jon")
     lock_with_board(reg, rs, ev, [m.display_name for m in ms[:10]])
     ev.autofill_paused, ev.autofill_paused_by = True, "Jon"
     ev.reminded_at, ev.reminded_by = reg.now_local().isoformat(), "Jon"
@@ -275,7 +279,10 @@ def test_an_events_raid_night_facts_come_from_its_runs(officer_client, reg, rs, 
     rs.save(ev, "t")
     j = officer_client.get(f"/api/event/{ev.key}").json()
     facts = {f["label"]: f for f in j["details"]}
-    assert facts["Automatic asks · Hyjal Summit"]["value"] == PAGE_WORDS["paused_by"].format(who="Jon")
+    # once locked, the Open seats sentence already says who paused the automatic asks: said once, not in a second fact
+    assert facts["Open seats · Hyjal Summit"]["value"].startswith("Automatic asks paused by Jon. ")
+    assert "Automatic asks · Hyjal Summit" not in facts
+    assert sum("paused by Jon" in str(f["value"]) for f in j["details"]) == 1
     assert facts["Reminded"]["value"].endswith(", by Jon") and not re.search(r"\d{4}-\d\d", facts["Reminded"]["value"]), "words, never ISO"
     assert facts["Confirmations"]["value"] == PAGE_WORDS["confirm_pending"]
     links = facts["In Discord"]
@@ -522,7 +529,9 @@ def test_a_lock_box_left_open_on_an_ended_event_gets_its_refusal(web_bot, reg, r
 def test_meta_carries_the_page_words(officer_client):
     m = officer_client.get("/api/meta").json()
     assert m["page_words"]["one_off"] == "One-off, no schedule" and m["confirm_words"]["discard"] == "Discard edits"
-    assert m["page_words"] == PAGE_WORDS and m["confirm_words"] == CONFIRM_WORDS and m["leave"] == cq.LEAVE_TEMPLATE
+    assert m["page_words"] == PAGE_WORDS and m["leave"] == cq.LEAVE_TEMPLATE
+    # + the title of a refusal the server sent no box for (the Save box's fallback never prints the question title)
+    assert m["confirm_words"] == {**CONFIRM_WORDS, "refused": cq.REFUSAL_TITLES["other"]}
     assert rc.confirmation_words(False) == PAGE_WORDS["not_asked"] and rc.confirmation_words(True) == PAGE_WORDS["asked_at_lock"]
 
 
@@ -796,3 +805,10 @@ def test_split_strategy_asks_with_the_servers_box_and_the_picture_and_lock_follo
     lock_with_board(reg, rs, ev, [])
     r = c.post(url, json={"strategy": now}, headers=h)
     assert r.status_code == 400 and r.json()["box"]["sentences"] == [cq.STRATEGY_LOCKED]
+
+
+def test_the_strategy_route_has_one_body_model():
+    """Task 12: the strategy route reads its body itself; the unused StrategyBody model is gone."""
+    from oibot_gm.web import api
+
+    assert not hasattr(api, "StrategyBody")
