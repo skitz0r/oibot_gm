@@ -127,3 +127,28 @@ def test_a_raid_not_full_locks_with_one_name_kept_off(reg, rs):
     on = {p.signup_name for p in ev.seated()}
     assert on == {m.display_name for m in ms} - {ms[2].display_name}
     assert shape(pic) == shape(ev.all_rosters)
+
+
+def _preview_later_then_lock(reg, rs):
+    ev, bd = evening(reg, rs)
+    bot = NightBot(reg, rs)
+    shown = asyncio.run(bot.lock_preview(reg, rs, bd, by="Jon"))  # the first raid is still open
+    asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
+    bd = rs.events[bd.key]
+    assert ev.state == "locked" and bd.state == "locked"
+    return shown, bd
+
+
+def test_preview_lock_on_a_later_raid_while_the_first_is_open_is_what_its_lock_rosters(reg, rs):
+    """The rehearsal's F2: Preview lock pressed on the later raid alone solved without the earlier raid's placement, so
+    it could show another roster than the lock (which runs after the first raid locks and reads its roster). It now
+    solves with who the first raid's lock will roster (rc.earlier_counts), as the board picture does."""
+    shown, bd = _preview_later_then_lock(reg, rs)
+    assert shape(shown) == shape(bd.all_rosters), "Preview lock was the lock"
+
+
+def test_without_the_earlier_raids_the_later_preview_is_another_roster(reg, rs, monkeypatch):
+    """The fixture is one where it matters: the same preview made without the earlier raids differs from the lock."""
+    monkeypatch.setattr(rc, "earlier_counts", lambda *a, **k: None)
+    shown, bd = _preview_later_then_lock(reg, rs)
+    assert shape(shown) != shape(bd.all_rosters)

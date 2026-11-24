@@ -12,6 +12,10 @@ solve → extract. The order of the steps is part of the model (variable and
 constraint indices), so keep it when editing."""
 from __future__ import annotations
 
+import hashlib
+import logging
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 from ortools.sat.python import cp_model
@@ -19,6 +23,8 @@ from ortools.sat.python import cp_model
 from ..constants import ROLES
 from ..models import GroupReport, Player, RosterResult, SpecInfo
 from ..profiles import Buff, GameProfile
+
+log = logging.getLogger(__name__)
 
 SCALE = 10  # buff values are floats; CP-SAT wants ints
 
@@ -59,6 +65,25 @@ class SolveOptions:
 RANDOM_SEED = 0
 DTIME_PER_SECOND = 6.0
 WALL_CEILING = 2.0
+
+# One answer per model (the final fix wave of §5.67 phase 4, 2026-11-24). The deterministic limit makes a solve
+# repeatable only while it finishes inside WALL_CEILING: on a loaded machine (a full test run, another solve, the
+# host busy) the wall clock stops it first, at whatever work it had done, and the Events board's picture and the lock
+# solved a minute apart came out different — the same model, two rosters (measured: the later raid's two rosters
+# numbered the other way round). So the process keeps the answer each model got (keyed by the model itself, every
+# variable, constraint and objective term, and the search parameters) and a solve of a model it has answered before
+# takes that answer: the picture, Preview lock and the lock give the same roster for the same input whatever the load.
+# A model never solved before searches exactly as before; nothing is kept for a stopped, infeasible or unfinished solve.
+ANSWERS_MAX = 64  # models whose answer is kept (least recently used goes first)
+_answers: "OrderedDict[str, _Answer]" = OrderedDict()
+_answers_lock = threading.Lock()
+ceiling_hits = 0  # solves the wall clock stopped before their deterministic budget (a log line each; tests read it)
+
+
+def forget_answers() -> None:
+    """Drop every kept answer (tests that measure the search itself)."""
+    with _answers_lock:
+        _answers.clear()
 
 DEFAULT_OPTIONS = SolveOptions()  # the shared default for solve()/solve_rosters(); never mutate it
 
@@ -660,10 +685,57 @@ class Stop:
 
 
 
-def _run(s: _Model) -> tuple[cp_model.CpSolver, int]:
+@dataclass(frozen=True)
+class _Answer:
+    """A model's kept answer: what _extract reads (the seat, group and offspec variables by index) and the summary."""
+    values: dict
+    objective: float
+    status: int
+    status_name: str
+
+    def Value(self, var) -> int:  # noqa: N802 — CpSolver's name, so _extract reads either
+        return self.values[var.Index()]
+
+    def ObjectiveValue(self) -> float:  # noqa: N802
+        return self.objective
+
+    def StatusName(self, status=None) -> str:  # noqa: N802
+        return self.status_name
+
+
+def _model_key(s: _Model) -> str:
+    """The model as CP-SAT gets it (the proto: variables, constraints, objective) and the search parameters."""
+    h = hashlib.sha1(str(s.m.Proto()).encode())
+    h.update(repr((s.opts.time_limit_s, s.opts.workers, RANDOM_SEED, DTIME_PER_SECOND, WALL_CEILING)).encode())
+    return h.hexdigest()
+
+
+def _keep(key: str, s: _Model, solver: cp_model.CpSolver, status: int) -> _Answer:
+    read = list(s.x.values()) + list(s.y.values()) + list(s.o.values())
+    a = _Answer({v.Index(): int(solver.Value(v)) for v in read}, solver.ObjectiveValue(), status, solver.StatusName(status))
+    with _answers_lock:
+        _answers[key] = a
+        _answers.move_to_end(key)
+        while len(_answers) > ANSWERS_MAX:
+            _answers.popitem(last=False)
+    return a
+
+
+def _run(s: _Model) -> tuple["cp_model.CpSolver | _Answer", int]:
     """Maximise seat quality + synergy + balance within the deterministic budget (the same input, the same answer);
-    raise when nothing feasible was found."""
+    raise when nothing feasible was found. A model answered before takes its kept answer without searching (see
+    ANSWERS_MAX); a stopped handle raises Stopped either way."""
+    global ceiling_hits
     s.m.Maximize(sum(s.terms) + sum(s.synergy_terms) + sum(s.balance_terms))
+    key = _model_key(s)
+    with _answers_lock:
+        kept = _answers.get(key)
+        if kept is not None:
+            _answers.move_to_end(key)
+    if kept is not None:
+        if s.opts.stop is not None and s.opts.stop.stopped:
+            raise Stopped()
+        return kept, kept.status
     solver = cp_model.CpSolver()
     solver.parameters.random_seed = RANDOM_SEED
     solver.parameters.interleave_search = True
@@ -680,10 +752,15 @@ def _run(s: _Model) -> tuple[cp_model.CpSolver, int]:
             s.opts.stop.detach(solver)  # Stopped when stopped meanwhile: the answer is never used
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise RuntimeError(f"no roster found: {solver.StatusName(status)}")
-    return solver, status
+    budget = s.opts.time_limit_s * DTIME_PER_SECOND
+    if status != cp_model.OPTIMAL and solver.deterministic_time < budget * 0.99:
+        ceiling_hits += 1  # the wall clock stopped it: this answer is the one kept for the model from now on
+        log.warning("a roster solve reached its wall-clock ceiling after %.1f s at %.0f of %.0f work units", solver.wall_time,
+                    solver.deterministic_time, budget)
+    return _keep(key, s, solver, status), status
 
 
-def _extract(s: _Model, solver: cp_model.CpSolver, status: int) -> list[RosterResult]:
+def _extract(s: _Model, solver: "cp_model.CpSolver | _Answer", status: int) -> list[RosterResult]:
     """Read the solution back: apply offspec switches to the Player objects (reports/coverage use the chosen spec),
     then one RosterResult per roster; everyone unseated is the bench of roster 0."""
     players, n_groups = s.players, s.n_groups

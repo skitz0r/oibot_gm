@@ -71,6 +71,17 @@ def _no_conversation_memory():
 
 
 @pytest.fixture(autouse=True)
+def _no_kept_solver_answers():
+    """solver keeps one answer per model, process-wide: every test starts and ends without one (a test that breaks
+    the search on purpose must not be handed an answer another test's identical model got)."""
+    from oibot_gm.roster import solver
+
+    solver.forget_answers()
+    yield
+    solver.forget_answers()
+
+
+@pytest.fixture(autouse=True)
 def _no_pending_policy_edits():
     """policy.PENDING is process-wide (one pending edit per guild and doc): every test starts and ends without one."""
     from oibot_gm import policy

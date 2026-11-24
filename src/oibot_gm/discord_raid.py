@@ -885,7 +885,9 @@ class RaidMixin:
 
     async def lock_preview(self, reg, rs, ev, *, by: str, by_id: int | None = None) -> list:
         """The roster(s) the lock would build NOW (rc.split_preview with the run's strategy, honouring the board and the
-        pins), under the run's solver single flight — the Discord Preview lock and the site's lock preview share it.
+        pins), under the run's solver single flight — the Discord Preview lock and the site's lock preview share it. A
+        later raid whose earlier raid is still open solves with who those raids will roster (rc.earlier_counts), so it
+        shows what its lock builds once they lock.
         Nothing about the run changes but `ev.last_proposal` (the layout shown, with who saw it: the same officer's plain
         text "use it" puts it on the board, also after a restart — configops._propose). RegistryError (SolverBusy, or the
         solver's own sentence) when no preview can be made."""
@@ -893,8 +895,9 @@ class RaidMixin:
             raise RegistryError(f"{run_title(reg, ev)} is already {rc.RUN_STATE_WORDS.get(ev.state, ev.state).split(' — ')[0]}, and the preview is for an open sheet.")
         strategy = rc.run_strategy(reg, ev)  # the lock's own strategy and budget: the preview is the roster the lock builds
         async with self.solving(reg, ev.key):
-            try:
-                layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy, None, rc.SOLVE_TIME_LIMIT_S)
+            try:  # a later raid whose earlier raid is still open: their lock solves first, as the board and the lock read them
+                earlier = await asyncio.to_thread(rc.earlier_counts, reg, rs, ev)
+                layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy, None, rc.SOLVE_TIME_LIMIT_S, earlier)
             except RuntimeError as e:
                 raise RegistryError(rc.solver_error_text(e)) from e
         ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(reg, ev), "by": by, "by_id": by_id, "at": rc.now(), "kind": "lock preview"}

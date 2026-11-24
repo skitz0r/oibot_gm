@@ -6,6 +6,7 @@ from conftest import join
 from test_follow_on import open_pair  # noqa: F401
 
 from oibot_gm import raidcycle as rc
+from oibot_gm.roster import solver
 
 pytestmark = pytest.mark.slow
 
@@ -23,7 +24,10 @@ def test_the_same_signups_give_the_same_rosters_every_time(reg, rs):
     rs.save(lead, "locked (test)")
     fev = rs.events[fev.key]
     for ev in (lead, fev):  # a 20 with five groups, and its follow-on split into two 10s
-        seen = [placement(rc._solve_run(reg, rs, ev, time_limit=2.0, whatif=False)[1]) for _ in range(3)]
+        seen = []
+        for _ in range(3):  # the search itself, each time (nothing kept: solver.forget_answers)
+            solver.forget_answers()
+            seen.append(placement(rc._solve_run(reg, rs, ev, time_limit=2.0, whatif=False)[1]))
         assert seen[0] == seen[1] == seen[2], f"{ev.key}: {[[len(sum(r, [])) for r in s] for s in seen]}"
 
 

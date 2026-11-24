@@ -4240,22 +4240,24 @@ NO_OTHER = "no other split"  # "another one" asked for a roster the earlier ones
 
 
 def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None,
-                  time_limit: float = PREVIEW_TIME_LIMIT_S) -> tuple[list[list[str]], list[RosterResult]]:
+                  time_limit: float = PREVIEW_TIME_LIMIT_S, earlier: dict[int, int] | None = None) -> tuple[list[list[str]], list[RosterResult]]:
     """A split under `strategy` for the modal: the layout (flat groups) and the rosters, nothing saved.
     `avoid` = earlier previews (flat groups) the answer must differ from. `time_limit`: the split modal's budget by
-    default; the lock preview passes the lock's (SOLVE_TIME_LIMIT_S) so it shows the roster the lock will build."""
+    default; the lock preview passes the lock's (SOLVE_TIME_LIMIT_S) so it shows the roster the lock will build.
+    `earlier` (a later raid whose earlier raid is still open: earlier_counts) = who the raids before it will roster."""
     k = groups_per_roster(reg, run_size(reg, ev))
     prev = [{n: gi // k for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     prev_g = [{n: gi for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     trial = ev.model_copy(deep=True)
     try:
-        players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=time_limit, whatif=False, avoid_groups=prev_g)
+        players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=time_limit, whatif=False, avoid_groups=prev_g,
+                                         earlier=earlier)
     except RuntimeError as e:
         if not (prev and "INFEASIBLE" in str(e)):
             raise
         # "another one" found none: is it the earlier answers that leave nothing, or the board and the rules? (a model
         # without the avoid lines is proven quickly either way)
-        _solve_run(reg, rs, ev.model_copy(deep=True), strategy=strategy, time_limit=time_limit, whatif=False)
+        _solve_run(reg, rs, ev.model_copy(deep=True), strategy=strategy, time_limit=time_limit, whatif=False, earlier=earlier)
         raise RuntimeError(f"no roster found: {NO_OTHER}") from e
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
@@ -4434,7 +4436,7 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
 # ---------------------------------------------------------------- the board as the lock would place it (Events page)
 
 def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None,
-                        memo=None, raid_key=None) -> dict[str, "list[RosterResult] | str"]:
+                        memo=None, raid_key=None, counts: dict[int, int] | None = None) -> dict[str, "list[RosterResult] | str"]:
     """Every OPEN raid of an event drawn as its lock would place people now — PURE: deep copies, nothing saved. Each
     raid solves through the lock's own entry (_solve_run, the run's strategy, the lock's budget SOLVE_TIME_LIMIT_S, the
     raid's minimums, pins and the officers' board as hard placements), so the solver's repeatable answer is the
@@ -4446,12 +4448,13 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
     starts — solver.Stopped is raised, never turned into a raid's sentence. `memo` + `raid_key(p, earlier)` (the
     board cache's, per event): a raid whose own inputs — its key covers them and the `earlier` it is handed — were
     solved before takes that answer instead of solving again (the solver is repeatable: the same answer); the picture
-    only, never the lock. → {run key: [RosterResult]
+    only, never the lock. `counts` (a dict): filled with how many of the raids solved rostered (or will roster) each
+    Discord id — the `earlier` a raid after them gets (earlier_counts). → {run key: [RosterResult]
     (rosters[0].benched = the joiners not placed) | the sentence}; a locked or closed raid has no entry (its board is
     its roster)."""
     parts = [p.model_copy(deep=True) for p in (parts if parts is not None else event_parts(rs, first))]
     out: dict[str, list[RosterResult] | str] = {}
-    times: dict[int, int] = {}  # discord id → how many raids before this one rostered (or will roster) them
+    times: dict[int, int] = counts if counts is not None else {}  # discord id → how many raids before this one rostered (or will roster) them
 
     def count(p: RaidEvent, rosters: list[RosterResult]) -> None:
         for uid in {player_uid(p, x) for r in rosters for x in r.selected} - {None}:
@@ -4486,6 +4489,23 @@ def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: l
         if mk is not None:
             memo[mk] = out[p.key]
     return out
+
+
+def earlier_counts(reg: Registry, rs: RaidStore, ev: RaidEvent) -> dict[int, int] | None:
+    """A later raid's `earlier` for a solve made while a raid before it is still OPEN (Preview lock on a later raid,
+    the final fix wave of §5.67 phase 4): who the raids before it will roster, as the board picture counts them — a
+    locked raid's roster, an open raid's own lock solve (event_board_preview over the raids before it). Without it the
+    preview solved as if nobody were rostered before it, while the lock (made only after those raids lock) reads their
+    rosters. BLOCKING (it may solve): a thread. None for a first raid, or when no raid before it is open (the solve
+    reads their rosters itself, exactly as the lock does)."""
+    if not is_follow(ev):
+        return None
+    before = [p for p in event_parts(rs, ev) if part_no(p) < part_no(ev)]
+    if not any(p.state == "open" for p in before):
+        return None
+    times: dict[int, int] = {}
+    event_board_preview(reg, rs, first_part(rs, ev), parts=before, counts=times)
+    return times
 
 
 def overlay_board(reg: Registry, ev: RaidEvent, rosters: list[RosterResult]) -> list[RosterResult]:

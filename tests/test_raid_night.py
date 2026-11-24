@@ -690,7 +690,7 @@ def test_lock_preview_route_shows_the_roster_and_saves_nothing_but_the_proposal(
     join(reg, rs, ev, ms)
     names = [m.display_name for m in ms]
 
-    def preview(reg_, rs_, ev_, strategy, avoid=None, time_limit=rc.PREVIEW_TIME_LIMIT_S):
+    def preview(reg_, rs_, ev_, strategy, avoid=None, time_limit=rc.PREVIEW_TIME_LIMIT_S, earlier=None):
         trial = ev_.model_copy(deep=True)
         rosters = rc.board_rosters(reg_, trial, [names[:5], names[5:]], rc.run_size(reg_, trial))
         seated = {p.signup_name for r in rosters for p in r.selected}
