@@ -171,7 +171,8 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
     if key == "join":
         if not locked:
             plays = spec or (s.spec if s and s.character == char else next((c.spec for c in m.characters if c.label == char), None)) or char
-            if plays != char and char != name and char != "their main":  # another character than the member's name: named too
+            main = m.main.label if m.main else None
+            if plays != char and (len(m.active()) > 1 or char != main):  # several characters, or not the main: which one is said
                 plays = f"{char}, {plays}"
             if own:
                 return [f"{name} is marked as joined, playing {plays}.", "You can change the answer until the lock."]

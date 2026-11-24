@@ -4538,7 +4538,7 @@ def _raid_changed(op: ConfigOp) -> set[str]:
     return out
 
 
-def op_box(reg: Registry, ops, diff=()) -> dict | None:
+def op_box(reg: Registry, ops, diff=(), rs=None) -> dict | None:
     """The box for one write (or several on the same schedule or raid): a NEW schedule → create (13), only `active`
     changing → Pause (15) / Resume (16), any other schedule edit → Save (14), schedule_remove → Remove (17), raid_set /
     comp_target → the raid's Save (19). None for anything else, or a batch spanning several schedules or raids."""
@@ -4555,9 +4555,9 @@ def op_box(reg: Registry, ops, diff=()) -> dict | None:
             if ref not in reg.profile.raids:
                 return None
             changed = set().union(*(_raid_changed(o) for o in ops))
-            return cq.raid_save_box(reg, None, ref, changed, diff)
+            return cq.raid_save_box(reg, rs, ref, changed, diff)
         if any(o.op == "schedule_remove" for o in ops):
-            return cq.schedule_remove_box(reg, None, ref)
+            return cq.schedule_remove_box(reg, rs, ref)
         parts = [p for o in ops for p in (o.parts if isinstance(o, MergedOp) else [o])]
         fields = {}
         for p in parts:
@@ -4569,8 +4569,8 @@ def op_box(reg: Registry, ops, diff=()) -> dict | None:
                 apply(sh, o, "preview", True)
             return cq.schedule_create_box(sh, sh.schedule_entry(ref))
         if set(fields) == {"active"}:
-            return (cq.schedule_resume_box if parse_bool(fields["active"] or "") else cq.schedule_pause_box)(reg, None, ref)
-        return cq.schedule_save_box(reg, None, ref, fields, diff)
+            return (cq.schedule_resume_box if parse_bool(fields["active"] or "") else cq.schedule_pause_box)(reg, rs, ref)
+        return cq.schedule_save_box(reg, rs, ref, fields, diff)
     except (RegistryError, ValueError):
         return None  # the line's own refusal says what is wrong
 
@@ -4607,11 +4607,11 @@ def officer_roles_after(reg: Registry, ops) -> list[int]:
     return left
 
 
-def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None = None) -> list[str]:
+def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None = None, rs=None) -> list[str]:
     """What a write does beyond the setting itself, in sentences from code (seats, regulars, members, where things post) —
     the same words on every surface. Empty for a routine reversible edit. `roles_after`: the officer role list once the
     whole batch has landed (officer_roles_after), so removing every role in one batch says so; None = this op alone."""
-    b = op_box(reg, op)
+    b = op_box(reg, op, rs=rs)
     if b is not None:  # a schedule's or a raid's write: the box's sentences, on every surface
         return list(b["sentences"])
     if isinstance(op, MergedOp):
@@ -4982,6 +4982,11 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
         sh = reg.shadow()
     merged = coalesce(list(ops))
     roles_after = officer_roles_after(reg, merged)
+    rs = None
+    if any(_box_group(o) is not None for o in merged):  # the boxes read the live runs: from disk once per preview
+        from . import raidcycle as rc
+
+        rs = rc.RaidStore(reg.store, reg.key)
     for op in merged:
         parts_ops = op.parts if isinstance(op, MergedOp) else [op]
         label, parts, notes = None, [], []
@@ -5008,7 +5013,7 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
                 warning = ""
             if warning and warning not in notes:
                 notes.append(_cap(warning) + ".")
-        cons = op_consequences(reg, op, roles_after)
+        cons = op_consequences(reg, op, roles_after, rs=rs)
         line = DescribedLine(op=op.op, target=op.target, label=label or op.op, parts=parts, notes=notes, text=text, error=_op_error(sh, op),
                              warn=is_warn(reg, op), consequences=cons, ops=[p.model_dump(exclude_none=True) for p in parts_ops])
         d.lines.append(line)
@@ -5016,13 +5021,13 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
         d.warn = d.warn or line.warn
     boxed = [(op, ln) for op, ln in zip(merged, d.lines) if _box_group(op) is not None]
     if boxed:
-        d.box = op_box(reg, [op for op, _ln in boxed], [x for _op, ln in boxed for x in _diff_lines(ln)])
+        d.box = op_box(reg, [op for op, _ln in boxed], [x for _op, ln in boxed for x in _diff_lines(ln)], rs=rs)
         if d.box is not None:
             for op, ln in boxed:
-                ln.box = op_box(reg, op, _diff_lines(ln))
+                ln.box = op_box(reg, op, _diff_lines(ln), rs=rs)
             mine = {c for _op, ln in boxed for c in ln.consequences}
             if d.box["verb"] in ("Create schedule", "Resume", "Save"):  # routine: only an open event keeping its own is reviewed (C10)
-                d.quiet = [c for c in d.box["sentences"] if "already open and keeps" not in c and "open events keep their" not in c]
+                d.quiet = [c for c in d.box["sentences"] if not (("already open and keeps" in c or "open events keep their" in c) and "timing" in c)]
             d.consequences = list(d.box["sentences"]) + [c for c in d.consequences if c not in mine and c not in d.box["sentences"]]
     _batch_roles(reg, list(ops), d)
     return d

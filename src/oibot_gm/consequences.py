@@ -61,14 +61,14 @@ REFUSAL_TITLES = {"past": "That time has passed", "clash": "That time is taken",
                   "locked": "The lineup is fixed", "other": "This can't go ahead"}
 
 
-def refusal_kind(sentence: str) -> str:
-    """Which REFUSAL_TITLES a verb's refusal sentence answers to (the reschedule and lineup refusals' own words)."""
+def refusal_kind(sentence) -> str:
+    """Which REFUSAL_TITLES a verb's refusal answers to: the kind a built sentence carries (rc.Refusal — a past start,
+    a clash), else the refusal constant it equals; anything else is 'other'. Never a match on words inside a sentence."""
+    kind = getattr(sentence, "kind", None)
+    if kind in REFUSAL_TITLES:
+        return kind
     s = str(sentence or "")
-    if " is in the past, so the event stays at " in s:
-        return "past"
-    if " already has a run at " in s:
-        return "clash"
-    if s in (rc.MOVE_CLOSED, rc.LINEUP_CLOSED) or s.startswith(("This run is already finished", "This run is already cancelled")):
+    if s in (rc.MOVE_CLOSED, rc.LINEUP_CLOSED, *(_closed_sentence(st) for st in ("done", "cancelled"))):
         return "closed"
     if s == rc.LINEUP_LOCKED:
         return "locked"
@@ -84,8 +84,9 @@ PAST_TAIL = "{new} is in the past, so the event stays at {old}."
 
 
 def move_past_sentence(reg: Registry, new, old) -> str:
-    """Reschedule into the past, refused: 'Fri 20 Nov 7:00 PM is in the past, so the event stays at Thu 10 Dec 6:30 PM.'"""
-    return PAST_TAIL.format(new=reg.local12(new), old=reg.local12(old))
+    """Reschedule into the past, refused: 'Fri 20 Nov 7:00 PM is in the past, so the event stays at Thu 10 Dec 6:30 PM.'
+    (an rc.Refusal of kind 'past')."""
+    return rc.Refusal(PAST_TAIL.format(new=reg.local12(new), old=reg.local12(old)), "past")
 
 
 LEAVE_TEMPLATE = {"one": "Your one edit to {name} is not saved yet.", "many": "Your {n} edits to {name} are not saved yet."}
@@ -162,10 +163,14 @@ CONFIRM_DM = "the Confirm or Can't make it DM"
 """The confirmation card by its two buttons, in every confirm sentence (the Confirm rule, design §5.57)."""
 
 
+def _closed_sentence(state: str) -> str:
+    return f"This run is already {rc.RUN_STATE_WORDS[state]}."
+
+
 def _closed(ev: rc.RaidEvent) -> list[str] | None:
     """A run already finished or cancelled: every verb's confirm says so, in one sentence."""
     if ev.state in ("done", "cancelled"):
-        return [f"This run is already {rc.RUN_STATE_WORDS[ev.state]}."]
+        return [_closed_sentence(ev.state)]
     return None
 
 
@@ -238,7 +243,9 @@ def _cancel(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
     where = "on their card" if rc.run_confirms(reg, first) else "on the sheet"
     who = ("Nobody is rostered" if r == 0 else f"The one person rostered sees it {where}" if r == 1
            else f"The {r} rostered see it {where.replace('their card', 'their cards')}")
-    return [head, who + ", and nobody gets a DM.", gone]
+    asks = len([n for n in ffx["fill_asks"] if n not in set(ffx["rostered"])])  # fill asks out to people not rostered
+    tail = (f", and {asks} open ask card{'s say' if asks > 1 else ' says'} Cancelled." if asks else ", and nobody gets a DM.")
+    return [head, who + tail, gone]
 
 
 def cancel_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
@@ -487,13 +494,27 @@ def lineup_consequence(reg: Registry, rs, ev: rc.RaidEvent, lineup: list[dict]) 
         when = _moved_at(reg, rs, first, ch)
         said = _and([f"{_raid(reg, r)} {'now starts ' if i == 0 else ''}{at_on(w)}" for i, (r, w) in enumerate(when.items())]) + "."
         times = said if _words(said) <= 20 else "Some raids start at new times."
-    lost = loss
+    # a roster that goes takes the board places on it (rc.roster_trim: apply_lineup drops them, the lock places the
+    # people again) — a loss too
+    def _was(k: str) -> int:
+        p = rs.events.get(k)
+        return int(((reg.config.team(p.team) if p is not None else None) or {}).get("rosters") or 1)
+    gone_rosters = sum(_was(k) - n for k, n in ch.rosters.items() if k in ch.trimmed_places or k in ch.trimmed_pins)
+    trim = None
+    if ch.trimmed_places or ch.trimmed_pins:
+        trim = "Moves made on the removed rosters are dropped." if gone_rosters > 1 else "Moves made on the removed roster are dropped."
+    losses = [x for x in (loss, trim) if x]
     if loss and out[0] in {f"{_raid(reg, p.instance)} leaves the lineup." for p in held}:
-        out[0], loss = loss, None  # the loss names the raid taken out: it says the change itself, with room for one more
-    third = loss or early or times or ("Its schedule keeps its own lineup." if first.schedule else None)
-    if third:
-        out.append(third)
-    assert not held or lost in out, "a removed raid's losses are never dropped from the confirm"
+        out[0] = loss  # the loss names the raid taken out: it says the change itself, with room for one more
+        losses.remove(loss)
+    if len(out) + len(losses) > 3:
+        out = [out[1]]  # the losses say what changes; who is told stays
+    out += losses
+    if len(out) < 3:
+        extra = early or times or ("Its schedule keeps its own lineup." if first.schedule else None)
+        if extra:
+            out.append(extra)
+    assert all(x in out for x in (loss, trim) if x), "a removed raid's or roster's losses are never dropped from the confirm"
     return out
 
 
@@ -684,6 +705,11 @@ def _schedule_name(reg: Registry, sid: str) -> str:
     return e.get("name") or e["id"]
 
 
+def _store(reg: Registry, rs):
+    """The run store a box reads: the caller's, else one read from disk ONCE for the whole box."""
+    return rs if rs is not None else rc.RaidStore(reg.store, reg.key)
+
+
 def _open_events(reg: Registry, rs, sid: str) -> list[rc.RaidEvent]:
     """The live events schedule `sid` opened, their first raids only, soonest first (test runs left out)."""
     out = []
@@ -696,24 +722,26 @@ def _open_events(reg: Registry, rs, sid: str) -> list[rc.RaidEvent]:
     return sorted(out, key=lambda e: e.start)
 
 
-def regular_remove(reg: Registry, m, key: str) -> list[str]:
+def regular_remove(reg: Registry, m, key: str, *, rs=None) -> list[str]:
     """Taking `m` off the regulars of schedule `key` (Registry.regular_remove — the Schedules page's remove and the
     orphan clear, Discord's /roster remove, plain text, MCP): no DM and no notice; the lock stops weighting them as a
     regular (rc.seat_bonus) and their answer on an open event stays. A removed schedule's leftovers change nothing else."""
     name = m.display_name
+    rs = _store(reg, rs)
     sid = reg.config.schedule_aliases.get(str(key), str(key))
     if key not in dict(reg.series("recurring")):
         return [f"{name} is no longer a regular of {series_words(reg, key)}.", "Nothing else changes."]
     out = [f"{name} is no longer a regular of {_schedule_name(reg, sid)}."]
-    if _open_events(reg, None, sid):
+    uid = str(m.discord_id)
+    if any(uid in ev.signups and ev.signups[uid].source != "absence" for ev in _open_events(reg, rs, sid)):
         out.append("They keep their answer on the open event.")
     out.append("You can add them again.")
     return out
 
 
-def regular_remove_box(reg: Registry, m, key: str) -> dict:
+def regular_remove_box(reg: Registry, m, key: str, *, rs=None) -> dict:
     """Box 18: take a member off a schedule's regulars."""
-    return box(f"Take {m.display_name} off the regulars?", regular_remove(reg, m, key), "Remove")
+    return box(f"Take {m.display_name} off the regulars?", regular_remove(reg, m, key, rs=rs), "Remove")
 
 
 def undo_box(n: int, rev: str = "") -> dict:
@@ -852,21 +880,34 @@ def _open_sentence(reg: Registry, opened: list, one: str, many: str) -> str | No
 PRIORITY_FIELDS = {"weights"}  # read live at the lock (rc.run_weights): a change reaches the events open now
 
 
+LINEUP_FIELDS = {"lineup", "rosters", "follow", "then"}  # copied onto an event when its sheet opens, like its timing
+WORDS_FIELDS = {"name", "notes"}  # read where they show: nothing waits for a sheet
+
+
 def schedule_save_box(reg: Registry, rs, sid: str, fields, diff=()) -> dict:
     """Box 14: a schedule edit's Save. Its timing, lineup and rosters are copied onto an event when its sheet opens, so
-    the change starts with the first event without a sheet and the open ones keep theirs; a priority change is read at
-    each lock, so it reaches the events open now."""
+    the change starts with the first event without a sheet, and an open one keeps its timing (configops.
+    SCHEDULE_TIME_SETTINGS) or its lineup — said only when that is what changed; a priority change is read at each
+    lock, so it reaches the events open now; a new name or note shows at once."""
+    from .configops import SCHEDULE_TIME_SETTINGS
+
     entry = reg.schedule_entry(sid)
     name = entry.get("name") or entry["id"]
-    opened = _open_events(reg, rs, entry["id"])
+    rs = _store(reg, rs)
     keys = {str(k).split(".")[0] for k in (fields or [])}
+    if keys and keys <= WORDS_FIELDS:
+        return box(f"Save {name}?", ["The change shows from now on."], "Save", diff=diff, rev=_schedule_rev(reg, entry["id"]))
+    opened = _open_events(reg, rs, entry["id"])
     if keys and keys <= PRIORITY_FIELDS:
         lines = ["The new priority applies at the next lock."]
         said = _open_sentence(reg, opened, "That includes the event open now.", "That includes the {n} events open now.")
     else:
         nxt = _next_unopened(reg, rs, entry, entry["id"])
         lines = [f"The change starts with the {_day(reg, nxt)} event." if nxt else "The change starts with the next event it opens."]
-        said = _open_sentence(reg, opened, "The {day} event is already open and keeps its timing.", "The {n} open events keep their timing.")
+        kept = [w for w, f in (("timing", SCHEDULE_TIME_SETTINGS), ("lineup", LINEUP_FIELDS)) if keys & f]
+        what = " and ".join(kept)
+        said = _open_sentence(reg, opened, "The {day} event is already open and keeps its " + what + ".",
+                              "The {n} open events keep their " + what + ".") if kept else None
     if said:
         lines.append(said)
     return box(f"Save {name}?", lines, "Save", diff=diff, rev=_schedule_rev(reg, entry["id"]))
@@ -874,6 +915,7 @@ def schedule_save_box(reg: Registry, rs, sid: str, fields, diff=()) -> dict:
 
 def schedule_pause_box(reg: Registry, rs, sid: str) -> dict:
     """Box 15: Pause a schedule."""
+    rs = _store(reg, rs)
     entry = reg.schedule_entry(sid)
     name = entry.get("name") or entry["id"]
     opened = _open_events(reg, rs, entry["id"])
@@ -885,6 +927,7 @@ def schedule_pause_box(reg: Registry, rs, sid: str) -> dict:
 
 def schedule_resume_box(reg: Registry, rs, sid: str) -> dict:
     """Box 16: Resume a schedule — when its next sheet opens, and for which event."""
+    rs = _store(reg, rs)
     entry = reg.schedule_entry(sid)
     name = entry.get("name") or entry["id"]
     lines = ["Sheets open from this schedule again."]
@@ -899,6 +942,7 @@ def schedule_resume_box(reg: Registry, rs, sid: str) -> dict:
 def schedule_remove_box(reg: Registry, rs, sid: str) -> dict:
     """Box 17: Remove a schedule (counts from Registry.schedule_removal_effects) — red, it cannot be brought back. What
     the open events no longer get at their lock (Effects.loses) is never dropped."""
+    rs = _store(reg, rs)
     entry = reg.schedule_entry(sid)
     name = entry.get("name") or entry["id"]
     fx = reg.schedule_removal_effects(entry["id"], rs)
@@ -927,6 +971,7 @@ def _open_events_of_raid(reg: Registry, rs, rid: str) -> int:
 def raid_save_box(reg: Registry, rs, rid: str, changed, diff=()) -> dict:
     """Box 19: a raid edit's Save. `changed`: what changes — 'minimum:<slot>' per minimum, 'weight:<key>' (or
     'weights') per priority weight, a setting's name otherwise (lockout_days, first_open, duration_hours…)."""
+    rs = _store(reg, rs)
     changed = {str(c) for c in changed or ()}
     mins = {c for c in changed if c.startswith("minimum")}
     weights = {c for c in changed if c.startswith("weight")}

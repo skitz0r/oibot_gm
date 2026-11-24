@@ -1279,9 +1279,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         ev = find_live(reg, rs, key)
         return rs, ev, (rc.run_team(reg, ev))
 
-    def box_refused(sentence: str, status: int = 400):
-        """A refusal as the confirmation box shows it (design §7b): the verb's own sentence, its title, only Back."""
-        return JSONResponse({"error": str(sentence), "box": cq.refusal_box_for(str(sentence))}, status_code=status)
+    def box_refused(why, status: int = 400):
+        """A refusal as the confirmation box shows it (design §7b): the verb's own sentence, its title, only Back. `why`:
+        the sentence or the RegistryError carrying it (its first argument keeps an rc.Refusal's kind)."""
+        if isinstance(why, BaseException):
+            why = why.args[0] if why.args and isinstance(why.args[0], str) else str(why)
+        return JSONResponse({"error": str(why), "box": cq.refusal_box_for(why)}, status_code=status)
 
     def box_stale(d: dict, fresh: dict):
         """`seen` (a box's fp) carried by a write: when the box built NOW differs, nothing is written and the fresh box
@@ -1676,7 +1679,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         try:  # cancel_run re-renders the sheet and cards, closes every open ask and writes the audit line itself
             line = await maybe_await(bot.cancel_run(v.reg, rs, ev, v.name, (d.get("reason") or "").strip()[:300] or None, notify=notify, by_id=v.uid, via=v.via))
         except (RegistryError, ValueError) as e:
-            return box_refused(str(e))
+            return box_refused(e)
         return {"message": line}
 
     def event_of(reg, rs, key: str):
@@ -1713,7 +1716,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         except RegistryError as e:
             if str(e) == rc.RUN_CHANGED:
                 return JSONResponse({"error": str(e), "rev": rc.event_rev(v.reg, rs, ev)}, status_code=409)
-            return box_refused(str(e))
+            return box_refused(e)
         return {"message": " ".join(lines)}
 
     @app.post("/api/run/{key}/lineup")
@@ -1742,7 +1745,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         except RegistryError as e:
             if str(e) == rc.RUN_CHANGED:
                 return JSONResponse({"error": str(e), "rev": rc.event_rev(v.reg, rs, ev)}, status_code=409)
-            return box_refused(str(e))
+            return box_refused(e)
         return {"message": " ".join(lines)}
 
     @app.post("/api/run/{key}/reopen")
@@ -1829,14 +1832,17 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise RegistryError(why)
         return [dict(e) for e in later]
 
+    OPEN_UNREAD = "This sheet's times can't be read right now, so nothing was opened. Open it again from the list."
+
     def open_box(reg, rid: str, p: dict) -> dict:
         """Open the sheet now's box (consequences.open_now_box) from rc.open_preview's answer `p`: how early against the
         schedule's own opening, where it posts, when it still locks."""
         start = datetime.fromisoformat(p["start"])
         sd = reg.schedule_def(rid, p.get("schedule"))
         lineup = [{"raid": rid, "rosters": int(sd.get("rosters") or 1)}] + [{"raid": e["raid"], "rosters": int(e.get("rosters") or 1)} for e in p.get("later") or []]
-        return cq.open_now_box(reg, start, start - timedelta(hours=float(sd["signup_lead_hours"])),
-                               start - timedelta(hours=float(sd["lock_hours_before"])), lineup=lineup, channel=bool(p.get("channel")))
+        lead, lock = float(sd.get("signup_lead_hours") or 0), float(sd.get("lock_hours_before") or 0)  # a one-off without its own: now
+        return cq.open_now_box(reg, start, start - timedelta(hours=lead), start - timedelta(hours=lock), lineup=lineup,
+                               channel=bool(p.get("channel")))
 
     @app.post("/api/raid/{rid}/open/preview")
     async def raid_open_preview(request: Request, rid: str):
@@ -1895,7 +1901,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             try:
                 fresh = open_box(reg, rid, rc.open_preview(reg, rs, rid, start.isoformat(), sid, follow=fw, lineup=later))
             except RegistryError as e:
-                return box_refused(str(e))
+                return box_refused(e)
+            except (KeyError, ValueError, TypeError):  # never a 500: the open screen's facts can't be read again
+                return box_refused(OPEN_UNREAD)
             if (r := box_stale(d, fresh)) is not None:
                 return r
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line

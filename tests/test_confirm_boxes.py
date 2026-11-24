@@ -3,6 +3,7 @@ most three sentences under the Confirm rule, the verb (None = a refusal, only Ba
 the "label: old → new" lines and a fingerprint the action route re-checks (`seen` → 409 with the fresh box)."""
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -173,11 +174,17 @@ def test_switch_and_answer_boxes(reg, rs):
     assert a["sentences"][1:] == ["They get a DM with Yes and No.", "Their seat changes only when they say yes."]
     nyx.dm_opt_out = True
     assert cq.switch_box(reg, ev, nyx, None, "Shadow", [HYJAL], locked=True)["sentences"][1] == "It waits on their Me page."
-    tavi = ms[3]
+    tavi = ms[3]  # one character: the mockup's words
     ab = cq.answer_box(reg, ev, tavi, "join", tavi.main.label, "Fire", by_id=1)
     assert (ab["title"], ab["verb"]) == ("Answer for someone", "Record answer")
-    assert ab["sentences"] == [f"{tavi.display_name} is marked as joined, playing {tavi.main.label}, Fire.", "They get a notice.",
+    assert ab["sentences"] == [f"{tavi.display_name} is marked as joined, playing Fire.", "They get a notice.",
                                "They can change the answer themselves."]
+    reg.add_character(tavi.discord_id, tavi.display_name, "Altonar", "Mage", "Frost", None, False)  # several: which one is said
+    tavi = reg.members[tavi.discord_id]
+    assert cq.answer_box(reg, ev, tavi, "join", "Altonar", "Frost", by_id=1)["sentences"][0] == \
+        f"{tavi.display_name} is marked as joined, playing Altonar, Frost."
+    assert cq.answer_box(reg, ev, tavi, "join", tavi.main.label, "Fire", by_id=1)["sentences"][0] == \
+        f"{tavi.display_name} is marked as joined, playing {tavi.main.label}, Fire."
 
 
 def test_the_swap_after_the_lock_reads_as_the_mockup(reg, rs):
@@ -258,12 +265,14 @@ def test_schedule_boxes_read_as_the_mockups(reg, rs):
     assert (rm["title"], rm["verb"], rm["danger"]) == ("Remove Tuesday raid night?", "Remove schedule", True)
     assert rm["sentences"][0] == "The schedule and its 6 regular spots are removed, and each regular sees a notice."
     assert rm["sentences"][1].startswith("The open event keeps its sheet") and rm["sentences"][2] == "A removed schedule cannot be brought back."
-    # a regular's removal (18)
+    # a regular's removal (18): their answer is kept only when they have one
     m = reg.members[REAL]
-    rr = cq.regular_remove_box(reg, m, sid)
+    rr = cq.regular_remove_box(reg, m, sid, rs=rs)
     assert (rr["title"], rr["verb"]) == (f"Take {m.display_name} off the regulars?", "Remove")
-    assert rr["sentences"] == [f"{m.display_name} is no longer a regular of Tuesday raid night.",
-                               "They keep their answer on the open event.", "You can add them again."]
+    assert rr["sentences"] == [f"{m.display_name} is no longer a regular of Tuesday raid night.", "You can add them again."]
+    join(reg, rs, ev, [m])
+    assert cq.regular_remove_box(reg, m, sid, rs=rs)["sentences"] == [f"{m.display_name} is no longer a regular of Tuesday raid night.",
+                                                                      "They keep their answer on the open event.", "You can add them again."]
 
 
 def test_resume_says_when_the_next_sheet_opens(reg, rs):
@@ -302,3 +311,133 @@ def test_a_raid_with_only_minimums_resets_and_names_them(reg):
     b = cq.raid_reset_box(reg, RID)
     assert b["verb"] == "Reset" and b["danger"] and "minimums for Healers" in b["sentences"][1]
     assert b["fp"] == cq.box(b["title"], b["sentences"], "Reset", danger=True, rev=reg.config_rev(f"raid_all:{RID}"))["fp"]
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def test_a_rename_is_not_reviewed_and_a_time_change_is(reg, rs):
+    sid = tuesday(reg)
+    ev = rc.open_run(reg, rs, HYJAL, next_tuesday(reg, sid), schedule=sid)
+    d = configops.describe_ops(reg, [ConfigOp(op="schedule_set", target=sid, field="name", value="Tuesdays")])
+    assert d.box["sentences"] == ["The change shows from now on."] and not d.review, "a rename says nothing of timing and isn't reviewed"
+    t = configops.describe_ops(reg, [ConfigOp(op="schedule_set", target=sid, field="lock_hours_before", value="30")])
+    assert f"The {reg.local12(ev.start, '%a %d %b')} event is already open and keeps its timing." in t.consequences and t.review
+    r = configops.describe_ops(reg, [ConfigOp(op="schedule_set", target=sid, field="rosters", value="2")])
+    assert r.box["sentences"][1] == f"The {reg.local12(ev.start, '%a %d %b')} event is already open and keeps its lineup." and not r.review
+
+
+def _roster_two(reg, rs, ms):
+    ev = one_off(reg, rs)
+    join(reg, rs, ev, ms)
+    bd = rc.event_parts(rs, ev)[1]
+    k = rc.groups_per_roster(reg, rc.run_size(reg, bd))
+    bd.layout = [[ms[0].display_name]] + [[] for _ in range(k - 1)] + [[ms[1].display_name, ms[2].display_name]]
+    bd.pins = {str(ms[2].discord_id): "in"}
+    rs.save(bd, "board on roster 2")
+    return ev, bd, k
+
+
+def test_a_roster_that_goes_drops_its_board_places(reg, rs):
+    from test_raid_night import NightBot
+
+    ms = people(reg, 6)
+    ev, bd, k = _roster_two(reg, rs, ms)
+    want = [{"raid": HYJAL, "rosters": 1}, {"raid": RID, "rosters": 1}]
+    ch = rc.plan_lineup(reg, rs, ev, want)
+    assert ch.trimmed_places == {bd.key: 2} and ch.trimmed_pins == {bd.key: 1}
+    b = cq.lineup_box(reg, rs, ev, want)
+    assert b["sentences"] == ["Barrow Deeps goes from two rosters to one.", "All 6 answers stand.", "Moves made on the removed roster are dropped."]
+    bot = NightBot(reg, rs)
+    asyncio.run(bot.edit_lineup(reg, rs, ev, want, by="Jon", by_id=None))
+    bd = rs.events[bd.key]
+    assert bd.layout == [[ms[0].display_name]] + [[] for _ in range(k - 1)] and bd.pins == {}, "the places and pin on roster 2 go"
+    assert all(str(m.discord_id) in bd.signups for m in ms), "the people stay joined"
+    assert rc.run_rosters(reg, bd) == 1 and len(rc.board_layout(reg, bd)) == k, "the lock builds one roster from this board"
+
+
+def test_no_places_on_the_roster_that_goes_no_sentence(reg, rs):
+    ms = people(reg, 3)
+    ev = one_off(reg, rs)
+    join(reg, rs, ev, ms)
+    b = cq.lineup_box(reg, rs, ev, [{"raid": HYJAL, "rosters": 1}, {"raid": RID, "rosters": 1}])
+    assert not any("Moves made" in x for x in b["sentences"])
+
+
+def test_a_loss_is_never_cut_with_a_raid_and_a_roster_going(reg, rs):
+    ms = people(reg, 6)
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=[{"raid": RID, "rosters": 2}, {"raid": ONY, "rosters": 1}])
+    join(reg, rs, ev, ms)
+    bd, ony = rc.event_parts(rs, ev)[1:]
+    k = rc.groups_per_roster(reg, rc.run_size(reg, bd))
+    bd.layout = [[] for _ in range(k)] + [[ms[1].display_name]]
+    ony.layout = [[ms[3].display_name]]
+    rs.save(bd, "b")
+    rs.save(ony, "o")
+    said = cq.lineup_consequence(reg, rs, ev, [{"raid": HYJAL, "rosters": 1}, {"raid": RID, "rosters": 1}])
+    assert len(said) <= 3 and "Onyxia's Lair is taken out with its board place." in said and "Moves made on the removed roster are dropped." in said
+
+
+def test_a_cancel_after_the_lock_counts_fill_asks_to_people_not_rostered(reg, rs):
+    from conftest import lock_with_board
+
+    ms = people(reg, 6)
+    ev = rc.open_run(reg, rs, RID, start_in(reg, 3), by="t")
+    join(reg, rs, ev, ms)
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms[:5]])
+    ev.fill_asks.append(rc.FillAsk(discord_id=ms[5].discord_id, display_name=ms[5].display_name, kind="other", role="healer",
+                                   character="X", spec="Holy", reason="short 1 healer"))
+    rs.save(ev, "an ask")
+    assert cq.cancel_box(reg, ev, rs)["sentences"][1].endswith(", and 1 open ask card says Cancelled.")
+
+
+def test_refusal_kinds_come_from_the_refusal_not_its_words(reg, rs):
+    ev = one_off(reg, rs)
+    past = reg.now_local() - timedelta(days=2)
+    assert cq.refusal_kind(rc.reschedule_refusal(reg, rs, ev, past, None)) == "past"
+    assert cq.refusal_kind(str(cq.move_past_sentence(reg, past, ev.start))) == "other", "a plain string is matched only by constant"
+    other = rc.open_run(reg, rs, HYJAL, ev.start + timedelta(days=1), by="t")
+    assert cq.refusal_kind(rc.reschedule_refusal(reg, rs, ev, other.start, None)) == "clash"
+    assert (cq.refusal_kind(rc.LINEUP_LOCKED), cq.refusal_kind(rc.MOVE_CLOSED)) == ("locked", "closed")
+
+
+def test_seen_on_reschedule_lineup_and_undo(reg, rs, web_bot):
+    ms = people(reg, 3)
+    ev = one_off(reg, rs)
+    join(reg, rs, ev, ms[:1])
+    new = (ev.start + timedelta(days=1)).isoformat()
+    c, h = web_bot.c, H()
+    a = c.post(f"/api/run/{ev.key}/reschedule", json={"start": new, "preview": True}, headers=h).json()["box"]
+    join(reg, rs, ev, ms[1:2])
+    r = c.post(f"/api/run/{ev.key}/reschedule", json={"start": new, "seen": a["fp"]}, headers=h)
+    assert r.status_code == 409 and r.json()["box"]["fp"] != a["fp"] and ev.start.isoformat() != new
+    want = [{"raid": HYJAL, "rosters": 1}, {"raid": RID, "rosters": 1}]
+    a = c.post(f"/api/run/{ev.key}/lineup", json={"lineup": want, "preview": True}, headers=h).json()["box"]
+    join(reg, rs, ev, ms[2:])
+    r = c.post(f"/api/run/{ev.key}/lineup", json={"lineup": want, "seen": a["fp"]}, headers=h)
+    assert r.status_code == 409 and rc.run_lineup(reg, rs, ev)[1]["rosters"] == 2, "nothing written"
+    r = c.post(f"/api/run/{ev.key}/lineup", json={"lineup": want}, headers=h)
+    assert r.status_code == 200 and rc.run_lineup(reg, rs, ev)[1]["rosters"] == 1, "no seen: as before"
+    r = c.post(f"/api/run/{ev.key}/reschedule", json={"start": new}, headers=h)
+    assert r.status_code == 200 and rc.first_part(rs, ev).start.isoformat() == new, "no seen: as before"
+    # undo: the board's fingerprint
+    a = c.post(f"/api/run/{ev.key}/layout", json={"groups": [], "preview": True, "moves": 2}, headers=h).json()["box"]
+    assert a["sentences"][0] == "Your 2 moves on this board are dropped."
+    ev.layout = [[ms[0].display_name]]
+    rs.save(ev, "a move meanwhile")
+    r = c.post(f"/api/run/{ev.key}/layout", json={"groups": [], "seen": a["fp"], "moves": 2}, headers=h)
+    assert r.status_code == 409 and ev.layout == [[ms[0].display_name]]
+    assert c.post(f"/api/run/{ev.key}/layout", json={"groups": []}, headers=h).status_code == 200, "no seen: as before"
+
+
+def test_seen_on_open_the_sheet_now(reg, rs, web_bot):
+    sid = weekly(reg, RID, "Tue 18:30")
+    t = next_tuesday(reg, sid)
+    c, h = web_bot.c, H()
+    p = c.post(f"/api/raid/{RID}/open/preview", json={"start": t.isoformat(), "schedule": sid}, headers=h).json()
+    assert p["box"]["verb"] == "Open the sheet", p
+    reg.set_schedule(sid, {"lock_hours_before": 6}, "t")  # its lock time changed while the box was open
+    body = {"start": t.isoformat(), "schedule": sid, "occurrence": p["occurrence"]}
+    r = c.post(f"/api/raid/{RID}/open", json={**body, "seen": p["box"]["fp"]}, headers=h)
+    assert r.status_code == 409 and r.json()["box"]["fp"] != p["box"]["fp"] and not rs.events
+    r = c.post(f"/api/raid/{RID}/open", json=body, headers=h)
+    assert r.status_code == 200 and rs.events, "no seen: as before"

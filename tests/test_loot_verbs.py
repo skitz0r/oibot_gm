@@ -1322,6 +1322,8 @@ def test_correct_retires_the_corrected_awards_precedent(council):
     ctx = RegistryLootContext(c.reg, c.reg.store, None)
     assert ctx.precedent_for(f"{c.ev.key}-d1") is None and "tanks progression" not in ctx.policy_for_llm(), "never cited again"
     assert "Overrides:" not in c.bot.loot_summary(c.reg, c.s)["text"] and c.s.overrides[0]["status"] == "retired"
+    head = c.bot.loot_summary(c.reg, c.s)["text"].splitlines()[0]
+    assert c.ev.key not in head and rc.run_words(c.reg, c.ev) in head, "the end summary names the run, never its key"
     assert precedents(c.reg)[-1]["reason"] == "award corrected: ML misclicked"
 
 

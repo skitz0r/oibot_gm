@@ -1251,7 +1251,9 @@ roster*). When a raid that stays starts at another time the confirm gives its ne
 start is allowed, and the confirm says when it opens. Only that run changes — its schedule keeps its own lineup, and the
 confirm says so on a schedule's run when it has room. The first raid's answers are never touched, and every raid of the new lineup takes
 them, a new raid included (*"All 18 answers stand."*). A raid that stays keeps its board, its pins
-and the plans to leave before it, in its new place. A raid taken out is cancelled with what it held, always counted in
+and the plans to leave before it, in its new place. A raid going down to fewer rosters loses the board places (and their
+pins) on the rosters that go: those people stay joined and the lock places them again, and the confirm always says so
+(*"Moves made on the removed roster are dropped."*). A raid taken out is cancelled with what it held, always counted in
 the confirm (*"Barrow Deeps is taken out with its 3 board places, 1 pin and 1 plan to leave early."*); an open ask on
 it closes and its card says so. A raid taken out answers as itself afterwards: cancelling it again says it is already
 cancelled and never touches the run. Nobody gets a DM: the sheet is edited in place to the new lineup (*Hyjal Summit,

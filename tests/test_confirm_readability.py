@@ -785,6 +785,11 @@ def box_cases(reg, rs, runs, ms, dump):
     for case, ev in runs.items():
         add("lock_box", case, cq.lock_box(reg, ev, rs))
         add("cancel_box", case, cq.cancel_box(reg, ev, rs))
+    four = next(e for e in rs.events.values() if e.state == "open" and not rc.is_follow(e) and len(rc.event_parts(rs, e)) == 4)
+    add("lock_box", "four raids", cq.lock_box(reg, four, rs))  # lineup_cases' four-raid event
+    b = cq.cancel_box(reg, four, rs)
+    assert b["sentences"][0] == "All 4 raids of this event are cancelled.", b
+    add("cancel_box", "four raids", b)
     ev = runs["open recurring"]
     add("reschedule_box", "open, answers", cq.reschedule_box(reg, rs, ev, ev.start + timedelta(hours=1)))
     quiet = runs["open recurring, nobody joined"]
@@ -804,6 +809,19 @@ def box_cases(reg, rs, runs, ms, dump):
         else:
             b = cq.lineup_box(reg, rs, three, lineup)
         add("lineup_box", case, b)
+    bd3 = rc.event_parts(rs, three)[1]  # board places on the second Barrow Deeps roster, which goes
+    k = rc.groups_per_roster(reg, rc.run_size(reg, bd3))
+    was = bd3.layout
+    bd3.layout = [[] for _ in range(k)] + [[ms[1].display_name]]
+    b = cq.lineup_box(reg, rs, three, L(hy, (RID, 1), ony))
+    assert "Moves made on the removed roster are dropped." in b["sentences"], b
+    add("lineup_box", "a roster that goes with board places", b)
+    add("lineup_box", "a roster with places goes and a raid is taken out", cq.lineup_box(reg, rs, three, L(hy, (RID, 1))))
+    bd3.layout = was
+    lk.fill_asks.append(rc.FillAsk(discord_id=ms[11].discord_id, display_name=ms[11].display_name, kind="other", role="healer",
+                                   character="X", spec="Holy", reason="short 1 healer"))
+    add("cancel_box", "locked, a fill ask out to someone not rostered", cq.cancel_box(reg, lk, rs))
+    lk.fill_asks.pop()
     m = ms[2]
     add("switch_box", "before the lock", cq.switch_box(reg, ev, m, None, "Shadow", [RID]))
     add("switch_box", "another character", cq.switch_box(reg, ev, m, "Kingsley", "Fire", [RID, hy]))
@@ -845,6 +863,9 @@ def box_cases(reg, rs, runs, ms, dump):
     add("schedule_save_box", "a priority change", cq.schedule_save_box(reg, rs, sid, {"weights": {"rank": 5}}))
     tue_ev = rc.open_run(reg, rs, hy, rc.next_runs_of(reg, hy, reg.schedule_entry("tue"), n=2)[1], schedule="tue")
     add("schedule_save_box", "one open", cq.schedule_save_box(reg, rs, "tue", {"lock_hours_before": 12}))
+    add("schedule_save_box", "one open, rosters", cq.schedule_save_box(reg, rs, "tue", {"rosters": 2}))
+    add("schedule_save_box", "many open, a time and the lineup", cq.schedule_save_box(reg, rs, sid, {"slots": ["Tue 20:00"], "lineup": []}))
+    add("schedule_save_box", "a rename", cq.schedule_save_box(reg, rs, "tue", {"name": "Tues"}))
     for case, x in (("one open", "tue"), ("many open", sid), ("none open", "lk")):
         add("schedule_pause_box", case, cq.schedule_pause_box(reg, rs, x))
         add("schedule_remove_box", case, cq.schedule_remove_box(reg, rs, x))

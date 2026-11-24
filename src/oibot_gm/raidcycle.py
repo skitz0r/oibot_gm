@@ -1389,6 +1389,18 @@ def place_run(reg: Registry, ev: "RaidEvent", start: datetime, team: dict | None
 EVENT_TIMING = {"nudge_hours_before": "cutoff_soft_hours", "lock_hours_before": "cutoff_hard_hours",
                 "confirm_hours_before": "confirm_hours", "fill_ask_hours": "fill_ask_hours", "nudge": "reminders",
                 "autofill": "autofill"}
+class Refusal(str):
+    """A refusal sentence that knows which kind it is (consequences.REFUSAL_TITLES: past · clash · …) — for the
+    sentences built from parts (a past start, a clash), whose words can't be compared with a constant."""
+
+    kind: str = "other"
+
+    def __new__(cls, text: str, kind: str = "other"):
+        obj = super().__new__(cls, text)
+        obj.kind = kind
+        return obj
+
+
 MOVE_CLOSED = "This run is finished or cancelled, so it can't move."
 MOVE_STARTED = "This run has started, so it can't move."
 TIMING_SAME = "The run already has that timing."
@@ -1531,7 +1543,7 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
     if start is not None and start != first.start:
         other = live_at(rs, first.instance, start, test=bool(first.test))
         if other is not None and not same_event(other, first):
-            return MOVE_CLASH.format(raid=reg.raid_def(first.instance).get("name", first.instance), when=reg.local12(start))
+            return Refusal(MOVE_CLASH.format(raid=reg.raid_def(first.instance).get("name", first.instance), when=reg.local12(start)), "clash")
     if values:
         if first.state != "open":
             return TIMING_LOCKED
@@ -1691,6 +1703,8 @@ class LineupChange(BaseModel):
     dropped_pins: dict[str, int] = Field(default_factory=dict)
     dropped_leaving: dict[str, int] = Field(default_factory=dict)
     dropped_asks: dict[str, int] = Field(default_factory=dict)
+    trimmed_places: dict[str, int] = Field(default_factory=dict)  # a kept part whose roster count goes down: its board
+    trimmed_pins: dict[str, int] = Field(default_factory=dict)  # places (and their pins) on the rosters that go
     moved: dict[str, int] = Field(default_factory=dict)
     told: list[int] = Field(default_factory=list)
     lineup: list[dict] = Field(default_factory=list)
@@ -1763,6 +1777,19 @@ def _board_places(p: "RaidEvent") -> int:
     return len({n for g in (p.layout or []) for n in g})
 
 
+def roster_trim(reg: Registry, p: "RaidEvent", rosters: int) -> tuple[list[list[str]], dict[str, str], int, int]:
+    """What part `p`'s board keeps when it goes down to `rosters` rosters: (the layout of the rosters that stay, the
+    pins left, how many board places go, how many pins go). A place on a roster that goes is dropped with its pin —
+    the person stays joined and the lock places them again (else _solve_run would build the old count from the board)."""
+    k = groups_per_roster(reg, run_size(reg, p))
+    layout = [list(g) for g in (p.layout or [])]
+    keep, gone = layout[: rosters * k], layout[rosters * k:]
+    names = {n for g in gone for n in g} - {n for g in keep for n in g}
+    uids = {str(sg.discord_id) for sg in p.signups.values() if sg.display_name in names}
+    pins = {u: v for u, v in p.pins.items() if u not in uids}
+    return keep, pins, len(names), len(p.pins) - len(pins)
+
+
 def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[dict]) -> LineupChange:
     """What `lineup` does to `ev`'s run (any raid of it stands for its first), worked out and nothing written: a live
     later part whose raid is still in the lineup is KEPT (its run key, signups, pins, board and leaving answers),
@@ -1778,6 +1805,7 @@ def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[di
     ch = LineupChange(order=[first.key], lineup=[{**e, "starts": at} for e, at in zip(full, offsets)])
     if full[0]["rosters"] != int((reg.config.team(first.team) or {}).get("rosters") or 1):
         ch.rosters[first.key] = full[0]["rosters"]
+        _note_trim(reg, ch, first, full[0]["rosters"])
     for e in ch.lineup[1:]:
         p = by_raid.get(e["raid"])
         if p is None:
@@ -1787,6 +1815,7 @@ def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[di
         ch.order.append(p.key)
         if e["rosters"] != int((reg.config.team(p.team) or {}).get("rosters") or 1):
             ch.rosters[p.key] = e["rosters"]
+            _note_trim(reg, ch, p, e["rosters"])
         was = p.starts or round((p.start - first.start).total_seconds() / 60)
         if int(e["starts"]) != was:  # a kept raid starts at another time: everyone who answered is told (reschedule's notice)
             ch.moved[p.key] = int(e["starts"])
@@ -1800,6 +1829,14 @@ def plan_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", lineup: list[di
     if ch.moved:
         ch.told = answered_ids(first)
     return ch
+
+
+def _note_trim(reg: Registry, ch: LineupChange, p: "RaidEvent", rosters: int) -> None:
+    _keep, _pins, places, pins = roster_trim(reg, p, rosters)
+    if places:
+        ch.trimmed_places[p.key] = places
+    if pins:
+        ch.trimmed_pins[p.key] = pins
 
 
 def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: LineupChange, by: str) -> list[str]:
@@ -1822,7 +1859,17 @@ def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: Lineup
     later = {p.key: p for p in later_parts(rs, first)}
     words = reg.later_words(change.lineup[1:])
     line = f"lineup changed by {by}: {reg.raid_def(first.instance).get('name', first.instance)}" + (f", then {words}" if words else " alone")
+    trims = {}  # a part going down in rosters: its board places (and pins) on the rosters that go, worked out before any dict changes
+    for key, n in change.rosters.items():
+        p = first if key == first.key else later.get(key)
+        if p is not None and n < int((reg.config.team(p.team) or {}).get("rosters") or 1):
+            trims[key] = roster_trim(reg, p, int(n))
     with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
+        for key, (keep, pins, places, npins) in trims.items():
+            p = first if key == first.key else later[key]
+            if places or npins:
+                p.layout, p.pins = keep, pins
+                p.log.append(f"{places} board place(s) and {npins} pin(s) on the removed roster dropped by {by}")
         for key in change.removed:  # first: a removed raid is a closed, dropped file before its dict goes
             p = later[key]
             p.prev_state, p.state, p.closed_at = p.state, "cancelled", now()

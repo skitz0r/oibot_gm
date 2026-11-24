@@ -1029,7 +1029,9 @@ class LootMixin:
         by_char: dict[str, list[str]] = {}
         for a in live:
             by_char.setdefault("disenchant" if a.raider == DISENCHANT else a.raider, []).append(a.item_name or "?")
-        lines = [f"**Loot council · {session.run_key or session.id}" + (f" · {session.label}" if session.roster_index is not None and session.label else "") + "**" + (" (rehearsal — nothing was recorded)" if session.test else "")]
+        where = self.loot_where(reg, session.run_key or session.id)  # the run named, never its key
+        lines = [f"**Loot council · {where}" + (f" · {session.label}" if session.roster_index is not None and session.label else "") + "**"
+                 + (" (rehearsal — nothing was recorded)" if session.test else "")]
         lines.append(f"{len(live)} award(s) to {len(by_char)} recipient(s)" + (f" · {len(overrides)} override(s)" if overrides else "") + (f" · the council agreed with the bot on {agreed}/{len(live)}" if live else ""))
         lines += [f"• **{w}**: {', '.join(i)}" for w, i in sorted(by_char.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
         if overrides:
