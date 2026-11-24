@@ -121,9 +121,9 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
             return JSONResponse({**out, "error": res.get("error") or "changed since you looked"}, status_code=409)
         return out
 
-    async def apply_now(v, allowed: list, refused: list, revs: dict) -> dict:
+    async def apply_now(v, allowed: list, refused: list, revs: dict, expect=None) -> dict:
         res = await configops.apply_ops(v.reg, allowed, by=v.name, by_id=v.uid, bot=bot, via=v.via, revs=revs, raids=raids_of(v.reg),
-                                        policy_store=PolicyStore(bot.registries.store, v.reg.key))
+                                        policy_store=PolicyStore(bot.registries.store, v.reg.key), expect=expect)
         res["refused"] = [*refused, *res["refused"]]
         return res
 
@@ -220,13 +220,20 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
                 # what the box said must still be true: described again now (an event opened meanwhile changes "keeps its
                 # timing" without touching the schedule's rev) — different words are a fresh preview and a new token,
                 # nothing written; the page shows the fresh box under the "changed" line and waits again
+                again = {k: x for k, x in d.items() if k not in ("token", "changes", "seen", "confirmed")}
+                again.update(ops=held["ops"], revs={k: x for k, x in held["revs"].items() if k.startswith(configops.CONFIG_REV)})
                 now_said = await asyncio.to_thread(configops.describe_ops, reg, allowed, refused)
                 if held.get("fingerprint") and now_said.fingerprint != held["fingerprint"]:
-                    again = {k: x for k, x in d.items() if k not in ("token", "changes", "seen", "confirmed")}
-                    again.update(ops=held["ops"], revs={k: x for k, x in held["revs"].items() if k.startswith(configops.CONFIG_REV)})
                     return await structured(v, again, reason="expired")
+                # and again in the same step as the write, under the lock an open takes (apply_ops `expect`): an event
+                # opening in the gap between this check and the write is a fresh box too, never a write it didn't show
+                fp = held.get("fingerprint")
+                expect = (lambda: configops.describe_ops(reg, allowed, refused).fingerprint == fp) if fp else None
                 pv = {"kind": "change", "ops": [op.model_dump(exclude_none=True) for op in allowed]}
-                return finish(pv, await apply_now(v, allowed, refused, dict(held["revs"])))
+                res = await apply_now(v, allowed, refused, dict(held["revs"]), expect=expect)
+                if res.get("stale_box"):
+                    return await structured(v, again, reason="expired")
+                return finish(pv, res)
             return await text_apply(v, held, raids)
         if "changes" in d or "ops" in d:
             return await structured(v, d)

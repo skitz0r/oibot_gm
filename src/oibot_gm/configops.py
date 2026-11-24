@@ -2895,7 +2895,12 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
 
         if v not in SPLIT_POLICIES:
             raise RegistryError(f"strategy is one of {', '.join(SPLIT_POLICIES)}")
-        return f"{label}: split strategy {ev.split_strategy or reg.raid_def(ev.instance).get('split_policy', 'balanced')} → {v} (used by auto-fill and the scheduled lock)"
+        from .consequences import strategy_refusal
+
+        why = strategy_refusal(reg, ev)  # the site's and MCP's refusal: a locked roster's split never changes
+        if why:
+            raise RegistryError(why)
+        return f"{label}: split strategy {ev.split_strategy or reg.raid_def(ev.instance).get('split_policy', 'balanced')} → {v} (the board is placed again this way and the lock uses it)"
     if op.op == "run_autofill":
         if ev.state != "open":
             raise RegistryError("already locked — move people on the board instead")
@@ -3108,6 +3113,11 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         if v not in SPLIT_POLICIES:
             raise RegistryError(f"strategy is one of {', '.join(SPLIT_POLICIES)}")
         rs, ev = _live_event(reg, op.target, raids)
+        from .consequences import strategy_refusal
+
+        why = strategy_refusal(reg, ev)  # re-checked at apply: the roster may have locked since the diff
+        if why:
+            raise RegistryError(why)
         ev.split_strategy = v
         rs.save(ev, f"split strategy {v} (by {by})")
         return f"{run_words(reg, ev)}: split strategy {v}"
@@ -5204,21 +5214,29 @@ def _batch_roles(reg: Registry, ops: list[ConfigOp], d: Described) -> None:
 # ---- the one core: apply a batch the caller has authorized
 
 async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int | None, bot=None, via: str = "web", revs: dict | None = None,
-                    raids=None, policy_store=None, self_id: int | None = None, channel_id=PLAIN_WEB) -> dict:
+                    raids=None, policy_store=None, self_id: int | None = None, channel_id=PLAIN_WEB, expect=None) -> dict:
     """Apply authorized ops as the structured path does — the honest contract ConfigConfirmView has: coalesce() first
     (one write per raid / schedule / buff / family), consecutive pure config writes in ONE worker-thread call under
     `config_lock` and ONE store.batch (one commit), anything with a Discord side effect through apply_async on the loop.
     A refused write is listed and the others still apply ('nothing else was changed' is true per write). `revs`: the
     section revs ('config:<section>') and board / plan revs the author saw — a stale one raises ConfigChanged for that
-    write. ONE ops.audited line for the batch (verbs that audit themselves are left out of it). Returns {applied,
-    refused, results [{label, ok, line}], error, changed [sections]}."""
+    write. ONE ops.audited line for the batch (verbs that audit themselves are left out of it). `expect` (BLOCKING, ->
+    bool): what the confirm box said is still true — checked under `config_lock` in the same step as the first write
+    (rc.open_run holds the lock for a whole open), so an event opening between the box and the write can't slip in:
+    False → nothing written and `stale_box` True. Returns {applied, refused, results [{label, ok, line}], error,
+    changed [sections], stale_box}."""
     from . import raidcycle as rc
     from .registry import ConfigChanged
 
     revs, stale = dict(revs or {}), set()
-    out = {"applied": [], "refused": [], "results": [], "error": None, "changed": []}
+    out = {"applied": [], "refused": [], "results": [], "error": None, "changed": [], "stale_box": False}
     audit_lines: list[str] = []
     merged = coalesce(list(ops))
+    checking = [expect]  # the box is checked once, at the first write
+
+    def still_true() -> bool:
+        check, checking[0] = checking[0], None
+        return check is None or bool(check())
 
     def label_of(op) -> str:
         try:
@@ -5256,9 +5274,11 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
             return False
         return True
 
-    def run_chunk(chunk: list) -> list:
+    def run_chunk(chunk: list) -> list | None:
         res = []
         with reg.config_lock, reg.store.batch():
+            if not still_true():
+                return None
             for op in chunk:
                 if id(op) in blocked:  # @everyone, a managed role, a role the server lacks (SetupMixin.role_refusal)
                     res.append((op, None, RegistryError(blocked[id(op)])))
@@ -5282,7 +5302,11 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
             j = i
             while j < len(merged) and pure(merged[j]):
                 j += 1
-            for op, line, e in await asyncio.to_thread(run_chunk, merged[i:j]):
+            done = await asyncio.to_thread(run_chunk, merged[i:j])
+            if done is None:
+                out["stale_box"] = True
+                return out
+            for op, line, e in done:
                 if e is None:
                     landed(op, line, False)
                     card = card or op.op == "recruit"
@@ -5295,6 +5319,15 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
             continue
         op = merged[i]
         i += 1
+        if checking[0] is not None:  # a first write on the loop: checked just before it, under the lock
+
+            def check_locked() -> bool:
+                with reg.config_lock:
+                    return still_true()
+
+            if not await asyncio.to_thread(check_locked):
+                out["stale_box"] = True
+                return out
         key = op_run_key(reg, op, raids)
         if op.op in BOARD_OPS and key in stale:
             failed(op, rc.BoardChanged())

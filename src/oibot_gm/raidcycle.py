@@ -1239,9 +1239,10 @@ def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by:
                                 "join theirs or clear it (nothing was opened)")
         complete_parts(reg, rs, have)  # an open cut off between its parts (a restart) is finished, once
         return have
-    t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow, rs=rs, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters)
-    ev = open_event(reg, rs, t, start)
-    complete_parts(reg, rs, ev)
+    with reg.config_lock:  # one step for a box re-described under the lock (configops.apply_ops `expect`): never half an open
+        t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow, rs=rs, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters)
+        ev = open_event(reg, rs, t, start)
+        complete_parts(reg, rs, ev)
     return ev
 
 
@@ -2440,9 +2441,12 @@ def not_answered(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredC
 
 
 def pool_unanswered(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
-    """Who the run is FOR (run_pool) with no row on its sheet, by name — the Events page's "No answer yet" and the
-    Answer-for-them rows, health's "no answer on the sheet" hint. Not gated by `expected` (that gate is the nudge's): a
-    one-off lists every main that hasn't answered; a recurring run lists exactly what not_answered does."""
+    """Who the run is FOR (run_pool — never `expected`, the nudge's gate, which lists nobody on an ad hoc run) with no
+    row on its sheet, by name, each with the character run_pool gives them (a regular's series character, else their
+    main): the Events page's "No answer yet" and Answer-for-them rows, health's "no answer on the sheet" hint. A one-off
+    lists every member's main without an answer; on a recurring run `expected` IS run_pool, so it equals not_answered.
+    A member run_pool gives no character (no active main, and not a regular) is never listed — health's hint never names
+    them, even when an alt of theirs plays the role."""
     return sorted([(m, c) for m, c in run_pool(reg, ev) if c and str(m.discord_id) not in ev.signups], key=lambda mc: mc[0].display_name.lower())
 
 
@@ -4192,6 +4196,22 @@ LOCK_AGAIN = ", then lock again."  # every conflict_sentence ends so (how a stor
 # lock_error sentences stored before SOLVER_WORDS (still on old run files): shown as they are
 _OLD_LOCK_WORDS = ("no roster satisfies the rules", "the bot couldn't find a roster in time", "the answers or pins kept changing",
                    "building the roster failed")
+
+
+_OLD_LOCK_KINDS = dict(zip(_OLD_LOCK_WORDS, ("infeasible", "time", "changing", "other")))
+
+
+def lock_failure_kind(text: str | None) -> str | None:
+    """What kind of failure a stored lock_error is: a SOLVER_WORDS key, the same key for a sentence stored before
+    SOLVER_WORDS (_OLD_LOCK_WORDS), else the sentence itself (a conflict names its people: another conflict is another
+    failure). The lock's "first time this failed" test reads it, so the same failure in new words after an upgrade posts
+    no second run-update line. None for no failure."""
+    if not text:
+        return None
+    for k, words in SOLVER_WORDS.items():
+        if text == words:
+            return k
+    return next((kind for old, kind in _OLD_LOCK_KINDS.items() if text.startswith(old)), text)
 
 
 def conflict_sentence(e: "solver.Conflict") -> str:

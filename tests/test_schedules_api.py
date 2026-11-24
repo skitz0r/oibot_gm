@@ -586,3 +586,30 @@ def test_a_stale_raid_save_names_the_raid_and_a_night_says_who_is_away(web_bot, 
     reg.add_absence(m.discord_id, day, day, "trip", "t")
     rows = web_bot.c.get(f"/api/schedules/{sid}", headers=H()).json()["regulars"]["forecast"]
     assert rows[0]["away_words"] == "1 away" and rows[0]["away"] == [m.display_name]
+
+
+def test_an_event_opening_between_the_check_and_the_write_is_a_fresh_box_too(web_bot, reg, rs, monkeypatch):
+    """The final review: the token's re-describe and its write were two steps, so an event opening in the gap was
+    written over unseen. The write now checks the box again under the lock an open takes, in the same step: here the
+    event opens right after the route's own check — still needs_review with the fresh box, nothing written."""
+    from oibot_gm import configops
+
+    sid = tuesday(reg)
+    revs = {f"config:schedule:{sid}": reg.config_rev(f"schedule:{sid}")}
+    changes = [{"kind": "schedule", "target": sid, "fields": {"lock_hours_before": 30}}]
+    pv = change(web_bot, changes, revs=revs).json()
+    t = rc.next_runs_of(reg, HYJAL, reg.schedule_entry(sid), 1)[0]
+    real = configops.describe_ops
+    calls: list = []
+
+    def describe(*a, **k):
+        said = real(*a, **k)
+        calls.append(1)
+        if len(calls) == 1:  # the route's own check has just said "unchanged": the event opens in the gap
+            rc.open_run(reg, rs, HYJAL, t, by="t", schedule=sid)
+        return said
+    monkeypatch.setattr(configops, "describe_ops", describe)
+    again = post(web_bot, "/api/ops/change", {"token": pv["token"], "apply": True, "changes": changes, "revs": revs}).json()
+    assert again.get("needs_review") and not again.get("applied"), again
+    assert any("keeps its timing" in x for x in again["described"]["box"]["sentences"])
+    assert float(reg.schedule_def(HYJAL, sid)["lock_hours_before"]) == 24, "nothing written on the changed box"

@@ -802,7 +802,8 @@ def strategy_refusal(reg: Registry, ev: rc.RaidEvent) -> str | None:
 def strategy_box(reg: Registry, ev: rc.RaidEvent, strategy: str | None) -> dict:
     """More › Split strategy… for one raid of an event: no pick yet (or the strategy it already has) → the pick box,
     Back only; locked → the refusal; else 'Split {raid} by {name}?' with what the strategy does, that the board is
-    placed again and the lock uses it, and that it can change until the lock. Its fp carries the run's rev."""
+    placed again and the lock uses it, and that it can change until the lock. Its fp carries the run's rev and the
+    split it has NOW (rc.run_strategy): another officer's change while the box is open answers 409 with the fresh box."""
     raid = reg.raid_def(ev.instance).get("name", ev.instance)
     title = f"Split {raid} by {strategy_name(strategy)}?" if strategy in STRATEGY_DOES else f"Split {raid}?"
     if (why := strategy_refusal(reg, ev)):
@@ -811,7 +812,8 @@ def strategy_box(reg: Registry, ev: rc.RaidEvent, strategy: str | None) -> dict:
         return box(title, [STRATEGY_PICK.format(raid=raid)], None)
     if strategy == rc.run_strategy(reg, ev):
         return box(title, [STRATEGY_SAME.format(raid=raid)], None)
-    return box(title, [STRATEGY_DOES[strategy].format(raid=raid), *STRATEGY_AFTER], "Use this split", rev=rc.board_rev(reg, ev))
+    return box(title, [STRATEGY_DOES[strategy].format(raid=raid), *STRATEGY_AFTER], "Use this split",
+               rev=f"{rc.board_rev(reg, ev)}:{rc.run_strategy(reg, ev)}")
 
 
 def undo_box(n: int, rev: str = "") -> dict:

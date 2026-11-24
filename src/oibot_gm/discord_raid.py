@@ -936,7 +936,7 @@ class RaidMixin:
             else:
                 why = rc.SOLVER_WORDS["changing"]
             if why is not None:
-                first = ev.lock_error != why
+                first = rc.lock_failure_kind(ev.lock_error) != rc.lock_failure_kind(why)  # old words, same failure: no new line
                 ev.lock_error = why
                 ev.log.append(f"lock ({by}) failed: {why}")
                 rs.save(ev, "lock failed")

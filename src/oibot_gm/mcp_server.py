@@ -582,7 +582,8 @@ def propose_split(run: str, strategy: str | None = None, avoid: list[list[list[s
 
 @mcp.tool()
 def set_strategy(run: str, strategy: str, guild: Guild = None) -> str:
-    """Remember the split philosophy on a run (Auto-fill and the scheduled lock use it)."""
+    """Set how an OPEN raid's rosters are split (balanced | first | rotation): the board's picture is placed again
+    that way and the lock uses it. Refused once the roster is locked: a locked roster's split never changes."""
     return msg(api(guild).post(f"/api/run/{run}/strategy", {"strategy": strategy}))
 
 

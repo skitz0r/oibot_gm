@@ -18,8 +18,10 @@ answer.
   in six tabs queue there one after another. An event nobody joined is answered inline (nothing to solve). A finished
   solve is kept; when the fingerprint still holds, BOARD_LISTENERS hear (guild key, event key) and the web publishes
   `run:<event key>` so the page reloads. A solve that went stale meanwhile is kept as the previous picture and solved
-  again for the new fingerprint when a page asked for it meanwhile. A solve that fails unexpectedly is kept too, as
-  every open raid's BOARD_FAILED sentence under that fingerprint: logged once, never solved again for it. An entry
+  again for the new fingerprint when a page asked for it meanwhile. A solve that fails unexpectedly is solved once
+  more at once (the thread reads members and other runs the loop writes meanwhile: a transient read is not the input
+  failing); failing again, it is kept as every open raid's BOARD_FAILED sentence under that fingerprint: logged once,
+  never solved again for it. An entry
   goes when its event has no open raid any more (looked at every `get` of the guild) and past MAX_BOARDS (least
   recently used).
 - The lock comes first: the pictures share the CPU with the lock's own CP-SAT solve, and a lock slowed to the solver's
@@ -248,11 +250,23 @@ class BoardCache:
         key = (reg.key, fkey)
         previews, stop = None, self.stops[key]
         try:
-            previews = await asyncio.get_running_loop().run_in_executor(self.pool(), self._preview, reg, view, parts, stop, key)
+            for attempt in (1, 2):
+                try:
+                    previews = await asyncio.get_running_loop().run_in_executor(self.pool(), self._preview, reg, view, parts, stop, key)
+                    break
+                except solver.Stopped:
+                    raise
+                except Exception:  # noqa: BLE001 — the unexpected kind (a raid's own failure is its sentence)
+                    if attempt == 2:
+                        raise
+                    # once more on the run store as it is now: the thread reads members and other runs that the loop
+                    # writes meanwhile (a dict that changed size mid-read), which is not the input failing
+                    log.warning("board preview failed once (%s %s); solving again", reg.key, fkey, exc_info=True)
+                    view = frozen(rs)
         except solver.Stopped:  # a lock-side solve began: this picture waits for it and is solved again after
             self.waiting[key] = (reg, rs)
         except Exception:  # noqa: BLE001 — a raid's own failure is its sentence; this is the unexpected kind
-            log.exception("board preview failed (%s %s); kept as failed for this fingerprint", reg.key, fkey)
+            log.exception("board preview failed twice (%s %s); kept as failed for this fingerprint", reg.key, fkey)
             previews = {p.key: PAGE_WORDS["board_failed"] for p in parts if p.state == "open"}
         finally:
             self.running.pop(key, None)

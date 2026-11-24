@@ -812,3 +812,38 @@ def test_the_strategy_route_has_one_body_model():
     from oibot_gm.web import api
 
     assert not hasattr(api, "StrategyBody")
+
+
+def test_the_strategy_box_is_stale_when_another_officer_changed_the_split(web_bot, reg, rs):
+    """The final review: the strategy box's fp held the board only, so another officer's split change while it was open
+    was silently overwritten. Its fp now carries the split the raid has; the press answers 409 with the fresh box."""
+    c, h = web_bot.c, H()
+    ev = rc.open_run(reg, rs, RID, start_in(reg, 3), by="t")
+    join(reg, rs, ev, people(reg, 12))
+    now = rc.run_strategy(reg, ev)
+    mine, theirs = [s for s in ("rotation", "first", "balanced") if s != now][:2]
+    url = f"/api/run/{ev.key}/strategy"
+    b = c.post(url, json={"preview": True, "strategy": mine}, headers=h).json()["box"]
+    ev.split_strategy = theirs  # another officer's change while the box is open
+    rs.save(ev, "another officer")
+    r = c.post(url, json={"strategy": mine, "seen": b["fp"]}, headers=h)
+    assert r.status_code == 409 and r.json()["box"] == cq.strategy_box(reg, rs.events[ev.key], mine)
+    assert rs.events[ev.key].split_strategy == theirs, "nothing overwritten"
+
+
+def test_no_answer_lists_who_the_run_is_for_with_the_character_it_gives_them(reg, rs):
+    """rc.pool_unanswered as its docstring says (the final review: it claimed more): run_pool, never `expected` — a
+    one-off lists every main without an answer, the main as the character; a member run_pool gives no character (no
+    active main) is never listed, even with an alt that plays."""
+    ms = people(reg, 6)
+    m = ms[0]
+    reg.add_character(m.discord_id, m.display_name, "Altchar", "Priest", "Holy", None, False)
+    m = reg.members[m.discord_id]
+    m.main.status = "retired"
+    reg.save(m, "t: main retired")
+    ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t")
+    join(reg, rs, ev, ms[1:3])
+    got = rc.pool_unanswered(reg, ev)
+    assert [x.discord_id for x, _c in got] == sorted((x.discord_id for x in ms[3:]), key=lambda u: reg.members[u].display_name.lower())
+    assert all(c is x.main for x, c in got) and rc.not_answered(reg, ev) == [], "a one-off expects nobody; who it is for is listed"
+    assert m.discord_id not in {x.discord_id for x, _c in got}, "no active main: not listed, though an alt plays"

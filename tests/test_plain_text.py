@@ -445,3 +445,19 @@ def test_guild_state_reads(reg, rs):
     assert f"fill asks outstanding: {ms[7].display_name} (sub: {ms[7].main.label} {ms[7].main.spec} for melee, short 15, deadline" in s
     assert f"bench after lock: {ms[5].display_name} · short: {rc.run_size(reg, ev) - 5} seat(s)" in s
     assert len(s) <= help_mod.MAX_STATE_CHARS
+
+
+def test_run_strategy_is_refused_after_the_lock_as_every_other_surface_refuses_it(reg, rs):
+    """The final review: plain text's run_strategy still changed a LOCKED run's split; the site and MCP refuse it
+    (consequences.strategy_refusal). Refused in the diff and again at apply; nothing written."""
+    from oibot_gm.consequences import STRATEGY_LOCKED
+
+    ev = open_test_run(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, ev, ms[:5])
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms[:5]])
+    op = ConfigOp(op="run_strategy", target=ev.key, value="first")
+    assert STRATEGY_LOCKED in configops.describe(reg, op)
+    with pytest.raises(RegistryError, match="The roster is locked, so its split can't change."):
+        configops.apply(reg, op, "officer", is_owner=False, raids=rs)
+    assert rc.RaidStore(reg.store, reg.key).events[ev.key].split_strategy is None

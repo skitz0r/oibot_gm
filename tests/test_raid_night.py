@@ -1233,3 +1233,28 @@ def test_expired_confirmation_card_is_found_by_id_after_a_rename(reg, rs):
     card = bot.cards[reg.members[m.discord_id].placement_asks[-1]["dm"][1]]
     assert any("was released" in t for t in card_texts(card))
     assert rc.expire_confirmation_asks(reg, rs, ev) == []
+
+
+@pytest.mark.parametrize("old, kind", [
+    ("no roster satisfies the rules (minimums, pins, board) — fix the board or pins and lock again", "infeasible"),
+    ("the bot couldn't find a roster in time — lock again", "time"),
+])
+def test_a_failure_stored_in_old_words_is_the_same_failure_and_posts_no_new_line(reg, rs, monkeypatch, old, kind):
+    """The final review: after the upgrade a run whose stored lock_error is in the old words, and whose lock keeps
+    failing the same way, posted one new run-update line because the sentence changed. The kind is compared now."""
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:10])
+    ev.lock_error = old
+    rs.save(ev, "an old file's lock_error")
+    raised = {"infeasible": "no roster found: INFEASIBLE", "time": "no roster found: UNKNOWN"}[kind]
+
+    def fail(*a, **k):
+        raise RuntimeError(raised)
+    monkeypatch.setattr(rc, "propose", fail)
+    bot = NightBot(reg, rs)
+    asyncio.run(bot.lock_run(reg, rs, ev, by="scheduler"))
+    assert ev.lock_error == rc.SOLVER_WORDS[kind] and rc.lock_failure_kind(old) == kind
+    assert not [u for u in bot.updates if "failed" in u], bot.updates
+    ev.lock_error = rc.SOLVER_WORDS["changing"]  # another failure before: this one is new, and says so once
+    asyncio.run(bot.lock_run(reg, rs, ev, by="scheduler"))
+    assert len([u for u in bot.updates if "failed" in u]) == 1

@@ -80,7 +80,8 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
 
     def receipt(v, ev, m, line: str | None = None) -> dict:
         r = rc.answer_receipt(v.reg, ev, m)
-        return {"message": r.replace("**", ""), "receipt": r, "line": (line or "").replace("**", "").removeprefix("✅ ")}
+        # the site's words (rc.site_words): never a Discord time stamp
+        return {"message": rc.site_words(v.reg, r), "receipt": r, "line": rc.site_words(v.reg, line or "")}
 
     @app.post("/api/me/run/{key}/answer")
     async def me_answer(request: Request, key: str):
@@ -237,4 +238,4 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
                                                 spec=(str(d.get("spec") or "").strip() or None), by=v.name, by_id=v.uid, via=v.via)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}  # the guild's 12-hour words, never a Discord time stamp

@@ -539,7 +539,7 @@ def test_an_unexpected_failure_is_kept_as_failed_and_never_solved_again(reg, rs,
     cache = eb.cache_of(web_bot.bot)
     for _ in range(3):  # the page reloads on `run:`: the same answers never solve again
         settle(cache, reg, rs, ev)
-    assert cache.solves == 1 and len([r for r in caplog.records if "board preview failed" in r.getMessage()]) == 1
+    assert cache.solves == 1 and len([r for r in caplog.records if "board preview failed twice" in r.getMessage()]) == 1
     assert heard == [ev.key], "the page is woken once, to show the failure"
     j = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()
     for part in j["parts"]:
@@ -750,3 +750,25 @@ def test_a_locked_raid_counts_seats_and_undo_says_why_it_is_greyed(reg, rs, monk
     locked = web_bot.c.get(f"/api/event/{bd.key}", headers=H()).json()["parts"][0]
     assert locked["placed_words"] is None and locked["undo_why"] is None
     assert locked["rostered_words"] == PAGE_WORDS["seats_of"].format(n=10, size=10)
+
+
+def test_a_failure_once_is_solved_again_before_it_is_kept_as_failed(reg, rs, monkeypatch, web_bot):
+    """The final review: the solve thread reads members and other runs the loop writes meanwhile, so a transient read
+    error (a dict that changed size mid-read) was kept as "failed" until an input changed. It is solved once more first."""
+    real, tries = rc.event_board_preview, []
+
+    def flaky(*a, **k):
+        tries.append(1)
+        if len(tries) == 1:
+            raise RuntimeError("dictionary changed size during iteration")
+        return real(*a, **k)
+
+    monkeypatch.setattr(rc, "event_board_preview", flaky)
+    monkeypatch.setattr(rc, "_solve_run", in_order())  # no CP-SAT: the retry is what is measured
+    ev = one_off(reg, rs)
+    join(reg, rs, ev, reg.test_members())
+    cache = eb.cache_of(web_bot.bot)
+    settle(cache, reg, rs, ev)
+    st, previews = get(cache, reg, rs, ev)
+    assert len(tries) == 2 and st == "ready" and cache.solves == 1
+    assert all(isinstance(v, list) for v in previews.values()), "a picture, never the failed sentence"

@@ -771,7 +771,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             line = await bot.answer_placement_for(v.reg, v.uid, b.roster, yes, v.name, by_id=v.uid)
         except (RegistryError, ValueError, KeyError) as e:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/me/regular/remove")
     async def me_regular_remove(request: Request):
@@ -1612,7 +1612,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             line = await inbox.pin_member(bot, v.reg, rs, ev, m, pin, by=v.name, by_id=v.uid, via=v.via)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/run/{key}/set")
     async def run_set(request: Request, key: str):
@@ -1663,7 +1663,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if ev.lock_error:
             return JSONResponse({"error": solver_text(RuntimeError(ev.lock_error))}, status_code=409)
         await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/run/{key}/lock/preview")
     async def run_lock_preview(request: Request, key: str):
@@ -1756,7 +1756,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             line = await maybe_await(bot.cancel_run(v.reg, rs, ev, v.name, (d.get("reason") or "").strip()[:300] or None, notify=notify, by_id=v.uid, via=v.via))
         except (RegistryError, ValueError) as e:
             return box_refused(e)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     def event_of(reg, rs, key: str):
         """A run a reschedule / lineup route names: any raid of it (its key), a live one; closed → the verb's own refusal."""
@@ -1837,7 +1837,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             line = await bot.reopen_run(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/run/{key}/remind")
     async def run_remind(request: Request, key: str):
@@ -1849,7 +1849,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             line = await bot.remind(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=409)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/run/{key}/pause")
     async def run_pause(request: Request, key: str):
@@ -1863,7 +1863,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             line = await bot.set_autofill_paused(v.reg, rs, ev, d.get("paused") in (True, "true", 1, "1", "yes"), by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/run/{key}/withdraw")
     async def run_withdraw(request: Request, key: str):
@@ -1876,7 +1876,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             line = await bot.withdraw_sent_ask(v.reg, rs, ev, m.discord_id, by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     def open_args(reg, rid: str, d: dict) -> tuple[str | None, str | None]:
         """The open / preview body → (when, schedule) for rc.open_when: `start` (the preview's exact ISO instant, aware) wins
@@ -2068,7 +2068,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         except (RegistryError, ValueError, KeyError) as e:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
         await ops_mod.audited(bot.ops, v.reg, v.name, f"answered for {m.display_name}: {line}", via=v.via, by_id=v.uid)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/admin/fill-answer")
     async def admin_fill_answer(request: Request):
@@ -2085,7 +2085,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         await ops_mod.audited(bot.ops, v.reg, v.name, f"answered a fill ask for {m.display_name}: {line}", via=v.via, by_id=v.uid)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     def channel_ref(reg, value) -> int | None:
         """A channel given as an id, <#id> or a name (#raids) → its id; None when empty. Unknown / ambiguous → 400."""
@@ -2117,7 +2117,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
-        return {"message": line}
+        return {"message": rc.site_words(v.reg, line)}
 
     # ---- the test bench (dual interfaces phase 2, B9): /api/test/* are the same verbs as /gm test … (SetupMixin.test_seed /
     # test_answer / test_compose / test_comp / test_bench_clear, RaidMixin.open_test_run) and MCP's test_bench; GET

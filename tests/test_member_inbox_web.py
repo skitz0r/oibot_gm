@@ -330,3 +330,47 @@ def test_join_while_away_keeps_its_sentence_on_the_sheet_button_and_the_me_page(
     (content, kw), = itx.followup.sent
     assert "marked away" in content and "still stands" in content and kw.get("view") is not None, "the I'm back button says why it is there"
     assert "marked away" not in rc.answer_receipt(w.reg, ev, w.reg.test_members()[2]), "no note for someone not away"
+
+
+def _strings(x):
+    if isinstance(x, str):
+        yield x
+    elif isinstance(x, dict):
+        for v in x.values():
+            yield from _strings(v)
+    elif isinstance(x, list):
+        for v in x:
+            yield from _strings(v)
+
+
+def test_no_route_answer_carries_a_discord_time_stamp(w):
+    """The final review: Answer for someone's toast showed a raw Discord stamp (<t:…:F>) from set_answer's run_label.
+    Every site route that returns a raid verb's line answers in the guild's 12-hour words (rc.site_words). Walked:
+    POST /api/me/run/{key}/answer and /out, /api/admin/action (join, callout, confirm_yes), /api/run/{key}/set,
+    /api/run/{key}/pin, /api/run/{key}/pause, /api/run/{key}/remind, /api/admin/placement, /api/me/placement,
+    /api/run/{key}/cancel."""
+    said: dict[str, object] = {}
+    ev = open_test_run(w.reg, w.rs)
+    a, b, c, d = w.reg.test_members()[:4]
+    h = as_user(w.c, a.discord_id)
+    said["me answer"] = w.c.post(f"/api/me/run/{ev.key}/answer", json={"status": "in"}, headers=h)
+    said["me out"] = w.c.post(f"/api/me/run/{ev.key}/out", json={"note": ""}, headers=h)
+    h = as_user(w.c, OFFICER)
+    said["admin action join"] = w.c.post("/api/admin/action", json={"run": ev.key, "member": str(b.discord_id), "action": "join"}, headers=h)
+    said["admin action callout"] = w.c.post("/api/admin/action", json={"run": ev.key, "member": str(b.discord_id), "action": "callout", "note": "x"},
+                                            headers=h)
+    said["run set"] = w.c.post(f"/api/run/{ev.key}/set", json={"member": str(c.discord_id), "status": "in"}, headers=h)
+    said["run pin"] = w.c.post(f"/api/run/{ev.key}/pin", json={"member": d.display_name, "pin": "in"}, headers=h)
+    locked, pool = locked_with_asks(w.reg, w.rs)
+    said["run pause"] = w.c.post(f"/api/run/{locked.key}/pause", json={"paused": True}, headers=h)
+    said["run remind"] = w.c.post(f"/api/run/{locked.key}/remind", json={}, headers=h)
+    said["admin action confirm"] = w.c.post("/api/admin/action", json={"run": locked.key, "member": str(pool[1].discord_id), "action": "confirm_yes"},
+                                            headers=h)
+    said["admin placement"] = w.c.post("/api/admin/placement", json={"run": locked.key, "member": str(pool[2].discord_id), "answer": "yes"}, headers=h)
+    said["me placement"] = w.c.post("/api/me/placement", json={"run": locked.key, "answer": "yes"}, headers=as_user(w.c, pool[3].discord_id))
+    said["run cancel"] = w.c.post(f"/api/run/{ev.key}/cancel", json={"reason": "x"}, headers=as_user(w.c, OFFICER))
+    answered = {k for k, r in said.items() if r.status_code == 200}
+    assert {"me answer", "me out", "admin action join", "admin action callout", "run set", "admin action confirm"} <= answered, \
+        {k: (r.status_code, r.text[:160]) for k, r in said.items()}
+    leaks = {k: s for k, r in said.items() for s in _strings(r.json()) if "<t:" in s}
+    assert not leaks, leaks
