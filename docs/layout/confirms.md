@@ -41,7 +41,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        "Change <event>?" + Save + event_edit_lines = 'label: old → new' in PAGE_WORDS schedule_fields / priority / split words,
                        event_value_words; TIMING_NAMES carries confirmation, seating, priority, split) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
                        cancel_box (5, red), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines), undo_box / undo_box_for (9),
-                       the board's consequence("swap") after the lock (10), open_now_box (11), move_past_sentence / PAST_TAIL (12),
+                       the board's consequence("swap") after the lock (10), open_now_box (11) + open_box_for(reg, rid, p) = THE box 11 from
+                       rc.open_preview (/raid open and both open routes; rev = the occurrence; OPEN_UNREAD when the lead or lock can't be read;
+                       event_view.coming_json passes the same rev), move_past_sentence / PAST_TAIL (12),
                        schedule_create_box / schedule_save_box / schedule_pause_box / schedule_resume_box / schedule_remove_box (13–17; 14 says
                        "keeps its timing" only for a time setting, "keeps its lineup" for lineup / rosters), regular_remove_box (18), raid_save_box
                        (19, open_events_of_raid), leave_box / leave_unsaved_sentence / LEAVE_TEMPLATE (20, /api/meta.leave); + raid_reset_box,

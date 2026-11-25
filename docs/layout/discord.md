@@ -93,7 +93,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        `heading = False` (a screen is its text alone, no bold title — /price) and `mentions` (AllowedMentions on every send/edit);
                        the defaults leave every other wizard unchanged
   wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)
-  wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow + AbsenceClearWizard = I'm back) · flows_raid ·
+  wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow + AbsenceClearWizard = I'm back) · flows_raid (OpenWizard = /raid open, built by
+                       OpenWizard.make — flows_event.LineupBlock mixed in at first use, flows_event imports flows_raid —: a schedule's night (Next,
+                       another upcoming one, a one-off minute rc.which_run calls scheduled) = decide_box(consequences.open_box_for) refreshed
+                       from rc.open_preview, its refusals (closed, already open, past, OPEN_UNREAD) as boxes; a one-off = when_fields(step=15)
+                       → lineup_hub → Locks (event_view.NEW_EVENT_LOCKS) + Rosters beside What this makes (event_view.new_event_view: facts,
+                       notes, lineup) = its confirmation, Open the sheet · Change · Back → open_run_and_post(lineup=, lock_hours=,
+                       first_rosters=); a pickup template keeps its own confirm and its post-here fallback; no horizon words) ·
                        flows_event (phase 5, Task 3: pick_event = THE event picker — live FIRST raids, soonest first, ≤ 25, one goes straight in,
                        none = NO_EVENT —; EventWizard (ev() re-read, act = working → the verb's ✅ line or its refusal); flow raid_reschedule =
                        RescheduleWizard: reschedule_pick_box's text + Pick the day and time → when_fields(step=15) (Later than this… → the week)

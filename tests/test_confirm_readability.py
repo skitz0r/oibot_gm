@@ -915,6 +915,9 @@ def box_cases(reg, rs, runs, ms, dump):
         add("open_now_box", case, b)
     # schedules: the harness's weekly Barrow Deeps schedule has many runs open; a fresh one has none
     sid = "barrow-deeps"
+    for case, nxt in (("the schedule's next night", 0), ("a night further ahead", 5)):  # /raid open and the site's open routes
+        start = [t for s_, t in rc.upcoming(reg, RID, reg.now_local(), 24 * 60) if s_["id"] == sid][nxt]
+        add("open_box_for", case, cq.open_box_for(reg, RID, rc.open_preview(reg, rs, RID, start.isoformat(), sid)))
     entry = reg.schedule_entry(sid)
     add("schedule_create_box", "three nights a week", cq.schedule_create_box(reg, entry))
     reg.set_schedule("tue", {"kind": "weekly", "slots": ["Tue 18:30"], "name": "Tuesday raid night"}, "t", raid=hy)

@@ -7,18 +7,22 @@ Every body here is the old slash-command body (raid_commands.py) with the same b
 only the way it answers changed, so it works from the slash command and from a select on the wizard message alike."""
 from __future__ import annotations
 
+import functools
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
 
 import discord
 
 from . import configops
+from . import consequences as cq
+from . import event_view
+from .constants import hours_words
 from .consequences import before_first_open_sentence, later_places_sentence
 from . import raidcycle as rc
 from . import wizard_opts as wo
 from .raid_buttons import RUN_WORDS
 from .raid_views import health_layout, health_locked_brief, raid_name, run_label, run_title, sheet_state
-from .registry import ADHOC_SCHEDULE, ADHOC_SCHEDULE_NAME, Registry, RegistryError, schedule_class
+from .registry import ADHOC_SCHEDULE, ADHOC_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, Registry, RegistryError, schedule_class
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, week_opts, when_fields, when_note
 
 LIVE = ("open", "locked")
@@ -93,13 +97,24 @@ async def with_run(interaction: discord.Interaction, reg: Registry, *, title: st
 
 class OpenWizard(Wizard):
     """Raid → Next run · Another upcoming run… (a select of the other upcoming runs of every recurring schedule) ·
-    Ad hoc run… (a pickup template, or a one-off — then day · hour · minute selects; roster redesign §5) → confirm with
-    both clocks → open and post. A one-off is ADHOC_SCHEDULE: ad hoc defaults, never a run of the raid's own times."""
+    Ad hoc run… (a pickup template, or a one-off — then day · hour · minute selects; roster redesign §5).
+    A schedule's night (Next, another upcoming one, or a one-off minute rc.which_run calls scheduled) prints the
+    server's box 11 (consequences.open_box_for — the site's open routes print the same). A one-off (ADHOC_SCHEDULE)
+    builds its lineup on flows_event.LineupBlock, then Locks and Rosters beside "What this makes"
+    (event_view.new_event_view), which is its confirmation, as on the site. A pickup template keeps its own confirm.
+    Build it with `OpenWizard.make`: flows_event imports this module, so LineupBlock is mixed in at first use."""
 
     def __init__(self, reg: Registry, rs, owner_id: int):
         super().__init__(reg, owner_id, title="Open a run", guard=officer_guard(reg))
         self.rs = rs
-        self.draft = {"raid": None, "start": None, "note": "", "day0": reg.now_local().date(), "schedule": None}
+        self.draft = {"raid": None, "start": None, "note": "", "day0": reg.now_local().date(), "schedule": None,
+                      "lock": event_view.NEW_EVENT_LOCKS[0]}
+        self.lineup: list[dict] = []
+        self.lineup_page = 0
+
+    @classmethod
+    def make(cls, reg: Registry, rs, owner_id: int) -> "OpenWizard":
+        return _with_lineup(cls)(reg, rs, owner_id)
 
     @property
     def rid(self) -> str:
@@ -177,8 +192,8 @@ class OpenWizard(Wizard):
         self.draft["schedule"], self.draft["matched"] = None, None
         many = self.many()
         if not ups:
-            await self.show(interaction, f"**{self.name()}** has no upcoming run to open: {self.no_slot_reason()}\n"
-                            "-# Set its run times, or open an ad hoc run at a day and time you pick.",
+            await self.show(interaction, f"**{self.name()}** {self.no_slot_reason()}\n"
+                            "-# Add a schedule on the Schedules page, or open an ad hoc run at a day and time you pick.",
                             self.button("Set this raid's run times →", self.to_run_times, discord.ButtonStyle.primary),
                             self.button("Ad hoc run", self.adhoc),
                             self.button("Cancel", self.cancel))
@@ -234,12 +249,13 @@ class OpenWizard(Wizard):
                         self.button("Back", self.shortlist), self.button("Cancel", self.cancel))
 
     def no_slot_reason(self) -> str:
+        """Why the raid offers no night to open, after its name: no schedule yet, else its first opening (no horizon)."""
         if not [s for s in self.reg.schedules(self.rid) if s["kind"] != "pickup" and s.get("active", True)]:
-            return "it has no run times yet." + (" (its pickup templates open when you pick a time)" if self.templates() else "")
+            return "has no schedule yet." + (" Its pickup templates open at a time you pick." if self.templates() else "")
         fo = self.reg.first_open(self.rid)
         if fo is not None:
-            return f"every run time in the next {rc.OPEN_HORIZON_DAYS} days falls before its first lockout opens ({self.reg.local12(fo)})."
-        return f"none of its run times falls in the next {rc.OPEN_HORIZON_DAYS} days."
+            return f"first opens {self.reg.local12(fo)}, and no schedule of it has a night after that yet."
+        return "has no coming night on its schedules."
 
     async def to_run_times(self, interaction: discord.Interaction) -> None:
         from .wizard import FLOWS
@@ -258,12 +274,12 @@ class OpenWizard(Wizard):
             await self.shortlist(interaction)
             return
         self.draft["start"], self.draft["note"], self.draft["schedule"] = ups[0][1], "", ups[0][0]["id"]
-        await self.confirm(interaction)
+        await self.night(interaction)
 
     async def start_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         iso, _, sid = values[0].partition("|")
         self.draft["start"], self.draft["note"], self.draft["schedule"] = datetime.fromisoformat(iso), "", sid or None
-        await self.confirm(interaction)
+        await self.night(interaction)
 
     # ---- layer 2: day · hour · minutes
     def when_form(self) -> Form:
@@ -271,7 +287,7 @@ class OpenWizard(Wizard):
         usual = starts[0] if starts else None
         tpl = self.draft.get("schedule")
         title = f"Open {self.sched_name(tpl) or self.name()}" if tpl and tpl != ADHOC_SCHEDULE else f"Open {self.name()}"
-        return Form(title, when_fields(self.reg, day0=self.draft["day0"], default=usual, day_note=self._day_note), self.when_submitted)
+        return Form(title, when_fields(self.reg, day0=self.draft["day0"], default=usual, day_note=self._day_note, step=15), self.when_submitted)
 
     def _day_note(self, day: date) -> str | None:
         hits = [t for t in self.starts() if t.astimezone(self.reg.tz).date() == day]
@@ -298,13 +314,123 @@ class OpenWizard(Wizard):
             w = rc.which_run(self.reg, self.rid, start, None)
             if w["kind"] == "scheduled":
                 self.draft["schedule"], self.draft["matched"] = w["schedule"], w["schedule_name"]
-        await self.confirm(interaction)
+                await self.night(interaction)
+                return
+            self.lineup, self.lineup_page = [{"raid": self.rid, "rosters": 1}], 0
+            await self.lineup_hub(interaction)
+            return
+        await self.confirm(interaction)  # a pickup template: its own settings, its own confirm
 
     async def week_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         self.draft["day0"] = date.fromisoformat(values[0])
         await self.open_form(interaction, self.when_form())
 
-    # ---- confirm and save
+    # ---- a schedule's night: box 11
+    def night_box(self) -> dict:
+        """Box 11 for the drafted night, built again at the press (rc.open_preview: no solve): a closed night, an event
+        already open then or a past time is its refusal; a lead or lock that can't be read is OPEN_UNREAD."""
+        p = rc.open_preview(self.reg, self.rs, self.rid, self.draft["start"].isoformat(), self.draft.get("schedule"))
+        start = datetime.fromisoformat(p["start"])
+        if p.get("refusal"):
+            return cq.refusal_box_for(p["refusal"])
+        if p.get("exists"):
+            return cq.refusal_box_for(cq.already_open_sentence(self.reg, rc.find_run(self.reg, self.rs, self.rid, start, p.get("schedule"))))
+        if p.get("past"):
+            return cq.refusal_box_for(cq.new_event_past_sentence(self.reg, start))
+        try:
+            return cq.open_box_for(self.reg, self.rid, p)
+        except (KeyError, TypeError, ValueError):
+            return cq.refusal_box_for(cq.OPEN_UNREAD)
+
+    async def night(self, interaction: discord.Interaction) -> None:
+        try:
+            box = self.night_box()
+        except RegistryError as e:
+            box = cq.refusal_box_for(str(e))
+        await self.decide_box(interaction, box, do=self.open_night, refresh=self.night_box, back=self.shortlist)
+
+    async def open_night(self, interaction: discord.Interaction, _values: dict) -> None:
+        try:
+            ev = await interaction.client.open_run_and_post(self.reg, self.rs, self.rid, self.draft["start"], by=interaction.user.display_name,
+                                                            schedule=self.draft.get("schedule") or None)
+        except RegistryError as e:
+            await self.finish(interaction, str(e))
+            return
+        await self.opened(interaction, ev)
+
+    # ---- a one-off: its lineup (LineupBlock), then Locks and Rosters beside "What this makes"
+    def lineup_start(self):
+        return self.draft["start"]
+
+    async def lineup_done(self, interaction: discord.Interaction) -> None:
+        await self.one_off(interaction)
+
+    def one_off_view(self) -> dict:
+        """event_view.new_event_view over rc.open_preview for the drafted one-off (nothing written, no solve)."""
+        later = [dict(e) for e in self.lineup[1:]]
+        n = int(self.lineup[0].get("rosters") or 1)
+        p = rc.open_preview(self.reg, self.rs, self.rid, self.draft["start"].isoformat(), ADHOC_SCHEDULE, lineup=later, first_rosters=n)
+        p["posts"] = "" if p.get("channel") else "No signup channel is set, so the sheet waits until one is."
+        p["when_note"] = p.get("when_note") or rc.dst_words(self.reg, self.draft.get("note") or "", self.draft["start"])  # the picked wall time's
+        return event_view.new_event_view(self.reg, self.rs, self.rid, p, n)
+
+    async def one_off(self, interaction: discord.Interaction) -> None:
+        try:
+            view = self.one_off_view()
+        except RegistryError as e:
+            await self.decide_box(interaction, cq.refusal_box_for(str(e)), do=self.open_one_off, back=self.shortlist)
+            return
+        if view["refusal_box"] is not None:
+            await self.decide_box(interaction, view["refusal_box"], do=self.open_one_off, back=self.shortlist)
+            return
+        lines = [f"{f['label']}: {f['value']}" for f in view["facts"]] + [f"-# {n}" for n in view["notes"]]
+        lines += [f"{i}. {e['name']} · {e['rosters']} roster{'s' if e['rosters'] != 1 else ''} · {e['time_words']}"
+                  for i, e in enumerate(view["lineup"], 1)]
+        lock, k = self.draft["lock"], int(self.lineup[0].get("rosters") or 1)
+        locks = [Opt(str(h), f"{hours_words(h)} before", default=h == lock) for h in event_view.NEW_EVENT_LOCKS]
+        rosters = [Opt(str(r), f"{r} roster{'s' if r != 1 else ''}", default=r == k) for r in range(1, MAX_SCHEDULE_ROSTERS + 1)]
+
+        async def set_lock(i: discord.Interaction, values: list[str]) -> None:
+            self.draft["lock"] = int(values[0])
+            await self.one_off(i)
+
+        async def set_rosters(i: discord.Interaction, values: list[str]) -> None:
+            self.lineup[0]["rosters"] = int(values[0])
+            await self.one_off(i)
+
+        await self.show(interaction, "\n".join(lines), self.select("Locks", locks, set_lock), self.select("Rosters", rosters, set_rosters),
+                        self.button("Open the sheet", self.press_open_one_off, discord.ButtonStyle.success),
+                        self.button("Change", self.lineup_hub), self.button("Back", self.shortlist))
+
+    async def press_open_one_off(self, interaction: discord.Interaction) -> None:
+        try:
+            view = self.one_off_view()
+        except RegistryError as e:
+            view = {"refusal_box": cq.refusal_box_for(str(e))}
+        if view["refusal_box"] is not None:  # something changed since the screen: its refusal, nothing written
+            await self.decide_box(interaction, view["refusal_box"], do=self.open_one_off, back=self.shortlist)
+            return
+        await self.working(interaction, "Opening…")
+        await self.open_one_off(interaction, {})
+
+    async def open_one_off(self, interaction: discord.Interaction, _values: dict) -> None:
+        later = [dict(e) for e in self.lineup[1:]]
+        try:
+            ev = await interaction.client.open_run_and_post(self.reg, self.rs, self.rid, self.draft["start"], by=interaction.user.display_name,
+                                                            schedule=ADHOC_SCHEDULE, lineup=later or None, lock_hours=float(self.draft["lock"]),
+                                                            first_rosters=int(self.lineup[0].get("rosters") or 1))
+        except RegistryError as e:
+            await self.finish(interaction, str(e))
+            return
+        await self.opened(interaction, ev)
+
+    async def opened(self, interaction: discord.Interaction, ev: rc.RaidEvent) -> None:
+        """The outcome of box 11 and of a one-off: the box said where the sheet goes, so it is never posted here."""
+        where = f" in <#{ev.channel_id}>" if ev.channel_id else ""
+        extra = "" if ev.message_id else "\n-# No signup channel is set, so the sheet waits until one is. Run /raid sheet here to post it in this channel."
+        await self.finish(interaction, f"✅ Opened {run_label(self.reg, ev)}{where}{extra}")
+
+    # ---- a pickup template: confirm and save
     def existing(self, start: datetime) -> rc.RaidEvent | None:
         """The run open_run would hand back for this start (rc.find_run: a schedule's occurrence, else a live one-off
         at that minute), if it is still live."""
@@ -373,11 +499,19 @@ class OpenWizard(Wizard):
         await self.finish(interaction, f"✅ Opened {run_label(self.reg, ev)}{where}{extra}")
 
 
+@functools.cache
+def _with_lineup(cls: type) -> type:
+    """OpenWizard with flows_event.LineupBlock mixed in after it (OpenWizard's lineup_start / lineup_done win)."""
+    from .flows_event import LineupBlock
+
+    return type(cls.__name__, (cls, LineupBlock), {"__doc__": cls.__doc__})
+
+
 @flow("raid_open")
 async def open_raid_open(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
     if not await officer_only(interaction, reg):
         return
-    await OpenWizard(reg, interaction.client.raids.store(reg), interaction.user.id).start(interaction)
+    await OpenWizard.make(reg, interaction.client.raids.store(reg), interaction.user.id).start(interaction)
 
 
 # ---------------------------------------------------------------- run-scoped commands

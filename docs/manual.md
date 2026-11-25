@@ -917,8 +917,8 @@ any raid of the run cancels the whole run in the same press, its sheet and every
 run is cancelled, with Barrow Deeps."*). Once the first raid has finished, a cancel takes only the raids still to play:
 the finished raid stays done, and nothing goes to the signup channel — the sheet and its channel line belong to the
 first raid — so the cancel screen has no *Tell the channel?* choice then. A cancelled run is never reopened. If the bot restarts while a run is opening,
-the next minute adds the follow-ons that didn't open yet, once, with no second sheet. The Discord `/raid open` and
-schedule wizards show follow-ons but don't set them — the site, plain text and MCP do. On the site's schedule editor the
+the next minute adds the follow-ons that didn't open yet, once, with no second sheet. Discord's `/raid open` sets a
+one-off's later raids; its schedule wizards show a schedule's later raids but don't set them — the site, plain text and MCP do. On the site's schedule editor the
 *Lineup* is the lineup builder: up to three later raids, each with its rosters (1–4) and its start, in 15-minute steps
 after the raid before it (by default when it ends); saving the schedule sends the whole lineup. Plain text
 lists them in one line (*"open Hyjal Thursday 6:30 PM with barrow deeps x2, onyxia"*), and MCP's `open_run` takes
@@ -1043,13 +1043,20 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    builder* below. `/raid open` does the same in Discord: pick the raid,
    then **Next run — <time>**, **Another upcoming run…** (the next three weeks, and each schedule's next three nights
    however far ahead) (each labelled with its schedule's name when there are several)
-   or **Ad hoc run…** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes from lists; nothing
-   typed; ad hoc defaults; more than three pickup templates come as one *Pick a template* select). **Another upcoming
+   or **Ad hoc run…** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes in 15-minute steps
+   from lists; nothing typed; more than three pickup templates come as one *Pick a template* select). **Another upcoming
    run…** pages by week (*← Earlier week* / *Later week →*) when the raid has more upcoming runs than one list holds.
-   A one-off picked at exactly the minute of an upcoming recurring run **is** that run: it opens as scheduled, with its
-   regulars and confirmations, and the confirm screen says so. The confirm screen shows
-   the time in guild time and in your own, and on a daylight-saving night says which time it used (2:30 AM on the
-   spring-forward night becomes 3:30 AM; on the fall-back night the first 1:30 AM is taken). On the Events page
+   A schedule's night prints the same box as the Events page's **Open the sheet now**: how early the sheet opens,
+   where it posts and when it still locks, with **Open the sheet** and Back. If the night changed while the box was
+   open, the box is shown again for you to read before you press; a night already open, cancelled or ended says so
+   instead. A one-off picked at exactly the minute of an upcoming recurring run **is** that run: it opens as scheduled,
+   with its regulars and confirmations, through that box. Any other one-off builds its lineup as on the New event page:
+   add up to three later raids, each with its rosters and start, then **Review changes** shows *What this makes* (one
+   signup sheet, seats, priority, confirmation, each raid's time) with **Locks** (2 or 24 hours before) and the first
+   raid's **Rosters**; **Open the sheet** opens it, **Change** goes back to the lineup. On a daylight-saving night it
+   says which time it used (2:30 AM on the spring-forward night becomes 3:30 AM; on the fall-back night the first 1:30
+   AM is taken). With no signup channel set, the sheet waits until one is; `/raid sheet` posts it where you run it. A
+   raid with no schedule yet says so and points at the Schedules page. On the Events page
    *Coming up* lists each active schedule's next three nights however far ahead, and every one of them opens with **Open
    the sheet now** (one press, then its box). The sheet goes up at once and stays until the event; its lock, reminder
    and confirm-by are counted from the event's start as usual, and the schedule never opens that night a second time.
@@ -3106,7 +3113,7 @@ and Rotation work). Buff facts, minimums, a schedule's week and split policy *ca
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
 repository. Regulars are a list of who is expected, never a standing answer: there is no standing availability or
 standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). A follow-on
-(§4) is set on the site, in plain text or over MCP, not in Discord's `/raid open` or schedule wizards (they show it); a
+(§4) is set on the site, in plain text or over MCP (Discord's `/raid open` sets a one-off's; its schedule wizards only show it); a
 fifth raid in one run, a "first raid only" answer on the sheet (leave after the lead instead) and a follow-on added to a
 run already open don't exist. Guild guides (§3b): a version has no name or note of its own, a new version is not announced in any channel, two
 versions can't be compared, and the route explorer and companion addon of §2a are built from your own import string, not

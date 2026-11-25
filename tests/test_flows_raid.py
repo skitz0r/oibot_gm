@@ -72,9 +72,14 @@ class FakeBot(LootMixin):
     async def _emit(self, cfg, level, text, *a):
         self.calls.append(("emit", level, text))
 
-    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None):
-        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
-        self.calls.append(("open_run_and_post", instance, start, by) + ((schedule,) if schedule else ()))
+    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None, lineup=None, lock_hours=None, first_rosters=None):
+        """Recorded as (name, raid, start, by[, schedule][, {lineup, lock_hours, first_rosters}]): the last only for a one-off's choices."""
+        if (why := rc.open_refusal(reg, rs, instance, start, schedule)) is not None:  # RaidMixin's own refusal
+            raise RegistryError(why)
+        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters)
+        kw = {"lineup": lineup, "lock_hours": lock_hours, "first_rosters": first_rosters}
+        self.calls.append(("open_run_and_post", instance, start, by) + ((schedule,) if schedule else ())
+                          + ((kw,) if any(v is not None for v in kw.values()) else ()))
         return ev
 
     async def post_sheet(self, reg, rs, ev, channel):
@@ -164,14 +169,14 @@ def test_open_next_slot_is_one_press_after_the_raid(reg, rs, officer, channel):
         assert h.buttons() == [label, "Another upcoming run", "Ad hoc run", "Cancel"]
         assert "19:30" not in h.text and "19:30" not in label
         await h.press(label)
-        assert f"<t:{int(want.timestamp())}:f>" in h.text and reg.local12(want) in h.text
-        assert "signup channel" in h.text  # none is set: say where the sheet will go
-        assert not bot.calls  # nothing before Confirm
-        await h.press("Open")
+        assert "19:30" not in h.text and reg.local12(want, "%a %d %b") in h.text  # box 11 (test_flows_open has it whole)
+        assert "No signup channel is set, so the sheet waits until one is." in h.text  # none is set: say where the sheet goes
+        assert not bot.calls  # nothing before the press
+        await h.press("Open the sheet")
     asyncio.run(go())
     assert bot.calls[0][:3] == ("open_run_and_post", "barrow_deeps", want)
-    assert ("post_sheet", bot.calls[1][1], channel.id) == bot.calls[1]
-    assert "✅ Opened" in h.text and "posted in this channel" in h.text
+    assert len(bot.calls) == 1, "the box said the sheet waits: it is never posted here"
+    assert "✅ Opened" in h.text and "/raid sheet" in h.text
 
 
 def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):
@@ -187,7 +192,7 @@ def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):
         assert [o.value for o in sel.options] == [f"{t.isoformat()}|barrow-deeps" for t in starts[1:23]]  # each names its schedule
         assert all(":" in o.label and ("AM" in o.label or "PM" in o.label) for o in sel.options)
         await h.pick("Pick the run", f"{starts[2].isoformat()}|barrow-deeps")
-        await h.press("Open")
+        await h.press("Open the sheet")
     asyncio.run(go())
     assert bot.calls[0][2] == starts[2]
 
@@ -202,7 +207,7 @@ def test_open_existing_run_is_named_on_confirm(reg, rs, officer, channel):
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         await h.press(f"Next run — {reg.local12(first)}")
-        assert "already exists" in h.text
+        assert "is already open" in h.text and h.buttons() == ["Back"]
     asyncio.run(go())
 
 
@@ -214,13 +219,14 @@ def test_open_dst_gap_shows_the_note_and_opens_3_30(reg, rs, officer, channel, m
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        assert "no run times yet" in h.text  # the profile has none: the one-off path
+        assert "no schedule yet" in h.text  # the profile has none: the one-off path
         await h.press("Ad hoc run")  # no pickup template: straight to the day · hour · minute form
         form = h.modal
         assert [o.value for o in form._items["day"].options][7] == "2026-03-08"
         await h.submit(form, day="2026-03-08", hour="2", minute="30")
+        await h.press("Review changes")  # the one-off's lineup: Barrow Deeps alone
         assert "doesn't exist" in h.text and "3:30 AM" in h.text
-        await h.press("Open")
+        await h.press("Open the sheet")
     asyncio.run(go())
     start = bot.calls[0][2]
     assert (start.year, start.month, start.day, start.hour, start.minute) == (2026, 3, 8, 3, 30)
@@ -235,7 +241,7 @@ def test_open_no_slots_says_why_and_offers_run_times(reg, rs, officer, channel, 
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        assert "no run times yet" in h.text
+        assert "no schedule yet" in h.text and "in the next" not in h.text
         assert h.buttons() == ["Set this raid's run times →", "Ad hoc run", "Cancel"]
         await h.press("Set this raid's run times →")
         assert "Raids page" in h.text
@@ -255,7 +261,7 @@ def test_open_offers_a_raids_first_nights_however_far_its_first_opening_is(reg, 
         await h.pick("Pick the raid", "barrow_deeps")
         assert f"Next run — {reg.local12(first)}" in h.buttons()[0]
         await h.press(h.buttons()[0])
-        assert "too far ahead" not in h.text and "Open" in h.buttons()
+        assert "too far ahead" not in h.text and "Open the sheet" in h.buttons()
     asyncio.run(go())
     assert not bot.calls
 
@@ -276,7 +282,7 @@ def test_open_refuses_the_past_and_cancel_writes_nothing(reg, rs, officer, chann
         tomorrow = (reg.now_local().date() + timedelta(days=1)).isoformat()
         await h.submit(day=tomorrow, hour="20", minute="0")
         assert "8:00 PM" in h.text
-        await h.press("Cancel")
+        await h.press("Back")  # the lineup's Back: nothing written
         assert "nothing was changed" in h.text
     asyncio.run(go())
     assert not bot.calls and len(rs.events) == runs
@@ -302,7 +308,8 @@ def test_open_later_than_the_window_narrows_by_week(reg, rs, officer, channel):
         await h.pick("Pick the week", week)
         assert h.modal._items["day"].options[0].value == week
         await h.submit(h.modal, day=week, hour="19", minute="30")
-        await h.press("Open")
+        await h.press("Review changes")
+        await h.press("Open the sheet")
     asyncio.run(go())
     start = bot.calls[0][2]
     assert start.date().isoformat() == got["week"] and (start.hour, start.minute) == (19, 30)

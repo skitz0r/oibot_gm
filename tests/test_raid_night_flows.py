@@ -179,7 +179,7 @@ def test_another_upcoming_run_pages_by_week(reg, rs, officer, channel):  # noqa:
         assert second and not set(first) & set(second)
         seen["pick"] = second[0]
         await h.pick("Pick the run", second[0])
-        await h.press("Open")
+        await h.press("Open the sheet")
     run(go())
     assert bot.calls[0][0] == "open_run_and_post" and bot.calls[0][2].isoformat() == seen["pick"].partition("|")[0]
 
@@ -195,8 +195,8 @@ def test_a_one_off_at_a_scheduled_minute_opens_as_that_run(reg, rs, officer, cha
         await h.press("Ad hoc run")
         local = nxt.astimezone(reg.tz)
         await h.submit(h.modal, day=local.date().isoformat(), hour=str(local.hour), minute=str(local.minute))
-        assert "It's a scheduled run" in h.text and "ad hoc run" not in h.text
-        await h.press("Open")
+        assert "The sheet opens now" in h.text and "ad hoc run" not in h.text  # box 11: that schedule's night
+        await h.press("Open the sheet")
     run(go())
     assert bot.calls[0][:3] == ("open_run_and_post", "barrow_deeps", nxt) and bot.calls[0][4:] == ("barrow-deeps",), "the schedule's run, not a one-off"
 

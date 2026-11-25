@@ -99,8 +99,8 @@ def test_discord_refuses_a_pickup_template_on_a_schedule_night_and_offers_a_far_
         await h.press("One-off — pick a day and time")
         assert far.date().isoformat() in [o.value for o in h.modal._items["day"].options]
         await h.submit(h.modal, day=far.date().isoformat(), hour=str(far.hour), minute=str(far.minute))
-        assert "That time is the Raid nights run" in h.text, "a one-off at a schedule's night is that schedule's run"
-        assert "too far ahead" not in h.text and "Open" in h.buttons(), "no horizon: the far night offers Open"
+        assert "The sheet opens now" in h.text, "a one-off at a schedule's night is that schedule's run: box 11"
+        assert "too far ahead" not in h.text and "Open the sheet" in h.buttons(), "no horizon: the far night offers Open"
     run(go())
     assert not rs.events
 

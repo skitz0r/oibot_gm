@@ -16,7 +16,7 @@ the Discord character, confirm and I'm back screens alike. A board sentence is a
 TO_TOKEN where those go and the board only puts the names in (it never composes a word of it)."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from . import raidcycle as rc
 from .registry import RANKS, Registry, RegistryError
@@ -1105,6 +1105,22 @@ def open_now_box(reg: Registry, start, opens, lock_at, *, lineup: list[dict] | N
         "It posts in the signup channel." if channel else "No signup channel is set, so the sheet waits until one is.")
     last = f"It locks {reg.local12(lock_at)}, and the schedule won't open that night again." if hours >= 1 else f"It still locks {reg.local12(lock_at)}."
     return box(f"Open the sheet for {reg.local12(start, '%a %d %b')}?", [head, where, last], "Open the sheet", rev=rev)
+
+
+OPEN_UNREAD = "The bot couldn't read when this sheet opens and locks, so nothing was opened and the event stays coming up."
+
+
+def open_box_for(reg: Registry, rid: str, p: dict) -> dict:
+    """Box 11 from rc.open_preview's answer `p` — the one box /raid open and the site's open routes print: how early
+    against the schedule's own opening, where it posts, when it still locks. Its rev is the night's occurrence, so a
+    press that would open another night sees a fresh box. Never a number the schedule doesn't hold: a missing lead or
+    lock raises KeyError / TypeError / ValueError, and the caller refuses with OPEN_UNREAD."""
+    start = datetime.fromisoformat(p["start"])
+    sd = reg.schedule_def(rid, p.get("schedule"))
+    lineup = [{"raid": rid, "rosters": int(sd.get("rosters") or 1)}] + [{"raid": e["raid"], "rosters": int(e.get("rosters") or 1)} for e in p.get("later") or []]
+    lead, lock = float(sd["signup_lead_hours"]), float(sd["lock_hours_before"])
+    return open_now_box(reg, start, start - timedelta(hours=lead), start - timedelta(hours=lock), lineup=lineup,
+                        channel=bool(p.get("channel")), rev=p.get("occurrence") or "")
 
 
 def already_open_sentence(reg: Registry, ev) -> "rc.Refusal":

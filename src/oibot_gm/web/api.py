@@ -1957,19 +1957,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise RegistryError(ROSTERS_RANGE)
         return lock, n
 
-    OPEN_UNREAD = "The bot couldn't read when this sheet opens and locks, so nothing was opened and the event stays coming up."
-
-    def open_box(reg, rid: str, p: dict) -> dict:
-        """Open the sheet now's box (consequences.open_now_box) from rc.open_preview's answer `p`: how early against the
-        schedule's own opening, where it posts, when it still locks."""
-        start = datetime.fromisoformat(p["start"])
-        sd = reg.schedule_def(rid, p.get("schedule"))
-        lineup = [{"raid": rid, "rosters": int(sd.get("rosters") or 1)}] + [{"raid": e["raid"], "rosters": int(e.get("rosters") or 1)} for e in p.get("later") or []]
-        # never a number the schedule doesn't hold: a missing lead or lock raises (KeyError / TypeError) and the route
-        # refuses with OPEN_UNREAD instead of saying the sheet locks at the start
-        lead, lock = float(sd["signup_lead_hours"]), float(sd["lock_hours_before"])
-        return cq.open_now_box(reg, start, start - timedelta(hours=lead), start - timedelta(hours=lock), lineup=lineup,
-                               channel=bool(p.get("channel")))
+    OPEN_UNREAD = cq.OPEN_UNREAD
+    open_box = cq.open_box_for  # the one box /raid open prints too
 
     @app.post("/api/raid/{rid}/open/preview")
     async def raid_open_preview(request: Request, rid: str):

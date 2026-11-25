@@ -76,7 +76,7 @@ scripts/serve_scratch.py  THIS worktree's site on a throw-away copy of fixtures/
                        test bench's messages name the run (raid_views.run_title), never its key
                        §5.67 phase 4: /api/meta `page_words` (PAGE_WORDS), `confirm_words` (CONFIRM_WORDS), `leave` (LEAVE_TEMPLATE); box_refused /
                        box_stale = THE `preview` / `seen` handling of /api/run/{key}/lock | cancel | reschedule | lineup | layout (Undo my moves:
-                       undo_box_for, RaidMixin.undo_moves) | strategy (strategy_box) and /api/raid/{rid}/open (box 11; OPEN_UNREAD); POST
+                       undo_box_for, RaidMixin.undo_moves) | strategy (strategy_box) and /api/raid/{rid}/open (box 11 = consequences.open_box_for, as /raid open; OPEN_UNREAD); POST
                        /api/admin/raid/regulars takes preview / seen on a removal (box 18); /api/run/{key}/move `shown` (+ by_id); /api/run/{key}/set
                        `spec` and its line through rc.site_words; /api/raid/{rid}/open/preview adds event_view.new_event_view when a lineup is sent,
                        open takes one_off_args (timing.lock_hours_before ∈ NEW_EVENT_LOCKS, rosters 1–4); /api/raids `page` (raid_page.raid_row),

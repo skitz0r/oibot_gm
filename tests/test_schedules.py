@@ -443,7 +443,7 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
     from oibot_gm.wizard import FLOWS
 
     class Bot(tfr.FakeBot):
-        async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None):
+        async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None, **_one_off):
             self.calls.append(("open_run_and_post", instance, start, schedule))
             return rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
 
@@ -465,8 +465,8 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
         alt_opt = next(o for o in sel.options if o.value.endswith("|alt"))
         assert alt_opt.description.startswith("Alt run · ") and "20:00" not in alt_opt.label
         await h.pick("Pick the run", alt_opt.value)
-        assert "**Barrow Deeps** · Alt run" in h.text
-        await h.press("Open")
+        assert "The sheet opens now" in h.text  # box 11 for the Alt run's night
+        await h.press("Open the sheet")
     asyncio.run(go())
     opens = [c for c in bot.calls if c[0] == "open_run_and_post"]
     assert opens[-1][3] == "alt"

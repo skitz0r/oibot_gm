@@ -395,7 +395,7 @@ class ComingGone(RegistryError):
 def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, now: datetime) -> dict:
     """ComingView: {title, chip, schedule {id, name}, details [Lineup, Comes from, Priority, Confirmation, Sheet opens,
     Locks], can_open (no horizon: every listed night opens unless closed), why (rc.open_row_refusal's sentence | None), open {start_iso, schedule,
-    occurrence, raid (the first raid: the route's {rid})} (what POST /api/raid/{rid}/open carries back), box (consequences.open_now_box | None)}. ComingGone when
+    occurrence, raid (the first raid: the route's {rid})} (what POST /api/raid/{rid}/open carries back), box (consequences.open_now_box | None, its rev the occurrence as open_box_for's)}. ComingGone when
     the night has an event now (its key) or is not one of coming_nights any more."""
     find = rc.occurrence_index(reg, rs)
     hit = find(sid, occurrence)
@@ -414,7 +414,8 @@ def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, no
     details = [_fact("Lineup", rc.lineup_words(reg, lineup)), _fact("Comes from", name, f"/schedules/{sid}"),
                _fact("Priority", rc.priority_words(reg, sd)), _fact("Confirmation", rc.confirmation_words(bool(sd.get("confirm", True)))),
                _fact("Sheet opens", reg.local12(opens)), _fact("Locks", reg.local12(lock_at))]
-    box = None if why else cq.open_now_box(reg, t, opens, lock_at, lineup=lineup, channel=bool(reg.config.signup_channel_id))
+    box = None if why else cq.open_now_box(reg, t, opens, lock_at, lineup=lineup, channel=bool(reg.config.signup_channel_id),
+                                           rev=occurrence)  # consequences.open_box_for's rev: the open route's box is this one
     return {"title": reg.local12(t), "chip": PAGE_WORDS["no_sheet_yet"], "schedule": {"id": sid, "name": name}, "details": details,
             "can_open": why is None, "why": why, "open": {"start_iso": t.isoformat(), "schedule": sid, "occurrence": occurrence, "raid": raid},
             "box": box}
