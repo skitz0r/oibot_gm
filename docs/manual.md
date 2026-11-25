@@ -2055,7 +2055,7 @@ the refusal the Save would give) and remove them. **Pause / Resume** sits beside
 … is already open and keeps its sheet. Its regulars stay."*). The editor saves only the fields you changed, so a pause made in
 Discord a moment ago is never undone by a Save on the site. **Remove** confirms with what goes: *"The Alt run schedule is
 removed. Ana, Bo and Cy come off its regulars and see a notice on their Me page. Barrow Deeps Sat 12 Dec 8:00 PM is already
-open and keeps its time and sheet, but locks with the raid's weights and no regulars."* — the
+open and keeps its time and sheet, but locks with no regulars."* (an open event keeps the priority it opened with) — the
 same lines on the wizard, the review, plain text and MCP. Changing a schedule's run times or its week with runs already
 open says *"The open run keeps its old times."* — those runs keep the times they opened with. If someone changed the
 schedule meanwhile, Pause, Remove and the editor's Save say so and write nothing; the page reloads. A schedule is always

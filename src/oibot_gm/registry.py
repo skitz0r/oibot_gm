@@ -5534,16 +5534,17 @@ class Registry:
         s = self.schedule_entry(sid)
         sid = s["id"]
         regs = sorted({m.display_name for m, _c in self.schedule_regulars(sid)}, key=str.lower)
-        runs = [str(t.get("name") or t.get("key")) for t in self.schedule_runs_open(sid, rs)]
-        # what the open runs' lock reads once the schedule is gone (rc.run_weights: the class's fallback; the series'
-        # regulars come off with it) — named so nobody expects the schedule's own weights or its regulars on them
+        open_dicts = self.schedule_runs_open(sid, rs)
+        runs = [str(t.get("name") or t.get("key")) for t in open_dicts]
+        # what the open runs' lock reads once the schedule is gone: the series' regulars come off with it; the weights
+        # only where a run reads them live — a run carries its own weights from its open (the owner's tweaks, 2026-11-24:
+        # rc.run_weights), so only a run dict without them (older code, before the start's migration) falls back
         loses: list[str] = []
         if runs:
             adhoc = schedule_class(s.get("kind")) == "adhoc"
-            if s.get("weights") and not adhoc:
-                loses.append("the raid's weights")
-            elif s.get("weights"):
-                loses.append("the ad hoc weights")
+            live = any(not isinstance(t.get("weights"), dict) for t in open_dicts)
+            if live and s.get("weights"):
+                loses.append("the ad hoc weights" if adhoc else "the raid's weights")
             if regs and not adhoc:
                 loses.append("no regulars")
         return Effects(name=s.get("name") or sid, label=self.schedule_label(s["raid"], s), regulars=regs, open_runs=runs, loses=loses)

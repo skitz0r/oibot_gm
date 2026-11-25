@@ -270,19 +270,27 @@ def test_timezone_wizard_with_only_a_locked_run_offers_keep_only(reg, rs, monkey
 
 
 def test_schedule_removal_names_the_open_runs_lock_fate(reg, rs):
-    """RD-11: a run already open from a removed schedule keeps its time and sheet, but its lock reads the raid's weights
-    (rc.run_weights' fallback) and no regulars (they came off with it) — the sentence says so, and it is true."""
+    """RD-11: a run already open from a removed schedule keeps its time and sheet, and no regulars (they came off with
+    it). Since the owner's tweaks (2026-11-24) an open run carries its OWN weights from its open, so it keeps them: the
+    sentence names only the regulars, and it is true. A run dict without its own weights (older code, before the start's
+    migration) still reads them live — the sentence names the raid's weights for it, and that is true too."""
     reg.set_schedule("alt", {"kind": "weekly", "slots": "Sat 20:00", "name": "Alt run", "weights": {"regular": 9}}, "t", raid="barrow_deeps")
     m = real(reg, 0)
     reg.regular_add(m.discord_id, "alt", "t")
     ev = open_real(reg, rs)
     assert rc.run_weights(reg, ev)["regular"] == 9 and rc.run_regulars(reg, ev)
     eff = reg.schedule_removal_effects("alt", rs)
-    assert eff.loses == ["the raid's weights", "no regulars"]
-    assert eff.lines()[-1] == reg.config.roster(ev.team)["name"] + " is already open and keeps its time and sheet, but locks with the raid's weights and no regulars."
+    assert eff.loses == ["no regulars"]
+    assert eff.lines()[-1] == reg.config.roster(ev.team)["name"] + " is already open and keeps its time and sheet, but locks with no regulars."
+    team = reg.config.roster(ev.team)
+    own = team.pop("weights")  # a run dict from older code: it reads the schedule's weights live
+    assert reg.schedule_removal_effects("alt", rs).loses == ["the raid's weights", "no regulars"]
+    team["weights"] = own
     reg.remove_schedule("alt", "t")
-    assert rc.run_weights(reg, ev)["regular"] != 9  # the raid's weights now
+    assert rc.run_weights(reg, ev)["regular"] == 9, "its own weights: the removal never changes them"
     assert rc.run_regulars(reg, ev) == []
+    team.pop("weights")
+    assert rc.run_weights(reg, ev)["regular"] != 9, "without its own weights it reads the raid's now"
 
 
 def test_a_run_has_no_minimums_of_its_own(reg, rs):

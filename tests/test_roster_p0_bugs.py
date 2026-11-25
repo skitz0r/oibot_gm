@@ -137,15 +137,19 @@ def test_sat_out_credit_survives_a_rename(reg, rs):
     first.state = "done"
     rs.save(first, "done")
     reg.rename(sat.discord_id, "Renamedperson", "t")  # a Discord rename, recorded as its own step (member() never renames)
+    # only sat_out counts — set BEFORE the run opens: a run carries the weights it opened with (the owner's tweaks,
+    # 2026-11-24), so a raid edit after its open no longer reaches it
+    reg.set_raid_overrides("barrow_deeps", {"weight_rank": 0, "weight_main": 0, "weight_signup_order": 0, "weight_sat_out": 5}, "t")
     second = open_test_run(reg, rs, days=2)
     join(reg, rs, second, seated + [sat])
     players = rc.players_for(reg, second)
     p = next(p for p in players if p.signup_name == "Renamedperson")
     assert p.discord_id == sat.discord_id
-    reg.set_raid_overrides("barrow_deeps", {"weight_rank": 0, "weight_main": 0, "weight_signup_order": 0, "weight_sat_out": 5}, "t")  # only sat_out counts
     bonus = rc.seat_bonus(reg, rs, second, players)
     assert bonus["Renamedperson"] == 5, bonus
     assert bonus[seated[-1].display_name] == 0, "seated last time: no sat-out credit"
+    reg.config.roster(second.team).pop("weights")  # a run dict without its own weights (older code) reads them live, as ever
+    assert rc.seat_bonus(reg, rs, second, players)["Renamedperson"] == 5
 
 
 def test_seat_player_carries_the_discord_id(reg, rs):
