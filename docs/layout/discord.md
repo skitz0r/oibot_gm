@@ -94,6 +94,14 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        the defaults leave every other wizard unchanged
   wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)
   wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow + AbsenceClearWizard = I'm back) · flows_raid ·
+                       flows_event (phase 5, Task 3: pick_event = THE event picker — live FIRST raids, soonest first, ≤ 25, one goes straight in,
+                       none = NO_EVENT —; EventWizard (ev() re-read, act = working → the verb's ✅ line or its refusal); flow raid_reschedule =
+                       RescheduleWizard: reschedule_pick_box's text + Pick the day and time → when_fields(step=15) (Later than this… → the week)
+                       → rc.move_start (MOVE_GAP / MOVE_TWICE = refusal_box_for, Back alone) → decide_box(reschedule_box) Move · Pick another
+                       time · Back, the rev taken with each box; flow raid_edit = EditEventWizard: a hub of edit_options' fields as 'label: value'
+                       (event_value_words, old → new once drafted; edit_locked / edit_over), Change a setting → one screen each (hours trimmed
+                       to 25 keeping the value, on / off, First to join / By priority, the weights = one Form of five selects, a split select
+                       per live raid), Review changes → decide_box(reschedule_box(edit=True)) Save → reschedule_event(timing=, rev=)) ·
                        flows_config (+ OwnerTransferWizard; AuraWizard = a draft hub per buff, one Save this buff through configops.apply_ops; CompTargetsBlock = the
                        Minimums block (officers), in RaidConfigWizard (officers; no sheet timing) and in CompTargetsWizard = /roster comp; ChannelsWizard
                        (/gm config channels: ChannelSelect / — not set — → draft → Review → apply_ops), ChannelSetWizard (the eight shortcuts' one confirm),

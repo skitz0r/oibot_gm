@@ -1,4 +1,4 @@
-"""The /raid slash commands (open, sheet, health, lock, loot, distribute, end, set, cancel, list, out, fill): thin handlers that
+"""The /raid slash commands (open, sheet, health, lock, loot, distribute, end, set, cancel, reschedule, edit, list, out, fill): thin handlers that
 resolve the guild + run and call the `RaidMixin` methods on the bot. `register_raid_commands` adds the group to the tree."""
 from __future__ import annotations
 
@@ -83,6 +83,18 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         reg, interaction = await officer(interaction)
         if reg:
             await FLOWS["raid_cancel"](interaction, reg)
+
+    @raid.command(name="reschedule", description="Officer: move an open event to another day or time")
+    async def raid_reschedule(interaction: discord.Interaction):
+        reg, interaction = await officer(interaction)
+        if reg:
+            await FLOWS["raid_reschedule"](interaction, reg)
+
+    @raid.command(name="edit", description="Officer: change one event's own settings — when it locks, reminders, confirmation, priority")
+    async def raid_edit(interaction: discord.Interaction):
+        reg, interaction = await officer(interaction)
+        if reg:
+            await FLOWS["raid_edit"](interaction, reg)
 
     @raid.command(name="list", description="Live runs")
     async def raid_list(interaction: discord.Interaction):

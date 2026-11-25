@@ -1447,7 +1447,7 @@ to Wednesday 8 PM"*, *"lock Thursday's run 12 hours before"*; the diff prints th
 skip or pass twice that night is refused: *"That time doesn't exist that night because the clocks go forward. Pick
 another time."*). MCP's `reschedule_run` previews first and sends the preview's `rev` back. If someone changed the run
 between the confirm and the press, nothing is saved (*"Someone changed this run a moment ago, so nothing was saved.
-Check it and try again."*). Discord gets a Reschedule wizard later; until then `/gm change` takes it as plain text.
+Check it and try again."*). In Discord, `/raid reschedule` (officers) asks which event when several are open, shows the same box asking for the time, and **Pick the day and time** opens a day, an hour and the minutes in quarter hours (*Later than this…* asks for the week first). The box then says what the move does, with **Move**, **Pick another time** and **Back**; a time the clocks skip or pass twice is the refusal with **Back** alone, never shifted. `/raid edit` (officers) is Edit event: a line per setting it may change now, in the same words, each change shown as *old → new*. **Change a setting** opens one setting at a time from a list (the five weights together in one box of five lists, each raid's split on one screen), and **Review changes** shows the bot's box with **Save**. A box that changed while it was open comes back with the new facts and waits again. If the roster locked meanwhile, the box says what is now fixed, with **Back** alone, and nothing is saved.
 
 **Changing the raids of an open run (officers).** Until the roster locks, one run's lineup can change: a raid added
 after the first, one taken out, the later raids put in another order, or a raid's number of rosters changed. The first
@@ -1734,7 +1734,9 @@ edits that new family and leaves the one it shared alone.
   goes and what stays: *"Orrin's record goes, with Wrenna, their absences, wishlists and notices. Loot already awarded
   stays in the ledger, and nobody gets a DM. …"*); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
   while they're still in the server or hold a seat on a live run. Members can't delete their own record.
-- Runs: `/raid open|sheet|health|fill|lock|set|cancel|list|loot|distribute|end` (officers) and `/raid out` (anyone).
+- Runs: `/raid open|sheet|health|fill|lock|set|cancel|reschedule|edit|list|loot|distribute|end` (officers) and `/raid out` (anyone).
+  `/raid reschedule` moves an event to a day and time picked from lists, and `/raid edit` changes the event's own settings
+  (§4 *Moving a run, and its own sheet timing*).
   They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member
   (and optionally `what`), then offers only what applies to them (§4 *Officers record anything…*). `/raid sheet`
   (anyone): an officer **moves** the live sheet here, or to `channel:` — its buttons and updates follow it and the old
