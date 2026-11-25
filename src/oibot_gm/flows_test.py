@@ -191,7 +191,7 @@ class TestCompWizard(Wizard):
         await self.start(interaction)
 
     async def go(self, interaction: discord.Interaction) -> None:
-        from .raid_views import board_url
+        from .raid_views import event_url
 
         rid = self.draft["raid"]
         if rid not in self.reg.profile.raids:
@@ -205,7 +205,7 @@ class TestCompWizard(Wizard):
             return
         from .raid_views import run_title
 
-        url = board_url(self.reg, ev)
+        url = event_url(self.reg, ev)
         where = f"Open its event page: {url}" if url else "Open it on the site: Members › Test bench › Test runs."
         await self.finish(interaction, f"🧪 Comp sandbox {run_title(self.reg, ev)}: {len(self.reg.test_members())} test members joined. {where}")
 

@@ -353,9 +353,9 @@ def test_a_card_links_the_event_page(reg, rs, monkeypatch):
     ev = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t", lineup=[{"raid": RID, "rosters": 1}])
     later = rc.event_parts(rs, ev)[1]
     want = f"https://gm.example/app/events/{ev.key}?g={reg.key}"
-    assert raid_views.board_url(reg, later) == want and raid_views.board_url(reg, ev) == want
+    assert raid_views.event_url(reg, later) == want and raid_views.event_url(reg, ev) == want
     monkeypatch.setenv("OIBOT_WEB_URL", "")
-    assert raid_views.board_url(reg, ev) is None
+    assert raid_views.event_url(reg, ev) is None
 
 
 def test_old_rosters_addresses_land_on_the_events_page(c):

@@ -19,7 +19,7 @@ from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton, fill
 from .raid_commands import register_raid_commands
 from .raid_scheduler import RaidSchedulerMixin
 from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _group_block, _group_summaries, _header,
-                         _raidwide_line, _role_counts, ask_closed_layout, ask_line, board_url, clock12, closed_layout, confirm_layout, fill_layout,
+                         _raidwide_line, _role_counts, ask_closed_layout, ask_line, event_url, clock12, closed_layout, confirm_layout, fill_layout,
                          gaps_text, guild_prefix, health_layout, health_locked_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
                          sheet_state)
 from .registry import Registry, RegistryError
@@ -30,7 +30,7 @@ __all__ = ["RaidContext", "RaidMixin", "RaidSchedulerMixin", "BotProto", "regist
            # buttons
            "FillButton", "PlaceButton", "RunButton", "SignupButton", "fill_view", "place_view", "sheet_view",
            # views + helpers
-           "CLOCK12", "OUT_MARK", "RELEASE_WHY", "ask_line", "board_url", "clock12", "closed_layout", "confirm_layout", "fill_layout", "gaps_text",
+           "CLOCK12", "OUT_MARK", "RELEASE_WHY", "ask_line", "event_url", "clock12", "closed_layout", "confirm_layout", "fill_layout", "gaps_text",
            "health_layout", "health_locked_layout", "lock_layout", "raid_name", "run_actions_row", "run_label", "run_times", "run_title", "sheet_message", "sheet_state",
            "_aura_line", "_group_block", "_group_summaries", "_header", "_raidwide_line", "_role_counts"]
 

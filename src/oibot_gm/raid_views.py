@@ -143,8 +143,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     thumb = raid_thumb_url(reg, ev.instance)
     if thumb:
         e.set_thumbnail(url=thumb)
-    if state in ("open", "locked"):
-        e.url = me_url(reg, ev)  # the title is the deep link to this run's row on the member's Me page (a finished sheet has no row)
+    e.url = event_url(reg, ev)  # the title opens the event (a member is sent on to their own row on the Me page)
 
     def member(character: str, cls: str, spec: str, mark: str | None = None, icons: bool = True) -> str:
         return ((mark + " ") if mark else "") + ((ico("spec", f"{cls}:{spec}") + " ") if icons else "") + character
@@ -247,20 +246,15 @@ def raid_thumb_url(reg: Registry, rid: str | None) -> str | None:
     return f"{web}/img/raid/{rid}.png?g={reg.key}" + (f"&s={sig}" if sig else "")
 
 
-def board_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
-    """The run's event on the site's Events page, in this guild (?g= selects it; two guilds can hold one run key): the
-    event's own address is its FIRST raid's key (a later raid's `follows`, rc.first_part's own link), so a later raid's
-    card opens the evening it belongs to. A raid taken out of a lineup links itself (the page says it is gone)."""
+def event_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
+    """THE address of a run's event on the site, `{web}/app/events/<key>?g=<guild key>` (?g= selects the guild; two guilds
+    can hold one run key) — every Discord link to an event is this one: the sheet's title, the officer cards, the test
+    bench's sandbox line. The event's own address is its FIRST raid's key (a later raid's `follows`), so a later raid's
+    link opens the evening it belongs to; a raid taken out of a lineup links itself (the page says it is gone). The page
+    sends a member who is not an officer on to their own row on the Me page. None off http(s)."""
     web = os.environ.get("OIBOT_WEB_URL", "")
     key = ev.follows if rc.is_follow(ev) and ev.follows and not ev.dropped else ev.key
     return f"{web}/app/events/{key}?g={reg.key}" if web.startswith("http") else None
-
-
-def me_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
-    """The run's row on the member's own Me page (`/app/me?g=<key>#run-<key>`): the sheet's title links here, so a member
-    answers on the site from Discord in one tap (the board is officers' — a member link never points there). None off http(s)."""
-    web = os.environ.get("OIBOT_WEB_URL", "")
-    return f"{web}/app/me?g={reg.key}#run-{ev.key}" if web.startswith("http") else None
 
 
 def guild_prefix(reg: Registry) -> str:
@@ -455,7 +449,7 @@ def _raidwide_line(reg: Registry, ico, r, show_missing: bool = True) -> str:
 def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
     ui = discord.ui
     items = []
-    url = board_url(reg, ev)
+    url = event_url(reg, ev)
     if url:
         items.append(ui.Button(label="Open the board", style=discord.ButtonStyle.link, url=url))
     # one order in every state — Open · Lock · Fill · Loot · Cancel — so nothing moves when the run locks; what does not
@@ -804,14 +798,21 @@ def prelock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask, cls: s
 
 
 def closed_layout(reg: Registry, ev: rc.RaidEvent, ico) -> discord.ui.LayoutView:
-    """What a run's officer cards become once it is cancelled or finished: the header and the last log line. A run
-    ENDED less than an hour ago keeps one button, Reopen (design B6 — an end by mistake; never a cancelled run, D19)."""
+    """What a run's officer cards become once it is cancelled or finished: the header, the last log line and Open the
+    event (its History view on the site). A run ENDED less than an hour ago also keeps Reopen (design B6 — an end by
+    mistake; never a cancelled run, D19)."""
     ui = discord.ui
     title = rc.RUN_STATE_WORDS["cancelled" if ev.state == "cancelled" else "done"].capitalize() + f" · {raid_name(reg, ev)}"
     view = ui.LayoutView(timeout=None)
     parts = [_header(reg, ev, title, [f"-# {ev.log[-1]}"] if ev.log else [])]
+    row = []
+    url = event_url(reg, ev)
+    if url:  # a finished or cancelled event opens its History view on the site
+        row.append(ui.Button(label="Open the event", style=discord.ButtonStyle.link, url=url))
     if ev.state == "done" and rc.reopen_refusal(reg, ev) is None:
-        parts.append(ui.ActionRow(RunButton(reg.key, ev.key, "reopen")))
+        row.append(RunButton(reg.key, ev.key, "reopen"))
+    if row:
+        parts.append(ui.ActionRow(*row))
     view.add_item(ui.Container(*parts, accent_colour=0x98A3B5))
     return view
 

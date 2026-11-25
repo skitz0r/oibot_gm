@@ -105,6 +105,16 @@ function RostersRedirect() {
   return <Navigate to={key ? `/events/${encodeURIComponent(key)}${search}` : `/events${search}`} replace />;
 }
 
+/** /events/:key — the address every Discord link to an event opens (raid_views.event_url). An officer gets the Events
+ *  page; a member who is not one is sent on to their own row for that event on the Me page (`/me#run-<key>`, ?g= kept),
+ *  where Join / Bench / No thanks are — never an empty or "officers only" page. */
+function EventRoute({ meta }: { meta: Meta }) {
+  const { key } = useParams();
+  const { search } = useLocation();
+  if (meta.viewer.officer) return <EventsPage meta={meta} />;
+  return <Navigate to={{ pathname: "/me", search, hash: key ? `#run-${encodeURIComponent(key)}` : "" }} replace />;
+}
+
 /** /events/:key/lineup's page needs the key in its own route (Edit lineup). */
 function EditLineupRoute({ meta }: { meta: Meta }) {
   const { key } = useParams();
@@ -225,7 +235,7 @@ export default function App() {
             <Route path="/events/:key/lineup" element={officer(<EditLineupRoute meta={meta} />)} />
             <Route path="/events/:key/edit" element={officer(<EditEventRoute meta={meta} />)} />
             <Route path="/events" element={officer(<EventsPage meta={meta} />)} />
-            <Route path="/events/:key" element={officer(<EventsPage meta={meta} />)} />
+            <Route path="/events/:key" element={<EventRoute meta={meta} />} />
             <Route path="/events/coming/:sid/:occurrence" element={officer(<EventsPage meta={meta} />)} />
             {/* Schedules: the list and one schedule (pages/Schedules); New schedule and Edit are the lineup builder's page */}
             <Route path="/schedules" element={officer(<SchedulesPage meta={meta} />)} />
