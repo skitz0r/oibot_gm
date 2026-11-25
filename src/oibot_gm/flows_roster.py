@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable, Sequence
 import discord
 
 from .constants import ROLES
-from .consequences import RANK_CHOICES
+from .consequences import MEMBER_ACTION_WORDS, RANK_CHOICES
 from .flows_armory import ARMORY_ACTIONS, CharArmory, bounded
 from .registry import Member, RegisteredCharacter, Registry, RegistryError
 from .wizard import MAX_OPTIONS, Opt, Wizard, flow
@@ -914,8 +914,10 @@ async def open_roster_absences(interaction: discord.Interaction, reg: Registry, 
 # ---------------------------------------------------------------- /raid set: anything a member can do, recorded for them (B5)
 
 SET_WHAT = {"join": "Join", "bench": "Bench", "no_thanks": "No thanks", "callout": "Can't make it (a callout)", "confirm_yes": "Confirm for them",
-            "confirm_no": "Can't make it for them (their Confirm ask)", "fill_yes": "Confirm their fill", "fill_no": "No to their fill",
+            "confirm_no": MEMBER_ACTION_WORDS["confirm_no"][1], "fill_yes": "Confirm their fill", "fill_no": MEMBER_ACTION_WORDS["fill_no"][1],
             "pin_in": "Pin to roster", "pin_out": "Keep off the roster", "unpin": "Unpin"}
+SET_GONE_EVENT = "This event is over, so nothing was changed."
+SET_GONE_MEMBER = "That member isn't registered any more, so nothing was changed."
 STATUS_WHAT = {"in": "join", "sub": "bench", "out": "no_thanks"}  # the old `status` seed (Join / Bench / No thanks)
 
 
@@ -923,15 +925,17 @@ class SetWizard(OfficerWizard):
     """`/raid set member:<User> [what]` (design B5): the run first — only runs where something applies to that member
     (one → straight on) — then ONLY the verbs that apply to them on that run (rc.member_actions: their open Confirm ask,
     their fill ask, Record a callout, Join (as <alt>) · Bench · No thanks, the pins), in their own words; a character pick
-    when the verb needs one; THE confirm screen (Wizard.decide) with the consequence from code (inbox.action_consequence:
-    who is told, and how — a notice, their open card edited, never a DM); a callout's note on its "with a note…" button.
-    At the write the member is re-read: an answer changed since the screen was drawn is shown first ("Kestrel is now
-    Bench … — keep going?"). Every write is inbox.do_member_action → the verbs every surface shares."""
+    when the verb needs one; for Join / Bench the spec it plays ("Plays which spec?" — the role switch); then the server's
+    box (Wizard.decide_box over consequences.member_action_box, the site's row ⋮ box: who is told, and how — a notice,
+    their open card edited, never a DM); a callout's note on its "with a note" button. The box's fp covers the member's
+    state, so an answer changed since the screen was drawn is a fresh box under CONFIRM_WORDS["changed"]; what the write
+    would refuse (rc.SPEC_SEATED, no longer applies) is the refusal box, Back alone. Every write is
+    inbox.do_member_action → the verbs every surface shares."""
 
     def __init__(self, reg: Registry, rs, owner_id: int, member_id: int, what: str | None = None):
         super().__init__(reg, owner_id, title="Set for someone")
         self.rs = rs
-        self.draft = {"member": member_id, "what": what, "key": None, "action": None, "character": None, "rev": None, "note": None}
+        self.draft = {"member": member_id, "what": what, "key": None, "action": None, "character": None, "spec": None}
 
     def member(self) -> Member | None:
         return self.reg.members.get(self.draft["member"])
@@ -989,7 +993,6 @@ class SetWizard(OfficerWizard):
             await self.finish(interaction, "That run closed — nothing was changed.")
             return
         acts = rc.member_actions(self.reg, ev, m)
-        self.draft["rev"] = rc.member_state_rev(ev, m)
         want = self.draft["what"]
         hit = next((a for a in acts if a["key"] == want), None) if want else None
         if hit:
@@ -1016,44 +1019,80 @@ class SetWizard(OfficerWizard):
                             self.select("Pick the character", opts, self.character_picked), self.button("Cancel", self.cancel))
             return
         self.draft["character"] = chars[0] if action.get("needs") == "character" and chars else None
-        await self.confirm(interaction)
+        await self.spec_step(interaction)
 
     async def character_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         self.draft["character"] = values[0]
+        await self.spec_step(interaction)
+
+    def plays(self) -> RegisteredCharacter | None:
+        """The character the answer plays: the one picked, else the one on the sheet, else their main."""
+        m, ev = self.member(), self.run()
+        if m is None or ev is None:
+            return None
+        s = ev.signups.get(str(m.discord_id))
+        label = self.draft["character"] or (s.character if s else (m.main.label if m.main else None))
+        return next((c for c in m.active() if c.label == label), None)
+
+    async def spec_step(self, interaction: discord.Interaction) -> None:
+        """Join / Bench: which spec the character plays (the role switch) — their spec on the sheet when that character
+        is the one there, else the character's own."""
+        from . import wizard_opts as wo
+
+        self.draft["spec"] = None
+        c = self.plays()
+        if self.draft["action"] not in ("join", "bench") or c is None:
+            await self.confirm(interaction)
+            return
+        ev, m = self.run(), self.member()
+        s = ev.signups.get(str(m.discord_id))
+        current = s.spec if s and s.character == c.label else c.spec
+        await self.show(interaction, f"Which spec does **{m.display_name}** play as {c.label}?",
+                        self.select("Plays which spec?", wo.specs_of(self.reg, c.cls, _ico(interaction), current=current), self.spec_picked),
+                        self.button("Cancel", self.cancel))
+
+    async def spec_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        c = self.plays()
+        self.draft["spec"] = None if c is not None and values[0] == c.spec else values[0]  # their own spec is no switch
         await self.confirm(interaction)
 
-    async def confirm(self, interaction: discord.Interaction) -> None:
-        from . import inbox
-
-        m, ev, key = self.member(), self.run(), self.draft["action"]
-        if ev is None or m is None:
-            await self.finish(interaction, "That run closed, or the member isn't registered any more — nothing was changed.")
-            return
-        text = inbox.action_consequence(self.reg, ev, m, key, self.draft["character"], by_id=interaction.user.id)
-        note = {"label": "Note for the officers (optional)", "max_length": 300, "description": "Never shown on the public sheet"} if key == "callout" else None
-        label = {"callout": "Record the callout"}.get(key) or SET_WHAT.get(key, "Do it")
-        await self.decide(interaction, text, do=self.save, note=note, do_label=label[:40], danger=key in ("callout", "confirm_no", "fill_no", "no_thanks"))
-
-    async def save(self, interaction: discord.Interaction, note: str | None, *, force: bool = False) -> None:
-        from . import inbox
+    def box(self) -> dict:
+        """THE box (consequences.member_action_box) — also the press's refresh; raises RegistryError for a refusal."""
+        from . import consequences as cq
         from . import raidcycle as rc
+
+        m, ev = self.member(), self.run()
+        if m is None:
+            raise RegistryError(SET_GONE_MEMBER)
+        if ev is None or ev.state not in ("open", "locked"):
+            raise RegistryError(SET_GONE_EVENT)
+        return cq.member_action_box(self.reg, ev, m, self.draft["action"], self.draft["character"], self.draft.get("spec"),
+                                    by_id=self.owner_id, rev=rc.member_state_rev(ev, m))
+
+    async def confirm(self, interaction: discord.Interaction) -> None:
+        from . import consequences as cq
+        from .wizard import Field
+
+        try:
+            box = self.box()
+        except (RegistryError, ValueError) as e:
+            await self.decide_box(interaction, cq.refusal_box_for(str(e)), do=self.save)
+            return
+        note = [Field("note", "Note for the officers (optional)", description="Never shown on the public sheet", required=False,
+                      paragraph=True, max_length=300)] if self.draft["action"] == "callout" else []
+        await self.decide_box(interaction, box, do=self.save, refresh=self.box, note=note)
+
+    async def save(self, interaction: discord.Interaction, values: dict[str, str]) -> None:
+        from . import inbox
 
         m, ev = self.member(), self.run()  # re-read: never trust the screen
         if ev is None or m is None or ev.state not in ("open", "locked"):
-            await self.finish(interaction, "That run closed — nothing was changed.")
-            return
-        if note is not None:
-            self.draft["note"] = note
-        if not force and rc.member_state_rev(ev, m) != self.draft["rev"]:
-            async def keep(i: discord.Interaction) -> None:
-                await self.working(i)
-                await self.save(i, self.draft["note"], force=True)
-            await self.show(interaction, f"⚠️ {rc.member_change_words(self.reg, ev, m)} — keep going?",
-                            self.button("Keep going", keep, discord.ButtonStyle.primary), self.button("Back", self.cancel))
+            await self.finish(interaction, SET_GONE_MEMBER if m is None else SET_GONE_EVENT)
             return
         try:
             line = await inbox.do_member_action(interaction.client, self.reg, self.rs, ev, m, self.draft["action"], character=self.draft["character"],
-                                                note=self.draft["note"], by=interaction.user.display_name, by_id=interaction.user.id)
+                                                note=(values.get("note") or None), spec=self.draft.get("spec"),
+                                                by=interaction.user.display_name, by_id=interaction.user.id)
         except (RegistryError, ValueError) as e:
             await self.finish(interaction, f"❌ {e}")
             return

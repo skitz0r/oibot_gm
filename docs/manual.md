@@ -1516,10 +1516,16 @@ applies to that person, never a test run (answer for puppets with `/gm test answ
 first: *Confirm for them* / *Can't make it for them* (their open Confirm ask) · *Confirm their fill* / *No to their fill*
 (their open seat or swap question) · *Record a callout…* (with an optional note; before lock it is No thanks + the
 callout) · *Join* (as which character, "as <alt>") · *Bench* · *No thanks* · *Pin to roster* / *Keep off the roster* /
-*Unpin* (open sheet). The confirm screen says what happens and who is told — *"Kestrel goes to No thanks for Barrow
-Deeps on Tue 9 Dec. No callout is recorded. They see it on their Me page."* — and if the member
-pressed something meanwhile it says so first (*"Kestrel is now Bench as Kestrel (since 5:12 PM) — keep going?"*).
-On your own record it is your own answer, so the screen promises no notice. On
+*Unpin* (open sheet). *Join* and *Bench* then ask **Plays which spec?** — the character's spec is picked already, and
+another spec it plays is a role switch (below). The confirm screen is the bot's box, the same one the site's ⋮ menu
+shows: what happens and who is told — *"Kestrel goes to No thanks for Barrow Deeps on Tue 9 Dec. No callout is
+recorded. They see it on their Me page."* — under a title that names them (*Record a callout for Kestrel?*, *Keep
+Kestrel off the roster?*; an answer is *Answer for someone*), and its button says what it does (*Record answer*,
+*Record the callout*, *Keep off*). If the member pressed something meanwhile, the press shows the box again under
+*"This changed while the box was open. Read it again before you press."* and writes nothing; press again to go
+ahead. What the bot would refuse — a
+spec the character doesn't play, a switch for someone rostered on the locked roster — is that one sentence with
+**Back** alone. On your own record it is your own answer, so the screen promises no notice. On
 the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
 list, and **Answer for someone** beside the run's headcount does it for anyone who hasn't answered yet (its Member list leaves out everyone with an answer on the sheet): the bot's box with *Member*, *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays), each pick shown in the bot's sentences before **Record answer**; a callout stays on the row's ⋮. Plain text ("Kestrel can't make it tonight,
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
@@ -1547,8 +1553,9 @@ the lock and **Fill seats…** after it. When a raid is short but no line can he
 sentence: the regulars who haven't answered are counted as coming, the asks already out cover it, the only switches
 need a cover (**Suggest…** / **Fill seats…** shows them), or nobody free can play the role. If the list changed since
 you opened it, the press is refused and the fresh list shows. The spec must be one the character plays (its spec, its
-offspec or an extra role's); anything else is refused (*"Nyx doesn't play Fire."*). Plain text ("set Nyx to Join as
-Holy"), **Answer for someone** and MCP `set_answer` with `spec` do the same before the lock; once the run is locked,
+offspec or an extra role's); anything else is refused (*"Nyx doesn't play Fire."*). In Discord, `/raid set` → *Join*
+(or *Bench*) → **Plays which spec?** does it. Plain text ("set Nyx to Join as Holy"), **Answer for someone** and MCP
+`set_answer` with `spec` do the same before the lock; once the run is locked,
 someone who holds a seat is never switched that way (*"Nyx holds a seat on the locked roster, so use Switch under the
 event's Role switches to ask them to play Holy."*) — `fill_seats` with `seats` sends one seat's ask instead. Every
 switch is in the run's log and the ops feed with who made it.

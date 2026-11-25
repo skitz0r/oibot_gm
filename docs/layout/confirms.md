@@ -40,7 +40,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        kept_off, lock_refusal = everyone kept off), reschedule_box (3; `edit=True` = Edit event's box, the owner's tweaks B:
                        "Change <event>?" + Save + event_edit_lines = 'label: old → new' in PAGE_WORDS schedule_fields / priority / split words,
                        event_value_words; TIMING_NAMES carries confirmation, seating, priority, split) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
-                       cancel_box (5, red), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines), undo_box / undo_box_for (9),
+                       cancel_box (5, red), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines) = a thin call of
+                       member_action_box(reg, ev, m, key, character, spec, *, by_id, rev) = THE box of whatever an officer records for
+                       someone (/raid set's SetWizard, POST /api/admin/action's preview / seen, the row ⋮ menu): action_lines under
+                       MEMBER_ACTION_WORDS' title naming them + verb (answers keep "Answer for someone" / "Record answer"), never red;
+                       raises RegistryError for what the write refuses (no_longer_applies, a spec not played, rc.SPEC_SEATED), undo_box / undo_box_for (9),
                        the board's consequence("swap") after the lock (10), open_now_box (11) + open_box_for(reg, rid, p, here=) = THE box 11 from
                        rc.open_preview (/raid open and both open routes; rev = the occurrence; the later raids keep their own `starts`, as
                        coming_json's lineup; OPEN_UNREAD when the lead or lock can't be read; event_view.coming_json passes the same rev;
@@ -57,6 +61,6 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        a refusal → 400 {error, box}. lineup_consequence counts a lowered roster count's dropped board places (rc.roster_trim), losses first
   inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(spec=, by_id=) / action_lines
-                       (the same sentences as a list: consequences.answer_box) / no_longer_applies + do_member_action(spec=) over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
+                       (the same sentences as a list: consequences.member_action_box) / no_longer_applies + do_member_action(spec=) over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
                        THE pin write (every surface; re-renders the sheet's pin footer). Never a DM from here
 ```

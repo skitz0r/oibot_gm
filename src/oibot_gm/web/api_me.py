@@ -205,26 +205,17 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
         """Record one on-behalf action {run, member, action, character?, spec?, note?, rev?, preview?, seen?} —
         inbox.do_member_action, the verbs the SetWizard and every other surface call. A `rev` that no longer matches the
         member's state is a 409 saying what they changed to ('Kestrel is now Bench as Kestrel (since 5:12 PM)'), nothing
-        written. The Events page's Answer for someone asks first (design §7b): `preview` → {box} (consequences.answer_box,
-        its fp covering the member's state), nothing written; `seen` = the box's fp → 409 with the fresh box when it
-        changed while open."""
+        written. The Events page's Answer for someone and the row ⋮ menu ask first (design §7b): `preview` → {box}
+        (consequences.member_action_box, its fp covering the member's state), nothing written; `seen` = the box's fp →
+        409 with the fresh box when it changed while open."""
         v, d = await body(request, officer=True)
         m = resolve_member(v.reg, d.get("member") if d.get("member") not in (None, "") else d.get("uid"))
         rs, ev = run_of(v, str(d.get("run") or ""))
         key = str(d.get("action") or "")
         if d.get("preview") or d.get("seen"):
             spec = str(d.get("spec") or "").strip() or None
-            try:
-                if key not in {a["key"] for a in rc.member_actions(v.reg, ev, m)}:
-                    raise RegistryError(inbox.no_longer_applies(v.reg, ev, m))
-                if spec and key in ("join", "bench"):  # the spec the write would refuse is refused here, in the box
-                    s = ev.signups.get(str(m.discord_id))
-                    label = d.get("character") or (s.character if s else (m.main.label if m.main else ""))
-                    c = next((c for c in m.active() if c.label == label), None)
-                    if c is None:
-                        raise RegistryError(f"{m.display_name} has no character named {label}.")
-                    rc.spec_role(v.reg, c, spec)
-                fresh = cq.answer_box(v.reg, ev, m, key, d.get("character") or None, spec, by_id=v.uid, rev=rc.member_state_rev(ev, m))
+            try:  # the box refuses what the write would (no longer applies, a spec it doesn't play, a seated switch)
+                fresh = cq.member_action_box(v.reg, ev, m, key, d.get("character") or None, spec, by_id=v.uid, rev=rc.member_state_rev(ev, m))
             except (RegistryError, ValueError) as e:
                 return JSONResponse({"error": str(e), "box": cq.refusal_box_for(str(e))}, status_code=400)
             if d.get("preview"):

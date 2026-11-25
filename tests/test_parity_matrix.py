@@ -432,14 +432,12 @@ def test_auction_prices_have_web_routes_mcp_tools_and_written_gaps(mcp_tools, we
 
 # role switches for the whole event (phase 4 Task 4): a feature, not an op — the Events page's Switch / Answer for them.
 # Plain text reaches it through `run_answer` (its `field` = the spec); MCP through set_answer(spec=) before the lock and
-# fill_seats(seats=) after it. Discord's spec select in the SetWizard is phase 5's, dated here until it lands (configops'
-# op tables hold ops only, so the gap sits beside the row as ARMORY_ / PRICES_DISCORD_PENDING do).
+# fill_seats(seats=) after it. Discord's is the SetWizard's spec select ("Plays which spec?", phase 5 Task 7: Join / Bench
+# as another spec before the lock; after it a seated member's switch is the SPEC_SEATED refusal — an ask on the Events page).
 RUN_SWITCH: dict[str, dict] = {
-    "run_switch": {"web": "POST /api/run/{key}/switch", "mcp": ["set_answer", "fill_seats"]},
+    "run_switch": {"web": "POST /api/run/{key}/switch", "mcp": ["set_answer", "fill_seats"], "discord": "flow:raid_set"},
 }
-RUN_SWITCH_DISCORD_PENDING = {
-    "run_switch": "phase 5: the spec select in the SetWizard; until then /gm change reaches it as plain text (run_answer's spec)",
-}
+RUN_SWITCH_DISCORD_PENDING: dict[str, str] = {}
 
 
 def test_role_switches_have_the_web_route_mcp_tools_and_a_dated_discord_gap(mcp_tools, web_routes, slash_paths):

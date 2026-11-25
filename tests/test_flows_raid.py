@@ -11,7 +11,9 @@ import wizard_harness
 from conftest import join, lock_with_board, open_test_run, weekly
 from oibot_gm import discord_registry
 from oibot_gm import flows_raid  # noqa: F401 — registers the flows
+from oibot_gm import flows_roster
 from oibot_gm import raidcycle as rc
+from oibot_gm.constants import CONFIRM_WORDS
 from oibot_gm.discord_loot import LootMixin
 from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.registry import RegistryError
@@ -86,8 +88,8 @@ class FakeBot(LootMixin):
         ev.channel_id, ev.message_id = channel.id, 4242
         self.calls.append(("post_sheet", ev.key, channel.id))
 
-    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None):
-        self.calls.append(("set_answer", ev.key, m.display_name, status, character, by))
+    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None, spec=None, via=None):
+        self.calls.append(("set_answer", ev.key, m.display_name, status, character, by) + ((spec,) if spec else ()))
         return f"✅ {m.display_name} {status}"
 
     async def lock_run(self, reg, rs, ev, by):
@@ -357,10 +359,12 @@ def test_set_picks_run_then_only_what_applies_then_the_character(reg, rs, office
         await h.press("Join")
         assert h.selects() == ["Pick the character"]
         await h.pick("Pick the character", "Altonar")
+        assert h.selects() == ["Plays which spec?"]
+        await h.pick("Plays which spec?", spec)  # Altonar's own spec: no role switch
         assert "Altonar" in h.text and "They get a notice." in h.text and "no new DM" not in h.text
-        assert h.buttons() == ["Join", "Back"]
+        assert h.buttons() == ["Record answer", "Back"]
         assert not bot.calls
-        await h.press("Join")
+        await h.press("Record answer")
     asyncio.run(go())
     assert bot.calls == [("set_answer", b.key, m.display_name, "in", "Altonar", "Tester")]
     assert a.key != b.key
@@ -373,7 +377,7 @@ def test_set_with_what_goes_straight_to_the_confirm_screen_and_back_writes_nothi
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="no_thanks")
-        assert h.buttons() == ["No thanks", "Back"] and "No thanks" in h.text and "No callout is recorded." in h.text
+        assert h.buttons() == ["Record answer", "Back"] and "No thanks" in h.text and "No callout is recorded." in h.text
         await h.press("Back")
         assert "Nothing was changed" in h.text
     asyncio.run(go())
@@ -387,10 +391,11 @@ def test_set_refuses_when_the_run_closed(reg, rs, officer, channel):
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join")
+        await h.pick("Plays which spec?", m.main.spec)
         ev.state = "cancelled"
         rs.save(ev, "cancelled")
-        await h.press("Join")
-        assert "closed" in h.text
+        await h.press("Record answer")
+        assert flows_roster.SET_GONE_EVENT in h.text and h.buttons() == ["Back"]
     asyncio.run(go())
     assert not bot.calls
 
@@ -409,11 +414,12 @@ def test_set_rereads_the_member_at_confirm(reg, rs, officer, channel):
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join")
+        await h.pick("Plays which spec?", m.main.spec)
         join(reg, rs, ev, [m], "sub")  # the member presses Bench while the officer's wizard is open
-        await h.press("Join")
-        assert "is now Bench" in h.text and "keep going?" in h.text
+        await h.press("Record answer")
+        assert CONFIRM_WORDS["changed"] in h.text  # the box again, its fp over the member's state
         assert not bot.calls
-        await h.press("Keep going")
+        await h.press("Record answer")
     asyncio.run(go())
     assert bot.calls and bot.calls[0][:4] == ("set_answer", ev.key, m.display_name, "in")
 

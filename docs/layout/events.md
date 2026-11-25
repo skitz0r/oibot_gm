@@ -241,7 +241,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409; `spec`; §5.67 phase 4: `preview` → {box} =
-                       consequences.answer_box (fp over rc.member_state_rev), `seen` → 409 with the fresh box, a refusal → 400 {error, box}); sheet_row_extras
+                       consequences.member_action_box for every action (fp over rc.member_state_rev; phase 5 Task 7), `seen` → 409 with
+                       the fresh box, a refusal → 400 {error, box}); sheet_row_extras
   web/api_events.py    install_events_api (called from api.py; §5.67 phase 4) = thin callers of event_view, officers, each in a thread (GET
                        /api/events stays the live stream): GET /api/event-list?history_offset=, GET /api/event-new, GET /api/event/{key} (any part's
                        key; the officers' boards, each open raid's Auto-fill line from event_board.AutoFill.state — nothing solves; NO_EVENT 404

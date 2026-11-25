@@ -1080,12 +1080,51 @@ def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: 
     return box(f"Switch {name} to {spec}?", [head, "They get a notice.", "You can switch them back until the lock."], "Switch", rev=rev)
 
 
+# what an officer records for someone (rc.member_actions' keys) → (title, verb); the three answers are box 8's own words
+MEMBER_ACTION_WORDS = {"callout": ("Record a callout for {name}?", "Record the callout"),
+                       "confirm_yes": ("Confirm for {name}?", "Confirm for them"),
+                       "confirm_no": ("Can't make it for {name}?", "Can't make it for them (their Confirm ask)"),
+                       "fill_yes": ("Confirm {name}'s fill?", "Confirm their fill"),
+                       "fill_no": ("Can't make it for {name}?", "No to their fill"),
+                       "pin_in": ("Pin {name} to the roster?", "Pin"),
+                       "pin_out": ("Keep {name} off the roster?", "Keep off"),
+                       "unpin": ("Unpin {name}?", "Unpin")}
+ANSWER_KEYS = ("join", "bench", "no_thanks")
+
+
+def member_action_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: str | None = None, spec: str | None = None, *,
+                      by_id: int | None = None, rev: str = "") -> dict:
+    """THE box of one thing an officer records for someone (rc.member_actions: /raid set, the site's row ⋮ menu and
+    Answer for someone, POST /api/admin/action's preview / seen): inbox.action_lines' sentences under a title naming the
+    person and the action's verb (MEMBER_ACTION_WORDS; the answers keep box 8's "Answer for someone" / "Record answer").
+    Never red: each can be answered again. Raises RegistryError for what the write would refuse — an action that no
+    longer applies (inbox.no_longer_applies), a character they don't have, a spec it doesn't play (rc.spec_role), a role
+    switch on a seat of the locked roster (rc.SPEC_SEATED) — so every surface prints that refusal box instead."""
+    from .inbox import action_lines, no_longer_applies
+
+    if key not in {a["key"] for a in rc.member_actions(reg, ev, m)}:
+        raise RegistryError(no_longer_applies(reg, ev, m))
+    if spec and key in ("join", "bench"):  # the spec the write would refuse is refused here, in the box
+        s = ev.signups.get(str(m.discord_id))
+        label = character or (s.character if s else (m.main.label if m.main else ""))
+        c = next((c for c in m.active() if c.label == label), None)
+        if c is None:
+            raise RegistryError(f"{m.display_name} has no character named {label}.")
+        rc.spec_role(reg, c, spec)
+        seat = ev.seat_of(m) if ev.state != "open" else None
+        if seat is not None and seat[1].spec != spec:
+            raise RegistryError(rc.SPEC_SEATED.format(name=m.display_name, spec=spec))
+    lines = action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id)
+    if key in ANSWER_KEYS:
+        return box("Answer for someone", lines, "Record answer", rev=rev)
+    title, verb = MEMBER_ACTION_WORDS[key]
+    return box(title.format(name=m.display_name), lines, verb, rev=rev)
+
+
 def answer_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: str | None = None, spec: str | None = None, *,
                by_id: int | None = None, rev: str = "") -> dict:
-    """Box 8: Answer for someone / Answer for them (inbox.action_lines' sentences)."""
-    from .inbox import action_lines
-
-    return box("Answer for someone", action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id), "Record answer", rev=rev)
+    """Box 8: Answer for someone / Answer for them — member_action_box for Join / Bench / No thanks."""
+    return member_action_box(reg, ev, m, key, character, spec, by_id=by_id, rev=rev)
 
 
 def no_channel_sentence(here: bool) -> str:

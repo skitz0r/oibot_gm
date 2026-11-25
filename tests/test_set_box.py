@@ -1,0 +1,130 @@
+"""Phase 5, Task 7: /raid set (flows_roster.SetWizard) prints the server's box — consequences.member_action_box, the one
+POST /api/admin/action's preview / seen answers for the site's row ⋮ menu — and Join / Bench pick the spec the
+character plays (the role switch). A switch on someone rostered on the locked roster is the rc.SPEC_SEATED refusal box,
+Back alone, nothing written. The client is test_raid_night's NightBot: the real RaidMixin verbs, nothing on Discord."""
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+
+from conftest import join, lock_with_board
+from test_flows_raid import _user, officer, open_real_run  # noqa: F401 — the fixture
+from test_raid_night import H, NightBot, web_bot  # noqa: F401 — the routes' fixture
+from test_reschedule import OFFICER_ID
+
+from oibot_gm import consequences as cq
+from oibot_gm import flows_roster  # noqa: F401 — registers raid_set
+from oibot_gm import raidcycle as rc
+from oibot_gm.constants import CONFIRM_WORDS
+from oibot_gm.wizard import FLOWS
+from wizard_harness import Harness
+
+UID = 630_000_000_000_000_000
+HEAL, DPS = "Holy", "Shadow"  # a Priest: Holy heals, Shadow is ranged damage
+
+
+def run(c):
+    return asyncio.run(c)
+
+
+def harness(reg, rs):
+    bot = NightBot(reg, rs)
+    return Harness(reg, rs, user=SimpleNamespace(id=OFFICER_ID, display_name="Officer", mention="@Officer"), client=bot), bot
+
+
+def healer(reg, k: int = 0):
+    """A member whose main heals as Holy and plays Shadow as their offspec."""
+    uid = UID + k
+    reg.add_character(uid, f"Healer{k}", f"Heal{chr(97 + k)}", "Priest", HEAL, DPS, True)
+    return reg.members[uid]
+
+
+def test_join_as_another_spec_switches_the_role_before_the_lock(reg, rs, officer):  # noqa: F811
+    ev = open_real_run(reg, rs)
+    m = healer(reg)
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    assert h.selects() == ["Plays which spec?"]
+    sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Plays which spec?")
+    assert next(o for o in sel.options if o.default).value == HEAL, "their main's own spec is picked already"
+    run(h.pick("Plays which spec?", DPS))
+    box = cq.member_action_box(reg, ev, m, "join", m.main.label, DPS, by_id=OFFICER_ID)
+    assert h.buttons() == ["Record answer", "Back"] and all(s in h.text for s in box["sentences"])
+    assert str(m.discord_id) not in ev.signups, "nothing before the press"
+    run(h.press("Record answer"))
+    s = ev.signups[str(m.discord_id)]
+    assert (s.status, s.spec) == ("in", DPS)
+
+
+def test_a_spec_switch_on_a_seated_member_is_refused(reg, rs, officer):  # noqa: F811
+    """Review Focus 5: Join as a spec of another role, for someone rostered after the lock, is the SPEC_SEATED box."""
+    ev = open_real_run(reg, rs)
+    pool = [healer(reg, k) for k in range(3)]
+    join(reg, rs, ev, pool)
+    lock_with_board(reg, rs, ev, [p.display_name for p in pool])
+    m = pool[0]
+    assert ev.seat_of(m)
+    reg.add_character(m.discord_id, m.display_name, "Altpriest", "Priest", HEAL, DPS, False)
+    m = reg.members[m.discord_id]
+    before = rc.member_state_rev(ev, m)
+    h, bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    run(h.pick("Plays which spec?", DPS))
+    assert h.buttons() == ["Back"]
+    assert rc.SPEC_SEATED.format(name=m.display_name, spec=DPS) in h.text
+    run(h.press("Back"))
+    assert rc.member_state_rev(ev, m) == before and ev.seat_of(m)[1].spec == HEAL, "nothing written"
+
+
+def test_a_callout_is_its_own_box_with_a_note(reg, rs, officer):  # noqa: F811
+    ev = open_real_run(reg, rs)
+    m = healer(reg)
+    join(reg, rs, ev, [m])
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="callout"))
+    assert h.selects() == [], "a callout plays no spec"
+    assert h.buttons() == ["Record the callout", "Record the callout with a note", "Back"]
+    assert h.text.startswith(f"**Record a callout for {m.display_name}?**")
+    run(h.press("Record the callout with a note"))
+    run(h.submit(note="flight delayed"))
+    assert ev.signups[str(m.discord_id)].status == "out"
+    assert ev.callouts and ev.callouts[-1].note == "flight delayed"
+
+
+def test_an_answer_changed_meanwhile_is_a_fresh_box(reg, rs, officer):  # noqa: F811
+    ev = open_real_run(reg, rs)
+    m = healer(reg)
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    run(h.pick("Plays which spec?", HEAL))
+    join(reg, rs, ev, [m], "sub")  # the member presses Bench while the officer's box is open
+    run(h.press("Record answer"))
+    assert CONFIRM_WORDS["changed"] in h.text and ev.signups[str(m.discord_id)].status == "sub", "nothing written"
+    run(h.press("Record answer"))
+    assert ev.signups[str(m.discord_id)].status == "in"
+
+
+def test_the_route_prints_the_same_box(reg, rs, web_bot):  # noqa: F811
+    ev = open_real_run(reg, rs)
+    m = healer(reg)
+    join(reg, rs, ev, [m])
+    body = {"run": ev.key, "member": str(m.discord_id), "action": "pin_out"}
+    r = web_bot.c.post("/api/admin/action", json={**body, "preview": True}, headers=H())
+    assert r.status_code == 200, r.text
+    want = cq.member_action_box(reg, ev, m, "pin_out", by_id=OFFICER_ID, rev=rc.member_state_rev(ev, m))  # the bearer = the owner
+    assert r.json()["box"] == want
+    assert (want["title"], want["verb"], want["danger"]) == (f"Keep {m.display_name} off the roster?", "Keep off", False)
+    r = web_bot.c.post("/api/admin/action", json={**body, "seen": want["fp"]}, headers=H())
+    assert r.status_code == 200, r.text
+    assert ev.pins.get(str(m.discord_id)) == "out"
+
+
+def test_each_action_names_its_person_and_verb(reg, rs):
+    ev = open_real_run(reg, rs)
+    m = healer(reg)
+    join(reg, rs, ev, [m])
+    for key, title, verb in (("pin_in", f"Pin {m.display_name} to the roster?", "Pin"), ("callout", f"Record a callout for {m.display_name}?",
+                             "Record the callout"), ("bench", "Answer for someone", "Record answer")):
+        b = cq.member_action_box(reg, ev, m, key, by_id=OFFICER_ID)
+        assert (b["title"], b["verb"], b["danger"]) == (title, verb, False)
+    assert cq.answer_box(reg, ev, m, "bench", by_id=OFFICER_ID) == cq.member_action_box(reg, ev, m, "bench", by_id=OFFICER_ID)

@@ -158,6 +158,31 @@ class Dump:
 
 # ------------------------------------------------------------------------------------------------------- the cases
 
+def member_action_boxes(reg, rs, ev, lk, ms, add):
+    """/raid set's and the row ⋮ menu's box (consequences.member_action_box) for every action that isn't an answer:
+    a callout, the pins on an open sheet, a Confirm ask and a fill ask after the lock."""
+    def first(run, key, **kw):
+        m = next(m for m in ms if any(a["key"] == key for a in rc.member_actions(reg, run, m)))
+        return cq.member_action_box(reg, run, m, key, by_id=OFFICER_ID, **kw)
+
+    add("member_action_box", "callout, before the lock", first(ev, "callout"))
+    add("member_action_box", "callout, rostered after the lock", first(lk, "callout"))
+    add("member_action_box", "pin_in", first(ev, "pin_in"))
+    add("member_action_box", "pin_out", first(ev, "pin_out"))
+    m = next(m for m in ms if str(m.discord_id) in ev.signups)
+    pins = dict(ev.pins)
+    ev.pins[str(m.discord_id)] = "in"
+    add("member_action_box", "unpin", cq.member_action_box(reg, ev, m, "unpin", by_id=OFFICER_ID))
+    ev.pins = pins
+    add("member_action_box", "confirm_yes", first(lk, "confirm_yes"))
+    m = next(m for m in ms if not lk.seat_of(m) and not any(a.discord_id == m.discord_id and a.open for a in lk.fill_asks))
+    lk.fill_asks.append(rc.FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="sub", role="ranged", character=m.main.label,
+                                   spec=m.main.spec, reason="short 1", expires_at=lk.start.isoformat()))
+    for key in ("fill_yes", "fill_no"):
+        add("member_action_box", key, cq.member_action_box(reg, lk, m, key, by_id=OFFICER_ID))
+    lk.fill_asks.pop()
+
+
 def run_cases(reg, rs, ms):
     """name → run, every state a run verb's confirm can meet."""
     weekly(reg)
@@ -876,9 +901,10 @@ def box_cases(reg, rs, runs, ms, dump):
     add("switch_box", "after the lock, someone without a seat", cq.switch_box(reg, lk, m, None, "Holy", [RID], locked=True, swap=False))
     add("switch_box", "the officer's own answer", cq.switch_box(reg, ev, m, None, "Holy", [RID, hy], own=True))
     add("switch_box", "the officer's own, another character", cq.switch_box(reg, ev, m, "Kingsley", "Fire", [RID], own=True))
-    add("answer_box", "join before the lock", cq.answer_box(reg, quiet, ms[4], "join", ms[4].main.label, "Fire", by_id=OFFICER_ID))
+    add("answer_box", "join before the lock", cq.answer_box(reg, quiet, ms[4], "join", ms[4].main.label, ms[4].main.spec, by_id=OFFICER_ID))
     add("answer_box", "join on their own record", cq.answer_box(reg, quiet, ms[4], "join", by_id=ms[4].discord_id))
     add("answer_box", "bench after the lock", cq.answer_box(reg, lk, ms[1], "bench", by_id=OFFICER_ID))
+    member_action_boxes(reg, rs, ev, lk, ms, add)
     for n in (1, 4):
         add("undo_box", f"{n} moves", cq.undo_box(n))
     add("strategy_box", "nothing picked yet", cq.strategy_box(reg, quiet, None))
