@@ -267,13 +267,13 @@ def my_absences_text(reg: Registry, ups: list) -> str:
 
 
 def clear_absences_view(reg: Registry, m, absences: list) -> discord.ui.View:
-    """The "My absences" reply's buttons: one Clear per absence (≤5, DynamicItems — no held state), then I'm back… to pick
+    """The "My absences" reply's buttons: one Clear per absence (≤5, DynamicItems — no held state), then Clear another absence to pick
     from a longer list. Each opens the I'm back screen (what re-opens, then the clear)."""
     view = discord.ui.View(timeout=None)
     for a in absences[:5]:
         view.add_item(AbsenceButton("clear", reg.key, m.discord_id, a.start, label=f"Clear {reg.span_label(a.start, a.end)}"))
     if len(absences) > 5:
-        view.add_item(AbsenceButton("back", reg.key, label="I'm back… (pick one)"))
+        view.add_item(AbsenceButton("back", reg.key, label="Clear another absence"))
     return view
 
 

@@ -164,3 +164,64 @@ def test_when_fields_takes_a_minute_step(reg):
     from datetime import date
     fields = when_fields(reg, day0=date(2030, 1, 7), step=15)
     assert [o.value for o in fields[2].options] == [o.value for o in minute_opts(15)] == ["0", "15", "30", "45"]
+
+
+def test_a_refresh_that_refuses_shows_a_refusal_box_and_writes_nothing(reg):
+    from oibot_gm.registry import RegistryError
+    h = Harness(reg)
+    wiz = Wizard(reg, h.user.id, title="T")
+    calls = []
+
+    async def do(i, v):
+        calls.append(v)
+
+    def refresh():
+        raise RegistryError("That event is gone.")
+    run(wiz.decide_box(h.command(), cq.box("Move X?", ["It moves."], "Move"), do=do, refresh=refresh))
+    run(h.press("Move"))
+    assert calls == [] and h.buttons() == ["Back"] and "That event is gone." in h.text
+    assert not h.text.startswith(CONFIRM_WORDS["changed"])
+
+
+def test_the_note_submit_refused_by_the_guard_finishes_and_writes_nothing(reg):
+    h = Harness(reg)
+    calls, why = [], {"v": None}
+
+    async def guard(i):
+        return why["v"]
+    wiz = Wizard(reg, h.user.id, title="T", guard=guard)
+
+    async def do(i, v):
+        calls.append(v)
+    b = cq.box("Cancel X?", ["It goes."], "Cancel event", danger=True)
+    run(wiz.decide_box(h.command(), b, do=do, refresh=lambda: b, note=[Field("reason", "Why?", required=False)]))
+    run(h.press("Cancel event with a note"))
+    why["v"] = "Only an officer can cancel an event."
+    run(h.submit(reason="x"))
+    assert calls == [] and "Only an officer can cancel an event." in h.text and h.screen["view"] is None
+
+
+def test_a_verb_with_an_ellipsis_is_taken_once(reg):
+    h = Harness(reg)
+
+    async def do(i, v):
+        pass
+    wiz = Wizard(reg, h.user.id, title="T")
+    run(wiz.decide(h.command(), "It moves.", do=do, do_label="Move…", note={"label": "Note"}))
+    assert h.buttons() == ["Move", "Move with a note", "Back"]
+    run(h.press("Move with a note"))
+    assert h.modal.title == "Move with a note"
+    wiz2 = Wizard(reg, h.user.id, title="T")
+    run(wiz2.decide_box(h.command(), cq.box("Move X?", ["It moves."], "Move…"), do=do, note=[Field("n", "Note", required=False)]))
+    assert h.buttons() == ["Move", "Move with a note", "Back"]
+    run(h.press("Move with a note"))
+    assert h.modal.title == "Move with a note"
+
+
+def test_lint_reads_a_persistent_buttons_own_label():
+    from oibot_gm.raid_buttons import LootButton
+    v = discord.ui.View(timeout=None)
+    b = LootButton("demo", "s", "-", next(iter(LootButton.LABELS)))
+    b.item.label = "Override…"
+    v.add_item(b)
+    assert any("ellipsis" in e for e in lint(v))

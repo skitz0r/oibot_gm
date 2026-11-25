@@ -17,13 +17,31 @@ PY = Path(__file__).resolve().parents[1] / "src" / "oibot_gm"
 ELLIPSIS = ("…", "...")
 
 
-def _tail(node) -> str | None:
-    """The literal end of a str / f-string argument."""
+def _tails(node) -> list[str]:
+    """Every literal end a label argument can take: a str / f-string's, both sides of a condition, each value of an
+    `or` / `and`, the right side of a `+`."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
+        return [node.value]
     if isinstance(node, ast.JoinedStr) and node.values and isinstance(node.values[-1], ast.Constant):
-        return node.values[-1].value
-    return None
+        return [node.values[-1].value]
+    if isinstance(node, ast.IfExp):
+        return _tails(node.body) + _tails(node.orelse)
+    if isinstance(node, ast.BoolOp):
+        return [t for v in node.values for t in _tails(v)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _tails(node.right)
+    return []
+
+
+def _bad(source: str, where: str = "") -> list[str]:
+    bad = []
+    for n in ast.walk(ast.parse(source)):
+        if not isinstance(n, ast.Call):
+            continue
+        name = getattr(n.func, "attr", getattr(n.func, "id", ""))
+        args = ([n.args[0]] if name == "button" and n.args else []) + [k.value for k in n.keywords if k.arg == "label" and name != "Field"]
+        bad += [f"{where}:{n.lineno} {t!r}" for a in args for t in _tails(a) if t.rstrip().endswith(ELLIPSIS)]
+    return bad
 
 
 def test_no_button_literal_ends_in_an_ellipsis():
@@ -31,13 +49,17 @@ def test_no_button_literal_ends_in_an_ellipsis():
     for f in PY.rglob("*.py"):
         if "web" in f.parts:
             continue
-        for n in ast.walk(ast.parse(f.read_text())):
-            if not isinstance(n, ast.Call):
-                continue
-            name = getattr(n.func, "attr", getattr(n.func, "id", ""))
-            args = ([n.args[0]] if name == "button" and n.args else []) + [k.value for k in n.keywords if k.arg == "label" and name != "Field"]
-            bad += [f"{f.name}:{n.lineno} {t!r}" for a in args if (t := _tail(a)) and t.rstrip().endswith(ELLIPSIS)]
+        bad += _bad(f.read_text(), f.name)
     assert not bad, bad
+
+
+def test_the_scan_reads_through_a_condition_an_or_and_a_join():
+    assert _bad('Button(label="Judging…" if busy else None)')
+    assert _bad('Button(label=None if busy else "Judging…")')
+    assert _bad('Button(label=name or "Pick one…")')
+    assert _bad('Button(label="Clear " + "the rest…")')
+    assert _bad('wiz.button(f"{verb}" + "…", go)')
+    assert not _bad('Button(label="Judging" if busy else "Wait … ok")')
 
 
 def test_every_persistent_button_renders_without_one():

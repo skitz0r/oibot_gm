@@ -338,7 +338,9 @@ class Wizard(discord.ui.View):
         the only place a text box lives). Owner-only presses and the guard are re-checked on every press (the View's
         interaction_check) and again on the note's submit (a Modal has no interaction_check). `extra`: buttons that read
         more before deciding (the lock's Preview lock) — they sit between the write and Back and never write. `hint`: one
-        small line under the consequence (what the thing is for), never part of the confirm sentences."""
+        small line under the consequence (what the thing is for), never part of the confirm sentences. A verb ending in
+        "…" is taken once without it, so the note button never reads "Move… with a note"."""
+        do_label = button_label(do_label)
         field = note if isinstance(note, Field) else (Field("note", str(note.get("label") or "Note"), required=False, paragraph=True,
                                                             max_length=int(note.get("max_length") or 400), description=note.get("description"),
                                                             placeholder=note.get("placeholder")) if note else None)
@@ -384,17 +386,26 @@ class Wizard(discord.ui.View):
         note` when `note` (a Form of those Fields whose Submit is the write), `extra` (reads only), then Back (`back`, or
         "Nothing was changed."). A refusal box (verb None) is its sentence and Back alone. At the verb's press and at the
         note's submit `refresh()` builds the box again: another `fp` is shown again under CONFIRM_WORDS["changed"] and
-        nothing is written; a refusal is shown as one. Otherwise `working`, then `do(interaction, values)` (`{}` for a
-        plain press). `refresh` must not solve: it runs inside Discord's 3 seconds."""
+        nothing is written; a refusal is shown as one, and a `refresh()` that raises RegistryError is shown as its refusal
+        box (consequences.refusal_box_for: its sentence, Back alone, nothing written). Otherwise `working`, then
+        `do(interaction, values)` (`{}` for a plain press). `refresh` must not solve: it runs inside Discord's 3
+        seconds. A verb ending in "…" is taken once without it."""
         verb = box.get("verb")
+        if verb is not None and verb != button_label(verb):
+            box = {**box, "verb": button_label(verb)}
+            verb = box["verb"]
         note = list(note)
         again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint)
 
         async def go(i: discord.Interaction, values: dict[str, str]) -> None:
             if refresh is not None:
-                fresh = refresh()
-                if inspect.isawaitable(fresh):
-                    fresh = await fresh
+                try:
+                    fresh = refresh()
+                    if inspect.isawaitable(fresh):
+                        fresh = await fresh
+                except RegistryError as e:
+                    from .consequences import refusal_box_for  # consequences → raidcycle; imported where it is needed
+                    fresh = refusal_box_for(str(e))
                 if fresh.get("fp") != box.get("fp"):
                     await self.decide_box(i, fresh, changed=fresh.get("verb") is not None, **again)
                     return
@@ -563,6 +574,7 @@ def lint(obj: discord.ui.View | discord.ui.Modal) -> list[str]:
         if len(kids) > MAX_MODAL_ITEMS:
             errs.append(f"modal has {len(kids)} items (max {MAX_MODAL_ITEMS})")
     for it in obj.walk_children() if hasattr(obj, "walk_children") else kids:
+        it = getattr(it, "item", it)  # a DynamicItem (a persistent card button) wraps the Button it renders
         if is_modal and isinstance(it, discord.ui.Button):
             errs.append("a Button inside a modal (the API rejects it)")
         if not is_modal and isinstance(it, discord.ui.Label):
