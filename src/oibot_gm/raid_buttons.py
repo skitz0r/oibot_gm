@@ -29,9 +29,9 @@ log = logging.getLogger(__name__)
 # THE label of every run verb (design §5.56 phase 2): the Discord cards' buttons (RunButton.LABELS below) and the site's
 # buttons alike — /api/meta.run_labels carries this map, the web keeps no copy. The keys past the RunButton actions are the
 # render-time variants (Locked, Resume…) and the verbs only the site's board and lock screen have (Place the rest, Preview lock).
-RUN_WORDS = {"fill": "Fill seats…", "lock": "Lock now", "locked": "Locked", "preview_lock": "Preview lock", "cancel": "Cancel run…",
+RUN_WORDS = {"fill": "Fill seats…", "lock": "Lock now", "locked": "Locked", "preview_lock": "Preview lock", "cancel": "Cancel event…",
              "loot": "Loot", "ask": "Ask", "suggest": "Suggest…", "remind": "Remind the unanswered", "pause": "Pause automatic asks",
-             "resume": "Resume automatic asks", "end": "End the run", "reopen": "Reopen", "place_rest": "Place the rest"}
+             "resume": "Resume automatic asks", "end": "End the event", "reopen": "Reopen", "place_rest": "Place the rest"}
 
 
 class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot|remind|pause|end|reopen)(?::(?P<rev>[0-9a-f]{6,16}))?"):
@@ -633,7 +633,7 @@ class LootPick(discord.ui.DynamicItem[discord.ui.Select], template=r"lootpick(?:
     `whynot.<drop>` (the item card's Why not… — values candidate names)."""
 
     def __init__(self, gk: str | None, sid: str, kind: str, options: list[discord.SelectOption], placeholder: str = "Pick…"):
-        opts = list(options)[:25] or [discord.SelectOption(label="—", value="-")]
+        opts = list(options)[:25] or [discord.SelectOption(label="Nothing left to pick", value="-")]
         super().__init__(discord.ui.Select(custom_id=loot_custom_id("lootpick", gk, sid, kind, None, None), placeholder=placeholder[:150],
                                            options=opts, min_values=1, max_values=1))
         self.gk, self.sid, self.kind = gk, sid, kind

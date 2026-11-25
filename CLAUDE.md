@@ -28,7 +28,7 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
 - **Iconography rule (user decision 2026-09-17):** in-game icons stand on their own — class, spec, role and aura icons never get a text label beside them on the site; a role count is the role icon plus a number; a buff row is icons only (tooltips carry the names). Don't add "3 tank" style labels, "seated" totals or buff-name strings next to icons. A **spec icon alone** denotes role + spec on a member line (no role icon beside it; role icons are for counts only). DMs and Discord cards reuse the board's group layout — one member per line, never the whole roster on one line.
 - **Copy rule (user decision 2026-10-24):** every label, hint, tooltip, empty state and card line — site and Discord — says what
   the thing does FOR THE READER, in the glossary's word (`docs/manual.md` §1a *The words*): a minimum, never limits or aims (nor bounds,
-  (comp) targets), rostered not seated (a seat is a place on the roster, that word stays), who could play not the pool, a run's week not cadence; never solver,
+  (comp) targets), rostered not seated (a seat is a place on the roster, that word stays), who could play not the pool, an event's week not cadence; never solver,
   derived, rev, series, ephemeral, ev/rc/ctx, matrix, override(s) as a config noun (the loot verb *Override…* stays). An empty
   list, card or section names what is missing and how to fill it (never "none yet" / "not set" / "none" / "—" alone); a bare
   dash in a table cell or an icon column stays (the Iconography rule — no words beside icons), and a review diff's "not set →

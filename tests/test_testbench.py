@@ -363,7 +363,7 @@ def test_tempo_of_four_minutes_is_strictly_ordered():
     for start in range(4, 241):
         _l, s, n, lk, c = testfeed.tempo_of(str(start))
         assert s == start and s > n > lk > c >= 0, (start, n, lk, c)
-    with pytest.raises(ValueError, match="start_in > nudge_in"):
+    with pytest.raises(ValueError, match="each sooner than the one before"):
         testfeed.tempo_of(None, start_in=10, nudge_in=20, lock_in=5, confirm_in=1)
 
 

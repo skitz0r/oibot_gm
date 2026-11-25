@@ -141,7 +141,7 @@ def tempo_of(tempo=None, *, start_in=None, nudge_in=None, lock_in=None, confirm_
     vals = [int(v) if v is not None else d for v, d in ((start_in, s0), (nudge_in, n0), (lock_in, l0), (confirm_in, c0))]
     start, nudge, lock, confirm = vals
     if not start > nudge > lock > confirm >= 0:
-        raise ValueError("need start_in > nudge_in > lock_in > confirm_in ≥ 0 (all minutes)")
+        raise ValueError("Give the marks in minutes from now, each sooner than the one before: the start, the reminder, the lock, then confirm by.")
     return (f"{start} min", start, nudge, lock, confirm)
 
 

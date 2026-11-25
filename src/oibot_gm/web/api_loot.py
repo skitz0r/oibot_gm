@@ -879,7 +879,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         if not preview:
             need_actor(v, "Importing loot history")
         if not preview and not (isinstance(d.get("rev"), str) and d["rev"]):
-            return JSONResponse({"error": "Preview the file first — an import applies the preview it was shown (send its rev)."}, status_code=400)
+            return JSONResponse({"error": "Preview the file first — an import applies the preview it was shown."}, status_code=400)
         try:
             parsed = await asyncio.to_thread(ledger_csv.parse, text, str(d.get("kind") or "auto"))
         except ValueError as e:
@@ -1132,7 +1132,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         if applying:
             need_actor(v, "Importing tiers")
             if not isinstance(d.get("rev"), str) or not d["rev"]:
-                return JSONResponse({"error": "Preview the file first — an import applies the preview it was shown (send its rev)."}, status_code=400)
+                return JSONResponse({"error": "Preview the file first — an import applies the preview it was shown."}, status_code=400)
         text = d.get("csv")
         if not isinstance(text, str) or not text.strip():
             raise HTTPException(400, "csv is the file's text (export the grid first to see the columns)")

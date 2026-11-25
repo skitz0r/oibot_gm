@@ -138,7 +138,7 @@ def test_the_run_vocabulary_reaches_the_site_from_python(c):
     for k in ("preview_lock", "lock", "fill", "suggest", "loot", "end", "reopen", "remind", "pause", "place_rest"):
         assert m["run_labels"][k], k
     assert (m["run_labels"]["fill"], m["run_labels"]["remind"], m["run_labels"]["pause"], m["run_labels"]["end"]) == (
-        "Fill seats…", "Remind the unanswered", "Pause automatic asks", "End the run")
+        "Fill seats…", "Remind the unanswered", "Pause automatic asks", "End the event")
     assert m["marks"]["yes"] == {"mark": MARK["yes"], "words": MARK_WORDS["yes"]} and m["marks"]["waiting"]["mark"] == MARK[None]
     assert m["ask_kinds"] == rc.ASK_HOW and m["ask_answers"]["waiting"] == rc.ASK_ANSWER_WORDS[None]
     assert m["level_words"] == {"green": "ready", "amber": "thin", "red": "short"}

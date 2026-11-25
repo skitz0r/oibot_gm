@@ -30,24 +30,40 @@ In Discord the first button under those sentences is the action itself (*Move*, 
 same action with a note where one fits, then **Back**. If what it says changed while it was open, it shows again for you
 to read before you press. A Discord button never ends in "…": the site's *Fill seats…* reads *Fill seats* there.
 
-- **Minimum** — the fewest of a role (tank, healer, melee, ranged), a class or a spec a run of a raid takes: one number,
+Older words: *run* is now **event**, a *follow-on* is a **later raid** of the lineup, *ad hoc* is **one-off**, a *pickup
+template* is a schedule an officer opens, and *Who gets a seat* is **Priority**. People may still say "run" and the bot
+understands; it answers in the words below.
+
+- **Event** — one raid night people sign up for: one sheet, a **lineup** of raids played one after the other, and a
+  roster for each raid at the lock. A schedule opens its events by itself; an officer opens a **one-off** with **New
+  event** on the Events page or `/raid open`.
+- **Lineup** — the raids an event plays the same night, from one signup: the **first raid** and up to three **later
+  raids**, each starting when the one before it ends. One Join covers them all; the first raid's lock builds every later
+  raid's rosters in order, each from the rosters before it (two 10s are the 20 split in two, bench joiners cover gaps);
+  nobody confirms twice. *Leaving after …* on the Me page (or `/raid out`, picking the later raid) frees that place and
+  keeps your other seats; *I'm staying* on the Me page undoes it. Cancelling any raid of the event cancels the whole
+  event.
+- **One-off** — an event an officer opens for one night: with **New event**, or from a schedule an officer opens
+  (*Opened by an officer*). It is first come, has no regulars, locks 2 hours before and, by default, asks nobody to
+  confirm.
+- **Minimum** — the fewest of a role (tank, healer, melee, ranged), a class or a spec an event's raid takes: one number,
   with an optional reason, and no upper limit (*"at least 3 healers"*). The lock fills every minimum first and never
-  stops on one: a run that joiners can't fill to a minimum still gets its roster, and the run shows what it is short. A
+  stops on one: an event that joiners can't fill to a minimum still gets its roster, and the event shows what it is short. A
   tank or healer past the minimum gets a seat only when nobody else can take it. Until the guild sets its own, a raid's
-  tank and healer minimums come from the game, scaled to the run's size and rounded up. A smaller run (a 10-player run
+  tank and healer minimums come from the game, scaled to the event's size and rounded up. A smaller event (a 10-player event
   of a 20-player raid) scales the guild's own minimums too, to the nearest whole number with a half rounded up, and a
-  minimum of 1 or more never scales below 1. A class or spec short is shown on the run (*short 1 Paladin*) and nobody is
+  minimum of 1 or more never scales below 1. A class or spec short is shown on the event (*short 1 Paladin*) and nobody is
   asked to fill it; only a short tank or healer gets fill asks. Set minimums with **Edit** in the Raids page's Rules view, with `/roster comp`, in `/gm config raid` › *Minimums* or in plain text ("at least 3 healers in Barrow Deeps"). They belong to the raid,
-  never to one run. A minimum is never 0: picking 0 takes away the guild's own minimum for that role, class or spec.
+  never to one event. A minimum is never 0: picking 0 takes away the guild's own minimum for that role, class or spec.
   Where the game gives one, the game's minimum applies again; where it gives none, the raid has no minimum of its own
   for it. Every preview says which before you press — *the game's minimum* or *no minimum of its own*, never *at least
   0*. A 0 an older version of the bot wrote is read the same way and stays in the file until the raid's minimums are
   next saved.
-- **A run's week** — when a run's sheet **opens** (a few days before the run; it differs per raid), when those who
+- **An event's week** — when an event's sheet **opens** (a few days before the event; it differs per raid), when those who
   haven't answered get a **reminder** (by default halfway between the opening and the lock), when it **locks** (a day
   before; the roster is decided then) and when the rostered must **confirm by** (6 hours before). Officers set them per
   schedule — each schedule holds its own — on the Schedules page or with `/gm config raid`; a new schedule starts with the
-  game's suggestion. An ad hoc run locks 2 hours before and, by default, asks nobody to confirm.
+  game's suggestion. A one-off locks 2 hours before and, by default, asks nobody to confirm.
 - **The four switches** of *Sheet timing* (the Schedules page's editor and **Edit event**; each has a **(?)** that says
   the same — hover it, tab to it or tap it):
   - **Signup Reminder** — when the reminder goes out (**Goes out**), each regular with no answer gets a DM with Join,
@@ -64,26 +80,27 @@ to read before you press. A Discord button never ends in "…": the site's *Fill
   - **Sheet Opening DM** (the Schedules page only) — when the sheet opens, each regular gets a DM with their answer so
     far and the sheet's buttons, and when the roster locks. With no regulars yet, every member gets it, and nobody
     with DMs off is sent one.
-- **When it runs** — the runs themselves: a sheet open for signup or locked right now (the Events page's *Open*), the
+- **When it runs** — the events themselves: a sheet open for signup or locked right now (the Events page's *Open*), the
   next nights an active schedule opens (its *Coming up*), and (before any sheet has opened) when the first one does.
   A raid with none says so and how to change it (add a schedule; make a New event on the Events page).
-- **Who gets a seat** — what decides between joiners at lock on a recurring run: rank, main over alt, who sat out last
-  time, who signed up early, and being a regular (each with a weight officers set per raid on the Raids page's Priority view, or per schedule on the Schedules
-  page). An ad hoc run is first come instead.
-- **Rostered** — you have a place on a locked run's roster. On a recurring run you are asked to Confirm or say Can't
-  make it (by DM, or on your Me page) unless officers turned that schedule's confirmations off — then a run says *nobody is asked to
+- **Priority** — what decides between joiners at the lock on a schedule's event when more join than there are seats:
+  rank, main over alt, who sat out last time, who signed up early, and being a regular (each with a weight officers set
+  per raid on the Raids page's Priority view, or per schedule on the Schedules page). A one-off is first come instead;
+  **Edit event** can set an event to *First to join* or *By priority*.
+- **Rostered** — you have a place on a locked event's roster. On a schedule's event you are asked to Confirm or say Can't
+  make it (by DM, or on your Me page) unless officers turned that schedule's confirmations off — then the event says *nobody is asked to
   confirm*. A joiner the lock left out reads **not rostered** (on the Me page too). The marks beside a
   rostered name are the Discord card's: ✅ confirmed · ⏳ waiting · ❌ can't make it · ⌛ no answer in time.
-- **A run's state** — one word on every surface: *open for signup*, *locked — the roster stands*, *finished* (it ended)
+- **An event's state** — one word on every surface: *open for signup*, *locked — the roster stands*, *finished* (it ended)
   or *cancelled*.
 - **Bench** — the sheet answer "call me if you need me": you aren't on the roster, but when a place frees up you are
   among the first asked.
-- **The board** — a run's groups on the Events page, the one name for them (never "builder" or "bank"): before the lock
+- **The board** — an event's groups on the Events page, the one name for them (never "builder" or "bank"): before the lock
   it is the layout the lock will use (officers drag names into groups; the lock places everyone else), after the lock it
   *is* the roster. On the Events page it shows what officers placed; they shape it by dragging names (or a name's
   **⋮ › Move to…**), let the bot place the rest the way the lock would with **Auto-fill groups**, take their own moves
   back with **Undo my moves**, empty it with **More › Clear the board**, and pick how a split is made in **Edit event**
-  (each raid's split). A test run's card on the Test bench keeps the older tools — **Place the rest**,
+  (each raid's split). A test event's card on the Test bench keeps the older tools — **Place the rest**,
   **Propose roster / splits…**, **Clear** and its ⓘ legend; plain text and MCP keep them too.
 - **Not placed / Not rostered** — the board's list of joiners who hold no place: *Not placed* before the lock (still
   joined — the lock seats them, or leaves them out; dropping a name there only takes it out of its group), *Not
@@ -92,22 +109,16 @@ to read before you press. A Discord button never ends in "…": the site's *Fill
   the roster — set from the name's **⋮ › Keep off the roster**, and on the Events page the word *kept off* is on their
   line).
 - **Leftovers** — the joiners a full roster left out at the lock (more joined than there are places, or the roles
-  didn't fit). They head the *Not rostered* list and the lock card, with what another run would be short.
-- **Follow-on** — a later raid the same night, from the same signup, that starts when the raid before it ends. A run
-  holds up to four raids: the first (the **lead**) and up to three follow-ons. One Join covers them all; the lead's
-  lock builds every follow-on's rosters in order, each from the rosters before it (two 10s are the 20 split in two,
-  bench joiners cover gaps); nobody confirms twice. *Leaving after …* on the Me page (or `/raid out`, picking the
-  follow-on) frees that follow-on place and keeps your other seats; *I'm staying* on the Me page undoes it. Cancelling
-  any raid of the run cancels the whole run.
+  didn't fit). They head the *Not rostered* list and the lock card, with what another event would be short.
 - **Suggest… / Fill seats…** — the same screen under two names, on the site and in Discord: **Suggest…** before the
   lock (who could cover a tank or healer minimum — a yes changes their signup, nobody is seated until the lock) and
   **Fill seats…** after it (who to ask for an open place). Both show exactly the DMs **Send** will send. **Pause
-  automatic asks** stops the bot asking anyone on its own for that run; an officer's own Fill seats… still sends.
-- **Schedule** — when a raid runs: weekly nights, days of each lockout or a pickup template, with its own sheet
+  automatic asks** stops the bot asking anyone on its own for that event; an officer's own Fill seats… still sends.
+- **Schedule** — when a raid is played: weekly nights, days of each lockout, or opened by an officer, with its own sheet
   timing. Each schedule has an **id** of its own across the guild (*barrow-deeps*, *tuesday*), so one id always names one
-  schedule. A raid has no run times of its own: its run times are an ordinary schedule (the one a guild had before is
+  schedule. A raid has no event times of its own: its event times are an ordinary schedule (the one a guild had before is
   called *Raid nights*).
-- **Regulars** — the people expected every week on a recurring schedule, each on one character. Regulars belong to the
+- **Regulars** — the people expected every week on a schedule that repeats, each on one character. Regulars belong to the
   schedule, not to the raid: removing the schedule takes them off it. Officers keep the list (each schedule's *Regulars* on the
   Schedules page, or `/roster add`); nothing is answered for them, they press Join like everyone else, and being one
   counts at lock.
@@ -129,10 +140,10 @@ to read before you press. A Discord button never ends in "…": the site's *Fill
 - **Who can make** — the finder: the crafters of a recipe, names only; nobody is pinged.
 - **Main / alt** — your main is the character you raid on by default (one per member; your rank is on it); alts are
   your other characters.
-- **Rank** — the member's standing: *trial*, *raider*, *core* or *social*. It lives on the main and counts for who gets a
-  seat; every alt reads *alt*, which is never a rank an officer gives. Only another officer sets yours.
+- **Rank** — the member's standing: *trial*, *raider*, *core* or *social*. It lives on the main and counts in
+  Priority; every alt reads *alt*, which is never a rank an officer gives. Only another officer sets yours.
 - **Confirm a character** — an officer's check that a newly registered character is real and is the member's; until
-  then it *waits for a confirm*. It is not a run's **Confirm** (the rostered saying they will come). Another officer
+  then it *waits for a confirm*. It is not an event's **Confirm** (the rostered saying they will come). Another officer
   confirms yours; the member sees it on their Me page. Officers walk the waiting ones with **Confirm characters…** on
   the Members page or `/roster confirm`.
 - **Retire / delete** — **retire** takes a character off sheets, rosters and the regulars and keeps it on the record as
@@ -141,9 +152,9 @@ to read before you press. A Discord button never ends in "…": the site's *Fill
 - **Not in the server** — the bot noticed this member is not in the guild's Discord server (they left, or were imported
   from a signup list and never joined). Their record stays until an officer uses **Remove record…**.
 - **Puppets** — pretend members the **test bench** creates for rehearsals (`/gm test seed`, or the Test bench tab on
-  the Members page). They only ever take part in test runs.
-- **The council** — the loot council for a run: code scores each candidate, the bot explains the pick against the
-  guild's loot policy, and an officer confirms or overrides it — in the run's thread in Discord or on **Loot › Tonight**.
+  the Members page). They only ever take part in test events.
+- **The council** — the loot council for an event: code scores each candidate, the bot explains the pick against the
+  guild's loot policy, and an officer confirms or overrides it — in the event's thread in Discord or on **Loot › Tonight**.
 - **The companion** — a small program the raid leader runs next to the game; it reads the game's chat log and tells the
   bot what dropped, who looted it and which bosses died. It needs a token from the owner (Config › Companions or
   `/gm config companion`).

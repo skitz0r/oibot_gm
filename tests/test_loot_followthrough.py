@@ -124,7 +124,7 @@ def test_the_lock_card_shows_bosses_and_the_end_prompt(council, bosses):
     c = council
     card = views.lock_layout(c.reg, c.ev, rc.run_team(c.reg, c.ev), ico, 0, c.rs)
     assert "☠ Bosses 0 / 2" in text_of(card) and "All bosses down" not in text_of(card)
-    assert end_button(card).label == "End the run"
+    assert end_button(card).label == "End the event"
     kill(c, "Gatekeeper")
     assert "☠ Bosses 1 / 2" in text_of(views.lock_layout(c.reg, c.ev, rc.run_team(c.reg, c.ev), ico, 0, c.rs))
     kill(c, "Warden of Tests")
@@ -132,7 +132,7 @@ def test_the_lock_card_shows_bosses_and_the_end_prompt(council, bosses):
     text = text_of(card)
     assert "☠ Bosses 2 / 2" in text and "**All bosses down — End the run?**" in text
     btn = end_button(card)
-    assert btn.label == "End the run" and not btn.disabled and btn.custom_id == f"runact.{c.reg.key}:{c.ev.key}:end"
+    assert btn.label == "End the event" and not btn.disabled and btn.custom_id == f"runact.{c.reg.key}:{c.ev.key}:end"
     assert "attendance" not in text.lower() and "factor" not in text.lower(), "numbers and icons on Discord — no factor prose"
 
 
@@ -171,7 +171,7 @@ def test_the_end_prompt_press_goes_through_the_decide_screen_to_end_run(reg, rs,
         run(bot._feed_kill(reg, s, {"type": "kill", "boss": b, "ts": 1_765_000_000}))
     assert ("refresh_cards", ev.key) in bot.calls, "the last kill redraws the lock card"
     card = views.lock_layout(reg, ev, rc.run_team(reg, ev), ico, 0, rs)
-    assert end_button(card).label == "End the run"
+    assert end_button(card).label == "End the event"
     h = Harness(reg, rs, client=bot, user=types.SimpleNamespace(id=424242, display_name="Tester", mention="@Tester"))
 
     async def go():

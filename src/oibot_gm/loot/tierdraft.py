@@ -270,7 +270,7 @@ def apply_csv(reg, preview: dict, by: str, rev: str | None) -> list[tuple[str, s
     between the check and the batch. Returns [(item key, the change line, {spec key: (before, after)})] for items that
     changed."""
     if not rev:
-        raise RegistryError("Preview the file first — an import applies the preview it was shown (its rev).")
+        raise RegistryError("Preview the file first — an import applies the preview it was shown.")
     keys = [r["key"] for r in preview["items"]]
     done = []
     with reg.config_lock:

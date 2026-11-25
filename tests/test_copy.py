@@ -42,6 +42,51 @@ FORBIDDEN = re.compile(
 # not a cell)
 EMPTY_ALONE = re.compile(r"^(?:\s*(?:none yet|not set|none|nothing)\s*\.?\s*|—|–|-)$", re.I)
 DASH_ALONE = re.compile(r"^\s*[—–-]\s*$")
+# The retired words (phase 6, docs/superpowers/plans/2026-11-25-event-words.md, the word table): a run → an event, a
+# follow-on → a later raid of the lineup, ad hoc → one-off, a pickup template → a schedule opened by an officer, a
+# recurring run → a schedule's event, the lead run → the first raid, Who gets a seat → Priority. "Rehearse" stays.
+RETIRED = re.compile(r"\b(?:recurring runs?|lead runs?|runs?|follow[- ]ons?|ad[- ]hoc|adhoc|pickups?|who gets a seat)\b",
+                     re.I)
+# "run" the verb stays ("it runs hourly", "run the command"). Only these explicit verb phrases are taken out before
+# RETIRED looks; a determiner just before ("the run again", "the runs on Tuesday", "3 runs at") keeps the noun caught.
+_NOUN_BEFORE = (r"(?<!\bthe )(?<!\ba )(?<!\bthis )(?<!\bthat )(?<!\beach )(?<!\bnext )(?<!\btest )(?<!\bone )"
+                r"(?<!\ball )(?<!\bthese )(?<!\bthose )(?<![0-9] )")
+VERB_RUN = re.compile("|".join((
+    r"\bit runs\b",                                                       # it runs
+    _NOUN_BEFORE + r"\bruns (?:on|at|every|hourly)\b",                    # runs on / at / every / hourly
+    _NOUN_BEFORE + r"\bruns (?:it|the|that|raid)\b",                      # whose PC runs it, runs the companion
+    r"\b(?:bot|clock|launchd|who|whoever|pc|schedule|leader) runs\b",     # the bot runs, no schedule runs
+    r"\b(?:you|we|they) run\b",                                           # lets you run your purchase
+    r"\bto run\b",                                                        # to run
+    r"\b(?:can|can['’]t|cannot|could|will|would|must|should|may|has|have|had|do|does|did) (?:not )?run\b",  # can run
+    _NOUN_BEFORE + r"\brun (?:it|this|the command|again)\b",              # run it / this / the command / again
+    _NOUN_BEFORE + r"\bruns? /",                                           # run /raid sheet
+    r"\bis running\b", r"\bran\b")), re.I)
+# The files that still hold a retired word (repo-relative). Each phase-6 task rewords its files and takes them out;
+# test_retired_words_are_gone fails for a hit anywhere else, and for a file here that has none left (the list only
+# shrinks). Computed by running the lint, never by hand.
+WORDS_PENDING: set[str] = {
+    "frontend/src/components/AttendanceCard.tsx", "frontend/src/components/CharacterTable.tsx",
+    "frontend/src/components/LootWeightsCard.tsx", "frontend/src/components/PlainPermissions.tsx",
+    "frontend/src/components/RaidCard.tsx", "frontend/src/components/SlotEditor.tsx",
+    "frontend/src/components/TestBench.tsx", "frontend/src/components/TestFeed.tsx",
+    "frontend/src/components/board/FillModal.tsx", "frontend/src/components/board/SheetCard.tsx",
+    "frontend/src/components/board/shared.tsx", "frontend/src/components/loot/History.tsx",
+    "frontend/src/components/loot/Tonight.tsx", "frontend/src/pages/Agents.tsx", "frontend/src/pages/Config.tsx",
+    "frontend/src/pages/Me.tsx", "src/oibot_gm/configops.py", "src/oibot_gm/consequences.py",
+    "src/oibot_gm/discord_bot.py", "src/oibot_gm/discord_feed.py", "src/oibot_gm/discord_help.py",
+    "src/oibot_gm/discord_loot.py", "src/oibot_gm/discord_loot_surface.py", "src/oibot_gm/discord_news.py",
+    "src/oibot_gm/discord_policy.py", "src/oibot_gm/discord_pool.py", "src/oibot_gm/discord_raid.py",
+    "src/oibot_gm/discord_registry.py", "src/oibot_gm/flows_config.py", "src/oibot_gm/flows_loot.py",
+    "src/oibot_gm/flows_misc.py", "src/oibot_gm/flows_raid.py", "src/oibot_gm/flows_register.py",
+    "src/oibot_gm/flows_roster.py", "src/oibot_gm/flows_schedule.py", "src/oibot_gm/flows_test.py",
+    "src/oibot_gm/guild_routing.py", "src/oibot_gm/help.py", "src/oibot_gm/inbox.py", "src/oibot_gm/loot_ops.py",
+    "src/oibot_gm/news.py", "src/oibot_gm/presets.py", "src/oibot_gm/raid_buttons.py",
+    "src/oibot_gm/raid_commands.py", "src/oibot_gm/raid_scheduler.py", "src/oibot_gm/raid_views.py",
+    "src/oibot_gm/raidcycle.py", "src/oibot_gm/registry.py", "src/oibot_gm/testfeed.py",
+    "src/oibot_gm/web/api_events.py", "src/oibot_gm/web/api_loot.py", "src/oibot_gm/web/api_me.py",
+    "src/oibot_gm/web/app.py", "src/oibot_gm/wizard_opts.py",
+}
 # a dash in a table cell (under its column's header) is a cell, not an empty state: the Iconography rule keeps icon
 # columns free of words, and "no offspec" beside every row is noise. The empty-state sentence is for a whole list, card or
 # section. Only a bare dash is carved out: "none yet" in a cell still names nothing.
@@ -169,7 +214,21 @@ PY_FILES = ["raid_views.py", "wizard.py", "inbox.py", "consequences.py", "discor
             # auction prices: the price table's states and every price sentence (spec §3)
             "discord_auctions.py", "prices.py",
             # the Events page's read model and its routes (phase 4)
-            "event_view.py", "web/api_events.py"]
+            "event_view.py", "web/api_events.py",
+            # phase 6 (event words): every other module that builds text a person reads — the shared word tables, the
+            # run buttons' labels, the Schedules / Raids pages' read models, the scheduler's and loot's lines, the routes'
+            # sentences. Not here: web/api.py and web/api_agents.py (old-lint hits in MCP-facing errors and the Agents
+            # page's setting ops), mcp_server.py / agents.py (operator tools), comp.py and loot/recommend.py (old-lint
+            # hits not yet reworded), nl.py (the parser's schemas).
+            "constants.py", "raid_buttons.py", "schedule_view.py", "raid_page.py", "event_board.py", "raid_scheduler.py",
+            "raid_commands.py", "testfeed.py", "discord_loot.py", "loot_ops.py", "discord_bot.py", "discord_feed.py",
+            "discord_news.py", "discord_armory.py", "armory_seed.py", "armory.py", "auctions.py", "professions.py",
+            "lootctx.py", "loot/session.py", "news.py", "feed.py", "guild_routing.py", "guild_picker.py", "perms.py",
+            "pending_views.py", "ops.py", "policy.py", "wizard_opts.py", "roster/explain.py", "roster/solver.py",
+            "loot/scoring.py", "loot/distil.py", "loot/tierdraft.py", "conversation.py", "importers/ledger_csv.py",
+            "web/app.py", "web/api_armory.py", "web/api_loot.py", "web/api_me.py", "web/api_memory.py", "web/api_ops.py",
+            "web/api_policy.py", "web/api_prices.py", "web/api_professions.py", "web/api_schedules.py",
+            "web/api_setup.py"]
 LOG_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical"}
 # calls whose string arguments are machine-facing (patterns, keys, ids), not words a person reads
 MACHINE_CALLS = {"compile", "match", "search", "fullmatch", "sub", "findall", "finditer", "split", "startswith", "endswith",
@@ -330,9 +389,16 @@ def _reads(text: str) -> str:
     return t
 
 
-def findings() -> list[tuple[str, int, str, str]]:
-    """(path, line, text, why) for every user-visible string that breaks the copy rule."""
-    rows: list[tuple[str, int, str, str]] = []
+def retired_words(text: str) -> list[str]:
+    """The retired words a reader would see in `text` (the verb phrases of VERB_RUN taken out first)."""
+    return sorted({" ".join(m.group(0).lower().split()) for m in RETIRED.finditer(VERB_RUN.sub(" ", _reads(text)))})
+
+
+_HELP_TAIL = " (in the data the help answer is written from — the answer repeats it)"
+
+
+def _strings():
+    """(path, line, text) for every user-visible string, each once, the ALLOW entries left out."""
     for f, extract in _sources():
         rel = str(f.relative_to(ROOT))
         seen: set[tuple[int, str]] = set()
@@ -340,16 +406,35 @@ def findings() -> list[tuple[str, int, str, str]]:
             if (line, text) in seen:
                 continue
             seen.add((line, text))
-            if _allowed(rel, text):
-                continue
-            words = sorted({m.group(0).lower() for m in FORBIDDEN.finditer(_reads(text))})
-            if words:
-                why = "internal word: " + ", ".join(words)
-                if rel.endswith("help.py"):
-                    why += " (in the data the help answer is written from — the answer repeats it)"
-                rows.append((rel, line, text, why))
-            elif EMPTY_ALONE.match(text):
-                rows.append((rel, line, text, "empty state that names nothing"))
+            if not _allowed(rel, text):
+                yield rel, line, text
+
+
+def findings() -> list[tuple[str, int, str, str]]:
+    """(path, line, text, why) for every user-visible string that breaks the copy rule."""
+    rows: list[tuple[str, int, str, str]] = []
+    for rel, line, text in _strings():
+        words = sorted({m.group(0).lower() for m in FORBIDDEN.finditer(_reads(text))})
+        if words:
+            why = "internal word: " + ", ".join(words)
+            if rel.endswith("help.py"):
+                why += _HELP_TAIL
+            rows.append((rel, line, text, why))
+        elif EMPTY_ALONE.match(text):
+            rows.append((rel, line, text, "empty state that names nothing"))
+    return rows
+
+
+def retired_findings() -> list[tuple[str, int, str, str]]:
+    """(path, line, text, why) for every user-visible string that still says a retired word (phase 6)."""
+    rows: list[tuple[str, int, str, str]] = []
+    for rel, line, text in _strings():
+        words = retired_words(text)
+        if words:
+            why = "retired word: " + ", ".join(words)
+            if rel.endswith("help.py"):
+                why += _HELP_TAIL
+            rows.append((rel, line, text, why))
     return rows
 
 
@@ -424,6 +509,55 @@ def g(cid, new):
     assert got == ["The solver seated … of ….", "Nothing to do here.", "Roster channel", "none"], got
 
 
+def test_retired_words_take_the_noun_not_the_verb():
+    """Phase 6 (event words): 'run' the dated occasion is retired for 'event'; 'run' the verb stays. VERB_RUN takes out
+    only the explicit verb phrases, so each of them goes quiet while the noun beside it is still caught."""
+    pairs = [  # (a verb that stays, a noun that is retired)
+        ("The check runs hourly.", "the run"),
+        ("It runs on Tuesdays at 7:30 PM.", "this run"),
+        ("The import runs at noon.", "runs this week"),
+        ("A reminder runs every hour.", "3 runs"),
+        ("Ask the bot to run the check.", "a run's roster"),
+        ("Run it again later.", "test run"),
+        ("Run this from the Members page.", "the run this week"),
+        ("Run the command in your server.", "the run again"),
+        ("The lock is running.", "a recurring run"),
+        ("The import ran overnight.", "the lead run"),
+        ("Run again after the lock.", "this run's sheet"),
+        ("Whose PC runs the companion?", "the runs the bot opened"),
+        ("No schedule runs this raid yet.", "these runs this month"),
+        ("The bot runs each check before it posts.", "the bot's runs"),
+        ("Whoever runs that companion needs a new token.", "Live runs"),
+        ("A bot can't run the companion.", "Can't make this run"),
+        ("Once it has run, it is listed here.", "Open a new run instead."),
+        ("Run /raid sheet in a server channel.", "the run /raid open made"),
+        ("The raid leader runs it next to the game.", "the leader's runs"),
+        ("This lets you run your purchase there.", "your run"),
+    ]
+    for verb, noun in pairs:
+        assert not retired_words(verb), verb
+        assert retired_words(noun), noun
+    for old in ("Barrow Deeps, then its follow-on", "a follow on raid", "an ad hoc run", "an ad-hoc raid", "adhoc",
+                "a pickup template", "Who gets a seat", "Lead runs first"):
+        assert retired_words(old), old
+    for fine in ("Rehearse a raid", "a rehearsal", "running total", "Event", "the rerun", "run_open", "Priority",
+                 "Barrow Deeps, then Onyxia's Lair"):
+        assert not retired_words(fine), fine
+
+
+def test_retired_words_are_gone():
+    """The retired words (the plan's word table) are out of every user-visible string, but for the files still in
+    WORDS_PENDING — and that list only shrinks: a file in it with no hit left must leave it."""
+    rows = retired_findings()
+    hit = {p for p, *_ in rows}
+    stray = [r for r in rows if r[0] not in WORDS_PENDING]
+    assert not stray, (f"{len(stray)} user-visible strings carry a retired word (event, lineup, one-off, Priority — the "
+                       "plan's word table; docs/manual.md §1a):\n"
+                       + "\n".join(f"{p}:{n}: {_one_line(t)}  [{why}]" for p, n, t, why in stray))
+    done = sorted(WORDS_PENDING - hit)
+    assert not done, f"these files hold no retired word any more — take them out of WORDS_PENDING: {done}"
+
+
 def _sources() -> list[tuple[Path, object]]:
     return [(f, tsx_strings) for f in sorted(SRC.rglob("*.tsx"))] + [(f, py_strings) for f in _flowfiles()]
 
@@ -440,7 +574,7 @@ def test_allow_list_entries_have_reasons_and_still_match():
             if frag not in str(f.relative_to(ROOT)):
                 continue
             for _, text in extract(f):
-                if sub in text and (FORBIDDEN.search(_reads(text)) or EMPTY_ALONE.match(text)):
+                if sub in text and (FORBIDDEN.search(_reads(text)) or EMPTY_ALONE.match(text) or retired_words(text)):
                     used = True
                     break
             if used:
@@ -456,14 +590,15 @@ def test_user_visible_copy_uses_the_readers_words():
 
 
 def write_findings(path: Path) -> int:
-    rows = findings()
+    rows = findings() + retired_findings()
     by: dict[str, list[tuple[int, str, str]]] = {}
     for p, n, t, why in rows:
         by.setdefault(p, []).append((n, t, why))
     out = ["# Copy findings — the sweep list (2026-10-24)", "",
            "Generated by `uv run python tests/test_copy.py` from tests/test_copy.py (the copy rule, CLAUDE.md; the glossary is",
            "docs/manual.md §1a *The words*). Each line is a user-visible string to rewrite in the reader's words; when the sweep",
-           "is done, this test is the gate.", "",
+           "is done, this test is the gate. A \"retired word\" line is phase 6's (event words): its file stays in",
+           "WORDS_PENDING until the word is gone.", "",
            f"**{len(rows)} hits in {len(by)} files.**", "", "| file | hits |", "|---|---|"]
     out += [f"| {p} | {len(v)} |" for p, v in sorted(by.items(), key=lambda kv: -len(kv[1]))]
     for p, v in sorted(by.items(), key=lambda kv: -len(kv[1])):

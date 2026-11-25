@@ -61,7 +61,7 @@ PAGE_WORDS = {
     "one_off": "One-off, no schedule", "first_to_join": "First to join", "not_asked": "Not asked",
     # an event's raid-night facts (event_view._night_facts) and the page's time zone line (event_list `tz_words`)
     "paused": "Paused", "paused_by": "Paused by {who}", "reminded_by": "{when}, by {who}", "away_reason": "{name} ({reason})",
-    "confirm_pending": "Not sent yet. The bot sends them within a minute.", "times_in": "Times in {zone}.", "test_run": "test run",
+    "confirm_pending": "Not sent yet. The bot sends them within a minute.", "times_in": "Times in {zone}.", "test_run": "test event",
     "asked_at_lock": "Asked at the lock", "no_sheet_yet": "no sheet yet", "from": "From {when}",
     "open_in_discord": "Open in Discord", "no_answer_yet": "no answer yet", "answers_one": "One for the whole evening",
     "bot_asks": "The bot asks people", "officer_asks": "An officer asks", "every_main": "Every main",
@@ -112,7 +112,7 @@ PAGE_WORDS = {
     "kinds": {"weekly": "Weekly", "lockout": "Day N of each lockout", "pickup": "Opened by an officer"},
     # the New event page's and Edit lineup's section title, the one-off's confirmation heading in /raid open
     "what_this_makes": "What this makes",
-    "by_an_officer": "An officer opens each event with /raid open in Discord", "no_times": "No run times yet. Edit the schedule to add them.",
+    "by_an_officer": "An officer opens each event with /raid open in Discord", "no_times": "No event times yet. Edit the schedule to add them.",
     "no_reminder": "No reminder", "for_seats": "{n} for {seats} seats", "short_every_week": "Short every week",
     "ready_every_week": "Ready every week", "short_weeks": "Short {n} of the next four weeks",
     "paused_next": "Paused, so no event opens. Resume it to open events again.",
@@ -137,7 +137,7 @@ PAGE_WORDS = {
     "weight_same": "Same as the raid ({n})",
     # a schedule's settings by name: the Schedules page's editor labels AND the Save box's "label: old → new" lines
     # (configops._schedule_part) — one word per setting, so the two never drift
-    "schedule_fields": {"name": "Name", "kind": "Repeats", "slots": "Run times", "days": "Days of each lockout", "time": "Starts",
+    "schedule_fields": {"name": "Name", "kind": "Repeats", "slots": "Event times", "days": "Days of each lockout", "time": "Starts",
                         "lineup": "Lineup", "rosters": "Rosters", "active": "Active", "signup_lead_hours": "Sheet opens",
                         # the four switches read as what they do (the owner, 2026-11-24); each select beside one never
                         # repeats the switch's word ("Signup Reminder" · "Goes out")
@@ -147,7 +147,7 @@ PAGE_WORDS = {
                         "open_dm": "Sheet Opening DM", "split_policy": "When one night fills two rosters",
                         "weights": "Priority",
                         # an event's own (Edit event, the owner's tweaks B): first to join or by priority
-                        "first_come": "Who gets a seat"},
+                        "first_come": "Priority"},
     # the (?) beside each switch of Sheet timing (the schedule editor and Edit event): exactly who gets what, when and
     # where — read from discord_raid.post_health / dm_on_open / lock_run / confirm_one / run_fill, raidcycle.fill_batch
     # (FILL_OVERASK one more than the shortfall, FILL_MAX_OPEN asks out at once) and expire_confirmation_asks
