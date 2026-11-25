@@ -202,7 +202,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        changed nick is the ONE trigger of Registry.rename; verbs never rename); an unconfigured server is told
                        "isn't set up" and never reaches another guild; DMs: only() → else guilds_of (owner / membership yes|no|unknown) → one, none (Join links of LISTED guilds only, B10),
                        several → the DM server picker (guild_picker.choose_guild: asked EVERY time, asker only, 2 min; the command continues on
-                       the press); resolve_button(interaction, g, legacy) for persistent buttons; may_access = the strict "belongs to" (the web uses it).
+                       the press); resolve_button(interaction, g, legacy) for persistent buttons; may_access = the strict "belongs to" (the web uses it);
+                       in_server_channel(channel) = asked in a server channel, never a DM (/raid open's `here`, open_test_run's fallback channel).
                        THE identity predicate (design §2.6/§5.33): resolve_role(bot, reg, who, max_age=) → Resolved(role owner|officer|member|outside,
                        role_ids, stale); role_of / identity are its names (bot.role_of, bot.identity); windows PRIV_LIVE=0 (writes) / PRIV_ROUTING=10 /
                        PRIV_WEB=60; role_sync = the no-lookup form. is_officer, is_officer_anywhere, plain_identity, asker_identity and app.py privilege

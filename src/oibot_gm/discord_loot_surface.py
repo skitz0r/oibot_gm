@@ -583,8 +583,8 @@ class LootSurfaceMixin:
 
         what = "; ".join(f"{(r.get('ev') or {}).get('item_name') or (r.get('ev') or {}).get('item_id')} → {(r.get('ev') or {}).get('recipient', '?')}" for r in rows[:8])
         run = ended.get("run_key") or ended.get("id")
-        url = loot_site_url(reg, run)
-        text = (f"{guild_prefix(reg)}In-game awards arrived after the loot council for {run} ended: {what}. They are not recorded yet — "
+        url = loot_site_url(reg, run)  # the key only inside the link, never in the words (self.loot_where names the run)
+        text = (f"{guild_prefix(reg)}In-game awards arrived after the loot council for {self.loot_where(reg, ended.get('id') or run)} ended: {what}. They are not recorded yet — "
                 + (f"record or correct them on the site: {url}" if url else "open a council (/raid loot) to record them, or record them on the site")
                 + " (held 10 minutes, then listed in the ops channel).")
         n = 0

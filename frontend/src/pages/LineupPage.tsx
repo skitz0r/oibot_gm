@@ -42,7 +42,7 @@ const EVENTS = "/events";
  *  editor (/schedules/new, /schedules/:id/edit — Schedules.dc.html, boxes 13–14). */
 export function LineupPage({ meta, mode }: { meta: Meta; mode: "new-event" | "edit-lineup" | "new-schedule" | "edit-schedule" }) {
   if (mode === "new-schedule" || mode === "edit-schedule") return <ScheduleEditor meta={meta} edit={mode === "edit-schedule"} />;
-  if (mode === "edit-lineup") return <EditLineup />;
+  if (mode === "edit-lineup") return <EditLineup meta={meta} />;
   return <NewEvent meta={meta} />;
 }
 
@@ -171,7 +171,7 @@ function NewEvent({ meta }: { meta: Meta }) {
             )}
           </WhenPicker>
         </ViewSection>
-        <ViewSection title="What this makes">
+        <ViewSection title={meta.page_words.what_this_makes}>
           <Stack gap="sm">
             {!lineup.length && <Text size="sm" c="dimmed">{meta.page_words.new_event_no_lineup}</Text>}
             {lineup.length > 0 && !body && <Text size="sm" c="dimmed">{meta.page_words.new_event_no_time}</Text>}
@@ -213,7 +213,7 @@ type Draft = { facts: Fact[]; lineup: (PictureStep & { raid: string; starts: num
  *  removed roster are dropped — and presses with the fp of the box on screen: a box whose facts changed comes back
  *  fresh (409) and the next press goes through. A locked or finished event shows the server's refusal and only Back.
  *  The draft is registered (useDirty, with its count and the event's title), so leaving asks first. */
-function EditLineup() {
+function EditLineup({ meta }: { meta: Meta }) {
   const { key = "" } = useParams();
   const navigate = useNavigate();
   const [edit, setEdit] = useState<EditStart | null>(null);
@@ -317,7 +317,7 @@ function EditLineup() {
                 times={own ? x!.lineup.map((s) => s.time_words) : undefined}
                 onChange={(next) => setLineup(next)} />
             </ViewSection>
-            <ViewSection title="What this makes">
+            <ViewSection title={meta.page_words.what_this_makes}>
               <Stack gap="sm">
                 {refusal && (
                   <MBox role="alert" p="sm" style={{ border: "1px solid var(--mantine-color-red-7)", borderRadius: 8 }}>
@@ -352,7 +352,6 @@ const TIMING_HOURS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_bef
 const TIMING_SWITCHES = ["nudge", "autofill", "open_dm", "confirm"] as const;
 /** a pickup template opens when an officer opens it and reminds nobody: these mean nothing there */
 const PICKUP_HIDDEN = new Set<string>(["signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"]);
-const KINDS = [{ value: "weekly", label: "Weekly" }, { value: "lockout", label: "Day N of each lockout" }, { value: "pickup", label: "Opened by an officer" }];
 const SCHEDULES = "/schedules";
 
 /** A new schedule's id from its name: unique across the guild (`taken`), never one of the server's reserved ids. */
@@ -497,6 +496,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
   const shown = (k: string) => !(pickup && PICKUP_HIDDEN.has(k));
   /** every label is the server's word for the setting (PAGE_WORDS schedule_fields): the Save box's diff lines say the same */
   const W = meta.page_words, F = W.schedule_fields;
+  const KINDS = (["weekly", "lockout", "pickup"] as const).map((value) => ({ value, label: W.kinds[value] }));  // the server's words (PAGE_WORDS kinds)
   const useRaids = `Use ${W.raids_own}`;  // the Priority section's button: clears every weight back to the raid's
   const raidWeights = pickup ? opts.adhoc.weights : firstRaid?.weights || {};
 

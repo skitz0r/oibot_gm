@@ -1492,8 +1492,7 @@ class RaidMixin:
         open_run_and_post: it adds to the live events the loop's handlers iterate, so never from a worker thread (L3);
         its one git commit is the same short block every on-demand open has."""
         start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
-        in_guild = (channel is not None and not isinstance(channel, (discord.DMChannel, discord.GroupChannel))
-                    and getattr(channel, "guild", True) is not None)  # a server channel, never a DM
+        in_guild = guild_routing.in_server_channel(channel)
         target = (self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None) or (channel if in_guild else None)
         if target is None:  # nowhere to post the sheet: refused before anything is written (the site, MCP, a DM), naming why
             raise RegistryError(bench_channel_refusal(reg, self.get_channel) or NO_TEST_CHANNEL)

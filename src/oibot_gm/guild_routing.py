@@ -126,6 +126,13 @@ class Resolved:
         yield self.role_ids
 
 
+def in_server_channel(channel) -> bool:
+    """Asked in a server channel, never a DM: where /raid open and a test run may post a sheet with no signup channel
+    set (RaidMixin.open_test_run, flows_raid.OpenWizard)."""
+    return (channel is not None and not isinstance(channel, (discord.DMChannel, discord.GroupChannel))
+            and getattr(channel, "guild", True) is not None)
+
+
 def _uid(who) -> int | None:
     if who is None:
         return None

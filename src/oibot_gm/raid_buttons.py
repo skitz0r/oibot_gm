@@ -19,7 +19,7 @@ import discord
 
 from . import raidcycle as rc
 from .wizard import button_label, fade
-from .consequences import consequence, ended_line
+from .consequences import ended_line
 from .guild_routing import resolve_button
 from .registry import RegistryError
 
@@ -174,12 +174,11 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
     """Lock — the card's Lock and /raid lock alike: the server's box (consequences.lock_box, boxes 1–2 — the site's
     Lock now prints the same) through Wizard.decide_box, then Lock · Preview lock · Back. Preview lock draws the roster
     the lock would build now (rc.split_preview under the run's solver single flight; nothing saved but
-    `ev.last_proposal`), one member per line with the spec icon, under the same box; its Lock goes back through
-    decide_box, so a box that changed during the preview is shown again. The lock itself is RaidMixin.lock_run, after
+    `ev.last_proposal`), one member per line with the spec icon, under the same box (decide_box's `embed`), so a box that
+    changed during the preview is shown again at Lock. The lock itself is RaidMixin.lock_run, after
     the screen has acknowledged the press."""
     from .configops import report_error
     from .consequences import lock_box
-    from .wizard import box_text
 
     wiz = wiz or officer_wizard(bot, reg, interaction, f"Lock {raid_name(reg, ev)}")
     key = ev.key
@@ -190,10 +189,10 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
     async def do(i: discord.Interaction, _values: dict) -> None:
         cur = rs.events.get(key)  # re-read: the scheduler or another officer may have locked it meanwhile
         if not cur or cur.state in ("done", "cancelled"):
-            await wiz.finish(i, "That run is closed — nothing was changed.")
+            await wiz.finish(i, f"{rc.run_words(reg, cur or ev)} closed before your press, so nothing was changed.")
             return
         if cur.state != "open":
-            await wiz.finish(i, "Already locked — nothing was changed.")
+            await wiz.finish(i, f"{rc.run_words(reg, cur)} was already locked, so nothing was changed.")
             return
         by = i.user.display_name
         try:
@@ -222,24 +221,10 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
         except RegistryError as e:  # the solver is busy on this run, or no roster satisfies the rules
             await wiz.refuse(i, str(e), retry=again, retry_label="Back")
             return
-        shown = box()
-
-        async def lock(li: discord.Interaction) -> None:  # through the box: changed during the preview → shown again
-            fresh = box()
-            if fresh.get("fp") != shown.get("fp"):
-                await wiz.decide_box(li, fresh, do=do, refresh=box, extra=[wiz.button(RUN_WORDS["preview_lock"], preview)],
-                                     changed=fresh.get("verb") is not None)
-                return
-            await wiz.working(li)
-            await do(li, {})
-
-        items = [wiz.button(shown["verb"], lock, discord.ButtonStyle.danger if shown.get("danger") else discord.ButtonStyle.success)
-                 ] if shown.get("verb") else []
-        heading, wiz.heading = wiz.heading, False  # one heading: the box's title
-        try:
-            await wiz.show(i, box_text(shown), *items, wiz.button("Back", again), embed=lock_preview_embed(reg, cur, rosters, bot.ico))
-        finally:
-            wiz.heading = heading
+        # the same screen with the roster under the box: Preview lock again draws a fresh one; a box that changed during
+        # the preview is shown again at Lock, without the (now old) roster
+        await wiz.decide_box(i, box(), do=do, refresh=box, back=again, extra=[wiz.button(RUN_WORDS["preview_lock"], preview)],
+                             embed=lock_preview_embed(reg, cur, rosters, bot.ico))
 
     await wiz.decide_box(interaction, box(), do=do, refresh=box, extra=[wiz.button(RUN_WORDS["preview_lock"], preview)])
 
@@ -262,7 +247,7 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
     async def do(i: discord.Interaction, v: dict) -> None:
         cur = rs.events.get(key)  # re-read: it may have closed while the box was open
         if not cur or cur.state in ("done", "cancelled"):
-            await wiz.finish(i, "That run already closed — nothing was changed.")
+            await wiz.finish(i, f"{rc.run_words(reg, cur or ev)} closed before your press, so nothing was changed.")
             return
         try:
             line = await bot.cancel_run(reg, rs, cur, by=i.user.display_name, reason=(v.get("reason") or "").strip() or None,
@@ -284,7 +269,7 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None
     Loot › Tonight's End print the same) through Wizard.decide_box, then LootMixin.end_run — the verb /raid end, the
     site, MCP and the scheduler share (its loot council is archived with its summary). Before the start
     (rc.end_refusal) the refusal box. Reopen stays possible for an hour (an end by mistake)."""
-    from .consequences import end_box, refusal_box_for
+    from .consequences import refusal_box_for
 
     wiz = officer_wizard(bot, reg, interaction, f"End {raid_name(reg, ev)}")
     key = ev.key
@@ -294,14 +279,12 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None
         why = rc.end_refusal(cur)
         if why:
             return refusal_box_for(why)
-        if hasattr(bot, "end_box"):
-            return bot.end_box(reg, rs, cur)
-        return end_box(reg, cur, consequence("end", reg, cur))
+        return bot.end_box(reg, rs, cur)
 
     async def do(i: discord.Interaction, _values: dict) -> None:
         cur = rs.events.get(key)
         if not cur or cur.state in ("done", "cancelled"):
-            await wiz.finish(i, "That run already closed — nothing was changed.")
+            await wiz.finish(i, f"{rc.run_words(reg, cur or ev)} closed before your press, so nothing was changed.")
             return
         try:
             await bot.end_run(reg, rs, cur, by=i.user.display_name, by_id=i.user.id, via="discord")
@@ -329,7 +312,7 @@ async def remind_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> N
     async def do(i: discord.Interaction, _values: dict) -> None:
         cur = rs.events.get(key)
         if not cur or cur.state != "locked":
-            await wiz.finish(i, "That run is no longer locked — nothing was sent.")
+            await wiz.finish(i, f"{rc.run_words(reg, cur or ev)} is no longer locked, so no reminder was sent.")
             return
         try:
             line = await bot.remind(reg, rs, cur, by=i.user.display_name, by_id=i.user.id)

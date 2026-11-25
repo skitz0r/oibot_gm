@@ -28,7 +28,7 @@ from .wizard import MAX_OPTIONS, Field, Form, Opt, flow, hour_opts, minute_opts
 F = PAGE_WORDS["schedule_fields"]
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-KINDS = {"weekly": "Weekly", "lockout": "Day N of each lockout", "pickup": "Opened by an officer"}  # the site's KINDS
+KINDS = PAGE_WORDS["kinds"]  # the site's Repeats choice says the same
 HOUR_FIELDS = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours")
 SWITCHES = ("nudge", "confirm", "autofill", "open_dm")
 PICKUP_HIDDEN = {"signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"}  # a pickup reminds nobody (the site's)

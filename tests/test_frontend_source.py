@@ -1576,3 +1576,18 @@ def test_each_sheet_timing_switch_carries_the_servers_help():
         assert needle in shared, needle
     for page in ("pages/LineupPage.tsx", "components/events/EditEvent.tsx"):
         assert "<TimingFields" in _code_only((SRC / page).read_text()), page
+
+
+def test_the_boards_older_confirms_are_the_test_benchs_alone():
+    """Phase 5, Task 9 (H): BoardView's useConfirm ("Clear the board?" and confirmMove) never runs on the Events page
+    (variant="event"): Clear is drawn only off the Events page, and an event's move either goes at once (before the lock)
+    or asks the server's box (serverMove, after it) before any confirmMove. Only the Test bench's SheetCard reaches them;
+    the Events page clears through More › Clear the board (consequences.clear_board_box)."""
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    clear_block = view.index("{!locked && !event && (")
+    assert clear_block < view.index("onClick={clear}") < view.index("</Group>", clear_block), "Clear: the Test bench's toolbar only"
+    assert view.count("onClick={clear}") == 1
+    assert 'const asks = locked || (via === "menu" && !event);' in view, "before the lock an event's move asks nothing"
+    head = view.index("if (event && locked) {")
+    assert head < view.index("await serverMove(name, target); return;") < view.index('confirmMove("release"'), "a locked event asks the server's box first"
+    assert view.index("async function place(") < head

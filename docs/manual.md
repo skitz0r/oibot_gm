@@ -1199,7 +1199,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    schedule opens nothing at that minute and the ops feed says so once, naming both. **Back** and *Back to Events* (and a rail link) ask *Leave
    without saving?* with how many edits you made. With **no signup channel set** the scheduler opens nothing: each run that was due
    gets one warning on the ops feed ("Barrow Deeps Tue 7:30 PM did not open: no signup channel is set") and its
-   row in *When it runs* says *needs a signup channel* in red. A raid with no run times offers *Set this raid's run times →*. A run opened closer
+   row in *When it runs* says *needs a signup channel* in red. A raid with no night to open offers *Add a schedule*, which opens the schedule wizard on that raid. A run opened closer
    than its week assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
    hours instead of inheriting a lock time that has already passed. A start more than five minutes in the past is
    refused however the run is opened (the site, `/raid open`, plain text, MCP), with the time named in words.

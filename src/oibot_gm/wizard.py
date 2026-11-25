@@ -380,7 +380,7 @@ class Wizard(discord.ui.View):
                          do: Callable[[discord.Interaction, dict[str, str]], Awaitable[None]],
                          refresh: Callable[[], dict | Awaitable[dict]] | None = None, note: Sequence[Field] = (),
                          extra: Sequence[discord.ui.Item] = (), back: Callable[[discord.Interaction], Awaitable[None]] | None = None,
-                         hint: str | None = None, changed: bool = False) -> None:
+                         hint: str | None = None, changed: bool = False, embed: discord.Embed | None = None) -> None:
         """The server's box (consequences.box) on one screen — the same box the site prints (§7b). The text is
         `box_text(box)` in place of the wizard's own title. Buttons: the box's verb (red iff `danger`), `<verb> with a
         note` when `note` (a Form of those Fields whose Submit is the write), `extra` (reads only), then Back (`back`, or
@@ -389,7 +389,8 @@ class Wizard(discord.ui.View):
         nothing is written; a refusal is shown as one, and a `refresh()` that raises RegistryError is shown as its refusal
         box (consequences.refusal_box_for: its sentence, Back alone, nothing written). Otherwise `working`, then
         `do(interaction, values)` (`{}` for a plain press). `refresh` must not solve; a sync one runs inside Discord's 3
-        seconds, an awaitable one (a thread) after `working` has answered the press. A verb ending in "…" is taken once without it."""
+        seconds, an awaitable one (a thread) after `working` has answered the press. A verb ending in "…" is taken once without it.
+        `embed`: shown under the box on this screen only (the lock's preview roster); a box shown again goes without it."""
         verb = box.get("verb")
         if verb is not None and verb != button_label(verb):
             box = {**box, "verb": button_label(verb)}
@@ -446,7 +447,7 @@ class Wizard(discord.ui.View):
         text = box_text(box, changed=changed)
         heading, self.heading = self.heading, False  # one heading: the box's title, never the wizard's too
         try:
-            await self.show(interaction, f"{text}\n-# {hint}" if hint else text, *items)
+            await self.show(interaction, f"{text}\n-# {hint}" if hint else text, *items, embed=embed)
         finally:
             self.heading = heading
 

@@ -18,7 +18,7 @@ import discord
 import pytest
 import yaml
 
-from conftest import GUILD, join, lock_with_board
+from conftest import GUILD, join, lock_with_board, open_test_run
 from oibot_gm import discord_registry, flows_loot, raid_views as views
 from oibot_gm import raidcycle as rc
 from oibot_gm import wizard_flows  # noqa: F401 — registers every flow
@@ -1596,3 +1596,34 @@ def test_an_ended_council_gets_no_batch_cards_and_its_file_is_never_written_agai
     run(n.bot.loot_notify(n.reg, n.s, "⚖️ 1 proposal(s)", kind="distribute"))
     run(n.bot._loot_cards_save(n.s, {"batch:x": 1}, message="late"))
     assert not live.exists() and len(n.thread.sent) == sent and (GUILD, n.s.id) not in ls.load_sessions(n.reg.store)
+
+
+def test_the_after_end_dm_names_the_run_in_words_never_its_key(reg, rs):
+    """Phase 5, Task 9 (J): the officers' one DM about in-game awards that arrived after a council ended names the run
+    as a person reads it (LootMixin.loot_where: raid + 12-hour time), never its run key."""
+    ev = open_test_run(reg, rs)
+    sent: list[str] = []
+
+    class User:
+        async def send(self, text):
+            sent.append(text)
+
+    class Fake:
+        loot_where = LootMixin.loot_where
+        _surface = LootSurfaceMixin._surface
+        raids = types.SimpleNamespace(store=lambda r: rs)
+
+        def _held_rows(self, key):
+            return [{"at": 1, "ev": {"type": "loot", "item_name": "Sword of Tests", "recipient": "Bob"}}]
+
+        def _loot_recent_end(self, r):
+            return {"id": f"{ev.key}-r2", "run_key": ev.key}
+
+        def loot_officer_ids(self, r):
+            return [1]
+
+        async def fetch_user(self, uid):
+            return User()
+
+    assert run(LootSurfaceMixin._loot_after_end_dm(Fake(), reg)) == 1
+    assert ev.key not in sent[0].split("http")[0] and f"{rc.run_words(reg, ev)} roster 2" in sent[0]

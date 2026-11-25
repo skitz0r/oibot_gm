@@ -120,7 +120,7 @@ def test_raid_lock_preview_draws_the_roster_one_member_per_line_then_locks(reg, 
         assert len(groups) == 2 and all(len(f.value.splitlines()) == 5 for f in groups), "the full roster, one member per line"
         left = next(f for f in emb.fields if f.name.startswith("Leftovers"))
         assert left.name == "Leftovers (2)"
-        assert h.buttons() == ["Lock", "Back"] and ("lock_preview", ev.key, "Tester") in bot.calls
+        assert h.buttons() == ["Lock", "Preview lock", "Back"] and ("lock_preview", ev.key, "Tester") in bot.calls
         await h.press("Back")
         assert h.buttons() == ["Lock", "Preview lock", "Back"]
         await h.press("Lock")

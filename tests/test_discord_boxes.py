@@ -64,7 +64,8 @@ def test_the_preview_screens_lock_goes_back_through_the_box(reg, rs, officer, ch
     h = Harness(reg, rs, client=bot)
     run(FLOWS["raid_lock"](h.command(), reg))
     run(h.press("Preview lock"))
-    assert h.buttons() == ["Lock", "Back"] and cq.lock_box(reg, ev, rs)["title"] in h.text
+    assert h.buttons() == ["Lock", "Preview lock", "Back"] and cq.lock_box(reg, ev, rs)["title"] in h.text
+    assert h.screen["embed"] is not None, "the roster the lock would build, under the box"
     join(reg, rs, ev, reals(reg, 1, start=6))  # the box changed during the preview
     run(h.press("Lock"))
     assert not [c for c in bot.calls if c[0] == "lock_run"] and h.text.startswith(CONFIRM_WORDS["changed"])

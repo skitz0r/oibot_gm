@@ -86,7 +86,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
                        @mentions and DMs routed by intent under the plain-text policy)
   wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms; Wizard.decide = THE confirm screen (consequence · <verb> · <verb> with a note · Back; do_label = the verb, required; guard re-run on every press);
-                       Wizard.decide_box(box, do=, refresh=, note=, extra=, back=, hint=) = the server's box (consequences.box) as given: box_text = [CONFIRM_WORDS changed] · **title** · diff lines · sentences (one heading, never the wizard's too); the verb (red iff danger) · '<verb> with a note' (a Form whose Submit is the write) · extra · Back (back=None → "Nothing was changed."); a refusal box (verb None) = Back alone; refresh() re-run at the press and the note's submit — another fp is shown again under CONFIRM_WORDS['changed'], nothing written; button_label = THE ellipsis drop (Wizard.button and the persistent RunButton / LootButton / CfgApplyButton apply it; the site's shared words keep theirs, D1); when_fields(step=) reaches minute_opts
+                       Wizard.decide_box(box, do=, refresh=, note=, extra=, back=, hint=) = the server's box (consequences.box) as given: box_text = [CONFIRM_WORDS changed] · **title** · diff lines · sentences (one heading, never the wizard's too); the verb (red iff danger) · '<verb> with a note' (a Form whose Submit is the write) · extra · Back (back=None → "Nothing was changed."); embed= under this screen only (the lock's preview roster; a box shown again goes without it); a refusal box (verb None) = Back alone; refresh() re-run at the press and the note's submit — another fp is shown again under CONFIRM_WORDS['changed'], nothing written; button_label = THE ellipsis drop (Wizard.button and the persistent RunButton / LootButton / CfgApplyButton apply it; the site's shared words keep theirs, D1); when_fields(step=) reaches minute_opts
                        (a select inside ui.Label, or a TextInput only for prose), owner-only presses + a guard re-checked on
                        every press, FLOWS registry (@flow), no-typing dates/times (day/hour/minute selects, 12-hour,
                        resolve_local = DST-safe), lint() = what the Discord API would refuse, checked offline (+ a button label ending in an ellipsis); opt-in class attributes
@@ -99,9 +99,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        OPEN_UNREAD) as boxes; a one-off = when_fields(step=15) → lineup_hub → Locks (event_view.lock_choices) + Rosters beside
                        What this makes (event_view.new_event_view: facts, notes, lineup) = its confirmation, Open the sheet · Change · Back →
                        open_run_and_post(lineup=, lock_hours=, first_rosters=); a pickup template keeps its own confirm; draft["here"] = asked
-                       in a server channel (in_server_channel, open_test_run's test): with no signup channel every path says the sheet posts
+                       in a server channel (guild_routing.in_server_channel, open_test_run's too): with no signup channel every path says the sheet posts
                        here (consequences.no_channel_sentence) and opened() — THE outcome of every open — posts it there (POSTED_HERE); from
-                       a DM it waits, as the site's box says; no horizon words) ·
+                       a DM it waits, as the site's box says; no horizon words; a raid with no night to open offers ADD_SCHEDULE "Add a
+                       schedule" = flow `schedule` on that raid, taking the screen over) ·
                        flows_lineup (no @flow; imports no flows_* module, so any wizard mixes it in at class definition — flows_event
                        re-exports LineupBlock / REVIEW / STEP / START_CHOICES / EVERY_RAID_IN): LineupBlock, below ·
                        flows_event (phase 5, Task 3: pick_event = THE event picker — live FIRST raids, soonest first, ≤ 25, one goes straight in,

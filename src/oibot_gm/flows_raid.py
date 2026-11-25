@@ -17,6 +17,8 @@ from . import consequences as cq
 from . import raidcycle as rc
 from . import wizard_opts as wo
 from .consequences import before_first_open_sentence, later_places_sentence
+from .constants import PAGE_WORDS
+from .guild_routing import in_server_channel
 from .flows_lineup import LineupBlock
 from .raid_buttons import RUN_WORDS
 from .raid_views import health_layout, health_locked_brief, raid_name, run_label, run_title, sheet_state
@@ -36,7 +38,8 @@ from .wizard import (
 )
 
 LIVE = ("open", "locked")
-WHAT_THIS_MAKES = "What this makes"  # the one-off's confirmation heading: the New event page's section title
+ADD_SCHEDULE = "Add a schedule"  # /raid open with no night to open: the schedule wizard on that raid
+WHAT_THIS_MAKES = PAGE_WORDS["what_this_makes"]  # the one-off's confirmation heading: the New event page's section title
 POSTED_HERE = "No signup channel is set, so the sheet was posted in this channel."
 OTHER_STARTS = 22  # the shortlist's select: the other upcoming runs (the first one is the primary button)
 
@@ -106,12 +109,6 @@ async def with_run(interaction: discord.Interaction, reg: Registry, *, title: st
 
 
 # ---------------------------------------------------------------- /raid open
-
-def in_server_channel(channel) -> bool:
-    """The command was asked in a server channel, never a DM: RaidMixin.open_test_run's own test."""
-    return (channel is not None and not isinstance(channel, (discord.DMChannel, discord.GroupChannel))
-            and getattr(channel, "guild", True) is not None)
-
 
 class OpenWizard(Wizard, LineupBlock):
     """Raid → Next run · Another upcoming run… (a select of the other upcoming runs of every recurring schedule) ·
@@ -209,8 +206,8 @@ class OpenWizard(Wizard, LineupBlock):
         many = self.many()
         if not ups:
             await self.show(interaction, f"**{self.name()}** {self.no_slot_reason()}\n"
-                            "-# Add a schedule on the Schedules page, or open an ad hoc run at a day and time you pick.",
-                            self.button("Set this raid's run times →", self.to_run_times, discord.ButtonStyle.primary),
+                            "-# Add a schedule for it, or open an ad hoc run at a day and time you pick.",
+                            self.button(ADD_SCHEDULE, self.to_schedules, discord.ButtonStyle.primary),
                             self.button("Ad hoc run", self.adhoc),
                             self.button("Cancel", self.cancel))
             return
@@ -273,16 +270,13 @@ class OpenWizard(Wizard, LineupBlock):
             return f"first opens {self.reg.local12(fo)}, and no schedule of it has a night after that yet."
         return "has no coming night on its schedules."
 
-    async def to_run_times(self, interaction: discord.Interaction) -> None:
+    async def to_schedules(self, interaction: discord.Interaction) -> None:
+        """No night to open: the schedule wizard (flow `schedule`) on this raid takes over the screen."""
         from .wizard import FLOWS
 
-        nxt = FLOWS.get("raid_config")
-        if nxt is None:
-            await self.finish(interaction, "Run times are set on the Raids page.")
-            return
         self._closed = True
         self.stop()
-        await nxt(interaction, self.reg, raid=self.rid, section="times")
+        await FLOWS["schedule"](interaction, self.reg, raid=self.rid, message_id=self.message_id)
 
     async def next_picked(self, interaction: discord.Interaction) -> None:
         ups = self.upcoming()

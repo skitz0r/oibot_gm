@@ -236,17 +236,18 @@ def test_open_dst_gap_shows_the_note_and_opens_3_30(reg, rs, officer, channel, m
     assert bot.calls[0][4] == "adhoc", "a one-off is ad hoc, never a run of the raid's own run times"
 
 
-def test_open_no_slots_says_why_and_offers_run_times(reg, rs, officer, channel, monkeypatch):
-    monkeypatch.delitem(FLOWS, "raid_config", raising=False)
+def test_open_no_slots_says_why_and_offers_a_schedule(reg, rs, officer, channel):
+    from oibot_gm import flows_schedule  # noqa: F401 — registers the flow
+
     h, bot = harness(reg, rs)
 
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         assert "no schedule yet" in h.text and "in the next" not in h.text
-        assert h.buttons() == ["Set this raid's run times →", "Ad hoc run", "Cancel"]
-        await h.press("Set this raid's run times →")
-        assert "Raids page" in h.text
+        assert h.buttons() == ["Add a schedule", "Ad hoc run", "Cancel"]
+        await h.press("Add a schedule")  # the schedule wizard on this raid takes the screen over
+        assert "No schedule runs Barrow Deeps yet. Add one with New schedule." in h.text and "New schedule" in h.buttons()
     asyncio.run(go())
     assert not bot.calls
 
@@ -820,8 +821,8 @@ def test_fill_before_lock_shows_suggestions(reg, rs, officer, channel):
     assert "before lock" in h.text and not bot.calls
 
 
-def test_handing_off_to_run_times_leaves_no_open_screen(reg, rs, officer, channel, monkeypatch):
-    """Regression (G2 review): to_run_times stopped the wizard without finish(), so its pending_views entry stayed for
+def test_handing_off_to_the_schedule_wizard_leaves_no_open_screen(reg, rs, officer, channel, monkeypatch):
+    """Regression (G2 review): the hand-off (to_run_times then, to_schedules now) stopped the wizard without finish(), so its pending_views entry stayed for
     the life of the process and GET /api/agents/quiet never read quiet again — every profile restart waited forever."""
     from oibot_gm import pending_views
 
@@ -829,15 +830,15 @@ def test_handing_off_to_run_times_leaves_no_open_screen(reg, rs, officer, channe
     monkeypatch.setattr(pending_views, "track_interaction",
                         lambda key, interaction, title="": pending_views.track(key, app_id=1, token="t", title=title))
 
-    async def raid_config(interaction, reg_, **seed):
+    async def schedule(interaction, reg_, **seed):
         pass
-    monkeypatch.setitem(FLOWS, "raid_config", raid_config)
+    monkeypatch.setitem(FLOWS, "schedule", schedule)
     h, bot = harness(reg, rs)
 
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         assert pending_views.live_count() == 1
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Set this raid's run times →")
+        await h.press("Add a schedule")
     asyncio.run(go())
     assert pending_views.live_count() == 0

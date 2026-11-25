@@ -227,9 +227,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
                        RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/End; the closed card's
                        Reopen; lock_decide / cancel_decide / remind_decide / end_decide = THE lock, cancel, remind and end screens: the server's
-                       box through Wizard.decide_box — cq.lock_box (Lock · Preview lock, whose Lock re-checks the box),
+                       box through Wizard.decide_box — cq.lock_box (Lock · Preview lock: the same box with the roster as decide_box's embed),
                        cq.cancel_box (Cancel event · Cancel event with a note = reason + Tell the channel? · a plain press:
-                       no reason, the line posted — D3), cq.remind_box (Send reminder), LootMixin.end_box or rc.end_refusal's
+                       no reason, the line posted — D3), cq.remind_box (Send reminder), bot.end_box (LootMixin's) or rc.end_refusal's
                        refusal box (End the run); `refresh` = the same builder on the run as it stands), LootButton `loot.<gk>:<session>:<drop|->:<action>[:<arg>]`,
                        LootPick `lootpick.<gk>:…`, LootStartButton `lootstart.<gk>:open`; constructors take the guild key first (`raid.<gk>:…` ids; old ids still match,
                        g=None → guild_routing.resolve_button + each button's legacy matcher); raid_views ⇄ raid_buttons import each other at the bottom

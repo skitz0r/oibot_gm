@@ -108,6 +108,10 @@ PAGE_WORDS = {
     "autofill_nobody": "Nobody has joined yet, so there is nobody to place.",
     # Schedules (schedule_view): a pickup's Repeats, a schedule with no run times, no reminder, the regulars' words and
     # the next four weeks, and the empty Next events of a paused schedule
+    # what a schedule repeats (the schedule editor's Repeats choice on the site, flows_schedule's select in Discord)
+    "kinds": {"weekly": "Weekly", "lockout": "Day N of each lockout", "pickup": "Opened by an officer"},
+    # the New event page's and Edit lineup's section title, the one-off's confirmation heading in /raid open
+    "what_this_makes": "What this makes",
     "by_an_officer": "An officer opens each event with /raid open in Discord", "no_times": "No run times yet. Edit the schedule to add them.",
     "no_reminder": "No reminder", "for_seats": "{n} for {seats} seats", "short_every_week": "Short every week",
     "ready_every_week": "Ready every week", "short_weeks": "Short {n} of the next four weeks",
