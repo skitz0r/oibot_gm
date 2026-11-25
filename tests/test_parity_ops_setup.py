@@ -62,7 +62,7 @@ def owner_apply(reg, op, bot=None, **kw):
 def test_plain_op_edits_groups_channels_dm_and_default(reg):
     reg.role_names[RAID_LEAD] = "Raid Lead"
     op = ConfigOp(op="plain", target="runs", value="officers, @Raid Lead")
-    assert configops.describe(reg, op) == "plain text · Runs: officers → officers or @Raid Lead"
+    assert configops.describe(reg, op) == "plain text · Events: officers → officers or @Raid Lead"
     owner_apply(reg, op)
     assert reg.plain_who("runs") == ["officers", f"role:{RAID_LEAD}"]
     owner_apply(reg, ConfigOp(op="plain", target="Runs", value="default"))
@@ -103,7 +103,7 @@ def test_plain_is_owner_only_even_when_setup_is_opened(reg):
 
 def test_parser_context_shows_the_policy_to_officers_only(reg):
     text = configops.current_config_text(reg, officer=True)
-    assert "## Plain-text permissions" in text and "- runs (Runs): officers" in text and "- DMs: self" in text
+    assert "## Plain-text permissions" in text and "- runs (Events): officers" in text and "- DMs: self" in text
     assert "## Plain-text permissions" not in configops.current_config_text(reg, officer=False)
 
 
@@ -244,7 +244,7 @@ def test_run_time_changes_preview_the_next_runs(reg):
     assert configops.describe(reg, ConfigOp(op="schedule_set", target="thu", field="slots", value="Thu 20:00")).endswith("There is no schedule called thu.")
     assert "Thu 8:00 PM — after it: Barrow Deeps · Weekly: next Thu " in d and "20:00" not in d
     refused = configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Thu 20:00"))
-    assert "Run times belong to a schedule now" in refused  # phase 3: a raid has no run times of its own
+    assert "Event times belong to a schedule now" in refused  # phase 3: a raid has no run times of its own
     bad = configops.describe(reg, configops.coalesce([ConfigOp(op="schedule_set", target="x", field="raid", value="barrow_deeps"),
                                                       ConfigOp(op="schedule_set", target="x", field="lockout", value="9 at 20:00")])[0])
     assert "refused" in bad or "day" in bad
@@ -273,7 +273,7 @@ def test_test_run_tempo_and_dm(reg, rs):
     assert t["test_by"] == OWNER and t.get("open_dm") is True
     minutes = (ev.start - reg.now_local()).total_seconds() / 60
     assert 18 <= minutes <= 21
-    assert "test run is 'run <raid>" in configops.describe(reg, ConfigOp(op="test", value="run barrow_deeps turbo"))
+    assert "a test event is `run <raid>" in configops.describe(reg, ConfigOp(op="test", value="run barrow_deeps turbo"))
 
 
 def test_test_answer_mix_and_seed_all(reg, rs):

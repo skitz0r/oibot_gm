@@ -606,7 +606,7 @@ def test_gm_config_plain_reads_the_policy_from_here(reg):
     assert {c["id"]: c["why"] for c in table["channels"]} == {"22": "listed", "11": "the ops channel acts unless listed"}
     here = plain_read_text(reg, table, 33)
     assert here.startswith("**Here (#general): Own record only** — the default for other channels")
-    assert "• Runs: officers" in here and "• #raid-chat: Answers only — listed" in here and "The site and MCP: Acts (not configurable)" in here
+    assert "• Events: officers" in here and "• #raid-chat: Answers only — listed" in here and "The site and MCP: Acts (not configurable)" in here
     assert plain_read_text(reg, table, None).startswith("**Here (DMs): Own record only** — the DMs setting")
     assert "#general" not in plain_read_text(reg, table, 11).split("\n", 1)[1], "an unlisted channel shows only as 'here'"
 

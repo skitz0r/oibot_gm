@@ -295,8 +295,8 @@ def test_the_start_saves_the_lift_and_the_stamps_in_one_commit(data_root, old_st
 
     said = subprocess.run(["git", "log", "-1", "--format=%B"], cwd=store.root, check=True, capture_output=True, text=True).stdout.strip()
     assert said == (f"{GUILD}: schedules have ids of their own, the old names kept as aliases "
-                    f"(Barrow Deeps · Raid nights is now barrow-deeps); live runs stamped with their schedule and occurrence: "
-                    f"{files[0]['key']}, {files[1]['key']}; live runs keep the priority they read today: "
+                    f"(Barrow Deeps · Raid nights is now barrow-deeps); live events stamped with their schedule and occurrence: "
+                    f"{files[0]['key']}, {files[1]['key']}; live events keep the priority they read today: "
                     f"{files[0]['key']}, {files[1]['key']} (by migration)"), "what the save changed, each clause once"
     assert rc.migrate_at_start(reg, rs) == []
     store.flush()

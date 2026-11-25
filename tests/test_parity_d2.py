@@ -140,7 +140,7 @@ def test_news_lists_every_proposal_state_and_the_jobs_past_runs(reg, rs):
                             agent_runs=lambda job: [{"id": "review-1", "started_label": "Sun 27 Sep 9:00 AM", "outcome": "2 proposals"}, {"id": "review-0", "started_label": "Sat 26 Sep 9:00 AM", "outcome": "nothing new"}])
     s = state(reg, rs, OWNER, True, "did the Blood Pact change go through?", x)
     assert f"{p.id} “Blood Pact stacks” · guild_setting · confidence " in s and "· applied" in s and "commit abc1234" in s
-    assert "last runs of review: Sun 27 Sep 9:00 AM 2 proposals ; Sat 26 Sep 9:00 AM nothing new" in s
+    assert "latest outcomes of review: Sun 27 Sep 9:00 AM 2 proposals ; Sat 26 Sep 9:00 AM nothing new" in s
 
 
 def test_the_officer_index_counts_failed_proposals_as_still_to_decide(reg, rs):
@@ -297,7 +297,7 @@ def test_the_parser_context_labels_machine_times_in_12_hour_words(reg, rs):
     assert f"2030-03-01→2030-03-03 = {reg.span_label('2030-03-01', '2030-03-03')}" in text
     now_line = next(l for l in text.splitlines() if l.startswith("## Now: "))
     assert " = " in now_line and ("AM" in now_line or "PM" in now_line)
-    up = next(l for l in text.split("## Upcoming runs not opened yet", 1)[1].splitlines() if l.startswith("- barrow_deeps: "))
+    up = next(l for l in text.split("## Upcoming events not opened yet", 1)[1].splitlines() if l.startswith("- barrow_deeps: "))
     assert re.search(r"\d{4}-\d\d-\d\d \d\d:\d\d barrow-deeps \(= \w{3} \d{1,2} \w{3} \d{1,2}:\d\d [AP]M\)", up)
 
 

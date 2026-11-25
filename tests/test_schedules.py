@@ -170,13 +170,13 @@ def test_rosters_2_aims_the_lock_at_two_when_roles_allow(reg, rs):
 # ---------------------------------------------------------------- the registry refuses, and leaves config alone
 
 @pytest.mark.parametrize("sid, fields, why", [
-    ("alt", {"kind": "weekly"}, "at least one run time"),
+    ("alt", {"kind": "weekly"}, "at least one event time"),
     ("alt", {"slots": "Sat 20:00", "lock_hours_before": 200}, "Sheet opens must come before Locks"),
     ("alt", {"slots": "Sat 20:00", "lock_hours_before": 2, "confirm_hours_before": 6}, "Confirm by can.t come before Locks"),
     ("alt", {"slots": "Sat 20:00", "rosters": 5}, "1 to 4 rosters"),
     ("reset", {"kind": "lockout", "days": "4", "time": "20:00"}, "past the end of a 3-day lockout"),
     ("reset", {"kind": "lockout", "days": "1"}, "day(s) and a start time"),
-    ("alt", {"name": "Alt"}, "start it with its kind"),
+    ("alt", {"name": "Alt"}, "start it with how it repeats"),
     ("Bad Id!", {"slots": "Sat 20:00"}, "short key"),
     ("alt", {"slots": "Saturday at 8"}, "should look like"),
     ("alt", {"slots": "Sat 20:00", "colour": "red"}, "unknown schedule setting"),
@@ -220,7 +220,7 @@ def test_schedule_labels_are_words_never_24_hour(reg):
     s = reg.schedules(RID)[0]
     assert reg.schedule_label(RID, s) == "Tuesdays and Thursdays 7:30 PM, Saturdays 9:00 PM"
     reg.set_schedule("pug", {"kind": "pickup"}, "t", raid=RID)
-    assert reg.schedule_label(RID, reg.schedules(RID)[1]) == "Pickup template: opened by an officer"
+    assert reg.schedule_label(RID, reg.schedules(RID)[1]) == "Opened by an officer"
     assert reg.time_label("00:05") == "12:05 AM"
 
 
@@ -296,7 +296,7 @@ def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, rs, store
         await h.press("✕ Sat 8:00 PM")  # the last run time of a weekly schedule: the registry's rule, at the box
         await h.press("Back")
         await h.press("Review changes")
-        assert "at least one run time" in h.text and h.buttons() == ["Back"]
+        assert "at least one event time" in h.text and h.buttons() == ["Back"]
         await h.press("Back")
         assert "Every Saturday at 8:00 PM → " in h.text, "the draft is kept"
         await h.press("Back")  # leaving with edits: box 20
@@ -343,7 +343,7 @@ def test_plain_text_schedule_ops_describe_in_words_and_apply(reg, store):
     configops.apply(reg, lk, "Owner", is_owner=True)
     assert next(s for s in reg.schedules(RID) if s["id"] == "reset")["days"] == [1, 3]
     rm = ConfigOp(op="schedule_remove", target="alt")
-    assert configops.describe(reg, rm) == "Barrow Deeps: remove schedule Alt run (Saturdays 8:00 PM); runs already open keep their times"
+    assert configops.describe(reg, rm) == "Barrow Deeps: remove schedule Alt run (Saturdays 8:00 PM); events already open keep their times"
     assert configops.apply(reg, rm, "Owner", is_owner=True) == "Barrow Deeps: schedule Alt run removed"
     bad = ConfigOp(op="schedule_set", target=f"{RID}:alt", field="name", value="x")
     assert "Name a schedule by its id alone." in configops.describe(reg, bad)

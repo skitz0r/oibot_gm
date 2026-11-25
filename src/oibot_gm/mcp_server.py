@@ -375,7 +375,7 @@ def list_regulars(raid: str, schedule: str | None = None, guild: Guild = None) -
     if schedule:
         rows = [s for s in rows if s.get("key") == schedule.strip().lower()]
         if not rows:
-            raise ToolError(f"{raid} has no recurring schedule {schedule} (get_raid lists them; pickup templates have no regulars)")
+            raise ToolError(f"{raid} has no recurring schedule {schedule} (get_raid lists them; a schedule opened by an officer has no regulars)")
     return {"raid": rid, "series": rows}
 
 
@@ -973,7 +973,7 @@ def test_bench(action: str, count: int = 20, raid: str | None = None, tempo: str
         body["count"] = max(0, int(count))
     elif action == "run":
         if not raid:
-            raise ToolError("run needs a raid")
+            raise ToolError("a test event needs a raid")
         body.update(raid=get_raid(raid, guild)["id"], dm_open=dm_open)
         if tempo not in (None, ""):
             body["tempo"] = tempo

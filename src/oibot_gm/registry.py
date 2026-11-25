@@ -347,8 +347,8 @@ class Applicant(BaseModel):
 PLAIN_GROUPS: dict[str, tuple[str, list[str], str]] = {
     "self": ("Own record", ["registered"], "I'll be away Nov 1–3 · make Xanthe my main · I can't make tonight"),
     "members": ("Other people's records", ["officers"], "rank Jonny raider · Mira is away next week · turn Kessa's DMs off"),
-    "runs": ("Runs", ["officers"], "lock tonight's Barrow Deeps · Xanthe confirmed for tonight · pin Jonny in tonight · fill the empty seats"),
-    "comp": ("Raids, schedules and policy", ["officers"], "Barrow Deeps runs Tue 7:30 pm · at least 3 healers in Barrow Deeps · add a loot rule"),
+    "runs": ("Events", ["officers"], "lock tonight's Barrow Deeps · Xanthe confirmed for tonight · pin Jonny in tonight · fill the empty seats"),
+    "comp": ("Raids, schedules and policy", ["officers"], "Barrow Deeps on Tue 7:30 pm · at least 3 healers in Barrow Deeps · add a loot rule"),
     "raids": ("Auras", ["owner"], "fortitude is party-wide"),
     "setup": ("Guild setup", ["owner"], "post raid sheets in #signups · add @Raid Lead as an officer role"),
     "test": ("Test bench", ["officers"], "seed 20 puppets · clear the test bench"),
@@ -895,7 +895,7 @@ def parse_slots(text) -> list[str]:
 # schedule any more — a raid's own run times are an ordinary schedule (lift_schedule_ids moved an older file's).
 # Registry.raid_def hands a raid's schedules back as its `schedules`, the shape schedules_of reads.
 _OLD_DEFAULT = "default"  # an older file's `default` schedule (the raid's own run times): read only by the lifts and the way back
-RUN_TIMES_ON_SCHEDULE = "Run times belong to a schedule now. Add or change a schedule for this raid."
+RUN_TIMES_ON_SCHEDULE = "Event times belong to a schedule now. Add or change a schedule for this raid."
 NO_SCHEDULE = "There is no schedule called {sid}."
 ID_TAKEN = "Another schedule is already called {sid}. Pick another id."
 # a schedule's own raid named again while editing it (the parser named the raid of the very schedule asked about): naming a
@@ -926,12 +926,12 @@ DEFAULT_SCHEDULE_NAME = "Raid nights"  # the name an older file's `default` sche
 # picked time, no regulars, first come, ADHOC_DEFAULTS).
 SCHEDULE_CLASS = {"weekly": "recurring", "lockout": "recurring", "pickup": "adhoc"}
 CLASSES = ("recurring", "adhoc")
-CLASS_WORDS = {"recurring": "Recurring", "adhoc": "Ad hoc"}
+CLASS_WORDS = {"recurring": "Recurring", "adhoc": "One-off"}
 # A one-off run ("Another day and time…", a picked time that is none of the upcoming runs) comes from this VIRTUAL schedule:
 # schedule_def_of knows it (ad hoc defaults), schedules_of never lists it (listings, wizards, the config dump don't change),
 # and its run carries no schedule stamp (RaidEvent.schedule None), so a one-off is never mistaken for a schedule's run.
 ADHOC_SCHEDULE = "adhoc"
-ADHOC_SCHEDULE_NAME = "Ad hoc"
+ADHOC_SCHEDULE_NAME = "One-off"
 
 
 def schedule_class(kind: str | None) -> str:
@@ -1024,9 +1024,9 @@ def parse_follow(value) -> dict | None:
     try:
         n = int(n)
     except (TypeError, ValueError):
-        raise RegistryError('a follow-on\'s rosters is a whole number, e.g. "barrow_deeps x2"')
+        raise RegistryError('a later raid\'s rosters is a whole number, e.g. "barrow_deeps x2"')
     if not 1 <= n <= MAX_SCHEDULE_ROSTERS:
-        raise RegistryError(f"a follow-on's rosters is 1 to {MAX_SCHEDULE_ROSTERS}")
+        raise RegistryError(f"a later raid's rosters is 1 to {MAX_SCHEDULE_ROSTERS}")
     return {"raid": rid, "rosters": n, **({"starts": starts} if starts is not None else {})}
 
 
@@ -1046,7 +1046,7 @@ def parse_lineup_text(text) -> list[dict]:
 
 
 LINEUP_MAX = 4  # a run's raids in one night: the first and up to three after it, all from one signup
-LINEUP_MAX_WORDS = "A run holds at most 4 raids."
+LINEUP_MAX_WORDS = "An event holds at most 4 raids."
 LINEUP_ORDER = "Each raid starts after the one before it."
 
 
@@ -1220,7 +1220,7 @@ def _lift_raid_of(cfg: "GuildConfig", instance: str) -> int | None:
     for r in olds:
         if _is_old_default(r):
             if str(r.get("kind") or "weekly") != "weekly":
-                raise RegistryError("the default schedule is the raid's own weekly run times; add another schedule for other kinds")
+                raise RegistryError("the default schedule is the raid's own weekly event times; add another schedule for other kinds")
             row = norm_schedule({**{k: v for k, v in r.items() if k != "kind"}, "id": "x"})
             row.pop("kind", None)  # an old `default` row is weekly by what it is; lift_schedule_ids writes the kind
             rows.append({"id": _OLD_DEFAULT, **{k: v for k, v in row.items() if k != "id"}})
@@ -1264,7 +1264,7 @@ def lift_schedules(cfg: "GuildConfig", raids: dict | None = None, refused: list 
         except RegistryError as e:
             if refused is not None:
                 why = str(e).rstrip(".")
-                refused.append(f"{name}: its schedules were not moved to guild level, so no run opens from them: {why}. "
+                refused.append(f"{name}: its schedules were not moved to guild level, so no event opens from them: {why}. "
                                f"No setting of {name} can be saved until its schedules are corrected by hand in guild.yaml or the raid is reset.")
             continue
         if n is None:
@@ -1353,7 +1353,7 @@ def schedule_value(field: str, value):
         except (TypeError, ValueError):
             raise RegistryError("rosters must be a whole number")
         if not 1 <= n <= MAX_SCHEDULE_ROSTERS:
-            raise RegistryError(f"a run holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
+            raise RegistryError(f"a raid holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
         return n
     if field in RAID_HOURS_FIELDS:
         try:
@@ -1427,11 +1427,11 @@ def norm_schedule(row: dict) -> dict:
         if nv is not None and not ((k == "active" and nv is True) or (k == "rosters" and nv == 1)):  # the defaults aren't stored
             out[k] = nv
     if sid == ADHOC_SCHEDULE:
-        raise RegistryError(f"schedule id {ADHOC_SCHEDULE!r} is kept for one-off runs; pick another id")
+        raise RegistryError(f"schedule id {ADHOC_SCHEDULE!r} is kept for one-off events; pick another id")
     if sid == "test":  # a rehearsal's run dict carries it (raidcycle._REHEARSAL), never a real schedule
-        raise RegistryError("schedule id 'test' is kept for test runs; pick another id")
+        raise RegistryError("schedule id 'test' is kept for test events; pick another id")
     if sid == FOLLOW_SCHEDULE:
-        raise RegistryError(f"schedule id {FOLLOW_SCHEDULE!r} is kept for follow-on runs; pick another id")
+        raise RegistryError(f"schedule id {FOLLOW_SCHEDULE!r} is kept for later raids; pick another id")
     if sid == _OLD_DEFAULT:  # an older file's name for a raid's own run times (the way back renames to it)
         raise RegistryError(f"schedule id {_OLD_DEFAULT!r} is kept for older files; pick another id")
     out.setdefault("kind", "weekly")
@@ -1788,7 +1788,7 @@ NO_UPPER_LIMIT = "A minimum has no upper limit. Give only the minimum."
 # what a slot reads once the guild's own minimum is gone (a clear, or a 0 — never saved): the game's, else none at all
 GAME_MINIMUM_WORDS = "the game's minimum"
 NO_MINIMUM_WORDS = "no minimum of its own"
-MINIMUM_ON_RAID = "Minimums belong to the raid. Set them on the raid, not on one run."
+MINIMUM_ON_RAID = "Minimums belong to the raid. Set them on the raid, not on one event."
 
 
 def role_limit_refusal(field: str, value=None) -> str:
@@ -1885,7 +1885,7 @@ def lift_minimums(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
     for t in cfg.rosters:
         if isinstance(t, dict) and "comp_targets" in t:
             t.pop("comp_targets")
-            out.append(f"{t.get('name') or name(t.get('instance'))} run {t.get('key')}: its own make-up dropped")
+            out.append(f"{t.get('name') or name(t.get('instance'))} event {t.get('key')}: its own make-up dropped")
     return out
 
 
@@ -2037,7 +2037,7 @@ def lower_schedule_ids(cfg: "GuildConfig", members: list, applicants: list = ())
         first[e["id"]] = rid
         want.append(lowered_id(e, back))
     if too_long:
-        raise RegistryError(f"{join_words(too_long)} run more than 2 raids, which the older code can't read.")
+        raise RegistryError(f"{join_words(too_long)} hold more than 2 raids, which the older code can't read.")
     pairs = [(_lead_raid(e), w) for e, w in zip(cfg.schedules, want) if w is not None]
     clash = sorted({f"{rid}:{w}" for rid, w in pairs if pairs.count((rid, w)) > 1})
     if clash:
@@ -2102,7 +2102,7 @@ class Effects(BaseModel):
             out.append(f"{who} off its regulars and see{'s' if n == 1 else ''} a notice on their Me page.")
         k = len(self.open_runs)
         if k:
-            head = f"{self.open_runs[0]} is already open and keeps" if k == 1 else f"The {k} runs already open keep"
+            head = f"{self.open_runs[0]} is already open and keeps" if k == 1 else f"The {k} events already open keep"
             fate = f", but lock{'s' if k == 1 else ''} with {join_words(self.loses)}" if self.loses else ""
             out.append(f"{head} {'its' if k == 1 else 'their'} time and sheet{fate}.")
         return out
@@ -2656,7 +2656,7 @@ class Registry:
         'Pickup template'. Never a 24-hour time."""
         kind, n = s.get("kind") or "weekly", int(s.get("rosters") or 1)
         if kind == "pickup":
-            text = "Pickup template: opened by an officer"
+            text = "Opened by an officer"
         elif kind == "lockout":
             days = list(s.get("days") or [])
             lockout = int(self.raid_def(instance).get("lockout_days") or 7)
@@ -2668,7 +2668,7 @@ class Registry:
             for slot in sorted(s.get("slots") or [], key=lambda x: (order.get(x.split()[0][:3].title(), 9), x.split()[-1])):
                 day, hm = slot.split()
                 by_time.setdefault(hm, []).append(DAY_PLURAL.get(day[:3].title(), day))
-            text = ", ".join(f"{join_words(days)} {self.time_label(hm)}" for hm, days in sorted(by_time.items(), key=lambda kv: order.get(kv[1][0][:3], 9))) or "No run times yet"
+            text = ", ".join(f"{join_words(days)} {self.time_label(hm)}" for hm, days in sorted(by_time.items(), key=lambda kv: order.get(kv[1][0][:3], 9))) or "No event times yet"
         later = ([s["follow"]] if s.get("follow") else []) + list(s.get("then") or [])
         return (text + (f" · {n} rosters" if n > 1 else "") + (f" · then {self.later_words(later)}" if later else "")
                 + ("" if s.get("active", True) else " · paused"))
@@ -2799,18 +2799,18 @@ class Registry:
             if r["locked"]:
                 return [f"{was} is locked, so it stays at its real moment. {now_}"]
             if r["test"]:
-                return [f"{was} is a test run, so it stays at its real moment. {now_}"]
+                return [f"{was} is a test event, so it stays at its real moment. {now_}"]
             if mode == "move" and r["movable"]:
                 return [f"{was} moves with the clock and keeps its signups. It still starts at {fmt12(r['moved'])} on the new clock."]
             if mode == "move":
                 return [f"{was} can't move with the clock, because its lock would already be past. {now_}"]
-            return [f"{was} stays at its real moment. {now_}" + ("" if mode == "keep" else " Move open runs with the clock to keep its time.")]
+            return [f"{was} stays at its real moment. {now_}" + ("" if mode == "keep" else " Move open events with the clock to keep its time.")]
         if not rows:
             return out
         # several runs: one sentence per fate, at most three (the Confirm rule, design §5.57)
 
         def runs(n: int, what: str) -> str:
-            return f"the {n} {what} runs" if n > 1 else f"the one {what} run"
+            return f"the {n} {what} events" if n > 1 else f"the one {what} event"
 
         fixed = [r for r in rows if r["locked"] or r["test"]]
         locked = [r for r in fixed if r["locked"]]
@@ -2835,7 +2835,7 @@ class Registry:
             out.append(h[:1].upper() + h[1:] + f" stay{'s' if len(opened) == 1 else ''} at {'its' if len(opened) == 1 else 'their'} real moment, "
                        f"so {'its' if len(opened) == 1 else 'their'} clock time changes.")
             if mode != "keep":
-                out.append("Move open runs with the clock to keep their times.")
+                out.append("Move open events with the clock to keep their times.")
         return out
 
     def timezone_refusal(self, zone: str, rs=None, mode: str = "") -> str | None:
@@ -2843,16 +2843,16 @@ class Registry:
         `mode` saying what to do with the live runs ("keep" / "move") — its roster was confirmed for that moment, so
         the owner must have seen it. Every surface sends the mode its confirm showed; plain text says "keep"."""
         if str(mode or "").strip().lower() not in self.TZ_MODES:
-            raise RegistryError("what to do with the runs already open: keep (they stay at their real moment) or move (open runs move with the clock)")
+            raise RegistryError("what to do with the events already open: keep (they stay at their real moment) or move (open events move with the clock)")
         if str(mode or "").strip():
             return None
         locked = [f"{r['name']} {self.local12(r['old'])}" for r in self.timezone_runs(zone, rs) if r["locked"]]
         if not locked:
             return None
-        head = f"{locked[0]} is locked" if len(locked) == 1 else f"{len(locked)} runs are locked"
+        head = f"{locked[0]} is locked" if len(locked) == 1 else f"{len(locked)} events are locked"
         return (f"{head}, and {zone} reads {'its' if len(locked) == 1 else 'their'} time differently. "
-                "Say keep to change it anyway, and locked runs stay at their real moment. "
-                "Say move to also move the open runs with the clock.")
+                "Say keep to change it anyway, and locked events stay at their real moment. "
+                "Say move to also move the open events with the clock.")
 
     def load_config(self) -> GuildConfig:
         """guild.yaml as a GuildConfig, an older file's schedules lifted to the guild level in memory (lift_schedules —
@@ -2937,9 +2937,9 @@ class Registry:
         if dropped:
             parts.append(f"dropped: {'; '.join(dropped)}")
         if stamped:
-            parts.append(f"live runs stamped with their schedule and occurrence: {', '.join(stamped)}")
+            parts.append(f"live events stamped with their schedule and occurrence: {', '.join(stamped)}")
         if weighed:
-            parts.append(f"live runs keep the priority they read today: {', '.join(weighed)}")
+            parts.append(f"live events keep the priority they read today: {', '.join(weighed)}")
         return "; ".join(parts) or "schedules saved"
 
     def migrate_schedules(self, by: str = "migration", stamped: list[str] = (), weighed: list[str] = ()) -> list[str]:
@@ -4965,12 +4965,12 @@ class Registry:
         days = self.attendance_window(window_days)
         tracked = self.attendance_tracked(days, at)
         if tracked["first"] is None:
-            return "not tracked yet — counts from the first run that ends"
+            return "not tracked yet — counts from the first raid that ends"
         att, total = self.attendance(member, days, bench=True, at=at)
         t = at or self.now_local()
         first = datetime.fromisoformat(tracked["first"])
         span = f"since {self.local12(first, '%a %d %b')}" if first > t - timedelta(days=days) else f"in the last {days} days"
-        return f"{att} of {total} {span}" if total else f"no runs for you {span}"
+        return f"{att} of {total} {span}" if total else f"no raids for you {span}"
 
     def set_item_tiers(self, ref, tiers: dict, by: str) -> tuple[str, dict]:
         """Loot › Items, the `tier` op and MCP tier_item: write tiers per spec key into the guild's item file
@@ -5489,7 +5489,7 @@ class Registry:
         if entry is None:
             kind = fields.get("kind") or ("weekly" if "slots" in fields else "lockout" if ("days" in fields or "time" in fields) else None)
             if not kind:
-                raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'}; start it with its kind (weekly, lockout or pickup) or its run times")
+                raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'}; start it with how it repeats (weekly, lockout or opened by an officer) or its event times")
             entry = {"id": sid, "kind": kind}
             stored.append(entry)
         fields = dict(fields)
@@ -5561,7 +5561,7 @@ class Registry:
             adhoc = schedule_class(s.get("kind")) == "adhoc"
             live = any(not isinstance(t.get("weights"), dict) for t in open_dicts)
             if live and s.get("weights"):
-                loses.append("the ad hoc weights" if adhoc else "the raid's weights")
+                loses.append("the one-off weights" if adhoc else "the raid's weights")
             if regs and not adhoc:
                 loses.append("no regulars")
         return Effects(name=s.get("name") or sid, label=self.schedule_label(s["raid"], s), regulars=regs, open_runs=runs, loses=loses)
@@ -5613,7 +5613,7 @@ class Registry:
                 e = norm_schedule(row)
                 f = e.get("follow")
                 if f and f["raid"] == instance:  # _check_schedules' words, before the stored lineup refuses it in its own
-                    raise RegistryError(f"{schedule_name(e)}: a follow-on is another raid, not the raid itself")
+                    raise RegistryError(f"{schedule_name(e)}: a later raid is another raid, not the raid itself")
                 if e["id"] in others:
                     raise RegistryError(ID_TAKEN.format(sid=e["id"]))
                 out.append(e)
@@ -5734,7 +5734,7 @@ class Registry:
             if n < 0:
                 raise RegistryError(f"{words}: a minimum can't be below 0.")
             if n > size:
-                raise RegistryError(f"{words}: at least {n} is more than the {size} a run seats.")
+                raise RegistryError(f"{words}: at least {n} is more than the {size} a raid seats.")
             note = str(t.get("note") or "").strip()
             if len(note) > COMP_NOTE_MAX:
                 raise RegistryError(f"{words}: the reason holds {COMP_NOTE_MAX} characters, and {len(note)} were given.")
@@ -5779,20 +5779,20 @@ class Registry:
             if not (se["lock_hours_before"] <= float(se["nudge_hours_before"]) <= se["signup_lead_hours"]):
                 raise RegistryError(TIMING_REFUSALS["reminder"])
             if not 1 <= int(s.get("rosters") or 1) <= MAX_SCHEDULE_ROSTERS:
-                raise RegistryError(f"{name}: a run holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
+                raise RegistryError(f"{name}: a raid holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
             later = ([s["follow"]] if s.get("follow") else []) + list(s.get("then") or [])
             for f in later:
                 if f["raid"] not in self.profile.raids:
-                    raise RegistryError(f"{name}: unknown raid {f['raid']} for the follow-on (one of {', '.join(self.profile.raids)})")
+                    raise RegistryError(f"{name}: unknown raid {f['raid']} for the later raid (one of {', '.join(self.profile.raids)})")
                 if f["raid"] == eff.get("id"):
-                    raise RegistryError(f"{name}: a follow-on is another raid, not the raid itself")
+                    raise RegistryError(f"{name}: a later raid is another raid, not the raid itself")
             if later and eff.get("id") in self.profile.raids:
                 try:
                     self.lineup_offsets([{"raid": eff["id"], "rosters": 1}, *later])
                 except RegistryError as e:
                     raise RegistryError(f"{name}: {e}") from None
             if s["kind"] == "weekly" and not s.get("slots"):
-                raise RegistryError(f"{name}: a weekly schedule needs at least one run time")
+                raise RegistryError(f"{name}: a weekly schedule needs at least one event time")
             if s["kind"] == "lockout":
                 if not eff.get("first_open"):
                     raise RegistryError(f"{name}: a lockout schedule counts from the raid's first opening; set that first")
@@ -5856,7 +5856,7 @@ class Registry:
                 if t.tzinfo is None:
                     t = t.replace(tzinfo=_Z(self.config.timezone))
                 over["first_open"] = t.isoformat()
-            value = self.local12(over["first_open"]) if over.get("first_open") else "no first lockout set — weekly runs start at the next run time; a day-of-lockout schedule needs one"  # stored ISO, shown in words
+            value = self.local12(over["first_open"]) if over.get("first_open") else "no first lockout set — weekly events start at the next event time; a day-of-lockout schedule needs one"  # stored ISO, shown in words
         elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
             raise RegistryError(role_limit_refusal(field, value))  # the old limit fields: a minimum is set as a minimum (set_minimums)
         else:
@@ -6209,7 +6209,7 @@ class Registry:
         names = [re.sub(r"\s*\(.*?\)", "", n) for n in c["buff_names"] + c["family_names"]]
         what = join_words(names) if len(names) <= 3 else " and ".join(p for p in parts if p)
         return (f"The guild drops its changes to {what}, families it declared included. "
-                "From the next run on, the groups, cards and board use the game's defaults. A roster already locked stays as it is.")
+                "From the next event on, the groups, cards and board use the game's defaults. A roster already locked stays as it is.")
 
     @_config_verb("buffs")
     def clear_aura_overrides(self, by: str, bid: str | None = None) -> str:
@@ -6788,7 +6788,7 @@ class Registry:
         known = dict(self.series("recurring"))
         if key not in known:
             if key in dict(self.series("adhoc")):
-                raise RegistryError(f"{self.series_label(key)} is ad hoc (a pickup template): ad hoc runs have no regulars — first come, first rostered")
+                raise RegistryError(f"{self.series_label(key)} is opened by an officer, so it has no regulars — first come, first rostered")
             raise RegistryError(f"no recurring schedule {key or '?'}" + (f" (recurring: {', '.join(known.values())})" if known else " — add a weekly or lockout schedule first"))
         return key
 
@@ -6819,7 +6819,7 @@ class Registry:
         if m is None or not m.active():
             raise RegistryError("they have no registered characters yet — they register first")
         if m.test:
-            raise RegistryError(f"{m.display_name} is a test puppet: a test run treats every puppet as a regular already")
+            raise RegistryError(f"{m.display_name} is a test puppet: a test event treats every puppet as a regular already")
         c = self.own_character(m.active(), character) if character else m.main
         if not c:
             raise RegistryError(f"{m.display_name} has no {'character named ' + character if character else 'main'} yet")
@@ -6983,7 +6983,7 @@ class Registry:
         m = self.members.get(discord_id)
         return [a for a in (m.placement_asks if m else []) if a.get("answer") is None]
 
-    ANSWER_WORDS = {"yes": "yes", "no": "can't make it", "expired": "no answer in time", "cancelled": "the run was cancelled",
+    ANSWER_WORDS = {"yes": "yes", "no": "can't make it", "expired": "no answer in time", "cancelled": "the event was cancelled",
                     "withdrawn": "withdrawn by an officer", "released": "the seat was released"}
 
     def close_placement_ask(self, discord_id: int, roster: str, answer: str, by: str | None = None, *, save: bool = True) -> dict | None:
@@ -7088,7 +7088,7 @@ class Registry:
             last = next((a for a in reversed(m.placement_asks) if a["roster"] == roster), None)
             raise RegistryError(self.already_answered(last) if last and last.get("answer") else "Nothing to answer for that roster.")
         ask["answer"], ask["answered_at"], ask["answered_by"] = ("yes" if yes else "no"), now(), by
-        run = (self.config.roster(roster) or {}).get("name") or "the run"  # the run as people read it (raid + 12-hour start), never its key
+        run = (self.config.roster(roster) or {}).get("name") or "the event"  # the run as people read it (raid + 12-hour start), never its key
         line = f"{m.display_name} confirmed {ask['character']} on {run}" if yes else f"{m.display_name} can't make {run} — seat re-opened"
         return m, ask, line
 

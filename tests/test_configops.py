@@ -73,7 +73,7 @@ def test_pin_apply_refusals(reg, rs):
         configops.apply(reg, ConfigOp(op="pin", target=ev.team, member="Nobody", value="in"), "officer", is_owner=False, raids=rs)
     with pytest.raises(RegistryError, match="in \\| out \\| clear"):
         configops.apply(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="maybe"), "officer", is_owner=False, raids=rs)
-    with pytest.raises(RegistryError, match="no live run"):
+    with pytest.raises(RegistryError, match="no live event"):
         configops.apply(reg, ConfigOp(op="pin", target="bd-0101-0000", member=m.display_name, value="in"), "officer", is_owner=False, raids=rs)
     with pytest.raises(RegistryError, match="isn't on this sheet"):  # a member who never answered can't be pinned
         configops.apply(reg, ConfigOp(op="pin", target=ev.team, member=m.display_name, value="in"), "officer", is_owner=False, raids=rs)

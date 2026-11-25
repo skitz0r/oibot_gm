@@ -61,7 +61,7 @@ def test_run_move_describes_and_moves_through_board_move(reg, rs):
         with pytest.raises(RegistryError, match=why.split("“")[0]):
             apply(reg, bot, bad)
     other = reg.test_members()[8]
-    assert "hasn't joined this run" in configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=other.display_name, value="g1"))
+    assert "hasn't joined this event" in configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=other.display_name, value="g1"))
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, ConfigOp(op="run_move", target=ev.key, member=names[0], value="g1"), "Officer", True, raids=rs)
 
@@ -188,7 +188,7 @@ def test_run_propose_previews_remembers_and_uses(reg, rs, monkeypatch):
     with pytest.raises(RegistryError, match="strategy is one of"):
         apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, value="chaos"))
     lock_with_board(reg, rs, ev, names[:4])
-    assert "proposals shape an open run" in configops.describe(reg, ConfigOp(op="run_propose", target=ev.key))
+    assert "proposals shape an open event" in configops.describe(reg, ConfigOp(op="run_propose", target=ev.key))
 
 
 def test_run_propose_memory_is_per_requester(reg, rs, monkeypatch):
@@ -253,7 +253,7 @@ def test_live_runs_text_has_the_board_and_unopened_runs(reg, rs):
     run(bot.save_board(reg, rs, ev, [names[:2]], by="t"))
     text = configops.live_runs_text(reg, rs)
     assert f"\n<data>\n{ev.key} board: g1 {names[0]}, {names[1]} · bench: {', '.join(names[2:])}\n</data>" in text, "names people chose are fenced as data (stage C L1)"
-    assert "## Upcoming runs not opened yet" in text
+    assert "## Upcoming events not opened yet" in text
     line = next(ln for ln in text.splitlines() if ln.startswith("- barrow_deeps: "))
     assert line.count(" barrow-deeps") == 6 and " 19:30 barrow-deeps" in line  # each run by its schedule id
 

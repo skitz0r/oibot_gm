@@ -88,7 +88,7 @@ def test_default_matrix(g, who, where):
 def test_refusals_say_who_and_where(g):
     member = g.me.discord_id
     assert one(g.reg, SAMPLE["members"](g), member, channel=OPS_CH) == "Only officers can change someone else's absence."
-    assert one(g.reg, SAMPLE["runs"](g), member, officer=True, channel=GENERAL_CH) == f"Plain text can't change runs in <#{GENERAL_CH}> — use <#{OPS_CH}> or <#{ANALYTICS_CH}>."
+    assert one(g.reg, SAMPLE["runs"](g), member, officer=True, channel=GENERAL_CH) == f"Plain text can't change events in <#{GENERAL_CH}> — use <#{OPS_CH}> or <#{ANALYTICS_CH}>."
     assert one(g.reg, SAMPLE["raids"](g), member, officer=True, channel=OPS_CH) == "Only the owner can change auras."
     assert "in DMs" in one(g.reg, SAMPLE["runs"](g), member, officer=True, channel=None)
     assert one(g.reg, SAMPLE["self"](g), 424242, channel=GENERAL_CH) == "Only registered members can change your absences — /register first."
@@ -100,7 +100,7 @@ def test_custom_policy_roles_and_channels(g):
                           "channels": {str(RAIDERS_CH): "act", str(GENERAL_CH): "answer", str(OPS_CH): "ignore"}, "dm": "answer"}, "owner")
     # a Raid Lead acts on runs in #raiders, not in #general (answer only), not in DMs
     assert one(reg, SAMPLE["runs"](g), member, roles=[RAID_LEAD], channel=RAIDERS_CH) is None
-    assert one(reg, SAMPLE["runs"](g), member, roles=[], channel=RAIDERS_CH) == f"Only officers or @role {RAID_LEAD} can change runs."
+    assert one(reg, SAMPLE["runs"](g), member, roles=[], channel=RAIDERS_CH) == f"Only officers or @role {RAID_LEAD} can change events."
     assert "only answers questions" in one(reg, SAMPLE["runs"](g), member, roles=[RAID_LEAD], channel=GENERAL_CH)
     assert "only answers questions" in one(reg, SAMPLE["self"](g), member, officer=True, channel=None)
     # the ops channel was switched off: even officers are refused there; the analytics channel still acts by default
@@ -124,7 +124,7 @@ def test_policy_is_validated_and_stored(g):
         with pytest.raises((RegistryError, ValueError)):
             reg.set_plain_policy(bad, "owner")
     line = reg.set_plain_policy({"groups": {"runs": ["officers", f"role:{RAID_LEAD}"], "members": ["officers"]}, "dm": "act"}, "owner")
-    assert "Runs →" in line and "DMs self → act" in line and "Other people's" not in line  # members left at its default isn't a change
+    assert "Events →" in line and "DMs self → act" in line and "Other people's" not in line  # members left at its default isn't a change
     assert reg.config.plain.groups == {"runs": ["officers", f"role:{RAID_LEAD}"]}  # defaults aren't stored
     fresh = type(reg)(reg.store, reg.key, reg.profile)
     assert fresh.plain_who("runs") == ["officers", f"role:{RAID_LEAD}"] and fresh.plain_mode(None) == "act"
@@ -294,7 +294,7 @@ def test_api_officers_read_owner_writes(web_client, g):
     r = post_confirmed(w.c, "/api/admin/plain-permissions", body, headers={"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"})
     assert r.status_code == 200, r.text
     assert g.reg.plain_who("runs") == ["officers", f"role:{RAID_LEAD}"] and g.reg.plain_mode(GENERAL_CH) == "answer" and g.reg.plain_mode(None) == "act"
-    assert "Runs → officers or @Raid Lead" in r.json()["message"]
+    assert "Events → officers or @Raid Lead" in r.json()["message"]
     assert any("plain-text permissions" in t for _, t in w.bot.ops.lines)
     bad = w.c.post("/api/admin/plain-permissions", json={"groups": {"runs": ["admins"]}}, headers={"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"})
     assert bad.status_code == 400 and "who is" in bad.json()["error"]

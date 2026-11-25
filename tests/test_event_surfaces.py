@@ -149,7 +149,7 @@ def test_plain_text_open_with_more_raids_than_a_run_holds_is_refused(store, prof
     assert str(e.value) == rc.LINEUP_GONE.format(raid="nope_raid")
     with pytest.raises(RegistryError) as e:
         configops.lineup_of_op(reg, HYJAL, "hyjal_summit_forever")
-    assert str(e.value) == "Hyjal Summit is the run's first raid. Pick another raid to follow it."
+    assert str(e.value) == "Hyjal Summit is the event's first raid. Pick another raid to follow it."
 
 
 def test_a_plain_text_lineup_edit_keeps_a_kept_raids_own_start(reg, rs):
@@ -337,7 +337,7 @@ def test_a_create_shaped_lineup_on_an_existing_id_is_refused_unless_the_edit_car
     draft = {"lineup": [{"raid": RID, "rosters": 1}, {"raid": ONY, "rosters": 1}], "slots": ["Fri 20:00"]}
     with pytest.raises(RegistryError) as e:
         configops.ops_from_fields(reg, "schedule", "alt", dict(draft))
-    assert str(e.value) == "Raid nights already exists. Change its raids and its run times in two saves, one after the other."
+    assert str(e.value) == "Raid nights already exists. Change its raids and its event times in two saves, one after the other."
     assert reg.schedule_entry("alt")["slots"] == ["Tue 19:30"]
     with pytest.raises(RegistryError) as e:
         configops.ops_from_fields(reg, "schedule", "alt", {"lineup": [{"raid": ONY, "rosters": 1}], "slots": ["Fri 20:00"]})

@@ -52,7 +52,7 @@ def test_schedule_follow_is_validated_and_read_back(reg):
         reg.set_schedule("tue", {"follow": "hyjal_summit_forever x2"}, "t")
     reg.set_schedule("tue", {"follow": "none"}, "t")
     assert next(x for x in reg.schedules(LEAD) if x["id"] == "tue")["follow"] is None
-    with pytest.raises(RegistryError, match="kept for follow-on"):
+    with pytest.raises(RegistryError, match="kept for later raids"):
         reg.set_schedule("after", {"slots": "Tue 18:30"}, "t", raid=LEAD)
 
 
@@ -630,14 +630,14 @@ def test_the_owners_sentence_as_ops(reg, rs):
     assert "6:30 PM" in lines[2] and "15" in lines[2] and "18:30" not in lines[2]
     assert "follow" in configops.SCHEMA_TEXT and "x<N>" in configops.SCHEMA_TEXT
     bad = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="hyjal_summit_forever x2")
-    assert "is the run's first raid. Pick another raid to follow it." in configops.describe(reg, bad)
+    assert "is the event's first raid. Pick another raid to follow it." in configops.describe(reg, bad)
     assert configops.apply(reg, ops[1], by="t", is_owner=True)  # the schedule is created by its run times first
     fw = ConfigOp(op="schedule_set", target="tue", field="follow", value="barrow_deeps x2")
-    assert "no follow-on → then Barrow Deeps ×2" in configops.describe(reg, fw)
+    assert "no later raid → then Barrow Deeps ×2" in configops.describe(reg, fw)
     assert configops.apply(reg, fw, by="t", is_owner=True)
     assert next(s for s in reg.schedules(LEAD) if s["id"] == "tue")["follow"] == {"raid": FOLLOW, "rosters": 2}
     off = ConfigOp(op="schedule_set", target="tue", field="follow", value="none")
-    assert "no follow-on" in configops.describe(reg, off)
+    assert "no later raid" in configops.describe(reg, off)
 
 
 def test_run_open_applies_with_the_follow_on(reg, rs, monkeypatch):
@@ -658,7 +658,7 @@ def test_run_open_on_an_open_run_says_the_follow_on_is_not_added(reg, rs):
     run(configops.apply_async(reg, plain, by="Jon", is_owner=True, bot=bot))
     ask = ConfigOp(op="run_open", target=LEAD, value=f"{day} 18:30", field="adhoc", text="barrow_deeps x2")
     line = configops.describe(reg, ask)
-    assert line.endswith(". A follow-on can't be added to a run that is already open. Cancel it and open the night again.") and "then" not in line
+    assert line.endswith(". A later raid can't be added to an event that is already open. Cancel it and open the night again.") and "then" not in line
     assert ";" not in line and " — " not in line.split(": already ", 1)[1]
     paired = ConfigOp(op="run_open", target=LEAD, value=f"{day} 20:00", field="adhoc", text="barrow_deeps x2")
     run(configops.apply_async(reg, paired, by="Jon", is_owner=True, bot=bot))
@@ -699,9 +699,9 @@ def test_open_route_takes_a_follow_on(reg, rs, monkeypatch):
     again = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": {"raid": FOLLOW, "rosters": 1}}, headers=bearer()).json()
     assert again["exists"] == "open" and again["follow"]["rosters"] == 2  # the run already there: ITS follow-on, not the one asked
     bad = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "follow": "hyjal_summit_forever x2"}, headers=bearer())
-    assert bad.status_code == 400 and "is the run's first raid. Pick another raid to follow it." in bad.json()["error"]
+    assert bad.status_code == 400 and "is the event's first raid. Pick another raid to follow it." in bad.json()["error"]
     bad = fc.post(f"/api/raid/{LEAD}/open", json={"when": when, "schedule": "adhoc", "follow": "hyjal_summit_forever x2"}, headers=bearer())
-    assert bad.status_code == 400 and "is the run's first raid. Pick another raid to follow it." in bad.json()["error"]
+    assert bad.status_code == 400 and "is the event's first raid. Pick another raid to follow it." in bad.json()["error"]
 
 
 def test_me_routes_leave_and_stay(reg, rs, monkeypatch):

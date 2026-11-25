@@ -66,7 +66,7 @@ def test_the_one_off_schedule_is_virtual(reg):
     sd = reg.schedule_def(RID, ADHOC_SCHEDULE)
     assert sd["class"] == "adhoc" and sd["lock_hours_before"] == 2 and sd["confirm"] is False
     assert ADHOC_SCHEDULE not in [s["id"] for s in reg.schedules(RID)], "never listed: listings, wizards and the config dump don't change"
-    with pytest.raises(RegistryError, match="kept for one-off runs"):
+    with pytest.raises(RegistryError, match="kept for one-off events"):
         reg.set_schedule(ADHOC_SCHEDULE, {"kind": "pickup"}, "t", raid=RID)
     t = soon(reg)
     assert rc.schedule_stamp(ADHOC_SCHEDULE) is None, "a one-off carries no schedule: it is never a schedule's run"

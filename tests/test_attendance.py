@@ -176,7 +176,7 @@ def test_scoring_uses_registry_attendance_and_keeps_unknown_neutral(reg, rs):
 
 def test_the_sentence_is_computed(reg, rs):
     a = reg.test_members()[0]
-    assert reg.attendance_text(a) == "not tracked yet — counts from the first run that ends"
+    assert reg.attendance_text(a) == "not tracked yet — counts from the first raid that ends"
     done_run(reg, rs, [a], [a], 5, confirm=[(a, "yes")])
     assert reg.attendance_text(a).startswith("1 of 1 since "), "the window reaches back past the guild's first run"
     done_run(reg, rs, [a], [], 40, n=1)  # an empty run 40 days back: no activity, never the 'first run'
@@ -184,7 +184,7 @@ def test_the_sentence_is_computed(reg, rs):
     done_run(reg, rs, [a], [a], 40, confirm=[(a, "yes")], n=2)
     assert reg.attendance_text(a) == "1 of 1 in the last 30 days"
     b = reg.test_members()[1]
-    assert reg.attendance_text(b) == "no runs for you in the last 30 days"
+    assert reg.attendance_text(b) == "no raids for you in the last 30 days"
 
 
 # ---------------------------------------------------------------- the roster solver's input (design §3.1 decision 10)

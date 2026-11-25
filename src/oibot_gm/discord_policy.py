@@ -252,7 +252,7 @@ async def compile_and_confirm(interaction: discord.Interaction, reg: Registry, p
         await send(f"⛔ {e}", ephemeral=True)
         return
     if not await pending_reading(send, reg, ps, doc, ops, ephemeral=True):
-        await send(f"The {doc} policy changed while I was reading it — run `/gm policy reload`.", ephemeral=True)
+        await send(f"The {doc} policy changed while I was reading it — use `/gm policy reload`.", ephemeral=True)
 
 
 async def pending_reading(send, reg: Registry, ps: policy_mod.PolicyStore, doc: str, ops: Ops, **kw) -> bool:
@@ -522,7 +522,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         body = configops.plain_footer(body[:3900])
     e = discord.Embed(title=f"{reg.config.name} · proposed changes" if reg.many_guilds else "Proposed changes", colour=TEAL, description=body[:4000])
     if any(op.op in configops.RUN_OPS or op.op == "test" for op in allowed):
-        e.set_footer(text="Run actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
+        e.set_footer(text="Event actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
     revs = configops.board_revs(reg, allowed, raids)  # the boards as this diff shows them
     confirm = ConfigConfirmView(reg, req, ps, ops, author.id, name, channel, revs=revs)
     view = apply_button(confirm)

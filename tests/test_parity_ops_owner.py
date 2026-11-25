@@ -109,7 +109,7 @@ def test_proposal_approve_then_dismiss(reg):
     p = a_proposal(reg)
     op = ConfigOp(op="proposal", target=p.id, value="approve", reason="checked the patch notes")
     assert configops.describe(reg, op) == (f"news proposal {p.id} “Barrow Deeps resets weekly” (guild_setting, high): proposed → approved — the apply job "
-                                           "carries it out at its next run; note: checked the patch notes")
+                                           "carries it out the next time it runs; note: checked the patch notes")
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, op, "Officer", is_owner=False)
     bot = Bot()

@@ -42,7 +42,7 @@ def test_a_four_raid_row_and_its_stored_entry_round_trip():
     entry = R.to_stored_schedule("hyjal_summit_forever", row)
     assert [e["raid"] for e in entry["lineup"]] == ["hyjal_summit_forever", "barrow_deeps", "onyxias_lair", "x"] and "then" not in entry
     assert R.from_stored_schedule(entry) == ("hyjal_summit_forever", row)
-    with pytest.raises(RegistryError, match="A run holds at most 4 raids."):
+    with pytest.raises(RegistryError, match="An event holds at most 4 raids."):
         R.parse_lineup([{"raid": r} for r in "abcde"])
 
 

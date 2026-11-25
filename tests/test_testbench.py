@@ -58,7 +58,7 @@ def start_in(reg, minutes=180):
     return (reg.now_local() + timedelta(minutes=minutes)).replace(second=0, microsecond=0)
 
 
-# ---------------------------------------------------------------- a rehearsal never meets a real run
+# ---------------------------------------------------------------- a rehearsal never meets a real event
 
 def test_a_test_run_and_a_real_run_at_the_same_minute_get_separate_keys(reg, rs):
     """The bug: open_test_run opened with schedule=None, so its key equalled a real default-schedule run's at that minute
@@ -72,7 +72,7 @@ def test_a_test_run_and_a_real_run_at_the_same_minute_get_separate_keys(reg, rs)
     join(reg, rs, test, reg.test_members()[:5])
     assert not real.signups, "puppets never land on the real sheet"
     assert reg.config.roster(real.team).get("test") is None and reg.config.roster(test.team)["test"] is True
-    # the real run's own settings: a test roster is never read for it, nor the schedule 'test' for either
+    # the real event's own settings: a test roster is never read for it, nor the schedule 'test' for either
     assert rc.open_run(reg, rs, "barrow_deeps", at, by="scheduler", schedule=sid) is real
 
 
@@ -92,7 +92,7 @@ def test_a_rehearsal_of_a_named_schedule_never_meets_that_schedules_run(reg, rs)
 
 
 def test_the_schedule_id_test_is_kept_for_test_runs(reg):
-    with pytest.raises(RegistryError, match="kept for test runs"):
+    with pytest.raises(RegistryError, match="kept for test events"):
         reg.set_schedule("test", {"kind": "weekly", "slots": "Sat 20:00"}, "t", raid="barrow_deeps")
 
 
@@ -127,7 +127,7 @@ def test_the_guards_hold_in_the_new_key_space(reg, rs, monkeypatch):
     assert "4242" not in ev.signups, "nothing written on the rehearsal's sheet"
     sid = night_at(reg, ev.start)
     real_run = rc.open_run(reg, rs, "barrow_deeps", ev.start, by="scheduler", schedule=sid)
-    assert real_run is not ev and not real_run.test, "the real run at that minute is its own"
+    assert real_run is not ev and not real_run.test, "the real event at that minute is its own"
 
 
 # ---------------------------------------------------------------- the puppet DM digest
@@ -219,7 +219,7 @@ def test_test_run_cards_post_in_the_asking_channel_with_the_test_badge(reg, rs):
     assert posted is asking and ev.message_id and reg.config.roster(ev.team)["test_channel"] == 77
     assert bot.officer_channel(reg, ev) is asking, "its health / lock cards post where it was asked for"
     real = rc.open_run(reg, rs, "barrow_deeps", start_in(reg, 600), by="t")
-    assert bot.officer_channel(reg, real) is roster, "a real run is untouched"
+    assert bot.officer_channel(reg, real) is roster, "a real event is untouched"
     assert "🧪 Test run · Locked" in header_text(_header(reg, ev, "Locked", []))
     assert "🧪" not in header_text(_header(reg, real, "Locked", []))
 
@@ -452,7 +452,7 @@ def test_answer_route_mix_one_puppet_asks_and_the_real_run_refusal(reg, rs, site
     assert r.status_code == 200 or "no open ask" in r.text
     real = rc.open_run(reg, rs, "barrow_deeps", start_in(reg, 700), by="t")
     r = client.post("/api/test/answer", json={"run": real.key, "join": 1}, headers=bearer())
-    assert r.status_code == 400 and "real run" in r.text and not real.signups
+    assert r.status_code == 400 and "real run" in r.text and not real.signups  # discord_pool.test_answer: Task 5 rewords it
 
 
 def test_clear_route_previews_the_consequence_then_clears(reg, rs, site):
@@ -527,15 +527,15 @@ def test_mcp_test_bench_sends_tempo_names_and_reads_the_feed(monkeypatch):
         ms.use(None)
 
 
-# ---------------------------------------------------------------- plain text keeps puppets off real runs
+# ---------------------------------------------------------------- plain text keeps puppets off real events
 
 def test_plain_text_test_answer_refuses_a_real_run(reg, rs):
     from test_plain_text import FakeBot
 
     real = rc.open_run(reg, rs, "barrow_deeps", start_in(reg, 800), by="t")
-    with pytest.raises(RegistryError, match="real run"):
+    with pytest.raises(RegistryError, match="real event"):
         run(configops.apply_async(reg, ConfigOp(op="test", value=f"answer {real.key} join 2"), "Officer", False, bot=FakeBot(rs), by_id=OWNER))
-    with pytest.raises(RegistryError, match="0 live test runs"):  # the only live run is real: never picked
+    with pytest.raises(RegistryError, match="0 live test events"):  # the only live run is real: never picked
         run(configops.apply_async(reg, ConfigOp(op="test", value="answer join 2"), "Officer", False, bot=FakeBot(rs), by_id=OWNER))
     assert not real.signups
 
@@ -677,7 +677,7 @@ def test_plain_text_test_run_reply_has_no_dead_tail_and_names_an_unreachable_cha
         run(configops.apply_async(reg, op, "Officer", False, bot=bot, by_id=OWNER, via="chat"))
     reg.config.signup_channel_id, bot.channels[55] = 55, Chan(55, "signups")
     out = run(configops.apply_async(reg, op, "Officer", False, bot=bot, by_id=OWNER, via="chat"))
-    assert out.startswith("test run ") and "not posted" not in out and "<#55>" in out, out
+    assert out.startswith("test event ") and "not posted" not in out and "<#55>" in out, out
 
 
 def test_plain_text_test_ops_are_the_bench_verbs_with_one_audit_line_each(reg, rs, spied):

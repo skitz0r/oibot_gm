@@ -393,7 +393,7 @@ def test_run_snapshot_board_roles_closed_runs_and_next_sheet(reg, rs):
     ev.fill_asks.append(rc.FillAsk(discord_id=ms[0].discord_id, display_name=ms[0].display_name, kind="sub", role="melee", character=ms[0].main.label, spec=ms[0].main.spec, reason="short 1", expires_at=ev.start.isoformat()))
     rs.save(ev, "ask")
     s = state(reg, rs, ms[0].discord_id, False)
-    assert "joined by role: tank " in s and "expects 1 roster(s) = " in s and "run(s) this slot on the answers so far" in s
+    assert "joined by role: tank " in s and "expects 1 roster(s) = " in s and "the answers make 1 roster(s) so far" in s
     assert f"board (layout the lock will use): roster 1: g1: {ms[0].display_name}" in s
     assert f"bank (joined, not on the board): {ms[8].display_name}" in s
     assert f"absent that day: {ms[14].display_name}" in s and "wedding" not in s
@@ -408,8 +408,8 @@ def test_run_snapshot_board_roles_closed_runs_and_next_sheet(reg, rs):
     rs.save(old, "cancelled")
     weekly(reg, "barrow_deeps", "Tue 19:30")
     s = state(reg, rs, OWNER, True)
-    assert "closed runs of Barrow Deeps: " in s and "server down" in s
-    assert "next sheet: Barrow Deeps run " in s and "its sheet opens " in s and "19:30" not in s.split("next sheet:")[1].split("\n")[0]
+    assert "closed events of Barrow Deeps: " in s and "server down" in s
+    assert "next sheet: Barrow Deeps event " in s and "its sheet opens " in s and "19:30" not in s.split("next sheet:")[1].split("\n")[0]
 
 
 def test_locked_run_rosters_carry_seat_roles_and_auras(reg, rs):
@@ -665,3 +665,11 @@ def test_the_askers_record_names_each_characters_armory_link(reg, monkeypatch, t
     s = H.guild_state(reg, None, uid, False, ask, None, public=False)
     assert f"Updated from the armory {when} · in the guild · professions kept by hand" in s
     discord_armory.reset_state()
+
+
+def test_the_help_prompt_says_the_older_words_once():
+    """Phase 6 (event words): a question in the old words is understood and answered in the new ones."""
+    line = "run, ad hoc and follow-on are older words for event, one-off and a later raid; answer in the new words."
+    tree = types.SimpleNamespace(get_commands=lambda: [])
+    text = help_mod.system_prompt(tree)
+    assert text.count(line) == 1 and "Name an event by its raid and its time" in text

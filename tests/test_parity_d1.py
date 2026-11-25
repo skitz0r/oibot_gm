@@ -15,6 +15,7 @@ import pytest
 from conftest import OFFICER_ROLE, OWNER
 
 from oibot_gm import configops, discord_policy, help as help_mod
+from oibot_gm.constants import OLD_WORDS_PROMPT
 from oibot_gm.configops import ConfigRequest
 from oibot_gm.discord_help import HelpMixin, officer_only_channel
 
@@ -822,7 +823,7 @@ def test_the_manual_reaches_the_model_in_parts_it_asks_for(reg, rs, monkeypatch)
     assert sum(len(p["body"]) for p in parts) > 0.97 * len(whole.split("\n## ", 1)[1]), "no text is lost between the parts"
     index = help_mod.manual_index()
     assert len(index) < 16_000 and all(f"  {p['id']} · " in index for p in parts)
-    system = help_mod.SYSTEM.format(manual=index, commands="")
+    system = help_mod.SYSTEM.format(manual=index, commands="", old_words=OLD_WORDS_PROMPT)
     assert len(system) < 25_000 and "contents list is NOT the manual" in system
     first = parts[0]["id"]
     text = help_mod.manual_read([first, "no such part"])

@@ -74,7 +74,7 @@ def test_regular_add_remove_and_their_refusals(reg):
     assert [m.discord_id for m, _ in reg.regulars(KEY)] == sorted([m.discord_id for m in ms], key=lambda u: reg.members[u].display_name.lower())
     with pytest.raises(RegistryError, match="already a regular"):
         reg.regular_add(a.discord_id, KEY, "t")
-    with pytest.raises(RegistryError, match="ad hoc"):
+    with pytest.raises(RegistryError, match="opened by an officer"):
         reg.regular_add(a.discord_id, "pug", "t")
     with pytest.raises(RegistryError, match="no recurring schedule"):
         reg.regular_add(a.discord_id, "nope", "t")
@@ -304,7 +304,7 @@ def test_web_route_adds_and_removes_regulars_and_members_step_down(reg, rs, monk
     r = c.post("/api/admin/raid/regulars", json={"raid": "Barrow Deeps", "member": m.display_name, "on": True}, headers=bearer())
     assert r.status_code == 200 and "is a regular of Barrow Deeps · Raid nights" in r.json()["message"]
     bad = c.post("/api/admin/raid/regulars", json={"raid": RID, "schedule": "pug", "member": m.display_name}, headers=bearer())
-    assert bad.status_code == 400 and "ad hoc" in bad.json()["error"]
+    assert bad.status_code == 400 and "opened by an officer" in bad.json()["error"]
     rows = c.get("/api/rosters", headers=bearer()).json()
     series = next(r for r in rows["raids"] if r["id"] == RID)["series"]
     assert series[0]["key"] == KEY and [x["uid"] for x in series[0]["regulars"]] == [str(m.discord_id)]

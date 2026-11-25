@@ -64,7 +64,7 @@ def test_set_minimums_is_one_write_and_refuses_a_maximum(reg, store):
     assert t["healer"] == {"min": 3, "note": "two raid healers"} and t["Shaman"] == {"min": 1}
     with pytest.raises(RegistryError, match="no upper limit"):
         reg.set_minimums("barrow_deeps", {"Mage": {"min": 1}, "tank": {"min": 0, "max": 1}}, "Jon")
-    with pytest.raises(RegistryError, match="more than the 10 a run seats"):
+    with pytest.raises(RegistryError, match="more than the 10 a raid seats"):
         reg.set_minimums("barrow_deeps", {"Mage": {"min": 11}}, "Jon")
     with pytest.raises(RegistryError, match="isn't a role, a class or a spec"):
         reg.set_minimums("barrow_deeps", {"Bard": {"min": 1}}, "Jon")
@@ -142,7 +142,7 @@ def test_pause_sentence_names_the_open_run(reg, rs):
     ev = open_real(reg, rs)
     s = configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", True, rs)
     assert s.startswith("Nothing new opens from Alt run. ") and reg.config.roster(ev.team)["name"] in s and s.endswith("Its regulars stay.")
-    assert configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", False).startswith("Alt run opens its sheets again on its usual week. The next run is ")
+    assert configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", False).startswith("Alt run opens its sheets again on its usual week. The next event is ")
 
 
 # ---------------------------------------------------------------- timezone change with live runs
@@ -152,7 +152,7 @@ def test_timezone_change_effects_lists_live_runs_whose_clock_moves(reg, rs):
     ev = open_real(reg, rs)
     effects = reg.timezone_change_effects("America/New_York", rs)
     assert len(effects) == 1 and "stays at its real moment" in effects[0] and "11:00 PM in America/New_York" in effects[0]
-    assert "Move open runs with the clock to keep its time." in effects[0] and not MILITARY.search(effects[0])
+    assert "Move open events with the clock to keep its time." in effects[0] and not MILITARY.search(effects[0])
     moving = reg.timezone_change_effects("America/New_York", rs, mode="move")
     assert "moves with the clock and keeps its signups" in moving[0] and "8:00 PM on the new clock." in moving[0]
     assert reg.timezone_change_effects(reg.config.timezone, rs) == []
@@ -200,7 +200,7 @@ def test_move_open_runs_with_the_clock_keeps_the_wall_clock_and_the_signups(reg,
     old = ev.start
     n0 = commits(store)
     line = configops.apply(reg, ConfigOp(op="set", path="timezone", value="America/New_York", field="move"), "Jon", True, raids=rs)
-    assert "1 open run moved with the clock" in line and ev.key not in line and "Barrow Deeps" in line and commits(store) == n0 + 1  # the zone and the run: one commit
+    assert "1 open event moved with the clock" in line and ev.key not in line and "Barrow Deeps" in line and commits(store) == n0 + 1  # the zone and the run: one commit
     moved = rs.events[ev.key]
     assert moved.key == ev.key and str(m.discord_id) in moved.signups  # the same run, nobody re-answers
     assert moved.start.astimezone(reg.tz).replace(tzinfo=None) == old.astimezone(old.tzinfo).replace(tzinfo=None)  # 8:00 PM stays 8:00 PM
@@ -576,7 +576,7 @@ def test_roster_comp_sets_a_minimum_through_configops(reg, rs, store, officer_on
         await h.pick("Set a minimum for…", "healer")
         assert set(h.modal._items) == {"min", "note"}  # one number and a reason: no upper limit (D16)
         await h.submit(h.modal, min="11")  # past the run's size: refused at once, Fix this reopens the form
-        assert "more than the 10 a run seats" in h.text and "Fix this" in h.buttons()
+        assert "more than the 10 a raid seats" in h.text and "Fix this" in h.buttons()
         await h.press("Fix this")
         await h.submit(h.modal, min="3", note="raid heals")
         assert "not saved yet" in h.text and "1 unsaved change" in h.text

@@ -79,7 +79,7 @@ def manual_section(marker: str) -> str:
 
 GUIDE_OPTIONS = [
     ("about", "About the guild", "who we are, what we raid, how big"),
-    ("schedule", "Raid schedule", "raids, their run times and the next sheet"),
+    ("schedule", "Raid schedule", "raids, their event times and the next sheet"),
     ("register", "How to register", "the registration card and what happens next"),
     ("signups", "How signups work", "sheets, lock and confirmation, fill DMs"),
     ("apply", "How to apply", "joining as a recruit"),
@@ -102,7 +102,7 @@ def guide_text(reg, key: str, user_id: int | None = None) -> str:
             rd = reg.raid_def(rid)
             scheds = reg.schedules(rid)
             if not scheds:
-                lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — no run times yet")
+                lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — no event times yet")
                 continue
             lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player)")
             for s in scheds:  # every schedule, with its real next runs (Discord stamps render in the reader's own zone)
@@ -117,11 +117,11 @@ def guide_text(reg, key: str, user_id: int | None = None) -> str:
                 nxt = rc.next_runs_of(reg, rid, s)
                 lines.append(head + (" · next " + ", ".join(f"<t:{int(t.timestamp())}:f>" for t in nxt) + f"; each sheet opens {float(sd['signup_lead_hours']):g} h before" if nxt else " · nothing coming up"))
         where = f" in <#{cfg.signup_channel_id}>" if cfg.signup_channel_id else ""
-        return "**Raid schedule**\n" + ("\n".join(lines) or "Nothing scheduled yet.") + f"\nEach run gets its own sheet{where}: answer Join / Bench / No thanks there."
+        return "**Raid schedule**\n" + ("\n".join(lines) or "Nothing scheduled yet.") + f"\nEach event gets its own sheet{where}: answer Join / Bench / No thanks there."
     if key == "register":
         where = f"<#{cfg.registration_channel_id}>" if cfg.registration_channel_id else "the registration card an officer posts"
         sheets = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "the signup channel"
-        return f"**How to register**\nNew to the guild? Apply first (`/apply` or **Apply to join**); members register and add alts:\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters.\n4. There is nothing else to fill in: answer each run's sheet in {sheets} (Join / Bench / No thanks)."
+        return f"**How to register**\nNew to the guild? Apply first (`/apply` or **Apply to join**); members register and add alts:\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters.\n4. There is nothing else to fill in: answer each event's sheet in {sheets} (Join / Bench / No thanks)."
     if key == "signups":
         parts = chunk_text(manual_section("## 4"), 1800)  # the start of the section, cut on a paragraph, and where the rest is
         return (parts[0] + ("\n\n-# The rest: `/help` → topic *Raids, sheets, lock, confirm and fill*." if len(parts) > 1 else "")) if parts else "See `/help` → topic *Raids, sheets, lock, confirm and fill*."
@@ -242,7 +242,7 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             path, _, rest = l.partition(" — ")
             desc, _, who = rest.rpartition(" — ")
             tiers.setdefault(who, []).append(f"`{path}` — {desc}")
-        e = discord.Embed(title="oibot_GM — what I do", colour=TEAL, description="I run registration, one sheet per raid run, roster health with suggestions for short tank/healer seats (an officer sends them), groups, filling freed seats by DM after lock, and the loot council (a thread per raid night: proposals, Confirm, overrides with reasons). Ask me anything in plain words with `/ask`, or @mention me. `/help topic:<name>` shows one part of the manual.")
+        e = discord.Embed(title="oibot_GM — what I do", colour=TEAL, description="I handle registration, one sheet per event, roster health with suggestions for short tank/healer seats (an officer sends them), groups, filling freed seats by DM after lock, and the loot council (a thread per raid night: proposals, Confirm, overrides with reasons). Ask me anything in plain words with `/ask`, or @mention me. `/help topic:<name>` shows one part of the manual.")
         e.add_field(name="Everyone", value="\n".join(tiers["member"])[:1024], inline=False)
         if officer:
             e.add_field(name="Officers", value="\n".join(tiers["officer"])[:1024], inline=False)

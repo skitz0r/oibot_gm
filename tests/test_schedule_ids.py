@@ -197,7 +197,7 @@ def test_the_raid_refuses_run_times(reg):
         reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
     with pytest.raises(RegistryError, match="belong to a schedule"):
         reg.set_raid_override(RID, "schedules", [], "t")
-    assert R.RUN_TIMES_ON_SCHEDULE == "Run times belong to a schedule now. Add or change a schedule for this raid."
+    assert R.RUN_TIMES_ON_SCHEDULE == "Event times belong to a schedule now. Add or change a schedule for this raid."
 
 
 def test_a_schedule_is_addressed_by_its_id_alone(reg):

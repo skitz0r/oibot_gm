@@ -1196,7 +1196,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         t["followed_by"] = parts[0]["key"]
     reg.config.rosters.extend(parts)
     reg.config.rosters.append(t)
-    reg.save_config(f"run {key} ({t['name']}) created by {by}" + (f" with {len(parts)} later raid{'s' if len(parts) > 1 else ''}" if parts else ""), notify=False)
+    reg.save_config(f"event {key} ({t['name']}) created by {by}" + (f" with {len(parts)} later raid{'s' if len(parts) > 1 else ''}" if parts else ""), notify=False)
     return t
 
 
@@ -1901,7 +1901,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     first.log.extend(what)
     line = "; ".join(what) or f"saved by {by}"
     with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
-        reg.save_config(f"run {first.key} {line}", notify=False)
+        reg.save_config(f"event {first.key} {line}", notify=False)
         for p in sorted(parts, key=lambda e: e is first):  # the first raid last: its save copies its answers onto the later raids
             rs.save(p, line)
     return moved
@@ -2157,7 +2157,7 @@ def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: Lineup
         t0["rosters"] = int(change.lineup[0]["rosters"])
         gone = {later[k].team for k in change.removed if k in later}
         reg.config.rosters = [t for t in reg.config.rosters if not (isinstance(t, dict) and t.get("key") in gone)]
-        reg.save_config(f"run {first.key} {line}", notify=False)
+        reg.save_config(f"event {first.key} {line}", notify=False)
         evs: list[RaidEvent] = []
         for t, p in chain:
             at = after_minutes(start, int(t["starts"]))
@@ -2412,7 +2412,7 @@ def stamp_runs(reg: Registry, rs: "RaidStore", commit: bool = True) -> list[str]
     if not commit:
         return done
     if dicts:
-        reg.save_config(f"live runs stamped with their schedule and occurrence ({len(done)})", notify=False)
+        reg.save_config(f"live events stamped with their schedule and occurrence ({len(done)})", notify=False)
     reg.store.commit(f"{rs.key}: live runs stamped with their schedule and occurrence: {', '.join(done)}")
     return done
 

@@ -133,9 +133,9 @@ def test_live_event_by_raid_id(reg, rs):
     assert configops._live_event(reg, "barrow_deeps")[1].key == ev.key
     assert configops._live_event(reg, reg.raid_def("barrow_deeps")["name"])[1].key == ev.key
     open_test_run(reg, rs, days=10)
-    with pytest.raises(RegistryError, match="2 live runs"):
+    with pytest.raises(RegistryError, match="2 live events"):
         configops._live_event(reg, "barrow_deeps")
-    with pytest.raises(RegistryError, match="no live run by that name"):
+    with pytest.raises(RegistryError, match="no live event by that name"):
         configops._live_event(reg, "hyjal_summit_forever")
 
 
@@ -161,7 +161,7 @@ def test_describe_run_ops(reg, rs):
     board = d(op="run_board", target=ev.key, value=f"{ms[0].display_name}, {ms[1].display_name} | {ms[2].display_name}")
     assert "board →" in board and "layout the lock will use" in board
     assert "not joined on this sheet: Nobody" in d(op="run_board", target=ev.key, value="Nobody")
-    assert "There is no live run by that name." in d(op="run_lock", target="bd-0101-0000"), "the target is never echoed: it may be a key"
+    assert "There is no live event by that name." in d(op="run_lock", target="bd-0101-0000"), "the target is never echoed: it may be a key"
     o = d(op="run_open", target="barrow_deeps", value="2030-01-08 19:30")
     assert o.startswith("open Barrow Deeps Tue 8 Jan 7:30 PM now:") and "no signup channel" in o
     assert "unknown raid" in d(op="run_open", target="nowhere")
@@ -181,17 +181,17 @@ def test_describe_member_and_test_ops(reg, rs):
     assert d(op="dm", member=m.display_name, value="off").startswith(f"{m.display_name}: DMs on → off")
     assert "dm is on | off" in d(op="dm", member=m.display_name, value="maybe")
     reg.add_absence(m.discord_id, "2030-03-01", "2030-03-03", None, "t")
-    assert d(op="absence_clear", member=m.display_name) == f"{m.display_name}: clear absence Fri 1 Mar → Sun 3 Mar — open sheets it had pre-filled re-open for them (a seat freed on a locked run is not handed back)"
+    assert d(op="absence_clear", member=m.display_name) == f"{m.display_name}: clear absence Fri 1 Mar → Sun 3 Mar — open sheets it had pre-filled re-open for them (a seat freed on a locked event is not handed back)"
     assert "no absence starting Mon 1 Apr" in d(op="absence_clear", member=m.display_name, start="2030-04-01")
     reg.add_absence(m.discord_id, "2030-06-10", "2030-06-10", None, "t")
     two = d(op="absence_clear", member=m.display_name)  # two upcoming: the refusal names them the way a person reads dates
     assert "2 upcoming absences (Fri 1 Mar → Sun 3 Mar, Mon 10 Jun) — say which" in two and "2030-" not in two
     reg.clear_absence(m.discord_id, "2030-06-10", "t")
     assert d(op="test", value="seed 5").startswith("test bench: seed 5 puppet member(s) (now 16 of 80")
-    assert "compressed Barrow Deeps run" in d(op="test", value="run barrow_deeps")
+    assert "compressed Barrow Deeps event" in d(op="test", value="run barrow_deeps")
     assert "unknown raid" in d(op="test", value="run nowhere")
-    assert d(op="test", value="clear").startswith("test bench: clear — cancel 0 test run(s) and delete 16 puppet")
-    assert "'seed N'" in d(op="test", value="explode")
+    assert d(op="test", value="clear").startswith("test bench: clear — cancel 0 test event(s) and delete 16 puppet")
+    assert "`seed N`" in d(op="test", value="explode")
 
 
 # ---------------------------------------------------------------- apply / apply_async
@@ -376,7 +376,7 @@ def test_test_bench(reg, rs):
         ev.message_id, ev.channel_id = 1, channel.id
     bot.post_sheet = post_sheet
     out = run(configops.apply_async(reg, ConfigOp(op="test", value="run barrow_deeps"), "Officer", False, bot=bot, by_id=42, channel_id=777))
-    assert out.startswith("test run Barrow Deeps ") and "lock 25 min before" in out and "sheet in <#777>" in out
+    assert out.startswith("test event Barrow Deeps ") and "lock 25 min before" in out and "sheet in <#777>" in out
     ev = rs.live()[0]
     t = reg.config.roster(ev.team)
     assert ev.test and t["test_channel"] == 777, "a rehearsal; its cards post where it was asked for (D20)"
@@ -406,7 +406,7 @@ def test_owner_gating_unchanged(reg, rs):
 def test_current_config_lists_live_runs(reg, rs):
     ev = open_test_run(reg, rs)
     text = configops.current_config_text(reg)
-    assert "## Live runs" in text and f"- {ev.key}: Barrow Deeps" in text and "open" in text and "(test run)" in text
+    assert "## Live events" in text and f"- {ev.key}: Barrow Deeps" in text and "open" in text and "(test event)" in text
     assert "## Test bench: 16 of 80 puppet" in text and "rosters:" not in text.split("## Effective")[0]
 
 
@@ -421,12 +421,12 @@ def test_guild_state_reads(reg, rs):
     rs.save(ev, "pin")
     reg.add_absence(ms[9].discord_id, ev.start.date().isoformat(), None, "wedding", "t")
     s = help_mod.guild_state(reg, rs, ms[0].discord_id, False)
-    assert f"live run {configops.run_words(reg, ev)}" in s and ev.key not in s and "TEST RUN" in s and "state open" in s and "nudge " in s and "lock " in s
+    assert f"live run {configops.run_words(reg, ev)}" in s and ev.key not in s and "TEST EVENT" in s and "state open" in s and "nudge " in s and "lock " in s
     assert "answers: 6 joined / 2 bench / 0 no thanks / 8 not answered" in s and f"pinned in: {ms[0].display_name}" in s
     assert f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec} {ms[0].main.cls})" in s
     assert f"absent that day: {ms[9].display_name}" in s and "wedding" not in s, "reasons are officer-only"
     assert "## Asker (member)" in s and f"on {configops.run_words(reg, ev)}: in as {ms[0].main.label}" in s and "pinned in" in s
-    assert "the guild's changes to buffs: no buff or family changed" in s and "test bench: 16 puppet member(s)" in s and f"test runs {configops.run_words(reg, ev)}" in s
+    assert "the guild's changes to buffs: no buff or family changed" in s and "test bench: 16 puppet member(s)" in s and f"test events {configops.run_words(reg, ev)}" in s
     assert "absences: <#" not in s and "absences: no channel set (/gm config channels)" in s
     # an officer asking about someone by character name gets their record; a member doesn't
     q = f"is {ms[3].main.name} coming tonight?"
@@ -461,3 +461,11 @@ def test_run_strategy_is_refused_after_the_lock_as_every_other_surface_refuses_i
     with pytest.raises(RegistryError, match="The roster is locked, so its split can't change."):
         configops.apply(reg, op, "officer", is_owner=False, raids=rs)
     assert rc.RaidStore(reg.store, reg.key).events[ev.key].split_strategy is None
+
+
+def test_the_parser_prompt_says_the_older_words_once():
+    """Phase 6 (event words): the parser still reads "cancel tonight's run" / "open an ad hoc Barrow Deeps" and answers
+    in the new words — the schema text carries the one line that says so, filled in (no placeholder left)."""
+    line = "run, ad hoc and follow-on are older words for event, one-off and a later raid; answer in the new words."
+    assert configops.SCHEMA_TEXT.count(line) == 1 and "{old_words}" not in configops.SCHEMA_TEXT
+    assert line in configops.SYSTEM.format(schema=configops.SCHEMA_TEXT)

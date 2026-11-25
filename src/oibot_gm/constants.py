@@ -46,6 +46,11 @@ def hours_words(h) -> str:
     return f"{h:g} hour{'' if h == 1 else 's'}"
 
 
+# the one line every prompt a person's words reach carries (phase 6, event words): people still say "run", "ad hoc" and
+# "follow-on"; the model understands them and answers in the glossary's words (configops.SCHEMA_TEXT, help.SYSTEM, the
+# listening gate's state in discord_bot)
+OLD_WORDS_PROMPT = "run, ad hoc and follow-on are older words for event, one-off and a later raid; answer in the new words."
+
 # the confirmation box's fixed words (design §7b, D18): the site's ConfirmBox and the leave guard print these, never their own
 CONFIRM_WORDS = {"back": "Back", "keep": "Keep editing", "discard": "Discard edits", "leave_title": "Leave without saving?",
                  "changed": "This changed while the box was open. Read it again before you press."}

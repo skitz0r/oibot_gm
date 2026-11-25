@@ -28,15 +28,15 @@ DECISION_FIELDS = ("award", "confirm", "reason", "correct", "retire")  # D8: an 
 ALL_WORDS = {"", "all", "the rest", "rest", "everything", "all pending", "every pick", "*"}
 LOOT_REV = "loot:"  # configops.board_revs key prefix: the batch_rev a confirm-all / discard-all diff showed
 
-SCHEMA = """Loot council (officer, op=loot; target = the run key from the live-runs list, the raid name when it has one live run, or a split
-  run's roster council '<run key>-r2'): field=open (open the council: a thread in the officer channel) | tick (value = what dropped, a comma
+SCHEMA = """Loot council (officer, op=loot; target = the event key from the live-events list, the raid name when it has one live event, or a split
+  event's roster council '<event key>-r2'): field=open (open the council: a thread in the officer channel) | tick (value = what dropped, a comma
   list of item names or ids; text = the boss) | distribute (judge the ticked drops; value = drop ids to judge only those) |
   award (value = the drop id like d3 or the item's name, member = the character who gets it instead of the bot's pick, or
   "disenchant"; reason REQUIRED — it becomes the precedent: "give the Syphon to Eltam, tanks progression") | confirm (value = a drop
   id / item, or empty = every pick still pending: "confirm the rest") | discard (value = a drop id / item = decide it later, empty = the
   whole pending batch) | reason (value = the drop id / item the companion recorded against the bot's pick, reason = why) |
   correct (value = drop id / item, member = who it should be recorded to, reason = what went wrong — a mistake, no precedent) |
-  end (end the run and its council: archived with its summary) | retire (value = a precedent's ref or item name, reason = why the bot
+  end (end the event and its council: archived with its summary) | retire (value = a precedent's ref or item name, reason = why the bot
   should stop citing it; text = "restore" brings it back).
 Wishlists (op=wishlist; a member's own list: member EMPTY): field=add|remove, value=<the item's name or id>, character=<which of their
   characters; blank = their main>, rank=<1-10, position on the list; blank = after the last>, text=ms|os (main or offspec; default ms),
@@ -73,7 +73,7 @@ def loot_log_state(reg) -> dict:
     if cfg.loot_channel_id:
         return {"state": "channel", "channel_id": str(cfg.loot_channel_id), "text": "Each confirmed award gets one line in the loot channel."}
     return {"state": "no_channel", "channel_id": None,
-            "text": "Log on, no channel — awards are posted in each run's updates thread (nowhere when the run has none). Pick a channel to keep one log."}
+            "text": "Log on, no channel — awards are posted in each event's updates thread (nowhere when the event has none). Pick a channel to keep one log."}
 
 
 # ---------------------------------------------------------------- where an op points
@@ -116,7 +116,7 @@ def _pick(sessions: list, ev, idx: int | None, ended_ok: bool = False, reg: Regi
     its raid and time, never its key."""
     from . import raidcycle as rc
 
-    run = rc.run_words(reg, ev) if reg is not None else "this run"
+    run = rc.run_words(reg, ev) if reg is not None else "this event"
     if idx is not None:
         s = next((s for s in sessions if s.roster_index == idx), None)
         if s is not None:
@@ -231,13 +231,13 @@ def describe(reg: Registry, op, *, why: str | None = None) -> str:
         return f"open the loot council for {title}: a thread in {where}" + (f" (one per roster: {n})" if n > 1 else "")
     if f == "end":
         if ev.state != "locked" and not sessions:  # LootMixin.end_run's rule, refused at the diff already (every surface)
-            raise RegistryError("No locked run to end." if ev.state not in ("done", "cancelled") else f"{title} is already {ev.state}.")
+            raise RegistryError("No locked event to end." if ev.state not in ("done", "cancelled") else f"{title} is already {ev.state}.")
         n_aw = sum(1 for s in sessions for a in s.awards if not a.void)
         n_p = sum(len(s.proposals) for s in sessions)
         n_u = sum(len(s.undistributed()) for s in sessions)
         n_r = sum(len(s.pending_reasons) for s in sessions)
         bits = [f"{n_aw} award(s)"] + ([f"{n_p} pick(s) never confirmed"] if n_p else []) + ([f"{n_u} drop(s) never distributed"] if n_u else []) + ([f"{n_r} award(s) waiting for a reason"] if n_r else [])
-        return f"end {title}" + (": " + ", ".join(bits) if sessions else ": no loot council is open") + " — the run is marked done" + (" and the council archived with its summary" if sessions else "")
+        return f"end {title}" + (": " + ", ".join(bits) if sessions else ": no loot council is open") + " — the event is marked done" + (" and the council archived with its summary" if sessions else "")
     s = _pick(sessions, ev, idx, ended_ok=f in ("reason", "correct"), reg=reg)
     if f == "tick":
         names = [x.strip() for x in (op.value or "").split(",") if x.strip()]
@@ -559,7 +559,7 @@ def received_map(reg: Registry, ctx, m) -> dict[tuple[str, str], str]:
 WEIGHT_GROUPS = (  # (key, title, path prefix, what it does) — Config › Loot scoring's sections, in this order
     ("tiers", "Item tiers", "tier_weight.", "how much an upgrade of each tier is worth (× the slot's weight)"),
     ("untiered", "Untiered items", "untiered_weight", "what an item without tier data is worth to everyone (D4)"),
-    ("attendance", "Attendance", "attendance.", "factor = 1 − weight × 0.5 × (1 − attended / runs); unknown attendance is neutral"),
+    ("attendance", "Attendance", "attendance.", "factor = 1 − weight × 0.5 × (1 − attended / raids); unknown attendance is neutral"),
     ("rank", "Rank", "rank_factor.", "a multiplier per guild rank"),
     ("recent", "Recent loot", "loot_divisor.", "divisor = 1 + k × (loot power in the window − the free allowance) ^ p"),
     ("wishlist", "Wishlist", "wishlist.", "a bonus by place on the list; offspec wishes count less"),
