@@ -160,7 +160,8 @@ class Dump:
 
 def member_action_boxes(reg, rs, ev, lk, ms, add):
     """/raid set's and the row ⋮ menu's box (consequences.member_action_box) for every action that isn't an answer:
-    a callout, the pins on an open sheet, a Confirm ask and a fill ask after the lock."""
+    a callout, the pins on an open sheet, a Confirm ask (both answers), No thanks, a fill ask after the lock and Play
+    another character of another role on a seat."""
     def first(run, key, **kw):
         m = next(m for m in ms if any(a["key"] == key for a in rc.member_actions(reg, run, m)))
         return cq.member_action_box(reg, run, m, key, by_id=OFFICER_ID, **kw)
@@ -175,6 +176,18 @@ def member_action_boxes(reg, rs, ev, lk, ms, add):
     add("member_action_box", "unpin", cq.member_action_box(reg, ev, m, "unpin", by_id=OFFICER_ID))
     ev.pins = pins
     add("member_action_box", "confirm_yes", first(lk, "confirm_yes"))
+    add("member_action_box", "confirm_no", first(lk, "confirm_no"))
+    add("member_action_box", "no_thanks, before the lock", first(ev, "no_thanks"))
+    add("member_action_box", "no_thanks, rostered after the lock", first(lk, "no_thanks"))
+    # Play another character of another role: the seat follows it, said first (task 7 fix round 1)
+    m = next(m for m in ms if lk.seat_of(m))
+    role = lk.seat_of(m)[1].role
+    cls, spec = next((cls, s) for cls, specs in reg.profile.classes.items() for s in specs if reg.profile.spec(cls, s).role != role)
+    reg.add_character(m.discord_id, m.display_name, "Otheralt", cls, spec, None, False)
+    m = reg.members[m.discord_id]
+    moved = cq.member_action_box(reg, lk, m, "join", "Otheralt", by_id=OFFICER_ID)
+    assert "moves from" in moved["sentences"][0]
+    add("member_action_box", "join on another character of another role, rostered after the lock", moved)
     m = next(m for m in ms if not lk.seat_of(m) and not any(a.discord_id == m.discord_id and a.open for a in lk.fill_asks))
     lk.fill_asks.append(rc.FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="sub", role="ranged", character=m.main.label,
                                    spec=m.main.spec, reason="short 1", expires_at=lk.start.isoformat()))

@@ -1083,9 +1083,9 @@ def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: 
 # what an officer records for someone (rc.member_actions' keys) → (title, verb); the three answers are box 8's own words
 MEMBER_ACTION_WORDS = {"callout": ("Record a callout for {name}?", "Record the callout"),
                        "confirm_yes": ("Confirm for {name}?", "Confirm for them"),
-                       "confirm_no": ("Can't make it for {name}?", "Can't make it for them (their Confirm ask)"),
+                       "confirm_no": ("Can't make it on {name}'s Confirm ask?", "Can't make it for them"),
                        "fill_yes": ("Confirm {name}'s fill?", "Confirm their fill"),
-                       "fill_no": ("Can't make it for {name}?", "No to their fill"),
+                       "fill_no": ("No to {name}'s fill ask?", "No to their fill"),
                        "pin_in": ("Pin {name} to the roster?", "Pin"),
                        "pin_out": ("Keep {name} off the roster?", "Keep off"),
                        "unpin": ("Unpin {name}?", "Unpin")}
@@ -1098,8 +1098,8 @@ def member_action_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: s
     Answer for someone, POST /api/admin/action's preview / seen): inbox.action_lines' sentences under a title naming the
     person and the action's verb (MEMBER_ACTION_WORDS; the answers keep box 8's "Answer for someone" / "Record answer").
     Never red: each can be answered again. Raises RegistryError for what the write would refuse — an action that no
-    longer applies (inbox.no_longer_applies), a character they don't have, a spec it doesn't play (rc.spec_role), a role
-    switch on a seat of the locked roster (rc.SPEC_SEATED) — so every surface prints that refusal box instead."""
+    longer applies (inbox.no_longer_applies), a character they don't have, a spec it doesn't play (rc.spec_role), a spec
+    of another role on a seat of the locked roster (rc.seated_switch_refusal) — so every surface prints that refusal box."""
     from .inbox import action_lines, no_longer_applies
 
     if key not in {a["key"] for a in rc.member_actions(reg, ev, m)}:
@@ -1111,9 +1111,9 @@ def member_action_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: s
         if c is None:
             raise RegistryError(f"{m.display_name} has no character named {label}.")
         rc.spec_role(reg, c, spec)
-        seat = ev.seat_of(m) if ev.state != "open" else None
-        if seat is not None and seat[1].spec != spec:
-            raise RegistryError(rc.SPEC_SEATED.format(name=m.display_name, spec=spec))
+        refused = rc.seated_switch_refusal(reg, ev, m, c, spec)
+        if refused:
+            raise RegistryError(refused)
     lines = action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id)
     if key in ANSWER_KEYS:
         return box("Answer for someone", lines, "Record answer", rev=rev)

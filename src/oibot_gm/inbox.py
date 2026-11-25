@@ -178,6 +178,12 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
                 return [f"{name} is marked as joined, playing {plays}.", "You can change the answer until the lock."]
             return [f"{name} is marked as joined, playing {plays}.", "They get a notice.", "They can change the answer themselves."]
         if seated:
+            seat = ev.seat_of(m)[1]
+            c = next((c for c in m.active() if c.label == char), None)
+            plays = spec or (s.spec if s and s.character == char else c.spec if c else None)
+            role = reg.profile.spec(c.cls, plays).role if c and plays else seat.role
+            if role != seat.role:  # Play another character of another role: the seat follows it, said first
+                return say(f"{name} plays {char} and moves from {seat.role} to {role} on the roster.")
             return say(f"{name} plays {char} on {run} and keeps their seat.")
         free = any(len(r.selected) < rc.run_size(reg, ev) for r in ev.all_rosters)
         if not free:

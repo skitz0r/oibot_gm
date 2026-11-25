@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from conftest import join, lock_with_board
 from test_flows_raid import _user, officer, open_real_run  # noqa: F401 — the fixture
 from test_raid_night import H, NightBot, web_bot  # noqa: F401 — the routes' fixture
@@ -128,3 +130,91 @@ def test_each_action_names_its_person_and_verb(reg, rs):
         b = cq.member_action_box(reg, ev, m, key, by_id=OFFICER_ID)
         assert (b["title"], b["verb"], b["danger"]) == (title, verb, False)
     assert cq.answer_box(reg, ev, m, "bench", by_id=OFFICER_ID) == cq.member_action_box(reg, ev, m, "bench", by_id=OFFICER_ID)
+
+
+# ---------------------------------------------------------------- fix round 1: the seated switch is by ROLE
+
+def seated_priest_with_druid(reg, rs):
+    """A Holy priest rostered on a locked run, with a druid alt that plays Feral (its own spec, melee) and Restoration
+    (its offspec, healer)."""
+    ev = open_real_run(reg, rs)
+    pool = [healer(reg, k) for k in range(3)]
+    join(reg, rs, ev, pool)
+    lock_with_board(reg, rs, ev, [p.display_name for p in pool])
+    m = pool[0]
+    reg.add_character(m.discord_id, m.display_name, "Druidalt", "Druid", "Feral", "Restoration", False)
+    return ev, reg.members[m.discord_id]
+
+
+def test_a_same_role_spec_on_another_character_keeps_the_healer_seat(reg, rs, officer):  # noqa: F811
+    ev, m = seated_priest_with_druid(reg, rs)
+    assert rc.seated_switch_refusal(reg, ev, m, next(c for c in m.active() if c.label == "Druidalt"), "Restoration") is None
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    run(h.pick("Plays which spec?", "Restoration"))
+    assert h.buttons() == ["Record answer", "Back"], h.text
+    assert "moves from" not in h.text
+    run(h.press("Record answer"))
+    seat = ev.seat_of(m)[1]
+    assert (seat.character, seat.spec, seat.role) == ("Druidalt", "Restoration", "healer")
+
+
+def test_an_explicit_spec_of_another_role_is_refused(reg, rs, officer):  # noqa: F811
+    ev, m = seated_priest_with_druid(reg, rs)
+    want = rc.SPEC_SEATED.format(name=m.display_name, spec=DPS)
+    assert rc.seated_switch_refusal(reg, ev, m, m.main, DPS) == want
+    before = rc.member_state_rev(ev, m)
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="bench"))
+    run(h.pick("Plays which spec?", DPS))
+    assert h.buttons() == ["Back"] and want in h.text
+    assert rc.member_state_rev(ev, m) == before and ev.seat_of(m)[1].spec == HEAL, "nothing written"
+    with pytest.raises(rc.RegistryError, match="holds a seat"):
+        rc.set_signup(reg, rs, ev, m, None, "sub", spec=DPS)
+
+
+def test_the_alts_own_spec_of_another_role_says_the_move_and_reseats(reg, rs, officer):  # noqa: F811
+    ev, m = seated_priest_with_druid(reg, rs)
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    run(h.pick("Plays which spec?", "Feral"))
+    box = cq.member_action_box(reg, ev, m, "join", "Druidalt", None, by_id=OFFICER_ID)
+    assert box["sentences"][0] == f"{m.display_name} plays Druidalt and moves from healer to melee on the roster."
+    assert box["sentences"][0] in h.text
+    run(h.press("Record answer"))
+    seat = ev.seat_of(m)[1]
+    assert (seat.character, seat.spec, seat.role) == ("Druidalt", "Feral", "melee")
+
+
+def test_bench_without_a_spec_keeps_a_seated_switch(reg, rs):
+    """Fix 5: a seated member whose answer carries a switched spec goes to Bench with no spec picked — the signup keeps
+    the switched spec, as the seat does."""
+    ev = open_real_run(reg, rs)
+    pool = [healer(reg, k) for k in range(3)]
+    join(reg, rs, ev, pool)
+    m = pool[0]
+    rc.set_signup(reg, rs, ev, m, None, "in", spec=DPS)
+    lock_with_board(reg, rs, ev, [p.display_name for p in pool])
+    assert ev.seat_of(m)[1].spec == DPS
+    s = rc.set_signup(reg, rs, ev, m, None, "sub")
+    assert (s.status, s.spec, ev.seat_of(m)[1].spec) == ("sub", DPS, DPS)
+
+
+def test_the_spec_select_offers_only_what_the_character_plays(reg, rs, officer):  # noqa: F811
+    ev = open_real_run(reg, rs)
+    m = healer(reg)
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Plays which spec?")
+    assert sorted(o.value for o in sel.options) == sorted([HEAL, DPS]), "never Discipline: they don't play it"
+    reg.add_character(UID + 9, "Solo", "Solo", "Priest", HEAL, None, True)
+    solo = reg.members[UID + 9]
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(solo), what="join"))
+    assert h.selects() == [] and h.buttons() == ["Record answer", "Back"], "one spec: no select"
+
+
+def test_the_confirm_no_box_names_the_ask(reg, rs):
+    title, verb = cq.MEMBER_ACTION_WORDS["confirm_no"]
+    assert "(" not in verb and "Confirm ask" in title
+    assert "fill ask" in cq.MEMBER_ACTION_WORDS["fill_no"][0]

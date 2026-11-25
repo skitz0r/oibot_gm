@@ -455,3 +455,26 @@ def test_a_four_raid_event_lists_one_row_for_every_raid_it_helps(wide, rs):
     rows = [r for r in sw["rows"] if r["uid"] == str(ilse.discord_id)]
     assert len(rows) == 1 and rows[0]["raids"] == ["Hyjal Summit", "Barrow Deeps", "Extra A", "Extra B"]
     assert rows[0]["box"]["sentences"][0] == "Ilse plays Restoration for Hyjal Summit, Barrow Deeps, Extra A and Extra B, not Balance."
+
+
+# ---------------------------------------------------------------- task 7 fix round 1
+
+def test_a_row_its_box_refuses_is_left_out_not_the_whole_list(reg, rs, web_bot, monkeypatch):
+    """A row whose box now refuses (a spec they no longer play, a retired character) is skipped; the list and
+    GET /api/event/{key} still answer with every other row."""
+    ev = evening(reg, rs)
+    ilse = add(reg, 0, "Ilse", "Druid", "Balance", "Restoration", flex=["healer"])
+    rook = add(reg, 1, "Rook", "Warrior", "Fury", "Protection")
+    join(reg, rs, ev, ilse, rook, add(reg, 2, "Mage", "Mage", "Fire"))
+    real = rc.switch_box_for
+
+    def refusing(reg_, rs_, part, m, *a, **kw):
+        if m.discord_id == ilse.discord_id:
+            raise RegistryError("Ilse doesn't play Restoration.")
+        return real(reg_, rs_, part, m, *a, **kw)
+
+    monkeypatch.setattr(rc, "switch_box_for", refusing)
+    uids = {r["uid"] for r in rc.event_switches(reg, rs, ev)["rows"]}
+    assert str(ilse.discord_id) not in uids and str(rook.discord_id) in uids
+    r = web_bot.c.get(f"/api/event/{ev.key}", headers=H())
+    assert r.status_code == 200, r.text

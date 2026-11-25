@@ -359,8 +359,7 @@ def test_set_picks_run_then_only_what_applies_then_the_character(reg, rs, office
         await h.press("Join")
         assert h.selects() == ["Pick the character"]
         await h.pick("Pick the character", "Altonar")
-        assert h.selects() == ["Plays which spec?"]
-        await h.pick("Plays which spec?", spec)  # Altonar's own spec: no role switch
+        assert h.selects() == [], "Altonar plays one spec: no spec select (task 7 fix round 1)"
         assert "Altonar" in h.text and "They get a notice." in h.text and "no new DM" not in h.text
         assert h.buttons() == ["Record answer", "Back"]
         assert not bot.calls
@@ -391,7 +390,6 @@ def test_set_refuses_when_the_run_closed(reg, rs, officer, channel):
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join")
-        await h.pick("Plays which spec?", m.main.spec)
         ev.state = "cancelled"
         rs.save(ev, "cancelled")
         await h.press("Record answer")
@@ -414,7 +412,6 @@ def test_set_rereads_the_member_at_confirm(reg, rs, officer, channel):
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join")
-        await h.pick("Plays which spec?", m.main.spec)
         join(reg, rs, ev, [m], "sub")  # the member presses Bench while the officer's wizard is open
         await h.press("Record answer")
         assert CONFIRM_WORDS["changed"] in h.text  # the box again, its fp over the member's state

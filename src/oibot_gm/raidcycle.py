@@ -2712,12 +2712,31 @@ def spec_role(reg: Registry, c: RegisteredCharacter, spec: str) -> str:
 SPEC_SEATED = "{name} holds a seat on the locked roster, so use Switch under the event's Role switches to ask them to play {spec}."
 
 
+def seated_switch_refusal(reg: Registry, ev: RaidEvent, m: Member, c: RegisteredCharacter, spec: str | None) -> str | None:
+    """THE seated-switch guard (set_signup and consequences.member_action_box read it): SPEC_SEATED when `m` holds a
+    seat on the locked roster and the EXPLICIT `spec` for `c` plays another ROLE than that seat (spec_role; its
+    RegistryError for a spec `c` doesn't play). None for no spec, a spec of the seat's role, an open run, no seat, or
+    another character's own spec (Play another character: the reseat, its role change said in the box)."""
+    if not spec or ev.state == "open":
+        return None
+    seat = ev.seat_of(m)
+    if seat is None:
+        return None
+    p = seat[1]
+    role = spec_role(reg, c, spec)
+    if spec == c.spec and c.label != p.character:
+        return None
+    return None if role == p.role else SPEC_SEATED.format(name=m.display_name, spec=spec)
+
+
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None,
                *, spec: str | None = None, by: str | None = None) -> Signup:
     """THE answer write on a first part. `spec` (an officer's role switch): the spec the character plays tonight — its
     own, its offspec or a flex role's (spec_role, refused otherwise); the signup's spec and role follow, its own spec
-    becomes the offspec (as a yes to a switch ask leaves it). Refused (SPEC_SEATED) once the run is locked and they hold
-    a seat whose spec it would change: that switch is an ask. `by`: who switched them, for the run's log."""
+    becomes the offspec (as a yes to a switch ask leaves it). Refused (seated_switch_refusal: SPEC_SEATED) once the run
+    is locked and they hold a seat whose ROLE it would change: that switch is an ask. No `spec` for the character
+    already on a seat of a locked run keeps the signup's spec (a switch stays on Bench as on the seat). `by`: who
+    switched them, for the run's log."""
     if ev.follows:  # D1: one Join for the night — the follow-on is never answered on its own
         lead = rs.events.get(ev.follows)
         raise RegistryError(FOLLOW_ANSWER_REFUSAL.format(lead=reg.raid_def(lead.instance if lead else None).get("name", "first raid")))
@@ -2730,12 +2749,15 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     # no curated-roster demotion here (roster redesign Phase 0): it keyed on the run key, which lock used to fill with
     # the seated, so a member's own Join after lock was stored as Bench and then seated anyway
     role = spec_role(reg, c, spec) if spec else None
-    seat = ev.seat_of(m) if spec and ev.state != "open" else None
-    if seat is not None and seat[1].spec != spec:
-        raise RegistryError(SPEC_SEATED.format(name=m.display_name, spec=spec))
-    s = carry_joined(ev.signups.get(str(m.discord_id)), _signup(reg, m, c, status, source, note))
+    refused = seated_switch_refusal(reg, ev, m, c, spec)
+    if refused:
+        raise RegistryError(refused)
+    old = ev.signups.get(str(m.discord_id))
+    s = carry_joined(old, _signup(reg, m, c, status, source, note))
     if spec and spec != c.spec:
         s.spec, s.offspec, s.role = spec, c.spec, role
+    elif not spec and status != "out" and ev.state != "open" and old is not None and old.character == c.label and ev.seat_of(m):
+        s.spec, s.offspec, s.role = old.spec, old.offspec, old.role  # no spec picked: a seated switch stays (the seat keeps it too)
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"{m.display_name} {status} as {c.label}" + (f", {s.spec}" if spec else "") + f" ({source}" + (f", switched by {by})" if by else ")"))
     rs.save(ev, f"{m.display_name} {status}")
@@ -3527,7 +3549,10 @@ def event_switches(reg: Registry, rs: "RaidStore", first: RaidEvent, *, viewer: 
                 else:
                     base = m.main.label if m.main else a.character
                     frm = LABELS["sub"] if sg is not None and sg.status == "sub" else PAGE_WORDS["no_answer_yet"]
-                box, button = switch_box_for(reg, rs, p, m, a.character, a.spec, plan_rev=plan.rev, viewer=viewer, swap=a.swap)
+                try:
+                    box, button = switch_box_for(reg, rs, p, m, a.character, a.spec, plan_rev=plan.rev, viewer=viewer, swap=a.swap)
+                except RegistryError:  # a row its own box refuses (a spec they no longer play, a retired character): left out
+                    continue
                 has_row = True
                 rows[k] = {"uid": str(m.discord_id), "display_name": m.display_name, "role": a.role, "from": frm,
                            "to": _plays_words(a.character, a.spec, base), "answered": joined, "button": button, "raids": [name],

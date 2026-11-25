@@ -1034,9 +1034,16 @@ class SetWizard(OfficerWizard):
         label = self.draft["character"] or (s.character if s else (m.main.label if m.main else None))
         return next((c for c in m.active() if c.label == label), None)
 
+    def current_spec(self, c: RegisteredCharacter) -> str:
+        """The spec `c` plays now: the sheet's when that character is the one there (a switch included), else its own."""
+        ev, m = self.run(), self.member()
+        s = ev.signups.get(str(m.discord_id)) if ev and m else None
+        return s.spec if s and s.character == c.label else c.spec
+
     async def spec_step(self, interaction: discord.Interaction) -> None:
-        """Join / Bench: which spec the character plays (the role switch) — their spec on the sheet when that character
-        is the one there, else the character's own."""
+        """Join / Bench: which spec the character plays (the role switch) — only the specs it plays (rc.spec_role: its
+        spec, offspec and flex roles' specs; one → no select), the one it plays now picked."""
+        from . import raidcycle as rc
         from . import wizard_opts as wo
 
         self.draft["spec"] = None
@@ -1044,16 +1051,24 @@ class SetWizard(OfficerWizard):
         if self.draft["action"] not in ("join", "bench") or c is None:
             await self.confirm(interaction)
             return
-        ev, m = self.run(), self.member()
-        s = ev.signups.get(str(m.discord_id))
-        current = s.spec if s and s.character == c.label else c.spec
-        await self.show(interaction, f"Which spec does **{m.display_name}** play as {c.label}?",
-                        self.select("Plays which spec?", wo.specs_of(self.reg, c.cls, _ico(interaction), current=current), self.spec_picked),
-                        self.button("Cancel", self.cancel))
+
+        def plays(spec: str) -> bool:
+            try:
+                rc.spec_role(self.reg, c, spec)
+                return True
+            except RegistryError:
+                return False
+
+        opts = [o for o in wo.specs_of(self.reg, c.cls, _ico(interaction), current=self.current_spec(c)) if plays(o.value)]
+        if len(opts) < 2:
+            await self.confirm(interaction)
+            return
+        await self.show(interaction, f"Which spec does **{self.member().display_name}** play as {c.label}?",
+                        self.select("Plays which spec?", opts, self.spec_picked), self.button("Cancel", self.cancel))
 
     async def spec_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         c = self.plays()
-        self.draft["spec"] = None if c is not None and values[0] == c.spec else values[0]  # their own spec is no switch
+        self.draft["spec"] = None if c is not None and values[0] == self.current_spec(c) else values[0]  # what they play now is no switch
         await self.confirm(interaction)
 
     def box(self) -> dict:

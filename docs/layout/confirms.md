@@ -44,7 +44,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        member_action_box(reg, ev, m, key, character, spec, *, by_id, rev) = THE box of whatever an officer records for
                        someone (/raid set's SetWizard, POST /api/admin/action's preview / seen, the row ⋮ menu): action_lines under
                        MEMBER_ACTION_WORDS' title naming them + verb (answers keep "Answer for someone" / "Record answer"), never red;
-                       raises RegistryError for what the write refuses (no_longer_applies, a spec not played, rc.SPEC_SEATED), undo_box / undo_box_for (9),
+                       raises RegistryError for what the write refuses (no_longer_applies, a spec not played, rc.seated_switch_refusal);
+                       a seated Play another character of another role says the move first (inbox.action_lines), undo_box / undo_box_for (9),
                        the board's consequence("swap") after the lock (10), open_now_box (11) + open_box_for(reg, rid, p, here=) = THE box 11 from
                        rc.open_preview (/raid open and both open routes; rev = the occurrence; the later raids keep their own `starts`, as
                        coming_json's lineup; OPEN_UNREAD when the lead or lock can't be read; event_view.coming_json passes the same rev;
