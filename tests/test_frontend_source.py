@@ -1077,8 +1077,9 @@ def test_the_schedule_editor_keeps_every_setting():
         assert needle in shared, needle
     assert "confirmed" not in editor and "opsApi.confirm(" not in editor and "staleOnPage: true" in editor
     # fix round 1: the labels are the server's words (the Save box's diff lines say the same), none written here
-    for literal in ('"Sheet opens"', '"Locks"', '"Reminder"', '"Confirm by"', '"An ask waits"', '"The bot asks people for open seats"', "SPLIT_LABEL"):
-        assert literal not in editor, literal
+    for literal in ('"Sheet opens"', '"Locks"', '"Reminder"', '"Confirm by"', '"An ask waits"', '"The bot asks people for open seats"',
+                    '"Signup Reminder"', '"Lock Confirmation"', '"Automated Fill Requests"', '"Sheet Opening DM"', "SPLIT_LABEL"):
+        assert literal not in editor and literal not in shared, literal
     assert "<NameFields" in editor and "TimePicker" not in editor and "<NumberInput" not in editor, "a time is picked, a number is a select"
     names = _code_only((SRC / "components" / "schedules" / "NameFields.tsx").read_text())
     assert names.count("<TextInput") == 2 and 'label="Name"' in names and 'label="Id"' in names, "prose is typed: the name and a new id"
@@ -1521,3 +1522,29 @@ def test_edit_event_is_one_editor_on_the_schedule_editors_own_pieces():
     assert "ev.actions.edit" in page and "/edit`" in page and "Edit event" in page
     app = _code_only((SRC / "App.tsx").read_text())
     assert 'path="/events/:key/edit"' in app
+
+
+def test_each_sheet_timing_switch_carries_the_servers_help():
+    """The owner, 2026-11-24: the four Sheet timing switches read as what they do (Signup Reminder, Lock Confirmation,
+    Automated Fill Requests, Sheet Opening DM) and each has a (?) whose sentence is the SERVER's (PAGE_WORDS
+    schedule_field_help) — hover, keyboard focus and a tap open it, a 44 px target, a screen-reader name from the
+    server's help_about. One component, so the schedule editor and Edit event both carry it."""
+    from oibot_gm.constants import PAGE_WORDS, schedule_line_label
+
+    F, help_ = PAGE_WORDS["schedule_fields"], PAGE_WORDS["schedule_field_help"]
+    assert (F["nudge"], F["confirm"], F["autofill"], F["open_dm"]) == ("Signup Reminder", "Lock Confirmation", "Automated Fill Requests", "Sheet Opening DM")
+    for sw, sel in (("nudge", "nudge_hours_before"), ("confirm", "confirm_hours_before"), ("autofill", "fill_ask_hours")):
+        assert not set(F[sw].lower().split()) & set(F[sel].lower().split()), (sw, sel, "a switch and its select never say one word twice")
+    assert schedule_line_label("nudge_hours_before") == "Signup Reminder goes out"
+    assert set(help_) == {"nudge", "confirm", "autofill", "open_dm"}
+    for k, text in help_.items():
+        sentences = [x for x in text.split(". ") if x]
+        assert 1 <= len(sentences) <= 3 and text.endswith(".") and text[0].isupper(), (k, text)
+        assert all(len(x.split()) <= 20 for x in sentences), (k, text)
+        assert not re.search(r"\b(nudge|autofill|solver|cadence|pool|seated|series)\b|:\d\d|\d{2}:\d{2}", text, re.I), (k, text)
+    shared = _code_only((SRC / "components" / "schedules" / "SettingsFields.tsx").read_text())
+    for needle in ("words.schedule_field_help", "<FieldHelp", "words.help_about", "size={44}", "onFocus=", "onMouseEnter=", "onClick=",
+                   "closeOnEscape", 'role="tooltip"', "aria-label={label}", 'maw="calc(100vw - 32px)"'):
+        assert needle in shared, needle
+    for page in ("pages/LineupPage.tsx", "components/events/EditEvent.tsx"):
+        assert "<TimingFields" in _code_only((SRC / page).read_text()), page

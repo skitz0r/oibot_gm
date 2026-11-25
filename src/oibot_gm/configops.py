@@ -14,7 +14,7 @@ import yaml
 from pydantic import BaseModel, Field, PrivateAttr
 
 from .llm.provider import Provider
-from .constants import PAGE_WORDS, ROLES
+from .constants import PAGE_WORDS, ROLES, schedule_line_label
 from .loot_ops import SCHEMA as LOOT_SCHEMA
 from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError, join_words, readable_config, schedule_class
 
@@ -5044,7 +5044,7 @@ def _part(reg: Registry, op: ConfigOp, by_id: int | None = None, *, raid: str | 
             label = f"{name} · {s['name'] if s else sid}" if name else sid
             if setting == "raid":  # a new schedule's first raid
                 return label, DescribedPart(label="Raid", before=None if s is None else name, after=reg.raid_def(op.value or "").get("name", op.value) if (op.value or "") in reg.profile.raids else op.value), []
-            words = PAGE_WORDS["schedule_fields"].get(setting) or _cap(setting.replace("_", " "))
+            words = schedule_line_label(setting) or _cap(setting.replace("_", " "))
             if s is None:  # a new schedule: what it will be
                 own = _schedule_value_words(reg, rid, setting, op.value, None)
                 return label, DescribedPart(label=words, before="new", after=own if own is not None else _schedule_words(reg, rid, _schedule_fields(setting, op.value))), []

@@ -158,6 +158,8 @@ export interface PageWords {
   schedule_fields: Record<"name" | "kind" | "slots" | "days" | "time" | "lineup" | "rosters" | "active" | "signup_lead_hours" | "nudge"
     | "nudge_hours_before" | "lock_hours_before" | "confirm" | "confirm_hours_before" | "autofill" | "fill_ask_hours" | "open_dm"
     | "split_policy" | "weights" | "first_come", string>;
+  /** the (?) beside each Sheet timing switch: exactly who gets what, when and where */
+  schedule_field_help: Record<"nudge" | "confirm" | "autofill" | "open_dm", string>; help_about: string;
   raid_fields: Record<string, string>; split: Record<string, string>; on: string; off: string; raids_own: string; suggested: string;
   regulars_one: string; regulars_n: string; away_n: string;
   /** the empty lists, hints and lines the pages wrote themselves until the final review */

@@ -101,7 +101,7 @@ def test_lock_box_names_the_lineup_and_says_one_off_rules(reg, rs):
     ev = one_off(reg, rs)
     b = cq.lock_box(reg, ev)
     assert b["title"] == f"Lock {reg.local12(ev.starts_at)}?" and b["verb"] == "Lock" and not b["danger"]
-    assert b["sentences"] == ["The board becomes the roster for Hyjal Summit and both Barrow Deeps rosters.",
+    assert b["sentences"] == ["The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined.",
                               "Nobody is asked to confirm.", "You can still move people after the lock."]
     assert cq.lock_box(reg, rc.event_parts(rs, ev)[1])["title"] == b["title"], "a later raid's box names the event"
 
@@ -112,8 +112,35 @@ def test_lock_box_on_a_scheduled_event_says_who_confirms(reg, rs):
     assert cq.lock_box(reg, ev)["sentences"][1:] == ["Nobody has joined yet, so nobody is asked to confirm."]
     join(reg, rs, ev, people(reg, 20))
     s = cq.lock_box(reg, ev)["sentences"]
-    assert s[0] == "The board becomes the roster for Hyjal Summit and both Barrow Deeps rosters."
+    assert s[0] == "The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined."
     assert s[1] == "The 20 rostered get the Confirm or Can't make it DM." and s[2].startswith("They have until ")
+
+
+def test_lock_box_says_what_the_board_becomes(reg, rs):
+    """The board is only what officers placed; the lock also places everyone still under Not placed (the last rehearsal):
+    an empty board builds the roster from those who joined, a part-filled one keeps its places and fills the rest from
+    Not placed, a full one (every raid's) IS the roster. With the run store every open raid of the event is read."""
+    sid = tuesday(reg)
+    ev = rc.open_run(reg, rs, HYJAL, next_tuesday(reg, sid), schedule=sid)
+    join(reg, rs, ev, people(reg, 20))
+    parts = [p for p in rc.event_parts(rs, ev) if p.state == "open"]
+    assert len(parts) == 2
+    empty = cq.lock_box(reg, ev, rs)["sentences"][0]
+    assert empty == "The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined."
+    names = [x.display_name for x in ev.by_status("in")]
+    ev.layout = [names[:2]]
+    part = cq.lock_box(reg, ev, rs)["sentences"]
+    assert part[0] == "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
+    assert cq.consequence("lock", reg, ev, rs=rs)[0] == part[0], "the Discord screen and the site say the same"
+    for p in parts:  # every raid's board holds everyone who joined: nobody is left under Not placed
+        here = [x.display_name for x in p.by_status("in")]
+        p.layout = [here[i:i + 5] for i in range(0, len(here), 5)]
+    full = cq.lock_box(reg, ev, rs)["sentences"]
+    assert full[0] == "The board becomes the roster for Hyjal Summit and both Barrow Deeps rosters."
+    parts[1].layout = None  # one raid's board emptied again: the event is part-filled
+    assert cq.lock_box(reg, ev, rs)["sentences"][0] == part[0]
+    for b in (empty, part[0], full[0]):
+        assert len(b.split()) <= 20 and b.endswith(".")
 
 
 def test_cancel_box_is_red_and_says_the_event(reg, rs):

@@ -140,7 +140,7 @@ def consequence(verb: str, reg: Registry, ev: rc.RaidEvent, *, name: str | None 
     if verb == "end":
         return _end(reg, ev)
     if verb == "lock":
-        return _lock(reg, ev)
+        return _lock(reg, ev, rs)
     if verb == "cancel":
         return _cancel(reg, ev, rs)
     if verb == "clear":
@@ -179,7 +179,37 @@ def _closed(ev: rc.RaidEvent) -> list[str] | None:
     return None
 
 
-def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
+def _board_state(reg: Registry, ev: rc.RaidEvent) -> str:
+    """What the lock does with one raid's board: 'empty' (nobody placed: the lock places those who joined), 'full'
+    (every seat placed, or nobody left under Not placed: the board is the roster) or 'part' (the lock keeps the board
+    and fills the open seats from Not placed). Read from lock_forces, the lock's own inputs."""
+    lf = rc.lock_forces(reg, None, ev)
+    placed = len(lf.placed)
+    if placed == 0:
+        return "empty"
+    seats = rc.run_size(reg, ev) * max(1, rc.run_rosters(reg, ev))
+    off = set(lf.kept_off)
+    waiting = [s for s in ev.by_status("in") if s.display_name not in off and s.display_name not in lf.placed]
+    return "full" if placed >= seats or not waiting else "part"
+
+
+def _lock_head(reg: Registry, ev: rc.RaidEvent, rs=None) -> str:
+    """The lock box's first sentence: what becomes the roster — the board as officers placed it, the board plus Not
+    placed, or (nobody placed) everyone who joined. `rs`: every raid of the event is read (its open ones), else `ev`."""
+    parts = [p for p in rc.event_parts(rs, ev) if p.state == "open"] if rs is not None else [ev]
+    states = {_board_state(reg, p) for p in parts or [ev]}
+    lineup = rc.event_lineup(reg, ev)
+    whom = rc.lineup_roster_words(reg, lineup)
+    if states == {"full"}:
+        head = f"The board becomes the roster for {whom}."
+        return head if _words(head) <= 20 else f"The board becomes the roster for all {len(lineup)} raids."
+    if states == {"empty"}:
+        head = f"The lock builds the roster for {whom} from those who joined."
+        return head if _words(head) <= 20 else f"The lock builds the roster for all {len(lineup)} raids from those who joined."
+    return "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
+
+
+def _lock(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
     from .raid_views import run_times
 
     if ev.state != "open":
@@ -188,9 +218,7 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     joined = [s for s in ev.by_status("in") if s.display_name not in off]
     seats = rc.run_size(reg, ev) * max(1, rc.run_rosters(reg, ev))
     n = min(len(joined), seats)
-    lineup = rc.event_lineup(reg, ev)
-    head = f"The board becomes the roster for {rc.lineup_roster_words(reg, lineup)}."
-    lines = [head if _words(head) <= 20 else f"The board becomes the roster for all {len(lineup)} raids."]
+    lines = [_lock_head(reg, ev, rs)]
     test = rc.is_test_run(reg, ev)
     if not rc.run_confirms(reg, ev):  # a one-off (D5): Join is the commitment
         lines.append("Nobody is asked to confirm.")
@@ -230,7 +258,7 @@ def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
         return refusal_box_for(_lock(reg, ev)[0])
     if (why := lock_refusal(reg, ev)) is not None:
         return refusal_box_for(why)
-    return box(f"Lock {event_title(reg, ev)}?", _lock(reg, ev), "Lock", rev=rc.event_rev(reg, rs, ev) if rs is not None else "")
+    return box(f"Lock {event_title(reg, ev)}?", _lock(reg, ev, rs), "Lock", rev=rc.event_rev(reg, rs, ev) if rs is not None else "")
 
 
 def _cancel(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
@@ -301,9 +329,10 @@ def _words(text: str) -> int:
     return len(text.split())
 
 
-def _timing_phrases(reg: Registry, start, changed: dict, team: dict) -> list[str]:
+def _timing_phrases(reg: Registry, start, changed: dict, team: dict, first_raid: str | None = None) -> list[str]:
     """One phrase per run setting that changes, in the manual's words, with the new time where it is a time. The
-    reminder is one thing: turned off, its time isn't named; turned on, it says when it goes out."""
+    reminder is one thing: turned off, its time isn't named; turned on, it says when it goes out. `first_raid` = the
+    first raid's name on an event of several raids: only that raid asks the rostered to confirm (later raids never do)."""
     out = []
     for k in TIMING_ORDER_OF:
         if k not in changed:
@@ -326,7 +355,8 @@ def _timing_phrases(reg: Registry, start, changed: dict, team: dict) -> list[str
         elif k == "autofill":
             out.append("automatic asks are on" if v else "automatic asks are off")
         elif k == "confirm":
-            out.append("the rostered are asked to confirm" if v else "nobody is asked to confirm")
+            out.append(("the rostered are asked to confirm" if not first_raid else f"those rostered on {first_raid} are asked to confirm")
+                       if v else "nobody is asked to confirm")
         elif k == "first_come":
             out.append("seats go to the first to join" if v else "seats go by priority")
         elif k == "weights":
@@ -357,7 +387,10 @@ def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: b
             return head + "."
         full = f"{head} with its own {_and(names)}."
         return full if _words(full) <= 20 else f"{head} with its own {whole}."
-    detail = "For this event, " + _and(_timing_phrases(reg, first.start, changed, rc.run_team(reg, first))) + "."
+    several = len(rc.event_lineup(reg, first)) > 1
+    if several and changed.get("confirm"):  # only the first raid asks the rostered to confirm: the short form says so too
+        names = [f"confirmation on {name}" if n == TIMING_NAMES["confirm"] else n for n in names]
+    detail = "For this event, " + _and(_timing_phrases(reg, first.start, changed, rc.run_team(reg, first), name if several else None)) + "."
     if _words(detail) <= 20:
         return detail
     listed = f"This event takes its own {_and(names)}."
@@ -467,7 +500,7 @@ def event_edit_lines(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | 
     labels and its Save box use (PAGE_WORDS['schedule_fields'], 'priority', 'split'): the start, the sheet timing, the
     confirmation, the open seats, the seating, each changed weight and each raid's split (the raid named when the event
     has several). Nothing is written."""
-    from .constants import PAGE_WORDS
+    from .constants import PAGE_WORDS, schedule_line_label
 
     F = PAGE_WORDS["schedule_fields"]
     first = rc.first_part(rs, ev)
@@ -497,7 +530,7 @@ def event_edit_lines(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | 
         elif setting == "nudge":
             out[setting] = f"{F['nudge']}: {event_value_words('nudge', now['nudge'])} → {event_value_words('nudge', v != rc.OFF)}"
         elif setting:
-            label = F.get(setting, setting)
+            label = schedule_line_label(setting) or setting
             out[setting] = f"{label}: {event_value_words(setting, now[setting])} → {event_value_words(setting, v)}"
     parts = [p for p in rc.event_parts(rs, first) if p.state not in ("done", "cancelled")]
     for k, v in rc.split_changes(reg, rs, ev, timing).items():

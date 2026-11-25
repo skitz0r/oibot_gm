@@ -217,11 +217,11 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
         except RegistryError as e:  # the solver is busy on this run, or no roster satisfies the rules
             await wiz.refuse(i, str(e), retry=lambda ri: lock_decide(ri, bot, reg, rs, rs.events.get(key) or cur, wiz=wiz), retry_label="Back")
             return
-        await wiz.show(i, f"{run_label(reg, cur)}\n" + "\n".join(consequence("lock", reg, cur)), wiz.button("Lock now", lock_now, discord.ButtonStyle.success),
+        await wiz.show(i, f"{run_label(reg, cur)}\n" + "\n".join(consequence("lock", reg, cur, rs=rs)), wiz.button("Lock now", lock_now, discord.ButtonStyle.success),
                        wiz.button("Back", lambda bi: lock_decide(bi, bot, reg, rs, rs.events.get(key) or cur, wiz=wiz)),
                        embed=lock_preview_embed(reg, cur, rosters, bot.ico))
 
-    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("lock", reg, ev)), do=do, do_label="Lock now",
+    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("lock", reg, ev, rs=rs)), do=do, do_label="Lock now",
                      extra=[wiz.button(RUN_WORDS["preview_lock"], preview)])
 
 

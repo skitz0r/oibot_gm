@@ -1,4 +1,6 @@
-import { Group, Input, SegmentedControl, Select, Stack, Switch } from "@mantine/core";
+import { useState } from "react";
+import { ActionIcon, Group, Input, Popover, SegmentedControl, Select, Stack, Switch, Text } from "@mantine/core";
+import { IconHelpCircle } from "@tabler/icons-react";
 import type { PageWords } from "../../api";
 
 /** One setting's choices from the server ({value, words}: "5 days before", an ask's wait "2 hours"). */
@@ -8,11 +10,35 @@ export type TimingDraft = Record<string, number | boolean>;
 
 const SAME = "same";  // a select's "the raid's" choice: the draft holds "" (nothing of its own)
 
+/** The (?) beside a switch: the server's sentence on what the switch does (PAGE_WORDS schedule_field_help) — opens on
+ *  hover, on keyboard focus and on a tap (a phone has no hover), closes on leaving, Escape or a tap elsewhere. A 44 px
+ *  target; the bubble keeps inside a 400 px screen. */
+function FieldHelp({ label, text }: { label: string; text: string }) {
+  const [hover, setHover] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const opened = hover || pinned;
+  return (
+    <Popover opened={opened} onChange={(o) => { if (!o) { setHover(false); setPinned(false); } }} width={300} position="top" withArrow
+      shadow="md" withinPortal closeOnEscape closeOnClickOutside>
+      <Popover.Target>
+        <ActionIcon variant="subtle" color="gray" size={44} radius="xl" aria-label={label} aria-expanded={opened}
+          onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)}
+          onBlur={() => { setHover(false); setPinned(false); }} onClick={() => setPinned((p) => !p)}
+          onKeyDown={(e) => { if (e.key === "Escape") { setHover(false); setPinned(false); } }}>
+          <IconHelpCircle size={18} />
+        </ActionIcon>
+      </Popover.Target>
+      <Popover.Dropdown role="tooltip" maw="calc(100vw - 32px)"><Text size="sm">{text}</Text></Popover.Dropdown>
+    </Popover>
+  );
+}
+
 /** The Sheet timing pieces the schedule editor and Edit event share (one component, two editors): an optional preset,
- *  then — as `shown(setting)` allows — when the sheet opens and locks, the reminder switch and its time, Ask the rostered
- *  to confirm and Confirm by, the automatic asks and how long an ask waits, and the open DM. Every label is the
- *  server's word for the setting (PAGE_WORDS schedule_fields), so the Save box's diff lines say the same; every choice
- *  is the server's (`hours`). Pickers only: nothing is typed. */
+ *  then — as `shown(setting)` allows — when the sheet opens and locks, the reminder switch and its time, the lock's
+ *  confirmation and Confirm by, the automatic asks and how long an ask waits, and the open DM. Every label is the
+ *  server's word for the setting (PAGE_WORDS schedule_fields), so the Save box's diff lines say the same; each switch's
+ *  (?) is the server's sentence (PAGE_WORDS schedule_field_help); every choice is the server's (`hours`). Pickers
+ *  only: nothing is typed. */
 export function TimingFields({ words, values, hours, shown, onChange, presets, onPreset }: {
   words: PageWords; values: TimingDraft; hours: Record<string, HourChoice[]>; shown: (setting: string) => boolean;
   onChange: (setting: string, value: number | boolean) => void;
@@ -25,8 +51,13 @@ export function TimingFields({ words, values, hours, shown, onChange, presets, o
       value={values[k] !== undefined ? String(values[k]) : null} data={(hours[k] || []).map((c) => ({ value: String(c.value), label: c.words }))}
       onChange={(v) => v && onChange(k, Number(v))} />
   );
+  const help = (words.schedule_field_help || {}) as Record<string, string>;
+  /** a switch, then its (?) with the server's sentence on what it does (who is sent what, when) */
   const toggle = (k: string) => (
-    <Switch key={k} label={F[k]} checked={values[k] === true} onChange={(e) => onChange(k, e.currentTarget.checked)} />
+    <Group key={k} gap={2} wrap="nowrap" align="center">
+      <Switch label={F[k]} checked={values[k] === true} onChange={(e) => onChange(k, e.currentTarget.checked)} />
+      {help[k] && <FieldHelp label={(words.help_about || "{name}").replace("{name}", F[k])} text={help[k]} />}
+    </Group>
   );
   const preset = presets?.find((p) => Object.entries(p.values).every(([k, v]) => Number(values[k]) === v));
   const row = (...items: (React.ReactNode | false)[]) => items.some(Boolean) && <Group gap="md" align="flex-end" wrap="wrap">{items}</Group>;

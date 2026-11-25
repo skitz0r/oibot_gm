@@ -700,7 +700,7 @@ def test_lock_preview_route_shows_the_roster_and_saves_nothing_but_the_proposal(
     r = web_bot.c.post(f"/api/run/{ev.key}/lock/preview", json={}, headers=H())
     assert r.status_code == 200, r.text
     j = r.json()
-    assert j["board"]["rosters"][0]["rostered"] == 10 and "The board becomes the roster for Barrow Deeps." in j["consequence"]
+    assert j["board"]["rosters"][0]["rostered"] == 10 and "The lock builds the roster for Barrow Deeps from those who joined." in j["consequence"]
     assert ev.state == "open" and not ev.rosters and ev.last_proposal["kind"] == "lock preview"
 
 

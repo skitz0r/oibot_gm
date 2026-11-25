@@ -47,7 +47,7 @@ def test_lock_consequence_counts_dms_and_names_the_deadline_in_words(reg, rs):
     reg.save(ms[0], "dms off")
     lines = consequences.consequence("lock", reg, ev)
     text = " ".join(lines)
-    assert lines[0] == "The board becomes the roster for Barrow Deeps."
+    assert lines[0] == "The lock builds the roster for Barrow Deeps from those who joined."
     assert "The 6 rostered get the Confirm or Can't make it DM, and the puppets' DMs come to the tester." in lines, "a test run says where the DMs really go"
     assert re.search(r"They have until \w{3} \d{1,2} \w{3} \d{1,2}:\d\d [AP]M to answer\.", text), text
     assert not MILITARY.search(text) and not ISO_DAY.search(text), "the clock rule: words, never 24-hour or ISO"
@@ -116,7 +116,7 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
     start = (reg.now_local() + timedelta(days=2, hours=3)).replace(second=0, microsecond=0)
     adhoc = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=rc.ADHOC_SCHEDULE)
     d = c.get(f"/api/run/{adhoc.key}", headers=bearer()).json()
-    assert d["consequences"]["lock"] == "The board becomes the roster for Barrow Deeps. Nobody is asked to confirm. You can still move people after the lock."
+    assert d["consequences"]["lock"] == "The lock builds the roster for Barrow Deeps from those who joined. Nobody is asked to confirm. You can still move people after the lock."
     assert "DM" not in d["consequences"]["lock"], "the old SheetCard text promised confirmation DMs on ad hoc runs (§4 item 5)"
     assert set(d["consequences"]) == set(consequences.VERBS) | {"release_named"}
     from pathlib import Path

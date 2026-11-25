@@ -479,7 +479,7 @@ def test_lock_with_one_run_needs_no_picker(reg, rs, officer, channel):
     async def go():
         # THE lock confirm screen (phase 2): the consequence from code, Lock now · Preview lock · Back — nothing before the press
         await FLOWS["raid_lock"](h.command(), reg)
-        assert h.buttons() == ["Lock now", "Preview lock", "Back"] and "The board becomes the roster for Barrow Deeps." in h.text and not bot.calls
+        assert h.buttons() == ["Lock now", "Preview lock", "Back"] and "The lock builds the roster for Barrow Deeps from those who joined." in h.text and not bot.calls
         await h.press("Lock now")
         assert bot.calls[0] == ("lock_run", ev.key, "Tester") and bot.calls[1][0] == "emit"
         assert h.text.endswith(f"{ev.key}: locked")

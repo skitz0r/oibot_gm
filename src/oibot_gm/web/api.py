@@ -1691,7 +1691,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=409)
         left = rc.leftovers(v.reg, ev, rosters)
-        return {"board": board_json(v.reg, ev, rosters, []), "consequence": " ".join(consequence_lines("lock", v.reg, ev)),
+        return {"board": board_json(v.reg, ev, rosters, []), "consequence": " ".join(consequence_lines("lock", v.reg, ev, rs=rs)),
                 "leftovers": [p.signup_name for p in left], "strategy": (ev.last_proposal or {}).get("strategy"), "rev": rc.board_rev(v.reg, ev)}
 
     def send_batch_json(reg, plan) -> list[dict]:

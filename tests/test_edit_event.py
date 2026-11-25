@@ -319,3 +319,19 @@ def test_an_empty_switch_is_refused_and_the_new_refusals_read_aloud(reg, rs):
     assert said[0].startswith("For this event,") and said[2] == cq.SEATING_WORDS[True]
     one = open_one_off(reg, rs, days=6)
     assert cq.reschedule_consequence(reg, rs, one, None, {"first_come": False})[2] == "Join order no longer decides who gets a seat."
+
+
+def test_turning_confirmation_on_names_the_first_raid_on_an_event_of_several(reg, rs):
+    """The last rehearsal: on an event of several raids only the first raid asks the rostered to confirm (later raids
+    never do), so Edit event's box names it; one raid alone reads as before."""
+    for r in (RID, HYJAL):
+        reg.set_raid_overrides(r, OPENED, "t")
+    first = open_one_off(reg, rs, days=4, raid=HYJAL, follow={"raid": RID, "rosters": 1})
+    said = cq.reschedule_consequence(reg, rs, first, None, {"confirm": True})
+    assert said[0] == "For this event, those rostered on Hyjal Summit are asked to confirm.", said
+    many = cq.reschedule_consequence(reg, rs, first, None, {"confirm": True, "nudge": True, "autofill": False})
+    assert many[0] == "This event takes its own reminder, automatic asks and confirmation on Hyjal Summit.", many
+    sid, ev = scheduled(reg, rs, days=5)
+    assert cq.reschedule_consequence(reg, rs, ev, None, {"confirm": False})[0] == "For this event, nobody is asked to confirm."
+    one = open_one_off(reg, rs, days=6)
+    assert cq.reschedule_consequence(reg, rs, one, None, {"confirm": True})[0] == "For this event, the rostered are asked to confirm."

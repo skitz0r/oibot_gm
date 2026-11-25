@@ -1394,7 +1394,7 @@ def test_a_save_boxs_diff_lines_are_the_pages_words(reg):
     the Schedules and Raids pages' own words (PAGE_WORDS schedule_fields / raid_fields / priority / split) — "Locks:
     24 hours before → 12 hours before", never the field's name, never the label twice, never true / false."""
     from oibot_gm import configops
-    from oibot_gm.constants import PAGE_WORDS
+    from oibot_gm.constants import schedule_line_label
 
     hy = "hyjal_summit_forever"
     sid = _weekly(reg, hy, "Tue 18:30", sid="tue")
@@ -1404,11 +1404,15 @@ def test_a_save_boxs_diff_lines_are_the_pages_words(reg):
     code = re.compile(r"_|\b(true|false|None|inherit|hours before:|weights|nudge|autofill|open dm|split policy|signup lead)\b", re.I)
     for field, value in changes.items():
         line = _box_line(reg, sid, field, value)
-        label = PAGE_WORDS["schedule_fields"][field]
+        label = schedule_line_label(field)
         assert line.startswith(f"{label}: ") and line.count(label) == 1, (field, line)
         assert not code.search(line), (field, line)
     assert _box_line(reg, sid, "lock_hours_before", 12) == "Locks: 24 hours before → 12 hours before"
-    assert _box_line(reg, sid, "open_dm", True) == "DM the regulars when the sheet opens: off → on"
+    assert _box_line(reg, sid, "open_dm", True) == "Sheet Opening DM: off → on"
+    assert _box_line(reg, sid, "nudge", False) == "Signup Reminder: on → off"
+    assert _box_line(reg, sid, "confirm", False) == "Lock Confirmation: on → off"
+    assert _box_line(reg, sid, "autofill", False) == "Automated Fill Requests: on → off"
+    assert _box_line(reg, sid, "nudge_hours_before", 12).startswith("Signup Reminder goes out: "), "the select's line names its switch"
     assert _box_line(reg, sid, "split_policy", "first") == "When one night fills two rosters: the raid's → Raid one first"
     for field, value, want in (("lockout_days", 5, "Lockout: 7 days → 5 days"), ("duration_hours", 2.5, "Length: 3 hours → 2.5 hours"),
                                ("weights", {"rank": 5}, "Rank: 3 → 5")):

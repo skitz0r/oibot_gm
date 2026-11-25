@@ -135,13 +135,33 @@ PAGE_WORDS = {
     # (configops._schedule_part) — one word per setting, so the two never drift
     "schedule_fields": {"name": "Name", "kind": "Repeats", "slots": "Run times", "days": "Days of each lockout", "time": "Starts",
                         "lineup": "Lineup", "rosters": "Rosters", "active": "Active", "signup_lead_hours": "Sheet opens",
-                        "nudge": "Send a reminder", "nudge_hours_before": "Reminder", "lock_hours_before": "Locks",
-                        "confirm": "Ask the rostered to confirm", "confirm_hours_before": "Confirm by",
-                        "autofill": "The bot asks people for open seats", "fill_ask_hours": "An ask waits",
-                        "open_dm": "DM the regulars when the sheet opens", "split_policy": "When one night fills two rosters",
+                        # the four switches read as what they do (the owner, 2026-11-24); each select beside one never
+                        # repeats the switch's word ("Signup Reminder" · "Goes out")
+                        "nudge": "Signup Reminder", "nudge_hours_before": "Goes out", "lock_hours_before": "Locks",
+                        "confirm": "Lock Confirmation", "confirm_hours_before": "Confirm by",
+                        "autofill": "Automated Fill Requests", "fill_ask_hours": "An ask waits",
+                        "open_dm": "Sheet Opening DM", "split_policy": "When one night fills two rosters",
                         "weights": "Priority",
                         # an event's own (Edit event, the owner's tweaks B): first to join or by priority
                         "first_come": "Who gets a seat"},
+    # the (?) beside each switch of Sheet timing (the schedule editor and Edit event): exactly who gets what, when and
+    # where — read from discord_raid.post_health / dm_on_open / lock_run / run_fill and raidcycle.expire_confirmation_asks
+    "schedule_field_help": {
+        "nudge": "When the reminder goes out, each regular with no answer gets a DM with Join, Bench and No thanks. "
+                 "With no regulars yet, every member with no answer gets it, and nobody with DMs off is sent one. "
+                 "One-off events remind nobody, and the officers' health card goes out then either way.",
+        "confirm": "At the lock, everyone rostered on the event's first raid gets a DM to Confirm or say Can't make it. "
+                   "With DMs off the ask waits on their Me page, and a seat unanswered by Confirm by is freed. "
+                   "With this off, the roster stands as locked and nobody is asked.",
+        "autofill": "After the lock, the bot DMs a player of each open seat's role, bench first, then anyone with no answer. "
+                    "Confirm takes the seat, and Can't make it or no answer within An ask waits asks the next person. "
+                    "A role switch waits for an officer, and with this off officers fill seats from More › Fill seats.",
+        "open_dm": "When the sheet opens, each regular gets a DM with their answer so far and the sheet's buttons. "
+                   "The DM also says when the roster locks. "
+                   "With no regulars yet, every member gets it, and nobody with DMs off is sent one.",
+    },
+    # the (?)'s name for a screen reader: "What Signup Reminder does"
+    "help_about": "What {name} does",
     # Edit event's seating choice beside PAGE_WORDS["first_to_join"], and its one-line states: after the lock, and once the
     # event has started or is over (the page shows nothing to edit)
     "by_priority": "By priority",
@@ -155,3 +175,13 @@ PAGE_WORDS = {
     # a schedule's Regulars when its raid left the game (no seats to count against), and a night's absences
     "regulars_one": "1 regular", "regulars_n": "{n} regulars", "away_n": "{n} away",
 }
+
+
+def schedule_line_label(setting: str) -> str | None:
+    """A schedule setting's name on a Save / Edit box's 'label: old → new' line: the editor's label, except a select
+    whose label leans on the switch beside it — 'Goes out' alone says nothing, so its line reads 'Signup Reminder goes
+    out'. configops (the schedule's Save) and consequences.event_edit_lines (Edit event) both read it."""
+    F = PAGE_WORDS["schedule_fields"]
+    if setting == "nudge_hours_before":
+        return f"{F['nudge']} {F['nudge_hours_before'].lower()}"
+    return F.get(setting)
