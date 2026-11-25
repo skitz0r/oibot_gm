@@ -45,6 +45,7 @@ function useRecord(run: string, onDone: () => Promise<void> | void) {
     const preview = async (): Promise<Box> => {
       try { return (await api.post<{ box: Box }>("/api/admin/action", { ...body, preview: true })).box; } catch (e) { const b = boxOf(e); if (b) return b; throw e; }
     };
+    let reload = false;
     try {
       const typed = { note: "" };
       let said = "";
@@ -57,8 +58,10 @@ function useRecord(run: string, onDone: () => Promise<void> | void) {
           catch (e) { const b = boxOf(e); if (b) return b; throw e; }
         },
       });
-      if (done) { ok(said); await onDone(); }
-    } catch (e) { fail(e); }
+      if (done) ok(said);
+      reload = done;
+    } catch (e) { fail(e); reload = true; }  // a refusal the server sent without a box: the board reloads as after a press
+    finally { if (reload) await onDone(); }
   }
   return [record, dialog] as const;
 }

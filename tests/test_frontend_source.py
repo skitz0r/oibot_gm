@@ -1591,3 +1591,20 @@ def test_the_boards_older_confirms_are_the_test_benchs_alone():
     head = view.index("if (event && locked) {")
     assert head < view.index("await serverMove(name, target); return;") < view.index('confirmMove("release"'), "a locked event asks the server's box first"
     assert view.index("async function place(") < head
+
+
+def test_member_menu_record_reloads_after_a_refusal_without_a_box_too():
+    """Final fix 9: useRecord's onDone runs in a finally — after a press and after an error the server sent no box for."""
+    src = (SRC / "components" / "board" / "MemberMenu.tsx").read_text()
+    body = src[src.index("function useRecord("):src.index("export function MemberMenu(")]
+    assert "catch (e) { fail(e); reload = true; }" in body and "finally { if (reload) await onDone(); }" in body
+
+
+def test_me_page_says_when_the_event_link_matches_no_row():
+    """Final fix 7: a finished or cancelled event's sheet title lands on /app/me#run-<key> with no row; the page prints
+    the server's words (PAGE_WORDS), none typed in the page."""
+    from oibot_gm.constants import PAGE_WORDS
+
+    src = (SRC / "pages" / "Me.tsx").read_text()
+    assert "meta.page_words.me_event_over" in src and "meta.page_words.me_event_over_tail" in src
+    assert "finished or was cancelled" in PAGE_WORDS["me_event_over"] and "finished or was cancelled" not in src

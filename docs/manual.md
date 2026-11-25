@@ -207,7 +207,8 @@ to read before you press. A Discord button never ends in "…": the site's *Fill
   says when applications are closed and shows the recruitment note; the bot edits it in place when those change.
 - **Signup channel** — one sheet per run. An **open** sheet has **Join / Bench / No thanks** buttons (Bench =
   call me if you need me). The sheet's title is a link to that event on the site: officers land on its event page,
-  everyone else on their own row for it on the Me page, so you can answer on the site from Discord. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
+  everyone else on their own row for it on the Me page, so you can answer on the site from Discord. Once the event has
+  finished or was cancelled it has no row there, and the Me page says so; your loot and attendance are further down. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
   joiners grouped by class with real class/spec/role icons, Bench and No thanks as member rows, lock and confirm
   times; it updates in place on every answer, and every live sheet is redrawn when the bot starts, so a change to
   the sheet's look reaches sheets already posted. With more than one character, Join, Bench and No thanks each ask which

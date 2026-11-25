@@ -181,6 +181,9 @@ PAGE_WORDS = {
     "on": "on", "off": "off", "raids_own": "the raid's", "suggested": "the game's suggestion",
     # a schedule's Regulars when its raid left the game (no seats to count against), and a night's absences
     "regulars_one": "1 regular", "regulars_n": "{n} regulars", "away_n": "{n} away",
+    # the Me page reached from a finished or cancelled event's sheet title (its run hash matches no row)
+    "me_event_over": "That event has finished or was cancelled, so My sheets has no row for it.",
+    "me_event_over_tail": "Your loot and attendance are further down this page.",
 }
 
 

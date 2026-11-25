@@ -164,6 +164,7 @@ export interface PageWords {
   schedule_field_help: Record<"nudge" | "confirm" | "autofill" | "open_dm", string>; help_about: string;
   raid_fields: Record<string, string>; split: Record<string, string>; on: string; off: string; raids_own: string; suggested: string;
   regulars_one: string; regulars_n: string; away_n: string;
+  me_event_over: string; me_event_over_tail: string;
   /** the empty lists, hints and lines the pages wrote themselves until the final review */
   events_empty: string; schedules_empty: string; raids_empty: string; raid_missing: string; new_event_no_lineup: string;
   new_event_no_time: string; schedule_no_lineup: string; activity_empty: string; repost_sheet: string; nothing_applies: string;

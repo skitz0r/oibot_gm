@@ -36,12 +36,16 @@ export function MePage({ meta }: { meta: Meta }) {
   // phone header: scrollMarginTop on the row), lights the row for a moment, and drops the hash so the next reload (the
   // poll, a live event) does not jump back there
   const [flash, setFlash] = useState<string | null>(null);
+  // the hash names an event with no row here (finished or cancelled): one sentence under My sheets says so
+  const [over, setOver] = useState(false);
   useEffect(() => {
     if (!me || !window.location.hash.startsWith("#run-")) return;
     const key = window.location.hash.slice(5);
     const t = setTimeout(() => {
-      document.getElementById(`run-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const row = document.getElementById(`run-${key}`);
+      row?.scrollIntoView({ behavior: "smooth", block: "start" });
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      if (!row) { setOver(true); return; }
       setFlash(key);
       setTimeout(() => setFlash(null), 3000);
     }, 150);
@@ -130,6 +134,7 @@ export function MePage({ meta }: { meta: Meta }) {
           <Card>
             <CardHeader title="My sheets" />
             <Stack p="md" gap="xs">
+              {over && <Text size="sm">{meta.page_words.me_event_over}{!me.must_apply && me.characters.length > 0 ? ` ${meta.page_words.me_event_over_tail}` : ""}</Text>}
               {me.sheets.length === 0 && <Text c="dimmed" size="sm">No live raids.</Text>}
               {me.sheets.map((s) => <SheetRow key={s.key} s={s} me={me} meta={meta} ask={ask} onDone={load} flash={flash === s.key} />)}
               {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer here or on the sheet in Discord — the same answer either way. Once the roster locks you confirm {me.dm ? "by DM or here" : "here — your DMs are off"}.</Text>}
