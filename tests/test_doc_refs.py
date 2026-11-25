@@ -13,6 +13,7 @@ def _headings() -> set[str]:
 
 def _sources():
     yield from (ROOT / "docs").glob("*.md")
+    yield from (ROOT / "docs" / "layout").glob("*.md")
     yield ROOT / "CLAUDE.md"
     for base, pats in (("src", ("*.py", "*.md")), ("scripts", ("*.py", "*.md")), ("frontend/src", ("*.ts", "*.tsx"))):
         for pat in pats:
@@ -63,6 +64,20 @@ def test_the_phase_4_sections_are_the_ones_the_code_points_at():
     for rel, sec in owners.items():
         first = (ROOT / rel).read_text().split('"""', 2)[1]
         assert f"§{sec}" in first, (rel, sec)
-    layout = (ROOT / "CLAUDE.md").read_text()
+    layout = _layout()
     for name in ("appeals.py", "flows_appeal.py", "ledger_csv.py", "distil.py"):
-        assert name in layout, f"CLAUDE.md's layout names {name}"
+        assert name in layout, f"docs/layout names {name}"
+
+
+def _layout() -> str:
+    """The module map: CLAUDE.md's index plus the per-area files it points at (docs/layout/)."""
+    return "\n".join(p.read_text() for p in [ROOT / "CLAUDE.md", *sorted((ROOT / "docs" / "layout").glob("*.md"))])
+
+
+def test_the_guide_stays_small_and_its_index_names_every_layout_file():
+    """CLAUDE.md is read into every agent request, so the module map lives in docs/layout/ and is read by area: the guide
+    stays under 20 KB, names every area file, and every file it names exists."""
+    guide = (ROOT / "CLAUDE.md").read_text()
+    assert len(guide.encode()) < 20_000, "CLAUDE.md grew past 20 KB: put module detail in docs/layout/<area>.md"
+    named = set(re.findall(r"`docs/layout/([a-z-]+\.md)`", guide))
+    assert named == {p.name for p in (ROOT / "docs" / "layout").glob("*.md")}
