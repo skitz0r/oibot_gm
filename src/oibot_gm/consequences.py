@@ -734,7 +734,7 @@ def leave_follow_consequence(reg: Registry, ev: rc.RaidEvent, seated: bool, lead
     first = f"You stay on the {lead_name} roster." if lead_seated else f"Your {lead_name} answer stands."
     if seated:
         return [first, f"Your {mine} place is freed.", rc.refill_sentence(reg, ev)]
-    return [first, f"You are out of {mine}, the later raid."]
+    return [first, f"You are out of the later raid, {mine}."]
 
 
 def _clear(reg: Registry, ev: rc.RaidEvent) -> list[str]:

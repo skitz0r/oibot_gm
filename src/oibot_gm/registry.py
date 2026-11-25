@@ -919,7 +919,7 @@ MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
 # in its run dict's `schedule_id` (never in its key: a run key holds no time or schedule since phase 3).
 FOLLOW_SCHEDULE = "after"
 FOLLOW_WORDS = {"none", "clear", "off", "no", ""}
-SCHEDULE_NAMES = {"weekly": "Weekly", "lockout": "Lockout days", "pickup": "Pickup"}
+SCHEDULE_NAMES = {"weekly": "Weekly", "lockout": "Lockout days", "pickup": "On demand"}
 DEFAULT_SCHEDULE_NAME = "Raid nights"  # the name an older file's `default` schedule (the raid's own run times) takes when lifted (D10)
 # ---- classes (roster redesign §2): derived from the kind, never set by hand. Recurring = weekly or lockout (opens on its
 # own, has REGULARS, counts toward fairness); ad hoc = a pickup template or a one-off run (opened by an officer at a

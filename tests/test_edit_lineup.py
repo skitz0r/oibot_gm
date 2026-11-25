@@ -155,7 +155,7 @@ def test_the_first_raid_cannot_change_and_a_locked_run_refuses(bot, reg, rs):
     assert rc.lineup_refusal(reg, rs, first, L(BD, H)) == rc.LINEUP_FIRST
     assert rc.lineup_refusal(reg, rs, first, L(H, "nowhere")) == "This game has no raid called nowhere. Pick another raid."
     assert rc.lineup_refusal(reg, rs, first, L(H, BD, "extra_a", "extra_b", ONY)) == "An event holds at most 4 raids."
-    assert rc.lineup_refusal(reg, rs, first, L(H, BD, BD)) == "A run can't hold the same raid twice."
+    assert rc.lineup_refusal(reg, rs, first, L(H, BD, BD)) == "An event can't hold the same raid twice."
     assert rc.lineup_refusal(reg, rs, first, L(H, BD)) == rc.LINEUP_SAME
     assert rc.lineup_refusal(reg, rs, first, [{"raid": H}, {"raid": BD, "starts": 200}, {"raid": "extra_a", "starts": 100}]) == "Each raid starts after the one before it."
     assert rc.lineup_refusal(reg, rs, first, [{"raid": H, "starts": 0}, {"raid": "extra_a"}]) is None, "the first raid's own 0 is fine"

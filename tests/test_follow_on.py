@@ -272,7 +272,7 @@ def test_a_refused_scheduled_open_never_stops_the_guilds_minute(reg, rs, monkeyp
 
     def refused(reg_, instance, start, *a, **k):
         if instance == LEAD and start == t:  # that one night only
-            raise RegistryError("That time's run was cancelled, and a cancelled event isn't opened again. Pick another time.")
+            raise RegistryError("That time's event was cancelled, and a cancelled event isn't opened again. Pick another time.")
         return real_ensure(reg_, instance, start, *a, **k)
 
     monkeypatch.setattr(rc, "ensure_run", refused)
@@ -457,7 +457,7 @@ def test_the_sentences(reg, rs, monkeypatch):
     refill = rc.refill_sentence(reg, fev)
     assert cq.leave_follow_consequence(reg, fev, True, True) == ["You stay on the Hyjal Summit roster.", "Your Barrow Deeps place is freed.", refill]
     assert cq.leave_follow_consequence(reg, fev, True, False) == ["Your Hyjal Summit answer stands.", "Your Barrow Deeps place is freed.", refill]
-    assert cq.leave_follow_consequence(reg, fev, False, False) == ["Your Hyjal Summit answer stands.", "You are out of Barrow Deeps, the later raid."]
+    assert cq.leave_follow_consequence(reg, fev, False, False) == ["Your Hyjal Summit answer stands.", "You are out of the later raid, Barrow Deeps."]
     rc.run_team(reg, fev)["autofill"] = True
     assert cq.leave_follow_consequence(reg, fev, True, True)[2] == "The bench is asked to fill it."  # never "an officer may" when the bot asks
     fx = rc.cancel_effects(reg, lead)
@@ -581,7 +581,7 @@ def test_me_rows_offer_leaving_and_staying(reg, rs, monkeypatch):
     f = r[fev.key]
     assert f["lead_raid"] == "Hyjal Summit" and f["then"] is None and f["may_answer"] is False and f["may_cant"] is False
     assert f["may_leave"] is True and f["may_stay"] is False
-    assert f["leave_consequence"] == "Your Hyjal Summit answer stands. You are out of Barrow Deeps, the later raid."
+    assert f["leave_consequence"] == "Your Hyjal Summit answer stands. You are out of the later raid, Barrow Deeps."
     rc.leave_follow(reg, rs, rs.events[fev.key], m)
     f = rows()[fev.key]
     assert f["may_leave"] is False and f["may_stay"] is True

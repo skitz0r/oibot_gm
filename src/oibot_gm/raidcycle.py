@@ -1967,9 +1967,9 @@ def parse_run_lineup(lineup) -> list[dict]:
     try:
         full = parse_lineup(rows)
     except RegistryError as e:
-        raise RegistryError(str(e).replace("A schedule can't run the same raid twice in one night.", "A run can't hold the same raid twice.")
-                            .replace("A schedule", "A run").replace("in a schedule", "in a run").replace("of a schedule", "of a run")
-                            .replace("the schedule's own time", "the run's own time")) from None
+        raise RegistryError(str(e).replace("A schedule can't run the same raid twice in one night.", "An event can't hold the same raid twice.")
+                            .replace("A schedule", "An event").replace("in a schedule", "in an event").replace("of a schedule", "of an event")
+                            .replace("the schedule's own time", "the event's own time")) from None
     return full
 
 
@@ -5406,7 +5406,7 @@ def open_when(reg: Registry, instance: str, value: str | None, schedule: str | N
         later_fo = [t for s in has for e in schedule_lineup(instance, s)[1:] if (t := reg.first_open(e["raid"])) and t > reg.now_local()]
         why = (f"its slots all fall before it opens on {reg.local12(fo)}" if has and fo and fo > reg.now_local()
                else f"a later raid of its lineup first opens {reg.local12(min(later_fo))}" if later_fo  # C8: those nights are skipped
-               else "it has no recurring slots yet")
+               else "it has no event times yet")
         raise RegistryError(f"No next slot for this raid: {why}. Pick a date and time instead, or set it up on the Raids page.")
     return nxt[0][1], nxt[0][0]["id"], ""
 

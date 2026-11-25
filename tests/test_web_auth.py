@@ -81,7 +81,7 @@ def test_opening_a_run_refuses_the_past_and_explains_a_missing_slot(reg, rs, mon
     junk = c.post(f"/api/raid/{rid}/open", json={"when": "next tuesday"}, headers=h)
     assert junk.status_code == 400 and "picker" in junk.json()["error"]
     none = c.post(f"/api/raid/{rid}/open", json={"when": ""}, headers=h)
-    assert none.status_code == 400 and "no recurring slots yet" in none.json()["error"] and "Pick a date and time" in none.json()["error"]
+    assert none.status_code == 400 and "no event times yet" in none.json()["error"] and "Pick a date and time" in none.json()["error"]
     # slots exist but every occurrence is before the raid opens: say THAT, not "no slots"
     weekly(reg, rid, "Tue 19:30")
     reg.set_raid_override(rid, "first_open", "2030-01-01T15:00", "t")

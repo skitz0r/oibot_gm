@@ -110,10 +110,10 @@ def test_plain_text_edits_a_lineup_and_opens_one(reg, rs):
     assert line.startswith("Hyjal Summit ") and " ".join(cq.lineup_consequence(reg, rs, first, [{"raid": HYJAL, "rosters": 1}, {"raid": ONY, "rosters": 1}])) in line
     run(configops.apply_async(reg, edit, "Officer", True, bot=bot, by_id=OWNER, via="chat"))
     assert [e["raid"] for e in rc.run_lineup(reg, rs, first)] == [HYJAL, ONY]
-    assert "A run can't hold the same raid twice." in configops.describe(reg, ConfigOp(op="run_lineup", target=first.key, value="onyxias_lair, onyxias_lair"))
+    assert "An event can't hold the same raid twice." in configops.describe(reg, ConfigOp(op="run_lineup", target=first.key, value="onyxias_lair, onyxias_lair"))
     with pytest.raises(RegistryError) as e:
         run(configops.apply_async(reg, ConfigOp(op="run_lineup", target=first.key, value="onyxias_lair, onyxias_lair"), "Officer", True, bot=bot, by_id=OWNER, via="chat"))
-    assert str(e.value) == "A run can't hold the same raid twice."
+    assert str(e.value) == "An event can't hold the same raid twice."
 
 
 def wide_reg(store, profile):
