@@ -174,9 +174,10 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
     """Lock — the card's Lock and /raid lock alike: the server's box (consequences.lock_box, boxes 1–2 — the site's
     Lock now prints the same) through Wizard.decide_box, then Lock · Preview lock · Back. Preview lock draws the roster
     the lock would build now (rc.split_preview under the run's solver single flight; nothing saved but
-    `ev.last_proposal`), one member per line with the spec icon, under the same box (decide_box's `embed`), so a box that
-    changed during the preview is shown again at Lock. The lock itself is RaidMixin.lock_run, after
-    the screen has acknowledged the press."""
+    `ev.last_proposal`), one member per line with the spec icon, under the box (decide_box's `embed`). The box is built
+    again after the preview, so what changed while it ran is in the box under the roster; Lock still compares the box's
+    fp at the press, and a box that changed since is shown fresh, without the roster, instead of locking. The lock
+    itself is RaidMixin.lock_run, after the screen has acknowledged the press."""
     from .configops import report_error
     from .consequences import lock_box
 
@@ -221,8 +222,8 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
         except RegistryError as e:  # the solver is busy on this run, or no roster satisfies the rules
             await wiz.refuse(i, str(e), retry=again, retry_label="Back")
             return
-        # the same screen with the roster under the box: Preview lock again draws a fresh one; a box that changed during
-        # the preview is shown again at Lock, without the (now old) roster
+        # the same screen with the roster under a box built again now: Preview lock again draws a fresh roster; Lock
+        # compares this box's fp at the press, and a change since shows the fresh box, without the (now old) roster
         await wiz.decide_box(i, box(), do=do, refresh=box, back=again, extra=[wiz.button(RUN_WORDS["preview_lock"], preview)],
                              embed=lock_preview_embed(reg, cur, rosters, bot.ico))
 
