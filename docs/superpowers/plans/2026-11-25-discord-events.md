@@ -874,6 +874,52 @@ Readability: every `decide_box` caller added in Tasks 2–7 prints a box built b
 
 ---
 
+### Task 10: Every Discord link to an event opens that event's page
+
+The owner (2026-11-25): "ensure deep linking from discord (ex signup sheet title) correctly leads to the event page".
+Today the sheet's title links to the member's Me page row (`raid_views`' `/app/me?g=<key>#run-<key>`), only the officer
+card's "Open the board" goes to `/app/events/<key>`, and the loot links use `#run-<key>` anchors.
+
+**Files:**
+- Modify: `src/oibot_gm/raid_views.py` (ONE link builder for an event, used by the sheet title and every card),
+  `src/oibot_gm/web/app.py` (only if the login round trip loses the address), `frontend/src/pages/Events.tsx` or the
+  router (`frontend/src/App.tsx`) for the member landing, `docs/manual.md`, `docs/layout/events.md` / `frontend.md`
+- Test: `tests/test_event_links.py` (new), `tests/test_frontend_source.py` (a source lint row)
+
+**Interfaces:**
+- Produces: `raid_views.event_url(reg, ev) -> str | None` = `{web}/app/events/<first part's key>?g=<guild key>` (None
+  without a public site address). Every Discord surface that links to an event calls it: the sheet's title, the health /
+  lock / closed cards, the confirm and fill DM cards where they link at all, the run-update thread lines. Grep for every
+  `/app/` literal and `site_url(` in the Discord-side modules and list in the report what each links to.
+- A later raid's key resolves to its event (the page already answers any part's key; the builder still emits the first
+  part's key).
+
+**Behaviour to pin:**
+- An officer following the link lands on `/events/<key>` for that guild (`?g=` selects the guild even when their
+  cookie holds another; an explicit `g` they may not open is the existing 403 not-a-member page, never another guild).
+- A member who is not an officer following the SAME link lands on their own row for that event on the Me page (the
+  page redirects `/events/<key>` → `/me#run-<key>` for a non-officer, keeping `?g=`); they never see an empty or
+  "officers only" page. Their Join / Bench / No thanks there is unchanged.
+- Not logged in: the Discord login round trip returns to the full address, key and `?g=` included (test the redirect
+  chain with the suite's auth helpers; fix `web/app.py` only if it drops them).
+- A key that no longer names an event (cleaned up, or a raid taken out of the lineup): the Events page's existing
+  one-sentence state, not a blank page; a finished or cancelled event opens its History view.
+- Old links already posted in Discord keep working: `/app/me#run-<key>` still scrolls to the row, `/rosters#run-<key>`
+  still redirects (`RostersRedirect`).
+- The sheets already posted are redrawn at the next start (`sheets_restore`), so no migration is needed; say so in the
+  report after checking that the title's link is part of what the redraw rewrites.
+
+- [ ] **Step 1:** Write `tests/test_event_links.py`: `event_url` for a first part, a later part (same address), no web
+  address (None); the sheet embed's title url and each card's link equal `event_url`; no Discord-side module builds an
+  event address by hand (a source scan for `/app/me?g=` + `#run-` and `/app/events/` outside `raid_views.event_url`).
+- [ ] **Step 2:** Run it: FAIL. Implement the builder and replace the callers.
+- [ ] **Step 3:** The member landing in the SPA (non-officer on `/events/:key` → `/me#run-<key>`), with a
+  `tests/test_frontend_source.py` row pinning that the Events route handles a non-officer; the login return-to test.
+- [ ] **Step 4:** `cd frontend && npx tsc --noEmit && npm run build`, `uv run python scripts/check_bundle.py`; run
+  `uv run --with pytest-xdist pytest -q -n 8 -m "not slow" tests/test_event_links.py tests/test_frontend_source.py
+  tests/test_web_auth.py` plus the sheet / card rendering test files you touched.
+- [ ] **Step 5:** Manual (the signup sheet's section: the title opens the event), layout entries, commit with the bundle.
+
 ## Self-review (done)
 
 - **Spec coverage:**
