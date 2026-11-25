@@ -225,3 +225,37 @@ def test_lint_reads_a_persistent_buttons_own_label():
     b.item.label = "Override…"
     v.add_item(b)
     assert any("ellipsis" in e for e in lint(v))
+
+
+def test_an_awaitable_refresh_runs_after_working_and_a_sync_one_before(reg):
+    """A refresh that is awaitable (a describe_ops in a thread) may pass Discord's 3 seconds: the press is answered with
+    `working` first. A plain sync refresh is checked before anything is shown, as before."""
+    h = Harness(reg)
+    order = []
+    b = cq.box("Move X?", ["It moves."], "Move")
+
+    class W(Wizard):
+        async def working(self, interaction, text="Working…"):
+            order.append("working")
+            await super().working(interaction, text)
+
+    async def do(i, v):
+        order.append("do")
+
+    async def slow():
+        order.append("refresh")
+        return b
+    wiz = W(reg, h.user.id, title="T")
+    run(wiz.decide_box(h.command(), b, do=do, refresh=slow))
+    run(h.press("Move"))
+    assert order == ["working", "refresh", "do"]
+
+    order.clear()
+
+    def quick():
+        order.append("refresh")
+        return b
+    wiz2 = W(reg, h.user.id, title="T")
+    run(wiz2.decide_box(h.command(), b, do=do, refresh=quick))
+    run(h.press("Move"))
+    assert order == ["refresh", "working", "do"]

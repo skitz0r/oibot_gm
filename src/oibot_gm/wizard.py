@@ -388,8 +388,8 @@ class Wizard(discord.ui.View):
         note's submit `refresh()` builds the box again: another `fp` is shown again under CONFIRM_WORDS["changed"] and
         nothing is written; a refusal is shown as one, and a `refresh()` that raises RegistryError is shown as its refusal
         box (consequences.refusal_box_for: its sentence, Back alone, nothing written). Otherwise `working`, then
-        `do(interaction, values)` (`{}` for a plain press). `refresh` must not solve: it runs inside Discord's 3
-        seconds. A verb ending in "…" is taken once without it."""
+        `do(interaction, values)` (`{}` for a plain press). `refresh` must not solve; a sync one runs inside Discord's 3
+        seconds, an awaitable one (a thread) after `working` has answered the press. A verb ending in "…" is taken once without it."""
         verb = box.get("verb")
         if verb is not None and verb != button_label(verb):
             box = {**box, "verb": button_label(verb)}
@@ -398,10 +398,13 @@ class Wizard(discord.ui.View):
         again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint)
 
         async def go(i: discord.Interaction, values: dict[str, str]) -> None:
+            worked = False
             if refresh is not None:
                 try:
                     fresh = refresh()
-                    if inspect.isawaitable(fresh):
+                    if inspect.isawaitable(fresh):  # a slow check (a thread): the press is answered first
+                        await self.working(i)
+                        worked = True
                         fresh = await fresh
                 except RegistryError as e:
                     from .consequences import refusal_box_for  # consequences → raidcycle; imported where it is needed
@@ -409,7 +412,8 @@ class Wizard(discord.ui.View):
                 if fresh.get("fp") != box.get("fp"):
                     await self.decide_box(i, fresh, changed=fresh.get("verb") is not None, **again)
                     return
-            await self.working(i)
+            if not worked:
+                await self.working(i)
             await do(i, values)
 
         async def plain(i: discord.Interaction) -> None:
