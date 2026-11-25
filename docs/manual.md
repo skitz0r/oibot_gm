@@ -6,7 +6,7 @@ current settings, whenever someone asks the bot a question (`/ask`, a DM, or an 
 ## 1. What the bot is
 
 oibot_GM is the guild's raid administrator. It keeps the character registry, opens signup sheets on a
-schedule, checks the roster's health, builds groups, fills freed seats by DM, and runs a loot council whose
+schedule, checks the roster's health, builds groups, fills freed seats by DM, and keeps a loot council whose
 recommendations an officer confirms or overrides (items the tables don't know are recorded by name, §9). Code does the computing
 (building groups, scoring, schedules); Claude only explains, judges against the written policy, and turns
 plain-text requests (members' about their own record, officers' about anything the site or a slash command can do,
@@ -18,7 +18,7 @@ stored with their reason as precedents.
 Your Discord account is your identity. Character names can be added later (before launch a "planned"
 main has no name yet). Roles come from the spec you register (Protection → tank, Holy → healer,
 Fire → ranged…); an offspec in another role counts as flexibility. There is no standing availability to
-fill in anywhere: you answer each run's sheet when it is posted, and you post absences for days you're away.
+fill in anywhere: you answer each event's sheet when it is posted, and you post absences for days you're away.
 
 ## 1a. The words
 
@@ -216,7 +216,7 @@ understands; it answers in the words below.
 - **#register (registration channel)** — read-only; the pinned card has four buttons: *Apply to join*
   (newcomers start here), *Register / plan my main*, *Add an alt*, *My status*. Anyone can press them. The card
   says when applications are closed and shows the recruitment note; the bot edits it in place when those change.
-- **Signup channel** — one sheet per run. An **open** sheet has **Join / Bench / No thanks** buttons (Bench =
+- **Signup channel** — one sheet per event. An **open** sheet has **Join / Bench / No thanks** buttons (Bench =
   call me if you need me). The sheet's title is a link to that event on the site: officers land on its event page,
   everyone else on their own row for it on the Me page, so you can answer on the site from Discord. Once the event has
   finished or was cancelled it has no row there, and the Me page says so; your loot and attendance are further down. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
@@ -226,8 +226,8 @@ understands; it answers in the words below.
   one (a Bench on your alt makes your alt the fill candidate): up to four characters are one button each, your main
   first; five or more are one list with your main already picked, plus a *Join as <main>* button — nothing is left
   out. The reply is your state, not the press: *"You're joined as Kestrel (Holy) for Barrow Deeps Tue 9 Dec 7:30 PM ·
-  14/20 so far. The roster is decided at lock."* — on a run with two rosters it says *"Join counts for 1 of 2 rosters —
-  which one is decided at lock"*, on an ad hoc run your place in the queue (*"14th of 20 seats — in if nothing
+  14/20 so far. The roster is decided at lock."* — on an event with two rosters it says *"Join counts for 1 of 2 rosters —
+  which one is decided at lock"*, on a one-off event your place in the queue (*"14th of 20 seats — in if nothing
   changes"*). Answering is code only, no model. The sheet's footer counts officers' pins (*Pinned: 2 · Kept off:
   1* — numbers only), current whichever way the pin was set (`/raid set`, the site, plain text or MCP). A **locked** sheet shows the roster(s) group by group,
   a **Not rostered** row (joiners the lock left off), the Bench and No thanks rows, and a single **Can't make
@@ -236,7 +236,7 @@ understands; it answers in the words below.
   after lock the columns are the groups, with ✅ / ⏳ / ❌ for each person's confirmation.
 - **Absences channel** — a pinned card with *I'll be away*; each absence is announced there (no reason shown).
 - **Roster channel (officers)** — health cards, roster cards at lock, fill progress (🧩 lines). Here and in the ops
-  channel a run is always named by its raid and start time (*Barrow Deeps Tue 8 Dec 7:30 PM*), never by an internal id. Each run's card
+  channel an event is always named by its raid and start time (*Barrow Deeps Tue 8 Dec 7:30 PM*), never by an internal id. Each event's card
   has an **updates thread** underneath where every ask, answer, freed seat, confirmation and expiry is logged. The
   **loot council's thread** lives here too (else in the ops channel), §9.
 - **Analytics channel (officers)** — one card per raid: how many could play (mains) against its size, role counts
@@ -256,7 +256,7 @@ understands; it answers in the words below.
 - **Applications channel** — one review card per application (§3a) with Accept / Decline buttons (they keep
   working after a bot restart).
 - **Loot channel (the public loot log)** — one line per recorded award (item → character · boss), with an **Add to my
-  wishlist** button; never a reason or a score (§9). Not set: the lines go to each run's updates thread.
+  wishlist** button; never a reason or a score (§9). Not set: the lines go to each event's updates thread.
 - **News channel** — a Wowhead webhook posts game news there. The bot reads only the post itself (title and
   summary, never the linked article) and keeps the items about our game version, our raids, or the extra news
   keywords on the Config page. A daily review compares them with what the bot believes about the game; a
@@ -273,8 +273,8 @@ with a Discord account that isn't in the server yet gets a short page saying so,
 line) and a log-out link, instead of an error; after joining they log in again. A logged-in member goes straight to **Me**.
 
 **Raid schedule** (the link on the card, `/schedule`): a public page — no login — with each raid's name and size and,
-per schedule, when it runs and its **next three runs** in words (*"Fri 6 Nov 8:00 PM"*, guild time; a paused schedule
-says so, a pickup template says an officer opens those runs). Nothing about members is on it. With several servers it
+per schedule, when it runs and its **next three events** in words (*"Fri 6 Nov 8:00 PM"*, guild time; a paused schedule
+says so, a schedule opened by an officer says an officer opens those events). Nothing about members is on it. With several servers it
 lists them; `/schedule?g=<key>` opens one.
 
 **Unlisted guilds.** The owner can switch a guild to *unlisted* (Config › Recruitment and more › **Homepage**, or
@@ -311,8 +311,8 @@ your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the 
 **What the bot remembers you saying** lists your own words the bot keeps from a remembering channel, each with **Forget** (§8c *Memory*). **Me is your
 inbox** (§4 *Your inbox*): every ask waiting for you — Confirm / Can't make it, a seat or swap question, a pre-lock
 "could you come?" — as a card with its two buttons and its deadline, then your **Notices** (what happened that you
-should know: not rostered, a seat released, an officer answered for you, a run cancelled…), and **My sheets** with
-Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; each sheet's badge says where you stand (*rostered*, *not rostered* when the lock left you out, or your answer) and the run's state (*open for signup*, *locked — the roster stands*); officers get, in the left rail, **Events** (every event in a list — *Open*, *Coming up*, *History* — beside one event in sections, with **New event**, **Edit lineup** and the **More** menu for the raid-night levers: §4 *The Events page*; the old Rosters address opens it, and an old link to a run opens that run's event), **Schedules** (every schedule in a list — *Active* and *Paused*, each with when it repeats — beside one schedule in sections; on a phone the list first, then the schedule under *Back to Schedules*. A schedule's header has **Edit**, **Pause** / **Resume** and **Remove**, each showing the bot's box first — what changes, who is told, what can be undone — and writing on its second press; a box whose facts changed while it was open shows the new ones and waits again. *Details* (when it repeats, its first event — or the next one if resumed —, priority, confirmation, who asks for open seats, one answer for the whole evening when it plays several raids), *Lineup* (each raid with its start and seats), *Sheet timing* (when the sheet opens, the reminder, the lock, confirm by, and how many open events keep their own timing), *Next events* (the next three nights with when each sheet opens and locks; a night links its event, or its coming-up page on the Events page) and *Regulars* (how many for how many seats, who is expected without regulars, what the regulars are short, the next four weeks — each short night with **Open this run early** while it can open, greyed with the reason when it can't —, **Add a member** by searching the members, and each regular with a **Remove** that asks first; their answer on an open event is untouched). A schedule whose raid left the game is listed, says so, shows no next events and keeps its Remove. Regulars of a removed schedule are listed under the list, each with Remove. **New schedule** and **Edit** open the lineup builder: *Start from* (a new one copies a lineup), *Details* (the name; a new one's id), *Lineup* (the same builder as New event; an edit keeps the first raid), *Repeats* (**Weekly** run times, **Day N of each lockout** and its start — both picked, never typed — or **Opened by an officer** for a pickup template, chosen once when the schedule is made), *Sheet timing* (when the sheet opens and locks from a list such as *5 days before*, a preset, **Signup Reminder** with when it **Goes out**, **Lock Confirmation** with **Confirm by**, **Automated Fill Requests** with how long **An ask waits**, **Sheet Opening DM** — each switch with a **(?)** that says exactly who is sent what and when, §1a *The four switches*) and *Priority* (the five weights from 0 to 6 and the split; **Use the raid's** clears them). One **Save** shows the bot's box first — changing run times while an event is open says that event keeps its timing — and saves nothing when nothing changed. If another officer saved the schedule meanwhile, your edits stay, the bot says the schedule changed, and **Reload** drops them after *Leave without saving?*; an id another schedule already has is refused under the Save, and you change the id there. The Raids page's *Played in* links here), **Raids** (the game's raids as a list beside one raid — on a phone the list first, then the raid under *Back to Raids*; three views, switched at the top: **Rules** — *Details* (size, groups, lockout, length, when the first sheet opens, and the schedules it is played in, each a link) and *Group make-up* (each minimum a roster takes, *In each roster* · *Minimum*: the game's tank and healer minimums and the guild's own); **Priority** — when the priority is used (*More people join than there are seats*), that one-off events are first to join whatever the priority, and the five weights as bars, highest first; **Readiness** — *Who could play* (a *ready* / *thin* / *short* chip with the bot's sentence saying why when it isn't ready, mains for the raid's seats, alts, who could switch role) and *Against the make-up* (each minimum with how many mains the guild has, red when short — the same minimums as the Rules view, one answer). Any officer presses **Edit** on Rules or Priority: the lockout, the length (in half hours), the first opening (a day from a calendar and a time in 15-minute steps, never typed), a minimum per row (on a minimum the guild set, 0 takes it away so the game's applies again — a 0 is never kept; a minimum only the game sets starts at the game's number and can only be raised), **Add a role or class**, and each weight from 0 to 6; the size is the game's and is never edited. **Save** shows the bot's box first — what changes, old → new, and when it applies — and writes on its second press; **Discard edits** leaves the edit mode. **Reset to defaults** shows what goes back to the game's defaults (the minimums by name, and the schedules) before it does. Leaving a page with unsaved edits — the rail, a list pick, *Back to …* — asks *Leave without saving?* with **Keep editing** and **Discard edits**. The old Readiness address opens the Readiness view), **Auras** (what the guild knows about each buff; the owner edits), **Members** (find a person, fix one thing on their record, confirm their characters: a line of counts that are also filters — *in the server*, *away now*, *characters wait for a confirm*, *not in the server*, *no character yet* — a search over member and character names, and **Confirm characters…**, which walks every character waiting for an officer's confirm one at a time with **Skip** · **Confirm** · **Done for now** (your own are left out: another officer confirms yours); then the tabs **Members** · **Absences** · **Test bench**. **Members** has one row per member: the name with an *owner* / *officer* / *puppet* badge only when they are one, their attendance sentence under it, each character as one line of icons — class, name in its class colour, a crown on the main, the spec, the offspec dimmed, extra roles dashed, a hollow mark and *waits for a confirm* until an officer confirms it, *regular of …* under it (a link to the Schedules page) — the rank as a word, and a standing line only when there is something to say: *away until Fri 6 Nov*, *⏳ Barrow Deeps on Tue 3 Nov waits for their Confirm* (a link to its event), *DMs off, so asks wait on their Me page*. The member's **⋮** holds **Rank…** (trial · raider · core · social), **Record an absence…**, **Turn DMs on / off for <name>…**, **Edit characters** and **Remove record…** (only for someone not in the server); each character's **⋮** holds **Spec…**, **Extra roles…**, **Make main**, **Confirm**, **Retire…** and **Delete…**. An item that doesn't apply stays in the menu, greyed, with the reason under it (*already the main*; on your own record *Another officer sets your rank.*). Every press shows the bot's own sentences first — the same words Discord's `/roster char` prints — and changes nothing until you press again. **Edit characters** turns that one member's row into inputs with **Cancel** and **Save <name>'s characters** beside it; Save says first what the change does to their runs (a seat handed back, a sheet answer that now reads the new spec) and, if someone changed the record meanwhile, keeps your edit and asks you to reload. At the foot, folded: **Not in the Discord server** (each with *not in the server · noticed Sun 25 Oct* and **Remove record…**), **No character yet** and the test bench's puppets. **Absences** is the list of everyone away, with when, the reason and who recorded it, *away now* in grey under the days, and an **I'm back** button (on a phone each absence is a card, the days and the reason under the name); with nobody away it says so and that an absence is recorded from a member's ⋮ (**Record an absence…**, a window titled *Record an absence for <name>*). **Test bench** seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a. On a phone every member is a card and every button is big enough for a thumb), **Config** (an **Overview**: the **Setup** checklist, then the whole configuration in words — the owner also sees the host's facts — then **Settings** (with *The guild in the armory* where the game has an armory, §8), **Channels**, **Recruitment and more** (with the **Loot scoring** weights, §9) and, for the owner, **Companions** — the loot companion tokens, §8; owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire and Distil;
+should know: not rostered, a seat released, an officer answered for you, an event cancelled…), and **My sheets** with
+Join · Bench · No thanks (and *Can't make it…* once an event is locked) — the same answers as the sheet's buttons; each sheet's badge says where you stand (*rostered*, *not rostered* when the lock left you out, or your answer) and the event's state (*open for signup*, *locked — the roster stands*); officers get, in the left rail, **Events** (every event in a list — *Open*, *Coming up*, *History* — beside one event in sections, with **New event**, **Edit lineup** and the **More** menu for the raid-night levers: §4 *The Events page*; the old Rosters address opens it, and an old link to one night opens its event), **Schedules** (every schedule in a list — *Active* and *Paused*, each with when it repeats — beside one schedule in sections; on a phone the list first, then the schedule under *Back to Schedules*. A schedule's header has **Edit**, **Pause** / **Resume** and **Remove**, each showing the bot's box first — what changes, who is told, what can be undone — and writing on its second press; a box whose facts changed while it was open shows the new ones and waits again. *Details* (when it repeats, its first event — or the next one if resumed —, priority, confirmation, who asks for open seats, one answer for the whole evening when it plays several raids), *Lineup* (each raid with its start and seats), *Sheet timing* (when the sheet opens, the reminder, the lock, confirm by, and how many open events keep their own timing), *Next events* (the next three nights with when each sheet opens and locks; a night links its event, or its coming-up page on the Events page) and *Regulars* (how many for how many seats, who is expected without regulars, what the regulars are short, the next four weeks — each short night with **Open this event early** while it can open, greyed with the reason when it can't —, **Add a member** by searching the members, and each regular with a **Remove** that asks first; their answer on an open event is untouched). A schedule whose raid left the game is listed, says so, shows no next events and keeps its Remove. Regulars of a removed schedule are listed under the list, each with Remove. **New schedule** and **Edit** open the lineup builder: *Start from* (a new one copies a lineup), *Details* (the name; a new one's id), *Lineup* (the same builder as New event; an edit keeps the first raid), *Repeats* (**Weekly** event times, **Day N of each lockout** and its start — both picked, never typed — or **Opened by an officer**, chosen once when the schedule is made), *Sheet timing* (when the sheet opens and locks from a list such as *5 days before*, a preset, **Signup Reminder** with when it **Goes out**, **Lock Confirmation** with **Confirm by**, **Automated Fill Requests** with how long **An ask waits**, **Sheet Opening DM** — each switch with a **(?)** that says exactly who is sent what and when, §1a *The four switches*) and *Priority* (the five weights from 0 to 6 and the split; **Use the raid's** clears them). One **Save** shows the bot's box first — changing event times while an event is open says that event keeps its timing — and saves nothing when nothing changed. If another officer saved the schedule meanwhile, your edits stay, the bot says the schedule changed, and **Reload** drops them after *Leave without saving?*; an id another schedule already has is refused under the Save, and you change the id there. The Raids page's *Played in* links here), **Raids** (the game's raids as a list beside one raid — on a phone the list first, then the raid under *Back to Raids*; three views, switched at the top: **Rules** — *Details* (size, groups, lockout, length, when the first sheet opens, and the schedules it is played in, each a link) and *Group make-up* (each minimum a roster takes, *In each roster* · *Minimum*: the game's tank and healer minimums and the guild's own); **Priority** — when the priority is used (*More people join than there are seats*), that one-off events are first to join whatever the priority, and the five weights as bars, highest first; **Readiness** — *Who could play* (a *ready* / *thin* / *short* chip with the bot's sentence saying why when it isn't ready, mains for the raid's seats, alts, who could switch role) and *Against the make-up* (each minimum with how many mains the guild has, red when short — the same minimums as the Rules view, one answer). Any officer presses **Edit** on Rules or Priority: the lockout, the length (in half hours), the first opening (a day from a calendar and a time in 15-minute steps, never typed), a minimum per row (on a minimum the guild set, 0 takes it away so the game's applies again — a 0 is never kept; a minimum only the game sets starts at the game's number and can only be raised), **Add a role or class**, and each weight from 0 to 6; the size is the game's and is never edited. **Save** shows the bot's box first — what changes, old → new, and when it applies — and writes on its second press; **Discard edits** leaves the edit mode. **Reset to defaults** shows what goes back to the game's defaults (the minimums by name, and the schedules) before it does. Leaving a page with unsaved edits — the rail, a list pick, *Back to …* — asks *Leave without saving?* with **Keep editing** and **Discard edits**. The old Readiness address opens the Readiness view), **Auras** (what the guild knows about each buff; the owner edits), **Members** (find a person, fix one thing on their record, confirm their characters: a line of counts that are also filters — *in the server*, *away now*, *characters wait for a confirm*, *not in the server*, *no character yet* — a search over member and character names, and **Confirm characters…**, which walks every character waiting for an officer's confirm one at a time with **Skip** · **Confirm** · **Done for now** (your own are left out: another officer confirms yours); then the tabs **Members** · **Absences** · **Test bench**. **Members** has one row per member: the name with an *owner* / *officer* / *puppet* badge only when they are one, their attendance sentence under it, each character as one line of icons — class, name in its class colour, a crown on the main, the spec, the offspec dimmed, extra roles dashed, a hollow mark and *waits for a confirm* until an officer confirms it, *regular of …* under it (a link to the Schedules page) — the rank as a word, and a standing line only when there is something to say: *away until Fri 6 Nov*, *⏳ Barrow Deeps on Tue 3 Nov waits for their Confirm* (a link to its event), *DMs off, so asks wait on their Me page*. The member's **⋮** holds **Rank…** (trial · raider · core · social), **Record an absence…**, **Turn DMs on / off for <name>…**, **Edit characters** and **Remove record…** (only for someone not in the server); each character's **⋮** holds **Spec…**, **Extra roles…**, **Make main**, **Confirm**, **Retire…** and **Delete…**. An item that doesn't apply stays in the menu, greyed, with the reason under it (*already the main*; on your own record *Another officer sets your rank.*). Every press shows the bot's own sentences first — the same words Discord's `/roster char` prints — and changes nothing until you press again. **Edit characters** turns that one member's row into inputs with **Cancel** and **Save <name>'s characters** beside it; Save says first what the change does to their events (a seat handed back, a sheet answer that now reads the new spec) and, if someone changed the record meanwhile, keeps your edit and asks you to reload. At the foot, folded: **Not in the Discord server** (each with *not in the server · noticed Sun 25 Oct* and **Remove record…**), **No character yet** and the test bench's puppets. **Absences** is the list of everyone away, with when, the reason and who recorded it, *away now* in grey under the days, and an **I'm back** button (on a phone each absence is a card, the days and the reason under the name); with nobody away it says so and that an absence is recorded from a member's ⋮ (**Record an absence…**, a window titled *Record an absence for <name>*). **Test bench** seeds or composes puppet members, opens and answers test events, follows them in a live feed and opens a comp sandbox, see §8a. On a phone every member is a card and every button is big enough for a thumb), **Config** (an **Overview**: the **Setup** checklist, then the whole configuration in words — the owner also sees the host's facts — then **Settings** (with *The guild in the armory* where the game has an armory, §8), **Channels**, **Recruitment and more** (with the **Loot scoring** weights, §9) and, for the owner, **Companions** — the loot companion tokens, §8; owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire and Distil;
 Items — the untiered list, the tier grid and the loot history import; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
 bot's recent actions and the plain-text permissions; a badge counts errors folded into an earlier alert), **Applications**
 (the open applications oldest first with every answer in full, the earlier verdicts, Accept / Decline with the same
@@ -321,7 +321,7 @@ member role), **Policy** (the loot policy, the standing comp instructions and th
 persona: what was written beside what the bot applies, a red bar when they differ, the waiting draft with Confirm /
 Discard, Edit and Add a rule — §7) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss, §7a). Everyone also gets **Help**: the
 whole manual, section by section (sections for officers or the owner are marked, not hidden), and the commands you may
-run; `/help` in Discord links to it. Only
+use; `/help` in Discord links to it. Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
 
 **The officers' rail** reads, in order: **Events**, **Schedules**, **Raids**, then **Members**, **Applications**,
@@ -330,10 +330,10 @@ Events page and the Raids page's Readiness view. On a phone the rail is behind t
 
 **What the raid pages leave to Discord, plain text and MCP.** A few things the older raid pages did are not on Events,
 Schedules or Raids; each still works elsewhere. A cancel's reason and its line in the signup channel: the card's
-*Cancel run* or `/raid cancel`, plain text, MCP `cancel_run`. Another layout for a run (*Propose roster*, *another
+*Cancel event…* or `/raid cancel`, plain text, MCP `cancel_run`. Another layout for an event (*Propose roster*, *another
 split like this*) and **Clear** of every officer's moves on a board: plain text, MCP `propose_split` / `set_layout`, a
-test run's card on the Test bench (on the Events page **Undo my moves** takes back your own). Opening a pickup
-template's event: `/raid open` › *Ad hoc run*, plain text, MCP `open_run` (New event opens one-offs and schedules'
+test event's card on the Test bench (on the Events page **Undo my moves** takes back your own). Opening the event of a
+schedule an officer opens: `/raid open` › *One-off event*, plain text, MCP `open_run` (New event opens one-offs and schedules'
 nights). Setting one timing value of a schedule back to the game's suggestion: plain text, MCP
 `schedule_set`. A start at a minute that isn't a quarter hour (the site's pickers step by 15 minutes): plain text or
 MCP. On the Raids page, a minimum's reason (*why*), a raid's notes and its split policy: `/roster comp` or
@@ -352,7 +352,7 @@ and that account's **BattleTag**, press **Build my guide**, and the site unlocks
 addon — unzip it into *Interface/AddOns* next to RXPGuides and the guide loads on any character of yours), **explorer.html** (the
 route explorer: pick faction, race and class, and the map draws the route zone by zone with every step's text; one file, it works
 offline from your own computer) and **guide-text.zip** (the guides as readable text, one file per group, with a summary of the zones
-visited, dungeons and walking distance). The explorer also runs on the page itself. *What you got* lists the guide groups with their
+visited, dungeons and walking distance). The explorer also works on the page itself. *What you got* lists the guide groups with their
 levels, steps, zones in order and dungeons. Your files are yours alone — nobody else, officers included, can open them — and the
 import string and the BattleTag are read once to unlock the guide and not kept; **Remove my files** deletes the outputs, and pasting
 the string again rebuilds them. When the host has a copy of the RXPGuides addon (`OIBOT_RXP_ADDON` in `.env`), the explorer adds the
@@ -411,21 +411,21 @@ character links whether or not the owner has linked the guild — §8; what a li
     and **Give it** links it (or registers and links it). If it was registered but couldn't be linked, the page says
     exactly that and why. Nobody without a record here can be given a character.
 
-**Tell the bot** (officers): every officer page has **Tell the bot…** in the left rail (on an event, name the event: *"Thursday's run: …"*), and
-every test run's card on the Test bench has **Tell the bot about this run** (it starts with the run's name). Type a question ("who hasn't answered tonight?") and the answer comes
-back from the same snapshot `/ask` uses, the officer view; type a request ("bench Jonny tonight", "Barrow Deeps alt run locks 12 hours
+**Tell the bot** (officers): every officer page has **Tell the bot…** in the left rail (on an event, name the event: *"Thursday's event: …"*), and
+every test event's card on the Test bench has **Tell the bot about this raid** (it starts with the event's name). Type a question ("who hasn't answered tonight?") and the answer comes
+back from the same snapshot `/ask` uses, the officer view; type a request ("bench Jonny tonight", "Barrow Deeps alt nights lock 12 hours
 before") and the bot shows the change first — the same current → new lines an @mention shows in Discord, refused lines saying who may
 and where — with **Apply N changes** / **Cancel**, then the result line by line. Nothing is saved before Apply; a preview is good for
 ten minutes (it says how long is left) and an expired one is previewed again rather than applied unseen. The box keeps its preview while
 the page updates around it. There is no box on **Me** (owner decision): members ask with `/ask` or a DM, or press the buttons. With the
 AI off the box says *The bot can't read sentences right now — use the controls on this page.* There is no
-standing signup: each run is answered on its sheet in Discord, or by telling the bot ("bench me for tonight").
+standing signup: each event is answered on its sheet in Discord, or by telling the bot ("bench me for tonight").
 
 ## 3. Members: registering and keeping your record current
 
 - **New here? Apply first.** Anyone can join the Discord server with the public invite; joining the guild is an
   application, made in Discord (§3a). Someone with nothing registered who presses *Register / plan my main* or
-  *Add an alt*, or runs `/register`, `/me plan main|alt` or `/me char action:Add an alt`, is sent to the application with one line:
+  *Add an alt*, or uses `/register`, `/me plan main|alt` or `/me char action:Add an alt`, is sent to the application with one line:
   *"New here? Apply first — the officers take it from there."* Plain text ("add my alt …", "plan my main as …") says
   the same, with the **Apply to join** button on the reply while applications are open. Officers, and anyone holding one of the guild's **member roles** (set by the owner, §8), register
   directly; anyone already registered is never affected and keeps adding alts as below.
@@ -444,17 +444,17 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   *"Larkspur stops being a regular of Barrow Deeps Raid nights, because retired characters aren't regulars."*. The Me page's characters card and telling
   the bot do exactly the same (one verb behind all three): on the Me page the row's ⋮ (**Make main** · **Retire** ·
   **Delete**) prints the very sentences `/me char` prints before anything changes, and **Save changes** after an Edit
-  says first what the edit does to your runs (a seat handed back, a sheet answer that now reads the new spec); when it
-  touches no run, the first press saves. A new character with a name waits for an officer's confirm; one without a
+  says first what the edit does to your events (a seat handed back, a sheet answer that now reads the new spec); when it
+  touches no event, the first press saves. A new character with a name waits for an officer's confirm; one without a
   name stays planned. The crown marks your main; an alt carries no mark.
   - **Alts**: *Add an alt* button, `/me char action:Add an alt` (first and last name, like the button), `/me plan alt`.
   - **Spec/offspec**: a sheet you answered shows the new spec at once (sheets keep the spec you answered with) — a
     planned character without a name too, whose name on the sheet follows ("Priest (Holy)" becomes "Priest (Shadow)"). On a
-    locked roster, a change in the same role follows your seat; a change of role (healer → damage) on a **recurring**
-    run keeps the seat as the roster was built and tells the officers on the run's card — they decide; on an **ad
-    hoc** run it hands the seat back (Join again to queue). Nobody is DMed.
+    locked roster, a change in the same role follows your seat; a change of role (healer → damage) on a **schedule's
+    event** keeps the seat as the roster was built and tells the officers on the event's card — they decide; on a
+    **one-off** event it hands the seat back (Join again to queue). Nobody is DMed.
   - **Main**: your rank moves with it (below). **Retire** keeps history; **Delete** removes a character outright
-    (prefer Retire if you may come back to it). Either way a seat the character holds on a locked run is handed back
+    (prefer Retire if you may come back to it). Either way a seat the character holds on a locked event is handed back
     and the bench asked, an open sheet's Join or Bench with it is cleared (a No thanks moves to your other character),
     and it comes off the regulars of any schedule; if it was your main, your next character becomes main. Your own
     change writes you no "seat released" notice (you did it); when an officer retires or deletes it for you, your Me
@@ -682,15 +682,15 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
 - **See everything the bot has on you**: `/me view` (your inbox first — open asks and unread notices, with **Mark
   notices read** — then characters, rosters, absences, your attendance, your last ten awards and how many items are on
   your wishlist) or the *My status* button.
-- **Attendance**: *"5 of 6 in the last 30 days"* in `/me view`, and the Me page's **Attendance** card lists each run —
+- **Attendance**: *"5 of 6 in the last 30 days"* in `/me view`, and the Me page's **Attendance** card lists each raid —
   day, raid, the character's spec icon and what happened (rostered, benched, away, can't make it, no thanks, no
   answer). It counts finished raids only, over the window your loot policy uses (30 days unless the guild changed it):
-  a run counts when you were one of its regulars or joined it, and a day you marked away **before the raid started** is
+  a raid counts when you were one of its regulars or joined it, and a day you marked away **before the raid started** is
   shown but never counted (an absence added after a raid you missed doesn't take the miss away).
   Every character of yours counts toward the same number. Rostered and benched both count here; for **loot** only
-  runs you were rostered on — and on a regular raid confirmed — count, and attendance counts in loot scores only once
-  the guild has three finished raids in the window (until then it is neutral for everyone). A pickup run counts only
-  for those who joined it. Before the first raid ends it reads *"not tracked yet — counts from the first run that ends"*.
+  raids you were rostered on — and on a regular raid confirmed — count, and attendance counts in loot scores only once
+  the guild has three finished raids in the window (until then it is neutral for everyone). A one-off event counts only
+  for those who joined it. Before the first raid ends it reads *"not tracked yet — counts from the first raid that ends"*.
   Officers see each member's sentence under their name on the Members page (*attended 5 of 6 in the last 30 days*),
   and once the guild has three finished raids in the window the lock prefers better attendance too — someone
   with no finished raid yet is treated as full attendance, never held back for being new.
@@ -816,46 +816,46 @@ can't upload, get, withdraw or restore a guild guide (a BattleTag and an import 
 *"is there a Horde guide?"* and it answers with each faction's latest and where to get it. Over MCP (§8b) the owner's
 tools list the library and withdraw or restore a version; they never upload or get one.
 
-## 4. Raids, runs and the signup cycle
+## 4. Raids, events and the signup cycle
 
 A **raid** is an instance and its rules: size, lockout, expected duration, its **minimums** (the fewest tanks,
-healers, or of a class a run takes — §1a). When it runs — its **slots** — and **a run's week** (when a sheet opens,
+healers, or of a class an event's raid takes — §1a). When it runs — its **slots** — and **an event's week** (when a sheet opens,
 locks and must be confirmed by) belong to each of its schedules, below. At launch: **Barrow Deeps**
 (10-player, 3-day lockout guess), **Hyjal Summit** (20-player, weekly), **Onyxia's Lair** (40-player,
 5-day like Classic). Each raid has a **first opens at** (seeded 9 Dec 2026, 3:00 PM PST for all three); no
 sheet opens before it. Officers set all of this — a raid's rules and its schedules — with `/gm config raid`, on the
-Raids and Schedules pages, in plain text (`raid_set`, `schedule_set`) or over MCP. Every run is built from its own sheet; a recurring schedule also has **regulars** (below) — the
+Raids and Schedules pages, in plain text (`raid_set`, `schedule_set`) or over MCP. Every event is built from its own sheet; a schedule that repeats also has **regulars** (below) — the
 people expected each week — but nobody's answer is ever filled in for them.
 
-A **slot** is a recurring run time in the guild's timezone (US Pacific), e.g. Tue 7:30 PM (on the site and in Discord you pick the weekday and time; nothing is typed). A raid can have
-several. One **run** = one slot occurrence = one sheet. A run is **open**, then **locked**, then **done**
+A **slot** is a weekly event time in the guild's timezone (US Pacific), e.g. Tue 7:30 PM (on the site and in Discord you pick the weekday and time; nothing is typed). A raid can have
+several. One **event** = one slot occurrence = one sheet. An event is **open**, then **locked**, then **done**
 (or **cancelled**). Members never keep standing availability; they answer each sheet.
 
-**Schedules** say *when* a raid runs; the raid itself keeps what it is (size, minimums, lockout, weights, split
-policy) and has no run times of its own. Each schedule has a name and an **id** that no other schedule of the guild has
-— two raids can't both have a *tuesday*. A guild whose raid had run times of its own before keeps them as an ordinary
+**Schedules** say *when* a raid is played; the raid itself keeps what it is (size, minimums, lockout, weights, split
+policy) and has no event times of its own. Each schedule has a name and an **id** that no other schedule of the guild has
+— two raids can't both have a *tuesday*. A guild whose raid had event times of its own before keeps them as an ordinary
 schedule named *Raid nights* (its id from the raid's name, e.g. *barrow-deeps*), and its regulars stay on it; the ops
 channel gets one line at the next start naming each such schedule (*"Each schedule now stands on its own instead of under
 one raid, and its regulars came with it: Barrow Deeps · Raid nights."*). A raid can have several schedules. Each
 schedule holds its own **sheet timing** in full: when its sheet opens, nudges, locks and asks to confirm, how long
-fill asks wait, autofill and the DM on open. A new schedule starts from the game's suggestion for its raid (a pickup
-template from the ad hoc values below); setting one of them back to the default gives it the suggestion again. The
+fill asks wait, autofill and the DM on open. A new schedule starts from the game's suggestion for its raid (a schedule
+opened by an officer from the one-off values below); setting one of them back to the default gives it the suggestion again. The
 raid's own settings no longer hold timing: change it on the schedule. A guild that set timing on a raid before has it
 on that raid's schedules from its next start, and the ops channel gets one line saying where each value went and which
 ones no schedule took. Moving a schedule's opening or lock past its
 reminder moves the reminder back to halfway between them. Weights and split policy stay the raid's unless the
 schedule sets its own. Three kinds:
-- **Weekly nights** — run times like the raid's own ("Saturdays 8:00 PM"). A Tuesday main night and a Saturday alt
-  run of the same raid, each with its own lock time.
+- **Weekly nights** — event times like "Saturdays 8:00 PM". A Tuesday main night and a Saturday alt
+  night of the same raid, each with its own lock time.
 - **Days of each lockout** — "Day 1 of each 3-day lockout, 8:00 PM": day 1 is the day the lockout resets, counted
   from the raid's first opening every `lockout_days`, so a 3- or 5-day reset is followed exactly (and daylight saving
   never moves the wall-clock time; a time the clocks skip that night moves past the gap).
-- **Pickup template** — never opens by itself. `/raid open` → *Ad hoc run* offers it (*Pickup — pick a time*); the
-  run gets the template's settings. (The site's **New event** page makes one-offs; a pickup template opens from
-  Discord, plain text or MCP.)
-Each schedule also says how many **rosters** a run expects (1–4). With 2, the sheet advertises 2 × the raid's size
+- **Opened by an officer** — never opens by itself. `/raid open` → *One-off event* offers it (*On demand — pick a
+  time*, by the schedule's name); the event gets the schedule's settings. (The site's **New event** page makes
+  one-offs; a schedule opened by an officer opens from Discord, plain text or MCP.)
+Each schedule also says how many **rosters** an event expects (1–4). With 2, the sheet advertises 2 × the raid's size
 (20 seats for a 10-player raid), the health check and the fill engine measure against two rosters, and the lock builds
-two. The board on the Events page shows every roster the run expects before the lock (a 10-player ×2 run has 20
+two. The board on the Events page shows every roster the event expects before the lock (a 10-player ×2 event has 20
 places, *Roster 1* and *Roster 2*), and *Rosters* reads *2 of 10*. The lock builds the second roster as soon
 as more people joined than one roster holds, even when the tanks or healers who joined only cover one: the missing
 seats stay open and are filled like any short seat. Everyone who joined for the short role gets a place before one of
@@ -864,76 +864,77 @@ stop the lock: the rosters are built and the empty seats wait to be filled. That
 can switch between tanking and healing are needed as both at once too: they take one role each and the rest waits.
 With one roster's worth of joiners or fewer it builds a second
 roster only when the tanks and healers allow two. A
-schedule can be **paused** (nothing opens from it). The bot finds a schedule's run by the schedule and the start it
-was opened for, never by its key, so two schedules starting at the same minute are two runs, and a start whose run is
+schedule can be **paused** (nothing opens from it). The bot finds a schedule's event by the schedule and the start it
+was opened for, never by its key, so two schedules starting at the same minute are two events, and a start whose event is
 already open, finished or cancelled never gets a second sheet — also after the guild's timezone changes. A schedule
-that names a raid the game no longer has opens no runs at all, not even the raids it still has. Until it is changed or
+that names a raid the game no longer has opens no events at all, not even the raids it still has. Until it is changed or
 removed, the ops feed says so once an hour, naming the schedule and the raid; both are done on the Schedules page.
 
-**Recurring and ad hoc.** Every run is one or the other, and nobody sets it by hand — it follows the schedule's kind:
-- **Recurring** — weekly nights and days of each lockout. Opens by itself on its
+**A schedule's event or a one-off.** Every event is one or the other, and nobody sets it by hand — it follows the schedule's kind:
+- **A schedule's event** — weekly nights and days of each lockout. Opens by itself on its
   week, has **regulars**, and its lock weighs being a regular (below). Confirmations on by default.
-- **Ad hoc** — a pickup template, or a **one-off** run at a time an officer picks (*Ad hoc run* in `/raid open`,
-  **New event** on the site, or plain text / MCP with a time that is none of the raid's upcoming runs).
-  It takes the raid's size, comp, lockout and length but none of its recurring timing — its own lighter defaults: no
+- **One-off** — the event of a schedule opened by an officer, or a **one-off** event at a time an officer picks
+  (*One-off event* in `/raid open`, **New event** on the site, or plain text / MCP with a time that is none of the
+  raid's upcoming events).
+  It takes the raid's size, comp, lockout and length but none of its schedules' timing — its own lighter defaults: no
   reminder, no DM on open, **no confirmations** (Join is the commitment; *Can't make it* frees your seat), locks
   **2 h** before, fill asks wait **1 h**, and seats go **first come, first rostered** (the joiners in the order they
   first pressed Join take the seats — pressing Join again, switching character or saying yes to an officer's ask keeps
   your place; Bench or No thanks and then Join again puts you at the back — except that a seat still needed for a tank or healer minimum is kept for the first later joiner who plays
   that role, and a tank or healer who joins once that role's minimum is met waits until everyone else who joined has
   a seat, then takes what is left in the order they joined). An officer's *Bench* pin (or a comp-policy *always bench*) takes that joiner out of the line, so the
-  next joiner gets the seat; a comp-policy *never bench* name keeps a seat even if they joined late. Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. Opening a
-  one-off at the minute of one already open points at that run instead of making a second. For a pickup template the Schedules page's editor hides the fields that mean nothing there (sheet opens, reminder, DM
-  on open); every timing field shows the schedule's own value, and a new template starts from *the pickup default*. An
-  officer opens a template's event with `/raid open` in Discord, in plain text or over MCP; the site's New event page opens one-offs and schedules' nights. Officers can change any of them per schedule, including **confirmations**
-  (on/off) and the **who gets a seat** weights — on the Schedules page, in plain text, over MCP, or in `/gm config raid`
+  next joiner gets the seat; a comp-policy *never bench* name keeps a seat even if they joined late. Nobody is expected on a one-off sheet, so there's no "No answer" list and nobody is reminded. Opening a
+  one-off at the minute of one already open points at that event instead of making a second. For a schedule opened by an officer the Schedules page's editor hides the fields that mean nothing there (sheet opens, reminder, DM
+  on open); every timing field shows the schedule's own value, and a new one starts from *the default for a schedule
+  opened by an officer*. An officer opens its event with `/raid open` in Discord, in plain text or over MCP; the site's New event page opens one-offs and schedules' nights. Officers can change any of them per schedule, including **confirmations**
+  (on/off) and the **Priority** weights — on the Schedules page, in plain text, over MCP, or in `/gm config raid`
   (*Schedules* › a schedule › *Change* › the four switches: Signup Reminder, Lock Confirmation, Automated Fill Requests and
   Sheet Opening DM, each on or off).
 
-**More raids the same night (follow-ons).** A schedule (Schedules page › the editor's *Lineup*; in Discord `/gm config raid` ›
+**More raids the same night (later raids).** A schedule (Schedules page › the editor's *Lineup*; in Discord `/gm config raid` ›
 *Schedules* › a schedule › *Change* › *Lineup*, where each later raid's start reads *1 h 30 min after the first*; plain text `<schedule>.follow = barrow_deeps x2`) or a one-off (the lineup on the site's **New
-event** page; plain text *"set up an ad hoc Hyjal raid for 6:30 on Dec 10 with
-10-man Barrow Deeps splits afterwards"*) names a follow-on: another raid with its own rosters per run, starting when the
+event** page; plain text *"set up a one-off Hyjal raid for 6:30 on Dec 10 with
+10-man Barrow Deeps splits afterwards"*) names a later raid: another raid with its own rosters per event, starting when the
 one before it ends (that raid's length: a 6:30 PM Hyjal Summit of 3 hours is followed at 9:30 PM, and a Barrow Deeps of
-2½ hours after it at midnight). A run holds up to four raids, all from one signup: the lead and up to three
-follow-ons, in order (a fifth is refused: *"A run holds at most 4 raids."*). Each is another raid, never one twice in a
-run, and each starts after the one before it (*"Each raid starts after the one before it."*). A schedule of three or four raids is made on the
+2½ hours after it at midnight). An event holds up to four raids, all from one signup: the first raid and up to three
+later raids, in order (a fifth is refused: *"An event holds at most 4 raids."*). Each is another raid, never one twice in an
+event, and each starts after the one before it (*"Each raid starts after the one before it."*). A schedule of three or four raids is made on the
 site's Schedules page (its editor is the lineup builder) or over MCP (`schedule_set` with `fields = {lineup: [{raid,
 rosters}, …]}`, the first raid first) or in Discord (`/gm config raid` › *Schedules* › *Change* › *Lineup*, up to four raids); plain text sets the second raid only. The site's **New event** page and the Schedules page's editor take the
-whole lineup, up to four raids, and at four they say *"A run holds at most 4 raids."* in place of the empty step; a
-schedule's Save there, and in Discord, writes the whole lineup. Editing a schedule in plain text changes only the lead and
-the second raid; the raids after them stay as they are, and clearing the second raid moves the third up into its place. Two runs at the same time each keep their
-own follow-ons. A schedule never opens a night on which a follow-on would start before that raid first opens: the
-schedule's next runs skip it. An ad hoc Open on such a night says so before you press (*"Barrow Deeps first opens Wed 9
-Dec 3:00 PM, after this run starts."*) and still opens. The lead's sheet is the night's sheet (*Hyjal Summit, then
-Barrow Deeps ×2, then Onyxia's Lair*, with each later start); a follow-on has no sheet and no answers of its own — they
-follow the lead's, and answering it directly says *"Answer on the Hyjal Summit sheet. It covers the whole night."* Each
-follow-on's health shows on the lead's card as one line (*Barrow Deeps follow-on* short, with the role icon and a
-number). The Events page shows the run as one event, *Hyjal Summit, then Barrow Deeps*: one Signups section (the
-lead's sheet answers for the evening) and, on the Board, a button per raid.
-The lead's lock locks every raid of the run, in order: each follow-on prefers the people rostered on the raids before
+whole lineup, up to four raids, and at four they say *"An event holds at most 4 raids."* in place of the empty step; a
+schedule's Save there, and in Discord, writes the whole lineup. Editing a schedule in plain text changes only the first raid and
+the second raid; the raids after them stay as they are, and clearing the second raid moves the third up into its place. Two events at the same time each keep their
+own later raids. A schedule never opens a night on which a later raid would start before that raid first opens: the
+schedule's next events skip it. A one-off Open on such a night says so before you press (*"Barrow Deeps first opens Wed 9
+Dec 3:00 PM, after this event starts."*) and still opens. The first raid's sheet is the night's sheet (*Hyjal Summit, then
+Barrow Deeps ×2, then Onyxia's Lair*, with each later start); a later raid has no sheet and no answers of its own — they
+follow the first raid's, and answering it directly says *"Answer on the Hyjal Summit sheet. It covers the whole night."* Each
+later raid's health shows on the first raid's card as one line (*Later raid Barrow Deeps short*, with the role icon and a
+number). The Events page shows them as one event, *Hyjal Summit, then Barrow Deeps*: one Signups section (the
+first raid's sheet answers for the evening) and, on the Board, a button per raid.
+The first raid's lock locks every raid of the event, in order: each later raid prefers the people rostered on the raids before
 it (most of all those who played every raid so far), so the 10s are the 20 split in two and bench joiners only cover
-gaps (a tank or healer the 20 can't give twice); first come applies to the lead only. A follow-on short of a tank still
-locks with whoever can play. One whose roster can't be built stays open with the reason, the follow-ons after it wait,
-and the bot tries it again (after 15 minutes, like any failed lock), then carries on down the run. A follow-on can't be
+gaps (a tank or healer the 20 can't give twice); first come applies to the first raid only. A later raid short of a tank still
+locks with whoever can play. One whose roster can't be built stays open with the reason, the later raids after it wait,
+and the bot tries it again (after 15 minutes, like any failed lock), then carries on down the lineup. A later raid can't be
 locked on its own while a raid before it is open (*"Lock Hyjal Summit Thu 10 Dec 6:30 PM first. Its lock builds every
-raid of the run."*), and it never asks anyone to confirm: the lead's Confirm covers the night, and a *Can't make it* on
-the lead frees every seat of the night, however it comes (the Confirm card, the Me page, `/raid out`, an absence, an
+raid of the event."*), and it never asks anyone to confirm: the first raid's Confirm covers the night, and a *Can't make it* on
+the first raid frees every seat of the night, however it comes (the Confirm card, the Me page, `/raid out`, an absence, an
 expired confirm). Its lock cards, board, fill asks and loot councils are its own (*Barrow Deeps · after Hyjal Summit*);
 a fill ask on it is a DM like any other.
-Leaving after a raid (*Leaving after Hyjal Summit…* on the Me page, or `/raid out` picking a follow-on) frees only that
-follow-on's place and your other seats stay (*"You're leaving after Hyjal Summit, so you're out of Barrow Deeps."*).
-An officer taking someone off a follow-on (its board, or their answer set to No thanks there) is the same: they leave
-that raid, keep their other seats and stay off it when the lead's answers change. *I'm staying* on the Me
+Leaving after a raid (*Leaving after Hyjal Summit…* on the Me page, or `/raid out` picking a later raid) frees only that
+later raid's place and your other seats stay (*"You're leaving after Hyjal Summit, so you're out of Barrow Deeps."*).
+An officer taking someone off a later raid (its board, or their answer set to No thanks there) is the same: they leave
+that raid, keep their other seats and stay off it when the first raid's answers change. *I'm staying* on the Me
 page undoes it (*"Noted: you're staying … A freed seat can come back to you through Fill."*): the place you left may
-already be filled, and nobody puts you back by hand. A *Can't make it* on the lead says the follow-on places go too
-(*"Your Barrow Deeps place goes too."*). Once a follow-on has started and its loot council is open, the companion's
+already be filled, and nobody puts you back by hand. A *Can't make it* on the first raid says the later raids' places go too
+(*"Your Barrow Deeps place goes too."*). Once a later raid has started and its loot council is open, the companion's
 drops go there, even while the council before it is still open; until then the earlier council takes them. Cancelling
-any raid of the run cancels the whole run in the same press, its sheet and every follow-on (*"The whole Hyjal Summit
-run is cancelled, with Barrow Deeps."*). Once the first raid has finished, a cancel takes only the raids still to play:
+any raid of the event cancels the whole event in the same press, its sheet and every later raid (*"Both raids of this
+event are cancelled."*). Once the first raid has finished, a cancel takes only the raids still to play:
 the finished raid stays done, and nothing goes to the signup channel — the sheet and its channel line belong to the
-first raid — so the cancel screen has no *Tell the channel?* choice then. A cancelled run is never reopened. If the bot restarts while a run is opening,
-the next minute adds the follow-ons that didn't open yet, once, with no second sheet. Discord's `/raid open` sets a
+first raid — so the cancel screen has no *Tell the channel?* choice then. A cancelled event is never reopened. If the bot restarts while an event is opening,
+the next minute adds the later raids that didn't open yet, once, with no second sheet. Discord's `/raid open` sets a
 one-off's later raids; its schedule wizards show a schedule's later raids but don't set them — the site, plain text and MCP do. On the site's schedule editor the
 *Lineup* is the lineup builder: up to three later raids, each with its rosters (1–4) and its start, in 15-minute steps
 after the raid before it (by default when it ends); saving the schedule sends the whole lineup. Plain text
@@ -960,28 +961,28 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   stays a Join; they are rostered after regulars and are the first asked when a seat frees.
 - **Fill seats…** asks the bench first, then the regulars who haven't answered, then other members (each ask says how
   it reaches them — *from the bench* / *a regular, no answer yet* / *not a regular* / *extra role* / *offspec* /
-  *on an alt*, the same words on the site, the Discord screens and the health card's "who could cover"; on an ad hoc
-  run or a schedule with no regulars yet, where everyone counts, it says *no answer yet* — nobody is called a regular there). The DM says only what the bot
+  *on an alt*, the same words on the site, the Discord screens and the health card's "who could cover"; on a one-off
+  event or a schedule with no regulars yet, where everyone counts, it says *no answer yet* — nobody is called a regular there). The DM says only what the bot
   knows: "you haven't answered the sheet" — never that you're free that night. See *Suggestions* below for short tanks and
   healers.
-- **Regulars coverage** (no run needed): per recurring schedule, the regulars' role counts against the tank and healer
+- **Regulars coverage** (no event needed): per schedule that repeats, the regulars' role counts against the tank and healer
   minimums (role icon and *count/minimum*, red when short), coloured **green** (the regulars' own characters cover the
   minimums with a spare in each), **amber** (exactly the minimum with no spare — one absence leaves it short, e.g.
   tanks 2/2 — or covered only with offspecs, a declared flex role or alts; the card says which, and who could cover) or
   **red** (they can't field the minimum — the card names members who play the missing role, best rank first, to
   recruit). Beside it a **4-week forecast**: for each upcoming
-  run in the next four weeks (counted from the raid's first opening until then) the regulars minus recorded absences, e.g. "Tue 15 Dec: short
+  event in the next four weeks (counted from the raid's first opening until then) the regulars minus recorded absences, e.g. "Tue 15 Dec: short
   1 tank, 1 healer (Thorn, Ona away)" — the hole shows a week ahead instead of at reminder time. These numbers show
   on the Schedules page's *Regulars* section (*Regulars are short*: role icon and number; *Next four weeks*: a line per
-  short night — role icon and a number per short role, who is away on hover, **Open this run early**), in an officer's `/roster overview` (*Regulars*), on each raid's analytics card (one
-  line per schedule: a 🟢/🟠/🔴 dot, role icons with counts, ⚠ when short, regulars / seats, then a line per short run)
+  short night — role icon and a number per short role, who is away on hover, **Open this event early**), in an officer's `/roster overview` (*Regulars*), on each raid's analytics card (one
+  line per schedule: a 🟢/🟠/🔴 dot, role icons with counts, ⚠ when short, regulars / seats, then a line per short event)
   and in an officer's `/ask` about readiness.
 - Officers edit regulars on the Schedules page (a schedule's *Regulars*: **Add a member** by search, then the character
   when they have several; the regulars one per line, each with a **Remove** that shows the bot's box first), with `/roster add`,
   `/roster remove` and `/roster members` (pick the schedule, then the member, then the character), in plain text ("make
   Ana a Tuesday Barrow Deeps regular with Anabelle") or MCP `set_regular`. One character per member per schedule; the
   same character on two schedules of one raid is allowed with a warning (one lockout). A test puppet is never a
-  regular — a test run treats every puppet as one. Removing a schedule never strips its regulars silently: the Schedules
+  regular — a test event treats every puppet as one. Removing a schedule never strips its regulars silently: the Schedules
   page lists them to clear. Removing a regular (× on the site, `/roster remove`) and clearing a removed schedule's one
   both ask first with the same sentences — *"Bramble is no longer a regular of Raid nights. They keep their answer on
   the open event. You can add them again."* (the middle sentence only while the schedule has an event open) — and if
@@ -992,14 +993,14 @@ the one character they raid on there. Regulars are the people the bot *expects* 
 - **Members** see *My regular raids* on the Me page and *Regular on* in `/me view`; **Step down** (either place)
   takes you off a schedule's regulars. Becoming a regular is an officer's call — ask one.
 
-**Suggestions: covering a short tank or healer seat.** When a run's tank or healer minimum is short, the bot works out
+**Suggestions: covering a short tank or healer seat.** When an event's tank or healer minimum is short, the bot works out
 who could cover it — and **sends nothing until an officer presses Ask**. It never changes anyone's spec on its own.
-- **Who counts.** Before lock: who joined, plus (on a recurring schedule with regulars) the regulars who haven't
+- **Who counts.** Before lock: who joined, plus (on a schedule with regulars) the regulars who haven't
   answered and aren't away — they are expected anyway, so the suggestions go beyond them — plus anyone already asked and
   not yet answered. After lock: who is rostered.
 - **Cheapest first**, each with a reason written by the bot (e.g. "short 1 healer · Ana can also play Holy · DPS
-  stays 6"): someone on **Bench** who plays the role or a joiner's **declared flex role** (*/me plan
-  roles*) · a joiner's **offspec** or a **regular who hasn't answered** · an **alt** of the role (never one already
+  stays 6"): someone on **Bench** who plays the role or a joiner's **declared flex role** (`/me char` ›
+  *Extra roles*) · a joiner's **offspec** or a **regular who hasn't answered** · an **alt** of the role (never one already
   rostered on this raid in the same lockout) · a **member who isn't a regular**. When every seat is already taken,
   switches by people coming go first — a new healer would only push a DPS to the bench at lock. A switch that would
   drop the role someone leaves under its minimum is offered only tied to someone covering it, and both must say yes:
@@ -1007,19 +1008,19 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
   lock arriving first) from either closes the other: its DM card is edited to "never mind" (never a new DM); when
   the second yes comes, the first one's card is edited to say it's on. Nobody is suggested for two seats (the
   *Suggest* screen refuses picking one person for two), and the bot never takes the one person a later seat can't do
-  without. Test puppets are never suggested or asked on a real run.
+  without. Test puppets are never suggested or asked on a real event.
 - **Two alternates** per short seat, so you can ask someone else without typing a name, and a **Still short if all say
   yes** line ("nothing", or what to recruit).
 - **Where.** The officer **health card** gets a *Suggested* block (up to three seats; one member per line, the spec
   icon they'd play and the character) with **Ask** (sends what the card shows — only those seats: when more are short
   the card says *+N more* and Ask leaves them alone) and **Suggest** (every seat with its alternates in a select, then
   *Send*). The block, the regulars who haven't answered and the buttons are for
-  officers: a member who runs `/raid health` sees the counts, what is short and the missing buffs only. On a recurring schedule with
+  officers: a member who runs `/raid health` sees the counts, what is short and the missing buffs only. On a schedule with
   regulars the health card is posted **as soon as the sheet opens** when the regulars (minus anyone away) can't cover a
   minimum — an early warning — and posted again, rebuilt, at reminder time. On the site, the card's **Suggest…**
   button (the Discord card's word) opens the same list (pick the suggestion or an alternate per seat, then *Send*); its tooltip says how many
   seats are short and how many suggestions there are. `/raid fill` on an open
-  run, plain text ("suggest fixes for Tuesday's run", then "send them") and MCP `fill_seats` give the same list.
+  event, plain text ("suggest fixes for Tuesday's event", then "send them") and MCP `fill_seats` give the same list.
 - **A stale list is refused.** If the suggestions changed since you looked (someone joined, someone answered), *Ask*
   sends nothing and the list is redrawn as it is now — check it and press again.
 - **What the member gets** (before lock): a DM — "Barrow Deeps <time> is short a healer. Could you come as Holy?"
@@ -1032,40 +1033,41 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
 - **Someone asked can't come after all.** If a member you asked records an absence for that day, answers No thanks or
   calls out, their ask closes at once (the other half of a swap is told it's off), the seat shows short again and the
   card suggests someone else; a late yes on the old DM is not taken (they're told to clear the absence first).
-- **The health card follows the sheet**: every answer, and an absence recorded or cleared, redraws it. Once the run
+- **The health card follows the sheet**: every answer, and an absence recorded or cleared, redraws it. Once the event
   locks it says *Locked* and points at the lock card — its *Suggested* block and **Ask** go (pressing an old Ask says
-  the run has locked).
-- **After lock** the automatic asks (step 6 below) use the same list. On every run — recurring or ad hoc — it asks people for the
+  the event has locked).
+- **After lock** the automatic asks (step 6 below) use the same list. On every event — a schedule's or a one-off — it asks people for the
   same role on its own, but a **role swap** (a flex role, an offspec or an alt, with or without someone covering)
   waits for an officer: the lock card shows it under *Suggested* with **Ask** — while it waits, a seat freed later
   (a missed confirmation) still gets its same-role asks automatically. An officer's Ask after lock counts the asks
   still out (nobody is asked twice for one seat) and keeps the cap of 3 questions out at a time: what doesn't fit
-  stays on the card ("1 more waits"). An **ad hoc** run works the same way: no swap goes out without an officer.
+  stays on the card ("1 more waits"). A **one-off** event works the same way: no swap goes out without an officer.
 
-Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps opens 48 h before):
+Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps opens 48 h before):
 
 1. **Sheet opens** — `signup_lead_hours` [120 h] before the slot the bot posts the sheet in the signup
    channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks** (⚑ after a name = called
    out after answering). With more than one character you pick which one. Anyone with a registered absence that day
    is listed under **Away** instead (names only, the first 15 then "+N"; reasons stay with officers): they aren't
    nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. A Join on a day you're away
-   answers that sheet only: the receipt says *"joined for this run; your absence … still stands for the other sheets"*
-   with an **I'm back** button for the whole absence. On a recurring schedule with
+   answers that sheet only: the receipt says *"joined for this event; your absence … still stands for the other sheets"*
+   with an **I'm back** button for the whole absence. On a schedule with
    regulars, if the regulars minus anyone away can't cover a tank or healer minimum, the officer channel gets the
    health card with its *Suggested* block right away (an early warning; see *Suggestions* above). With `open_dm` on [off] everyone
    the sheet is for (the schedule's regulars, or every main while it has none) is also DMed when it opens. Officers can
    open a sheet early from the Events page, however far ahead the night is: each night under *Coming up* has **Open the
    sheet now** (greyed, with why, only when that night's event was cancelled or has ended), and **New event** (the page is `/events/new`) makes a one-off — see *New event and the lineup
    builder* below. `/raid open` does the same in Discord: pick the raid,
-   then **Next run — <time>**, **Another upcoming run** (the next three weeks, and each schedule's next three nights
+   then **Next event — <time>**, **Another upcoming event** (the next three weeks, and each schedule's next three nights
    however far ahead) (each labelled with its schedule's name when there are several)
-   or **Ad hoc run** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes in 15-minute steps
-   from lists; nothing typed; more than three pickup templates come as one *Pick a template* select). **Another upcoming
-   run** pages by week (*← Earlier week* / *Later week →*) when the raid has more upcoming runs than one list holds.
+   or **One-off event** (a schedule an officer opens, or *Own settings — pick a day and time*: day, hour and minutes in
+   15-minute steps from lists; nothing typed; more than three schedules opened by an officer come as one *Pick the
+   schedule* select). **Another upcoming event** pages by week (*← Earlier week* / *Later week →*) when the raid has
+   more upcoming events than one list holds.
    A schedule's night prints the same box as the Events page's **Open the sheet now**: how early the sheet opens,
    where it posts and when it still locks, with **Open the sheet** and Back. If the night changed while the box was
    open, the box is shown again for you to read before you press; a night already open, cancelled or ended says so
-   instead. A one-off picked at exactly the minute of an upcoming recurring run **is** that run: it opens as scheduled,
+   instead. A one-off picked at exactly the minute of a schedule's upcoming event **is** that event: it opens as scheduled,
    with its regulars and confirmations, through that box. Any other one-off builds its lineup as on the New event page:
    add up to three later raids, each with its rosters and start, then **Review changes** shows *What this makes* (one
    signup sheet, seats, priority, confirmation, each raid's time) with **Locks** (2 or 24 hours before) and the first
@@ -1078,15 +1080,15 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    the sheet now** (one press, then its box). The sheet goes up at once and stays until the event; its lock, reminder
    and confirm-by are counted from the event's start as usual, and the schedule never opens that night a second time.
    **The Events page** replaced the Rosters page: officers reach it from the rail (**Events**), from New event's *Back
-   to Events*, from Open the sheet, and from every Discord card's link to a run (the run's event; a later raid's card
-   opens its evening). An old Rosters address opens the Events page, and an old link to a run opens that run's event —
-   or, when the run is gone, the bot's sentence that it is no longer on the list. On the left the list: **Open** (every live event, soonest first, its start and
+   to Events*, from Open the sheet, and from every Discord card's link to an event (a later raid's card
+   opens its evening). An old Rosters address opens the Events page, and an old link to one night opens its event —
+   or, when the event is gone, the bot's sentence that it is no longer on the list. On the left the list: **Open** (every live event, soonest first, its start and
    the raids it plays or the schedule it comes from), **Coming up** (each active schedule's next three nights with no
    sheet yet) and **History** (finished and cancelled events, newest first, 20 at a time; **Show older** adds the next
    20). On a desktop the first open event is shown (else the first night coming up); on a phone the list comes first
    and an event opens under *Back to Events*. An event reads in sections. The header has its start, its state
    (*open for signup*, *locked — the roster stands*), **Reschedule**, **Edit lineup**, **Edit event** (the event's own settings, see
-   *Moving a run, and its own sheet timing* below) and **Lock now** (open only) and **More** (below). **Details** has
+   *Moving an event, and its own sheet timing* below) and **Lock now** (open only) and **More** (below). **Details** has
    the lineup, where it comes from (*One-off, no schedule* or the schedule, a link), the event's own priority and
    confirmation, when the sheet opened, the *Reminder* (before the lock), when it locks, *Open seats after the lock*
    (before the lock: *The bot asks people* or *An officer asks*), *Confirm by* (when the rostered are asked to
@@ -1096,8 +1098,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    and *Reminded* (when, and by whom). Before the lock it says *Automatic asks: Paused by Jon* for a raid whose asks
    are paused; once locked, that raid's *Open seats* sentence says it (*Automatic asks paused by Jon. 3 seats are
    open.*), once. Any time it shows *Also on another event* (who joined another event that night) and *Away that day* (each with the reason
-   recorded). The list says once which time zone every time on the page is in (*Times in Berlin.*), and a test run's
-   page carries a *test run* chip beside its state. **Signups** has four tabs, each with its count — *Joined* (shown first), *Bench*, *No thanks*, *No answer yet*
+   recorded). The list says once which time zone every time on the page is in (*Times in Berlin.*), and a test event's
+   page carries a *test event* chip beside its state. **Signups** has four tabs, each with its count — *Joined* (shown first), *Bench*, *No thanks*, *No answer yet*
    — and a tab lists its names grouped by class, a class per column under its icon as on the Discord sheet, one per
    line, each with its spec icon and the row **⋮** (the same on-behalf
    list the Test bench's cards have). **Answer for someone** opens the bot's box with *Member* (someone with no answer yet),
@@ -1156,7 +1158,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    screen: each seat with its alternates, then *Send N asks*), **Remind the unanswered** and **Pause automatic asks** /
    **Resume automatic asks** once locked, **Re-post the sheet…** (it moves the sheet to another channel), **Loot** (open
    the loot council; once open, a link to Loot › Tonight), **Asks and callouts…** (every fill ask with its answer, an
-   ask still out with **Withdraw**, callouts with their notes) and **End the run** once locked. What can't be pressed
+   ask still out with **Withdraw**, callouts with their notes) and **End the event** once locked. What can't be pressed
    yet is greyed with the bot's reason under it. Remind and End show the bot's own box first; when it changed while open
    (someone answered, a drop was distributed) the new box comes back and waits again, and nothing is sent or ended; on a finished event
    **More** has **Reopen** for an end made by mistake, within the hour. A scheduled lock that failed shows its
@@ -1164,7 +1166,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    is picked in **Edit event** (before the lock), with the event's other own settings; once locked it says *The roster
    is locked, so its split can't change.* Not here, by design: another layout (*Propose roster* /
    *another split like this*) and **Place the rest** — **Auto-fill groups** is the lock's own placement, and **Clear the
-   board** is in the event's More menu; plain text, MCP (`propose_split`, `set_layout`, `autofill`) and a test run's card
+   board** is in the event's More menu; plain text, MCP (`propose_split`, `set_layout`, `autofill`) and a test event's card
    on the Test bench keep the older tools.
    **Edit lineup** (until the roster locks) opens the lineup builder on the event, `/events/<event>/lineup`: its first
    raid is fixed, every later raid has **Move earlier** / **Move later** / **Remove**, the palette adds a raid, and each
@@ -1186,7 +1188,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    schedule). A **History** event shows its details (*Rostered*, *Ended*) and its activity. The page updates itself
    when anyone answers or a setting changes, and an open box keeps what you picked.
    **New event and the lineup builder.** The page has four sections. *Start from* › *Copy a lineup* fills the builder
-   with an active schedule's lineup (the first schedule is picked to begin with; a pickup template is not offered) or
+   with an active schedule's lineup (the first schedule is picked to begin with; a schedule opened by an officer is not offered) or
    *An empty lineup*. *Lineup* is the
    builder: the raids on the left (each with its size and about how long it runs, and an **Add** button — a raid
    already in the lineup is greyed), the steps on the track (up to four, one raid each, never the same raid twice).
@@ -1207,31 +1209,31 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    schedule's lineup (*Comes from* names it) and opens that schedule's event — not the builder's lineup, rosters or lock —
    asking first with the *Open the sheet for …?* box, however far ahead the night is, so it never becomes a one-off
    beside the event the schedule would open later. Asked for as a one-off or from a
-   pickup template — in Discord, in plain text or through MCP — a schedule's night is refused too: *… is a night of
+   schedule opened by an officer — in Discord, in plain text or through MCP — a schedule's night is refused too: *… is a night of
    Raid nights, so a one-off can't start then.* A one-off made on such a night before this check keeps the night: the
    schedule opens nothing at that minute and the ops feed says so once, naming both. **Back** and *Back to Events* (and a rail link) ask *Leave
-   without saving?* with how many edits you made. With **no signup channel set** the scheduler opens nothing: each run that was due
+   without saving?* with how many edits you made. With **no signup channel set** the scheduler opens nothing: each event that was due
    gets one warning on the ops feed ("Barrow Deeps Tue 7:30 PM did not open: no signup channel is set") and its
-   row in *When it runs* says *needs a signup channel* in red. A raid with no night to open offers *Add a schedule*, which opens the schedule wizard on that raid. A run opened closer
-   than its week assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
+   row in *When it runs* says *needs a signup channel* in red. A raid with no night to open offers *Add a schedule*, which opens the schedule wizard on that raid. An event opened closer
+   than its week assumes keeps a usable window: a one-off two hours out nudges, locks and confirms inside those two
    hours instead of inheriting a lock time that has already passed. A start more than five minutes in the past is
-   refused however the run is opened (the site, `/raid open`, plain text, MCP), with the time named in words.
+   refused however the event is opened (the site, `/raid open`, plain text, MCP), with the time named in words.
 2. **Nudge** — at `nudge_hours_before` [halfway between open and lock: lock + (lead − lock) / 2, so 72 h for a
    sheet that opens 120 h out and locks at 24 h] the officer channel gets a health card (headcount, tank/healer
    tiles with who could cover via offspec/alt, buff coverage, **No answer** — the regulars who haven't answered, one per
    line — double-booked members, and the *Suggested* block with **Ask** / **Suggest…** when a minimum is short; an early
    card from the sheet's opening is replaced by this one) and those regulars (every main while the schedule has none) are nudged once by
-   DM. An ad hoc run reminds nobody; its health card comes an hour before its lock. The tiles count against the seats and tank/healer minimums of the
-   rosters the run expects (1, or its schedule's *rosters per run*) — the same numbers Fill works from; when the
-   joiners could make more runs than that, the "Enough people for 2 runs …" line says what another run is short. `nudge` [on] switches the DM off per raid; the health card
+   DM. A one-off event reminds nobody; its health card comes an hour before its lock. The tiles count against the seats and tank/healer minimums of the
+   rosters the event expects (1, or its schedule's *Rosters*) — the same numbers Fill works from; when the
+   joiners could make more rosters than that, the "Enough people for 2 rosters …" line says what another roster is short. `nudge` [on] switches the DM off per raid; the health card
    still comes.
 3. **Officers shape the roster** (before lock; the Events page's Board — see *On the Events page* below — and, for a
-   test run, its card on the Test bench, which this paragraph describes): the run's card shows its week as a strip (the steps
+   test event, its card on the Test bench, which this paragraph describes): the event's card shows its week as a strip (the steps
    done in teal, a *now* mark), the headcount (*7 / 10 joined*) with the role counts and one *short* line (role icon +
    number, and why — *2 regulars haven't answered: …*), every Join by class, the other answers in one line (Bench, No
    thanks, Away that day — each only when someone is in it), and the **board**, one line (*Board — 7 joined, 2 placed:
    shape it before the lock, or let the lock place everyone*) until you press **Open the board** — **Not placed** (everyone
-   who joined and isn't in a group yet) and the groups of the run; its ⓘ says what the marks mean. Drag names from Not placed into groups, between groups, or back to Not placed; dropping on
+   who joined and isn't in a group yet) and the groups of the event; its ⓘ says what the marks mean. Drag names from Not placed into groups, between groups, or back to Not placed; dropping on
    someone swaps them. On a phone, or without a mouse, each name's **⋮** menu has **Move to…**: every group with room
    (*Group 2 · 3/5*) and *Not placed* — tap one, and the confirm says where they go (*"Move Nettle to Group 2? Nettle
    takes an open seat in Group 2. Nothing is sent before the lock."* · **Back** ·
@@ -1243,10 +1245,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    *Use this split/layout*) are refused if someone changed the board since you looked; the page shows the current
    board and you press again. Not placed sorts by **signup** (who answered first), **spec** or **role** (tanks, healers,
    melee, ranged); the choice sticks in your browser. On a joiner's menu, **Pin to roster** guarantees a seat and
-   **Keep off the roster** keeps them off this run — a pin icon beside the name says which (its tooltip names it; never
-   a "bench" badge); pins are per run and the lock honours them (plain text
+   **Keep off the roster** keeps them off this event — a pin icon beside the name says which (its tooltip names it; never
+   a "bench" badge); pins are per event and the lock honours them (plain text
    works too: "pin Xanthe to roster", "keep Jon off the roster", "clear the pin for Xanthe"). **Propose
-   roster** shows the groups the bot would build for the run (your placements and pins kept), with *another layout*
+   roster** shows the groups the bot would build for the event (your placements and pins kept), with *another layout*
    for a different one, and *Use this layout on the board* puts it on the board; **Place the rest** lets
    the bot place whoever is still not placed around what you placed (nothing is sent; the button spins while it works,
    and if someone changed the board since you looked it is refused and the board reloads); **Clear** empties the board after a
@@ -1267,45 +1269,46 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    the roster, and a finished event shows the board as it was locked. Names kept off by a drag onto *Not placed* before
    this change stay kept off: they were pinned on purpose, and **⋮ › Unpin** takes one back.
    More Join answers than a raid needs → the board shows a second (third…) roster for the same
-   slot while a full run with its tank/healer minimums is possible, and the button becomes **Propose
-   splits**: pick a philosophy — **Balanced** (both runs equally strong in buffs, tanks, healers and seat quality),
+   slot while a full roster with its tank/healer minimums is possible, and the button becomes **Propose
+   splits**: pick a philosophy — **Balanced** (both rosters equally strong in buffs, tanks, healers and seat quality),
    **Raid one first** (roster 1 gets the best, roster 2 the rest), **Rotation** (whoever sat out or was in
-   the weaker run last window moves up) — check the one preview, press *another split like this* if it
+   the weaker roster last window moves up) — check the one preview, press *another split like this* if it
    doesn't feel right, and *Use this split on the board*. The preview says how the rosters compare in words — *the two
-   rosters are close* or *roster 2 is the weaker* — never the numbers the bot builds them with. The bot builds both runs in one go, so a shaman
+   rosters are close* or *roster 2 is the weaker* — never the numbers the bot builds them with. The bot builds both rosters in one go, so a shaman
    lands where it lifts the pair the most. Each raid has a **split policy** (`/gm config raid`,
-   plain text) that the scheduled lock uses when nobody chose one for the run.
-   **When it can't split.** If enough people joined for more runs than the tanks and healers allow, the board's
-   header says so where the split count would be — e.g. "Enough people for 2 runs — a second is short" followed by
+   plain text) that the scheduled lock uses when nobody chose one for the event.
+   **When it can't split.** If enough people joined for more rosters than the tanks and healers allow, the board's
+   header says so where the split count would be — e.g. "Enough people for 2 rosters — a second is short" followed by
    the tank and healer icons with a number each (2 and 2) — and the same line is on the Discord health card,
-   `/raid health` and the lock card. If not even one run meets its tank/healer minimums it says "1 run is short"
-   and what. The bot then makes the **one healthiest run** it can: the tank/healer minimums come first (every tank
+   `/raid health` and the lock card. If not even one roster meets its tank/healer minimums it says "1 roster is short"
+   and what. The bot then makes the **one healthiest roster** it can: the tank/healer minimums come first (every tank
    and healer who joined is rostered before anyone's rank or signup order counts), then buffs and weights. The
    joiners it couldn't fit are listed apart as **Leftovers (n)** — at the top of the board's *Not rostered* list, in the Propose preview and
-   on the lock card, one per line — with what another run is short under them. When the leftovers plus the Bench
-   answers plus everyone else who could play (people who haven't answered and aren't away) could make another run, one more
-   line says so, and says when that needs offspecs or alts. Nothing is sent for it: open another run, or ask people,
+   on the lock card, one per line — with what another roster is short under them. When the leftovers plus the Bench
+   answers plus everyone else who could play (people who haven't answered and aren't away) could make another roster, one more
+   line says so, and says when that needs offspecs or alts. Nothing is sent for it: open another event, or ask people,
    yourself. After lock the leftovers are simply the bench — the first people Fill seats… asks when a seat frees up; each
-   gets one notice on the Me page (*"You weren't rostered (20 seats, 23 joined). You're in line for a freed seat"*),
+   gets one notice on the Me page (*"You weren't rostered for Barrow Deeps Wed 9 Dec 7:30 PM (20 seats, 23 joined). You're in line for a freed seat"*),
    never a DM until a seat is actually offered.
    **Cancel** shows the same sentences everywhere: first the sentences from the event as it stands — how many of its raids
    go, who sees it and where (*"Both raids of this event are cancelled. The 18 who joined see it on the sheet, and
    nobody gets a DM. A cancelled event cannot be reopened."*; after the lock *"The 10 rostered see it on their cards…"*)
    — then an optional **reason** (officers only: it goes to the
-   run's updates thread and the ops feed, never to the signup channel) and **Tell the channel?** (a fixed line in the
-   signup channel — "🛑 Barrow Deeps … is cancelled. Rostered seats are released — nothing to do." — on by default, or
+   event's updates thread and the ops feed, never to the signup channel) and **Tell the channel?** (a fixed line in the
+   signup channel — "🛑 Barrow Deeps … is cancelled. Rostered seats are released." — on by default, or
    no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
-   the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel run** and `/raid cancel` show
+   the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel event** and `/raid cancel` show
    the same box as the Events page with **Cancel event** (red: no reason, and the channel line is posted), **Cancel event
-   with a note** (the form with the reason and the channel choice) and **Back**; a test run's card on the Test bench has
+   with a note** (the form with the reason and the channel choice) and **Back**; a test event's card on the Test bench has
    the reason and the channel choice too; plain text takes the reason and "…, no announcement" for no channel
    line, MCP takes `reason` and `notify`. The Events page's **Cancel event** is the box alone: no reason and no channel
-   line (use Discord, plain text or MCP for either). A cancel waits for a lock that is being built and then cancels the locked run — the lock
-   stops asking people the moment the run is cancelled, and so do fill asks, suggestions and a Remind that are going
+   line (use Discord, plain text or MCP for either). A cancel waits for a lock that is being built and then cancels the locked event — the lock
+   stops asking people the moment the event is cancelled, and so do fill asks, suggestions and a Remind that are going
    out: nobody after the cancel is DMed, and a card that arrived just as it happened is edited to *Cancelled* at once.
-   Clearing the test bench cancels its test runs without a line in the signup channel. A cancelled run is final: it
-   can't be reopened, and opening a run at the same time is refused ("That time's run was cancelled — pick another
-   time"; the open screen and the site say so before you press anything). A test run opened in the same minute as one
+   Clearing the test bench cancels its test events without a line in the signup channel. A cancelled event is final: it
+   can't be reopened, and opening an event at the same time is refused ("That time's event was cancelled, and a
+   cancelled event isn't opened again. Pick another time."; the open screen and the site say so before you press
+   anything). A test event opened in the same minute as one
    you just cleared starts a minute later.
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): everyone officers
    placed on the board keeps their place, and the lock places those still under *Not placed* in the open seats. Lock
@@ -1317,7 +1320,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    until Tue 15 Dec 12:30 PM to answer."* — on a one-off *"Nobody is asked to confirm. You can still move people after
    the lock."* On the site every such confirm is one box: a title naming the action (*Lock Tue 15 Dec 6:30 PM?*), at
    most three sentences, **Back** and the action's own verb (red only when it can't be undone). If what the box said
-   changed while it was open — someone joined, the run moved — pressing the verb changes nothing and the box shows the
+   changed while it was open — someone joined, the event moved — pressing the verb changes nothing and the box shows the
    new sentences under *"This changed while the box was open. Read it again before you press."* The sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
    make it* button); the officer channel gets the roster cards. A roster that came out under its tank/healer minimum
    (nobody else could fill it) says **Locked short** with the role icons and a number, instead of locking quietly; the
@@ -1331,29 +1334,29 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    with the spec icon, then the leftovers (the first 15) — without saving anything; **Lock** or *Back* from there (a box that changed during the preview is shown again first).
    It can take up to half a minute: on a later raid whose first raid is still open, the bot places the first raid too,
    so the preview counts who that raid will roster, as the lock will.
-   On the Events page **Auto-fill groups** writes that preview into the board; a test run's
+   On the Events page **Auto-fill groups** writes that preview into the board; a test event's
    card on the Test bench has the same **Preview lock** button beside **Lock now**. If the bot stops half way through the confirmation DMs (a restart, a
    Discord outage), the lock card says *confirmations not yet sent* and within a minute the bot asks exactly the
    rostered who weren't asked — nobody twice. If a lock fails (the bot couldn't find a roster in time), the sheet's footer says
-   *Lock failed <time> — the sheet stays open, retrying* and so does the site. With confirmations off (the ad hoc default) nobody is asked and
+   *Lock failed <time> — the sheet stays open, retrying* and so does the site. With confirmations off (the one-off default) nobody is asked and
    no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable,
    and every change — a drag or **Move to…** — asks first with one sentence from the bot: moving people between groups
    (*"Nettle moves to Group 2 and stays rostered. Nobody is told."*) changes nothing else, and swapping two says who sees it
    (*"Nettle and Ivy swap seats. Both see the change on the roster card. You can swap them back."*); bringing
    someone in from *Not rostered* to an open seat asks them to confirm (*"Nettle takes an open seat in Group 2 and gets
    the Confirm or Can't make it DM. With DMs off it waits on their Me page. The seat is theirs once they say yes."* — on
-   an ad hoc run *"On an ad hoc run Join is the commitment, so the seat is theirs now."*); dropping them on someone is a
+   a one-off *"On a one-off event Join is the commitment, so the seat is theirs now."*); dropping them on someone is a
    **substitution** — *"Nettle takes Ivy's seat in Group 2 and gets the Confirm or Can't make it DM. … Ivy sees the seat
    was released on their card and their Me page."* (the bench isn't asked: the seat is taken); dragging someone out
    releases the seat — they see it on their card and their Me page, never a DM — and the bench is asked to fill it when
    automatic asks are on (paused or off, the sentence says the seat waits for **Fill seats**). A
-   drag started on the open board and dropped after the run locked is refused ("The run locked while you were
+   drag started on the open board and dropped after the event locked is refused ("The event locked while you were
    dragging") and the board shows the roster — it is never applied as a change to the locked roster.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out; their seat is released and their confirmation card is edited to say so (never a new DM). Only someone who
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for
-   "no answer". **Remind the unanswered** (the lock card's second row, the same button on the site's locked run card) sends the Confirm / Can't
-   DM again to everyone still unanswered — the same ask, the same deadline — at most once an hour per run; the ones
+   "no answer". **Remind the unanswered** (the lock card's second row, the same button on the site's locked event) sends the Confirm / Can't
+   DM again to everyone still unanswered — the same ask, the same deadline — at most once an hour per event; the ones
    waiting on the site aren't DMed. It asks first, on both surfaces, with the same sentences: *"The 3 rostered who
    haven't answered get their Confirm or Can't make it DM again. One more waits on the site with DMs off. Remind works
    once an hour."* The older Confirm card loses its buttons and reads *Reminded — see the newer message
@@ -1362,8 +1365,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    *Suggestions* above). Whenever a seat frees (decline, callout, absence, missed
    confirmation, officer removal) and `autofill` is on [on], the bot DMs the next best people, in the suggestions' cost
    order: joiners the lock left off and *Bench* answers first → the schedule's regulars who haven't answered (every
-   main while it has none; on an ad hoc run, every main) → other members → **swaps** (a rostered player's declared flex
-   role, offspec or alt in the needed role; never the spec the lock already moved them to). On every run (recurring or ad hoc)
+   main while it has none; on a one-off, every main) → other members → **swaps** (a rostered player's declared flex
+   role, offspec or alt in the needed role; never the spec the lock already moved them to). On every event (a schedule's or a one-off)
    a swap is not sent on its own: the lock card shows it under *Suggested* and an officer presses **Ask** (or Fill
    seats); the updates thread says so once. A swap goes out only when the role it vacates stays covered; otherwise the bot looks ahead
    for someone on the bench, or anyone else who could play that role, and sends both asks tied together — the swap and its backfill — and
@@ -1372,13 +1375,13 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    time, never more than 3 outstanding, and never asks someone who is rostered on another raid within 4 hours or
    absent. A fill DM that can't be delivered leaves the ask on the person's Me page (same deadline; the lock card counts
    "N wait on the site") — never a no. **Pause automatic asks** (the lock card's second row, the same button on the site's
-   locked run card) stops the bot asking anyone on its own for that run; an officer's own *Fill seats…* / *Ask* still
+   locked event) stops the bot asking anyone on its own for that event; an officer's own *Fill seats…* / *Ask* still
    sends, and *Resume automatic asks* picks up where it left off. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after
-   it was sent, never later than the run start; the updates thread logs the timeout and the next person is
+   it was sent, never later than the event's start; the updates thread logs the timeout and the next person is
    asked. A yes goes straight into the freed seat (a swap changes the seat in place). A roster that is full but
    short a tank or healer has no seat for a newcomer, so only swaps are asked for it; a yes that finds every seat
    taken meanwhile is a Join, not rostered, and the bot says so (move them in on the board). Officers can run a batch
-   by hand: **Fill seats…** in an event's **More** on the Events page (locked runs) or on the lock card in the roster channel, and
+   by hand: **Fill seats…** in an event's **More** on the Events page (locked events) or on the lock card in the roster channel, and
    `/raid fill`, first show the batch — what is short, who is still being waited on, each seat with its alternates,
    and **exactly the asks Send DMs**, one per line: who, as which character and spec, for which short role, a role
    swap marked **SWAP** (with the role it leaves) and its tied backfill named; what waits under the 3-at-a-time cap;
@@ -1388,44 +1391,44 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    the role swaps it lists. On a very long list the reasons go first, then the last seat lines ("+N more seats"); when
    even the batch can't fit one screen, the screen lists the asks of the first seats that fit and the button reads
    **Send these N (the rest on the site)** — it DMs exactly those; the site's Fill seats… sends the rest. **Withdraw an ask…**
-   on the same screen (and *Withdraw* on an ask in the site's run detail) closes an ask already out before its
+   on the same screen (and *Withdraw* on an ask in the site's event detail) closes an ask already out before its
    deadline: its card says "never mind", its tied half is released.
    `/raid fill preview:true` shows the same batch without a Send button. With `autofill` off
    nothing is asked until an officer presses Fill seats…. On the site one button opens the right screen — **Suggest…**
-   before the lock, **Fill seats…** after it, the Discord cards' own words; when a role swap waits for you (any run, ad
-   hoc too), a banner above the roster says *Waiting on you: …* with Fill seats…, and the fill state is a sentence
-   ("Asking for open seats — waiting for answers (1 on the site)."; a closed run's is "The run is finished.").
+   before the lock, **Fill seats…** after it, the Discord cards' own words; when a role swap waits for you (any event, a
+   one-off too), a banner above the roster says *Waiting on you: …* with Fill seats…, and the fill state is a sentence
+   ("Asking for open seats — waiting for answers (1 on the site)."; a closed event's is "The event is finished.").
 7. **Raid** — `/raid loot` (or the lock card's **Loot**, or Loot › Tonight on the site) opens the loot council;
-   `/raid end` ends the run and its council (§9) — so does **End the run** on the lock card's second row and on the
-   site's locked event (**More › End the run**), both after the scheduled start and both through one confirm screen with the same sentence
-   (*"The run is finished and its loot council closes with 6 awards and 1 override. The summary posts in the council's
-   thread. Reopen works for an hour if this was a mistake."*; with no council: *"The run is finished. The sheet and the
+   `/raid end` ends the event and its council (§9) — so does **End the event** on the lock card's second row and on the
+   site's locked event (**More › End the event**), both after the scheduled start and both through one confirm screen with the same sentence
+   (*"Barrow Deeps on Tue 9 Dec is finished and its loot council closes with 6 awards and 1 override. The summary posts in the council's
+   thread. Reopen works for an hour if this was a mistake."*; with no council: *"Barrow Deeps on Tue 9 Dec is finished. The sheet and the
    lock card close and no more fill asks go out. Reopen works for an hour if this was a mistake."*). Ended by mistake? The closed
-   officer card keeps a **Reopen** button (and the event under History on the Events page has **More › Reopen**) for an hour: the run goes back to
+   officer card keeps a **Reopen** button (and the event under History on the Events page has **More › Reopen**) for an hour: the event goes back to
    locked with its roster and asks as they were (the loot council stays archived — open it again with /raid loot).
-   Never a cancelled run, and not after its scheduled close.
-8. **Close** — 3 h after its scheduled end (start + the raid's length) the run is **done** and the sheet says so.
+   Never a cancelled event, and not after its scheduled close.
+8. **Close** — 3 h after its scheduled end (start + the raid's length) the event is **done** and the sheet says so.
 
-**Reading a run.** `/raid health` works at any time: on an open sheet the health card, on a locked run a brief with
+**Reading an event.** `/raid health` works at any time: on an open sheet the health card, on a locked event a brief with
 rostered against the seats, what is short (role icon + number), the confirmations tally and the fill state in words —
 officers also see who is waiting and the lock card's buttons; members see the counts only. On the site a sheet shows,
-under its role counts, who could cover a short role (officers) and the party buffs nobody in the run brings (icons only in one dashed frame, the names in its tooltip; shown once someone has joined); links to the sheet, the officer card and the updates thread in Discord; and, once locked, *Playing an
-offspec* and *Regulars not rostered* (one member per line, the spec icon alone) — that is a test run's card on the
+under its role counts, who could cover a short role (officers) and the party buffs nobody in the event brings (icons only in one dashed frame, the names in its tooltip; shown once someone has joined); links to the sheet, the officer card and the updates thread in Discord; and, once locked, *Playing an
+offspec* and *Regulars not rostered* (one member per line, the spec icon alone) — that is a test event's card on the
 Test bench; an event on the Events page reads in its sections, its fill asks and callouts under **More › Asks and
-callouts…**. A run's **What happened · N lines** lists its fill
+callouts…**. An event's **What happened · N lines** lists its fill
 asks (who answered for whom, which wait on the site), callouts with their notes, and the **log** — every line with its
-time in words, lines only officers would read marked *officers*. Past runs are the Events page's **History** (20 at a
+time in words, lines only officers would read marked *officers*. Past events are the Events page's **History** (20 at a
 time, **Show older** for more); each opens read only, its board as it was locked.
 
-**Moving a run, and its own sheet timing (officers).** One run can move to another start without touching its
+**Moving an event, and its own sheet timing (officers).** One event can move to another start without touching its
 schedule: every raid of it moves together and keeps its gap to the first (counted in real time, also across a clocks
 change night). Answers stand — nobody answers again, and pins, the board and a locked roster stay as they are. Away
 answers are worked out again for the new day: an away row goes when the absence no longer covers the new day, and
 someone away on the new day who hadn't answered is marked away. Everyone who answered gets a notice on the Me page and
 in `/me view` (*"Barrow Deeps now starts Wed 2 Dec 8:00 PM."*); nobody gets a DM. The sheet is edited in place (the same
 message), the officer cards follow, and every card still waiting for an answer — a Confirm / Can't make it card, a fill
-ask — is edited to show the new time with its buttons, so the ask they hold still works. A confirm-by moves with the run;
-one the move would leave in the past is set to within the hour. A fill ask keeps its own deadline. Moving a run whose
+ask — is edited to show the new time with its buttons, so the ask they hold still works. A confirm-by moves with the event;
+one the move would leave in the past is set to within the hour. A fill ask keeps its own deadline. Moving an event whose
 lock time is then past locks it at the scheduler's next minute, and the confirm says so first. Before the lock an event
 can also take its own settings, kept on that event alone (its schedule is never changed): the **sheet timing** — the
 reminder (on or off, and when), the lock, confirm-by, how long a fill ask waits and automatic asks —, whether the
@@ -1435,72 +1438,72 @@ carries its own priority from the moment it opens, so a later change to its sche
 (an event already open when this came in keeps the priority it had). Once the roster locks only the start, the
 automatic asks and how long an ask waits can change; the rest is refused in one sentence each (*"Asking the rostered to
 confirm is fixed once the roster locks."*, *"The priority is fixed once the roster locks, because the roster is already
-chosen."*). Switching who gets a seat says what decides it now (*"Join order no longer decides who gets a seat."* or
+chosen."*). Switching the seat order says what decides it now (*"Join order no longer decides the seats."* or
 *"The first to join now get the seats, whatever the priority."*), and the sheet, the member's own line, the Me page and
 the bot's answers follow the event's own choice. A weight changed applies to every raid of the event, each keeping its
 other weights. A reminder that is off moves with a lock set earlier than it, so the officers' check still comes before
 the lock. A new lock time is told to everyone who answered, as a new start is; a change to the confirmation, the
 priority or the split tells nobody. The confirm
 reads, for example, *"The event moves to Wed 2 Dec 8:00 PM. All 7 answers stand, and each person gets a notice. The
-sheet in Discord shows the new time."*; it names people also on another run that night when there are any. The first
-sentence says only what really changes: the move, this run's own settings (*"For this event, automatic asks are off."*),
-or both (*"… moves to Wed 2 Dec 8:00 PM with its own lock time."*). A run is refused in one sentence when it is finished
-or cancelled, when it has already started (*"This run has started, so it can't move."* — its timing doesn't change
+sheet in Discord shows the new time."*; it names people also on another event that night when there are any. The first
+sentence says only what really changes: the move, this event's own settings (*"For this event, automatic asks are off."*),
+or both (*"… moves to Wed 2 Dec 8:00 PM with its own lock time."*). An event is refused in one sentence when it is finished
+or cancelled, when it has already started (*"This event has started, so it can't move."* — its timing doesn't change
 either), when the start is in the past (*"Fri 20 Nov 7:00 PM is in the past, so the event stays at Thu 10 Dec 6:30
-PM."*), when nothing would change, and when its raid already has another run at that minute. A moved run still counts as the run of the date its schedule gave it: that date never opens a second sheet, and
-the schedule's next runs open on time wherever the moved one now sits. Moved exactly onto another night of its schedule
-that hasn't opened yet, it becomes that night's run, and the confirm says so (*"That night's Raid nights run is this
-one."*). When a schedule's run time changes while its run is open or locked — a later hour, past midnight or another
-weekday — the bot decides once, at that save, which new time the run stands for: the run time put in place of the one
-it came from (two changed at once pair up by time, whatever order they were typed in), in the same lockout as the run
-(a raid with no first opening: the same Monday-to-Sunday week). The run keeps its old time, that lockout gets no
-second run, and the next one opens at the new time; a new time that falls in the next lockout opens there. A run
-time that was only taken away stands for nothing new, a run already finished or cancelled is never changed, a
-cancelled run gives back the night it stood for (it opens after all), and a schedule with two run times keeps both:
-editing one never stops the other opening. An edit that gives the run's own time back — Tuesday moved to Wednesday, then
-both Tuesday and Wednesday set — makes the run answer for its Tuesday alone, and that Wednesday opens a sheet of its own. Lockouts, the alt filter and *also on another run* read the new
+PM."*), when nothing would change, and when its raid already has another event at that minute. A moved event still counts as the event of the date its schedule gave it: that date never opens a second sheet, and
+the schedule's next events open on time wherever the moved one now sits. Moved exactly onto another night of its schedule
+that hasn't opened yet, it becomes that night's event, and the confirm says so (*"That night's Raid nights event is this
+one."*). When a schedule's event time changes while its event is open or locked — a later hour, past midnight or another
+weekday — the bot decides once, at that save, which new time the event stands for: the event time put in place of the one
+it came from (two changed at once pair up by time, whatever order they were typed in), in the same lockout as the event
+(a raid with no first opening: the same Monday-to-Sunday week). The event keeps its old time, that lockout gets no
+second event, and the next one opens at the new time; a new time that falls in the next lockout opens there. An event
+time that was only taken away stands for nothing new, an event already finished or cancelled is never changed, a
+cancelled event gives back the night it stood for (it opens after all), and a schedule with two event times keeps both:
+editing one never stops the other opening. An edit that gives the event's own time back — Tuesday moved to Wednesday, then
+both Tuesday and Wednesday set — makes the event answer for its Tuesday alone, and that Wednesday opens a sheet of its own. Lockouts, the alt filter and *also on another event* read the new
 start. **Where:** on the Events page, an open or locked event's **Reschedule** (§4 *The Events page*): pick the new day and
 time, the box prints the bot's own confirm, and **Move** saves it. **Edit event** beside it opens every one of the
 event's own settings in one editor — *Sheet timing* (Locks, Signup Reminder and when it Goes out, Lock Confirmation and
 Confirm by, Automated Fill Requests and An ask waits, each switch with its (?) — §1a *The four switches*),
-*Priority* (Who gets a seat: First to join or By priority, the five weights from 0 to 6, and each raid's split) — all
+*Priority* (Seat order: First to join or By priority, the five weights from 0 to 6, and each raid's split) — all
 picked from lists, the same labels as the Schedules page's editor. **Save** shows the bot's box first: each change as
 *label: old → new* (*Locks: 24 hours before → 12 hours before*), then what changes, who is told and what can still be
 undone; if the event changed meanwhile the box comes back with the new facts and waits again. After the lock the
 editor shows only the automatic asks and how long an ask waits. The split moved here from **More**. Plain text says it (*"move tonight's Barrow Deeps
-to Wednesday 8 PM"*, *"lock Thursday's run 12 hours before"*; the diff prints the same confirm, and a time the clocks
+to Wednesday 8 PM"*, *"lock Thursday's event 12 hours before"*; the diff prints the same confirm, and a time the clocks
 skip or pass twice that night is refused: *"That time doesn't exist that night because the clocks go forward. Pick
-another time."*). MCP's `reschedule_run` previews first and sends the preview's `rev` back. If someone changed the run
-between the confirm and the press, nothing is saved (*"Someone changed this run a moment ago, so nothing was saved.
+another time."*). MCP's `reschedule_run` previews first and sends the preview's `rev` back. If someone changed the event
+between the confirm and the press, nothing is saved (*"Someone changed this event a moment ago, so nothing was saved.
 Check it and try again."*). In Discord, `/raid reschedule` (officers) asks which event when several are open, shows the same box asking for the time, and **Pick the day and time** opens a day, an hour and the minutes in quarter hours (*Later than this…* asks for the week first). The box then says what the move does, with **Move**, **Pick another time** and **Back**; a time the clocks skip or pass twice is the refusal with **Back** alone, never shifted. `/raid edit` (officers) is Edit event: a line per setting it may change now, in the same words, each change shown as *old → new*. **Change a setting** opens one setting at a time from a list (the five weights together in one box of five lists, each raid's split on one screen), and **Review changes** shows the bot's box with **Save**. A box that changed while it was open comes back with the new facts and waits again. If the roster locked meanwhile, the box says what is now fixed, with **Back** alone, and nothing is saved.
 
-**Changing the raids of an open run (officers).** Until the roster locks, one run's lineup can change: a raid added
+**Changing the raids of an open event (officers).** Until the roster locks, one event's lineup can change: a raid added
 after the first, one taken out, the later raids put in another order, or a raid's number of rosters changed. The first
-raid stays (*"The first raid of a run can't change. Start a new run instead."*), the four-raid limit and the order of
+raid stays (*"The first raid of an event can't change. Start a new event instead."*), the four-raid limit and the order of
 the starts hold as for a schedule, and a raid the game doesn't have is refused. Each raid without its own start begins
 when the one before it ends, so taking out the second raid brings the third forward, and a new order moves every raid
 after the first. The confirm says the first change (*"Barrow Deeps goes from two rosters to one."*, *"Onyxia's Lair
 joins the lineup after Hyjal Summit."*) and, on the site, lists every change above it (*Barrow Deeps: 2 rosters → 1
 roster*). When a raid that stays starts at another time the confirm gives its new time (*"Onyxia's Lair now starts at
 9:30 PM."*) and everyone who answered gets a notice on the Me page and in `/me view`
-(*"Onyxia's Lair now starts Thu 10 Dec 9:30 PM."*), as when a run moves. Adding a raid that hasn't first opened by its
-start is allowed, and the confirm says when it opens. Only that run changes — its schedule keeps its own lineup, and the
-confirm says so on a schedule's run when it has room. The first raid's answers are never touched, and every raid of the new lineup takes
+(*"Onyxia's Lair now starts Thu 10 Dec 9:30 PM."*), as when an event moves. Adding a raid that hasn't first opened by its
+start is allowed, and the confirm says when it opens. Only that event changes — its schedule keeps its own lineup, and the
+confirm says so on a schedule's event when it has room. The first raid's answers are never touched, and every raid of the new lineup takes
 them, a new raid included (*"All 18 answers stand."*). A raid that stays keeps its board, its pins
 and the plans to leave before it, in its new place. A raid going down to fewer rosters loses the board places (and their
 pins) on the rosters that go: those people stay joined and the lock places them again, and the confirm always says so
 (*"Moves made on the removed roster are dropped."*). A raid taken out is cancelled with what it held, always counted in
 the confirm (*"Barrow Deeps is taken out with its 3 board places, 1 pin and 1 plan to leave early."*); an open ask on
 it closes and its card says so. A raid taken out answers as itself afterwards: cancelling it again says it is already
-cancelled and never touches the run. Nobody gets a DM: the sheet is edited in place to the new lineup (*Hyjal Summit,
-then Onyxia's Lair*), and the run's thread hears it. Once the roster locks the lineup is fixed (*"The lineup is fixed
+cancelled and never touches the event. Nobody gets a DM: the sheet is edited in place to the new lineup (*Hyjal Summit,
+then Onyxia's Lair*), and the event's thread hears it. Once the roster locks the lineup is fixed (*"The lineup is fixed
 once the roster locks."*). **Where:** plain text (*"add onyxia after tonight's Barrow Deeps"*, *"take onyxia out of
-Thursday's run"* — the later raids are named in order, *"barrow deeps x2, onyxia"*, or *"none"* for the first raid alone;
+Thursday's event"* — the later raids are named in order, *"barrow deeps x2, onyxia"*, or *"none"* for the first raid alone;
 a raid that stays after the same raid as before keeps its own start, so adding a raid at the end moves nobody's night)
-and MCP's `edit_lineup` (the whole lineup, previewed first, its `rev` sent back); a run changed meanwhile is refused as
+and MCP's `edit_lineup` (the whole lineup, previewed first, its `rev` sent back); an event changed meanwhile is refused as
 when it moves. On the site it is the event's **Edit lineup** (§4 *The Events page*). In Discord, `/raid lineup` (officers) asks which
 event when several are open and lists its raids, one line each with its rosters and start (*2. Onyxia's Lair · 1 roster ·
-9:30 PM*). **Add a raid** picks one the run doesn't hold yet, until it holds four (*"A run holds at most 4 raids."*).
+9:30 PM*). **Add a raid** picks one the event doesn't hold yet, until it holds four (*"An event holds at most 4 raids."*).
 **Pick a step** opens one raid: its rosters, its start (*When Hyjal Summit ends · 9:30 PM* first, then quarter hours after
 the raid before it), **Move earlier**, **Move later** and **Remove** — the first raid offers its rosters alone. Moving or
 removing a raid puts every raid after it back to starting when the one before it ends. A new start for one raid moves
@@ -1511,13 +1514,13 @@ same box as the site with **Save lineup**; if the roster locked meanwhile, the b
 Seat selection at lock is deterministic: the raid's minimums (filled first, never a stop), buff synergy, the comp policy's
 standing instructions, officer pins, and the schedule's **weights** (the raid's unless the schedule sets its own) —
 rank (core > raider > trial), main over alt, sat out last window (matched by member, so a Discord rename keeps it),
-earlier signup, and being one of the schedule's **regulars** on their regular character. An ad hoc run is first come
-instead (see *Recurring and ad hoc* above). A comp-policy line such
+earlier signup, and being one of the schedule's **regulars** on their regular character. A one-off is first come
+instead (see *A schedule's event or a one-off* above). A comp-policy line such
 as "at least 3 healers" raises that role's minimum and leaves the others (the raid's tank minimum stays). Officers tune the weights per raid (*Selection weights* in `/gm config
 raid`, the Raids page, or plain text: "weight rank 5 for Barrow Deeps").
 
-If you can't make a run you joined: press *No thanks* on an open sheet, *Can't make it* on a locked one, or
-`/raid out` (a box asks for an optional note; it goes to the run's updates thread for officers, not to the public sheet). After
+If you can't make an event you joined: press *No thanks* on an open sheet, *Can't make it* on a locked one, or
+`/raid out` (a box asks for an optional note; it goes to the event's updates thread for officers, not to the public sheet). After
 lock this releases your seat immediately and the bench is asked; *Can't make it* is recorded as a callout like `/raid
 out` (hours before, late after the lock). The same two words mean the same thing on every surface, before and after
 lock: **No thanks** is an answer change (no record), **Can't make it** is a callout with an optional note for the
@@ -1526,14 +1529,14 @@ the note box) once it is locked; your own "I can't make tonight" in plain text i
 when an officer presses Apply on your request for you.
 
 **Officers record anything a member can do, for them, from one place per surface.** In Discord: `/raid set
-member:<someone>` (optionally `what:` to go straight to one thing) picks the run first — only runs where something
-applies to that person, never a test run (answer for puppets with `/gm test answer` or the Test bench) — then offers **only what applies to them on that run**, in the members' own words, raid-night
+member:<someone>` (optionally `what:` to go straight to one thing) picks the event first — only events where something
+applies to that person, never a test event (answer for puppets with `/gm test answer` or the Test bench) — then offers **only what applies to them on that event**, in the members' own words, raid-night
 first: *Confirm for them* / *Can't make it for them* (their open Confirm ask; the box's title names it) · *Confirm their fill* / *No to their fill*
 (their open seat or swap question) · *Record a callout…* (with an optional note; before lock it is No thanks + the
 callout) · *Join* (as which character, "as <alt>") · *Bench* · *No thanks* · *Pin to roster* / *Keep off the roster* /
 *Unpin* (open sheet). *Join* and *Bench* then ask **Plays which spec?** — only the specs that character plays (its spec,
 its offspec, an extra role's; a character with one spec skips the question), the one it plays now picked already, and
-another spec it plays is a role switch (below). For someone rostered on a locked run a spec of the same role is fine
+another spec it plays is a role switch (below). For someone rostered on a locked event a spec of the same role is fine
 (their seat stays a healer seat); *Play another character* on a character of another role moves their seat to that
 role, and the box says so first (*"Kestrel plays Thornpaw and moves from healer to melee on the roster."*). The confirm screen is the bot's box, the same one the site's ⋮ menu
 shows: what happens and who is told — *"Kestrel goes to No thanks for Barrow Deeps on Tue 9 Dec. No callout is
@@ -1545,13 +1548,13 @@ ahead. What the bot would refuse — a
 spec the character doesn't play, a switch for someone rostered on the locked roster — is that one sentence with
 **Back** alone. On your own record it is your own answer, so the screen promises no notice. On
 the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
-list, and **Answer for someone** beside the run's headcount does it for anyone who hasn't answered yet (its Member list leaves out everyone with an answer on the sheet): the bot's box with *Member*, *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays), each pick shown in the bot's sentences before **Record answer**; a callout stays on the row's ⋮, in the same box with a *Note for the officers* field. Plain text ("Kestrel can't make it tonight,
+list, and **Answer for someone** beside the event's headcount does it for anyone who hasn't answered yet (its Member list leaves out everyone with an answer on the sheet): the bot's box with *Member*, *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays), each pick shown in the bot's sentences before **Record answer**; a callout stays on the row's ⋮, in the same box with a *Note for the officers* field. Plain text ("Kestrel can't make it tonight,
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
 `callout=false`) do the same. Whatever an officer records for someone reaches them as a **notice** on their Me page and
 in `/me view` ("Jon set you to No thanks for Barrow Deeps Tue 7:30 PM"), and an open DM card of theirs is edited to
 *answered for you by Jon* — never a new DM. Pins are officers' planning: nobody is told. When an officer drags
-someone onto a locked board, the run's thread says they were asked to confirm only when the run asks for
-confirmations (an ad hoc run with confirmations off just says *in*).
+someone onto a locked board, the event's thread says they were asked to confirm only when the event asks for
+confirmations (a one-off with confirmations off just says *in*).
 
 **Role switches (an officer picks the spec someone plays).** An event's page on the site has a **Role switches**
 section when one of its raids is short of a tank or healer minimum: *Hyjal Summit is short* with the role icon and how
@@ -1573,44 +1576,44 @@ need a cover (**Suggest…** / **Fill seats…** shows them), or nobody free can
 you opened it, the press is refused and the fresh list shows. The spec must be one the character plays (its spec, its
 offspec or an extra role's); anything else is refused (*"Nyx doesn't play Fire."*). In Discord, `/raid set` → *Join*
 (or *Bench*) → **Plays which spec?** does it. Plain text ("set Nyx to Join as Holy"), **Answer for someone** and MCP
-`set_answer` with `spec` do the same before the lock; once the run is locked,
+`set_answer` with `spec` do the same before the lock; once the event is locked,
 someone who holds a seat is never switched to another role that way (*"Nyx holds a seat on the locked roster, so use Switch under the
 event's Role switches to ask them to play Holy."*) — `fill_seats` with `seats` sends one seat's ask instead. Every
-switch is in the run's log and the ops feed with who made it.
+switch is in the event's log and the ops feed with who made it.
 
 **Your inbox (Me page, `/me view`).** Asks — what you must act on — come first, one card each: what it is (*Confirm
-your seat*, *A seat is open*, *Could you switch?*, *Could you come?*), the run, the spec icon you'd play (its tooltip
+your seat*, *A seat is open*, *Could you switch?*, *Could you come?*), the event, the spec icon you'd play (its tooltip
 says *as Holy*), the group it puts you in
 (spec icons, one member per line), *answer by Tue 6:30 PM*, and the two buttons. Pressing one is the same as pressing
 the DM's button — the card shows the reply, and a second answer (from another device, or the DM) is refused with what
 the first was (*"Already answered (yes, by Kestrel at 5:12 PM)."*). A tied pair you said yes to shows *waiting for
 Kestrel's answer*. Under the asks, your **Notices**: outcomes the bot used to DM, or never told you, now land here
 instead — *not rostered* at lock (how many seats, how many joined, and that a freed seat would reach you), a seat
-released (by the board, an absence, a missed confirmation), something an officer answered for you, a run cancelled,
+released (by the board, an absence, a missed confirmation), something an officer answered for you, an event cancelled,
 a schedule you were a regular of removed, your application's decision, a character confirmed, a loot award (a
 correction reaches both — the one who gets the item and the one who held it). Notices
 are kept 30 days (the newest 20); *Mark read* clears the bold. **DMs off** changes where asks wait, never whether you
 are asked: before lock and for confirmations you are asked in the same order as everyone else, on the Me page, with
 the same deadline (the lock card and the updates thread mark it *(site)*). After lock, in the last hours before the
-start (when a fill ask can no longer run its whole wait), a seat offered to someone with DMs off is also offered to
+start (when a fill ask can no longer last its whole wait), a seat offered to someone with DMs off is also offered to
 the next person a DM can reach, at the same time: the first yes takes the seat and the other ask closes (*"Never mind
 — someone else took the seat first"*).
 
 **Where the buttons are (site and Discord).** One label per verb, the same on the site and on the Discord cards. On
 the Events page an event's header holds **Reschedule** · **Edit lineup** · **Edit event** · **Lock now** · **More** (the rest of the verbs
-below, §4 *The Events page*), with **Cancel event** at Activity's right. A test run's card on the Test bench keeps the
-older layout: its actions sit in one bar under its board and never move: *Cancel run…* far left (and, once locked, *End the run*),
+below, §4 *The Events page*), with **Cancel event** at Activity's right. A test event's card on the Test bench keeps the
+older layout: its actions sit in one bar under its board and never move: *Cancel event…* far left (and, once locked, *End the event*),
 then on the right — before the lock **Suggest…** · **Preview lock** · **Lock now**; after it **Remind the unanswered** ·
-**Pause automatic asks** · **Fill seats…** · **Loot**; what does not apply yet is greyed with the reason. The run's
+**Pause automatic asks** · **Fill seats…** · **Loot**; what does not apply yet is greyed with the reason. The card's
 **⋮ menu** (top right) holds *Re-post sheet…*. The board's own tools sit above the groups: **Place the rest**, *Propose
 roster/splits…*, and *Clear* set apart. Officer cards in Discord use the same fixed order — Open the board · Lock now ·
-Fill seats… · Loot · Cancel run… (the *Suggested* block has its own row: **Ask** · **Suggest…**), and the lock card adds
-a second row: **Remind the unanswered** · **Pause automatic asks** · **End the run**. **One confirm screen, the same
+Fill seats… · Loot · Cancel event… (the *Suggested* block has its own row: **Ask** · **Suggest…**), and the lock card adds
+a second row: **Remind the unanswered** · **Pause automatic asks** · **End the event**. **One confirm screen, the same
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
-a news proposal, the bot shows one sentence computed from the run as it stands — for a lock: *"Everyone on the board keeps
+a news proposal, the bot shows one sentence computed from the event as it stands — for a lock: *"Everyone on the board keeps
 their place, and the lock fills the open seats from Not placed. 16 of the 18 rostered get the Confirm or Can't make it DM and 2 see it on the site. They have until Tue 9 Dec
-6:30 PM to answer."*; on an ad hoc run: *"On an ad hoc run Join is the commitment, so nobody is asked to confirm."* — then the verb's own button (*Lock*, *Cancel event*, *Send reminder*, *End the run*, *Approve*…), **<verb> with a
-note** where a note makes sense, and **Back**. In Discord, Lock, Cancel event, Send reminder and End the run print the very
+6:30 PM to answer."*; on a one-off: *"On a one-off event Join is the commitment, so nobody is asked to confirm."* — then the verb's own button (*Lock*, *Cancel event*, *Send reminder*, *End the event*, *Approve*…), **<verb> with a
+note** where a note makes sense, and **Back**. In Discord, Lock, Cancel event, Send reminder and End the event print the very
 box the site's confirm shows — its title, its sentences, its verb; a box that changed while it was open is shown again
 first, and one that can't go ahead says why with Back alone. The site's dialogs print the
 very same sentence (it comes from the bot, the page never writes its own), so no surface promises a DM the bot would
@@ -1631,7 +1634,7 @@ open past ten minutes it is checked again on Apply and goes through when nothing
 *"The bot restarted — review again"* and shows the fresh lines. Pages update on their own; *Refresh* in
 the left rail is the manual fallback. Every yes/no DM (confirmations and fill asks) reads **Confirm / Can't make it**;
 a pre-lock ask reads **Yes, as <spec>** / **No**.
-A run is locked once, whoever asks first — the site, a card, chat, MCP or the schedule: a second *Lock now* while the
+An event is locked once, whoever asks first — the site, a card, chat, MCP or the schedule: a second *Lock now* while the
 roster is being built is told the groups are already being built. A move made while the lock (or *Place the rest*) is
 building them waits, then is refused as *"the board changed since you looked"* instead of being lost; check the board and
 move again.
@@ -1683,12 +1686,12 @@ edits that new family and leaves the one it shared alone.
   **Group make-up** in the Raids page's Rules view (**Edit**), with `/roster comp` (pick the raid, a role, a class or *A
   particular spec…*, then the number and why), in plain text ("at least 3 healers in Barrow Deeps", "clear the paladin
   minimum"), in `/gm config raid` › *Minimums*, or MCP `set_minimum`. One write per raid whichever way. A maximum is refused (*"A minimum has no upper
-  limit. Give only the minimum."*), so is one run's own (*"Minimums belong to the raid. Set them on the raid, not on
-  one run."*) and a minimum past the raid's size. The reason is kept with the minimum and shown on the Raids page (on hover),
+  limit. Give only the minimum."*), so is one event's own (*"Minimums belong to the raid. Set them on the raid, not on
+  one event."*) and a minimum past the raid's size. The reason is kept with the minimum and shown on the Raids page (on hover),
   `/ask` (readiness) and MCP `raid_readiness`, next to the line it explains. The group layout (`comp_groups`) stays
   plain text only. A guild that kept role ranges and officers' wants before has them as minimums from its next start:
   each tank and healer range's lower number, each class, spec, melee or ranged want's lower number with its reason; the
-  upper numbers, the damage dealers' range, an officers' tank or healer want and one run's own wants are dropped, and
+  upper numbers, the damage dealers' range, an officers' tank or healer want and one event's own wants are dropped, and
   the ops channel gets one line naming each. If a value there can't be read, nothing of it moves and the ops channel
   gets one warning saying what was left and how to fix it.
 - The same readiness as data: MCP `raid_readiness` (one raid or all) and `GET /api/readiness` — headcount, each role's
@@ -1720,13 +1723,13 @@ edits that new family and leaves the one it shared alone.
   **Move it** moves it. Both members get a notice on their Me page, and nobody is DMed. Everything follows
   the character: its record (with its armory link and professions), its past loot awards and its raid attendance count
   for the new member as if they had held it all along (on a night both played, the better of the two counts, once), an
-  open question to the council about one of its awards becomes the new member's, and its answers and seats on live runs
+  open question to the council about one of its awards becomes the new member's, and its answers and seats on live events
   move with it. It arrives as an alt, or as the main when the new member has none; if it was the old member's main,
   their next character becomes main. A regular spot is given up when the new member already has one in that raid's
   schedule (a member holds one spot per schedule) — the confirm names it. The loot history itself is never rewritten:
   the move is recorded, and every lookup reads it. A move is refused in one sentence, with **Pick someone else**: an
   open ask on the character (withdraw it first), a new member with no record here or who left, one who already has a
-  character of that name, one already on a live run the character is on (sort that out first), or a test character
+  character of that name, one already on a live event the character is on (sort that out first), or a test character
   moving to or from a real member. An officer can't move a character to themselves; another officer does it. The owner
   can.
   `/roster armory` (where the game has an armory) shows the guild linked and when its roster was read, how many
@@ -1776,12 +1779,12 @@ edits that new family and leaves the one it shared alone.
   Members page lists them with *not in the server · noticed Sun 25 Oct* and **Remove record…** (one confirm saying what
   goes and what stays: *"Orrin's record goes, with Wrenna, their absences, wishlists and notices. Loot already awarded
   stays in the ledger, and nobody gets a DM. …"*); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
-  while they're still in the server or hold a seat on a live run. Members can't delete their own record.
-- Runs: `/raid open|sheet|health|fill|lock|set|cancel|reschedule|edit|lineup|list|loot|distribute|end` (officers) and `/raid out` (anyone).
+  while they're still in the server or hold a seat on a live event. Members can't delete their own record.
+- Events: `/raid open|sheet|health|fill|lock|set|cancel|reschedule|edit|lineup|list|loot|distribute|end` (officers) and `/raid out` (anyone).
   `/raid reschedule` moves an event to a day and time picked from lists, and `/raid edit` changes the event's own settings
-  (§4 *Moving a run, and its own sheet timing*); `/raid lineup` changes its raids before the lock (§4 *Changing the raids
-  of an open run*).
-  They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member
+  (§4 *Moving an event, and its own sheet timing*); `/raid lineup` changes its raids before the lock (§4 *Changing the raids
+  of an open event*).
+  They need no arguments: with one live event they act on it; with several they ask which. `/raid set` takes the member
   (and optionally `what`), then offers only what applies to them (§4 *Officers record anything…*). `/raid sheet`
   (anyone): an officer **moves** the live sheet here, or to `channel:` — its buttons and updates follow it and the old
   message says *Re-posted in #raids*; anyone else posts a **read-only copy** labelled *copy — the live sheet is in
@@ -1828,20 +1831,20 @@ edits that new family and leaves the one it shared alone.
   every surface says the same thing — *Something went wrong and nothing was changed. The owner has the details.* — and
   the owner gets the details in the ops channel and a DM; when the model itself can't be reached (a bad API key, no
   network, the provider down) the sentence is *The model isn't reachable right now, so I couldn't read that. Nothing was
-  changed; the owner has the details.*; a refusal ("that run is locked") always reads as written. A board change (a move, the groups, auto-fill, using a
+  changed; the owner has the details.*; a refusal ("that event is locked") always reads as written. A board change (a move, the groups, auto-fill, using a
   proposal) is refused with *"the board changed since you looked"* when someone else changed that board between the
   diff and your Apply — nothing is overwritten, even when an unrelated step of the request (a DM setting) comes first;
-  the request's own earlier steps (a pin, a move) never count as a change, and once one board step is refused the request's later board steps on that run are refused too. Absences
+  the request's own earlier steps (a pin, a move) never count as a change, and once one board step is refused the request's later board steps on that event are refused too. Absences
   entered this way are announced like `/me absent add`; channel changes post (or drop) their card like the Config page
   does. Several raid or schedule settings in a row are saved as one change, so "open 100 hours before and lock 60
   before" can't fail half way.
   A whole night and a weekly schedule in one message works too: *"set up an ad hoc hyjal raid for 6:30 pst on Dec 10th with 10 man
-  barrow deeps splits afterwards. also set up a scheduled hyjal raid for 6:30 pst every tuesday"* opens the ad hoc Hyjal
-  Summit with a Barrow Deeps ×2 follow-on (*"…, then Barrow Deeps ×2 at Thu 10 Dec 9:30 PM"*) and sets the weekly Tuesday
-  schedule — one diff, one Apply. Its first run follows the raid's first opening (Hyjal Summit's is Wed 9 Dec, so the
+  barrow deeps splits afterwards. also set up a scheduled hyjal raid for 6:30 pst every tuesday"* opens the one-off Hyjal
+  Summit with Barrow Deeps ×2 as its later raid (*"…, then Barrow Deeps ×2 at Thu 10 Dec 9:30 PM"*) and sets the weekly Tuesday
+  schedule — one diff, one Apply. Its first event follows the raid's first opening (Hyjal Summit's is Wed 9 Dec, so the
   first Tuesday is the 15th); a later start for the whole raid is its *first opening* ("Hyjal opens first on Dec 15"),
-  as no single schedule has a start date of its own. A run already open can't take a follow-on: cancel it and open the
-  night again (§4 *More raids the same night*).
+  as no single schedule has a start date of its own. An event already open takes or drops a later raid with **Edit lineup** on its page or
+  `/raid lineup`, until its roster locks (§4 *Changing the raids of an open event*).
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, the news review — last run,
   its result, the next run, proposals waiting — and the apply job: idle, running, busy with another server's proposal or
   failed with why, recent ops),
@@ -1871,8 +1874,8 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   writes. A **guild setting** (a raid's lockout, what the guild knows about a buff, a minimum) reads "the apply
   job carries it out at its next run (the time), no restart:" and the change as a diff line; it is applied like the same
   change on the Raids or Auras page. A **game data** change reads "Claude edits the game data for <version>, the tests
-  run, and the bot restarts for every server it serves (every name) for about two minutes", plus "⚠ <server> has a run
-  right now — the job will wait" for each server that is raiding. **Only the owner approves a game-data change** (it
+  run, and the bot restarts for every server it serves (every name) for about two minutes", plus "⚠ <server> is raiding
+  right now, so the job waits until the raid is over." for each server that is raiding. **Only the owner approves a game-data change** (it
   restarts the whole bot, for every server), even when the bot serves one guild; an officer's press is refused at once
   and says so. The same holds for a guild setting that only the owner may change on any surface — a buff, a stacking
   family, an aura reset: **the owner approves it** (an officer's press is refused, an
@@ -1889,9 +1892,9 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
 - **Needs a developer** — the change can't be expressed as a setting or a data edit; the card has no Approve and says
   so in its Status. Dismiss it once someone has handled it.
 - **Raid time (D33).** A game-data change restarts the bot, so the apply job never restarts it while any server it
-  serves is busy: a locked run from 4 hours before its start until it closes, an open run within the hour, or a live
-  loot council (however late it runs — a council still open past the run's scheduled end counts until it ends). It waits, and writes why on the proposal ("waiting: Barrow Deeps raids until 11:30 PM") — the card's
-  Status and the Agents page show it. If a raid begins while the edit and the tests run, the change is committed and
+  serves is busy: a locked event from 4 hours before its start until it closes, an open event within the hour, or a live
+  loot council (however late it runs — a council still open past its raid's scheduled end counts until it ends). It waits, and writes why on the proposal ("waiting: Barrow Deeps raids until 11:30 PM") — the card's
+  Status and the Agents page show it. If a raid begins during the edit and the tests, the change is committed and
   the restart waits for the next quiet poll ("committed c0ffee1; the restart waits: …"). It also waits while the host's
   checkout has uncommitted changes or is on another branch (the bot runs from it), saying so on the proposal. A
   committed change waits for its restart even when its server is no longer served: it changes every server on that
@@ -1937,7 +1940,7 @@ The setup screen still makes the server's own owner the guild owner, so a superu
 without taking it over. Keep the list to the person who runs the bot.
 
 **Setting up a server.** Inviting the bot never sets anything up. In the new server, the Discord server owner (or
-someone with Manage Server) runs `/gm config owner`: a short screen shows the server's name, the guild key the bot
+someone with Manage Server) uses `/gm config owner`: a short screen shows the server's name, the guild key the bot
 picked from it (it never changes; the site and MCP use it), the game version (WoW: Forever unless you pick another) and
 the owner (you, or pick someone). Nothing is saved until **Confirm**; then the server is a guild of its own — empty:
 its own members, raids, schedules, policy and settings — and you continue with the channels below. When the bot is
@@ -2069,7 +2072,7 @@ and what it does), **Save** (a change refused at Save stays in the draft with wh
 the **news webhook** itself when it has Manage Webhooks there, and hands you its URL (privately) to point your news
 source at; without the permission it says what to add. Every hour the bot re-checks each channel it uses: a channel
 deleted or a permission taken away is one warning in the ops channel (and on the Setup card) — not repeated until it
-changes; for the ops or signup channel, without which the bot can't tell anyone anything or open a run, it is an error,
+changes; for the ops or signup channel, without which the bot can't tell anyone anything or open an event, it is an error,
 so it also reaches whoever gets the error alerts. A change someone else made to the settings after you opened a
 channel screen or the hub makes Save refuse that channel (nothing posted) and keep it in your draft. `loot-channel
 channel: | clear: [log:]` (the public loot log, §9 — the same one confirm screen as the other channels, with the log
@@ -2077,7 +2080,7 @@ switch said on it), `officer-role role: [remove:]` (applies at once; removing th
 says *"No officer roles now: only the server owner and Manage Server count."*), `officers` (Discord's role picker with the
 current roles chosen, a **Map <name>…** button for an old role name the bot never found, Review, Save; @everyone and a
 bot's or integration's own role are refused), `timezone` (five common zones as buttons, or a region then a city; it shows what
-now and the next run become before saving; `about` likewise shows the text first — if someone changed the guild settings
+now and the next event become before saving; `about` likewise shows the text first — if someone changed the guild settings
 meanwhile, Save says so and writes nothing) — or all of these on
 the site's **Config** page — **Setup** (a checklist: owner, each channel, officer roles, the server-wide permissions
 the invite asks for, the optional ones — Manage Roles to give accepted applicants the member role, Manage Channels to
@@ -2086,11 +2089,11 @@ before it posts, named when you hover it; *Open in Discord*), **Channels** (pres
 set —*, **Save** → one review of every change and what it does → the result; while Discord is unreachable editing waits
 and the page says so instead of calling channels "not found"; *Webhook URL* beside the news channel), and **Settings**: press **Edit settings**, change any of the timezone, who may ask the bot, the officer roles and the
 about text, then one **Save settings**. The **timezone** is picked from a searchable list grouped by region (type a city to
-find it; never an IANA name to spell); under it the bot shows each raid's next run under the new zone and on today's clock,
-and every run already open or locked whose time reads differently on the new clock (*"Barrow Deeps Tue 20 Oct 8:00 PM stays
-at its real moment (now 11:00 PM in America/New_York) — move open runs with the clock to keep its time"*). Then you pick:
-**Keep runs at their real moment**, or **Move open runs with the clock** — an open run keeps its 8:00 PM on the new clock,
-same sheet, same signups, nobody asked again. A **locked** run never moves (its roster confirmed that moment), and while one
+find it; never an IANA name to spell); under it the bot shows each raid's next event under the new zone and on today's clock,
+and every event already open or locked whose time reads differently on the new clock (*"Barrow Deeps Tue 20 Oct 8:00 PM stays
+at its real moment (now 11:00 PM in America/New_York) — move open events with the clock to keep its time"*). Then you pick:
+**Keep events at their real moment**, or **Move open events with the clock** — an open event keeps its 8:00 PM on the new clock,
+same sheet, same signups, nobody asked again. A **locked** event never moves (its roster confirmed that moment), and while one
 is affected the change only goes through once you've picked. `/gm config timezone` offers the same two Saves. A timezone or officer-role change is reviewed before
 it is written, with those lines; the rest saves at once. Widening **who may ask** asks first: *widening this shares the
 model budget with everyone who may ask*. The **about** text counts its characters against the cap and shows the homepage
@@ -2110,42 +2113,42 @@ the raid meanwhile, the box is shown again under *"This changed while the box wa
 written and your draft is kept; **Save** on that box saves it. **Reset** shows the Raids page's own Reset box (*"Reset Barrow Deeps?"*, what goes back to the game's defaults), red, before it does. The same settings are on the Raids and Schedules pages and in plain text (`raid_set`, `schedule_set`).
 **Schedules** in Discord: `/gm config raid` › *Schedules* opens the schedule wizard on that raid's schedules (its
 Back returns to the raid's sections with your draft as it was). The list is grouped **Active** and **Paused**, each
-schedule by its name and when it repeats; an empty one says *"No schedule runs Barrow Deeps yet. Add one with New
+schedule by its name and when it repeats; an empty one says *"No schedule plays Barrow Deeps yet. Add one with New
 schedule."* Pick one to open its screen: Repeats, Lineup, Sheet timing (Sheet opens, Signup Reminder and when it goes
 out, Locks, Lock Confirmation and Confirm by, Automated Fill Requests and how long An ask waits, Sheet Opening DM),
 Priority and When one night fills two rosters, in the Schedules page's words, and its next event (a paused one says
 *"Paused, so no event opens. Resume it to open events again."*). **Change** edits one thing at a time: the name; the
-run times (a day, an hour and the minutes in quarter hours; ✕ a time to drop it) or a lockout schedule's days and
+event times (a day, an hour and the minutes in quarter hours; ✕ a time to drop it) or a lockout schedule's days and
 start; the lineup (the same lineup screen as `/raid lineup`: add a raid, its rosters, its start after the first); Sheet
 timing (a preset — Standard, Short notice, Same week — or one setting's hours); the four switches; Priority (five
 picks, each a number or *Same as the raid*); the split. Each change shows as *was → now* until you save. **Review
-changes** shows the Schedules page's Save box (*"Save Alt run?"* with each change and what it reaches: *"The change
+changes** shows the Schedules page's Save box (*"Save Alt night?"* with each change and what it reaches: *"The change
 starts with the Tue 15 Dec event. The Tue 8 Dec event is already open and keeps its timing."*); **Pause**, **Resume**
 and **Remove** show theirs (Remove's verb is red: a removed schedule cannot be brought back). Pause, Resume, Remove or
 Back with changes not saved first ask *Leave without saving?* with **Discard edits** and **Keep editing**. **New schedule** asks the kind
 (Weekly, Day N of each lockout, Opened by an officer) and a name, then opens the same screen; its box is *"Create Alt
-run?"*. A value the schedule refuses (a reminder after the lock) is the box's one sentence with Back, the draft kept.
+night?"*. A value the schedule refuses (a reminder after the lock) is the box's one sentence with Back, the draft kept.
 If someone changed the schedule meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."*,
 nothing is written and your changes are kept; pressing the verb on that box saves them.
-On the site: the **Schedules** page lists each raid's schedules in words with the next three runs (a
-paused one: *Paused — nothing opens; it would next run …*); officers add, edit (the editor opens in place of the
+On the site: the **Schedules** page lists each raid's schedules in words with the next three events (a
+paused one: its *Next event if resumed*); officers add, edit (the editor opens in place of the
 schedule's row: weekday + 12-hour time pickers, lockout-day picks; every timing field shows the schedule's own value
-and the draft's week as a timeline above them — a field left empty says *the game's suggestion* (a pickup template's:
-*the pickup default*), which it takes when saved, and its step isn't drawn until it has a number; the **Standard / Short notice / Same week** presets fill the hours and the one the
-hours match lights up; under the form *With these rules* shows the next three runs the bot computes from the draft, or
-the refusal the Save would give) and remove them. **Pause / Resume** sits beside Edit with one confirm (*"Nothing new opens from Alt run.
+and the draft's week as a timeline above them — a field left empty says *the game's suggestion* (on a schedule an officer opens:
+*the default for a schedule opened by an officer*), which it takes when saved, and its step isn't drawn until it has a number; the **Standard / Short notice / Same week** presets fill the hours and the one the
+hours match lights up; under the form *With these rules* shows the next three events the bot computes from the draft, or
+the refusal the Save would give) and remove them. **Pause / Resume** sits beside Edit with one confirm (*"Nothing new opens from Alt night.
 … is already open and keeps its sheet. Its regulars stay."*). The editor saves only the fields you changed, so a pause made in
-Discord a moment ago is never undone by a Save on the site. **Remove** confirms with what goes: *"The Alt run schedule is
+Discord a moment ago is never undone by a Save on the site. **Remove** confirms with what goes: *"The Alt night schedule is
 removed. Ana, Bo and Cy come off its regulars and see a notice on their Me page. Barrow Deeps Sat 12 Dec 8:00 PM is already
 open and keeps its time and sheet, but locks with no regulars."* (an open event keeps the priority it opened with) — the
-same lines on the wizard, the review, plain text and MCP. Changing a schedule's run times or its week with runs already
-open says *"The open run keeps its old times."* — those runs keep the times they opened with. If someone changed the
+same lines on the wizard, the review, plain text and MCP. Changing a schedule's event times or its week with events already
+open says *"The open event keeps its old times."* — those events keep the times they opened with. If someone changed the
 schedule meanwhile, Pause, Remove and the editor's Save say so and write nothing; the page reloads. A schedule is always
 named by its own id, which no other schedule in the guild holds; a new one also names its raid, and naming a raid
 always means a new schedule, so an id already in use is refused rather than rewritten. A raid's Reset checks the raid
 and every schedule it removes: one added since you looked stops the reset, and nothing is removed. In plain text:
-`schedule_set` (e.g. "add an alt run on Saturdays at 8 to Barrow Deeps", "the alt run locks 12 hours before",
-"short-notice week for the alt run", "make the alt run two rosters") and `schedule_remove`. Minimums: *Minimums* in `/gm config raid` ↔ `/roster comp` ↔ the Raids page ↔
+`schedule_set` (e.g. "add an alt night on Saturdays at 8 to Barrow Deeps", "the alt night locks 12 hours before",
+"short-notice week for the alt night", "make the alt night two rosters") and `schedule_remove`. Minimums: *Minimums* in `/gm config raid` ↔ `/roster comp` ↔ the Raids page ↔
 "at least 3 healers in Barrow Deeps" in plain text ↔ MCP `set_minimum`.
 
 **Recruitment.** `/gm config recruitment` opens one screen with the whole draft: applications **open or closed**, the
@@ -2185,7 +2188,7 @@ The same settings are in `/gm config recruitment` and in the MCP tools (§8b).
 **News.** `/gm config news-channel` (or the Config page's *News* picker, or "set the news channel to #news" in
 plain text) is where the Wowhead webhook posts; *News keywords* on the Config page (or `news_keywords` in plain
 text) adds words that make a post relevant besides the game version's names and raid names. The review and apply
-jobs run on the host as their own launchd agents (`scripts/agents/README.md`; `sh scripts/agents/install.sh`), and the
+jobs live on the host as their own launchd agents (`scripts/agents/README.md`; `sh scripts/agents/install.sh`), and the
 site's **Agents** page shows whether they are installed and running, what the current run is doing step by step,
 past runs, the news kept and the proposals; **Run review now** (owner) starts the review at once — so does telling
 the bot "run the news review now" (or "apply the approved proposals now"), which only the owner can ever do, whatever
@@ -2195,8 +2198,8 @@ the Mac mini (GM ✓ / ⟳ / ⚠ / ✕) shows the same at a glance, even when th
 **Channels in plain text.** "post raid sheets in #signups", "use #away for absences" — the same as the Config page's
 pickers (the bot checks it can see the channel and posts that channel's card); "stop posting absences anywhere" or
 "clear the news channel" unsets one (its card is forgotten). "Set the timezone to America/New_York" shows, before
-you Apply, each raid's next run on the new clock and on today's; with a run locked, add "keep the runs where they are"
-(or "and move the open runs with the clock"). A setup change asked in plain words reads in the
+you Apply, each raid's next event on the new clock and on today's; with an event locked, add "keep the events where they are"
+(or "and move the open events with the clock"). A setup change asked in plain words reads in the
 proposal exactly as the site's review does: one line per thing it writes (two settings of one buff are one line),
 each setting *current → new*, a part the bot would refuse marked ⛔, and what else happens marked ⚠ — and when a
 plain-text permission change would stop the bot acting in the channel you are asking in, the line says so.
@@ -2224,33 +2227,33 @@ the sentence into one or more operations, shows each as a one-line "what will ha
 confirmation DMs and cards as `/raid lock`, a cancel withdraws the same confirmations, a cleared absence
 re-opens the same sheets. The exceptions are handing the guild to a new owner (`/gm config owner` only, above) and
 the loot session (`/raid loot`). Who may do what, and in which channel, is the owner's plain-text policy (§8c): by
-default officer actions (raids and schedules included) need an officer, and auras and guild setup need the owner. A run is
-named by its key (`bd-k7m2qx`), or by raid and day ("tonight's Barrow Deeps", "the Hyjal run") when only one of
-that raid's runs is live — with two live, the bot asks which. A member is named by display name, @mention or one
-of their characters. The bot reads each live run's board as it stands and each raid's next unopened runs, so
-"groups for tonight" and "open Saturday's alt run" start from the real thing.
+default officer actions (raids and schedules included) need an officer, and auras and guild setup need the owner. An event is
+named by its key (`bd-k7m2qx`), or by raid and day ("tonight's Barrow Deeps", "the Hyjal event" — the older "the Hyjal
+run" works too) when only one of that raid's events is live — with two live, the bot asks which. A member is named by
+display name, @mention or one of their characters. The bot reads each live event's board as it stands and each raid's
+next unopened events, so "groups for tonight" and "open Saturday's alt night" start from the real thing.
 
-- *Runs:* "open Barrow Deeps for Thursday 7:30 PM" (one of the raid's upcoming runs opens as that schedule's run;
+- *Events:* "open Barrow Deeps for Thursday 7:30 PM" (one of the raid's upcoming events opens as that schedule's event;
   "open the 8 PM Barrow Deeps" picks the next one at that time; any other time is a one-off; "open the next Barrow
   Deeps") posts the sheet now; "lock tonight's Barrow Deeps" builds the roster and DMs everyone rostered; "cancel
   bd-k7m2qx, server down"; "put Xanthe on the bench for bd-k7m2qx" / "set Marrow to join as Marrowlite" /
   "Kestrel can't make it" (after lock: join seats and asks to confirm, no thanks frees the seat and the fill engine
   looks for cover; with a reason — "Kestrel can't make it, work" — it is a callout like `/raid out`, the reason
   kept for the officers; your own "I can't make it" is always a callout, reason or not); "Xanthe confirmed for tonight" / "Kestrel said she can't make it after all" (on a locked
-  run: answers their Confirm / Can't make it ask for them, or the fill ask the bot sent them, when they told you out
+  event: answers their Confirm / Can't make it ask for them, or the fill ask the bot sent them, when they told you out
   of band — exactly as if they had pressed the button, so a no frees the seat and asks the bench); "who would fill
-  ask next for tonight's run" (preview, nothing sent) and "send the fill asks" (the diff lists every ask Apply sends,
+  ask next for tonight's event" (preview, nothing sent) and "send the fill asks" (the diff lists every ask Apply sends,
   role swaps marked SWAP and the backfill named; Apply sends exactly that batch, and nothing if it changed meanwhile);
   before lock "suggest fixes for Tuesday's Barrow Deeps" (the suggestions, nothing sent) and "send them" (the diff
-  shows exactly who will be asked; if the suggestions changed before you press Apply, nothing is sent); "split tonight's run
+  shows exactly who will be asked; if the suggestions changed before you press Apply, nothing is sent); "split tonight's event
   first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock); "remind the
-  unconfirmed for tonight" (once an hour); "pause automatic asks on tonight's run" / "resume automatic asks"; "withdraw the ask
-  to Kestrel"; "reopen bd-k7m2qx" (an end by mistake, within the hour — never a cancelled run).
+  unconfirmed for tonight" (once an hour); "pause automatic asks on tonight's event" / "resume automatic asks"; "withdraw the ask
+  to Kestrel"; "reopen bd-k7m2qx" (an end by mistake, within the hour — never a cancelled event).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
   one person, like a drag (after lock: in from *Not rostered* = asked to confirm, out to it = seat freed); "groups for
   bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the whole board — the layout the lock will use, or after lock the roster
   itself (names added are asked to confirm, names dropped are freed). "Propose a roster for tonight" (or "a rotation
-  split") shows the groups the bot would build — how a split's rosters compare (in words), who is left out, why there can't be more runs, whether leftovers
+  split") shows the groups the bot would build — how a split's rosters compare (in words), who is left out, why there can't be more rosters, whether leftovers
   could make another — and leaves the board as it is; "another one" shows a different one, "use it" puts the last one on the board
   with its strategy in one step (what it showed you — also after a restart, and a preview you looked at on the site or
   with the lock's Preview; never one only another officer saw, and never one made before someone moved people on the
@@ -2258,7 +2261,7 @@ of their characters. The bot reads each live run's board as it stands and each r
   `/raid sheet` in the channel you ask in (not in DMs): an officer's ask moves the live sheet there (its buttons and
   updates follow the new message); anyone else registered may ask too, in any channel where plain text acts on their own
   record, and gets a read-only copy — the live sheet stays where it is. The preview says which it will be. Pins stay as
-  before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on a run is someone's answer ("put Ash in for
+  before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on an event is someone's answer ("put Ash in for
   tonight": before lock they join, after lock they are rostered and asked to confirm) or a board move.
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
   one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
@@ -2275,18 +2278,18 @@ really called All or Pending is confirmed alone); "Mira is away
   Nov 1–3" (the diff lists the live sheets those days touch — No thanks, or a rostered seat freed — before anything is
   saved); "Marrow is back, clear her absence" (by start
   date when she has several — the bot lists them as days, e.g. "Fri 1 Mar → Sun 3 Mar, Mon 10 Jun"); "turn DMs off for Marrow" (off: her Confirm and fill asks wait on her Me page; she is still asked, in order).
-- *Raids and schedules (officers):* "Barrow Deeps runs Tuesdays and Thursdays at 7:30 PM" (the diff shows the next runs it makes),
+- *Raids and schedules (officers):* "Barrow Deeps on Tuesdays and Thursdays at 7:30 PM" (the diff shows the next events it makes),
   "short-notice week for the Barrow Deeps raid nights" (Standard, Short notice or Same week — the same presets as `/gm config
   raid`: when the sheet opens, the nudge, the lock and the confirmation deadline together, on one schedule), "the Barrow Deeps
   raid nights lock 12 hours before", schedules (`schedule_set`, above), "at least 3 healers in Barrow Deeps", "put Barrow Deeps
-  back to the defaults" (the diff lists the guild's changes it drops in words: run times, first open, schedules, minimums).
+  back to the defaults" (the diff lists the guild's changes it drops in words: event times, first open, schedules, minimums).
   Settings that only make sense together are saved as one change.
 - *Recruitment (owner):* "close applications", "open applications", "set the recruitment note to Looking for
   healers", "add a required question: Why us? — hint: a line or two is plenty", "reword question 2 …", "move the
   logs question up", "remove the question Why us?" (or by number), "@Veterans can register without applying",
   "set the invite link to https://discord.gg/abc123", "create an invite to #welcome" (op `recruit`).
 - *Channels (owner):* "post raid sheets in #signups", "stop posting absences anywhere".
-- *Plain-text permissions (owner only, whatever the policy says):* "only officers and @Raid Lead can change runs by
+- *Plain-text permissions (owner only, whatever the policy says):* "only officers and @Raid Lead can change events by
   chat", "make #raid-chat answers only", "the bot ignores DMs" — §8c.
 - *Applications (officers):* "accept Nyx", "decline nyxie: we're full on healers" — the applicant is named by
   display name, @mention or character; the decision goes through the same code as the card (DM, card, ops line).
@@ -2294,22 +2297,22 @@ really called All or Pending is confirmed alone); "Mira is away
   "recompile the loot policy" — then the reading with Confirm / Discard.
 - *News (officers):* "approve proposal 260927-a1b2", "dismiss 260927-a1b2: already handled". *Jobs (owner only,
   never opened to anyone else):* "run the news review now", "apply the approved proposals now".
-- *Test bench:* "seed 20 test members" (or "seed all of them"), "open a quick test Barrow Deeps run" (the tempos of
+- *Test bench:* "seed 20 test members" (or "seed all of them"), "open a quick test Barrow Deeps event" (the tempos of
   `/gm test run`: Quick starts in 20 min, nudge 16, lock 12, confirm 8 min before; Standard 40/32/25/15, the default;
   Slow 90/70/55/35 — add "and DM them" to DM every puppet when it opens, which reaches you), "test answer join 8 bench
-  2 out 1" (a random mix of puppets who haven't answered; name the run when several test runs are live — a real run is
+  2 out 1" (a random mix of puppets who haven't answered; name the event when several test events are live — a real event is
   refused), "test answer yes 3 no 1" once it is locked (that many Confirm and Can't make it among the puppets holding an
   open ask, as `/gm test answer` and the site do; *out* is No thanks on the sheet, *no* is Can't make it), "clear the
-  test bench". Opening a test run by plain text needs the signup channel, or a server channel to
+  test bench". Opening a test event by plain text needs the signup channel, or a server channel to
   ask in (§8a).
 - *Loot council (officers, §9):* "open the loot council", "the Gatekeeper dropped the Robe of Tests", "distribute",
   "give the Syphon to Eltam instead — tanks progression" (a reason is required), "confirm the rest", "hold the Shard for
   later", "Mira got the wand because …" (the reason for an in-game award), "the robe should have gone to Kestrel —
-  misclick", "end tonight's run", "retire the Syphon precedent — tier changed", "tier the Robe of Tests S for holy
+  misclick", "end tonight's event", "retire the Syphon precedent — tier changed", "tier the Robe of Tests S for holy
   priests" (add "and re-weight its past awards" to re-weight them). *Wishlists:* your own (§3), or an officer's for
   someone ("put the Robe on Kestrel's wishlist").
 - *Loot log (owner):* "post the loot log in #loot", "turn the loot log off".
-- Several things in one sentence become several operations, applied in order ("lock tonight's run and turn
+- Several things in one sentence become several operations, applied in order ("lock tonight's event and turn
   DMs off for Marrow"). Standing availability is not settable anywhere; handing the guild to a new owner is a slash
   command only, by design.
 
@@ -2318,7 +2321,7 @@ really called All or Pending is confirmed alone); "Mira is away
 Who may change what through plain text, and where, is one policy on the **Ops** page of the site (card
 *Plain-text permissions*; the owner presses **Edit permissions**, changes the table and presses one **Save**;
 officers see it read-only; MCP has `plain_permissions` / `set_plain_permissions`; the owner can also say it: "only
-officers can change runs by chat", "make #raid-chat answers only", "put #general back to the default", "listen in #signups"). It covers every
+officers can change events by chat", "make #raid-chat answers only", "put #general back to the default", "listen in #signups"). It covers every
 plain-text path: @mentions, DMs, `/gm change`, and MCP `plain_change` (which counts as a place where plain text acts;
 the site has no plain-text box). When the owner's own change would stop plain text acting in the channel it is made
 in, or make the bot ignore @mentions there, the diff says so before Apply.
@@ -2334,7 +2337,7 @@ it may do is the person's own rights), and saving a table that would ignore plai
 asks first.
 
 **Listening.** The owner can choose channels the bot *listens* in, such as #signups: there it reads every message,
-tagged or not, and answers what is clearly for it — "when does Barrow Deeps run this week?", "I can't make Thursday" —
+tagged or not, and answers what is clearly for it — "when is Barrow Deeps this week?", "I can't make Thursday" —
 exactly as if you had @mentioned it, under the same rules for that channel. A decision service judges each message
 "is this for the bot?"; it only answers yes or no and never writes anything, and chat between people, game talk, jokes
 and links are left alone. Starting a message with "bot" ("bot does Mara have the Free Action Potion recipe?", "hey bot
@@ -2367,7 +2370,7 @@ replied, asked with 👀, stayed quiet, would have replied, would have asked, or
 updates as messages come in. `/gm config plain` lists the listening channels too ("• #signups: Replies — listening"), and
 its first line ends "— listening (Replies)" when the channel you are in listens.
 
-**Memory.** In a listening channel the owner can also turn on Memory: the bot then keeps what members say there that someone could ask about later — where a pattern drops, who the guild's jewelcrafter is, what day the horde runs happen — and, asked later, repeats it as that person's words with the day: "Mara said on 25 Sep that our only jewelcrafter is Ysolde." It never states a memory as its own fact, and the guild's records win when they disagree. Questions, jokes, links and chat between people are not kept. Each remembering channel is one of two: **Remembers** — repeated anywhere the bot answers, in channels, DMs and on the site; **Remembers here only** — repeated only when answering in that same channel, for an officers' channel. Memory needs Listening on in the channel (Watches is enough: watching still reads) and the host's TypeSafe key. Turning a channel's Memory **Off forgets everything it held**, and the change says how much before Apply.
+**Memory.** In a listening channel the owner can also turn on Memory: the bot then keeps what members say there that someone could ask about later — where a pattern drops, who the guild's jewelcrafter is, what day the horde raids happen — and, asked later, repeats it as that person's words with the day: "Mara said on 25 Sep that our only jewelcrafter is Ysolde." It never states a memory as its own fact, and the guild's records win when they disagree. Questions, jokes, links and chat between people are not kept. Each remembering channel is one of two: **Remembers** — repeated anywhere the bot answers, in channels, DMs and on the site; **Remembers here only** — repeated only when answering in that same channel, for an officers' channel. Memory needs Listening on in the channel (Watches is enough: watching still reads) and the host's TypeSafe key. Turning a channel's Memory **Off forgets everything it held**, and the change says how much before Apply.
 The owner sets it in plain text ("remember what's said in #general", "remember #officer-chat here only", "stop remembering #general") or on the Ops page's **Plain-text permissions** tab, in the **Memory** column beside Listening. Officers read everything the bot remembers on the Ops page's **Memory** tab — when, the channel, who said it, their words — with a search box and **Forget** on each; a member sees what the bot remembers *them* saying on their Me page, under **What the bot remembers you saying**, with **Forget**. A forgotten memory is never repeated or listed again. Nothing here sends a DM. `/gm config plain` shows which channels remember ("• #general: Replies — listening, remembers").
 
 **DMs with several servers (D41).** When the bot looks after more than one server, a plain DM asks which server it is
@@ -2379,10 +2382,10 @@ record*; someone else's is *Other people's records*):
 
 | Group | Default | Someone could type |
 |---|---|---|
-| Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles, professions and recipes) and your own answer or confirmation on a run; re-posting a live sheet here (it touches nobody's record, like `/raid sheet`) | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight", "post tonight's sheet here" |
+| Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles, professions and recipes) and your own answer or confirmation on an event; re-posting a live sheet here (it touches nobody's record, like `/raid sheet`) | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight", "post tonight's sheet here" |
 | Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters, deciding applications | officers | "rank Jonny raider", "Mira is away next week", "accept Nyx" |
-| Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, pins (who the lock rosters), `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight", "pin Jonny in tonight" |
-| Raids, schedules and policy — a raid's settings and its schedules (with their sheet timing), minimums and group layout, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "Barrow Deeps runs Tue 7:30 pm", "at least 3 healers in Barrow Deeps", "add a loot rule" |
+| Events — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, pins (who the lock rosters), `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight", "pin Jonny in tonight" |
+| Raids, schedules and policy — a raid's settings and its schedules (with their sheet timing), minimums and group layout, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "Barrow Deeps on Tue 7:30 pm", "at least 3 healers in Barrow Deeps", "add a loot rule" |
 | Auras — buff and family facts | the owner | "fortitude is party-wide" |
 | Guild setup — channels, officer roles, timezone, who may ask, the about text, recruitment (applications open/closed, note, questions, invite), starting the local jobs | the owner | "post raid sheets in #signups" |
 | Test bench | officers | "seed 20 puppets", "clear the test bench" |
@@ -2392,7 +2395,7 @@ record*; someone else's is *Other people's records*):
 and specific Discord roles (picked from the server's roles, stored by id, so renaming a role keeps it). An empty
 list means the owner only. Anyone allowed a group for other people may also do it for themselves. Two things stay
 the owner's whatever this table says: starting the local jobs and changing this policy itself — an officer given
-*Guild setup* still can't widen their own rights. Your own answer follows the sheet's rules: once a run is locked,
+*Guild setup* still can't widen their own rights. Your own answer follows the sheet's rules: once an event is locked,
 "I'm in" or "bench me" from a member is refused in the sheet's words (answer your confirmation DM, or press *Can't
 make it*) — after lock a seat comes from the fill engine or an officer; "I can't make it" still works.
 
@@ -2400,7 +2403,7 @@ make it*) — after lock a seat comes from the fill engine or an officer; "I can
 own record; other requests are refused with where to go instead), **Answers only** (questions, no changes) or
 **Ignored** (the bot doesn't answer @mentions there). DMs have their own entry, and there is a default for every
 channel not listed. Defaults: the ops and analytics channels act; DMs and every other channel are *own record
-only* — so a raider can tell the bot about their absence anywhere, while run and roster changes stay in the
+only* — so a raider can tell the bot about their absence anywhere, while event and roster changes stay in the
 officer channels.
 
 **How it decides.** The bot reads a message's intent first: in a channel that acts, the sentence is parsed as a
@@ -2410,7 +2413,7 @@ change for you to Apply. Who an operation is about is decided by the bot's code,
 person out ("I'll be away") means *you*; naming yourself by display name, @mention or one of your characters
 means you; a name that could also be someone else (two people with that name, or your name is another member's
 character) counts as someone else; a character you name must be one of yours. Refusals say who may and where:
-*"Only officers can change someone else's absence."*, *"Plain text can't change runs in #general — use
+*"Only officers can change someone else's absence."*, *"Plain text can't change events in #general — use
 #officer-ops."* Every applied plain-text change is logged in the ops channel with who asked and where.
 What the bot reads your sentence against depends on who you are, decided before it reads it: an officer's request is
 matched against the open applications, the news proposals waiting, the unconfirmed characters and the member-role
@@ -2422,8 +2425,8 @@ a DM from them gets the static guide, never a change (an Apply left on an old di
 Only Discord saying they are gone counts: a Discord outage never locks a member out.
 
 **A follow-up is understood.** Reply to the bot's message, or write again in the same channel within 20 minutes, and
-"him", "that run" and answers to its questions refer to what you said before — answer "7:30 PM" to "What time should
-the run open?" and the diff carries both your first request and the answer. The bot keeps this only in memory (a
+"him", "that event" and answers to its questions refer to what you said before — answer "7:30 PM" to "What time should
+the event open?" and the diff carries both your first request and the answer. The bot keeps this only in memory (a
 restart forgets it) and only for the last few exchanges, per person and per place: someone else writing in the same
 channel is never read as continuing your conversation. On the site, the Tell the bot box remembers its own last few
 exchanges while the page is open.
@@ -2437,72 +2440,72 @@ bench** tab on the Members page), and plain text and MCP reach the same steps.
 realistic class mix and ranks, mains confirmed — or, when the host put a `test_roster.yaml` in the guild's data folder, the guild's own signup shape by name; `scripts/raidhelper_roster.py` writes that file from a Raid-Helper event export, and its `--members` mode writes the rows that register the same people for real, §7). `/gm test compose` builds the bench by composition instead: pick a
 class, then a spec, then how many; repeat for as many specs as you like; the screen keeps the review line ("3 to add ·
 2 to remove") and nothing is written before **Save** (removals take the newest puppets of that spec; one rostered on a
-locked run is refused — cancel that run or clear the bench). On the site the **Test bench** tab reads top to bottom:
+locked event is refused — cancel that event or clear the bench). On the site the **Test bench** tab reads top to bottom:
 **Puppets · 12 of up to 80** with each role's icon and count; **Seed** 5 · 10 · 20 · *the guild's 30 from the signup
 list* (with no `test_roster.yaml`, *all 30 in the built-in mix*); the bench as spec icons with a count each (− / + to
 change it); **Class** → **Spec** → **Add one puppet**; **Save test members** writes the difference and **Clear the
 test bench** sits at the end of the row. The puppets fold at the foot of the Members tab.
 
-**A test run.** `/gm test run` is one screen: the raid (when there is more than one), a tempo (Quick, Standard or Slow)
-and whether to DM every puppet when it opens, then **Open the test run**. On the site one **Rehearse with** picker
-chooses the raid for both **Try a comp** and the test run (the guild's first raid at first, then the last one you
-used on that browser); **Open a test run** has the tempo and the DM switch, and the tempo is drawn as the run's week —
+**A test event.** `/gm test run` is one screen: the raid (when there is more than one), a tempo (Quick, Standard or Slow)
+and whether to DM every puppet when it opens, then **Open the test event**. On the site one **Rehearse with** picker
+chooses the raid for both **Try a comp** and the test event (the guild's first raid at first, then the last one you
+used on that browser); **Open a test event** has the tempo and the DM switch, and the tempo is drawn as the event's week —
 *sheet opens now · reminder in 8 min · locks in 15 min · confirm by in 25 min · raid in 40 min* for Standard. A greyed
 button always has a line under it saying why (*Add puppets first.*, or the missing signup channel), and once it can
-open the line says where the run's card will live. It opens a real sheet for that raid on a week squeezed into minutes, so the unchanged scheduler goes
+open the line says where the event's card will live. It opens a real sheet for that raid on a week squeezed into minutes, so the unchanged scheduler goes
 through nudge → lock → confirmations → expiry → fill → close within the hour. The sheet goes to the signup channel; with
 no signup channel set it goes to the channel you used the command in. With neither — the site, MCP, a DM, plain text
 on the site — the bot refuses before anything is written and says so: set the signup channel (Config › Channels or
 `/gm config signup-channel`), or use `/gm test run` in a server channel. A signup channel that is set but the bot
 can't reach (deleted, or hidden from the bot) is refused the same way, and the message says that is the problem. The
 site's card says all of this before you press.
-A test run never has a follow-on (a second raid the same night, §4): rehearse the lead and the follow-on one at a time.
-A test run never shares a real run's sheet, even when it starts the same minute as one: the bot finds a test run only
-among test runs, and the schedule id `test` is kept for it. A test run belongs to the officer who opened it:
-a second officer opening one in the same minute is refused — "Tess opened a test run at Tue 9 Dec 7:30 PM — join
+A test event never has a later raid (a second raid the same night, §4): rehearse the first raid and the later raid one at a time.
+A test event never shares a real event's sheet, even when it starts the same minute as one: the bot finds a test event only
+among test events, and the schedule id `test` is kept for it. A test event belongs to the officer who opened it:
+a second officer opening one in the same minute is refused — "Tess opened a test event at Tue 9 Dec 7:30 PM — join
 theirs or clear it" — and nothing is opened for them.
 
-**Where its traffic goes.** The test run's officer cards (health, lock, the updates thread) post in **the channel you
-opened it from**, marked 🧪 *Test run* — not in the roster channel (a run opened from the site or MCP uses the roster
-channel, as any run does, still marked). The puppets never get DMs of their own: what each would have got (open, nudge,
-Confirm / Can't make it, fill asks) is collected into **one DM per batch** to the officer running *that* test run —
+**Where its traffic goes.** The test event's officer cards (health, lock, the updates thread) post in **the channel you
+opened it from**, marked 🧪 *Test event* — not in the roster channel (an event opened from the site or MCP uses the roster
+channel, as any event does, still marked). The puppets never get DMs of their own: what each would have got (open, nudge,
+Confirm / Can't make it, fill asks) is collected into **one DM per batch** to the officer running *that* test event —
 "12 Confirm asks sent to puppets · 3 fill asks", the puppets' names, and an **Answer as puppets…** button that opens
-the answer screen on that run. Two officers rehearsing at once each get their own.
+the answer screen on that event. Two officers rehearsing at once each get their own.
 
-**The feed.** The site follows a rehearsal live: the Test bench tab on Members (with each live test run's card under
-*Test runs*, and **Open its event page**; test runs never appear in the Events list) lists every card posted, every
+**The feed.** The site follows a rehearsal live: the Test bench tab on Members (with each live test event's card under
+*Test events*, and **Open its event page**; test events never appear in the Events list) lists every card posted, every
 puppet DM (with what it said), every scheduler step (opened, nudged, locked, confirmations sent, expired, filled,
-cancelled, thread lines) and every answer, newest first, as they happen. With several test runs each line names its run as *<raid> · <start>*. On a phone a line's text wraps under its time.
+cancelled, thread lines) and every answer, newest first, as they happen. With several test events each line names its event as *<raid> · <start>*. On a phone a line's text wraps under its time.
 The feed is kept in the bot's memory only: nothing of it is stored, and a restart empties it.
 
 **Answering as puppets.** `/gm test answer` (or the digest's button, or **Answer as puppets** on the site) offers a
 **Random mix** — on an open sheet how many Join, Bench and No thanks; once locked how many Confirm and Can't make it
 among the puppets holding an open ask — or **One member** (pick a puppet, then Join, Bench or No thanks, or Confirm /
 Can't make it when they hold an ask). It stays open so you can answer again; after lock a rostered puppet's *No thanks*
-is a callout. Puppets answer test runs only — naming a real run is refused on every path.
+is a callout. Puppets answer test events only — naming a real event is refused on every path.
 
 **Try a comp.** `/gm test comp` (pick the raid, then **Try a comp**) or **Try a comp** on the site opens a *comp
-sandbox*: a test run two weeks out with every puppet joined, never posted in Discord; Discord answers with a link to
+sandbox*: a test event two weeks out with every puppet joined, never posted in Discord; Discord answers with a link to
 its event page and the site takes you there, where **Auto-fill groups** shows the best comp from that mix (its card
-under the Test bench's *Test runs* keeps **Propose roster**, with Leftovers and "what a second run would need"). Change the mix and try again; the old sandbox goes with the next clear.
+under the Test bench's *Test events* keeps **Propose roster**, with Leftovers and "what a second roster would need"). Change the mix and try again; the old sandbox goes with the next clear.
 
-**Clearing.** `/gm test clear` shows what it does — "Cancels 1 test run, deletes 12 puppets, analytics cards
-resume." — then *Clear the test bench* / *Back*; the site's **Clear the test bench** asks with the same words.
+**Clearing.** `/gm test clear` shows what it does — "1 test event is cancelled, 12 puppets are deleted and the
+analytics cards resume." — then *Clear the test bench* / *Back*; the site's **Clear the test bench** asks with the same words.
 
 Every bench step writes one line to the ops feed, saying who did it and where: `[web]` from the site, `[mcp]` from MCP,
 `[chat]` from plain text, no prefix from Discord. A restart sends a puppet digest that was still waiting before the bot
 goes down. Only officers' pages follow the feed live.
 
 Plain text does the same ("add 3 Warrior Protection, 2 Priest Holy to the test bench", "remove 2 Warrior Protection",
-"comp sandbox for Barrow Deeps", "seed all test members", "open a slow test Barrow Deeps run and DM them", "test answer
+"comp sandbox for Barrow Deeps", "seed all test members", "open a slow test Barrow Deeps event and DM them", "test answer
 join 8 bench 2 out 1", "test answer yes 3 no 1"), through the very same steps as `/gm test` and the site — and so does MCP (`test_bench`, §8b; its tempo is a name — quick, standard, slow — or minutes to
 the start, at least 4: nudge, lock and the confirmation deadline each get a minute before it).
 
-What is safe: who could play on a test run is only the puppets and you (the tester) — real members are never nudged,
+What is safe: who could play on a test event is only the puppets and you (the tester) — real members are never nudged,
 rostered or asked to fill it, and the test sheet refuses presses from real members. The other way round too: a real
-run (ad hoc, or a schedule with no regulars yet, where every main is expected) never expects, suggests, asks or marks
-away a puppet; setting a real member's answer on a test run is refused on every path too (the site, plain text, MCP),
-and a test run refuses `/raid set`. What real members do see: the test sheet in the signup channel (marked as a
+event (a one-off, or a schedule with no regulars yet, where every main is expected) never expects, suggests, asks or marks
+away a puppet; setting a real member's answer on a test event is refused on every path too (the site, plain text, MCP),
+and a test event refuses `/raid set`. What real members do see: the test sheet in the signup channel (marked as a
 test), the ops lines, and the analytics cards pausing until the bench is cleared.
 
 ## 8b. MCP server (owner, from Claude Code)
@@ -2529,7 +2532,7 @@ consequences, and whether the site would ask for a review first. Read that to th
 and the tool uses `OIBOT_MCP_GUILD` from `.env` (or `uv run oibot-mcp --guild <key>`), else the only server; when
 the bot serves several and no default is set, the tool answers with the list instead of guessing. `list_guilds`
 lists them (key, name, Discord ids, owner, game version, which one is the default) and always asks the bot afresh, so
-a server claimed while the session runs can be named at once. Each call acts as the owner of the server it is for;
+a server claimed while the session is open can be named at once. Each call acts as the owner of the server it is for;
 `guild_overview` says which server answered. The news review and apply jobs lock their sessions to one server
 (`OIBOT_MCP_GUILD_LOCK=1` beside `OIBOT_MCP_GUILD`): a tool call naming any other server is refused, so nothing a
 news post says can make the review read or write another server.
@@ -2543,13 +2546,13 @@ news post says can make the review read or write another server.
 | `armory_map` · `armory_seed` | each member's characters and their armory link (linked, level, when it was last updated, in the guild or not, how its professions are kept, what looks off: the armory's class differs, the armory no longer finds it, not in the guild), the guild's characters no record here is linked to, and when the roster was last read · the proposed matches between registered characters and the guild's roster (sure, likely with their candidates, no match) and its `rev` — nothing is linked by reading either |
 | `link_character` · `unlink_character` · `move_character` · `apply_armory_seed` | link a member's character to its armory character (`preview=true` first: what the armory found and its `armory_id`; then the same names with that `armory_id`) · unlink it (the record keeps what it last had; its professions are kept by hand) · move a character to another member, with its past loot, attendance, signups, wishlist and regular spots (both get a notice, nobody a DM) · link the seed's picks with `armory_seed`'s `rev`, each on its own — **decisions: need `OIBOT_MCP_ACTOR`** (`preview=true` = the sentences, no actor). A move works on every game version, with or without an armory. How professions are kept and Sync now are the site's and Discord's; Give to a member… is on the site only (the Members page's not-claimed fold) |
 | `list_companions` · `revoke_companion` | the loot-companion tokens (label, connected or not, last seen, who issued it — never a value) · revoke one by label or id (`preview=true` says what it does first). Issuing is not a tool: a token is issued on the site or with `/gm config companion` (§8) |
-| `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), each raid's week, live runs, test bench, and `summary`: the configuration in words by section (as `config_summary`) |
-| `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (recurring or ad hoc and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
-| `list_raids` · `get_raid` | each raid's settings (the game's defaults + the guild's changes); each schedule's class (recurring / ad hoc), regulars count, where each inherited value comes from, seat weights |
+| `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), each raid's week, live events, test bench, and `summary`: the configuration in words by section (as `config_summary`) |
+| `list_runs` · `get_run` | live sheets per raid with upcoming slots · one event in full (a schedule's or a one-off, and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
+| `list_raids` · `get_raid` | each raid's settings (the game's defaults + the guild's changes); each schedule's class (recurring / one-off), regulars count, where each inherited value comes from, seat weights |
 | `set_regular` | add or remove a regular of a recurring schedule (member, character, schedule; the Schedules page's route) |
-| `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record, with its `attendance` (the sentence, the count the site shows, the loot factor's count — null while unknown — and a row per run) |
+| `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record, with its `attendance` (the sentence, the count the site shows, the loot factor's count — null while unknown — and a row per raid) |
 | `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buffs table · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and award log (up to 100) from the Loot pages, `member` narrowing both to one person |
-| `get_loot` · `open_loot` · `loot_tick` · `loot_distribute` · `loot_discard` · `end_loot` | the councils (every locked run, or one run in full: drops by boss, picks with their candidate tables, pending overrides, awards, reasons owed, the roster, `batch_rev` / `drops_rev`, the End sentence) · open the council on a locked run · tick drops by name or id (`remove` un-ticks) · judge the ticked drops · drop pending picks (`batch_rev`, or `only` some = decide later; `preview`) · end the run and its council (`preview` = the sentence) |
+| `get_loot` · `open_loot` · `loot_tick` · `loot_distribute` · `loot_discard` · `end_loot` | the councils (every locked event, or one council in full: drops by boss, picks with their candidate tables, pending overrides, awards, reasons owed, the roster, `batch_rev` / `drops_rev`, the End sentence) · open the council on a locked event · tick drops by name or id (`remove` un-ticks) · judge the ticked drops · drop pending picks (`batch_rev`, or `only` some = decide later; `preview`) · end the event and its council (`preview` = the sentence) |
 | `loot_confirm` · `loot_award` · `loot_reason` · `loot_correct` | **decisions — need `OIBOT_MCP_ACTOR`**: record picks (one with `expect_to`, or the rest with `batch_rev`; `preview` needs no actor) · override a pick with a reason · the reason for an in-game award (an ended council too) · fix a recorded award |
 | `list_appeals` · `resolve_appeal` | members' questions about their own awards (open oldest first, then the resolved; the officers' record of each award, the outcome choices) · close one with an outcome (stands · corrected · noted · withdrawn) and an officers-only note — **a decision: needs `OIBOT_MCP_ACTOR`** (`preview` = the sentence, no actor); the member gets a notice, never a DM. No tool opens one |
 | `loot_history` · `loot_log` · `list_precedents` · `retire_precedent` | ended councils (one in full) · the award log (`scores` for officers' columns) · precedents with their refs and the awards still needing a reason · retire or restore one (actor) |
@@ -2560,13 +2563,13 @@ news post says can make the review read or write another server.
 | `import_batches` · `undo_import` | the ledger's imports, newest first (batch id, who, when, rows still live, what an undo does) · void every award of one import (`batch`, an optional `reason`; needs the actor) — the rows stay, a fixed file imports again |
 | `loot_weights` · `set_loot_weights` | the scoring weights with the game's default beside each · change some (`fields` = {path: number or null for the default}; the owner's; `preview=True` first — weights are reviewed) |
 | `distil` | Claude's draft of up to five loot-policy sentences from the active precedents, each with the precedents it rests on — nothing written; add the ones the person wants with `policy_append` |
-| `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`; `follow` ('barrow_deeps x2') = a follow-on the same night from the same signup; `lineup` [{raid, rosters, starts?}] = up to three later raids instead, §4) |
-| `reschedule_run` · `edit_lineup` | move a run (`when`, guild time) and / or give it its own sheet timing (`timing`), or change an open run's raids (`lineup`, the whole lineup, first raid first) — always `preview=true` first (`sentences` = the confirm to read out, `rev`), then again with that `rev`: a run changed meanwhile is refused; nobody is DMed, everyone who answered sees a notice (§4) |
-| `schedule_set` · `schedule_remove` | `schedule` = the schedule's id alone (never with its raid). A schedule's settings, one or several as `fields` in one write — its sheet timing (`cadence` = a preset, or each hour and switch; null = the game's suggestion), kind, slots or lockout days, rosters, `follow` = 'barrow_deeps x2' or none; a NEW schedule names its first raid with `raid` · drop a schedule by its id (schedules come back in `list_raids` / `get_raid`, each with its id and its own sheet timing; runs already open keep their times) |
+| `open_run` | open a sheet now (next slot, or a date and time — an upcoming event's exact time opens that event, any other time is a one-off; `schedule` = that schedule's next event, or a schedule an officer opens at `when`; `follow` ('barrow_deeps x2') = a later raid the same night from the same signup; `lineup` [{raid, rosters, starts?}] = up to three later raids instead, §4) |
+| `reschedule_run` · `edit_lineup` | move an event (`when`, guild time) and / or give it its own sheet timing (`timing`), or change an open event's raids (`lineup`, the whole lineup, first raid first) — always `preview=true` first (`sentences` = the confirm to read out, `rev`), then again with that `rev`: an event changed meanwhile is refused; nobody is DMed, everyone who answered sees a notice (§4) |
+| `schedule_set` · `schedule_remove` | `schedule` = the schedule's id alone (never with its raid). A schedule's settings, one or several as `fields` in one write — its sheet timing (`cadence` = a preset, or each hour and switch; null = the game's suggestion), kind, slots or lockout days, rosters, `follow` = 'barrow_deeps x2' or none; a NEW schedule names its first raid with `raid` · drop a schedule by its id (schedules come back in `list_raids` / `get_raid`, each with its id and its own sheet timing; events already open keep their times) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
 | `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |
-| `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · the bot builds the groups on the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
-| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per run) · pause (`paused=true`) or resume the fill engine for one run · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled run) |
+| `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more rosters and who is left over) · remember the strategy · the bot builds the groups on the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
+| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per event) · pause (`paused=true`) or resume the fill engine for one event · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled event) |
 | `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | a raid's own settings — one, or several as `fields` in one write (slots, weights, lockout and length, split policy, notes, first open; sheet timing is `schedule_set`'s, a minimum `set_minimum`'s) · back to defaults — the raid's schedules go too, so pass the preview's `revs` back: a schedule added or changed since is refused, never removed unseen |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
@@ -2576,10 +2579,10 @@ news post says can make the review read or write another server.
 | `list_guild_guides` · `withdraw_guild_guide` · `restore_guild_guide` | the guild guide library (§3b): every version, newest first, with its faction, when, who uploaded it, `latest` and `withdrawn` · take one out of members' reach or bring it back — **a decision: needs `OIBOT_MCP_ACTOR`** (`preview=true` = the sentences, no actor). No tool uploads or gets a guide: a BattleTag and an import string must not land in a transcript |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
 | `import_members` | a roster from a signup list (§7): rows `{discord_id, name, character, cls, spec, offspec?, rank?}` — `scripts/raidhelper_roster.py --members event.json` writes them from a Raid-Helper export — register each person with the character as their main; `preview=true` lists what would be added and skipped, nothing written; a row's `rank` needs the actor (D8), without one they start as trial |
-| `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone (with runs open or locked, preview it, then add `timezone_runs`: `keep` or `move`), ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `public` (listed on the homepage and the public schedule, or not), `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
+| `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone (with events open or locked, preview it, then add `timezone_runs`: `keep` or `move`), ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `public` (listed on the homepage and the public schedule, or not), `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, created and saved as the invite link in one step (`preview=true` shows it first) |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
-| `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
+| `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / `run` (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
 | `policy_get` · `policy_edit` · `policy_append` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full, with what is applied and the waiting draft · replace its text (a draft, the persona too) · add one rule to the loot or comp policy as a draft (refused while another officer's draft waits) · the bot's reading of it (the persona: its text), nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
 | `plain_change` | text → the config ops it means, with current → new, and a `token`; `apply=true` with that token (within ten minutes, once) applies exactly those ops — never a new reading of the text — and refuses a board someone changed since the preview; like Discord's Apply, an op that fails is listed in `refused` with why and the rest still apply (`applied` is what landed, `error` the first failure) (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
 | `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles; the channels the bot listens in and its recent decisions there, `listen` · `listen_recent`) · change it (owner: groups, per-channel modes, DMs, default; listening with `listen`, the whole map {channel: watch or reply}, or `set_listen` for some channels, null = off) |
@@ -2589,8 +2592,8 @@ news post says can make the review read or write another server.
 | `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full (with the consequence of each verdict), approve or dismiss it — a decision a person makes (D8): it needs `OIBOT_MCP_ACTOR` (sent as `X-Oibot-Actor`) naming an officer of the server, and a game-data approval needs that person to be the owner; the token alone is refused. The apply job's steps (applying · applied · failed · reverted, and its "waiting: …" notes) need the job's own `X-Oibot-Job` header, which only the job scripts send — the owner's token alone reports none, and a call with the job header never decides |
 | `job_status` · `get_job_run` · `run_job` | the review and apply jobs: state, last and next run, launchd, recent runs · one run's steps · start a job now (refused when it is running or not installed) |
 
-Members can be named by display name, character name or Discord id; runs by key, roster key or the raid's
-name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.
+Members can be named by display name, character name or Discord id; events by key, roster key or the raid's
+name when it has one live event. An ambiguous name comes back with the candidates instead of a guess.
 
 **Decisions are a named officer's (D8).** A decision about an award — confirming, overriding, a reason, a correction,
 retiring a precedent, tiers, someone's wishlist — or about a person — a member's rank, confirming a character, accepting
@@ -2605,7 +2608,7 @@ and End work without it, as do the owner's own setup writes.
 change is logged under the owner's own display name with an `[mcp]` prefix (`[mcp] Jon: signup channel → #raids`) —
 the word "mcp" is never the name on a record. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
 put it in `.mcp.json` or a commit. **Local only** (on by default): the bot accepts the token only from a call made on
-the machine it runs on, which is where the MCP server runs. The same token arriving from anywhere else, through the
+the bot's own machine, which is also where the MCP server is. The same token arriving from anywhere else, through the
 public site's tunnel included, is refused as if it were wrong, and the bot DMs the **host** (the superusers in
 `OIBOT_SUPERUSERS`, or the owner when it serves one guild; once per 30 minutes) and writes it to its log — never the
 token itself, and never a guild's ops channel — because it means the token has leaked: rotate it. `OIBOT_MCP_LOCAL_ONLY=0` in `.env` (then restart the bot) lets it work
@@ -2634,15 +2637,15 @@ Discord cards show only numbers.
 
 ### In Discord: the thread and its cards
 
-**Open the council** on a locked run with `/raid loot`, the **Loot** button on the run's lock card (the raid-night
-hub; it opens that card's own run, even when another run is locked too), **Open loot council** on Loot › Tonight or
+**Open the council** on a locked event with `/raid loot`, the **Loot** button on the raid's lock card (the raid-night
+hub; it opens that card's own raid, even when another event is locked too), **Open loot council** on Loot › Tonight or
 **Loot** in a locked event's **More** on the Events page (the lock card's word; once open the same **Loot** is a link to Loot › Tonight), "open the
 loot council for tonight" in plain text, or MCP `open_loot`. It lives in one thread under the officer channel (the
 roster channel, else the ops channel); with neither set the bot refuses and says so. The channel gets one line *"⚔
-Loot council · <run> → #thread"*. A run split into several rosters gets one council per roster (thread *"loot · Roster
-2 · …"*; one block per roster on the site), each judging only its own roster's seats. A test-bench run opens a
+Loot council · <raid> → #thread"*. A raid split into several rosters gets one council per roster (thread *"loot · Roster
+2 · …"*; one block per roster on the site), each judging only its own roster's seats. A test-bench event opens a
 **rehearsal** (*"rehearsal · …"*): everything works, nothing reaches the guild's loot history, the award log or the
-public loot log — rehearse with a test run (§8a). If Discord can't be reached when you open it, the council opens
+public loot log — rehearse with a test event (§8a). If Discord can't be reached when you open it, the council opens
 anyway and its thread is made as soon as Discord answers (or on your next `/raid loot`); the site shows *thread
 pending* meanwhile. Running `/raid loot` again on an open council posts a fresh card at the bottom of the thread and
 re-posts every pick still waiting on fresh cards.
@@ -2666,10 +2669,10 @@ instead.
 **Distribute** judges the ticked drops nobody has proposed or recorded yet and adds a batch of proposals (earlier
 picks still waiting count as if given); `/raid distribute` does the same. You are told about how long it takes and the
 card counts the judging. With the companion connected it starts by itself about 20 seconds after a boss's last drop (a
-per-raid switch, on by default) and the card hides the button while that covers everything. Only one Distribute runs
+per-raid switch, on by default) and the card hides the button while that covers everything. Only one Distribute works
 at a time per council — a second press says *"Distributing already (Jonny, 8:12 PM)"*. If the bot restarts
 mid-judgement the thread says *"Distribute was interrupted at 8:12 PM — press Distribute"*, with the button; it never
-re-runs on its own. **Scores only** (a toggle, named on the card) picks by score with no model call — the picks say so
+starts again on its own. **Scores only** (a toggle, named on the card) picks by score with no model call — the picks say so
 — and is also what happens by itself when Claude is unavailable or the budget is spent.
 
 **The proposal cards** follow, at most five items to a message, grouped by boss: each item says *"#2 Syphon → Kestrel"*
@@ -2691,7 +2694,7 @@ press that card shows what happened (*"✅ recorded by you · 8:14 PM"*).
 
 **Override…** is two presses: pick who gets it instead — *In the table* (the top candidates), *Rostered tonight*,
 *Disenchant*, or *Someone not on the roster…* (type their character's name, first and last if they have both) — then
-write the **reason** (required) and submit. A typed name is checked against the run's signups, the guild's registered
+write the **reason** (required) and submit. A typed name is checked against the event's signups, the guild's registered
 characters and anyone recorded before as a guest, and is recorded in their spelling; if nobody has that name the bot
 says so and offers **Record <name> as a guest** — a second, deliberate press, so a typo never becomes an award. An
 override is shown as pending (⚠, with who set it) and is **not recorded until Confirm**; the reason becomes a precedent
@@ -2702,7 +2705,7 @@ confirming one item at a time still works; a pick you held or discarded while a 
 
 **Roster changes** after the council opened count at once: someone who joins the roster is a candidate straight away
 (a thread line says so); someone who leaves stays a candidate until an officer removes them (*Remove a candidate…* on
-the card, or ✕ beside their name on the site) — on a split run only on their own roster's council.
+the card, or ✕ beside their name on the site) — on a split raid only on their own roster's council.
 
 **Precedents.** `/gm precedents` lists the latest active precedents (what the bot picked, who the council gave it to,
 why, who decided, when); pick one and **Retire…** with a reason — it stays on record, and the bot stops citing it.
@@ -2713,7 +2716,7 @@ award, override, reason, correction and retirement is an ops line with the offic
 
 ### The companion
 
-The companion is a small program an officer runs next to the game: it reads the game's chat log and reports drops,
+The companion is a small program an officer keeps open next to the game: it reads the game's chat log and reports drops,
 kills and in-game awards to the bot (its token is set up in §8). When the master looter hands an item out in game, the
 bot matches it to one copy of the item: the copy whose pick names who got it (two copies of a token can be handed out in either order), or a copy an
 officer already confirmed to them (never recorded twice). To the pick shown (the override if there is one) → recorded.
@@ -2742,13 +2745,13 @@ another companion of that council already reported (same boss and items, or same
 seconds by the game's clock) is listed in the ops channel as a duplicate and recorded once — while two copies of an
 item stay two drops.
 
-**No run live.** Drops arriving when no run is live are held for 10 minutes (a restart keeps them; the site shows them
+**No event live.** Drops arriving when no event is live are held for 10 minutes (a restart keeps them; the site shows them
 waiting) and the officer channel (roster, else ops — never the public loot log) asks once *"Drops arriving from Jon's
-log but no run is live — start an ad hoc run for tonight?"* with **Start an ad hoc run**. Held drops go into the
-council of **their own run** when it opens (one opened near the run's time; never a council days early) — an event
-that arrives just after a council ended stays with that ended run and is never replayed into the next raid's council,
+log but no event is live — start a one-off event for tonight?"* with **Start a one-off event**. Held drops go into the
+council of **their own raid** when it opens (one opened near the raid's time; never a council days early) — a drop or kill
+that arrives just after a council ended stays with that ended raid and is never replayed into the next raid's council,
 and one a council refuses stays held. Anything still held after 10 minutes is listed in the ops channel as **not
-recorded** (naming the ended run when there is one), so you can add it by hand. An in-game award that arrives shortly
+recorded** (naming the ended raid when there is one), so you can add it by hand. An in-game award that arrives shortly
 after a council ended reaches the officers as **one DM** with a link to record or correct it on the site — the
 council's only DM (never for an ended rehearsal). A rehearsal takes drops only from a puppet's or the tester's
 companion. The companion shows as **live**, **quiet** (no events for a couple of minutes — normal during trash and
@@ -2756,10 +2759,10 @@ breaks) or **disconnected**, in the thread and at the top of Loot › Tonight.
 
 **Kills and stamps.** The companion sends every event's time as an instant (it reads the chat log's clock on the PC
 that wrote it), so the thread's *"☠ Gatekeeper down (8:15 PM)"* shows in each reader's own time zone. Each kill counts
-toward **Bosses 3 / 6** on the lock card, a test run's card on the Test bench and Loot › Tonight, and a killed boss's
-drops are judged first. When the raid's **last boss** goes down the thread says once *"All bosses down — End the run?"*
-(on a split run, each roster's thread — once every roster's last boss is down) and the lock card shows the same
-line with its End button reading **End the run** — the same End as always (the confirm screen first, then the run and
+toward **Bosses 3 / 6** on the lock card, a test event's card on the Test bench and Loot › Tonight, and a killed boss's
+drops are judged first. When the raid's **last boss** goes down the thread says once *"All bosses down — End the event?"*
+(on a split raid, each roster's thread — once every roster's last boss is down) and the lock card shows the same
+line with its End button reading **End the event** — the same End as always (the confirm screen first, then the event and
 its council close). A raid whose bosses the game profile doesn't list yet shows *Bosses 3* and never asks. A companion
 older than the one in the repo sends kills with a clock time only; the bot refuses those (it won't guess which time zone
 the raider's PC was in) — the companion prints *"companion too old"* and the ops channel says so once. Update the file
@@ -2788,15 +2791,15 @@ for whoever presses it. When the bot can't read sentences (Claude unavailable) i
 
 ### End
 
-`/raid end` (with several locked runs it asks which, the one with a council first), **End council** on the card or on
-Loot › Tonight, "end tonight's run" in plain text, or MCP `end_loot` first shows what ending means — *"End <run>: 6
-awards, 1 override, 2 drops never distributed, 1 award waiting for a reason"* — with **End the run** / **Back** (in
+`/raid end` (with several locked events it asks which, the one with a council first), **End council** on the card or on
+Loot › Tonight, "end tonight's event" in plain text, or MCP `end_loot` first shows what ending means — *"End <event>: 6
+awards, 1 override, 2 drops never distributed, 1 award waiting for a reason"* — with **End the event** / **Back** (in
 Discord the same box the site prints; a council that changed while it was open is shown again first). End posts
 the summary in the thread (the awards, the overrides and anything left undecided — proposals never confirmed, drops
 never distributed, awards still waiting for a reason — so nothing anyone decided disappears), turns the card into the
-summary, archives the thread, marks the run done and redraws its sheet and lock card closed. On every surface only a
-locked run ends (*"No locked run to end."*), and not while a Distribute is judging (*"Distributing already (…) — wait
-for it, or retry End"*). The bot ends a council by itself only after the run's scheduled end, once it has been idle
+summary, archives the thread, marks the event done and redraws its sheet and lock card closed. On every surface only a
+locked event ends (*"No locked event to end."*), and not while a Distribute is judging (*"Distributing already (…) — wait
+for it, or retry End"*). The bot ends a council by itself only after its raid's scheduled end, once it has been idle
 for 30 minutes with no pick waiting for Confirm and no drop nobody judged — after one *"closing in 15 min"* notice with
 **Keep open**. If picks or drops still wait, it says so once in the thread and leaves the council open for an officer;
 the raid itself is over either way (no more fill asks, nobody shows as rostered on it).
@@ -2806,13 +2809,13 @@ the raid itself is over either way (no more fill asks, nobody shows as rostered 
 On every loot page — Tonight, History, Items, Wishlists, the Loot log, My loot and your wishlist — an item's name with an
 id is a link to its page on Wowhead (in a new tab); an item ticked or imported by name only stays plain text.
 
-**Tonight** is the same council as a table, live: every locked run (with **Open loot council** until it has one), its
+**Tonight** is the same council as a table, live: every locked event (with **Open loot council** until it has one), its
 drops per boss (the *Drops* block ticks by item name, a boss and how many copies; un-tick a false drop), every proposal
 with **Confirm** / **Override…** / **Decide later** — a row opens its whole candidate table (tier, upgrade, attendance,
 rank, wishlist place, recent loot, score; no model call to browse it) — **Confirm the rest** and **Discard batch**,
 **Distribute**, **Scores only**, **End council**, the awards *Waiting for a reason or a correction* (**Give the
 reason…** / **Mistake — correct…** / **Correct…**), what is *Still owed from ended councils*, the companion chip and
-drops held with no run live. What you do there edits the Discord cards; what an officer presses in Discord shows there
+drops held with no event live. What you do there edits the Discord cards; what an officer presses in Discord shows there
 at once. Opening the council from the site makes the Discord thread the same way `/raid loot` does.
 
 **History**: every ended council, newest first, with its awards, who recorded them, its overrides and its summary.
@@ -2883,7 +2886,7 @@ it like a learned drop; saving its tiers asks whether to re-weight the awards it
 line number and skipped. **Confirm** adds exactly the new rows — an import only ever adds: it never changes or removes a
 row already in the ledger — and the council reads them at its next judgement (recent loot, "already has it"). If the
 ledger changed since your preview the import is refused and the fresh preview shown. **While a loot council is live**
-(its run is locked and the council open) Confirm is refused, naming the run — the council records tonight's awards as
+(its event is locked and the council open) Confirm is refused, naming the raid — the council records tonight's awards as
 they are confirmed, and an import then could count them twice; import after the council ends (the preview still works
 and says so). A character nobody registered is
 recorded by name. Gargul and RCLootCouncil exports aren't read yet (which addon the council will run is still open):
@@ -2901,7 +2904,7 @@ candidate's score — tier weights, the untiered weight, attendance, rank factor
 free allowance), wishlist bonuses and the offspec multiplier, the same-slot discount and the slot weights — each with
 the game's **default** beside it. **Edit**, change any number (or **reset** it to the default), **Save**: the change is
 always reviewed first (each weight, current → new) and saved in one go. Weights change scores from the next judgement
-on; **no award already recorded changes** — who got what, and what it weighed, stay as they were. **Re-score last run**
+on; **no award already recorded changes** — who got what, and what it weighed, stay as they were. **Re-score the last raid**
 shows what the newest council's drops would have scored, with the weights as they are and as drafted (top three per
 drop, and which top picks would change) — the numbers alone, no Claude, nothing saved. Plain text: "make S items worth
 0.8" (the owner); MCP `loot_weights` / `set_loot_weights`.
@@ -2955,7 +2958,7 @@ on someone's behalf, can't be asked about: an officer who thinks an award was wr
 With the log on (the default) every recorded award gets one line in the **loot channel** (*"🎁 Robe of Tests →
 Kestrel · Gatekeeper"*; a correction *"✎ Robe of Tests: was Kestrel, now Mira"*; a disenchant *"→ disenchanted"*),
 with an **Add to my wishlist** button — and nothing else goes there (no officer prompts, no reasons, no scores). With
-no loot channel set the lines go to the run's updates thread — never the signup channel — and the first one says so in
+no loot channel set the lines go to the event's updates thread — never the signup channel — and the first one says so in
 the ops channel and the council's thread. With the log off nothing is posted; the site still shows every award. A
 rehearsal posts nothing. The owner sets it with `/gm config loot-channel` (a channel or `clear`, and `log` on or off —
 one confirm screen saying what changes), on the
@@ -2968,7 +2971,7 @@ In the ops channel (or `/gm change`, or an @mention where plain text acts) an of
 "the Gatekeeper dropped the Robe of Tests and a Shard of Doom", "distribute", "give the Syphon to Eltam instead — tanks
 progression" (refused without a reason), "confirm the rest", "hold the Shard for later", "Mira got the wand because
 she's on her last piece" (the reason for an in-game award), "the robe should have gone to Kestrel — misclick", "end
-tonight's run" and "retire the Syphon precedent — tier changed": each is shown as a diff with **Apply**, and Apply
+tonight's event" and "retire the Syphon precedent — tier changed": each is shown as a diff with **Apply**, and Apply
 refuses a "confirm the rest" whose batch changed, or a confirm or award whose pick moved, since the diff. These are the
 **Loot council** group of the plain-text permissions (officers by default, §8c). Over MCP the owner's token reads the
 council, ticks, distributes, discards and ends; **decisions about an award** — `loot_confirm`, `loot_award`,
@@ -2994,12 +2997,12 @@ locked roster, your callouts and your pending asks are tied to your Discord acco
 on your record follows your server nick the next time the bot sees you in the server (a command, a button press) —
 a sheet keeps the name you answered under until you answer again. An absence reason is seen by you and
 the officers, nobody else. The bot DMs only when you must act — sheets, nudges, confirmations and fill
-asks (a released seat, a cancelled run, an ask that expired, closed at the lock or closed by your own No thanks /
+asks (a released seat, a cancelled event, an ask that expired, closed at the lock or closed by your own No thanks /
 callout / absence edits the card you already have to say so — no buttons left, nothing to do; everything else you
 should know is a notice on the Me page and in `/me view`); switch DMs off on the **Me** page or with `/me dms off` if you'd rather not
 get them — with DMs off, Confirm and fill asks wait on your Me page and the sheet; nothing is sent anywhere else (you
 are still asked, in the same order, with the same deadline). **My absences** on the absences card lists yours with a **Clear** button each; clearing
-an absence puts you back to unanswered on any open sheet it had pre-filled (a seat freed on a locked run is
+an absence puts you back to unanswered on any open sheet it had pre-filled (a seat freed on a locked event is
 not handed back automatically — ask an officer). Claude is used sparingly — never for registry, signup or group building — and spend is
 capped by a monthly budget the owner sets (`OIBOT_BUDGET_USD`, per calendar month, kept across restarts); questions and
 plain-text requests may use at most half of it each, so they can't spend what loot night needs. `/gm status` shows
@@ -3041,26 +3044,26 @@ dumps; long lists are cut short). Always in it: the guild's channels (a channel 
 *not found*), officer roles, owner and ask audience; the *about* text, the invite link and the news keywords;
 recruitment (applications open or closed, the note, the guild's questions with their hints); every raid's schedules (in words, with
 their own sheet timing — when sheets open, nudge, lock and confirmation times, `fill_ask_hours`, `autofill`, `open_dm` — and
-next runs; *Raid schedule* in the static guide lists each schedule's next three runs too), the raid itself (slots, split
+next events; *Raid schedule* in the static guide lists each schedule's next three events too), the raid itself (slots, split
 policy, weights, minimums and group layout, which settings the guild changed from the game's default), the raid's
-notes and the lockout window it is in now; the guild's changes to buffs and stacking families; the test bench; and every live run as the Raids
+notes and the lockout window it is in now; the guild's changes to buffs and stacking families; the test bench; and every live event as the Events
 page has it — state, nudge / lock / confirmation-expiry times, split strategy, the schedule it came from and how many
 rosters it expects, who joined (character, spec and class) and how many per role, bench, no thanks, who hasn't
 answered, pins, the board before lock (per roster, with who is still in the bank and the same aura line as after
-lock), what the run is short and who could cover it (a member gets the counts — "+1 offspec" — not the names),
-auras nobody brings, people In on another run that evening
+lock), what the event is short and who could cover it (a member gets the counts — "+1 offspec" — not the names),
+auras nobody brings, people In on another event that evening
 (before and after lock), the rostered groups after lock (each seat's spec and role) with confirmed / waiting /
 declined, and per roster its auras: every raid-wide buff with how many bring it, each group's missing auras and
 totems, the synergy (the top advisories on how the groups were built are for officers only),
-the bench after lock, leftovers and whether they could make another run, for officers the fill asks outstanding
+the bench after lock, leftovers and whether they could make another roster, for officers the fill asks outstanding
 (who, why) and recent answers — a member sees only their own open ask (what it asks, until when), never who else was asked —
 for officers the bot's suggestions for short tank/healer seats (exactly as the cards word them — the answer may
-rephrase them, never invent one), members absent that day, callouts, and the last log lines (more of the log when your question names the run, its
+rephrase them, never invent one), members absent that day, callouts, and the last log lines (more of the log when your question names the event, its
 raid or "tonight"; a member's view leaves out the officers' workflow lines — suggestions and fill asks sent, approvals,
-the planner's notes). Also the last few finished or cancelled runs per raid (with the cancel reason) — a past run you
+the planner's notes). Also the last few finished or cancelled events per raid (with the cancel reason) — a past event you
 name by key or in words ("last Tuesday", "the last Barrow Deeps") in full, who joined and who was rostered — and when
 the next sheet opens. And your own record — characters, roles, DMs, upcoming absences with your own reasons,
-confirmations and fill asks waiting on you, your answer and seat on each live run, and, where the game has an armory,
+confirmations and fill asks waiting on you, your answer and seat on each live event, and, where the game has an armory,
 each character's link (linked or not, when it was last updated, in the guild or not when that is known, professions
 from the armory or kept by hand) — or, if you applied, your
 application's status and the note sent to you (never which officer decided).
@@ -3142,7 +3145,7 @@ removing a server (when the bot leaves it) or renaming a guild's key is a manual
 Loot: a ThatsMyBIS import has no Discord path (the Loot › Wishlists page and MCP `import_wishlists`); the item tier
 grid, its CSV import and Claude's tier drafts are on the site only (MCP: `draft_tiers`, `export_tiers`); a loot history
 import reads BisCouncil, ThatsMyBIS and the generic CSV only — **Gargul and RCLootCouncil exports aren't read** (which
-addon the council runs is still undecided), and the import, the loot scoring card and the precedents' Distil have no
+addon the council uses is still undecided), and the import, the loot scoring card and the precedents' Distil have no
 Discord screens (the site and MCP; the weights also in plain text); a Claude draft is forgotten on a restart;
 the member's "ask the council about an item" thread
 doesn't exist yet; a companion bound to a council with **Bind companion…** is forgotten on a restart (the card offers it
@@ -3150,7 +3153,7 @@ again). Splits: the **Loot-quality** split philosophy is a greyed placeholder, n
 and Rotation work). Buff facts, minimums, a schedule's week and split policy *can* be changed (Auras page, Raids page,
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
 repository. Regulars are a list of who is expected, never a standing answer: there is no standing availability or
-standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). A lineup
+standing signup to set: each event is answered on its own sheet (or by telling the bot, or an officer for you). A lineup
 (§4) is set on every surface: the site, plain text, MCP and Discord (`/raid open` for a one-off, `/raid lineup` for an open
 event, the schedule wizard for a schedule). A fifth raid in one event and a "first raid only" answer on the sheet (leave
 after the first raid instead) don't exist; raids join an open event through Edit lineup or `/raid lineup`, never by
@@ -3160,6 +3163,6 @@ versions can't be compared, and the route explorer and companion addon of §2a a
 from a library version. The armory (§3): the bot can't prove a character is yours (there is no Battle.net login), so a
 wrong claim is fixed by an officer's **Move to another member…**; it reads no gear, talents, stats or reputations and
 ignores the in-game rank; a character that just joined the guild reads *not in the guild* until the next roster read (up
-to three hours); bulk linking is reviewed on demand and never runs by itself, and on Discord `/roster armory` links only
+to three hours); bulk linking is reviewed on demand and never starts by itself, and on Discord `/roster armory` links only
 the sure matches (the likely ones, the guild characters no record is linked to and **Give to a member…** are on the site's Members
 page); plain text can't link, unlink or move a character. If you ask for one of these, the bot says it can't.

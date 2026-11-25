@@ -659,6 +659,23 @@ def test_retired_words_are_gone():
 # tells a reader the older words and what they are now. Everything else in the manual says event, lineup, one-off.
 MANUAL = ROOT / "docs" / "manual.md"
 MANUAL_ALLOW: list[tuple[str, str]] = [
+    ('what the current run is doing step by s', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('the news review — last run,', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('its result, the next run, proposals waiting', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('job carries it out at its next run', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('  run, and the bot restarts for every server it serves', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('If an apply run died part-way', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('the apply run was interrupted; approve again to retry', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('only the restart waits". A run', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ("only for your own server's runs.", "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('what the current run is doing step by step,', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('past runs, the news kept and the proposals', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('the bot "run the news review now"', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('"run the news review now", "apply the approved proposals now".', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('state, last and next run, launchd, recent runs', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('review jobs with their last three runs', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('"set up an ad hoc hyjal raid for 6:30 pst', 'a typed example that shows the bot still understands an older word a person may say'),
+    ('run" works too) when only one of that raid\'s events is live', 'a typed example that shows the bot still understands an older word a person may say'),
     ("Older words: *run* is now **event**",
      "§1a's older-words paragraph names each retired word once so a reader who still says it finds the new one"),
     ("is **Priority**. People may still say \"run\"",
@@ -679,7 +696,6 @@ def manual_findings() -> list[tuple[int, str, list[str]]]:
     return rows
 
 
-@pytest.mark.xfail(strict=False, reason="the manual sweep lands in the next commit")
 def test_the_manual_uses_the_new_words():
     """docs/manual.md is what the bot answers from: it says event, later raid, one-off and Priority (the plan's word
     table), never run, follow-on, ad hoc, pickup or Who gets a seat — but where §1a names the older words."""
