@@ -474,7 +474,7 @@ async def update_card(bot, reg: Registry, ap: Appeal) -> None:
 
 
 class AppealButton(discord.ui.DynamicItem[discord.ui.Button], template=r"appeal(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>details|resolve):(?P<aid>[0-9a-f]{12})"):
-    """The card's Details (the council's record, ephemeral) and Resolve… (the decide flow) — officers only, re-checked live
+    """The card's Details (the council's record, ephemeral) and Resolve (the decide flow) — officers only, re-checked live
     on every press. The id carries the guild key (`appeal.<gk>:<action>:<appeal id>`)."""
 
     LABELS = {"details": ("Details", discord.ButtonStyle.secondary), "resolve": ("Resolve", discord.ButtonStyle.primary)}

@@ -1268,7 +1268,7 @@ def test_a_chat_award_with_no_reason_asks_why_instead_of_an_error_line(night, mo
     p = n.s.pending("d1")
     other = next(c.character for c in p.result.candidates if c.character != p.to)
     text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="override", reply="", changes=[nl.LootChange(item_id=1, award_to=other, reason="")]))
-    assert f"Shard of Doom (d1): bot picked {p.to} → council awards {other} — why? — press Give the reason…" in text, text
+    assert f"Shard of Doom (d1): bot picked {p.to} → council awards {other} — why? — press Give the reason (" in text, text
     assert "needs a reason" not in text and view.apply.item.disabled and view.edit.item.label == "Give the reason"
     monkeypatch.undo()
     h = officer_h(n)

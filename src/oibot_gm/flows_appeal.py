@@ -4,8 +4,8 @@
   typed reference) → one prose modal (validated, never parsed) → THE confirm screen (wizard.Wizard.decide: the
   consequence from appeals.open_consequence, your words quoted, `[Send to the council]` `[Edit my words]` `[Back]`).
   Nothing is written before Send. Awards you already asked about are left out of the select.
-- `appeal_resolve` (the card's *Resolve…*): officers only, re-checked LIVE (PRIV_LIVE) on every press — pick ONE outcome (a select over
-  appeals.OUTCOMES) → the decide screen (appeals.resolve_consequence; `[Resolve]` `[Resolve with a note…]` `[Back]`, the
+- `appeal_resolve` (the card's *Resolve*): officers only, re-checked LIVE (PRIV_LIVE) on every press — pick ONE outcome (a select over
+  appeals.OUTCOMES) → the decide screen (appeals.resolve_consequence; `[Resolve]` `[Resolve with a note]` `[Back]`, the
   note stays with the officers) → appeals.resolve_appeal: the member's notice, the card's final state. No DM, no LLM."""
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ async def me_loot_ask(interaction: discord.Interaction, reg: Registry, *, award:
 
 @flow("appeal_resolve")
 async def appeal_resolve(interaction: discord.Interaction, reg: Registry, *, aid: str, **_seed) -> None:
-    """An officer closes appeal `aid` with one outcome (the card's Resolve…). Officer rights are decided LIVE
+    """An officer closes appeal `aid` with one outcome (the card's Resolve). Officer rights are decided LIVE
     (PRIV_LIVE, flows_loot.is_loot_officer) here, on every press and on the note's submit — the write is resolve_appeal,
     and a write never trusts a cached role (design §2.6)."""
     from .flows_loot import is_loot_officer

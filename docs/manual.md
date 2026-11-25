@@ -28,7 +28,7 @@ is told and how, what can still be undone — so it reads aloud the first time (
 Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it on their Me page."*).
 In Discord the first button under those sentences is the action itself (*Move*, *Save*, *Cancel event*), then the
 same action with a note where one fits, then **Back**. If what it says changed while it was open, it shows again for you
-to read before you press.
+to read before you press. A Discord button never ends in "…": the site's *Fill seats…* reads *Fill seats* there.
 
 - **Minimum** — the fewest of a role (tank, healer, melee, ranged), a class or a spec a run of a raid takes: one number,
   with an optional reason, and no upper limit (*"at least 3 healers"*). The lock fills every minimum first and never
@@ -241,7 +241,7 @@ to read before you press.
   info or warnings. If the bot can't post in the ops channel three times in a row, that is itself an error alert — once
   per 30 minutes however often it flaps, never while Discord has the server in an outage, and not again when the hourly
   channel check already reported that channel.
-- **Applications channel** — one review card per application (§3a) with Accept / Decline… buttons (they keep
+- **Applications channel** — one review card per application (§3a) with Accept / Decline buttons (they keep
   working after a bot restart).
 - **Loot channel (the public loot log)** — one line per recorded award (item → character · boss), with an **Add to my
   wishlist** button; never a reason or a score (§9). Not set: the lines go to each run's updates thread.
@@ -318,10 +318,10 @@ Events page and the Raids page's Readiness view. On a phone the rail is behind t
 
 **What the raid pages leave to Discord, plain text and MCP.** A few things the older raid pages did are not on Events,
 Schedules or Raids; each still works elsewhere. A cancel's reason and its line in the signup channel: the card's
-*Cancel run…* or `/raid cancel`, plain text, MCP `cancel_run`. Another layout for a run (*Propose roster*, *another
+*Cancel run* or `/raid cancel`, plain text, MCP `cancel_run`. Another layout for a run (*Propose roster*, *another
 split like this*) and **Clear** of every officer's moves on a board: plain text, MCP `propose_split` / `set_layout`, a
 test run's card on the Test bench (on the Events page **Undo my moves** takes back your own). Opening a pickup
-template's event: `/raid open` › *Ad hoc run…*, plain text, MCP `open_run` (New event opens one-offs and schedules'
+template's event: `/raid open` › *Ad hoc run*, plain text, MCP `open_run` (New event opens one-offs and schedules'
 nights). Setting one timing value of a schedule back to the game's suggestion: plain text, MCP
 `schedule_set`. A start at a minute that isn't a quarter hour (the site's pickers step by 15 minutes): plain text or
 MCP. On the Raids page, a minimum's reason (*why*), a raid's notes and its split policy: `/roster comp` or
@@ -736,10 +736,10 @@ application is shortened on the card with "…", and its last line points to the
 which shows every answer in full, the earlier verdicts, and Accept / Decline with the same sentences as the card.
 **Accept** registers the character as the applicant's main, rank trial, already confirmed, and gives them the guild's
 **member role** (the first one in the recruitment settings) when the bot has Manage Roles and the role sits below the
-bot's own — otherwise the verdict says it couldn't and you add it by hand; **Decline…** turns them down. A second
+bot's own — otherwise the verdict says it couldn't and you add it by hand; **Decline** turns them down. A second
 decision on the same application is refused with who made the first (*"Jonny already declined it on Tue 12 Mar 8:02
 PM."*); the note to the applicant holds up to 400 characters. Both open the same small screen first: one sentence saying exactly what happens to the applicant, then
-**Accept** (or **Decline**), **… with a note…** (a box for a note that goes into their DM) and **Back**. Nothing is
+**Accept** (or **Decline**), **Accept with a note** (or **Decline with a note**: a box for a note that goes into their DM) and **Back**. Nothing is
 written before that press. Either way the applicant gets a DM, the card updates to show the decision, and the ops
 channel logs it. The same decision is on `/roster applicant`, in plain text ("accept Nyx", "decline nyxie: we're full on
 healers" — officers by default, and the note goes to the applicant) and over MCP (`decide_application`), all through
@@ -838,7 +838,7 @@ schedule sets its own. Three kinds:
 - **Days of each lockout** — "Day 1 of each 3-day lockout, 8:00 PM": day 1 is the day the lockout resets, counted
   from the raid's first opening every `lockout_days`, so a 3- or 5-day reset is followed exactly (and daylight saving
   never moves the wall-clock time; a time the clocks skip that night moves past the gap).
-- **Pickup template** — never opens by itself. `/raid open` → *Ad hoc run…* offers it (*Pickup — pick a time*); the
+- **Pickup template** — never opens by itself. `/raid open` → *Ad hoc run* offers it (*Pickup — pick a time*); the
   run gets the template's settings. (The site's **New event** page makes one-offs; a pickup template opens from
   Discord, plain text or MCP.)
 Each schedule also says how many **rosters** a run expects (1–4). With 2, the sheet advertises 2 × the raid's size
@@ -861,7 +861,7 @@ removed, the ops feed says so once an hour, naming the schedule and the raid; bo
 **Recurring and ad hoc.** Every run is one or the other, and nobody sets it by hand — it follows the schedule's kind:
 - **Recurring** — weekly nights and days of each lockout. Opens by itself on its
   week, has **regulars**, and its lock weighs being a regular (below). Confirmations on by default.
-- **Ad hoc** — a pickup template, or a **one-off** run at a time an officer picks (*Ad hoc run…* in `/raid open`,
+- **Ad hoc** — a pickup template, or a **one-off** run at a time an officer picks (*Ad hoc run* in `/raid open`,
   **New event** on the site, or plain text / MCP with a time that is none of the raid's upcoming runs).
   It takes the raid's size, comp, lockout and length but none of its recurring timing — its own lighter defaults: no
   reminder, no DM on open, **no confirmations** (Join is the commitment; *Can't make it* frees your seat), locks
@@ -994,13 +994,13 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
   the first yes changes nothing until the other answers; the second yes makes both changes; a no (or silence, or the
   lock arriving first) from either closes the other: its DM card is edited to "never mind" (never a new DM); when
   the second yes comes, the first one's card is edited to say it's on. Nobody is suggested for two seats (the
-  *Suggest…* screen refuses picking one person for two), and the bot never takes the one person a later seat can't do
+  *Suggest* screen refuses picking one person for two), and the bot never takes the one person a later seat can't do
   without. Test puppets are never suggested or asked on a real run.
 - **Two alternates** per short seat, so you can ask someone else without typing a name, and a **Still short if all say
   yes** line ("nothing", or what to recruit).
 - **Where.** The officer **health card** gets a *Suggested* block (up to three seats; one member per line, the spec
   icon they'd play and the character) with **Ask** (sends what the card shows — only those seats: when more are short
-  the card says *+N more* and Ask leaves them alone) and **Suggest…** (every seat with its alternates in a select, then
+  the card says *+N more* and Ask leaves them alone) and **Suggest** (every seat with its alternates in a select, then
   *Send*). The block, the regulars who haven't answered and the buttons are for
   officers: a member who runs `/raid health` sees the counts, what is short and the missing buffs only. On a recurring schedule with
   regulars the health card is posted **as soon as the sheet opens** when the regulars (minus anyone away) can't cover a
@@ -1045,11 +1045,11 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    open a sheet early from the Events page, however far ahead the night is: each night under *Coming up* has **Open the
    sheet now** (greyed, with why, only when that night's event was cancelled or has ended), and **New event** (the page is `/events/new`) makes a one-off — see *New event and the lineup
    builder* below. `/raid open` does the same in Discord: pick the raid,
-   then **Next run — <time>**, **Another upcoming run…** (the next three weeks, and each schedule's next three nights
+   then **Next run — <time>**, **Another upcoming run** (the next three weeks, and each schedule's next three nights
    however far ahead) (each labelled with its schedule's name when there are several)
-   or **Ad hoc run…** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes in 15-minute steps
+   or **Ad hoc run** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes in 15-minute steps
    from lists; nothing typed; more than three pickup templates come as one *Pick a template* select). **Another upcoming
-   run…** pages by week (*← Earlier week* / *Later week →*) when the raid has more upcoming runs than one list holds.
+   run** pages by week (*← Earlier week* / *Later week →*) when the raid has more upcoming runs than one list holds.
    A schedule's night prints the same box as the Events page's **Open the sheet now**: how early the sheet opens,
    where it posts and when it still locks, with **Open the sheet** and Back. If the night changed while the box was
    open, the box is shown again for you to read before you press; a night already open, cancelled or ended says so
@@ -1753,7 +1753,7 @@ edits that new family and leaves the one it shared alone.
   Schedules page's *Regulars*, plain text and MCP `set_regular` (§4 *Regulars*).
 - Applications: `/roster applicants` (oldest first, ten cards; the rest are on the site's **Applications** page),
   `/roster applicant member: decision: [note:]` (the same one confirm screen as the card's buttons), the Accept /
-  Decline… buttons on the review card, the Applications page, or plain text ("accept Nyx", "decline nyxie: full on
+  Decline buttons on the review card, the Applications page, or plain text ("accept Nyx", "decline nyxie: full on
   healers") (§3a).
 - Someone **not in the Discord server** (§1a): their record stays. The bot notes the day it noticed as soon as Discord
   tells it so — when it looks them up (a page, a DM, a sheet), when an officer opens the Members page (the bot reads the
@@ -1854,7 +1854,7 @@ guild's own changes to them. When a post clearly contradicts one of those, it po
 channel: the change in words, what it touches, the sentence from the news it rests on, links to the posts, and a
 confidence (low / medium / high). Most days there is no card: nothing new, or nothing that contradicts anything.
 
-- **Approve** first shows what approving does, then *Approve* / *Approve with a note…* / *Back* — the press itself never
+- **Approve** first shows what approving does, then *Approve* / *Approve with a note* / *Back* — the press itself never
   writes. A **guild setting** (a raid's lockout, what the guild knows about a buff, a minimum) reads "the apply
   job carries it out at its next run (the time), no restart:" and the change as a diff line; it is applied like the same
   change on the Raids or Auras page. A **game data** change reads "Claude edits the game data for <version>, the tests
@@ -2705,12 +2705,12 @@ kills and in-game awards to the bot (its token is set up in §8). When the maste
 bot matches it to one copy of the item: the copy whose pick names who got it (two copies of a token can be handed out in either order), or a copy an
 officer already confirmed to them (never recorded twice). To the pick shown (the override if there is one) → recorded.
 To someone else → **recorded at once** (the game is the truth) and the thread line carries two buttons — **Give the
-reason** (it becomes the precedent) or **Mistake — correct…** (it was a misclick: the record is fixed, no precedent);
+reason** (it becomes the precedent) or **Mistake — correct** (it was a misclick: the record is fixed, no precedent);
 the site lists the same under *Waiting for a reason or a correction*. A drop nobody distributed is recorded straight
-away — *"[item] → Kestrel · recorded"* with **Wrong? Fix…**; a sub who isn't registered is recorded by name. A reason
+away — *"[item] → Kestrel · recorded"* with **Wrong? Fix**; a sub who isn't registered is recorded by name. A reason
 given twice asks before replacing the first.
 
-**Correct…** (and *Mistake — correct…*, *Wrong? Fix…*, or **Correct…** beside the award on the site) is the same two
+**Correct** in Discord (and *Mistake — correct*, *Wrong? Fix*, or **Correct…** beside the award on the site) is the same two
 presses as Override: who it should be recorded to, then what went wrong (the old record is kept, marked void). A
 correction also retires the precedent of the award it fixed — the bot never cites a council decision that, per the
 correction, never happened — and an award whose reason was given (even if that precedent was later retired) never goes
@@ -2731,7 +2731,7 @@ item stay two drops.
 
 **No run live.** Drops arriving when no run is live are held for 10 minutes (a restart keeps them; the site shows them
 waiting) and the officer channel (roster, else ops — never the public loot log) asks once *"Drops arriving from Jon's
-log but no run is live — start an ad hoc run for tonight?"* with **Start an ad hoc run…**. Held drops go into the
+log but no run is live — start an ad hoc run for tonight?"* with **Start an ad hoc run**. Held drops go into the
 council of **their own run** when it opens (one opened near the run's time; never a council days early) — an event
 that arrives just after a council ended stays with that ended run and is never replayed into the next raid's council,
 and one a council refuses stays held. Anything still held after 10 minutes is listed in the ops channel as **not
@@ -2903,7 +2903,7 @@ the resolved. Each shows the award, the member's words as written, the council's
 decided, the bot's pick, who recorded it, tier and weight, the candidates then and the reason on file) and a link to its
 thread. **Resolve…**: pick one outcome (*The award stands* · *Corrected* · *Noted for next time* · *Withdrawn*) — the
 confirm says exactly what the member will read and takes an optional note that stays with the officers. In Discord the
-card's **Details** shows the same record to the officer who pressed it only, and **Resolve…** is the same choice and
+card's **Details** shows the same record to the officer who pressed it only, and **Resolve** is the same choice and
 confirm. The member gets a notice, never a DM; the card is edited to *Resolved* and the thread archived. To change who
 got the item, use **Correct…** as usual and resolve the question as *Corrected*. Over MCP, `list_appeals` reads the
 same list and `resolve_appeal` closes one — that needs `OIBOT_MCP_ACTOR` (sent as the `X-Oibot-Actor` header: an
@@ -3137,10 +3137,12 @@ again). Splits: the **Loot-quality** split philosophy is a greyed placeholder, n
 and Rotation work). Buff facts, minimums, a schedule's week and split policy *can* be changed (Auras page, Raids page,
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
 repository. Regulars are a list of who is expected, never a standing answer: there is no standing availability or
-standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). A follow-on
-(§4) is set on the site, in plain text or over MCP (Discord's `/raid open` sets a one-off's; its schedule wizards only show it); a
-fifth raid in one run, a "first raid only" answer on the sheet (leave after the lead instead) and a follow-on added to a
-run already open don't exist. Guild guides (§3b): a version has no name or note of its own, a new version is not announced in any channel, two
+standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). A lineup
+(§4) is set on every surface: the site, plain text, MCP and Discord (`/raid open` for a one-off, `/raid lineup` for an open
+event, the schedule wizard for a schedule). A fifth raid in one event and a "first raid only" answer on the sheet (leave
+after the first raid instead) don't exist; raids join an open event through Edit lineup or `/raid lineup`, never by
+opening it again. The board (dragging names, Auto-fill groups, Clear the board, the split strategy) is the site's Events
+page alone; Discord shows the roster the lock made. Guild guides (§3b): a version has no name or note of its own, a new version is not announced in any channel, two
 versions can't be compared, and the route explorer and companion addon of §2a are built from your own import string, not
 from a library version. The armory (§3): the bot can't prove a character is yours (there is no Battle.net login), so a
 wrong claim is fixed by an officer's **Move to another member…**; it reads no gear, talents, stats or reputations and

@@ -1591,7 +1591,7 @@ class LootMixin:
     # ------------------------------------------------------------ the thread's buttons (the Discord surface's)
     def loot_view(self, reg, session: LootSession, kind: str, drop_id: str | None = None):
         """The buttons a thread line carries: none here — LootSurfaceMixin.loot_view gives a council's lines their
-        persistent LootButtons (Give the reason · Mistake — correct… · Correct… · Distribute · Keep open)."""
+        persistent LootButtons (Give the reason · Mistake — correct · Correct · Distribute · Keep open)."""
         return None
 
     # ------------------------------------------------------------ helpers for callers

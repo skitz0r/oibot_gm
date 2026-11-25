@@ -13,7 +13,7 @@ always shows the state the verbs left:
     edited in place after every write; re-posted at the bottom (the old ones stubbed) when a pick appears that no card
     shows, so the live controls are always on the newest messages;
   · thread LINES for what happened (ticks, kills, companion awards, corrections), with the buttons a line needs
-    (Give the reason · Mistake — correct… · Correct… · Distribute · Keep open), all persistent LootButtons;
+    (Give the reason · Mistake — correct · Correct · Distribute · Keep open), all persistent LootButtons;
   · the end: the summary in the thread, the session card's final state, the starter line edited, the thread archived.
 
 The council sends NO DMs (the DM rule), except one: a companion award arriving after the council ended DMs the officers
@@ -321,8 +321,8 @@ class LootSurfaceMixin:
         return msg
 
     def loot_view(self, reg, session: LootSession, kind: str, drop_id: str | None = None):
-        """The persistent buttons a thread line carries (None: none): Give the reason + Mistake — correct… under a
-        companion award against the bot's pick, Correct… under a conflict or an in-game award with no proposal,
+        """The persistent buttons a thread line carries (None: none): Give the reason + Mistake — correct under a
+        companion award against the bot's pick, Correct under a conflict, Wrong? Fix under an in-game award with no proposal,
         Distribute under ticked drops / the interrupted line, Keep open under the closing notice."""
         if session.origin != "raid":
             return None
@@ -497,7 +497,7 @@ class LootSurfaceMixin:
         """Every minute, per guild: in-game awards held with no council live shortly after one ended → one DM to the
         officers with the link to correct or record them (they must act — and no ad hoc prompt when that is all that
         waits); other companion events held while no council is live → one line in the officer channel (roster, else
-        ops; never the public loot log) with "Start an ad hoc run…", edited once the held events went somewhere."""
+        ops; never the public loot log) with "Start an ad hoc run", edited once the held events went somewhere."""
         st = self._surface()["prompts"]
         w = self.feed_waiting(reg)
         live = [s for s in self.loot_sessions(reg) if s.origin == "raid"]
@@ -756,7 +756,7 @@ def loot_op(session: LootSession, ch: dict):
     return ConfigOp(op="loot", field="award", target=session.id, value=ch["drop_id"], member=ch["to"], reason=ch.get("reason") or "")
 
 
-WHY = "why? — press Give the reason… (it becomes the precedent)"
+WHY = "why? — press Give the reason (it becomes the precedent)"
 
 
 def _confirm_view_base():
@@ -773,7 +773,7 @@ class LootChatConfirmView(_confirm_view_base()):
     what changed, and an override never replaces another officer's).
 
     Why a subclass and not ConfigConfirmView itself: the reason of an override can be missing or only the model's guess.
-    Then the line asks "why?" in the reason's place and a third button, Give the reason… (the reason modal), must be
+    Then the line asks "why?" in the reason's place and a third button, Give the reason (the reason modal), must be
     answered before Apply — the reason becomes a precedent, so the bot never records one an officer didn't write. The
     diff is a reply in the thread (not an ephemeral /gm change answer), with CfgApplyButtons like every pending diff."""
 
@@ -836,7 +836,7 @@ class LootChatConfirmView(_confirm_view_base()):
 
     async def press_apply(self, interaction: discord.Interaction) -> None:
         if any(c.get("inferred") for c in self.changes):
-            await interaction.response.send_message("Give the reason first (Give the reason…) — it becomes a precedent, so it has to be yours.", ephemeral=True)
+            await interaction.response.send_message("Press Give the reason first. It becomes a precedent, so it has to be yours.", ephemeral=True)
             return
         self.req.ops = [loot_op(self.session, c) for c in self.changes]  # with the reasons as given
         await super().press_apply(interaction)

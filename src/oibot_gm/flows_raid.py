@@ -111,8 +111,8 @@ async def with_run(interaction: discord.Interaction, reg: Registry, *, title: st
 # ---------------------------------------------------------------- /raid open
 
 class OpenWizard(Wizard, LineupBlock):
-    """Raid → Next run · Another upcoming run… (a select of the other upcoming runs of every recurring schedule) ·
-    Ad hoc run… (a pickup template, or a one-off — then day · hour · minute selects; roster redesign §5).
+    """Raid → Next run · Another upcoming run (a select of the other upcoming runs of every recurring schedule) ·
+    Ad hoc run (a pickup template, or a one-off — then day · hour · minute selects; roster redesign §5).
     A schedule's night (Next, another upcoming one, or a one-off minute rc.which_run calls scheduled) prints the
     server's box 11 (consequences.open_box_for — the site's open routes print the same). A one-off (ADHOC_SCHEDULE)
     builds its lineup on flows_lineup.LineupBlock, then Locks and Rosters beside "What this makes"
@@ -198,7 +198,7 @@ class OpenWizard(Wizard, LineupBlock):
         self.draft["raid"] = values[0]
         await self.shortlist(interaction)
 
-    # ---- layer 1: Next run · Another upcoming run… · Ad hoc run…
+    # ---- layer 1: Next run · Another upcoming run · Ad hoc run
     async def shortlist(self, interaction: discord.Interaction) -> None:
         ups = self.upcoming()
         self.draft["day0"] = self.reg.now_local().date()

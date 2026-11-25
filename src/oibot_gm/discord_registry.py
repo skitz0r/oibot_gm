@@ -713,7 +713,7 @@ def application_consequence(reg: Registry, a, accept: bool) -> list[str]:
 
 async def application_decide(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None = None) -> None:
     """The ONE confirm screen for an application decision (wizard.Wizard.decide): the consequence, then Accept /
-    Accept with a note… / Back (Decline likewise — the note is the old DeclineModal's box, now on both verdicts). The
+    Accept with a note / Back (Decline likewise — the note is the old DeclineModal's box, now on both verdicts). The
     card's buttons and /roster applicant both open it (`note`: the command's typed note, used by the plain press). The
     write is `client_decide` → the client's decide path; the officer check is re-run at every press."""
     from .wizard import Wizard

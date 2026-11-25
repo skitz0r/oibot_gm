@@ -8,7 +8,7 @@ from code (NewsMixin.proposal_consequence → news.consequence):
 - dismiss (D34: the same screen): "nothing changes, and the review is told not to propose it again"; Withdraw approval
   when it is approved (§2.7).
 
-`[Approve] [Approve with a note…] [Back]`; the note's Submit IS the write. The press re-checks officer standing (and the
+`[Approve] [Approve with a note] [Back]`; the note's Submit IS the write. The press re-checks officer standing (and the
 owner, for a game-data approval) on every press; the write is NewsMixin.decide_proposal, the one verb every surface calls.
 A refusal (already decided by someone else — named with the time —, the owner-only rule, a shared game version) finishes
 the screen AND redraws the card, so a stale card catches up. No edit-before-approve (D35)."""

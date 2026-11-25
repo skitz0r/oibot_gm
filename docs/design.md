@@ -1071,7 +1071,7 @@ guild (taken at connect, `?g=`); `publish(topic, guild)` reaches only that guild
 unchanged, so two guilds holding one run key never wake each other's boards. **Images and Discord links:**
 `/img/raid/<rid>.png?g=<key>` (else the cookie, else the only guild; several and none named → the profile's defaults,
 never "the first guild"; the cache key holds profile, name, size and lockout, K15); `raid_views.raid_thumb_url(reg,
-rid)`, `board_url(reg, ev)` (`/app/rosters?g=<key>#run-<key>`) and `discord_pool._site(reg, path)` carry the key.
+rid)`, `raid_views.event_url(reg, ev)` (`/app/events/<key>?g=<key>`, phase 5: every Discord link to an event) and `discord_pool._site(reg, path)` carry the key.
 **Homepage and not-a-member page** (`landing_page(infos)`, `not_member_page(infos)` over `guild_infos()` =
 `public_card` per guild in ordered() order): one guild — the old pages byte for byte (a golden test), none — the
 generic card (K22); several — the servers side by side (a grid that stacks at phone width), each with its icon, name,
@@ -2170,7 +2170,7 @@ new `badge` prop carries the test badge; the feed below). Config's Test bench ca
 
 **Discord.** `/gm test compose` (TestComposeWizard: class → spec → count, repeat; the review line "3 to add · 2 to
 remove" from `flows_test.compose_diff` against the live bench at Save; counts are preset selects capped by
-`Registry.TEST_MAX`) and `/gm test comp` (TestCompWizard: raid → Try a comp → `board_url`). `/gm test clear` keeps the
+`Registry.TEST_MAX`) and `/gm test comp` (TestCompWizard: raid → Try a comp → `raid_views.event_url`). `/gm test clear` keeps the
 `decide` screen; its consequence is now "Cancels 1 test run, deletes 12 puppets, analytics cards resume."
 (`flows_misc.test_clear_consequence`, the site reads the same lines). `/gm test answer` lists test runs only and, once
 locked, answers the puppets' open asks.
@@ -6122,7 +6122,62 @@ board) instead of solving it (`event_board_preview(complete_boards=True)`, Auto-
 Not placed. Auto-fill groups places them now the way the lock would." and Not placed says "Nobody here is placed yet.
 The lock seats them where a seat is open, unless they are kept off."
 
-**Later phases** (spec §9): the Discord wizards (phase 5, closing the two `PARITY_PENDING` rows and the role switch's
-`RUN_SWITCH_DISCORD_PENDING`) and the words (phase 6). Phases 1 and 2's tests:
+**Phase 5 built (2026-11-25): Discord.** Spec §7, §7b and §9 item 5; plan `docs/superpowers/plans/2026-11-25-discord-events.md`.
+Every verb the Events, Schedules and Raids pages gained in phases 3–4 now has its Discord screen, and every Discord confirm
+prints the server's box. `Wizard.decide_box(box, do=, refresh=, note=, extra=, back=, hint=, embed=)` puts a
+`consequences.box` on one screen as given: the title, the diff lines, the sentences, then the box's verb (red iff
+`danger`), `<verb> with a note` when the write takes one (a Form whose Submit is the write), the read-only extras and Back;
+a refusal box is its sentence and Back alone. At the press and at the note's submit `refresh()` builds the box again: a
+different `fp` is shown again under `CONFIRM_WORDS["changed"]` and nothing is written, a refresh that refuses is shown as its
+refusal box, and an awaitable refresh (a thread) runs after `working` has answered the press. `embed` sits under that screen
+only: the lock's Preview lock is the same box with the roster it would build, so its re-check is decide_box's own.
+`wizard.button_label` drops a trailing ellipsis wherever Discord renders a button (`Wizard.button`, the persistent
+`RunButton` / `LootButton` / `CfgApplyButton`), and `wizard.lint` plus `tests/test_discord_labels.py` refuse one; the words
+shared with the site (`RUN_WORDS`, `rc.ACTION_LABELS`, the armory actions) keep the site's "…" (D1).
+
+*The commands.* `/raid reschedule`, `/raid edit` and `/raid lineup` (no argument: the event, day and time are picked
+inside) are `flows_event.py`: `pick_event` lists the live events by title, `EventWizard` moves one (day from the guild's
+date, hour and minutes in 15-minute steps, `rc.move_start`, box 3), edits its own settings (a hub with one "Change a
+setting" select, a screen per setting, the five weights as one modal of five selects, box 3 with `edit=True`) and edits
+its lineup on `flows_lineup.LineupBlock` (up to four raids, rosters and starts per step, box 4). `/raid open` builds a
+one-off's lineup on the same block beside "What this makes" (`event_view.new_event_view`) and prints box 11 for a
+schedule's night through `consequences.open_box_for(reg, rid, preview, here=)`; asked in a server channel with no signup
+channel set, the sheet posts there (`no_channel_sentence`, `guild_routing.in_server_channel`); a raid with no night to
+open offers *Add a schedule*. `/gm config raid`'s schedule section hands off to `flows_schedule.py` (flow `schedule`): a
+list, one schedule's hub and its boxes 13–17 saved through configops like the site's editor, the schedule's rev read with
+the box and re-described under `config_lock` at the write; the raid wizard's own Save is box 19 (D4). Lock, Cancel event,
+Remind and End print `lock_box`, `cancel_box`, `remind_box` and `LootMixin.end_box` (D3: a plain Cancel event posts the
+channel line with no reason, *Cancel event with a note* opens the form). `/raid set` prints
+`consequences.member_action_box` (the row ⋮ menu's box on the site too) and picks the spec for Join / Bench: the role
+switch, refused once the member holds a seat of another role on the locked roster (`rc.seated_switch_refusal`). Every
+Discord link to an event is `raid_views.event_url` (`/app/events/<key>`; a member who is not an officer lands on their
+Me row).
+
+*Parity.* `configops.PARITY_PENDING` is empty: `run_reschedule` is `flow:raid_reschedule` (and `/raid edit`),
+`run_lineup` is `flow:raid_lineup`, and the role switch is `flow:raid_set` (`RUN_SWITCH_DISCORD_PENDING` is gone). The
+board's ops (`run_strategy`, `run_autofill`, `run_board`, `run_move`, `run_propose`) stay the site's by design
+(`BY_DESIGN_EXEMPT`): an officer drags names on the Events page, Discord shows the roster the lock made (tweak C).
+`tests/test_confirm_readability.py` renders `member_action_box` and `open_box_for` with the other generators. Shared words
+moved into `PAGE_WORDS`: `kinds` (a schedule's Repeats) and `what_this_makes`. The officers' one loot DM after a council
+ended names the run in words (`LootMixin.loot_where`), never its key.
+
+*Decisions (the owner may disagree).* D1: the site keeps its ellipses; Discord drops them through `button_label`. D2: no
+Reschedule button on a card (the officer row is full); three new `/raid` subcommands instead, 15 of 25. D3: a plain Cancel
+event cancels with no reason and posts the channel line; the note button opens the form. D4: the schedule section of
+`/gm config raid` is a hand-off to the schedule wizard, which saves through configops on boxes 13–17; the raid wizard's
+Save is box 19. D5: Edit event is a hub, one screen per setting, the five weights one modal; the editors' tooltips (all
+over 100 characters) are left out of option descriptions.
+
+*Told to the owner.* The officer guard on the run cards is `is_officer_anywhere` at `PRIV_ROUTING`, and `lock_run` takes
+no `by_id` (both older than this phase). The lock box's `fp` ignores a joiner past full rosters, the same on the site.
+"Play another character" after the lock still reseats, and now says the role change first. Bench with an explicit
+same-role spec on a seated member changes the signup's spec, not the seat's.
+
+Phase 6 still owes the words: "run" renamed to "event" in the existing strings, the activity log's code nouns, and the
+older pages' Apply N changes. Tests: `tests/test_wizard_box.py`, `tests/test_discord_labels.py`,
+`tests/test_discord_boxes.py`, `tests/test_flows_event.py`, `tests/test_flows_lineup.py`, `tests/test_flows_open.py`,
+`tests/test_flows_schedule.py`, `tests/test_set_box.py`, `tests/test_event_links.py`, `tests/test_parity_matrix.py`.
+
+**Later phases** (spec §9): the words (phase 6). Phases 1 and 2's tests:
 `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`, `tests/test_minimums.py`, `tests/test_minimums_solver.py`,
 `tests/test_officer_raids.py`.

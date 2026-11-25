@@ -9,7 +9,7 @@ replayed when a council opens) and the guild's 'no run live' state shows it.
   drop  → tick (unknown items by name, learned) + auto-distribute ~20 s after the boss's last drop (per raid switch)
   loot  → matched to ONE copy of the item under the session lock: the open copy whose pick names the recipient →
           confirm; a copy an officer already recorded to them → already recorded; else the first open copy: someone
-          else → the ledger row at once, precedent pending a reason (Give the reason / Mistake — correct…), no
+          else → the ledger row at once, precedent pending a reason (Give the reason / Mistake — correct), no
           proposal → recorded as a manual award; every copy recorded to others → a conflict line (Correct?)
   kill  → the boss is down (and starts the auto-distribute wait)
   hello/heartbeat → presence (live / quiet / disconnected, feed_presence)
