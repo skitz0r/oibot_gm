@@ -141,7 +141,7 @@ class RaidSchedulerMixin:
             return
         warned.add(key)
         await self.ops.emit(reg.config, "warn", f"{schedule_name(sched)} did not open its night of {reg.local12(start)}: "
-                            f"{run_title(reg, other)} already starts then. That run stands for the night. Cancel it if the "
+                            f"{run_title(reg, other)} already starts then. That event stands for the night. Cancel it if the "
                             "schedule's own sheet should open instead.")
 
     async def _warn_gone_raids(self, reg, now) -> None:
@@ -160,7 +160,7 @@ class RaidSchedulerMixin:
             if not gone or (key in warned and now - warned[key] < timedelta(hours=1)):
                 continue
             warned[key] = now
-            await self.ops.emit(reg.config, "warn", f"{schedule_name(s)} opens no runs: {rc.gone_sentence(reg, gone)} "
+            await self.ops.emit(reg.config, "warn", f"{schedule_name(s)} opens no events: {rc.gone_sentence(reg, gone)} "
                                                     "Change its raids on the Schedules page, or remove it there.")
 
     async def _close_run(self, reg, rs, ev, now, exhausted_posted: set) -> None:

@@ -74,19 +74,11 @@ WORDS_PENDING: set[str] = {
     "frontend/src/components/board/FillModal.tsx", "frontend/src/components/board/SheetCard.tsx",
     "frontend/src/components/board/shared.tsx", "frontend/src/components/loot/History.tsx",
     "frontend/src/components/loot/Tonight.tsx", "frontend/src/pages/Agents.tsx", "frontend/src/pages/Config.tsx",
-    "frontend/src/pages/Me.tsx",
-    "src/oibot_gm/discord_bot.py", "src/oibot_gm/discord_feed.py",
+    "frontend/src/pages/Me.tsx", "src/oibot_gm/discord_bot.py", "src/oibot_gm/discord_feed.py",
     "src/oibot_gm/discord_loot.py", "src/oibot_gm/discord_loot_surface.py", "src/oibot_gm/discord_news.py",
-    "src/oibot_gm/discord_pool.py", "src/oibot_gm/discord_raid.py",
-    "src/oibot_gm/discord_registry.py", "src/oibot_gm/flows_config.py", "src/oibot_gm/flows_loot.py",
-    "src/oibot_gm/flows_misc.py", "src/oibot_gm/flows_raid.py", "src/oibot_gm/flows_register.py",
-    "src/oibot_gm/flows_roster.py", "src/oibot_gm/flows_schedule.py", "src/oibot_gm/flows_test.py",
-    "src/oibot_gm/guild_routing.py",
-    "src/oibot_gm/news.py", "src/oibot_gm/raid_buttons.py",
-    "src/oibot_gm/raid_commands.py", "src/oibot_gm/raid_scheduler.py", "src/oibot_gm/raid_views.py",
-    "src/oibot_gm/testfeed.py",
+    "src/oibot_gm/flows_loot.py", "src/oibot_gm/guild_routing.py", "src/oibot_gm/news.py",
     "src/oibot_gm/web/api_events.py", "src/oibot_gm/web/api_loot.py", "src/oibot_gm/web/api_me.py",
-    "src/oibot_gm/web/app.py", "src/oibot_gm/wizard_opts.py",
+    "src/oibot_gm/web/app.py",
 }
 # a dash in a table cell (under its column's header) is a cell, not an empty state: the Iconography rule keeps icon
 # columns free of words, and "no offspec" beside every row is noise. The empty-state sentence is for a whole list, card or

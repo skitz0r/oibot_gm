@@ -35,7 +35,7 @@ def test_a_schedules_night_ahead_prints_box_11(reg, rs, officer, channel):  # no
     h, bot = harness(reg, rs)
     run(FLOWS["raid_open"](h.command(), reg))
     run(h.pick("Pick the raid", RID))
-    run(h.press(next(b for b in h.buttons() if b.startswith("Next run"))))
+    run(h.press(next(b for b in h.buttons() if b.startswith("Next event"))))
     p = rc.open_preview(reg, rs, RID, None, sched(reg))  # the night the button names
     box = cq.open_box_for(reg, RID, p, here=True)  # asked in a server channel, no signup channel: it posts here
     assert box["verb"] == "Open the sheet"
@@ -51,7 +51,7 @@ def test_a_night_that_changed_under_the_box_is_shown_again(reg, rs, officer, cha
     h, bot = harness(reg, rs)
     run(FLOWS["raid_open"](h.command(), reg))
     run(h.pick("Pick the raid", RID))
-    run(h.press(next(b for b in h.buttons() if b.startswith("Next run"))))
+    run(h.press(next(b for b in h.buttons() if b.startswith("Next event"))))
     reg.set_schedule(sched(reg), {"lock_hours_before": 6}, "t")  # its lock moved while the box was open
     run(h.press("Open the sheet"))
     assert CONFIRM_WORDS["changed"] in h.text and not bot.calls
@@ -64,7 +64,7 @@ def test_a_night_already_open_is_refused_by_its_name(reg, rs, officer, channel):
     h, bot = harness(reg, rs)
     run(FLOWS["raid_open"](h.command(), reg))
     run(h.pick("Pick the raid", RID))
-    run(h.press(f"Next run — {reg.local12(first)}"))
+    run(h.press(f"Next event — {reg.local12(first)}"))
     assert str(cq.already_open_sentence(reg, ev)) in h.text and h.buttons() == ["Back"]
     assert ev.key not in h.text and not bot.calls
 
@@ -74,7 +74,7 @@ def test_a_one_off_with_a_second_raid_opens_one_sheet(reg, rs, officer, channel)
     day = (reg.now_local() + timedelta(days=3)).date().isoformat()
     run(FLOWS["raid_open"](h.command(), reg))
     run(h.pick("Pick the raid", RID))
-    run(h.press("Ad hoc run"))  # no pickup template: straight to the day · hour · minute form
+    run(h.press("One-off event"))  # no pickup template: straight to the day · hour · minute form
     assert [o.value for o in h.modal._items["minute"].options] == ["0", "15", "30", "45"]
     run(h.submit(h.modal, day=day, hour="20", minute="0"))
     assert h.selects() == ["Pick a step", "Add a raid"]
@@ -103,7 +103,7 @@ def test_a_one_off_on_a_schedules_night_is_that_night_and_its_box(reg, rs, offic
     h, bot = harness(reg, rs)
     run(FLOWS["raid_open"](h.command(), reg))
     run(h.pick("Pick the raid", RID))
-    run(h.press("Ad hoc run"))
+    run(h.press("One-off event"))
     local = nxt.astimezone(reg.tz)
     run(h.submit(h.modal, day=local.date().isoformat(), hour=str(local.hour), minute=str(local.minute)))
     p = rc.open_preview(reg, rs, RID, nxt.isoformat(), sched(reg))
@@ -119,7 +119,7 @@ def test_a_one_off_refused_shows_its_box_and_back(reg, rs, officer, channel, mon
     day = (reg.now_local() + timedelta(days=3)).date().isoformat()
     run(FLOWS["raid_open"](h.command(), reg))
     run(h.pick("Pick the raid", RID))
-    run(h.press("Ad hoc run"))
+    run(h.press("One-off event"))
     run(h.submit(h.modal, day=day, hour="20", minute="0"))
     run(h.press("Review changes"))
     start = rc.open_when(reg, RID, f"{day} 20:00", rc.ADHOC_SCHEDULE)[0]
@@ -164,7 +164,7 @@ def test_a_night_asked_in_a_dm_says_the_sheet_waits_and_posts_nothing(reg, rs, o
     h, bot = harness(reg, rs)
     run(FLOWS["raid_open"](h.command(), reg))
     run(h.pick("Pick the raid", RID))
-    run(h.press(next(b for b in h.buttons() if b.startswith("Next run"))))
+    run(h.press(next(b for b in h.buttons() if b.startswith("Next event"))))
     assert "No signup channel is set, so the sheet waits until one is." in h.text and NO_CHANNEL_HERE not in h.text
     run(h.press("Open the sheet"))
     assert [c[0] for c in bot.calls] == ["open_run_and_post"] and "✅ Opened" in h.text

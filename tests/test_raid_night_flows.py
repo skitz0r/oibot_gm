@@ -155,7 +155,7 @@ def test_more_than_three_templates_become_one_select(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Ad hoc run")
+        await h.press("One-off event")
         assert "Pick a template" in h.selects() and not any(b.endswith("pick a time") for b in h.buttons())
         await h.pick("Pick a template", "pug2")
         assert h.modal is not None and "Pug 2" in h.modal.title
@@ -170,15 +170,15 @@ def test_another_upcoming_run_pages_by_week(reg, rs, officer, channel):  # noqa:
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Another upcoming run")
+        await h.press("Another coming event")
         assert "Week of" in h.text and "← Earlier week" in h.buttons() and "Later week →" in h.buttons()
-        first = [o.value for o in next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run").options]
+        first = [o.value for o in next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the event").options]
         assert len(first) <= 14
         await h.press("Later week →")
-        second = [o.value for o in next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run").options]
+        second = [o.value for o in next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the event").options]
         assert second and not set(first) & set(second)
         seen["pick"] = second[0]
-        await h.pick("Pick the run", second[0])
+        await h.pick("Pick the event", second[0])
         await h.press("Open the sheet")
     run(go())
     assert bot.calls[0][0] == "open_run_and_post" and bot.calls[0][2].isoformat() == seen["pick"].partition("|")[0]
@@ -192,7 +192,7 @@ def test_a_one_off_at_a_scheduled_minute_opens_as_that_run(reg, rs, officer, cha
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Ad hoc run")
+        await h.press("One-off event")
         local = nxt.astimezone(reg.tz)
         await h.submit(h.modal, day=local.date().isoformat(), hour=str(local.hour), minute=str(local.minute))
         assert "The sheet opens now" in h.text and "one-off event" not in h.text  # box 11: that schedule's night

@@ -167,7 +167,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         _soft, hard, confirm = run_times(reg, ev, team)
         confirms = rc.run_confirms(reg, ev)
         e.title = f"{tag}{name}"
-        e.description = (f"<t:{unix}:F> · <t:{unix}:R>" + "".join(f"\nthen {reg.follow_words({'raid': t.get('instance'), 'rosters': t.get('rosters') or 1})} <t:{int(rc.dict_start(reg, ev, t).timestamp())}:t>" for t in rc.later_dicts(reg, ev)) + f"\n**{len(ins)}** / {size * want}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
+        e.description = (f"<t:{unix}:F> · <t:{unix}:R>" + "".join(f"\nthen {reg.follow_words({'raid': t.get('instance'), 'rosters': t.get('rosters') or 1})} <t:{int(rc.dict_start(reg, ev, t).timestamp())}:t>" for t in rc.later_dicts(reg, ev)) + f"\n**{len(ins)}** / {size * want}" + (f" · {runs} rosters" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
                          + f"\n🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
         by_cls: dict[str, list] = {}
         for sg in ins:
@@ -182,7 +182,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         failed = (f"Lock failed {reg.local12(ev.lock_tried_at, '%a %I:%M %p')} — the sheet stays open, retrying · " if ev.lock_error and ev.lock_tried_at
                   else "Lock failed — the sheet stays open, retrying · " if ev.lock_error else "")
         pins = rc.pin_counts(ev)  # numbers only (who is officer data): 'Pinned: 2 · Kept off: 1'
-        e.set_footer(text=failed + ("test run · " if test else "") + (rc.FIRST_COME.capitalize() + " · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me"
+        e.set_footer(text=failed + ("test event · " if test else "") + (rc.FIRST_COME.capitalize() + " · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me"
                      + (f" · {pins}" if pins else ""))
         return e, sheet_view(reg, ev.key)
     # locked | done: the roster(s) as the board shows them, a group per column
@@ -215,7 +215,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     rows_field()
     if state != "locked":
         return e, None
-    e.set_footer(text=("test run · " if test else "") + ("Rostered? answer your DM." if rc.run_confirms(reg, ev)
+    e.set_footer(text=("test event · " if test else "") + ("Rostered? answer your DM." if rc.run_confirms(reg, ev)
                                                        else "Rostered? you're in — press Can't make it if that changes."))
     v = discord.ui.View(timeout=None)
     v.add_item(SignupButton(reg.key, ev.key, "cant"))
@@ -269,7 +269,7 @@ def _header(reg: Registry, ev: rc.RaidEvent, title: str, lines: list[str]):
     ui = discord.ui
     unix = int(ev.start.timestamp())
     if rc.is_test_run(reg, ev):
-        title = f"🧪 Test run · {title}"
+        title = f"🧪 Test event · {title}"
     if getattr(reg, "many_guilds", False):
         title = f"{discord.utils.escape_markdown(str(reg.config.name))} · {title}"
     text = f"## {title}\n<t:{unix}:F> · <t:{unix}:R>" + ("\n" + "\n".join(lines) if lines else "")
@@ -495,7 +495,7 @@ def boss_lines(reg: Registry, ev: rc.RaidEvent, i: int) -> list[str]:
     mine = per.get(i) or per.get(None) or prog
     out = [f"☠ Bosses {mine['done']}" + (f" / {mine['total']}" if mine["total"] else "")]
     if i == 0 and prog["all_down"]:
-        out.append("**All bosses down — End the run?**")
+        out.append("**All bosses down — End the event?**")
     return out
 
 
@@ -546,7 +546,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
     for r in h["roles"]:
         have, need = r["have"], r["need"]
         roles.append(f"{ico('role', r['role'])} " + (f"**{have}**/{need}" if need and have < need else f"{have}" + (f"/{need}" if need else "")))
-    head = _header(reg, ev, f"Roster health · {reg.raid_def(ev.instance).get('name', ev.instance)}", [f"**{n}** / {seats}" + (f" · {runs} runs" if runs > 1 else "") + (f" · {subs} bench" if subs else "") + "   " + "   ".join(roles)])
+    head = _header(reg, ev, f"Roster health · {reg.raid_def(ev.instance).get('name', ev.instance)}", [f"**{n}** / {seats}" + (f" · {runs} rosters" if runs > 1 else "") + (f" · {subs} bench" if subs else "") + "   " + "   ".join(roles)])
     body = []
     reason = rc.split_reason(reg, players, per, reg.role_bounds(ev.instance, per))  # per run, as rc.run_split_reason
     if reason:  # the headcount allows more runs than the tanks/healers do (or not even one meets its minimums)
@@ -557,7 +557,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
         hints = [x["hint"] for x in rc.cover_hints(short)] if officer else []  # names of who could cover: officers only; "not on the sheet" once
         body.extend("-# " + x for x in hints)  # a line each ("Could tank: … · …" has its own dots); `-#` only renders at the start of a line
     for fname, fshort in rc.parts_short(reg, ev):  # each later raid's tanks and healers, counted on this sheet's Join answers
-        body.append(f"**{fname} follow-on** short " + "   ".join(f"{ico('role', r)} {k}" for r, k in fshort.items()))
+        body.append(f"Later raid **{fname}** short " + "   ".join(f"{ico('role', r)} {k}" for r, k in fshort.items()))
     missing = [b for b in h["buffs"] if not b["providers"]]
     if missing:
         body.append("⛔ " + " ".join(ico("buff", b["id"]) for b in missing if ico("buff", b["id"])))
@@ -939,7 +939,7 @@ def loot_status_text(reg: Registry, session, ev, *, judging: dict | None = None,
         if session.drop_list:
             bits.append("everything ticked is recorded")
         elif 0 < hours < 24:  # the header's native stamp carries a start further out
-            bits.append(f"run starts in {round(hours)} h" if hours >= 1.5 else f"run starts in {max(1, round(hours * 60))} min")
+            bits.append(f"event starts in {round(hours)} h" if hours >= 1.5 else f"event starts in {max(1, round(hours * 60))} min")
         else:
             bits.append("waiting for drops")
     if session.scores_only or not provider:  # the banner (§2.7): picks by score, no model call

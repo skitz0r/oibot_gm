@@ -35,11 +35,11 @@ __all__ = ["RaidContext", "RaidMixin", "RaidSchedulerMixin", "BotProto", "regist
            "_aura_line", "_group_block", "_group_summaries", "_header", "_raidwide_line", "_role_counts"]
 
 
-NO_TEST_CHANNEL = ("No signup channel is set, so a test run's sheet has nowhere to go: set the signup channel (Config › Channels, "
-                   "or /gm config signup-channel), or use /gm test run in a server channel.")
-UNREACHABLE_TEST_CHANNEL = ("The signup channel is set but the bot can't reach it (deleted, or hidden from the bot), so a test run's sheet "
+NO_TEST_CHANNEL = ("No signup channel is set, so a test event's sheet has nowhere to go: set the signup channel (Config › Channels, "
+                   "or /gm config signup-channel), or use `/gm test run` in a server channel.")
+UNREACHABLE_TEST_CHANNEL = ("The signup channel is set but the bot can't reach it (deleted, or hidden from the bot), so a test event's sheet "
                             "has nowhere to go: pick the signup channel again (Config › Channels, or /gm config signup-channel), "
-                            "or use /gm test run in a server channel.")
+                            "or use `/gm test run` in a server channel.")
 
 
 def bench_channel_refusal(reg, get_channel) -> str | None:
@@ -191,7 +191,7 @@ class RaidMixin:
         ev = self.raids.store(reg).events.get(run_key) if run_key else None
         names = d["names"]
         who = ", ".join(names[:10]) + (f" +{len(names) - 10}" if len(names) > 10 else "")
-        head = f"🧪 {guild_prefix(reg)}**{run_title(reg, ev)}** (test run) · " if ev is not None else f"🧪 {guild_prefix(reg)}"
+        head = f"🧪 {guild_prefix(reg)}**{run_title(reg, ev)}** (test event) · " if ev is not None else f"🧪 {guild_prefix(reg)}"
         text = head + testfeed.digest_line(d["counts"]) + f"\n-# {who}\n-# Answer as them below, with `/gm test answer`, or on the site's Test bench (its feed shows each DM)."
         view = None
         if ev is not None and ev.state in ("open", "locked"):
@@ -348,7 +348,7 @@ class RaidMixin:
         team = rc.run_team(reg, ev)
         if team.get("test") and not getattr(m, "test", False) and str(m.discord_id) != str(team.get("test_by") or ""):
             # a rehearsal: its pool is the puppets plus the officer running it — never a real member (web, chat, MCP alike)
-            raise RegistryError(f"{run_title(reg, ev)} is a test run: only test members and the officer running it can answer it")
+            raise RegistryError(f"{run_title(reg, ev)} is a test event: only test members and the officer running it can answer it")
         label = run_label(reg, ev).replace("**", "")  # plain text: the line is shown in Discord replies and on the web alike
         who = "" if mine else f"{m.display_name}: "
         released = status == "out" and await self.release_asks_of(reg, rs, ev, m, "answered No thanks")  # their ask covers nothing now
@@ -553,7 +553,7 @@ class RaidMixin:
                 if ev.state == "locked":  # a cancel during the fan-out: the run's fill state stays as the cancel left it
                     ev.fill_state = "asking"
                 ev.log.append(f"fill ({by}): asked {', '.join(a.display_name + (' (site)' if a.channel == 'web' else '') for a in sent)}"
-                              + ("" if ev.state == "locked" else f" — the run was {ev.state} meanwhile; nobody after that was asked"))
+                              + ("" if ev.state == "locked" else f" — the event was {ev.state} meanwhile; nobody after that was asked"))
                 rs.save(ev, f"fill asked {len(sent)}")
             elif batch and ev.state != "locked":
                 rs.save(ev, f"fill stopped: the run is {ev.state}")  # the unsent asks closed by _send_asks
@@ -633,7 +633,7 @@ class RaidMixin:
         label = run_label(reg, ev)
         if ev.state == "cancelled":
             return f"Cancelled — {label} was cancelled."
-        return f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — the run is {ev.state} now."
+        return f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — the event is {ev.state} now."
 
     def plan_lock(self, reg, key: str) -> asyncio.Lock:
         """One officer send per run at a time (two presses of Ask never ask anyone twice). Keyed (guild, run): two
@@ -845,7 +845,7 @@ class RaidMixin:
                 cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
                 gone.append(t["key"])
         if gone:
-            reg.save_config(f"runs closed: {gone}", notify=False)
+            reg.save_config(f"events closed: {gone}", notify=False)
 
     # ---- lock → roster(s) → confirmations
     def officer_channel(self, reg, ev=None):
@@ -1033,8 +1033,8 @@ class RaidMixin:
                     warned: set = self.__dict__.setdefault("_follow_lock_warned", set())
                     if (reg.key, fev.key) not in warned:
                         warned.add((reg.key, fev.key))
-                        await self.ops.emit(reg.config, "warn", f"{run_title(reg, fev)}: follow-on not locked with {run_title(reg, first)}: {why}")
-                    tails.append(f"follow-on not locked: {why}")
+                        await self.ops.emit(reg.config, "warn", f"{run_title(reg, fev)}: later raid not locked with {run_title(reg, first)}: {why}")
+                    tails.append(f"later raid not locked: {why}")
                     break
                 tails.append(line)
                 if fev.state != "locked":  # its solve failed: it stays open with its lock_error, the parts after it wait
@@ -1236,7 +1236,7 @@ class RaidMixin:
         state = ev.state
         async with self.board_lock(reg, ev.key):
             if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state or (expect_state and ev.state != expect_state):
-                raise rc.BoardChanged("The run locked while you were dragging — the board is the roster now; check it and move again." if expect_state == "open" and ev.state != "open" else rc.BoardChanged().args[0])
+                raise rc.BoardChanged("The event locked while you were dragging — the board is the roster now; check it and move again." if expect_state == "open" and ev.state != "open" else rc.BoardChanged().args[0])
             pins_before = dict(ev.pins)
             at_before = {n: gi for gi, g in enumerate(rc.board_layout(reg, ev)) for n in g}
             groups = rc.apply_move(reg, ev, name, to)
@@ -1277,7 +1277,7 @@ class RaidMixin:
         id) decides whether it is the member's own callout, as in set_answer. Returns the line to show."""
         t = rc.run_team(reg, ev)
         if t.get("test") and not getattr(m, "test", False) and str(m.discord_id) != str(t.get("test_by") or ""):
-            raise RegistryError(f"{run_title(reg, ev)} is a test run: only test members and the officer running it can answer it")
+            raise RegistryError(f"{run_title(reg, ev)} is a test event: only test members and the officer running it can answer it")
         co = rc.callout(reg, rs, ev, m, t, note)
         released = await self.release_asks_of(reg, rs, ev, m, "called out")
         when = f"{co.hours_before:.0f}h before{', after lock' if co.late else ''}"
@@ -1502,7 +1502,7 @@ class RaidMixin:
         ev = rc.open_run(reg, rs, raid, start, by=by, cutoffs=cut)
         if target is not None and not ev.message_id:
             await self.post_sheet(reg, rs, ev, target)
-        await ops_mod.audited(self.ops, reg, by, f"test bench: opened test run {run_title(reg, ev)} (lock in {start_in - lock_in} min)", via=via, level="warn", by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"test bench: opened test event {run_title(reg, ev)} (lock in {start_in - lock_in} min)", via=via, level="warn", by_id=by_id)
         return ev, target
 
     async def cancel_run(self, reg, rs, ev, by: str, reason: str | None, *, notify: bool = True, by_id: int | None = None, via: str = "discord",
@@ -1545,7 +1545,7 @@ class RaidMixin:
             await self.edit_ask_card(reg, cid, mid, f"Cancelled — {label} was cancelled.")
         await self.refresh_sheet(reg, ev)
         await self.refresh_cards(reg, ev)
-        await self.post_run_update(reg, ev, f"🛑 run cancelled by {by}" + (f": {reason}" if reason else "")
+        await self.post_run_update(reg, ev, f"🛑 event cancelled by {by}" + (f": {reason}" if reason else "")
                                    + (f" · confirmations withdrawn for {len(waiting)}" if waiting else "") + (f" · {len(fills)} fill ask(s) closed" if fills else ""))
         posted = False
         sig = self.get_channel(ev.channel_id) if notify and ev.channel_id else None
@@ -1562,7 +1562,7 @@ class RaidMixin:
                 if fev is not ev and fev.state not in ("done", "cancelled"):
                     await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False)
                     gone.append(run_title(reg, fev))
-        tail = (f" and its follow-on {gone[0]}" if len(gone) == 1 else f" and its follow-ons {', '.join(gone)}") if gone else ""
+        tail = (f" and its later raid {gone[0]}" if len(gone) == 1 else f" and its later raids {', '.join(gone)}") if gone else ""
         if audit:
             await ops_mod.audited(self.ops, reg, by, f"cancelled {run_title(reg, ev)}{tail}" + (f": {reason}" if reason else ""), via=via, level="warn", by_id=by_id)
         sheet = not rc.is_follow(ev)  # a later raid reached here once its first raid has closed: no sheet, no channel of its own
@@ -1697,7 +1697,7 @@ class RaidMixin:
                 if fills:
                     rs.save(p, f"removed from the lineup: {len(fills)} ask(s) closed")
             for a in fills:
-                await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id, f"{raid} was taken out of the {name} run, so this ask is closed.")
+                await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id, f"{raid} was taken out of the {name} event, so this ask is closed.")
             await self.refresh_cards(reg, p)
         moved = []
         for key, at in change.moved.items():
@@ -1711,7 +1711,7 @@ class RaidMixin:
                                    + (f" · {len(change.told)} who answered see a notice" if change.told else ""))
         await ops_mod.audited(self.ops, reg, by, f"changed {run_title(reg, first)}'s lineup to {now_words}"
                               + (f", removing {', '.join(run_title(reg, p) for p in removed)}" if removed else ""), via=via, by_id=by_id)
-        return [f"The run is now {now_words}."]
+        return [f"The event is now {now_words}."]
 
     async def remind(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
         """Remind the unconfirmed (design B2 levers, D15): re-send the Confirm / Can't DM to everyone rostered whose ask is
@@ -1759,14 +1759,14 @@ class RaidMixin:
                     await self.edit_ask_card(reg, prev[0], prev[1], f"Reminded — see the newer message below for {run_label(reg, ev)}.")
             ask["reminded_at"] = rc.now()
             await asyncio.to_thread(reg.save, m, f"{m.display_name} reminded to confirm {ev.team}")
-        ev.log.append(f"reminded the unconfirmed ({sent} by DM) — {by}" + (f"; stopped, the run is {stopped}" if stopped else ""))
+        ev.log.append(f"reminded the unconfirmed ({sent} by DM) — {by}" + (f"; stopped, the event is {stopped}" if stopped else ""))
         rs.save(ev, f"reminded {sent} by {by}")
         await self.post_run_update(reg, ev, f"🔔 {by} reminded the unconfirmed: {sent} by DM" + (f" · {site} wait on the site" if site else "")
-                                   + (f" · stopped: the run is {stopped}" if stopped else ""))
+                                   + (f" · stopped: the event is {stopped}" if stopped else ""))
         await self.refresh_cards(reg, ev)
         await ops_mod.audited(self.ops, reg, by, f"reminded {sent} unconfirmed on {run_title(reg, ev)}", via=via, by_id=by_id)
         if stopped:
-            return f"Reminded {sent} by DM, then stopped: the run is {stopped}."
+            return f"Reminded {sent} by DM, then stopped: the event is {stopped}."
         return f"Reminded {sent} by DM" + (f"; {site} wait on the site (DMs off)" if site else "") + ". Next reminder possible in an hour."
 
     async def set_autofill_paused(self, reg, rs, ev, paused: bool, *, by: str, by_id: int | None = None, via: str = "discord") -> str:

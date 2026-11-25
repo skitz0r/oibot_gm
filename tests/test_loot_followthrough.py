@@ -130,7 +130,7 @@ def test_the_lock_card_shows_bosses_and_the_end_prompt(council, bosses):
     kill(c, "Warden of Tests")
     card = views.lock_layout(c.reg, c.ev, rc.run_team(c.reg, c.ev), ico, 0, c.rs)
     text = text_of(card)
-    assert "☠ Bosses 2 / 2" in text and "**All bosses down — End the run?**" in text
+    assert "☠ Bosses 2 / 2" in text and "**All bosses down — End the event?**" in text
     btn = end_button(card)
     assert btn.label == "End the event" and not btn.disabled and btn.custom_id == f"runact.{c.reg.key}:{c.ev.key}:end"
     assert "attendance" not in text.lower() and "factor" not in text.lower(), "numbers and icons on Discord — no factor prose"

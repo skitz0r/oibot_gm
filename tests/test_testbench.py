@@ -109,7 +109,7 @@ def test_the_guards_hold_in_the_new_key_space(reg, rs, monkeypatch):
     assert pool == {m.discord_id for m in reg.test_members()} | {TESTER}, "puppets + the run's own tester, nobody else"
     assert 4242 not in pool and {m.discord_id for m, _c in rc.run_regulars(reg, ev)} == pool
     assert real.discord_id == 4242 and tester.discord_id == TESTER
-    with pytest.raises(RegistryError, match="test run"):
+    with pytest.raises(RegistryError, match="test event"):
         run(bot.set_answer(reg, rs, ev, reg.members[4242], "in", None, by="Officer", by_id=OWNER))
     # /raid set: the command's own path, on the only live run — a test run. Since the inbox build (§5.40) the SetWizard
     # offers only what applies (rc.member_actions → rc.on_bench_side): a real member gets no action on a rehearsal at
@@ -145,7 +145,7 @@ def test_puppets_confirm_asks_reach_the_tester_as_one_digest(reg, rs):
         assert await bot.flush_puppet_digests() == 1
     run(go())
     (text, view), = bot.sent[TESTER]
-    assert "10 Confirm asks sent to puppets" in text and "(test run)" in text and ms[0].display_name in text
+    assert "10 Confirm asks sent to puppets" in text and "(test event)" in text and ms[0].display_name in text
     btn = next(c for c in view.children if isinstance(c, TestAnswerButton))
     assert btn.item.label == "Answer as puppets" and btn.item.custom_id == f"testans.{reg.key}:{ev.key}"
     assert all(m.discord_id not in bot.sent for m in ms), "never a DM to a puppet's own (fake) id"
@@ -190,7 +190,7 @@ def test_answer_as_puppets_button_opens_the_answer_wizard_on_that_run(reg, rs, m
 
     async def go():
         await TestAnswerButton(reg.key, b.key).callback(h.card_press())
-        assert h.buttons() == ["Random mix", "One member", "Done"] and "Pick the run" not in h.selects(), "the run is preselected"
+        assert h.buttons() == ["Random mix", "One member", "Done"] and "Pick the event" not in h.selects(), "the run is preselected"
         await h.press("Random mix")
         await h.submit(h.modal, **{"in": "3", "sub": "0", "out": "0"})
     run(go())
@@ -220,7 +220,7 @@ def test_test_run_cards_post_in_the_asking_channel_with_the_test_badge(reg, rs):
     assert bot.officer_channel(reg, ev) is asking, "its health / lock cards post where it was asked for"
     real = rc.open_run(reg, rs, "barrow_deeps", start_in(reg, 600), by="t")
     assert bot.officer_channel(reg, real) is roster, "a real event is untouched"
-    assert "🧪 Test run · Locked" in header_text(_header(reg, ev, "Locked", []))
+    assert "🧪 Test event · Locked" in header_text(_header(reg, ev, "Locked", []))
     assert "🧪" not in header_text(_header(reg, real, "Locked", []))
 
 
@@ -460,7 +460,7 @@ def test_clear_route_previews_the_consequence_then_clears(reg, rs, site):
     ev = open_test_run(reg, rs, test_by=OWNER)
     n = len(reg.test_members())
     r = client.post("/api/test/clear", json={"preview": True}, headers=bearer())
-    assert r.status_code == 200 and r.json()["consequence"][0] == f"1 test run is cancelled, {n} puppets are deleted and the analytics cards resume."
+    assert r.status_code == 200 and r.json()["consequence"][0] == f"1 test event is cancelled, {n} puppets are deleted and the analytics cards resume."
     assert reg.test_members() and ev.state == "open", "a preview writes nothing"
     r = client.post("/api/test/clear", json={}, headers=bearer())
     assert r.status_code == 200 and not reg.test_members() and rs.events[ev.key].state == "cancelled"
@@ -626,7 +626,7 @@ def test_clear_wizard_shows_the_consequence_from_code(reg, rs, officer):
 
     async def go():
         await FLOWS["test_clear"](h.command(), reg)
-        assert f"1 test run is cancelled, {n} puppets are deleted and the analytics cards resume." in h.text
+        assert f"1 test event is cancelled, {n} puppets are deleted and the analytics cards resume." in h.text
         await h.press("Clear the test bench")
     run(go())
     assert not reg.test_members() and rs.events[ev.key].state == "cancelled"
@@ -703,7 +703,7 @@ def test_plain_text_test_ops_are_the_bench_verbs_with_one_audit_line_each(reg, r
     out, lines = plain("comp barrow_deeps")
     assert out.startswith("comp sandbox ") and len(lines) == 1 and lines[0][1].startswith("[chat] Officer: test bench: opened a comp sandbox")
     out, lines = plain("clear")
-    assert "test run(s) cancelled" in out and all(ln.startswith("[chat] Officer: ") for _lvl, ln in lines)
+    assert "test event(s) cancelled" in out and all(ln.startswith("[chat] Officer: ") for _lvl, ln in lines)
     assert sum("test member(s) removed" in ln for _lvl, ln in lines) == 1, "clear's own line, once"
     assert [c[0] for c in spied] == ["test_seed", "test_compose", "test_compose", "test_answer", "test_comp", "test_bench_clear"]
     assert all(c[1] == "chat" and c[2] == OWNER for c in spied), spied

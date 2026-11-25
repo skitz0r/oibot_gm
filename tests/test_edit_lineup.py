@@ -66,7 +66,7 @@ def test_add_reorder_and_remove_keep_part_keys(bot, reg, rs):
     join(reg, rs, first, reg.test_members()[:5])
     bd, xa = rc.event_parts(rs, first)[1:]
     assert edit(bot, reg, rs, first, L(H, "extra_a", BD, "extra_b")) == [
-        "The run is now Hyjal Summit, then Extra A at 9:30 PM, then Barrow Deeps at 11:30 PM, then Extra B."], "the kept raids' new times"
+        "The event is now Hyjal Summit, then Extra A at 9:30 PM, then Barrow Deeps at 11:30 PM, then Extra B."], "the kept raids' new times"
     parts = rc.event_parts(rs, first)
     assert [p.key for p in parts[:3]] == [first.key, xa.key, bd.key], "the kept parts keep their keys, in their new places"
     assert (xa.part, bd.part, parts[3].part, parts[3].instance) == (1, 2, 3, "extra_b")
@@ -283,8 +283,8 @@ def test_an_ask_on_a_removed_raid_closes_under_its_plan_lock_and_its_card_says_s
     monkeypatch.setattr(bot, "edit_ask_card", edit_card)
     edit(bot, reg, rs, first, L(H, "extra_a"))
     assert [a.answer for a in rs.events[bd.key].fill_asks] == ["cancelled", "cancelled"]
-    assert sorted(edited) == [(501, "Barrow Deeps was taken out of the Hyjal Summit run, so this ask is closed."),
-                              (502, "Barrow Deeps was taken out of the Hyjal Summit run, so this ask is closed.")]
+    assert sorted(edited) == [(501, "Barrow Deeps was taken out of the Hyjal Summit event, so this ask is closed."),
+                              (502, "Barrow Deeps was taken out of the Hyjal Summit event, so this ask is closed.")]
 
 
 def test_adding_a_raid_before_it_first_opens_is_allowed_and_said(bot, reg, rs):

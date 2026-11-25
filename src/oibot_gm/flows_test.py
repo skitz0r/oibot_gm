@@ -183,7 +183,7 @@ class TestCompWizard(Wizard):
         if len(self.reg.profile.raids) > 1:
             items.append(self.select("Which raid", wizard_opts.raids(self.reg, current=rid), self.raid_picked))
         items += [self.button("Try a comp", self.go, discord.ButtonStyle.success, disabled=not rid), self.button("Cancel", self.cancel)]
-        await self.show(interaction, f"**{name}** — all {n} test members join a sandbox run two weeks out. It is never posted in Discord; "
+        await self.show(interaction, f"**{name}** — all {n} test members join a sandbox event two weeks out. It is never posted in Discord; "
                                      "On its event page, Auto-fill groups shows the best comp from them.", *items)
 
     async def raid_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
@@ -206,7 +206,7 @@ class TestCompWizard(Wizard):
         from .raid_views import run_title
 
         url = event_url(self.reg, ev)
-        where = f"Open its event page: {url}" if url else "Open it on the site: Members › Test bench › Test runs."
+        where = f"Open its event page: {url}" if url else "Open it on the site: Members › Test bench › Test events."
         await self.finish(interaction, f"🧪 Comp sandbox {run_title(self.reg, ev)}: {len(self.reg.test_members())} test members joined. {where}")
 
 
@@ -251,7 +251,7 @@ class TestAnswerButton(discord.ui.DynamicItem[discord.ui.Button], template=r"tes
         rs = bot.raids.store(reg)
         ev = rs.events.get(self.key)
         if ev is None or ev.state in ("done", "cancelled"):
-            await interaction.response.send_message("That test run is closed.", ephemeral=True)
+            await interaction.response.send_message("That test event is closed.", ephemeral=True)
             return
         await TestAnswerWizard(reg, rs, interaction.user.id, team=ev.team, guard=officer_anywhere_guard(reg)).start(interaction)
 

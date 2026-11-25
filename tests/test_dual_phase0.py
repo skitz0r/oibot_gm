@@ -373,15 +373,15 @@ def test_test_clear_is_the_decide_screen(reg, rs, monkeypatch):
 
     async def test_bench_clear(reg_, by, *, via="discord", by_id=None):  # the verb writes its own audit line (the flow adds none)
         calls.append((by, by_id))
-        await bot.ops.emit(reg_.config, "warn", f"{by}: test bench: 16 test member(s) removed, 1 test run(s) cancelled")
-        return "16 test member(s) removed, 1 test run(s) cancelled"
+        await bot.ops.emit(reg_.config, "warn", f"{by}: test bench: 16 test member(s) removed, 1 test event(s) cancelled")
+        return "16 test member(s) removed, 1 test event(s) cancelled"
 
     bot = card_bot(reg, rs, test_bench_clear=test_bench_clear)
     h = Harness(reg, rs, user=officer_user(), client=bot)
 
     async def go():
         await FLOWS["test_clear"](h.command(), reg)
-        assert "1 test run is cancelled, 16 puppets are deleted and the analytics cards resume." in h.text and h.buttons() == ["Clear the test bench", "Back"]
+        assert "1 test event is cancelled, 16 puppets are deleted and the analytics cards resume." in h.text and h.buttons() == ["Clear the test bench", "Back"]
         assert calls == []
         await h.press("Clear the test bench")
         assert calls == [("Officer", h.user.id)] and "16 test member(s) removed" in h.text and bot.ops.lines[-1][0] == "warn"

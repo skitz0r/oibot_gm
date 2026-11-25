@@ -371,14 +371,14 @@ CHANNEL_KINDS = {"ops": "ops_channel_id", "applications": "applications_channel_
 # what each channel is for — the channels hub, the Config page's Channels card (GET /api/admin/channels) and the Setup card read these
 CHANNEL_LABELS: dict[str, tuple[str, str]] = {
     "registration": ("Registration", "public, read-only: the registration card with its buttons"),
-    "signup": ("Signups", "public: one sheet per run (Join / Bench / No thanks)"),
+    "signup": ("Signups", "public: one sheet per event (Join / Bench / No thanks)"),
     "absences": ("Absences", "public: the I'll be away card; one line per absence"),
     "roster": ("Roster (officers)", "health, lock and fill cards; the loot council's thread"),
     "analytics": ("Analytics (officers)", "one readiness card per raid + the change log"),
     "applications": ("Applications (officers)", "review cards for /apply (defaults to ops)"),
     "ops": ("Ops (officers)", "one line per action the bot takes; plain-text config by @mention"),
     "news": ("News", "where the news webhook posts; the bot keeps the items about our game"),
-    "loot": ("Loot log", "public: one line per confirmed award; empty = each run's updates thread"),
+    "loot": ("Loot log", "public: one line per confirmed award; empty = each event's updates thread"),
 }
 REQUIRED_KINDS = ("ops", "signup")  # without these the bot can't tell anyone anything / can't open a run (the Setup card's red rows)
 CARD_KINDS = ("registration", "absences", "analytics")  # a card the bot posts there (set_channel posts first, then drops the old one)
@@ -433,7 +433,7 @@ def channel_consequences(reg: Registry, kind: str, channel_id: int | None, bot=N
         elif kind == "news":
             out.append(f"News posts in {old} are no longer read.")
         elif kind == "loot":
-            out.append("Award lines go to each run's updates thread instead.")
+            out.append("Award lines go to each event's updates thread instead.")
         return out
     new = channel_name(bot, cid)
     old = channel_name(bot, cur) if cur else None
@@ -976,9 +976,9 @@ class SetupMixin:
         from . import raidcycle as rc
 
         if ev is None or ev.state in ("done", "cancelled"):
-            raise RegistryError("That run is no longer live.")
+            raise RegistryError("That event is no longer live.")
         if not rc.is_test_run(reg, ev):
-            raise RegistryError(f"{views.run_title(reg, ev)} is a real run: test members answer test runs only.")
+            raise RegistryError(f"{views.run_title(reg, ev)} is a real event: test members answer test events only.")
         done: list[str] = []
         if member is not None:
             m = member
@@ -1029,7 +1029,7 @@ class SetupMixin:
                 cancelled.append(views.run_title(reg, ev))
         gone = await asyncio.to_thread(reg.clear_test_members, by)
         await self.cleanup_ephemeral(reg, rs)
-        line = f"{gone} test member(s) removed, {len(cancelled)} test run(s) cancelled" + (f" ({', '.join(cancelled)})" if cancelled else "")
+        line = f"{gone} test member(s) removed, {len(cancelled)} test event(s) cancelled" + (f" ({', '.join(cancelled)})" if cancelled else "")
         await self._test_ops(reg, "warn", f"test bench: {line}", by=by, via=via, by_id=by_id)
         return line
 
@@ -1248,7 +1248,7 @@ class LootLogMixin:
             warned = self.__dict__.setdefault("_loot_log_warned", set())
             if guild_key not in warned:
                 warned.add(guild_key)
-                note = ("The public loot log is on but no loot channel is set — award lines go to each run's updates thread. "
+                note = ("The public loot log is on but no loot channel is set — award lines go to each event's updates thread. "
                         "Pick one with /gm config loot-channel or on the Config page.")
                 ops = getattr(self, "ops", None)
                 if ops is not None:

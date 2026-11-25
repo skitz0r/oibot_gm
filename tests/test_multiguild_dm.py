@@ -524,9 +524,9 @@ def test_dm_text_and_cards_name_the_guild_only_when_there_are_several(duo, reg, 
     ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
     head = raid_views._header(duo.b, ev_b, "You're rostered", [])
     text = head.content if isinstance(head, discord.ui.TextDisplay) else head.children[0].content
-    assert text.startswith("## Duo Guild · 🧪 Test run · You're rostered"), "the guild first, then the test badge (a test run's card, B9)"
+    assert text.startswith("## Duo Guild · 🧪 Test event · You're rostered"), "the guild first, then the test badge (a test run's card, B9)"
     single = raid_views._header(reg, ev_a, "You're rostered", [])
-    assert (single.content if isinstance(single, discord.ui.TextDisplay) else single.children[0].content).startswith("## 🧪 Test run · You're rostered")
+    assert (single.content if isinstance(single, discord.ui.TextDisplay) else single.children[0].content).startswith("## 🧪 Test event · You're rostered")
 
 
 # ---------------------------------------------------------------- must_apply in a DM

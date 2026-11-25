@@ -254,7 +254,7 @@ def test_the_sheet_and_the_health_card_name_every_later_raid(reg, rs):
     assert [n for n, _ in shorts] == ["Barrow Deeps", "Extra A", "Extra B"]  # nobody joined: every later raid is short
     card = "\n".join(str(ch.content) for ch in rv.health_layout(reg, rs, first, rc.run_team(reg, first), ico).walk_children()
                      if isinstance(ch, discord.ui.TextDisplay))
-    assert all(f"**{n} follow-on** short" in card for n in ("Barrow Deeps", "Extra A", "Extra B"))
+    assert all(f"Later raid **{n}** short" in card for n in ("Barrow Deeps", "Extra A", "Extra B"))
     assert rc.parts_short(reg, rc.event_parts(rs, first)[1]) == []  # a later raid has no later raids of its own
 
 

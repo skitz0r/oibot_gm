@@ -74,7 +74,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
             await reopen_press(interaction, bot, reg, rs, ev)
             return
         if not ev or ev.state in ("done", "cancelled"):
-            await interaction.response.send_message("That run is closed.", ephemeral=True)
+            await interaction.response.send_message("That event is closed.", ephemeral=True)
             return
         team = rc.run_team(reg, ev)
         by = interaction.user.display_name
@@ -87,7 +87,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
                 await bot.refresh_cards(reg, ev)
                 lock_cards = {mid for k, mid in ev.cards.items() if k.startswith("lock:")}
                 if ev.state != "open" and getattr(interaction.message, "id", None) not in lock_cards:  # the open sheet's health card, pressed after lock
-                    await interaction.followup.send("This run has locked, so this card's suggestions are closed — the lock card has the roster and its own Ask.", ephemeral=True)
+                    await interaction.followup.send("This event has locked, so this card's suggestions are closed — the lock card has the roster and its own Ask.", ephemeral=True)
                     return
                 await interaction.followup.send(f"{e} The card shows them as they are now.", ephemeral=True)
                 return
@@ -155,7 +155,7 @@ def sent_words(sent: list) -> str:
     site = [a.display_name for a in sent if getattr(a, "channel", "dm") == "web"]
     return (("Asked " + ", ".join(dm) + " by DM" if dm else "")
             + ("; " if dm and site else "") + (", ".join(site) + " wait on the site (DMs off or the DM failed)" if site else "")
-            + " — their answers post in the run's thread.")
+            + " — their answers post in the event's thread.")
 
 
 # ---------------------------------------------------------------- the ONE confirm screen for lock, cancel and end (§2.3)
@@ -258,7 +258,7 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
         await wiz.finish(i, line)
 
     note = [Field("reason", "Why? (optional)", required=False, paragraph=True, max_length=300,
-                  description="Officers only: the run's thread and the ops feed.", placeholder="never posted in the signup channel")]
+                  description="Officers only: the event's thread and the ops feed.", placeholder="never posted in the signup channel")]
     if rc.cancel_tells_channel(rs, rs.events.get(key) or ev):  # a later raid once its first has finished: no sheet, no channel line
         note.append(Field("notify", "Tell the channel?", [Opt("post", "Post a line in the signup channel", "fixed text, no reason", default=True),
                                                           Opt("quiet", "No line — the sheet and the thread show it")]))
@@ -334,7 +334,7 @@ async def remind_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> N
 async def reopen_press(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
     """The closed card's Reopen (a run ended by mistake, within the hour; never a cancelled run — D19)."""
     if ev is None:
-        await interaction.response.send_message("This run was removed, so it can't be reopened.", ephemeral=True)
+        await interaction.response.send_message("This event was removed, so it can't be reopened.", ephemeral=True)
         return
     why = rc.reopen_refusal(reg, ev)
     if why:
@@ -389,7 +389,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid(?:
                 await interaction.response.send_message("The sheet is still open — press **No thanks** instead.", ephemeral=True)
                 return
             if not ev.seat_of(m):
-                await interaction.response.send_message("You're not rostered for this run, so there is no seat to give up.", ephemeral=True)
+                await interaction.response.send_message("You're not rostered for this event, so there is no seat to give up.", ephemeral=True)
                 return
             await bot.apply_signup(interaction, reg, rs, ev, m, None, "out")
             return
@@ -495,7 +495,7 @@ class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill(?:\.
         rs = bot.raids.store(reg) if reg else None
         ev = rs.events.get(self.key) if rs else None
         if not ev or ev.state in ("done", "cancelled"):
-            await interaction.response.send_message("This run has ended or was cancelled, so there is no seat to answer for.", ephemeral=True)
+            await interaction.response.send_message("This event has ended or was cancelled, so there is no seat to answer for.", ephemeral=True)
             return
         ask = next((a for a in ev.fill_asks if a.discord_id == self.uid and a.open), None)
         if not ask:
@@ -655,7 +655,7 @@ class LootStartButton(discord.ui.DynamicItem[discord.ui.Button], template=r"loot
     (the officer picks the raid and Ad hoc run…; nothing opens before its Confirm)."""
 
     def __init__(self, gk: str | None, what: str = "open"):
-        super().__init__(discord.ui.Button(label="Start an ad hoc run", style=discord.ButtonStyle.primary, custom_id=f"lootstart{_g(gk)}:{what}"))
+        super().__init__(discord.ui.Button(label="Start a one-off event", style=discord.ButtonStyle.primary, custom_id=f"lootstart{_g(gk)}:{what}"))
         self.gk = gk
 
     @classmethod

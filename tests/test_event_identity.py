@@ -486,13 +486,13 @@ def test_a_schedule_with_a_raid_the_game_lacks_opens_nothing_and_warns_hourly(re
     if gone == RID:
         assert rc.upcoming_rows(reg, rs, HYJAL) == []
     assert all(not r["runs"] for sec in schedule_sections(reg) for r in sec["schedules"]), "the public page agrees"
-    warns = [x for lvl, x in bot.ops.lines if lvl == "warn" and "opens no runs" in x]
+    warns = [x for lvl, x in bot.ops.lines if lvl == "warn" and "opens no events" in x]
     name = "Barrow Deeps" if gone == RID else "Hyjal Summit Forever"  # a raid the profile lacks: its id in words
-    assert warns == [f"Raid nights opens no runs: {name} is no longer a raid "
+    assert warns == [f"Raid nights opens no events: {name} is no longer a raid "
                      "of this game. Change its raids on the Schedules page, or remove it there."]
     clock["now"] += timedelta(minutes=61)
     run(bot.scheduler_tick_guild(reg))
-    assert len([x for lvl, x in bot.ops.lines if "opens no runs" in x]) == 2, "again after an hour, never every minute"
+    assert len([x for lvl, x in bot.ops.lines if "opens no events" in x]) == 2, "again after an hour, never every minute"
 
 
 @pytest.mark.parametrize("gone", [RID, HYJAL], ids=["a later raid left the game", "the first raid left the game"])

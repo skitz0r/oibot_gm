@@ -474,7 +474,7 @@ class CharNameWizard(Wizard):
     async def picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         c = next((c for c in self.planned(interaction.user.id) if ("main" if c.is_main else "alt") == values[0]), None)
         if not c:
-            await self.refuse(interaction, "That planned character is gone. Run `/me char` → Name again.")
+            await self.refuse(interaction, "That planned character is gone. Use `/me char` → Name again.")
             return
         self.choose(c)
         await self.open_form(interaction, self.form())
@@ -505,7 +505,7 @@ class CharNameWizard(Wizard):
             await self.refuse(interaction, f"A first name is needed ({NAME_RULE}).", self.reopen)
             return
         if self.current(uid) is None:  # re-planned meanwhile: don't name a different character than the one shown
-            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Run `/me char` → Name again.")
+            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Use `/me char` → Name again.")
             return
         try:  # every refusal the save would give (the letters, a name already registered), nothing written
             await discord_people.save_characters(interaction.client, self.reg, uid, self.rows(), interaction.user.display_name,
@@ -526,7 +526,7 @@ class CharNameWizard(Wizard):
 
         d, uid = self.draft, interaction.user.id
         if self.current(uid) is None:
-            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Run `/me char` → Name again.")
+            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Use `/me char` → Name again.")
             return
         try:
             res = await discord_people.save_characters(interaction.client, self.reg, uid, self.rows(), interaction.user.display_name, by_id=uid, via="discord")

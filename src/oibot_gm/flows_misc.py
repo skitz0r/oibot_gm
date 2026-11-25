@@ -51,7 +51,7 @@ def tempo_note(key: str) -> str:
 
 class TestRunWizard(Wizard):
     def __init__(self, reg: Registry, owner_id: int):
-        super().__init__(reg, owner_id, title="Test run", guard=_officer_guard(reg))
+        super().__init__(reg, owner_id, title="Test event", guard=_officer_guard(reg))
         raids = list(reg.profile.raids)
         self.draft = {"raid": raids[0] if raids else None, "tempo": DEFAULT_TEMPO, "dm": False}
 
@@ -63,7 +63,7 @@ class TestRunWizard(Wizard):
         items.append(self.select("Tempo", [Opt(k, v[0], tempo_note(k), default=k == d["tempo"]) for k, v in TEMPOS.items()], self.tempo_picked))
         items.append(self.button(f"DM everyone when it opens: {'on' if d['dm'] else 'off'}", self.toggle_dm,
                                  discord.ButtonStyle.primary if d["dm"] else discord.ButtonStyle.secondary))
-        items.append(self.button("Open the test run", self.open, discord.ButtonStyle.success, disabled=not d["raid"]))
+        items.append(self.button("Open the test event", self.open, discord.ButtonStyle.success, disabled=not d["raid"]))
         items.append(self.button("Cancel", self.cancel))
         name = self.reg.raid_def(d["raid"]).get("name", d["raid"]) if d["raid"] else "no raid in the profile"
         await self.show(interaction, f"**{name}** · {TEMPOS[d['tempo']][0]} — {tempo_note(d['tempo'])}.\n"
@@ -87,7 +87,7 @@ class TestRunWizard(Wizard):
         if raid not in self.reg.profile.raids:  # re-read: the profile may have been reloaded
             await self.refuse(interaction, "That raid is no longer in the game profile.", self.start, "Pick again")
             return
-        await self.working(interaction, "Opening the test run…")
+        await self.working(interaction, "Opening the test event…")
         reg, client = self.reg, interaction.client
         # RaidMixin.open_test_run: the one opener (plain text and the site too) — signup channel, else this one (never a
         # DM: refused, naming the setting); its cards post here (D20); the ops line
@@ -100,7 +100,7 @@ class TestRunWizard(Wizard):
         from .raid_views import run_title
 
         where = f" in {channel.mention}" if channel is not None and getattr(channel, "mention", None) else ""
-        await self.finish(interaction, f"🧪 Test run {run_title(reg, ev)} open{where}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, "
+        await self.finish(interaction, f"🧪 Test event {run_title(reg, ev)} open{where}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, "
                                        f"confirm by {confirm_in} min before. Next: `/gm test answer`; the puppets' DMs reach *your* DMs as one digest per batch.")
 
 
@@ -144,15 +144,15 @@ class TestAnswerWizard(Wizard):
             return
         live = self.test_runs()
         if not live:
-            await self.finish(interaction, "No live test run. Open one with `/gm test run`.")
+            await self.finish(interaction, "No test event is live. Open one with `/gm test run`.")
             return
         if len(live) == 1:
             self.draft["team"] = live[0].team
             await self.menu(interaction)
             return
         keys = {ev.team for ev in live}
-        await self.show(interaction, "Which test run do the test members answer?",
-                        self.select("Pick the run", [o for o in wizard_opts.live_runs(self.reg, self.rs) if o.value in keys], self.run_picked),
+        await self.show(interaction, "Which test event do the test members answer?",
+                        self.select("Pick the event", [o for o in wizard_opts.live_runs(self.reg, self.rs) if o.value in keys], self.run_picked),
                         self.button("Cancel", self.cancel))
 
     async def run_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
@@ -168,7 +168,7 @@ class TestAnswerWizard(Wizard):
     async def menu(self, interaction: discord.Interaction, done: str = "") -> None:
         ev = self.run()
         if ev is None:
-            await self.finish(interaction, (done + "\n" if done else "") + "That run is no longer live.")
+            await self.finish(interaction, (done + "\n" if done else "") + "That event is no longer live.")
             return
         head = (done + "\n") if done else ""
         n_asks = len(self.asks(ev)) if ev.state != "open" else 0
@@ -206,7 +206,7 @@ class TestAnswerWizard(Wizard):
         self.draft["counts"].update({k: v.get(k) or "0" for k in ("in", "sub", "out", "yes", "no") if k in v})
         ev = self.run()
         if ev is None:
-            await self.finish(interaction, "That run is no longer live; nothing was answered.")
+            await self.finish(interaction, "That event is no longer live, so nothing was answered.")
             return
         await self.working(interaction, "Answering…")
         c = {k: int(v.get(k) or 0) for k in ("in", "sub", "out", "yes", "no")}  # only this form's fields: the other phase's stay 0
@@ -222,7 +222,7 @@ class TestAnswerWizard(Wizard):
     async def member_screen(self, interaction: discord.Interaction) -> None:
         ev = self.run()
         if ev is None:
-            await self.finish(interaction, "That run is no longer live.")
+            await self.finish(interaction, "That event is no longer live.")
             return
         from . import raidcycle as rc
 
@@ -277,7 +277,7 @@ class TestAnswerWizard(Wizard):
         ev = self.run()
         m = self.reg.members.get(self.draft["member"] or 0)
         if ev is None:
-            await self.finish(interaction, "That run is no longer live; nothing was answered.")
+            await self.finish(interaction, "That event is no longer live, so nothing was answered.")
             return
         if not m or not m.test:
             await self.refuse(interaction, "That test member is gone (the bench was cleared?).", self.member_screen, "Pick again")
@@ -436,12 +436,12 @@ def test_clear_consequence(reg: Registry, rs) -> list[str]:
         return [TEST_BENCH_EMPTY]
     parts = []
     if runs:
-        parts.append(f"{len(runs)} test run{'s are' if len(runs) != 1 else ' is'} cancelled")
+        parts.append(f"{len(runs)} test event{'s are' if len(runs) != 1 else ' is'} cancelled")
     if puppets:
         parts.append(f"{puppets} puppet{'s are' if puppets != 1 else ' is'} deleted")
     line = ", ".join(parts) + " and the analytics cards resume."
     return [line[:1].upper() + line[1:], "Real members and their answers stay as they are.",
-            "The cancelled test runs post nothing where members read."]
+            "The cancelled test events post nothing where members read."]
 
 
 @flow("test_clear")

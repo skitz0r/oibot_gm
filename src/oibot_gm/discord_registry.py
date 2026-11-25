@@ -1294,7 +1294,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         view = overview_post_view(reg, ico) if officer_view and reg.config.roster_channel_id else None
         await interaction.response.send_message(embed=e, ephemeral=True, **({"view": fade(view, interaction)} if view else {}))
 
-    @roster.command(name="comp", description="Minimums: the fewest of a role, class or spec a raid's runs need")
+    @roster.command(name="comp", description="Minimums: the fewest of a role, class or spec each roster of a raid needs")
     async def roster_comp(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:  # flows_config.CompTargetsWizard: only the targets block of the Group make-up screen → configops (authorize_ops + apply_ops)
@@ -1539,7 +1539,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await FLOWS["aura"](interaction, reg)
 
     @config.command(name="loot-channel", description="Owner: the public loot log — one line per confirmed award (log off: awards stay on the site)")
-    @app_commands.describe(channel="where award lines go (Discord's picker)", clear="tick to stop using a channel: award lines go to each run's updates thread",
+    @app_commands.describe(channel="where award lines go (Discord's picker)", clear="tick to stop using a channel: award lines go to each event's updates thread",
                            log="the public loot log on or off")
     async def cfg_loot_channel(interaction: discord.Interaction, channel: discord.TextChannel | None = None, clear: bool = False, log: bool | None = None):
         # the ninth channel kind: the same helper and one-screen confirm as the eight shortcuts (flows_config.ChannelSetWizard),
@@ -1579,7 +1579,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["recruitment"](interaction, reg)
 
-    @config.command(name="timezone", description="Owner: the guild's timezone for every run time, lock and lockout")
+    @config.command(name="timezone", description="Owner: the guild's timezone for every event time, lock and lockout")
     async def cfg_tz(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if reg:
@@ -1647,7 +1647,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     # ---------------- /gm test: seed puppet members and rehearse the whole cycle in Discord within the hour
-    test = app_commands.Group(name="test", description="Officers: test bench — seed fake members, open a compressed run, answer for them", parent=gm)
+    test = app_commands.Group(name="test", description="Officers: test bench — seed fake members, open a compressed event, answer for them", parent=gm)
 
     @test.command(name="seed", description="Officer: add test members to the bench (5, 10, 20 or all of them)")
     async def test_seed(interaction: discord.Interaction):
@@ -1655,7 +1655,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["test_seed"](interaction, reg)
 
-    @test.command(name="run", description="Officer: open a short test run now (pick raid and tempo)")
+    @test.command(name="run", description="Officer: open a short test event now (pick raid and tempo)")
     async def test_run(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:
@@ -1673,13 +1673,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:  # flows_test.TestComposeWizard → SetupMixin.test_compose (the site's spec grid writes through it too)
             await FLOWS["test_compose"](interaction, reg)
 
-    @test.command(name="comp", description="Officer: try a comp — every test member joins a sandbox run; its board builds the best comp")
+    @test.command(name="comp", description="Officer: try a comp — every test member joins a sandbox event; its board builds the best comp")
     async def test_comp(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:  # flows_test.TestCompWizard → SetupMixin.test_comp, then a link to the sandbox run's board
             await FLOWS["test_comp"](interaction, reg)
 
-    @test.command(name="clear", description="Officer: end the test — cancel test runs, remove every test member and their placements")
+    @test.command(name="clear", description="Officer: end the test — cancel test events, remove every test member and their placements")
     async def test_clear(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:  # the decide screen (consequence · Clear the test bench · Back), then SetupMixin.test_bench_clear

@@ -167,8 +167,8 @@ def test_open_next_slot_is_one_press_after_the_raid(reg, rs, officer, channel):
         await FLOWS["raid_open"](h.command(), reg)
         assert h.selects() == ["Pick the raid"]
         await h.pick("Pick the raid", "barrow_deeps")
-        label = f"Next run — {reg.local12(want)}"
-        assert h.buttons() == [label, "Another upcoming run", "Ad hoc run", "Cancel"]
+        label = f"Next event — {reg.local12(want)}"
+        assert h.buttons() == [label, "Another coming event", "One-off event", "Cancel"]
         assert "19:30" not in h.text and "19:30" not in label
         await h.press(label)
         assert "19:30" not in h.text and reg.local12(want, "%a %d %b") in h.text  # box 11 (test_flows_open has it whole)
@@ -189,11 +189,11 @@ def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Another upcoming run")
-        sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run")
+        await h.press("Another coming event")
+        sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the event")
         assert [o.value for o in sel.options] == [f"{t.isoformat()}|barrow-deeps" for t in starts[1:23]]  # each names its schedule
         assert all(":" in o.label and ("AM" in o.label or "PM" in o.label) for o in sel.options)
-        await h.pick("Pick the run", f"{starts[2].isoformat()}|barrow-deeps")
+        await h.pick("Pick the event", f"{starts[2].isoformat()}|barrow-deeps")
         await h.press("Open the sheet")
     asyncio.run(go())
     assert bot.calls[0][2] == starts[2]
@@ -208,7 +208,7 @@ def test_open_existing_run_is_named_on_confirm(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press(f"Next run — {reg.local12(first)}")
+        await h.press(f"Next event — {reg.local12(first)}")
         assert "is already open" in h.text and h.buttons() == ["Back"]
     asyncio.run(go())
 
@@ -222,7 +222,7 @@ def test_open_dst_gap_shows_the_note_and_opens_3_30(reg, rs, officer, channel, m
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         assert "no schedule yet" in h.text  # the profile has none: the one-off path
-        await h.press("Ad hoc run")  # no pickup template: straight to the day · hour · minute form
+        await h.press("One-off event")  # no pickup template: straight to the day · hour · minute form
         form = h.modal
         assert [o.value for o in form._items["day"].options][7] == "2026-03-08"
         await h.submit(form, day="2026-03-08", hour="2", minute="30")
@@ -245,9 +245,9 @@ def test_open_no_slots_says_why_and_offers_a_schedule(reg, rs, officer, channel)
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         assert "no schedule yet" in h.text and "in the next" not in h.text
-        assert h.buttons() == ["Add a schedule", "Ad hoc run", "Cancel"]
+        assert h.buttons() == ["Add a schedule", "One-off event", "Cancel"]
         await h.press("Add a schedule")  # the schedule wizard on this raid takes the screen over
-        assert "No schedule runs Barrow Deeps yet. Add one with New schedule." in h.text and "New schedule" in h.buttons()
+        assert "No schedule plays Barrow Deeps yet. Add one with New schedule." in h.text and "New schedule" in h.buttons()
     asyncio.run(go())
     assert not bot.calls
 
@@ -262,7 +262,7 @@ def test_open_offers_a_raids_first_nights_however_far_its_first_opening_is(reg, 
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        assert f"Next run — {reg.local12(first)}" in h.buttons()[0]
+        assert f"Next event — {reg.local12(first)}" in h.buttons()[0]
         await h.press(h.buttons()[0])
         assert "too far ahead" not in h.text and "Open the sheet" in h.buttons()
     asyncio.run(go())
@@ -277,7 +277,7 @@ def test_open_refuses_the_past_and_cancel_writes_nothing(reg, rs, officer, chann
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Ad hoc run")
+        await h.press("One-off event")
         await h.submit(day=today, hour="0", minute="0")  # midnight today: already gone
         assert "already passed" in h.text and "Pick again" in h.buttons()
         await h.press("Pick again")
@@ -305,7 +305,7 @@ def test_open_later_than_the_window_narrows_by_week(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Ad hoc run")
+        await h.press("One-off event")
         await h.submit(day="later", hour="19", minute="30")
         week = got["week"] = h._items()[0].options[2].value
         await h.pick("Pick the week", week)
@@ -353,8 +353,8 @@ def test_set_picks_run_then_only_what_applies_then_the_character(reg, rs, office
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m))
-        assert h.selects() == ["Pick the run"]
-        await h.pick("Pick the run", b.key)
+        assert h.selects() == ["Pick the event"]
+        await h.pick("Pick the event", b.key)
         assert h.buttons() == ["Record a callout", "Join", "Bench", "No thanks", "Cancel"], "no answer yet: no Confirm, no pins"
         assert "no answer yet" in h.text
         await h.press("Join")
@@ -469,14 +469,14 @@ def test_set_leaves_test_runs_to_gm_test_answer(reg, rs, officer, channel):
     m = reg.test_members()[0]
     h, bot = harness(reg, rs)
     asyncio.run(FLOWS["raid_set"](h.command(), reg, member=_user(m)))
-    assert "test run" in h.text and "/gm test answer" in h.text and not bot.calls
+    assert "test event" in h.text and "/gm test answer" in h.text and not bot.calls
     real = open_real_run(reg, rs, days=5)
     r = reals(reg, 1, 7)[0]
     h2, bot2 = harness(reg, rs)
 
     async def go():  # a real run alongside: only it is offered (one run → straight to the verbs)
         await FLOWS["raid_set"](h2.command(), reg, member=_user(r))
-        assert "Pick the run" not in h2.selects() and "Join" in h2.buttons()
+        assert "Pick the event" not in h2.selects() and "Join" in h2.buttons()
     asyncio.run(go())
     assert real.key in [e.key for e in rs.live()]
 
@@ -522,12 +522,12 @@ def test_lock_with_two_runs_shows_the_picker_and_cancel_does_nothing(reg, rs, of
 
     async def go():
         await FLOWS["raid_lock"](h.command(), reg)
-        assert h.selects() == ["Pick the run"] and len(h._items()[0].options) == 2
+        assert h.selects() == ["Pick the event"] and len(h._items()[0].options) == 2
         await h.press("Cancel")
         assert not bot.calls
         h2, bot2 = harness(reg, rs)
         await FLOWS["raid_lock"](h2.command(), reg)
-        await h2.pick("Pick the run", b.team)
+        await h2.pick("Pick the event", b.team)
         assert not bot2.calls and "Lock" in h2.buttons()
         await h2.press("Lock")
         assert bot2.calls[0] == ("lock_run", b.key, "Tester")
@@ -606,7 +606,7 @@ def test_health_from_the_command_and_from_the_picker(reg, rs, officer, channel):
     async def go():
         h2, _ = harness(reg, rs)
         await FLOWS["raid_health"](h2.command(), reg)
-        await h2.pick("Pick the run", b.team)
+        await h2.pick("Pick the event", b.team)
         assert "below" in h2.screens[-2]["text"] and h2.screen["view"] is not None
     asyncio.run(go())
 
@@ -739,7 +739,7 @@ def test_cancel_with_two_runs_picks_then_opens_the_box(reg, rs, officer, channel
 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
-        await h.pick("Pick the run", b.team)
+        await h.pick("Pick the event", b.team)
         await h.press("Cancel event with a note")
         assert h.modal is not None
         await h.submit(reason="", notify="quiet")

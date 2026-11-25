@@ -72,10 +72,10 @@ def test_run_default_press_opens_todays_standard_run(reg, rs, officer):
 
     async def go():
         await FLOWS["test_run"](h.command(), reg)
-        assert "Standard" in h.text and "Open the test run" in h.buttons()
+        assert "Standard" in h.text and "Open the test event" in h.buttons()
         before = reg.now_local()
-        await h.press("Open the test run")
-        assert "🧪 Test run" in h.text and " open in <#5>" in h.text and h.screen["view"] is None
+        await h.press("Open the test event")
+        assert "🧪 Test event" in h.text and " open in <#5>" in h.text and h.screen["view"] is None
         ev = only_run(rs)
         start_in = (ev.start - before).total_seconds() / 60
         assert 39 <= start_in <= 40
@@ -84,7 +84,7 @@ def test_run_default_press_opens_todays_standard_run(reg, rs, officer):
     assert cutoff_minutes(reg, ev) == (32, 25, 15)
     t = reg.config.roster(ev.team)
     assert t["test"] and t["test_by"] == h.user.id and t["open_dm"] is False
-    assert calls["posted"] == [ev.key] and any("opened test run" in l for _, l in client.ops.lines)
+    assert calls["posted"] == [ev.key] and any("opened test event" in l for _, l in client.ops.lines)
 
 
 def test_run_quick_tempo_and_dm_toggle(reg, rs, officer):
@@ -100,7 +100,7 @@ def test_run_quick_tempo_and_dm_toggle(reg, rs, officer):
         await h.pick("Tempo", "quick")
         await h.press("DM everyone when it opens: off")
         assert "DM everyone when it opens: on" in h.buttons()
-        await h.press("Open the test run")
+        await h.press("Open the test event")
     asyncio.run(go())
     ev = only_run(rs)
     soft, hard, confirm = cutoff_minutes(reg, ev)
@@ -170,8 +170,8 @@ def test_answer_picks_the_run_when_several_are_live(reg, rs, officer):
 
     async def go():
         await FLOWS["test_answer"](h.command(), reg)
-        assert h.selects() == ["Pick the run"]
-        await h.pick("Pick the run", b.team)
+        assert h.selects() == ["Pick the event"]
+        await h.pick("Pick the event", b.team)
         await h.press("One member")
         await h.pick("Pick a test member", str(m.discord_id))
         assert h.buttons()[:3] == ["Join", "Bench", "No thanks"]
@@ -226,7 +226,7 @@ def test_answer_cancel_writes_nothing_and_no_run_says_so(reg, rs, officer):
 
     async def go():
         await FLOWS["test_answer"](h.command(), reg)
-        assert "No live test run" in h.text
+        assert "No test event is live" in h.text
     asyncio.run(go())
     ev = open_test_run(reg, rs)
 

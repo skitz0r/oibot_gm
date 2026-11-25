@@ -127,7 +127,7 @@ def tempo_of(tempo=None, *, start_in=None, nudge_in=None, lock_in=None, confirm_
         except ValueError:
             raise ValueError(f"tempo is one of {', '.join(TEMPOS)}, or minutes to the start") from None
         if start < 4:
-            raise ValueError("a test run needs at least 4 minutes to its start (nudge, lock and the confirmation deadline come before it)")
+            raise ValueError("a test event needs at least 4 minutes to its start (nudge, lock and the confirmation deadline come before it)")
         _, s0, n0, l0, c0 = TEMPOS[DEFAULT_TEMPO]
         # each mark clamped below the one before it (start → nudge → lock → confirm), so every start ≥ 4 has a
         # strictly ordered set: 4 → 3, 2, 1 (clamping upward from confirm made nudge = lock at 4 minutes)
@@ -135,7 +135,7 @@ def tempo_of(tempo=None, *, start_in=None, nudge_in=None, lock_in=None, confirm_
         lock = min(nudge - 1, round(start * l0 / s0))
         confirm = max(0, min(lock - 1, round(start * c0 / s0)))
         if not start > nudge > lock > confirm >= 0:
-            raise ValueError("a test run needs at least 4 minutes to its start")
+            raise ValueError("a test event needs at least 4 minutes to its start")
         return (f"{start} min", start, nudge, lock, confirm)
     _, s0, n0, l0, c0 = TEMPOS[DEFAULT_TEMPO]
     vals = [int(v) if v is not None else d for v, d in ((start_in, s0), (nudge_in, n0), (lock_in, l0), (confirm_in, c0))]
@@ -220,7 +220,7 @@ class TestFeed:
             if not any(line.startswith(p) for p in said):
                 add("step", plain(reg, line, name_of))
         if seen["state"] is not None and ev.state != seen["state"] and not any(ev.state in ln for ln in new_lines):
-            add("step", f"Run is now {ev.state}")
+            add("step", f"Event is now {ev.state}")
         for uid, status, char in changed:
             sg = ev.signups[uid]
             was = seen["answers"].get(uid)

@@ -602,8 +602,8 @@ class RegularsWizard(OfficerWizard):
     async def pick_series(self, interaction: discord.Interaction) -> None:
         opts = self.series_opts()
         if not opts:
-            await self.finish(interaction, "No recurring schedule yet. An officer adds weekly run times on the Raids page or with /gm config raid. "
-                                           "Ad hoc runs (pickup templates, one-offs) have no regulars: first come, first rostered.")
+            await self.finish(interaction, "No recurring schedule yet. An officer adds weekly event times on the Schedules page or with /gm config raid. "
+                                           "One-off events have no regulars: first come, first rostered.")
             return
         if len(opts) == 1:
             await self.series_picked(interaction, [opts[0].value])
@@ -967,19 +967,19 @@ class SetWizard(OfficerWizard):
         self.title = f"Set for {m.display_name}"
         runs = self.runs(m)
         if not runs and self.runs(m, test=True):
-            await self.finish(interaction, f"{m.display_name} is only on a test run, and `/raid set` leaves test runs alone — answer for "
+            await self.finish(interaction, f"{m.display_name} is only on a test event, and `/raid set` leaves test events alone — answer for "
                                            "puppets with `/gm test answer` (or the Test bench on the Members page).")
             return
         if not runs:
             what = SET_WHAT.get(self.draft["what"] or "", "")
-            await self.finish(interaction, f"Nothing to set for {m.display_name}" + (f" ({what})" if what else "") + " on a live run right now.")
+            await self.finish(interaction, f"Nothing to set for {m.display_name}" + (f" ({what})" if what else "") + " on a live event right now.")
             return
         if len(runs) == 1:
             self.draft["key"] = runs[0].key
             await self.verbs(interaction)
             return
         opts = [Opt(ev.key, f"{raid_name(self.reg, ev)} · {self.reg.local12(ev.start)}", ev.state) for ev in runs][:MAX_OPTIONS]
-        await self.show(interaction, f"Which run for **{m.display_name}**?", self.select("Pick the run", opts, self.run_picked), self.button("Cancel", self.cancel))
+        await self.show(interaction, f"Which event for **{m.display_name}**?", self.select("Pick the event", opts, self.run_picked), self.button("Cancel", self.cancel))
 
     async def run_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         self.draft["key"] = values[0]
@@ -990,7 +990,7 @@ class SetWizard(OfficerWizard):
 
         m, ev = self.member(), self.run()
         if ev is None or m is None or ev.state not in ("open", "locked"):
-            await self.finish(interaction, "That run closed — nothing was changed.")
+            await self.finish(interaction, "That event closed before anything was changed.")
             return
         acts = rc.member_actions(self.reg, ev, m)
         want = self.draft["what"]

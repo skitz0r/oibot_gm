@@ -985,7 +985,7 @@ def test_drops_with_no_run_live_prompt_an_ad_hoc_run_once(reg, rs):
     prompts = [m for m in bot.officer_ch.sent if "no run is live" in (m.content or "")]
     assert len(prompts) == 1 and "Lootmaster's log" in prompts[0].content
     (b,) = prompts[0].view.children
-    assert b.item.label == "Start an ad hoc run" and b.item.custom_id == f"lootstart.{GUILD}:open"
+    assert b.item.label == "Start a one-off event" and b.item.custom_id == f"lootstart.{GUILD}:open"
     assert not bot.dms
 
 

@@ -114,9 +114,9 @@ WEIGHTS = tuple(RAID_WEIGHT_DEFAULTS)
 WEIGHT_HINT = {"rank": "core > raider > trial", "main": "a main is picked over an alt", "sat_out": "benched in the last lockout",
                "signup_order": "an earlier signup", "regular": "being one of the schedule's regulars (on their regular character)"}  # the Raids page's WEIGHT_HINT, in words
 WEIGHT_WORDS = {0: "doesn't count", 1: "a little", 2: "some", 3: "a lot", 4: "more", 5: "the most"}
-SPLIT_WORDS = {"balanced": ("Balanced", "both runs equal in synergy, tanks, healers and seats"),
+SPLIT_WORDS = {"balanced": ("Balanced", "both rosters equal in synergy, tanks, healers and seats"),
                "first": ("Raid one first", "roster 1 gets the best, roster 2 the rest"),
-               "rotation": ("Rotation", "whoever sat out or was in the weaker run moves up")}
+               "rotation": ("Rotation", "whoever sat out or was in the weaker roster moves up")}
 _RF = PAGE_WORDS["raid_fields"]
 SECTIONS = [  # (key, label, fields it edits). Each schedule — its run times, lineup and sheet timing — is the schedule wizard's.
     ("times", "Schedules", ()),  # flows_schedule (flow `schedule`) takes the screen over; saved on its own boxes 13–17
@@ -249,7 +249,7 @@ class CompTargetsBlock:
         from .registry import slot_words
 
         mins = self.reg.minimums(self.raid)
-        return ("-# A run needs at least " + ", ".join(slot_words(k, n) for k, n in mins.items()) + ".") if mins else "-# A run needs no minimum of any role yet."
+        return ("-# A roster needs at least " + ", ".join(slot_words(k, n) for k, n in mins.items()) + ".") if mins else "-# A roster needs no minimum of any role yet."
 
     async def targets(self, i: discord.Interaction, note: str = "") -> None:
         from .configops import _target_words
@@ -258,7 +258,7 @@ class CompTargetsBlock:
         rd = self.reg.raid_def(self.raid)
         cur = self.t_current()
         lines = [note] if note else []
-        lines += [f"**Minimums** · {rd.get('name', self.raid)} — the fewest of a role, class or spec a run should hold. The lock fills them first.",
+        lines += [f"**Minimums** · {rd.get('name', self.raid)} — the fewest of a role, class or spec a roster should hold. The lock fills them first.",
                   self.reads_line()]
         for slot in sorted(cur, key=lambda s: (s not in ("tank", "healer", "melee", "ranged"), s)):
             t = cur[slot]
@@ -324,7 +324,7 @@ class CompTargetsBlock:
             await self.targets(it, f"{words}: at least {entry['min']} — not saved yet.")
         await self.open_form(i, Form(f"Minimum · {words}"[:45], [
             Field("min", "At least", [Opt(str(n), str(n) if n else self.reg.minimum_words(self.raid, slot, None)[:100], default=n == lo)
-                                      for n in target_numbers(top, lo)], description="the fewest a run should hold"),
+                                      for n in target_numbers(top, lo)], description="the fewest a roster should hold"),
             Field("note", "Why", required=False, default=cur.get("note") or None, max_length=COMP_NOTE_MAX, placeholder="e.g. Windfury for every melee group",
                   description="shown beside the minimum (optional)"),
         ], submitted))
@@ -437,7 +437,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         if field == "duration_hours":
             return length_words(v)
         if field == "first_open":
-            return self.reg.local12(datetime.fromisoformat(v)) if v else "no first lockout set — weekly runs start at the next run time; a day-of-lockout schedule needs one"
+            return self.reg.local12(datetime.fromisoformat(v)) if v else "no first lockout set — weekly events start at the next event time; a day-of-lockout schedule needs one"
         if field == "notes":
             return f"“{v[:80]}{'…' if len(v) > 80 else ''}”" if v else "no notes"
         return str(v)
@@ -453,7 +453,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             scheds = [s for s in self.reg.all_schedules() if s["raid"] == self.raid]
             if scheds:
                 return f"{len(scheds)} schedule{'s' if len(scheds) > 1 else ''}: " + ", ".join(schedule_name(s) for s in scheds)
-            return "No schedule runs this raid yet. Add one here."
+            return "No schedule plays this raid yet. Add one here."
         if key == "comp":
             from .registry import slot_words
 
@@ -581,7 +581,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         await self.open_form(i, Form("Lockout & length", [
             Field("lockout_days", "Lockout", [Opt(str(d), lockout_words(d), default=d == days) for d in dvals][:MAX_OPTIONS], description="how long one lockout lasts"),
             Field("duration_hours", "Raid length", [Opt(num(h), length_words(h), default=h == hours) for h in hvals][:MAX_OPTIONS],
-                  description="how long a run takes (the sheet closes after it)"),
+                  description="how long the raid takes (the sheet closes after it)"),
         ], self.length_submitted))
 
     async def length_submitted(self, i: discord.Interaction, v: dict[str, str]) -> None:
@@ -590,13 +590,13 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             self.put("lockout_days", int(v["lockout_days"]))
         if v.get("duration_hours"):
             self.put("duration_hours", float(v["duration_hours"]))
-        await self.checked(i, snapshot, self.length_form, f"Lockout {lockout_words(self.cur('lockout_days'))}, runs {length_words(self.cur('duration_hours'))}.")
+        await self.checked(i, snapshot, self.length_form, f"Lockout {lockout_words(self.cur('lockout_days'))}, lasts {length_words(self.cur('duration_hours'))}.")
 
     # ---- First lockout opens (a date often months away: day list + narrowing by week)
     async def first_open(self, i: discord.Interaction) -> None:
         v = self.cur("first_open")
-        text = ("**First lockout opens** — the anchor lockout windows count from; no run opens before it.\n"
-                + (f"Now: {both_clocks(self.reg, datetime.fromisoformat(v))}" if v else "Not set: lockouts roll from each run."))
+        text = ("**First lockout opens** — the anchor lockout windows count from; no event opens before it.\n"
+                + (f"Now: {both_clocks(self.reg, datetime.fromisoformat(v))}" if v else "Not set: lockouts roll from each event."))
         items = [self.button("Pick the date and time", self.fo_form, discord.ButtonStyle.primary)]
         if v:
             items.append(self.button("Clear it", self.fo_clear))
@@ -635,7 +635,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
     async def behaviour(self, i: discord.Interaction, note: str = "") -> None:
         split = self.cur("split_policy")
         lines = [note] if note else []
-        lines.append("**How one night's groups are made** — when more join than one run seats, the raid's default split. A schedule may set its own.")
+        lines.append("**How one night's groups are made** — when more join than one roster seats, the raid's default split. A schedule may set its own.")
         lines.append(f"• Now: **{SPLIT_WORDS[split][0]}** — {SPLIT_WORDS[split][1]}")
         lines.append("-# Each schedule's sheet timing and switches are under Schedules.")
         split_opts = [Opt(p, SPLIT_WORDS[p][0], SPLIT_WORDS[p][1], default=p == split) for p in SPLIT_POLICIES]
@@ -1281,7 +1281,7 @@ class TimezoneWizard(OwnerWizard):
         items = [self.button(f"{name} · {city_words(z)}", self._chooser(z), discord.ButtonStyle.primary if z == cur else discord.ButtonStyle.secondary)
                  for z, name in COMMON_ZONES]
         items += [self.button("Another zone", self.regions), self.button("Cancel", self.cancel)]
-        await self.show(i, f"Now **{cur}** — it's {fmt12(self.reg.now_local())} there. Every run time, lock and lockout is in this zone.", *items)
+        await self.show(i, f"Now **{cur}** — it's {fmt12(self.reg.now_local())} there. Every event time, lock and lockout is in this zone.", *items)
 
     def _chooser(self, zone: str):
         async def choose(i: discord.Interaction) -> None:
@@ -1329,16 +1329,16 @@ class TimezoneWizard(OwnerWizard):
         except RegistryError as e:
             await self.refuse(i, str(e), self.start, "Pick another")
             return
-        lines.append("-# Run times keep their clock time (Tue 7:30 PM stays Tue 7:30 PM), so the real moment moves with the zone.")
+        lines.append("-# Event times keep their clock time (Tue 7:30 PM stays Tue 7:30 PM), so the real moment moves with the zone.")
         if not live:
             await self.show(i, "\n".join(lines), self._saver(zone), self.button("Pick another", self.start), self.button("Cancel", self.cancel))
             return
         # live runs: the owner picks what happens to them (the save carries it — a locked run is never changed unasked)
-        items = [self._saver(zone, "keep", "Save · keep runs at their moment")]
+        items = [self._saver(zone, "keep", "Save · keep events at their moment")]
         if any(r["movable"] for r in live):
             moving = [f"⚠ {x}" for x in self.reg.timezone_change_effects(zone, rs=rs, mode="move") if "moves with the clock" in x]
-            lines += ["-# Or move the open runs with the clock:", *[f"-# {x}" for x in moving]]
-            items.append(self._saver(zone, "move", "Save · move open runs with the clock"))
+            lines += ["-# Or move the open events with the clock:", *[f"-# {x}" for x in moving]]
+            items.append(self._saver(zone, "move", "Save · move open events with the clock"))
         await self.show(i, "\n".join(lines), *items, self.button("Pick another", self.start), self.button("Cancel", self.cancel))
 
     def _saver(self, zone: str, runs: str | None = None, label: str = "Save") -> discord.ui.Button:

@@ -18,7 +18,7 @@ def raids(reg: Registry, *, current: str | None = None) -> list[Opt]:
     out = []
     for rid in reg.profile.raids:
         rd = reg.raid_def(rid)
-        slots = "; ".join(reg.schedule_label(rid, s) for s in reg.schedules(rid) if s["kind"] != "pickup") or "no run times yet"
+        slots = "; ".join(reg.schedule_label(rid, s) for s in reg.schedules(rid) if s["kind"] != "pickup") or "no event times yet"
         out.append(Opt(rid, rd.get("name", rid), f"{rd.get('size', '?')}-player · {slots}", default=rid == current))
     return out
 

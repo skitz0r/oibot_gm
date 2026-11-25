@@ -65,14 +65,14 @@ def test_a_schedules_lineup_step_saves_through_box_14(reg, rs, officer):  # noqa
 def test_new_schedule_is_box_13_and_pause_is_box_15(reg, rs, officer):  # noqa: F811
     h = harness(reg, rs)
     run(FLOWS["schedule"](h.command(), reg, raid="barrow_deeps"))
-    assert "No schedule runs Barrow Deeps yet. Add one with New schedule." in h.text
+    assert "No schedule plays Barrow Deeps yet. Add one with New schedule." in h.text
     run(h.press("New schedule"))
     run(h.pick("Repeats", "weekly"))
     run(h.submit(h.modal, name="Alt run"))
     assert "**Alt run**" in h.text and "Review changes" in h.buttons()
     assert "Pause" not in h.buttons() and "Remove" not in h.buttons(), "nothing to pause or remove before it exists"
     run(h.pick("Change", "repeats"))
-    run(h.press("Add a run time"))
+    run(h.press("Add an event time"))
     assert [o.value for o in h.modal._items["minute"].options] == ["0", "15", "30", "45"]
     run(h.submit(h.modal, day="Thu", hour="20", minute="15"))
     assert "✕ Thu 8:15 PM" in h.buttons() and "Every Thursday at 8:15 PM" in h.text and "20:15" not in h.text
@@ -124,14 +124,14 @@ def test_run_times_add_and_drop_and_a_duplicate_is_refused(reg, rs, officer):  #
     h = harness(reg, rs)
     open_hub(h, reg, sid)
     run(h.pick("Change", "repeats"))
-    run(h.press("Add a run time"))
+    run(h.press("Add an event time"))
     run(h.submit(h.modal, day="Sat", hour="21", minute="15"))
-    run(h.press("Add a run time"))
+    run(h.press("Add an event time"))
     run(h.submit(h.modal, day="Tue", hour="21", minute="15"))
     run(h.press("✕ Tue 9:15 PM"))
-    run(h.press("Add a run time"))
+    run(h.press("Add an event time"))
     run(h.submit(h.modal, day="Sat", hour="21", minute="15"))
-    assert "Sat 9:15 PM is already a run time." in h.text
+    assert "Sat 9:15 PM is already an event time." in h.text
     run(h.press("Back"))
     run(h.press("Review changes"))
     run(h.press("Save"))

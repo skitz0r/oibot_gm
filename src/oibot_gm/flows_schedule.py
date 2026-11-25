@@ -39,7 +39,7 @@ NEW = "New schedule"
 CHANGE = "Change"
 SHEET_TIMING = "Sheet timing"
 NOTHING_TO_SAVE = "Nothing has changed yet, so there is nothing to save."
-EMPTY_RAID = "No schedule runs {raid} yet. Add one with New schedule."
+EMPTY_RAID = "No schedule plays {raid} yet. Add one with New schedule."
 
 
 def _slot_key(slot: str) -> tuple[int, str]:
@@ -324,7 +324,7 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         if kind == "weekly":
             slots = list(self.draft.get("slots") or [])
             items += [self.button(f"✕ {self.reg.slot_label(s)}", self._dropper(s)) for s in slots[:MAX_RUN_TIMES]]
-            items.append(self.button("Add a run time", self.add_time, discord.ButtonStyle.primary, disabled=len(slots) >= MAX_RUN_TIMES))
+            items.append(self.button("Add an event time", self.add_time, discord.ButtonStyle.primary, disabled=len(slots) >= MAX_RUN_TIMES))
         elif kind == "lockout":
             items.append(self.button("Pick the days and time", self.lockout_form, discord.ButtonStyle.primary))
         items.append(self.button("Back", self.hub))
@@ -341,7 +341,7 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         return drop
 
     async def add_time(self, i: discord.Interaction) -> None:
-        await self.open_form(i, Form("Add a run time", [
+        await self.open_form(i, Form("Add an event time", [
             Field("day", "Day", [Opt(d, n) for d, n in zip(DAYS, DAY_NAMES)]),
             Field("hour", "Hour", hour_opts(20), description=f"Guild time, {self.reg.config.timezone}"),
             Field("minute", "Minutes", minute_opts(15, 0)),
@@ -351,7 +351,7 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         slot = f"{v.get('day') or 'Mon'} {int(v.get('hour') or 0):02d}:{int(v.get('minute') or 0):02d}"
         cur = list(self.draft.get("slots") or [])
         if slot in cur:
-            await self.repeats(i, f"{self.reg.slot_label(slot)} is already a run time.")
+            await self.repeats(i, f"{self.reg.slot_label(slot)} is already an event time.")
             return
         try:
             self.draft["slots"] = sorted(parse_slots(cur + [slot]), key=_slot_key)

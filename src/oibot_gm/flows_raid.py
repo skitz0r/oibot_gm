@@ -105,7 +105,7 @@ async def with_run(interaction: discord.Interaction, reg: Registry, *, title: st
     async def picked(i: discord.Interaction, values: list[str]) -> None:
         await then(i, wiz, rs, rs.for_team(values[0]))  # re-read: the run may have closed since the list was drawn
 
-    await wiz.show(interaction, "Which run?", wiz.select("Pick the run", opts, picked), wiz.button("Cancel", wiz.cancel))
+    await wiz.show(interaction, "Which event?", wiz.select("Pick the event", opts, picked), wiz.button("Cancel", wiz.cancel))
 
 
 # ---------------------------------------------------------------- /raid open
@@ -121,7 +121,7 @@ class OpenWizard(Wizard, LineupBlock):
     posts it there once opened."""
 
     def __init__(self, reg: Registry, rs, owner_id: int):
-        super().__init__(reg, owner_id, title="Open a run", guard=officer_guard(reg))
+        super().__init__(reg, owner_id, title="Open an event", guard=officer_guard(reg))
         self.rs = rs
         self.draft = {"raid": None, "start": None, "note": "", "day0": reg.now_local().date(), "schedule": None,
                       "lock": event_view.NEW_EVENT_LOCKS[0], "here": False}
@@ -206,17 +206,17 @@ class OpenWizard(Wizard, LineupBlock):
         many = self.many()
         if not ups:
             await self.show(interaction, f"**{self.name()}** {self.no_slot_reason()}\n"
-                            "-# Add a schedule for it, or open an ad hoc run at a day and time you pick.",
+                            "-# Add a schedule for it, or open a one-off event at a day and time you pick.",
                             self.button(ADD_SCHEDULE, self.to_schedules, discord.ButtonStyle.primary),
-                            self.button("Ad hoc run", self.adhoc),
+                            self.button("One-off event", self.adhoc),
                             self.button("Cancel", self.cancel))
             return
         s0, t0 = ups[0]
-        items: list[discord.ui.Item] = [self.button(f"Next run — {self.reg.local12(t0)}" + (f" · {s0['name']}" if many else ""), self.next_picked, discord.ButtonStyle.primary)]
+        items: list[discord.ui.Item] = [self.button(f"Next event — {self.reg.local12(t0)}" + (f" · {s0['name']}" if many else ""), self.next_picked, discord.ButtonStyle.primary)]
         if len(ups) > 1:
-            items.append(self.button("Another upcoming run", self.another))
-        items += [self.button("Ad hoc run", self.adhoc), self.button("Cancel", self.cancel)]
-        await self.show(interaction, f"**{self.name()}** — which run?\n-# Ad hoc = a pickup or a one-off at a time you pick: {rc.FIRST_COME}, no regulars, no reminder.", *items)
+            items.append(self.button("Another coming event", self.another))
+        items += [self.button("One-off event", self.adhoc), self.button("Cancel", self.cancel)]
+        await self.show(interaction, f"**{self.name()}** — which event?\n-# A one-off event opens at a time you pick: {rc.FIRST_COME}, no regulars, no reminder.", *items)
 
     async def another(self, interaction: discord.Interaction) -> None:
         """The other upcoming runs of every recurring schedule (the value names the schedule).
@@ -229,7 +229,7 @@ class OpenWizard(Wizard, LineupBlock):
             return
         many = self.many()
         page_btns: list[discord.ui.Item] = []
-        head = f"**{self.name()}** — which upcoming run?"
+        head = f"**{self.name()}** — which coming event?"
         if len(others) > OTHER_STARTS:
             tz = self.reg.tz
             weeks = sorted({(t.astimezone(tz).date() - timedelta(days=t.astimezone(tz).weekday())) for _s, t in others})
@@ -243,7 +243,7 @@ class OpenWizard(Wizard, LineupBlock):
         else:
             others = others[:OTHER_STARTS]
         opts = [Opt(f"{t.isoformat()}|{s['id']}", self.reg.local12(t), (f"{s['name']} · " if many else "") + when_relative(self.reg, t)) for s, t in others]
-        await self.show(interaction, head, self.select("Pick the run", opts, self.start_picked), *page_btns,
+        await self.show(interaction, head, self.select("Pick the event", opts, self.start_picked), *page_btns,
                         self.button("Back", self.shortlist), self.button("Cancel", self.cancel))
 
     def _week_page(self, page: int):
@@ -257,14 +257,14 @@ class OpenWizard(Wizard, LineupBlock):
         if not self.templates():
             await self.open_when(interaction)
             return
-        await self.show(interaction, f"**{self.name()}** · an ad hoc run — {rc.FIRST_COME}, no regulars, no reminder. From a template, or a one-off?",
-                        *self.template_buttons(), self.button("One-off — pick a day and time", self.open_when),
+        await self.show(interaction, f"**{self.name()}** · a one-off event — {rc.FIRST_COME}, no regulars, no reminder. From a schedule an officer opens, or its own settings?",
+                        *self.template_buttons(), self.button("Own settings — pick a day and time", self.open_when),
                         self.button("Back", self.shortlist), self.button("Cancel", self.cancel))
 
     def no_slot_reason(self) -> str:
         """Why the raid offers no night to open, after its name: no schedule yet, else its first opening (no horizon)."""
         if not [s for s in self.reg.schedules(self.rid) if s["kind"] != "pickup" and s.get("active", True)]:
-            return "has no schedule yet." + (" Its pickup templates open at a time you pick." if self.templates() else "")
+            return "has no schedule yet." + (" Its schedules opened by an officer open at a time you pick." if self.templates() else "")
         fo = self.reg.first_open(self.rid)
         if fo is not None:
             return f"first opens {self.reg.local12(fo)}, and no schedule of it has a night after that yet."
@@ -301,7 +301,7 @@ class OpenWizard(Wizard, LineupBlock):
 
     def _day_note(self, day: date) -> str | None:
         hits = [t for t in self.starts() if t.astimezone(self.reg.tz).date() == day]
-        return f"{self.name()} run time {self.reg.local12(hits[0], '%I:%M %p')}" if hits else None
+        return f"{self.name()} event time {self.reg.local12(hits[0], '%I:%M %p')}" if hits else None
 
     async def open_when(self, interaction: discord.Interaction) -> None:
         self.draft["schedule"] = ADHOC_SCHEDULE  # a one-off at a picked time: ad hoc (its own defaults, never the raid's run times)
@@ -459,7 +459,7 @@ class OpenWizard(Wizard, LineupBlock):
         label = f"**{self.name()}**" + (f" · {self.sched_name(sid)}" if sid and (sid == ADHOC_SCHEDULE or self.many()) else "")
         lines = [f"Open {label} at {both_clocks(self.reg, start)}?"]
         if self.draft.get("matched"):
-            lines.append(f"-# That time is the {self.draft['matched']} run. " + " ".join(rc.open_rules(self.reg, self.rid, sid, "scheduled")))
+            lines.append(f"-# That time is the {self.draft['matched']} event. " + " ".join(rc.open_rules(self.reg, self.rid, sid, "scheduled")))
         if self.is_adhoc(sid):
             lines.append("-# " + " ".join(rc.open_rules(self.reg, self.rid, sid, "adhoc")))
         if sid:
@@ -477,7 +477,7 @@ class OpenWizard(Wizard, LineupBlock):
             lines.append(when_note(self.draft["note"], start))
         ev = self.existing(start)
         if ev:
-            lines.append(f"-# A run for that time already exists and is {sheet_state(ev)}. Open points you at it instead of making a second.")
+            lines.append(f"-# An event for that time already exists and is {sheet_state(ev)}. Open points you at it instead of making a second.")
         closed = (rc.closed_run_refusal(self.rs, rc.find_run(self.reg, self.rs, self.rid, start, self.draft.get("schedule")))
                   or rc.open_refusal(self.reg, self.rs, self.rid, start, sid))  # a schedule's night from a template, or a one-off holds it
         if closed:  # open_run_and_post refuses it: the screen says so instead of offering an Open that would fail
@@ -645,14 +645,14 @@ async def open_raid_cancel(interaction: discord.Interaction, reg: Registry, **_s
 
         wiz.title = f"Cancel {raid_name(reg, ev)}"
         await cancel_decide(i, i.client, reg, rs, ev, wiz=wiz)
-    await with_run(interaction, reg, title="Cancel a run", then=body, officer=True)
+    await with_run(interaction, reg, title="Cancel an event", then=body, officer=True)
 
 
 @flow("raid_out")
 async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
     uid = interaction.user.id
     if not reg.members.get(uid):  # before any run picker: nothing to pick for someone who isn't registered
-        await interaction.response.send_message("No live run, or you're not registered.", ephemeral=True)
+        await interaction.response.send_message("No event is live, or you're not registered.", ephemeral=True)
         return
 
     def mine(ev: rc.RaidEvent) -> bool:  # the runs they answered Join/Bench on, or hold a seat in
@@ -662,14 +662,14 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
 
     async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
         if not ev or not reg.members.get(uid):
-            await wiz.finish(i, "No live run, or you're not registered.")
+            await wiz.finish(i, "No event is live, or you're not registered.")
             return
         key = ev.key
 
         async def submitted(si: discord.Interaction, v: dict[str, str]) -> None:
             cur, m = rs.events.get(key), reg.members.get(uid)  # re-read
             if not cur or cur.state in ("done", "cancelled") or not m:
-                await wiz.finish(si, "That run closed — nothing to call out of.")
+                await wiz.finish(si, "That event has closed, so there is nothing to call out of.")
                 return
             await wiz.working(si, "Noting it…")
             # the shared verb (the site, MCP and plain text call it too): callout, seat freed after lock, the note for
@@ -726,7 +726,7 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
     reg = wiz.reg
     ev = rs.events.get(key)
     if not ev or ev.state not in LIVE:
-        await wiz.finish(i, "That run is closed.")
+        await wiz.finish(i, "That event is closed.")
         return
     plan = rc.role_plan(reg, rs, ev)
     if wiz.draft.get("rev") != plan.rev:
@@ -788,7 +788,7 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
     async def send(si: discord.Interaction) -> None:
         cur = rs.events.get(key)
         if not cur or cur.state not in LIVE:
-            await wiz.finish(si, "That run closed — nothing sent.")
+            await wiz.finish(si, "That event closed before anything was sent.")
             return
         await wiz.working(si, "Sending…")
         try:
@@ -830,7 +830,7 @@ def withdraw_select(wiz: Wizard, rs, key: str, ev: rc.RaidEvent):
     async def picked(si: discord.Interaction, values: list[str]) -> None:
         cur = rs.events.get(key)
         if not cur or cur.state not in LIVE:
-            await wiz.finish(si, "That run closed — nothing was changed.")
+            await wiz.finish(si, "That event closed before anything was changed.")
             return
         try:
             line = await si.client.withdraw_sent_ask(wiz.reg, rs, cur, int(values[0]), by=si.user.display_name, by_id=si.user.id)
@@ -903,7 +903,7 @@ async def open_raid_suggest(interaction: discord.Interaction, reg: Registry, *, 
 
     async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
         if not ev:
-            await wiz.finish(i, "No live run.")
+            await wiz.finish(i, "No event is live.")
             return
         await show_suggestions(i, wiz, rs, ev.key)
     await with_run(interaction, reg, title=RUN_WORDS["suggest"].rstrip("…"), then=body, officer=True)
@@ -916,7 +916,7 @@ async def open_raid_fill(interaction: discord.Interaction, reg: Registry, *, pre
 
     async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
         if not ev:
-            await wiz.finish(i, "No live run.")
+            await wiz.finish(i, "No event is live.")
             return
         if sheet_state(ev) != "open" and not ev.all_rosters:
             await wiz.finish(i, "The roster is still being built — try again in a moment.")

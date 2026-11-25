@@ -225,8 +225,8 @@ def test_a_follow_on_whose_lock_raises_leaves_the_lead_locked(reg, rs, monkeypat
     monkeypatch.setattr(bot, "lock_run", lock_run)
     line = run(bot.lock_run(reg, rs, lead, by="Jon"))
     assert lead.state == "locked" and rs.events[fev.key].state == "open"
-    assert line.startswith(f"{configops.run_words(reg, lead)}: locked by Jon") and line.endswith(f"follow-on not locked: {err}")
-    assert [x for lvl, x in bot.ops.lines if lvl == "warn" and "follow-on not locked" in x]
+    assert line.startswith(f"{configops.run_words(reg, lead)}: locked by Jon") and line.endswith(f"later raid not locked: {err}")
+    assert [x for lvl, x in bot.ops.lines if lvl == "warn" and "later raid not locked" in x]
 
 
 def test_a_follow_on_cannot_lock_before_its_lead(reg, rs):
@@ -524,7 +524,7 @@ def test_sheet_and_cards_say_then_and_after(reg, rs):
     assert e.title.endswith("Hyjal Summit, then Barrow Deeps ×2") and "\nthen Barrow Deeps ×2 <t:" in e.description
     join(reg, rs, lead, reg.test_members()[:5])
     assert rc.parts_short(reg, lead)  # five joiners can't cover two 10s' tanks and healers
-    assert "Barrow Deeps follow-on" in card_text(raid_views.health_layout(reg, rs, lead, rc.run_team(reg, lead), ico))
+    assert "Later raid **Barrow Deeps**" in card_text(raid_views.health_layout(reg, rs, lead, rc.run_team(reg, lead), ico))
     assert rc.parts_short(reg, fev) == []  # a follow-on has no follow-on of its own
     join(reg, rs, lead, reg.test_members()[5:10])
     fev = rs.events[fev.key]

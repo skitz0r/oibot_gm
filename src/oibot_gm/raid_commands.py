@@ -27,7 +27,7 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
 
     raid = app_commands.Group(name="raid", description="Raid sheets and rosters")
 
-    @raid.command(name="open", description="Officer: open a sheet — the raid's next run, another upcoming one, or a day and time you pick")
+    @raid.command(name="open", description="Officer: open a sheet — the raid's next event, another coming one, or a day and time you pick")
     async def raid_open(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:
@@ -64,13 +64,13 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if reg:
             await FLOWS["loot_distribute"](interaction, reg)
 
-    @raid.command(name="end", description="Officer: end a locked run and its loot council (the summary posts in the thread)")
+    @raid.command(name="end", description="Officer: end a locked event and its loot council (the summary posts in the thread)")
     async def raid_end(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:
             await FLOWS["loot_end"](interaction, reg)
 
-    @raid.command(name="set", description="Officer: record anything a member can do on a run, for them — only what applies is offered")
+    @raid.command(name="set", description="Officer: record anything a member can do on an event, for them — only what applies is offered")
     @app_commands.describe(member="who you're recording it for", what="skip the list: the one thing to record (only if it applies)")
     @app_commands.choices(what=[app_commands.Choice(name=label, value=key) for key, label in SET_WHAT.items()])
     async def raid_set(interaction: discord.Interaction, member: discord.User, what: app_commands.Choice[str] | None = None):
@@ -78,7 +78,7 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if reg:
             await FLOWS["raid_set"](interaction, reg, member=member, what=what.value if what else None)
 
-    @raid.command(name="cancel", description="Officer: cancel a run (an optional reason goes in a box)")
+    @raid.command(name="cancel", description="Officer: cancel an event (an optional reason goes in a box)")
     async def raid_cancel(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:
@@ -102,22 +102,22 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if reg:
             await FLOWS["raid_lineup"](interaction, reg)
 
-    @raid.command(name="list", description="Live runs")
+    @raid.command(name="list", description="Live events")
     async def raid_list(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if not reg:
             return
         rs = bot.raids.store(reg)
         live = rs.live()
-        await interaction.response.send_message("\n".join(f"• {run_label(reg, e)} · {sheet_state(e)} · {len(e.seated()) if sheet_state(e) == 'locked' else len(e.by_status('in'))} {'rostered' if sheet_state(e) == 'locked' else 'joined'}" for e in live) or "No live runs.", ephemeral=True)
+        await interaction.response.send_message("\n".join(f"• {run_label(reg, e)} · {sheet_state(e)} · {len(e.seated()) if sheet_state(e) == 'locked' else len(e.by_status('in'))} {'rostered' if sheet_state(e) == 'locked' else 'joined'}" for e in live) or "No event is live. Open one with /raid open.", ephemeral=True)
 
-    @raid.command(name="out", description="Can't make a run you joined (frees your seat if the roster is locked)")
+    @raid.command(name="out", description="Can't make an event you joined (frees your seat if the roster is locked)")
     async def callout_cmd(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if reg:
             await FLOWS["raid_out"](interaction, reg)
 
-    @raid.command(name="fill", description="Officer: who could cover a run's gaps — shows the asks, Send DMs exactly those")
+    @raid.command(name="fill", description="Officer: who could cover an event's gaps — shows the asks, Send DMs exactly those")
     @app_commands.describe(preview="only show who would be asked (no Send button)")
     async def raid_fill(interaction: discord.Interaction, preview: bool = False):
         reg, interaction = await officer(interaction)

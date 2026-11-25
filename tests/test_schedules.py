@@ -146,7 +146,7 @@ def test_rosters_2_doubles_the_advertised_seats_and_the_health_target(reg, rs):
     nd = rc.needs(reg, ev, team)
     assert nd["headcount"] == 20 - 6 and nd["roles"]["tank"] == 2 * bounds["tank"]["min"] - 1
     embed, _view = sheet_message(reg, ev, team, lambda kind, key: "")
-    assert "/ 20" in embed.description and "2 runs" in embed.description
+    assert "/ 20" in embed.description and "2 rosters" in embed.description
     players = rc.players_for(reg, ev)
     assert rc.how_many_rosters(reg, players, 10, bounds) == 1  # bodies alone: one run
     capable = rc.how_many_rosters(reg, players, 10, bounds, want=2)
@@ -249,7 +249,7 @@ def test_config_schedules_add_edit_and_save_in_one_commit(reg, rs, store, owner)
         await h.pick("Repeats", "weekly")
         await h.submit(h.modal, name="Alt run")
         await h.pick("Change", "repeats")
-        await h.press("Add a run time")
+        await h.press("Add an event time")
         await h.submit(h.modal, day="Sat", hour="20", minute="0")
         assert "8:00 PM" in h.text and "20:00" not in h.text
         await h.press("Back")
@@ -476,12 +476,12 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", RID)
         s0, t0 = ups[0]
-        assert h.buttons() == [f"Next run — {reg.local12(t0)} · {s0['name']}", "Another upcoming run", "Ad hoc run", "Cancel"]
-        await h.press("Another upcoming run")
-        sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run")
+        assert h.buttons() == [f"Next event — {reg.local12(t0)} · {s0['name']}", "Another coming event", "One-off event", "Cancel"]
+        await h.press("Another coming event")
+        sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the event")
         alt_opt = next(o for o in sel.options if o.value.endswith("|alt"))
         assert alt_opt.description.startswith("Alt run · ") and "20:00" not in alt_opt.label
-        await h.pick("Pick the run", alt_opt.value)
+        await h.pick("Pick the event", alt_opt.value)
         assert "The sheet opens now" in h.text  # box 11 for the Alt run's night
         await h.press("Open the sheet")
     asyncio.run(go())
@@ -494,8 +494,8 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
     async def go2():
         await FLOWS["raid_open"](h2.command(), reg)
         await h2.pick("Pick the raid", RID)
-        await h2.press("Ad hoc run")
-        assert h2.buttons() == ["Pickup — pick a time", "One-off — pick a day and time", "Back", "Cancel"]
+        await h2.press("One-off event")
+        assert h2.buttons() == ["Pickup — pick a time", "Own settings — pick a day and time", "Back", "Cancel"]
         await h2.press("Pickup — pick a time")
         assert h2.modal.title == "Open Pickup"
         await h2.submit(h2.modal, day=day, hour="21", minute="0")

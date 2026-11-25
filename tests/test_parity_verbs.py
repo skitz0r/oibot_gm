@@ -79,10 +79,10 @@ def test_set_answer_refuses_a_real_member_on_a_test_run(reg, rs):
     bot = Bot(reg, rs)
     ev = open_test_run(reg, rs, test_by=REAL_UID + 1)
     m = real_member(reg)
-    with pytest.raises(RegistryError, match="test run"):
+    with pytest.raises(RegistryError, match="test event"):
         run(bot.set_answer(reg, rs, ev, m, "in", None, by="Officer"))
     assert str(m.discord_id) not in ev.signups
-    with pytest.raises(RegistryError, match="test run"):  # the callout path has the same guard
+    with pytest.raises(RegistryError, match="test event"):  # the callout path has the same guard
         run(bot.call_out(reg, rs, ev, m, "busy", by="Officer"))
     puppet = reg.test_members()[0]
     assert "Join" in run(bot.set_answer(reg, rs, ev, puppet, "in", None, by="Officer"))

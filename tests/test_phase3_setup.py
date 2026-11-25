@@ -242,9 +242,9 @@ def test_timezone_wizard_offers_keep_or_move_and_moves(reg, rs, monkeypatch):
     async def go():
         await FLOWS["timezone"](h.command(), reg)
         await h.press("Eastern · New York")
-        assert "Save · keep runs at their moment" in h.buttons() and "Save · move open runs with the clock" in h.buttons() and "Save" not in h.buttons()
+        assert "Save · keep events at their moment" in h.buttons() and "Save · move open events with the clock" in h.buttons() and "Save" not in h.buttons()
         assert "moves with the clock and keeps its signups. It still starts at " in h.text
-        await h.press("Save · move open runs with the clock")
+        await h.press("Save · move open events with the clock")
         assert "✅ Timezone **America/New_York**" in h.text and "moved with the clock" in h.text
     run(go())
     assert reg.config.timezone == "America/New_York" and rs.events[ev.key].start.astimezone(reg.tz).hour == 20
@@ -262,8 +262,8 @@ def test_timezone_wizard_with_only_a_locked_run_offers_keep_only(reg, rs, monkey
     async def go():
         await FLOWS["timezone"](h.command(), reg)
         await h.press("Eastern · New York")
-        assert h.buttons()[0] == "Save · keep runs at their moment" and "Save · move open runs with the clock" not in h.buttons()
-        await h.press("Save · keep runs at their moment")
+        assert h.buttons()[0] == "Save · keep events at their moment" and "Save · move open events with the clock" not in h.buttons()
+        await h.press("Save · keep events at their moment")
         assert "✅" in h.text
     run(go())
     assert reg.config.timezone == "America/New_York" and rs.events[ev.key].starts_at == was
@@ -572,7 +572,7 @@ def test_roster_comp_sets_a_minimum_through_configops(reg, rs, store, officer_on
     async def go():
         await FLOWS["roster_comp"](h.command(), reg)
         await h.pick("Pick a raid", "barrow_deeps")
-        assert "**Minimums**" in h.text and "A run needs at least 2 tanks, 2 healers." in h.text and "Save minimums" in h.buttons()
+        assert "**Minimums**" in h.text and "A roster needs at least 2 tanks, 2 healers." in h.text and "Save minimums" in h.buttons()
         await h.pick("Set a minimum for…", "healer")
         assert set(h.modal._items) == {"min", "note"}  # one number and a reason: no upper limit (D16)
         await h.submit(h.modal, min="11")  # past the run's size: refused at once, Fix this reopens the form
