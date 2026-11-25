@@ -862,7 +862,7 @@ def test_roster_applicant_opens_the_one_decide_screen(reg, monkeypatch):
     h = Harness(reg, user=types.SimpleNamespace(id=1, display_name="Off", mention="@Off"))
     h.client = types.SimpleNamespace(decide_application=decide, ico=lambda k, v: "")
     run(discord_registry.application_decide(h.command(), reg, a.discord_id, False, "typed note"))
-    assert "Your note: typed note" in h.text and h.buttons() == ["Decline", "Decline with a note…", "Back"]
+    assert "Your note: typed note" in h.text and h.buttons() == ["Decline", "Decline with a note", "Back"]
     run(h.press("Decline"))
     assert decided == [(a.discord_id, False, "typed note", 1)]
 
@@ -1006,11 +1006,11 @@ def test_officers_hub_role_picker_review_and_save(reg):
     reg.config.officer_roles = ["Old Officers"]
     h = owner_harness(reg, bot)
     run(FLOWS["officers"](h.command(), reg))
-    assert "From an older config, by name" in h.text and "Map Old Officers…" in h.buttons()
+    assert "From an older config, by name" in h.text and "Map Old Officers" in h.buttons()
     run(pick_widget(h, discord.ui.RoleSelect, "Officer roles (pick every role that counts)", bot.guild.get_role(55)))
     assert "belongs to a bot or an integration" in h.text, "managed roles are refused"
     run(pick_widget(h, discord.ui.RoleSelect, "Officer roles (pick every role that counts)"))
-    run(h.press("Map Old Officers…"))
+    run(h.press("Map Old Officers"))
     run(pick_widget(h, discord.ui.RoleSelect, "The role for Old Officers", bot.guild.get_role(66)))
     run(h.press("Review"))
     assert "Officer roles" in h.text and "With no officer roles left" not in h.text

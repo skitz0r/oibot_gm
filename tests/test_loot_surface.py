@@ -289,7 +289,7 @@ def test_open_posts_a_public_thread_on_the_officer_channel_with_the_pinned_sessi
     first = n.thread.sent[0]
     assert first.id == n.s.cards["loot"] and first.pinned and n.s.cards["starter"] == starter.id and n.s.cards["channel"] == n.ch.id
     v = first.view
-    assert [b.item.label for b in loot_buttons(v)] == ["Tick drops…", "Distribute", "Scores only: off", "End council"]
+    assert [b.item.label for b in loot_buttons(v)] == ["Tick drops", "Distribute", "Scores only: off", "End council"]
     assert button(v, "Distribute").item.disabled, "nothing to judge yet"
     body = text_of(v)
     seated = [p for r in n.ev.all_rosters for p in r.selected]
@@ -437,7 +437,7 @@ def test_the_item_card_edits_itself_after_confirm(night):
         v = h.screen["view"]
         body = text_of(v)
         assert "No tier data for this item" in body and "**Candidates**" in body and "<spec:" in body
-        assert [b.item.label for b in loot_buttons(v)] == ["Confirm", "Override…", "Disenchant"]
+        assert [b.item.label for b in loot_buttons(v)] == ["Confirm", "Override", "Disenchant"]
         assert any(isinstance(it, LootPick) and it.kind == "whynot.d1" for it in items_of(v))
         iok = button(v, "Confirm")
         itx = h._on_screen()
@@ -472,7 +472,7 @@ def test_override_is_a_grouped_select_then_the_reason_modal_whose_submit_is_the_
     rev = ls.batch_rev(n.s)
 
     async def go():
-        await button(m.view, "Override…").callback(h.card_press())
+        await button(m.view, "Override").callback(h.card_press())
         assert h.selects() == ["Award to…"] and "the bot picked" in h.text
         sel = h.screen["view"].children[0]
         descs = [o.description for o in sel.options]
@@ -550,7 +550,7 @@ def test_a_second_officers_override_asks_to_replace(night):
     async def go():
         await h.submit(flows_loot.reason_modal(GUILD, n.s.id, "d1", "ovr", item="Shard of Doom", who=names[1]), who=names[1], reason="my call instead")
         assert "Jonny already set this" in h.text and "replace?" in h.text
-        rep = button(h.screen["view"], "Replace their override…")
+        rep = button(h.screen["view"], "Replace their override")
         await rep.callback(h.card_press())
         assert isinstance(h.modal, flows_loot.LootModal) and h.modal.custom_id.endswith(":ovr:r")
         await h.submit(who=names[1], reason="my call instead")
@@ -599,12 +599,12 @@ def test_tick_wizard_names_a_boss_and_an_item_not_on_the_table(night):
     h = officer_h(n)
 
     async def go():
-        await button(card(n), "Tick drops…").callback(h.card_press())
-        assert h.selects() == ["Which boss?"] and "Un-tick…" not in h.buttons()
+        await button(card(n), "Tick drops").callback(h.card_press())
+        assert h.selects() == ["Which boss?"] and "Un-tick" not in h.buttons()
         await h.pick("Which boss?", flows_loot.NEW_BOSS)
         await h.submit(boss="Gatekeeper")
-        assert "no loot table yet" in h.text and "Not on the table…" in h.buttons()
-        await h.press("Not on the table…")
+        assert "no loot table yet" in h.text and "Not on the table" in h.buttons()
+        await h.press("Not on the table")
         await h.submit(name="Shard of Doom", copies="2")
         assert "Tick **Shard of Doom** from **Gatekeeper** — 2 of each?" in h.text
         assert not n.s.drop_list, "nothing before Tick"
@@ -644,7 +644,7 @@ def test_untick_refuses_a_recorded_drop_and_removes_the_rest(night):
 
     async def go():
         await FLOWS["loot_tick"](h.card_press(), n.reg, sid=n.s.id)
-        await h.press("Un-tick…")
+        await h.press("Un-tick")
         assert [o.value for o in h.screen["view"].children[0].options] == ["d2"], "a recorded drop isn't offered"
         await h.pick("Un-tick…", "d2")
         await h.press("Un-tick")
@@ -660,12 +660,12 @@ def test_a_mismatch_line_carries_give_the_reason_and_mistake_correct(night):
     run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
     run(n.bot.loot_notify(n.reg, n.s, "⚠ mismatch", kind="mismatch", drop_id="d1"))
     line = n.thread.sent[-1]
-    assert labels(line.view) == ["Give the reason", "Mistake — correct…"]
+    assert labels(line.view) == ["Give the reason", "Mistake — correct"]
     assert all(b.item.custom_id.startswith(f"loot.{GUILD}:{n.s.id}:d1:") for b in line.view.children)
     run(n.bot.loot_notify(n.reg, n.s, "📒 manual", kind="manual", drop_id="d1"))
-    assert labels(n.thread.sent[-1].view) == ["Wrong? Fix…"]
+    assert labels(n.thread.sent[-1].view) == ["Wrong? Fix"]
     run(n.bot.loot_notify(n.reg, n.s, "⚠ conflict", kind="conflict", drop_id="d1"))
-    assert labels(n.thread.sent[-1].view) == ["Correct…"]
+    assert labels(n.thread.sent[-1].view) == ["Correct"]
 
 
 def companion_mismatch(n):
@@ -697,7 +697,7 @@ def test_give_the_reason_writes_the_precedent_and_a_second_asks_to_replace(night
         assert "📌 Precedent" in h.text
         await h.submit(flows_loot.reason_modal(GUILD, n.s.id, "d1", "why", item="Shard of Doom"), reason="a different reason")
         assert "already gave a reason" in h.text and "replace?" in h.text
-        await button(h.screen["view"], "Replace with my reason…").callback(h.card_press())
+        await button(h.screen["view"], "Replace with my reason").callback(h.card_press())
         assert h.modal.custom_id.endswith(":why:r")
         await h.submit(reason="a different reason")
     run(go())
@@ -713,7 +713,7 @@ def test_mistake_correct_is_the_grouped_select_then_the_reason(night):
     h = officer_h(n)
 
     async def go():
-        await LootButton(GUILD, n.s.id, "d1", "fix", label="Mistake — correct…").callback(h.card_press())
+        await LootButton(GUILD, n.s.id, "d1", "fix", label="Mistake — correct").callback(h.card_press())
         assert h.selects() == ["Record it to…"] and "no precedent" in h.text
         await h.pick("Record it to…", bot_pick)
         assert h.modal.custom_id == f"lootmodal.{GUILD}:{n.s.id}:d1:fix"
@@ -794,7 +794,7 @@ def test_a_press_in_another_server_is_refused(night):
     n = night
     h = officer_h(n)
     h.guild_id = 999
-    run(button(card(n), "Tick drops…").callback(h.card_press()))
+    run(button(card(n), "Tick drops").callback(h.card_press()))
     assert "another server" in h.text.lower() or "isn't" in h.text.lower()
 
 
@@ -966,7 +966,7 @@ def test_drops_with_no_run_live_prompt_an_ad_hoc_run_once(reg, rs):
     prompts = [m for m in bot.officer_ch.sent if "no run is live" in (m.content or "")]
     assert len(prompts) == 1 and "Lootmaster's log" in prompts[0].content
     (b,) = prompts[0].view.children
-    assert b.item.label == "Start an ad hoc run…" and b.item.custom_id == f"lootstart.{GUILD}:open"
+    assert b.item.label == "Start an ad hoc run" and b.item.custom_id == f"lootstart.{GUILD}:open"
     assert not bot.dms
 
 
@@ -1078,7 +1078,7 @@ def test_an_override_sentence_becomes_a_diff_and_apply_waits_for_a_real_reason(n
     run(n.bot.loot_chat(msg, n.s))
     text, view = msg.replies[-1]
     assert isinstance(view, LootChatConfirmView) and f"council awards {other} — why? (my guess: “he needs it”)" in text and view.apply.item.disabled
-    assert view.edit.item.label == "Give the reason…"
+    assert view.edit.item.label == "Give the reason"
     assert not n.s.pending("d1").override, "nothing before Apply"
     view.changes[0].update(reason="tanks progression first", inferred=False)
     view._sync_apply()
@@ -1269,7 +1269,7 @@ def test_a_chat_award_with_no_reason_asks_why_instead_of_an_error_line(night, mo
     other = next(c.character for c in p.result.candidates if c.character != p.to)
     text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="override", reply="", changes=[nl.LootChange(item_id=1, award_to=other, reason="")]))
     assert f"Shard of Doom (d1): bot picked {p.to} → council awards {other} — why? — press Give the reason…" in text, text
-    assert "needs a reason" not in text and view.apply.item.disabled and view.edit.item.label == "Give the reason…"
+    assert "needs a reason" not in text and view.apply.item.disabled and view.edit.item.label == "Give the reason"
     monkeypatch.undo()
     h = officer_h(n)
     run(view.press_apply(h.card_press()))
@@ -1315,10 +1315,10 @@ def test_gm_precedents_retires_one_with_a_reason(night):
         await FLOWS["gm_precedents"](h.command(), n.reg)
         assert h.selects() == ["Pick a precedent"]
         await h.pick("Pick a precedent", iid)
-        assert "promised last week" in h.text and h.buttons() == ["Retire…", "Back"]
+        assert "promised last week" in h.text and h.buttons() == ["Retire", "Back"]
         # the clock rule: the precedent's stored date (ISO) is never what a person reads
         assert not re.search(r"\d{4}-\d\d-\d\d|T\d\d:|\b\d\d:\d\d\b(?! [AP]M)", h.text), h.text
-        await h.press("Retire…")
+        await h.press("Retire")
         await h.submit(reason="policy changed this tier")
     run(go())
     assert "Precedent retired" in h.text
@@ -1511,10 +1511,10 @@ def test_keep_open_and_the_tick_wizard_answer_before_the_write(night, monkeypatc
     seen = _spy_answered(n, monkeypatch, "tick", box)
 
     async def go():
-        await button(card(n), "Tick drops…").callback(h.card_press())
+        await button(card(n), "Tick drops").callback(h.card_press())
         await h.pick("Which boss?", flows_loot.NEW_BOSS)
         await h.submit(boss="Gatekeeper")
-        await h.press("Not on the table…")
+        await h.press("Not on the table")
         await h.submit(name="Shard of Doom", copies="1")
         btn = next(b for b in h._items() if isinstance(b, discord.ui.Button) and b.label == "Tick")
         box["itx"] = h._on_screen()

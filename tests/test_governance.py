@@ -529,7 +529,7 @@ def test_the_decide_flow_refuses_an_officers_game_data_approval_at_once(reg):
     # the owner: the restart sentence names every served server, then Approve writes
     owner = Harness(reg, user=SimpleNamespace(id=OWNER, display_name="Owner"), client=client)
     run(ProposalButton(reg.key, p.id, "approve").callback(owner.card_press()))
-    assert "the bot restarts for about two minutes for Demo Guild." in owner.text and owner.buttons() == ["Approve", "Approve with a note…", "Back"]
+    assert "the bot restarts for about two minutes for Demo Guild." in owner.text and owner.buttons() == ["Approve", "Approve with a note", "Back"]
     run(owner.press("Approve"))
     assert ProposalStore(reg.store, reg.key).get(p.id).state == "approved" and "the card is updated" in owner.text
     assert client.card_edits[-1] == (p.id, "approved")
@@ -543,11 +543,11 @@ def test_the_decide_flow_on_a_dismiss_and_back_changes_nothing(reg):
     client, lines = fake_client(reg, officer=True)
     h = Harness(reg, user=SimpleNamespace(id=5, display_name="Kessa"), client=client)
     run(ProposalButton(reg.key, p.id, "dismiss").callback(h.card_press()))
-    assert "the review won't propose it again" in h.text and h.buttons() == ["Dismiss", "Dismiss with a note…", "Back"]
+    assert "the review won't propose it again" in h.text and h.buttons() == ["Dismiss", "Dismiss with a note", "Back"]
     run(h.press("Back"))
     assert ProposalStore(reg.store, reg.key).get(p.id).state == "proposed" and not lines
     run(ProposalButton(reg.key, p.id, "dismiss").callback(h.card_press()))
-    run(h.press("Dismiss with a note…"))
+    run(h.press("Dismiss with a note"))
     run(h.submit(note="already handled"))
     q = ProposalStore(reg.store, reg.key).get(p.id)
     assert (q.state, q.note) == ("dismissed", "already handled") and any("→ dismissed" in x and "already handled" in x for x in lines)

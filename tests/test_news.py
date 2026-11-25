@@ -256,8 +256,8 @@ def test_buttons_are_officer_only_and_flip_the_state(reg):
         h = Harness(reg, user=SimpleNamespace(id=5, display_name="Kessa"), client=client)
         press = h.card_press()
         await ProposalButton(reg.key, p.id, "approve").callback(press)
-        assert "apply job" in h.text and h.buttons() == ["Approve", "Approve with a note…", "Back"] and ps.get(p.id).state == "proposed"
-        await h.press("Approve with a note…")
+        assert "apply job" in h.text and h.buttons() == ["Approve", "Approve with a note", "Back"] and ps.get(p.id).state == "proposed"
+        await h.press("Approve with a note")
         await h.submit(note="checked the patch notes")
         q = ps.get(p.id)
         assert q.state == "approved" and q.decided_by == "Kessa" and q.decided_by_id == 5 and q.note == "checked the patch notes"

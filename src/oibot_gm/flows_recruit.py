@@ -82,9 +82,9 @@ class RecruitWizard(OwnerWizard):
                                      self.on_question))
         items += [self.role_picker(),
                   self.button("Close applications" if d["open"] else "Open applications", self.toggle),
-                  self.button("Note…", lambda x: self.open_form(x, self.note_form())),
-                  self.button("Invite link…", lambda x: self.open_form(x, self.invite_form())),
-                  self.button("Add a question…", self.add_question, disabled=len(qs) >= QUESTIONS_MAX),
+                  self.button("Note", lambda x: self.open_form(x, self.note_form())),
+                  self.button("Invite link", lambda x: self.open_form(x, self.invite_form())),
+                  self.button("Add a question", self.add_question, disabled=len(qs) >= QUESTIONS_MAX),
                   self.button("Save", self.save, discord.ButtonStyle.success),
                   self.button("Cancel", self.cancel)]
         await self.show(i, self.summary(), *items, embed=self.questions_embed())
@@ -162,7 +162,7 @@ class RecruitWizard(OwnerWizard):
             self.form_vals = {}
             await self.open_form(x, self.question_form(idx))
         await self.show(i, text,
-                        self.button("Edit…", edit, discord.ButtonStyle.primary),
+                        self.button("Edit", edit, discord.ButtonStyle.primary),
                         self.button("Move up", lambda x: self.move(x, idx, -1), disabled=idx == 0),
                         self.button("Move down", lambda x: self.move(x, idx, 1), disabled=idx == len(qs) - 1),
                         self.button("Remove", lambda x: self.remove(x, idx), discord.ButtonStyle.danger),

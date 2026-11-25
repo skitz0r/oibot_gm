@@ -744,12 +744,12 @@ async def application_decide(interaction: discord.Interaction, reg: Registry, di
 
 
 class ApplicationButton(discord.ui.DynamicItem[discord.ui.Button], template=r"app(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>accept|decline):(?P<uid>[0-9]{1,20})"):
-    """Accept / Decline… on a review card; persistent, so a card posted before a restart still works. The id carries
+    """Accept / Decline on a review card; persistent, so a card posted before a restart still works. The id carries
     the guild (`app.<gk>:…`); a card only works in its own server either way (an old id: that server's guild). Both
-    open the same `decide` screen (consequence · verdict · verdict with a note… · Back) — DeclineModal is retired."""
+    open the same `decide` screen (consequence · verdict · verdict with a note · Back) — DeclineModal is retired."""
 
     def __init__(self, action: str, discord_id: int, gk: str | None):
-        label, style = ("Accept", discord.ButtonStyle.success) if action == "accept" else ("Decline…", discord.ButtonStyle.secondary)
+        label, style = ("Accept", discord.ButtonStyle.success) if action == "accept" else ("Decline", discord.ButtonStyle.secondary)
         super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"app{'.' + gk if gk else ''}:{action}:{discord_id}"))
         self.action, self.discord_id, self.gk = action, discord_id, gk
 
@@ -1117,7 +1117,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         view = None
         if regular:  # D7: a member can step down from a series' regulars themselves (volunteering is a request to officers)
             view = discord.ui.View(timeout=600)
-            btn = discord.ui.Button(label="Step down from a regular raid…", style=discord.ButtonStyle.secondary)
+            btn = discord.ui.Button(label="Step down from a regular raid", style=discord.ButtonStyle.secondary)
 
             async def step_down(i: discord.Interaction) -> None:
                 await FLOWS["regular_step_down"](i, reg)

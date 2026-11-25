@@ -25,7 +25,7 @@ from oibot_gm.web import api_armory
 from oibot_gm.wizard import FLOWS
 
 ROOT = Path(__file__).resolve().parents[1]
-ARMORY_BUTTONS = {"Link to the armory…", "Unlink…", "Keep professions by hand", "Follow the armory again", "Sync now"}
+ARMORY_BUTTONS = {"Link to the armory", "Unlink", "Keep professions by hand", "Follow the armory again", "Sync now"}
 
 
 def run(coro):
@@ -86,8 +86,8 @@ def test_a_member_links_their_character_through_the_lookup_and_the_decide_screen
     async def go():
         await FLOWS["member_char"](h.command(), reg)
         assert "Not linked to the armory yet" in h.text and "Not linked to the armory yet." not in h.text, "a status line: no full stop"
-        assert "Link to the armory…" in h.buttons() and not ({"Unlink…", "Sync now", "Move to another member…"} & set(h.buttons()))
-        await h.press("Link to the armory…")  # one named character: straight to the box
+        assert "Link to the armory" in h.buttons() and not ({"Unlink", "Sync now", "Move to another member"} & set(h.buttons()))
+        await h.press("Link to the armory")  # one named character: straight to the box
         assert h.modal is not None and [f.label for f in h.modal._fields] == ["First name", "Surname"]
         assert h.modal._fields[0].default == "Bram"
         before = commits(reg)
@@ -112,8 +112,8 @@ def test_the_hub_line_and_the_actions_of_a_linked_character(reg, rs, fake, clock
     run(FLOWS["member_char"](h.command(), reg))
     assert "Linked to the armory · Updated <t:" in h.text and ":R>" in h.text
     assert "in the guild" not in h.text, "not known before the roster is read: nothing said"
-    assert {"Unlink…", "Keep professions by hand", "Sync now"} <= set(h.buttons())
-    assert "Link to the armory…" not in h.buttons() and "Follow the armory again" not in h.buttons()
+    assert {"Unlink", "Keep professions by hand", "Sync now"} <= set(h.buttons())
+    assert "Link to the armory" not in h.buttons() and "Follow the armory again" not in h.buttons()
     run(discord_armory.roster_refresh(Client(rs), reg))
     h2 = harness(reg, rs, TESSA)
     run(FLOWS["member_char"](h2.command(), reg))
@@ -127,7 +127,7 @@ def test_not_found_and_the_armory_down_are_one_sentence_with_a_way_back(reg, rs,
 
     async def go():
         await FLOWS["member_char"](h.command(), reg)
-        await h.press("Link to the armory…")
+        await h.press("Link to the armory")
         await h.submit(h.modal, name="Bram", surname="Nobody")
         assert discord_armory.NOT_FOUND in h.text and h.buttons() == ["Try again", "Cancel"]
         await h.press("Try again")
@@ -171,7 +171,7 @@ def test_keep_by_hand_follow_again_sync_now_and_unlink(reg, rs, fake, clock):
         assert discord_armory.SYNC_LIMITED in h.text
 
         await FLOWS["member_char"](h.command(), reg)
-        await h.press("Unlink…")
+        await h.press("Unlink")
         c = char(reg, TESSA, "Bram Kettle")
         assert h.text.endswith("\n".join(cq.armory_unlink_consequence(reg, tessa(reg), c, TESSA)))
         await h.press("Unlink it")
@@ -189,8 +189,8 @@ def test_an_officer_links_for_a_member_and_rights_are_checked_on_every_press(reg
 
     async def go():
         await FLOWS["member_char"](h.command(), reg, member=tess)
-        assert {"Link to the armory…", "Move to another member…"} <= set(h.buttons())
-        await h.press("Link to the armory…")
+        assert {"Link to the armory", "Move to another member"} <= set(h.buttons())
+        await h.press("Link to the armory")
         officer["officer"] = False  # Ivy stops being an officer while the box is open
         await h.submit(h.modal, name="Bram", surname="Kettle")
         assert "Officers only" in h.text and h.screen["view"] is None
@@ -203,7 +203,7 @@ def test_an_officer_links_for_a_member_and_rights_are_checked_on_every_press(reg
 
     async def again():
         await FLOWS["member_char"](h.command(), reg, member=tess)
-        await h.press("Link to the armory…")
+        await h.press("Link to the armory")
         await h.submit(h.modal, name="Bram", surname="Kettle")
         assert "Tessa's Bram takes that name" in h.text
         officer["officer"] = False
@@ -220,7 +220,7 @@ def test_an_officer_moves_a_character_with_the_user_select(reg, rs, fake, clock,
 
     async def go():
         await FLOWS["member_char"](h.command(), reg, member=wren)
-        await h.press("Move to another member…")
+        await h.press("Move to another member")
         assert h.selects() == ["Pick the member it moves to"]
         before = commits(reg)
         await h.pick_member("Pick the member it moves to", orla)
@@ -242,7 +242,7 @@ def test_a_move_refusal_is_the_verbs_sentence_with_a_way_back(reg, rs, fake, clo
 
     async def go():
         await FLOWS["member_char"](h.command(), reg, member=wren)
-        await h.press("Move to another member…")
+        await h.press("Move to another member")
         await h.pick_member("Pick the member it moves to", stranger)
         why = reg.move_refusal(WREN, "Pip", 999, rs=rs, by_id=OWNER)
         assert why and why in h.text and "Pick someone else" in h.buttons()
@@ -255,7 +255,7 @@ def test_self_mode_never_offers_move(reg, rs, fake, clock):
     people(reg)
     h = harness(reg, rs, WREN)
     run(FLOWS["member_char"](h.command(), reg))
-    assert "Move to another member…" not in h.buttons()
+    assert "Move to another member" not in h.buttons()
 
 
 # ---------------------------------------------------------------- /me professions on a synced character
@@ -266,11 +266,11 @@ def test_a_synced_characters_professions_are_shown_not_edited(reg, rs, fake, clo
     h = harness(reg, rs, TESSA)
     run(FLOWS["me_professions"](h.command(), reg))
     assert "Leatherworking" in h.text and "come from the armory" in h.text and "Keep professions by hand" in h.text and "/me char" in h.text
-    assert not ({"Add profession…", "Change skill…", "Add recipe…", "Remove…"} & set(h.buttons()))
+    assert not ({"Add profession", "Change skill", "Add recipe", "Remove"} & set(h.buttons()))
     run(discord_armory.set_profession_sync(Client(rs), reg, TESSA, "Bram Kettle", False, "Tessa", by_id=TESSA))
     h2 = harness(reg, rs, TESSA)
     run(FLOWS["me_professions"](h2.command(), reg))
-    assert "Change skill…" in h2.buttons() and "come from the armory" not in h2.text
+    assert "Change skill" in h2.buttons() and "come from the armory" not in h2.text
 
 
 # ---------------------------------------------------------------- /roster armory
@@ -383,7 +383,7 @@ def test_tbc_shows_nothing_of_the_armory_but_the_officers_move(tbc, rs, fake, of
     assert "armory" not in hp.text.lower()
     ho = harness(reg, rs, OWNER, "Owner")
     run(FLOWS["member_char"](ho.command(), reg, member=types.SimpleNamespace(id=TESSA, display_name="Tessa", mention="@Tessa")))
-    assert ho.buttons() == ["Spec", "Main", "Flex", "Rank", "Retire", "Delete", "Move to another member…", "Cancel"], "R11: only Move is added"
+    assert ho.buttons() == ["Spec", "Main", "Flex", "Rank", "Retire", "Delete", "Move to another member", "Cancel"], "R11: only Move is added"
     assert "armory" not in ho.text.lower()
     hr = harness(reg, rs, OWNER, "Owner")
     run(FLOWS["roster_armory"](hr.command(), reg))
@@ -426,7 +426,7 @@ def test_the_link_box_counts_against_the_same_lookup_limit_as_the_site(reg, rs, 
 
     async def go():
         await FLOWS["member_char"](h.command(), reg)
-        await h.press("Link to the armory…")
+        await h.press("Link to the armory")
         await h.submit(h.modal, name="Bram", surname="Kettle")
         assert discord_armory.TOO_MANY_LOOKUPS in h.text and "Try again" in h.buttons()
     run(go())

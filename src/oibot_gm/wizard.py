@@ -18,6 +18,7 @@ Discord facts the code depends on (verified against discord.py 2.7.1):
 """
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from .constants import CONFIRM_WORDS
 from .registry import CLOCK12, MAX_ABSENCE_DAYS, Registry, RegistryError
 
 log = logging.getLogger(__name__)
@@ -51,6 +53,23 @@ def fade(view, interaction):
 # Discord limits (the API refuses payloads past these; `lint` checks them offline)
 MAX_OPTIONS, MAX_MODAL_ITEMS, MAX_LABEL, MAX_DESCRIPTION, MAX_TITLE, MAX_BUTTON = 25, 5, 45, 100, 45, 80
 WIZARD_TIMEOUT_S = 600  # an interaction token lives 15 minutes; expiring first lets the wizard say it expired
+ELLIPSES = ("…", "...")
+
+
+def button_label(text: str) -> str:
+    """A Discord button never ends in an ellipsis (§7b): drop ONE trailing "…" or "..." and the space before it. The
+    site keeps its ellipses (its menu words, D1), so shared words pass through here where Discord renders a button."""
+    for e in ELLIPSES:
+        if text.endswith(e):
+            return text[: -len(e)].rstrip()
+    return text
+
+
+def box_text(box: dict, *, changed: bool = False) -> str:
+    """A server box (consequences.box) as a Discord screen: CONFIRM_WORDS["changed"] first when it changed while open,
+    then the bold title, each diff line, each sentence on its own line. Nothing is added or reworded."""
+    lines = ([CONFIRM_WORDS["changed"]] if changed else []) + [f"**{box['title']}**"]
+    return "\n".join(lines + [str(x) for x in box.get("diff") or ()] + [str(x) for x in box.get("sentences") or ()])
 
 
 @dataclass
@@ -278,7 +297,7 @@ class Wizard(discord.ui.View):
     # ---- building blocks (callbacks are bound here, so a screen is a short list of these)
     def button(self, label: str, on_press: Callable[[discord.Interaction], Awaitable[None]], style: discord.ButtonStyle = discord.ButtonStyle.secondary,
                *, disabled: bool = False, emoji: str | None = None) -> discord.ui.Button:
-        b = discord.ui.Button(label=label[:MAX_BUTTON], style=style, disabled=disabled, emoji=emoji)
+        b = discord.ui.Button(label=button_label(label)[:MAX_BUTTON], style=style, disabled=disabled, emoji=emoji)
         b.callback = on_press  # type: ignore[method-assign]
         return b
 
@@ -309,9 +328,9 @@ class Wizard(discord.ui.View):
 
     # ---- the ONE confirm screen (dual interfaces §2.3)
     async def decide(self, interaction: discord.Interaction, text: str, *, do: Callable[[discord.Interaction, str | None], Awaitable[None]],
-                     note: Field | dict | None = None, do_label: str = "Do it", danger: bool = False, back_label: str = "Back",
+                     do_label: str, note: Field | dict | None = None, danger: bool = False, back_label: str = "Back",
                      extra: Sequence[discord.ui.Item] = (), hint: str | None = None) -> None:
-        """The consequence, then `[Do it]` `[Do it with a note…]` `[Back]`. `text` is the consequence sentence(s) from
+        """The consequence, then `[<verb>]` `[<verb> with a note]` `[Back]` — `do_label` is the action's verb, required. `text` is the consequence sentence(s) from
         code (consequences.consequence, news.consequence) — never composed here. `do(interaction, note)` is the write:
         this screen has already acknowledged the press (`working`) before calling it, so `do` may run a solver or a DM
         fan-out and ends with `finish` (or `refuse`). `note`: a Field (prose only — a TextInput never parses) or
@@ -343,17 +362,78 @@ class Wizard(discord.ui.View):
             await run(si, values.get(field.key) if field else None)
 
         async def with_note(i: discord.Interaction) -> None:
-            await self.open_form(i, Form(f"{self.title}: a note"[:MAX_TITLE], [field], submitted))
+            await self.open_form(i, Form(f"{do_label} with a note"[:MAX_TITLE], [field], submitted))
 
         async def back(i: discord.Interaction) -> None:
             await self.finish(i, "Nothing was changed.")
 
         items = [self.button(do_label, plain, style)]
         if field is not None:
-            items.append(self.button(f"{do_label} with a note…", with_note, discord.ButtonStyle.secondary))
+            items.append(self.button(f"{do_label} with a note", with_note, discord.ButtonStyle.secondary))
         items += list(extra)
         items.append(self.button(back_label, back, discord.ButtonStyle.secondary))
         await self.show(interaction, f"{text}\n-# {hint}" if hint else text, *items)
+
+    async def decide_box(self, interaction: discord.Interaction, box: dict, *,
+                         do: Callable[[discord.Interaction, dict[str, str]], Awaitable[None]],
+                         refresh: Callable[[], dict | Awaitable[dict]] | None = None, note: Sequence[Field] = (),
+                         extra: Sequence[discord.ui.Item] = (), back: Callable[[discord.Interaction], Awaitable[None]] | None = None,
+                         hint: str | None = None, changed: bool = False) -> None:
+        """The server's box (consequences.box) on one screen — the same box the site prints (§7b). The text is
+        `box_text(box)` in place of the wizard's own title. Buttons: the box's verb (red iff `danger`), `<verb> with a
+        note` when `note` (a Form of those Fields whose Submit is the write), `extra` (reads only), then Back (`back`, or
+        "Nothing was changed."). A refusal box (verb None) is its sentence and Back alone. At the verb's press and at the
+        note's submit `refresh()` builds the box again: another `fp` is shown again under CONFIRM_WORDS["changed"] and
+        nothing is written; a refusal is shown as one. Otherwise `working`, then `do(interaction, values)` (`{}` for a
+        plain press). `refresh` must not solve: it runs inside Discord's 3 seconds."""
+        verb = box.get("verb")
+        note = list(note)
+        again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint)
+
+        async def go(i: discord.Interaction, values: dict[str, str]) -> None:
+            if refresh is not None:
+                fresh = refresh()
+                if inspect.isawaitable(fresh):
+                    fresh = await fresh
+                if fresh.get("fp") != box.get("fp"):
+                    await self.decide_box(i, fresh, changed=fresh.get("verb") is not None, **again)
+                    return
+            await self.working(i)
+            await do(i, values)
+
+        async def plain(i: discord.Interaction) -> None:
+            await go(i, {})
+
+        async def submitted(si: discord.Interaction, values: dict[str, str]) -> None:
+            if si.user.id != self.owner_id:
+                await si.response.send_message("This belongs to someone else's wizard.", ephemeral=True)
+                return
+            why = await self.guard(si) if self.guard else None
+            if why:
+                await self.finish(si, why)
+                return
+            await go(si, values)
+
+        async def with_note(i: discord.Interaction) -> None:
+            await self.open_form(i, Form(f"{verb} with a note"[:MAX_TITLE], note, submitted))
+
+        async def nothing(i: discord.Interaction) -> None:
+            await self.finish(i, "Nothing was changed.")
+
+        items: list[discord.ui.Item] = []
+        if verb is not None:
+            style = discord.ButtonStyle.danger if box.get("danger") else discord.ButtonStyle.success
+            items.append(self.button(verb, plain, style))
+            if note:
+                items.append(self.button(f"{verb} with a note", with_note, discord.ButtonStyle.secondary))
+            items += list(extra)
+        items.append(self.button(CONFIRM_WORDS["back"], back or nothing, discord.ButtonStyle.secondary))
+        text = box_text(box, changed=changed)
+        heading, self.heading = self.heading, False  # one heading: the box's title, never the wizard's too
+        try:
+            await self.show(interaction, f"{text}\n-# {hint}" if hint else text, *items)
+        finally:
+            self.heading = heading
 
 
 # ---------------------------------------------------------------- dates and times (never typed)
@@ -445,13 +525,14 @@ def span_end(start: date, days: int) -> date:
     return start + timedelta(days=max(1, days) - 1)
 
 
-def when_fields(reg: Registry, *, day0: date, default: datetime | None = None, later: bool = True, day_note: Callable[[date], str | None] | None = None) -> list[Field]:
+def when_fields(reg: Registry, *, day0: date, default: datetime | None = None, later: bool = True, day_note: Callable[[date], str | None] | None = None,
+                step: int = 5) -> list[Field]:
     """The three selects that pick a start: which day, the hour, the minutes. `default` preselects the usual time."""
     tzname = reg.config.timezone
     return [
         Field("day", "Which day?", day_opts(reg, day0, default=default.date() if default else None, note=day_note, later=later), description=f"days in {tzname}"),
         Field("hour", "Start time — hour", hour_opts(default.hour if default else 19), description="guild time, 12-hour clock"),
-        Field("minute", "Minutes", minute_opts(5, default.minute if default else 0)),
+        Field("minute", "Minutes", minute_opts(step, default.minute if default else 0)),
     ]
 
 
@@ -499,6 +580,8 @@ def lint(obj: discord.ui.View | discord.ui.Modal) -> list[str]:
                     errs.append(f"select option too long: {o.label!r}")
         if isinstance(it, discord.ui.Button) and it.label and len(it.label) > MAX_BUTTON:
             errs.append(f"button label over {MAX_BUTTON}: {it.label!r}")
+        if isinstance(it, discord.ui.Button) and it.label and it.label.endswith(ELLIPSES):
+            errs.append(f"button label ends in an ellipsis: {it.label!r}")
         cid = getattr(it, "custom_id", None)
         if isinstance(cid, str) and len(cid) > 100:
             errs.append(f"custom_id over 100: {cid!r}")

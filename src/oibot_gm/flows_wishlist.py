@@ -107,7 +107,7 @@ class WishlistWizard(Wizard):
         if n < WISHLIST_MAX:
             items.append(self.select("Add an item…", self.item_opts(), self.item_picked))
         if n:
-            items.append(self.button("Remove one…", self.remove_menu))
+            items.append(self.button("Remove one", self.remove_menu))
         items.append(self.button("Done", self.done, discord.ButtonStyle.primary))
         await self.show(interaction, head + ("" if n < WISHLIST_MAX else f"\nThe list is full ({WISHLIST_MAX}) — remove one to add another."), *items)
 
@@ -184,7 +184,7 @@ class WishlistWizard(Wizard):
     async def details_prompt(self, interaction: discord.Interaction) -> None:
         """After a modal (a form can't open from another form) or from the log button: one press to the details form."""
         await self.show(interaction, f"**{self.draft['name']}** for **{self.draft['character']}** — pick its place on the list and main or offspec.",
-                        self.button("Place and MS/OS…", self.open_details, discord.ButtonStyle.primary), self.button("Back", self.home))
+                        self.button("Place and MS/OS", self.open_details, discord.ButtonStyle.primary), self.button("Back", self.home))
 
     async def open_details(self, interaction: discord.Interaction) -> None:
         await self.open_form(interaction, self.details_form())

@@ -631,7 +631,7 @@ def test_me_wishlist_wizard_adds_by_select_by_search_and_removes(reg, rs):
         await h.press("Confirm")
         wl = reg.wish_character(m.discord_id)[1].wishlist
         assert [(e.name, e.rank, e.item_id) for e in wl] == [("Sunfire Pauldrons", 1, 0), ("Robe of Tests", 2, 90001)]
-        await h.press("Remove one…")
+        await h.press("Remove one")
         await h.pick("Pick the item", "Robe of Tests")
         await h.press("Remove")
         assert [e.name for e in reg.wish_character(m.discord_id)[1].wishlist] == ["Sunfire Pauldrons"]
@@ -651,7 +651,7 @@ def test_the_log_buttons_item_opens_the_wizard_on_it(reg, rs):
     async def go():
         await FLOWS["me_wishlist"](h.command(), reg, item="90001")
         assert "**Robe of Tests**" in h.text
-        await h.press("Place and MS/OS…")
+        await h.press("Place and MS/OS")
         await h.submit(h.modal, rank="1", kind="ms", note="")
         await h.press("Confirm")
     asyncio.run(go())
@@ -861,7 +861,7 @@ def test_me_wishlist_wizard_saves_and_removes_off_the_event_loop(reg, rs, monkey
         await h.pick("Add an item…", "90001")
         await h.submit(h.modal, rank="1", kind="ms", note="")
         await h.press("Confirm")
-        await h.press("Remove one…")
+        await h.press("Remove one")
         await h.pick("Pick the item", "Robe of Tests")
         await h.press("Remove")
     asyncio.run(go())
@@ -986,7 +986,7 @@ def test_me_wishlist_wizard_answers_before_the_write(reg, rs, monkeypatch):
         await h.pick("Add an item…", "90001")
         await h.submit(h.modal, rank="1", kind="ms", note="")
         await h.press("Confirm")
-        await h.press("Remove one…")
+        await h.press("Remove one")
         await h.pick("Pick the item", "Robe of Tests")
         await h.press("Remove")
     asyncio.run(go())

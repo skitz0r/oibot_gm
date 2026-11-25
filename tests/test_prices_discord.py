@@ -77,12 +77,12 @@ def test_the_hub_offers_the_auction_house_only_with_a_linked_guild(reg, rs, mark
     reg.set_armory_guild(facts(), "Owner", by_id=OWNER)
     h = harness(reg, rs)
     run(FLOWS["armory_guild"](h.command(), reg))
-    assert h.buttons() == ["Change…", "Unlink…", "Auction house…", "Done"], "no house picked: nothing to turn off"
+    assert h.buttons() == ["Change", "Unlink", "Auction house", "Done"], "no house picked: nothing to turn off"
     assert "No auction house is picked" in h.text
     reg.set_market(HORDE_AH, 2, "Owner", by_id=OWNER)
     h = harness(reg, rs)
     run(FLOWS["armory_guild"](h.command(), reg))
-    assert h.buttons() == ["Change…", "Unlink…", "Auction house…", "Turn prices off…", "Done"]
+    assert h.buttons() == ["Change", "Unlink", "Auction house", "Turn prices off", "Done"]
     assert "Horde Auction House · picked by Owner" in h.text and discord_auctions.WAITING_WORDS in h.text and ".." not in h.text
     # without the Blizzard keys the armory command refuses before the hub, as it always did
     monkeypatch.setattr(armory, "available", lambda reg: False)
@@ -97,7 +97,7 @@ def test_pick_decide_set_and_the_rev_is_checked(reg, rs, market_on):
 
     async def go():
         await FLOWS["armory_guild"](h.command(), reg)
-        await h.press("Auction house…")
+        await h.press("Auction house")
         assert h.selects() == ["Which auction house"]
         sel = h._items()[0]
         labels = [o.label for o in sel.options]
@@ -112,7 +112,7 @@ def test_pick_decide_set_and_the_rev_is_checked(reg, rs, market_on):
         assert h.text.endswith(" ".join(cq.market_consequence(reg, HORDE_AH))) and reg.config.market is None, "nothing before the press"
         assert h.buttons() == ["Pick this auction house", "Back"]
         await h.press("Pick this auction house")
-        assert "✅" in h.text and "Turn prices off…" in h.buttons(), "back on the hub with the house picked"
+        assert "✅" in h.text and "Turn prices off" in h.buttons(), "back on the hub with the house picked"
         await asyncio.sleep(0.05)  # the first read of its prices runs in the background
     run(go())
     m = reg.config.market
@@ -126,9 +126,9 @@ def test_pick_decide_set_and_the_rev_is_checked(reg, rs, market_on):
 
     async def same():
         await FLOWS["armory_guild"](h2.command(), reg)
-        await h2.press("Auction house…")
+        await h2.press("Auction house")
         await h2.pick("Which auction house", "1")
-        assert "already the guild's auction house" in h2.text and "Auction house…" in h2.buttons()
+        assert "already the guild's auction house" in h2.text and "Auction house" in h2.buttons()
     run(same())
     assert reg.config_rev("settings") == before and len(audit(h2)) == 0
 
@@ -137,7 +137,7 @@ def test_pick_decide_set_and_the_rev_is_checked(reg, rs, market_on):
 
     async def stale():
         await FLOWS["armory_guild"](h3.command(), reg)
-        await h3.press("Auction house…")
+        await h3.press("Auction house")
         await h3.pick("Which auction house", "2")
         reg.set_market(House(id=20, name="Horde Auction House"), 2, "Owner", by_id=OWNER)  # another surface, meanwhile
         reg.clear_market("Owner", by_id=OWNER)
@@ -154,7 +154,7 @@ def test_the_picker_says_why_it_has_nothing_to_offer(reg, rs, market_on, monkeyp
 
     async def empty():
         await FLOWS["armory_guild"](h.command(), reg)
-        await h.press("Auction house…")
+        await h.press("Auction house")
         assert discord_auctions.NO_CHOICES in h.text and "Try again" in h.buttons()
     run(empty())
 
@@ -165,7 +165,7 @@ def test_the_picker_says_why_it_has_nothing_to_offer(reg, rs, market_on, monkeyp
 
     async def outage():
         await FLOWS["armory_guild"](h.command(), reg)
-        await h.press("Auction house…")
+        await h.press("Auction house")
         assert armory.DOWN_WORDS in h.text and "Try again" in h.buttons()
     run(outage())
     assert reg.config.market is None
@@ -178,11 +178,11 @@ def test_turn_prices_off(reg, rs, market_on):
 
     async def go():
         await FLOWS["armory_guild"](h.command(), reg)
-        await h.press("Turn prices off…")
+        await h.press("Turn prices off")
         assert h.text.endswith(" ".join(cq.market_clear_consequence(reg))) and reg.config.market is not None
         assert h.buttons() == ["Turn prices off", "Back"]
         await h.press("Turn prices off")
-        assert "✅" in h.text and "Turn prices off…" not in h.buttons()
+        assert "✅" in h.text and "Turn prices off" not in h.buttons()
     run(go())
     assert reg.config.market is None
     assert sum("turned prices off" in t for t in audit(h)) == 1
@@ -303,4 +303,4 @@ def test_a_version_without_auction_houses_has_no_price_anywhere_in_discord(reg, 
     h = harness(reg, rs)
     run(FLOWS["armory_guild"](h.command(), reg))
     assert h.text.endswith(armory.NO_ARMORY_WORDS) and h.modal is None
-    assert "Auction house…" not in (h.buttons() if h.screen.get("view") else []) and "Auction house" not in h.text
+    assert "Auction house" not in (h.buttons() if h.screen.get("view") else []) and "Auction house" not in h.text

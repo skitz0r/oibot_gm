@@ -146,8 +146,8 @@ def test_owner_links_the_guild_and_the_confirm_names_what_was_found(reg, rs, arm
 
     async def again():
         await FLOWS["armory_guild"](h2.command(), reg)
-        assert "Lantern Wardens" in h2.text and "Horde" in h2.text and h2.buttons() == ["Change…", "Unlink…", "Auction house…", "Done"]
-        await h2.press("Change…")
+        assert "Lantern Wardens" in h2.text and "Horde" in h2.text and h2.buttons() == ["Change", "Unlink", "Auction house", "Done"]
+        await h2.press("Change")
         await h2.submit(name="Stranger Hall")
         assert "replaces Lantern Wardens" in h2.text
         await h2.press("Back")
@@ -221,7 +221,7 @@ def test_clear_keeps_character_links(reg, rs, armory_on):
 
     async def go():
         await FLOWS["armory_guild"](h.command(), reg)
-        await h.press("Unlink…")
+        await h.press("Unlink")
         assert "Every character keeps its link" in h.text and "Unlink" in h.buttons()
         await h.press("Unlink")
         assert "✅" in h.text
@@ -383,7 +383,7 @@ def test_discord_link_and_unlink_audit_lines_say_prices_turned_off(reg, rs, armo
 
     async def link():
         await FLOWS["armory_guild"](h.command(), reg)
-        await h.press("Change…")
+        await h.press("Change")
         await h.submit(name="Lantern Wardens")
         await h.press("Link this guild")
     run(link())
@@ -397,7 +397,7 @@ def test_discord_link_and_unlink_audit_lines_say_prices_turned_off(reg, rs, armo
 
         async def unlink():
             await FLOWS["armory_guild"](h.command(), reg)
-            await h.press("Unlink…")
+            await h.press("Unlink")
             await h.press("Unlink")
         run(unlink())
         lines = [t for _k, _l, t in h.client.ops.lines]

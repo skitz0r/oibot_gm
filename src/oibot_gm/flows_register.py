@@ -123,7 +123,7 @@ class RegisterWizard(Wizard):
             self.select("Class", opts.classes(self.reg, ico, current=d["cls"]), self.on_class),
             self.select("Main spec", specs, self.on_spec),
             self.select("Offspec (optional)", offs, self.on_offspec),
-            self.button("Confirm…" if self.plan_only else "Continue", self.on_continue, discord.ButtonStyle.primary, disabled=not d["spec"]),
+            self.button("Confirm" if self.plan_only else "Continue", self.on_continue, discord.ButtonStyle.primary, disabled=not d["spec"]),
             self.button("Cancel", self.cancel),
         ]
 

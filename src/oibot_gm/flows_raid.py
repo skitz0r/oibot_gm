@@ -180,14 +180,14 @@ class OpenWizard(Wizard):
             await self.show(interaction, f"**{self.name()}** has no upcoming run to open: {self.no_slot_reason()}\n"
                             "-# Set its run times, or open an ad hoc run at a day and time you pick.",
                             self.button("Set this raid's run times →", self.to_run_times, discord.ButtonStyle.primary),
-                            self.button("Ad hoc run…", self.adhoc),
+                            self.button("Ad hoc run", self.adhoc),
                             self.button("Cancel", self.cancel))
             return
         s0, t0 = ups[0]
         items: list[discord.ui.Item] = [self.button(f"Next run — {self.reg.local12(t0)}" + (f" · {s0['name']}" if many else ""), self.next_picked, discord.ButtonStyle.primary)]
         if len(ups) > 1:
-            items.append(self.button("Another upcoming run…", self.another))
-        items += [self.button("Ad hoc run…", self.adhoc), self.button("Cancel", self.cancel)]
+            items.append(self.button("Another upcoming run", self.another))
+        items += [self.button("Ad hoc run", self.adhoc), self.button("Cancel", self.cancel)]
         await self.show(interaction, f"**{self.name()}** — which run?\n-# Ad hoc = a pickup or a one-off at a time you pick: {rc.FIRST_COME}, no regulars, no reminder.", *items)
 
     async def another(self, interaction: discord.Interaction) -> None:

@@ -27,10 +27,10 @@ def test_officer_card_buttons_never_move(reg, rs):
     # start: greyed) — the labels are raid_buttons.RUN_WORDS, the site's own (design §5.56 phase 2)
     assert row_of(card) == [("Remind the unanswered", True), ("Pause automatic asks", False), ("End the run", True)]
     strip = lambda row: [(l, d) for l, d in row if l != "Open the board"]  # the link needs OIBOT_WEB_URL  # noqa: E731
-    assert [l for l, _ in strip(open_row)] == ["Lock now", "Fill seats…", "Loot", "Cancel run…"]
-    assert [l for l, _ in strip(locked_row)] == ["Locked", "Fill seats…", "Loot", "Cancel run…"]
-    assert dict(strip(open_row)) == {"Lock now": False, "Fill seats…": True, "Loot": True, "Cancel run…": False}
-    assert dict(strip(locked_row)) == {"Locked": True, "Fill seats…": False, "Loot": False, "Cancel run…": False}  # the hub reaches the council
+    assert [l for l, _ in strip(open_row)] == ["Lock now", "Fill seats", "Loot", "Cancel run"]
+    assert [l for l, _ in strip(locked_row)] == ["Locked", "Fill seats", "Loot", "Cancel run"]
+    assert dict(strip(open_row)) == {"Lock now": False, "Fill seats": True, "Loot": True, "Cancel run": False}
+    assert dict(strip(locked_row)) == {"Locked": True, "Fill seats": False, "Loot": False, "Cancel run": False}  # the hub reaches the council
 
 
 def test_yes_no_dms_share_one_label_pair_and_cant_is_grey():

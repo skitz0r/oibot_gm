@@ -285,17 +285,17 @@ def test_the_recruitment_wizard_edits_questions_and_saves_once(reg, store, owner
 
     async def go():
         await FLOWS["recruitment"](h.command(), reg)
-        assert "Applications:** open" in h.text and h.buttons()[:4] == ["Close applications", "Note…", "Invite link…", "Add a question…"]
-        await h.press("Add a question…")
+        assert "Applications:** open" in h.text and h.buttons()[:4] == ["Close applications", "Note", "Invite link", "Add a question"]
+        await h.press("Add a question")
         assert set(h.modal._items) == {"label", "hint", "required"}
         await h.submit(h.modal, label="Why us?", hint="a line or two", required="yes")
-        await h.press("Add a question…")
+        await h.press("Add a question")
         await h.submit(h.modal, label="x" * 46, hint="", required="no")  # past Discord's 45: the registry's own rule refuses it
         assert "❌" in h.text and "45" in h.text
         await h.press("Fix this")
         assert h.modal._items["label"].default == "x" * 46
         await h.submit(h.modal, label="Raiding experience", hint="", required="no")
-        await h.press("Add a question…")
+        await h.press("Add a question")
         await h.submit(h.modal, label="Anything else?", hint="", required="no")
         await h.pick("Pick a question to change", "1")
         await h.press("Move up")
@@ -304,11 +304,11 @@ def test_the_recruitment_wizard_edits_questions_and_saves_once(reg, store, owner
         await h.pick("Pick a question to change", "2")
         await h.press("Remove")
         await h.pick("Pick a question to change", "1")
-        await h.press("Edit…")
+        await h.press("Edit")
         await h.submit(h.modal, label="Why us?", hint="a sentence", required="yes")
         await role_pick(h, 4242, 4343)
         await h.press("Close applications")
-        await h.press("Note…")
+        await h.press("Note")
         await h.submit(h.modal, note="Looking for healers")
         assert commits(store) == n0, "nothing written before Save"
         assert "change(s) in the draft" in h.text and "<@&4242>" in h.text
@@ -327,7 +327,7 @@ def test_a_bad_invite_is_refused_at_save_and_the_draft_is_kept(reg, store, owner
 
     async def go():
         await FLOWS["recruitment"](h.command(), reg)
-        await h.press("Invite link…")
+        await h.press("Invite link")
         await h.submit(h.modal, invite="https://evil.example/x")
         await h.press("Save")
         assert "❌" in h.text and "discord.gg" in h.text
@@ -451,14 +451,14 @@ def test_the_card_buttons_use_the_clients_decide_path(reg, monkeypatch):
     async def go():
         # Accept: the ONE decide screen (consequence from code, Accept · Accept with a note… · Back), then the client's path
         await view.children[0].callback(h.card_press())
-        assert "registered and confirmed as **Kessa Dawnfire**" in h.text and h.buttons() == ["Accept", "Accept with a note…", "Back"]
+        assert "registered and confirmed as **Kessa Dawnfire**" in h.text and h.buttons() == ["Accept", "Accept with a note", "Back"]
         assert calls == [], "nothing is written before the press"
         await h.press("Accept")
         assert calls == [(NEW_ID, True, "Officer", None)] and h.text.endswith("✅ line from the client")
         # Decline with a note: the note is a Form (prose), its Submit is the write — DeclineModal is retired
         await view.children[1].callback(h.card_press())
-        assert "wasn't accepted" in h.text and h.buttons() == ["Decline", "Decline with a note…", "Back"]
-        await h.press("Decline with a note…")
+        assert "wasn't accepted" in h.text and h.buttons() == ["Decline", "Decline with a note", "Back"]
+        await h.press("Decline with a note")
         assert h.modal is not None and not hasattr(discord_registry, "DeclineModal")
         await h.submit(note="try again next tier")
         assert calls[-1] == (NEW_ID, False, "Officer", "try again next tier")

@@ -227,7 +227,7 @@ def test_decide_screen_shape_do_it_note_and_back(reg):
 
     class W(Wizard):
         async def start(self, i):
-            await self.decide(i, "Something happens.", do=self.go, note={"label": "Why?", "max_length": 100})
+            await self.decide(i, "Something happens.", do=self.go, do_label="Move", note={"label": "Why?", "max_length": 100})
 
         async def go(self, i, note):
             done.append(note)
@@ -237,15 +237,15 @@ def test_decide_screen_shape_do_it_note_and_back(reg):
 
     async def go():
         await W(reg, h.user.id, title="Test").start(h.command())
-        assert h.buttons() == ["Do it", "Do it with a note…", "Back"] and "Something happens." in h.text
+        assert h.buttons() == ["Move", "Move with a note", "Back"] and "Something happens." in h.text
         await h.press("Back")
         assert done == [] and "Nothing was changed." in h.text
         await W(reg, h.user.id, title="Test").start(h.command())
-        await h.press("Do it")
+        await h.press("Move")
         assert done == [None] and h.text.endswith("done (None)")
         await W(reg, h.user.id, title="Test").start(h.command())
-        await h.press("Do it with a note…")
-        assert h.modal is not None and not lint(h.modal) and h.modal.title == "Test: a note"
+        await h.press("Move with a note")
+        assert h.modal is not None and not lint(h.modal) and h.modal.title == "Move with a note"
         await h.submit(note="  because  ")
         assert done == [None, "because"] and h.text.endswith("done (because)")
         # no note configured: two buttons only
@@ -270,7 +270,7 @@ def test_decide_reruns_the_guard_on_the_note_submit(reg):
 
     class W(Wizard):
         async def start(self, i):
-            await self.decide(i, "x", do=self.go, note={"label": "Why?", "max_length": 50})
+            await self.decide(i, "x", do=self.go, do_label="Move", note={"label": "Why?", "max_length": 50})
 
         async def go(self, i, note):
             done.append(note)
@@ -280,7 +280,7 @@ def test_decide_reruns_the_guard_on_the_note_submit(reg):
 
     async def go():
         await W(reg, h.user.id, title="T", guard=guard).start(h.command())
-        await h.press("Do it with a note…")
+        await h.press("Move with a note")
         allowed["ok"] = False
         await h.submit(note="late")
         assert done == [] and "Officers only." in h.text
@@ -315,12 +315,12 @@ def test_cancel_card_button_is_the_one_cancel_screen_with_reason_and_notify(reg,
 
     async def go():
         await RunButton(reg.key, ev.key, "cancel").callback(h.card_press())
-        assert "The 3 who joined see it on the sheet, and nobody gets a DM." in h.text and h.buttons() == ["Cancel the run…", "Back"]
+        assert "The 3 who joined see it on the sheet, and nobody gets a DM." in h.text and h.buttons() == ["Cancel the run", "Back"]
         assert h.screen["view"].children[0].style == discord.ButtonStyle.danger
         await h.press("Back")
         assert calls == [] and "Nothing was changed." in h.text
         await RunButton(reg.key, ev.key, "cancel").callback(h.card_press())
-        await h.press("Cancel the run…")
+        await h.press("Cancel the run")
         await h.submit(reason="server down", notify="quiet")  # one Form: the optional reason + "Tell the channel?"
         assert calls == [(ev.key, "Officer", "server down", False)] and h.text.endswith(f"Cancelled {ev.key}")
         # the old 60-second plain View is gone: nothing else answers a cancel press

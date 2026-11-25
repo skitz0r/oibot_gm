@@ -330,11 +330,11 @@ class LootSurfaceMixin:
 
         items = []
         if kind == "mismatch" and drop_id:
-            items = [LootButton(session.guild, session.id, drop_id, "why"), LootButton(session.guild, session.id, drop_id, "fix", label="Mistake — correct…")]
+            items = [LootButton(session.guild, session.id, drop_id, "why"), LootButton(session.guild, session.id, drop_id, "fix", label="Mistake — correct")]
         elif kind == "conflict" and drop_id:
             items = [LootButton(session.guild, session.id, drop_id, "fix")]
         elif kind == "manual" and drop_id:  # an in-game award with no proposal: recorded first, fixed second (L21)
-            items = [LootButton(session.guild, session.id, drop_id, "fix", label="Wrong? Fix…")]
+            items = [LootButton(session.guild, session.id, drop_id, "fix", label="Wrong? Fix")]
         elif kind == "closing":
             items = [LootButton(session.guild, session.id, "-", "keep")]
         elif kind in ("tick", "interrupted") and session.undistributed() and not session.distributing:

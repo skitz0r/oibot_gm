@@ -604,7 +604,7 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
                     return
                 stash[(reg.key, sid, drop, by_id, "ovr")] = {"who": who, "reason": reason}
                 view = discord.ui.View(timeout=None)
-                view.add_item(LootButton(reg.key, sid, drop, "ovrr", label="Replace their override…"))
+                view.add_item(LootButton(reg.key, sid, drop, "ovrr", label="Replace their override"))
                 await say(interaction, _err(e), view=view)
                 return
             await _answer_submit(interaction, line.replace("**", ""), kind=kind, session=session)
@@ -799,7 +799,7 @@ class TickWizard(Wizard):
             return
         items = [self.select("Which boss?", self.bosses(), self.boss_picked)]
         if any(s.drop_state(d) != "awarded" for d in s.drop_list):
-            items.append(self.button("Un-tick…", self.untick))
+            items.append(self.button("Un-tick", self.untick))
         items.append(self.button("Cancel", self.cancel))
         await self.show(interaction, "What dropped? Pick the boss first.", *items)
 
@@ -826,14 +826,14 @@ class TickWizard(Wizard):
         its = self.items_for(boss)
         if not its:
             await self.show(interaction, f"**{boss_name(boss)}**: no loot table yet — name the item.",
-                            self.button("Not on the table…", self.not_listed, discord.ButtonStyle.primary), self.button("Back", self.start))
+                            self.button("Not on the table", self.not_listed, discord.ButtonStyle.primary), self.button("Back", self.start))
             return
         pages = (len(its) - 1) // self.PAGE + 1
         page = min(self.draft["page"], pages - 1)
         chunk = its[page * self.PAGE:(page + 1) * self.PAGE]
         opts = [Opt(k, it.name, f"{it.slot.replace('_', ' ')} · {it.type}" if it.slot != "unknown" else "untiered" if not it.tiers else None) for k, it in chunk]
         items = [self.select(f"What dropped from {boss_name(boss)}?", opts, self.items_picked, max_values=len(opts)),
-                 self.button("Not on the table…", self.not_listed)]
+                 self.button("Not on the table", self.not_listed)]
         if pages > 1:
             items += [self.button("◀ Prev", self.prev, disabled=page == 0), self.button("Next ▶", self.next, disabled=page >= pages - 1)]
         items.append(self.button("Back", self.start))
@@ -1093,7 +1093,7 @@ async def open_gm_precedents(interaction: discord.Interaction, reg: Registry, **
             await wiz.finish(i, "This precedent was removed, so there is nothing to retire.")
             return
         wiz.draft["pick"] = p["import_id"]
-        await wiz.show(i, line(p) + "\n-# Retiring keeps it on record; the bot stops citing it.", wiz.button("Retire…", retire, discord.ButtonStyle.danger),
+        await wiz.show(i, line(p) + "\n-# Retiring keeps it on record; the bot stops citing it.", wiz.button("Retire", retire, discord.ButtonStyle.danger),
                        wiz.button("Back", start))
 
     async def retire(i: discord.Interaction) -> None:

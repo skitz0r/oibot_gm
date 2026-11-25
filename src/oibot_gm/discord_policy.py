@@ -12,6 +12,7 @@ from . import configops, guild_routing, policy as policy_mod
 from .discord_registry import Guilds, is_officer, is_owner
 from .ops import Ops
 from .registry import Registry, RegistryError
+from .wizard import button_label
 from .wizard_flows import FLOWS
 
 from .constants import TEAL  # noqa: E402
@@ -53,7 +54,7 @@ class CfgApplyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"cfgap
 
     def __init__(self, gk: str | None, token: str, action: str):
         label, style = self.LABELS[action]
-        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"cfgapply{'.' + gk if gk else ''}:{token}:{action}"))
+        super().__init__(discord.ui.Button(label=button_label(label), style=style, custom_id=f"cfgapply{'.' + gk if gk else ''}:{token}:{action}"))
         self.gk, self.token, self.action = gk, token, action
 
     @classmethod

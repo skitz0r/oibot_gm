@@ -307,8 +307,8 @@ def test_appeal_resolve_flow_is_officers_only_and_resolves_with_one_outcome(a):
         assert "Pick the outcome" in h.text and "wrote:" in h.text
         await h.pick("Pick the outcome…", "corrected")
         assert appeals.resolve_consequence(a.reg, appeals.store_of(a.reg).get(a.aid), "corrected") in h.text
-        assert set(h.buttons()) >= {"Resolve", "Resolve with a note…", "Back"}
-        await h.press("Resolve with a note…")
+        assert set(h.buttons()) >= {"Resolve", "Resolve with a note", "Back"}
+        await h.press("Resolve with a note")
         await h.submit(h.modal, note="gave it to the tank instead")
         assert "✅" in h.text
     asyncio.run(go())

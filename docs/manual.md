@@ -26,6 +26,9 @@ The bot, the site and this manual use one word for each thing. When you ask the 
 Before any button that changes something, the bot says what happens in at most three short sentences — what changes, who
 is told and how, what can still be undone — so it reads aloud the first time (*"Kestrel goes to No thanks for Barrow
 Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it on their Me page."*).
+In Discord the first button under those sentences is the action itself (*Move*, *Save*, *Cancel event*), then the
+same action with a note where one fits, then **Back**. If what it says changed while it was open, it shows again for you
+to read before you press.
 
 - **Minimum** — the fewest of a role (tank, healer, melee, ranged), a class or a spec a run of a raid takes: one number,
   with an optional reason, and no upper limit (*"at least 3 healers"*). The lock fills every minimum first and never

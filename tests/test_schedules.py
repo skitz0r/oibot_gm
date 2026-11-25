@@ -459,8 +459,8 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", RID)
         s0, t0 = ups[0]
-        assert h.buttons() == [f"Next run — {reg.local12(t0)} · {s0['name']}", "Another upcoming run…", "Ad hoc run…", "Cancel"]
-        await h.press("Another upcoming run…")
+        assert h.buttons() == [f"Next run — {reg.local12(t0)} · {s0['name']}", "Another upcoming run", "Ad hoc run", "Cancel"]
+        await h.press("Another upcoming run")
         sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run")
         alt_opt = next(o for o in sel.options if o.value.endswith("|alt"))
         assert alt_opt.description.startswith("Alt run · ") and "20:00" not in alt_opt.label
@@ -477,7 +477,7 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
     async def go2():
         await FLOWS["raid_open"](h2.command(), reg)
         await h2.pick("Pick the raid", RID)
-        await h2.press("Ad hoc run…")
+        await h2.press("Ad hoc run")
         assert h2.buttons() == ["Pickup — pick a time", "One-off — pick a day and time", "Back", "Cancel"]
         await h2.press("Pickup — pick a time")
         assert h2.modal.title == "Open Pickup"

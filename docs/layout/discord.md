@@ -85,10 +85,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        events / schedules / raids pages (no rosters / readiness), PAGE_ALIASES rosters → events, readiness → raids
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
                        @mentions and DMs routed by intent under the plain-text policy)
-  wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms; Wizard.decide = THE confirm screen (consequence · Do it · Do it with a note… · Back; guard re-run on every press)
+  wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms; Wizard.decide = THE confirm screen (consequence · <verb> · <verb> with a note · Back; do_label = the verb, required; guard re-run on every press);
+                       Wizard.decide_box(box, do=, refresh=, note=, extra=, back=, hint=) = the server's box (consequences.box) as given: box_text = [CONFIRM_WORDS changed] · **title** · diff lines · sentences (one heading, never the wizard's too); the verb (red iff danger) · '<verb> with a note' (a Form whose Submit is the write) · extra · Back (back=None → "Nothing was changed."); a refusal box (verb None) = Back alone; refresh() re-run at the press and the note's submit — another fp is shown again under CONFIRM_WORDS['changed'], nothing written; button_label = THE ellipsis drop (Wizard.button and the persistent RunButton / LootButton / CfgApplyButton apply it; the site's shared words keep theirs, D1); when_fields(step=) reaches minute_opts
                        (a select inside ui.Label, or a TextInput only for prose), owner-only presses + a guard re-checked on
                        every press, FLOWS registry (@flow), no-typing dates/times (day/hour/minute selects, 12-hour,
-                       resolve_local = DST-safe), lint() = what the Discord API would refuse, checked offline; opt-in class attributes
+                       resolve_local = DST-safe), lint() = what the Discord API would refuse, checked offline (+ a button label ending in an ellipsis); opt-in class attributes
                        `heading = False` (a screen is its text alone, no bold title — /price) and `mentions` (AllowedMentions on every send/edit);
                        the defaults leave every other wizard unchanged
   wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)

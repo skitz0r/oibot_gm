@@ -18,7 +18,7 @@ import re
 import discord
 
 from . import raidcycle as rc
-from .wizard import fade
+from .wizard import button_label, fade
 from .consequences import consequence, ended_line
 from .guild_routing import resolve_button
 from .registry import RegistryError
@@ -51,7 +51,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
         render-time only (the card is re-rendered on every state change): a button that does not apply yet stays in its
         place, greyed, instead of disappearing. `rev`: Ask's plan fingerprint."""
         text, style = self.LABELS[action]
-        super().__init__(discord.ui.Button(label=label or text, style=style, custom_id=f"runact{_g(gk)}:{key}:{action}" + (f":{rev}" if rev else ""), disabled=disabled))
+        super().__init__(discord.ui.Button(label=button_label(label or text), style=style, custom_id=f"runact{_g(gk)}:{key}:{action}" + (f":{rev}" if rev else ""), disabled=disabled))
         self.gk, self.key, self.action, self.rev = gk, key, action, rev
 
     @classmethod
@@ -275,7 +275,7 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
         await wiz.finish(i, "Nothing was changed.")
 
     await wiz.show(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("cancel", reg, ev, rs=rs)),
-                   wiz.button("Cancel the run…", open_box, discord.ButtonStyle.danger), wiz.button("Back", back))
+                   wiz.button("Cancel the run", open_box, discord.ButtonStyle.danger), wiz.button("Back", back))
 
 
 async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
@@ -615,7 +615,7 @@ class LootButton(discord.ui.DynamicItem[discord.ui.Button], template=r"loot(?:\.
         cid = loot_custom_id("loot", gk, sid, drop, action, arg)
         if arg and not cid.endswith(f":{arg}"):
             arg = None  # too long for Discord's 100: the press checks without it (a fresh read decides)
-        super().__init__(discord.ui.Button(label=(label or text)[:80], style=style, custom_id=cid, disabled=disabled))
+        super().__init__(discord.ui.Button(label=button_label(label or text)[:80], style=style, custom_id=cid, disabled=disabled))
         self.gk, self.sid, self.drop, self.action, self.arg = gk, sid, drop, action, arg
 
     @classmethod
@@ -657,7 +657,7 @@ class LootStartButton(discord.ui.DynamicItem[discord.ui.Button], template=r"loot
     (the officer picks the raid and Ad hoc run…; nothing opens before its Confirm)."""
 
     def __init__(self, gk: str | None, what: str = "open"):
-        super().__init__(discord.ui.Button(label="Start an ad hoc run…", style=discord.ButtonStyle.primary, custom_id=f"lootstart{_g(gk)}:{what}"))
+        super().__init__(discord.ui.Button(label="Start an ad hoc run", style=discord.ButtonStyle.primary, custom_id=f"lootstart{_g(gk)}:{what}"))
         self.gk = gk
 
     @classmethod

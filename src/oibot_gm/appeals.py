@@ -477,7 +477,7 @@ class AppealButton(discord.ui.DynamicItem[discord.ui.Button], template=r"appeal(
     """The card's Details (the council's record, ephemeral) and Resolve… (the decide flow) — officers only, re-checked live
     on every press. The id carries the guild key (`appeal.<gk>:<action>:<appeal id>`)."""
 
-    LABELS = {"details": ("Details", discord.ButtonStyle.secondary), "resolve": ("Resolve…", discord.ButtonStyle.primary)}
+    LABELS = {"details": ("Details", discord.ButtonStyle.secondary), "resolve": ("Resolve", discord.ButtonStyle.primary)}
 
     def __init__(self, gk: str | None, action: str, aid: str):
         label, style = self.LABELS[action]

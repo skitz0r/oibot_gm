@@ -229,7 +229,7 @@ class TestAnswerButton(discord.ui.DynamicItem[discord.ui.Button], template=r"tes
     def __init__(self, gk: str | None, key: str):
         from .raid_buttons import _g
 
-        super().__init__(discord.ui.Button(label="Answer as puppets…", style=discord.ButtonStyle.primary, custom_id=f"testans{_g(gk)}:{key}"[:100]))
+        super().__init__(discord.ui.Button(label="Answer as puppets", style=discord.ButtonStyle.primary, custom_id=f"testans{_g(gk)}:{key}"[:100]))
         self.gk, self.key = gk, key
 
     @classmethod

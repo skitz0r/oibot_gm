@@ -192,7 +192,7 @@ def test_raid_open_another_upcoming_run_keeps_its_schedules_series(reg, rs, raid
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", RID)
-        await h.press("Another upcoming run…")
+        await h.press("Another upcoming run")
         await h.pick("Pick the run", f"{alt_t.isoformat()}|alt")
         await h.press("Open")
     asyncio.run(go())
@@ -213,7 +213,7 @@ def test_raid_open_ad_hoc_pickup_template_is_adhoc_without_a_series(reg, rs, rai
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", RID)
-        await h.press("Ad hoc run…")
+        await h.press("Ad hoc run")
         await h.press("Pickup — pick a time")
         await h.submit(h.modal, day=day, hour="21", minute="0")
         await h.press("Open")

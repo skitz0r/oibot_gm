@@ -147,7 +147,7 @@ def test_puppets_confirm_asks_reach_the_tester_as_one_digest(reg, rs):
     (text, view), = bot.sent[TESTER]
     assert "10 Confirm asks sent to puppets" in text and "(test run)" in text and ms[0].display_name in text
     btn = next(c for c in view.children if isinstance(c, TestAnswerButton))
-    assert btn.item.label == "Answer as puppets…" and btn.item.custom_id == f"testans.{reg.key}:{ev.key}"
+    assert btn.item.label == "Answer as puppets" and btn.item.custom_id == f"testans.{reg.key}:{ev.key}"
     assert all(m.discord_id not in bot.sent for m in ms), "never a DM to a puppet's own (fake) id"
     # the asks are real asks: each puppet holds one, answerable as a member's own
     assert len(SetupMixin.puppet_asks(reg, ev)) == 10

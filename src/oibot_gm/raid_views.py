@@ -995,7 +995,7 @@ def loot_layout(reg: Registry, ev, session, ico, *, status: str, show_distribute
     buttons = [LootButton(reg.key, session.id, "-", "tick")]
     if show_distribute:
         busy = bool(session.distributing)
-        buttons.append(LootButton(reg.key, session.id, "-", "dist", disabled=busy or not und, label="Judging…" if busy else None))
+        buttons.append(LootButton(reg.key, session.id, "-", "dist", disabled=busy or not und, label="Judging" if busy else None))
     buttons.append(LootButton(reg.key, session.id, "-", "scores", label="Scores only: on" if session.scores_only else "Scores only: off"))
     buttons.append(LootButton(reg.key, session.id, "-", "end"))
     parts += [ui.Separator(), ui.ActionRow(*buttons)]
@@ -1101,7 +1101,7 @@ def batch_layout(reg: Registry, session, drop_ids: list[str], ico, *, last: bool
         judging = bool(session.distributing)
         n_judge = len((session.distributing or {}).get("drops") or [])
         parts.append(ui.ActionRow(
-            LootButton(reg.key, session.id, "-", "all", arg=rev, disabled=judging, label=f"Re-scoring {n_judge} item(s)…" if judging else f"Confirm the rest ({total})"),
+            LootButton(reg.key, session.id, "-", "all", arg=rev, disabled=judging, label=f"Re-scoring {n_judge} item(s)" if judging else f"Confirm the rest ({total})"),
             LootButton(reg.key, session.id, "-", "discard", arg=rev, disabled=judging)))
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=TEAL if pending_n else 0x98A3B5))

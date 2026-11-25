@@ -161,7 +161,7 @@ def test_open_next_slot_is_one_press_after_the_raid(reg, rs, officer, channel):
         assert h.selects() == ["Pick the raid"]
         await h.pick("Pick the raid", "barrow_deeps")
         label = f"Next run — {reg.local12(want)}"
-        assert h.buttons() == [label, "Another upcoming run…", "Ad hoc run…", "Cancel"]
+        assert h.buttons() == [label, "Another upcoming run", "Ad hoc run", "Cancel"]
         assert "19:30" not in h.text and "19:30" not in label
         await h.press(label)
         assert f"<t:{int(want.timestamp())}:f>" in h.text and reg.local12(want) in h.text
@@ -182,7 +182,7 @@ def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Another upcoming run…")
+        await h.press("Another upcoming run")
         sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run")
         assert [o.value for o in sel.options] == [f"{t.isoformat()}|barrow-deeps" for t in starts[1:23]]  # each names its schedule
         assert all(":" in o.label and ("AM" in o.label or "PM" in o.label) for o in sel.options)
@@ -215,7 +215,7 @@ def test_open_dst_gap_shows_the_note_and_opens_3_30(reg, rs, officer, channel, m
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         assert "no run times yet" in h.text  # the profile has none: the one-off path
-        await h.press("Ad hoc run…")  # no pickup template: straight to the day · hour · minute form
+        await h.press("Ad hoc run")  # no pickup template: straight to the day · hour · minute form
         form = h.modal
         assert [o.value for o in form._items["day"].options][7] == "2026-03-08"
         await h.submit(form, day="2026-03-08", hour="2", minute="30")
@@ -236,7 +236,7 @@ def test_open_no_slots_says_why_and_offers_run_times(reg, rs, officer, channel, 
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         assert "no run times yet" in h.text
-        assert h.buttons() == ["Set this raid's run times →", "Ad hoc run…", "Cancel"]
+        assert h.buttons() == ["Set this raid's run times →", "Ad hoc run", "Cancel"]
         await h.press("Set this raid's run times →")
         assert "Raids page" in h.text
     asyncio.run(go())
@@ -268,7 +268,7 @@ def test_open_refuses_the_past_and_cancel_writes_nothing(reg, rs, officer, chann
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Ad hoc run…")
+        await h.press("Ad hoc run")
         await h.submit(day=today, hour="0", minute="0")  # midnight today: already gone
         assert "already passed" in h.text and "Pick again" in h.buttons()
         await h.press("Pick again")
@@ -296,7 +296,7 @@ def test_open_later_than_the_window_narrows_by_week(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Ad hoc run…")
+        await h.press("Ad hoc run")
         await h.submit(day="later", hour="19", minute="30")
         week = got["week"] = h._items()[0].options[2].value
         await h.pick("Pick the week", week)
@@ -345,7 +345,7 @@ def test_set_picks_run_then_only_what_applies_then_the_character(reg, rs, office
         await FLOWS["raid_set"](h.command(), reg, member=_user(m))
         assert h.selects() == ["Pick the run"]
         await h.pick("Pick the run", b.key)
-        assert h.buttons() == ["Record a callout…", "Join", "Bench", "No thanks", "Cancel"], "no answer yet: no Confirm, no pins"
+        assert h.buttons() == ["Record a callout", "Join", "Bench", "No thanks", "Cancel"], "no answer yet: no Confirm, no pins"
         assert "no answer yet" in h.text
         await h.press("Join")
         assert h.selects() == ["Pick the character"]
@@ -419,9 +419,9 @@ def test_set_records_a_callout_with_a_note_before_lock(reg, rs, officer, channel
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="callout")
-        assert h.buttons() == ["Record the callout", "Record the callout with a note…", "Back"]
+        assert h.buttons() == ["Record the callout", "Record the callout with a note", "Back"]
         assert "No thanks" in h.text and "The bot records a callout" in h.text
-        await h.press("Record the callout with a note…")
+        await h.press("Record the callout with a note")
         await h.submit(note="flight delayed")
     asyncio.run(go())
     assert ev.signups[str(m.discord_id)].status == "out"
@@ -439,7 +439,7 @@ def test_set_on_a_locked_run_offers_their_confirm_ask_first(reg, rs, officer, ch
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=_user(m))
-        assert h.buttons()[:3] == ["Confirm for them", "Can't make it for them", "Record a callout…"]
+        assert h.buttons()[:3] == ["Confirm for them", "Can't make it for them", "Record a callout"]
         assert "Pin to roster" not in h.buttons(), "pins are for an open sheet"
     asyncio.run(go())
 
@@ -674,8 +674,8 @@ def test_cancel_shows_the_consequence_then_one_form_with_reason_and_notify(reg, 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
         # THE cancel screen (phase 2): the consequence from code, then one Form — nothing written before Submit
-        assert h.buttons() == ["Cancel the run…", "Back"] and "nobody gets a DM" in h.text and not bot.calls
-        await h.press("Cancel the run…")
+        assert h.buttons() == ["Cancel the run", "Back"] and "nobody gets a DM" in h.text and not bot.calls
+        await h.press("Cancel the run")
         assert h.modal is not None and set(h.modal._items) == {"reason", "notify"}
         await h.submit(reason="tank flu", notify="post")
     asyncio.run(go())
@@ -697,7 +697,7 @@ def test_cancel_on_a_later_raid_after_the_first_finished_offers_no_channel_line(
 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
-        await h.press("Cancel the run…")
+        await h.press("Cancel the run")
         assert h.modal is not None and set(h.modal._items) == {"reason"}
         await h.submit(reason="")
     asyncio.run(go())
@@ -710,7 +710,7 @@ def test_cancel_dismissed_box_writes_nothing_and_a_closed_run_is_refused(reg, rs
 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
-        await h.press("Cancel the run…")  # the box opens; closing it sends nothing back
+        await h.press("Cancel the run")  # the box opens; closing it sends nothing back
         assert h.modal is not None and not bot.calls
         form = h.modal
         ev.state = "done"
@@ -729,7 +729,7 @@ def test_cancel_with_two_runs_picks_then_opens_the_box(reg, rs, officer, channel
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
         await h.pick("Pick the run", b.team)
-        await h.press("Cancel the run…")
+        await h.press("Cancel the run")
         assert h.modal is not None
         await h.submit(reason="", notify="quiet")
     asyncio.run(go())

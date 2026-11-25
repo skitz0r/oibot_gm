@@ -89,13 +89,13 @@ def test_discord_refuses_a_pickup_template_on_a_schedule_night_and_offers_a_far_
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", RID)
-        await h.press("Ad hoc run…")
+        await h.press("Ad hoc run")
         await h.press("Pickup — pick a time")
         await h.submit(h.modal, day=near.date().isoformat(), hour=str(near.hour), minute=str(near.minute))
         assert "is a night of Raid nights, so a one-off can't start then." in h.text
         assert "Open" not in h.buttons()
         await h.press("Change")
-        await h.press("Ad hoc run…")
+        await h.press("Ad hoc run")
         await h.press("One-off — pick a day and time")
         assert far.date().isoformat() in [o.value for o in h.modal._items["day"].options]
         await h.submit(h.modal, day=far.date().isoformat(), hour=str(far.hour), minute=str(far.minute))

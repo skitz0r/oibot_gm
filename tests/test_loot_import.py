@@ -699,7 +699,7 @@ def test_wishlist_wizard_points_at_the_me_page_greys_received_items_and_defaults
         await h.submit(h.modal, rank=default, kind="ms", note="")
         assert "at **#3**" in h.text, "the rank defaults to the next free place"
         await h.press("Confirm")
-        await h.press("Remove one…")
+        await h.press("Remove one")
         await h.pick("Pick the item", "Robe of Tests")
         await h.press("Remove")
         assert [e.name for e in reg.wish_character(m.discord_id)[1].wishlist] == ["Sunfire Pauldrons", "Helm of Order"]

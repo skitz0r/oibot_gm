@@ -120,7 +120,7 @@ class ProfessionsWizard(MemberWizard):
             lines = [f"**{c.label}** · {self.reg.professions_summary(c)}. Press Add profession to record the first one."]
         if synced(c):  # the armory keeps them (armory link §5.4): shown, never edited here, with why and what to do
             lines.append(synced_sentence(c, self_mode=self.self_mode))
-            items = [self.button("Other character…", self.pick_char)] if len(self.indexed()) > 1 else []
+            items = [self.button("Other character", self.pick_char)] if len(self.indexed()) > 1 else []
             await self.show(interaction, "\n".join(lines)[:1800], *items, self.button("Done", self.cancel))
             return
         if self.trades_full(c):
@@ -129,15 +129,15 @@ class ProfessionsWizard(MemberWizard):
             lines.append(f"{NUMBER_WORDS.get(slots, str(slots))} trades are taken." + (f" {_join(free)} {'is' if len(free) == 1 else 'are'} open." if free else ""))
         items = []
         if self.open_professions(c):
-            items.append(self.button("Add profession…", self.add_profession, discord.ButtonStyle.primary))
+            items.append(self.button("Add profession", self.add_profession, discord.ButtonStyle.primary))
         if c.professions:
-            items.append(self.button("Change skill…", self.change_skill))
+            items.append(self.button("Change skill", self.change_skill))
         if self.makers(c):
-            items.append(self.button("Add recipe…", self.add_recipe))
+            items.append(self.button("Add recipe", self.add_recipe))
         if c.professions:
-            items.append(self.button("Remove…", self.remove))
+            items.append(self.button("Remove", self.remove))
         if len(self.indexed()) > 1:
-            items.append(self.button("Other character…", self.pick_char))
+            items.append(self.button("Other character", self.pick_char))
         items.append(self.button("Cancel", self.cancel))
         await self.show(interaction, "\n".join(lines)[:1800], *items)
 
@@ -235,7 +235,7 @@ class ProfessionsWizard(MemberWizard):
         c = self.char()
         held = {r.id for p in c.professions if p.id == pid for r in p.recipes if r.id is not None}
         hits = [r for r in found if r.id not in held]  # what the character already has is not offered again
-        again = self.button("Search again…", self.recipe_form, discord.ButtonStyle.primary)
+        again = self.button("Search again", self.recipe_form, discord.ButtonStyle.primary)
         if not hits:
             said = (f"{c.label} already has every {self.name(pid)} recipe that matches. Search again for another one." if found
                     else pr.NOT_A_RECIPE + f" Search {self.name(pid)}'s recipes again, by part of the name.")
@@ -299,7 +299,7 @@ class ProfessionsWizard(MemberWizard):
         async def save(i: discord.Interaction, _note: str | None) -> None:
             await self.save_rows(i, [{"label": label, "professions": self.draft["entries"]}], f"{label}: {summary}.")
 
-        await self.decide(interaction, "\n".join(said), do=save)
+        await self.decide(interaction, "\n".join(said), do=save, do_label="Save")
 
 
 @flow("me_professions")

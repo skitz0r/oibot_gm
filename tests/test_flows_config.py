@@ -526,7 +526,7 @@ def test_timezone_paging_reaches_a_city_past_the_first_25(reg, store, owner):
 
     async def go():
         await FLOWS["timezone"](h.command(), reg)
-        await h.press("Another zone…")
+        await h.press("Another zone")
         await h.pick("Pick a region", "America")
         seen = set(options(h, "Pick a city"))
         while target not in options(h, "Pick a city"):
@@ -547,7 +547,7 @@ def test_timezone_every_city_is_reachable_and_cancel_writes_nothing(reg, store, 
 
     async def go():
         await FLOWS["timezone"](h.command(), reg)
-        await h.press("Another zone…")
+        await h.press("Another zone")
         await h.pick("Pick a region", "America")
         seen = set(options(h, "Pick a city"))
         while "More →" in h.buttons():

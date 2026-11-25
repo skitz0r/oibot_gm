@@ -557,8 +557,8 @@ def test_the_hub_dms_the_token_once_to_the_chosen_member(reg, rs, in_server):
 
     async def go():
         await FLOWS["companion"](h.command(), reg)
-        assert "No companion token yet" in h.text and h.buttons() == ["Issue…", "Revoke…", "Done"]
-        await h.press("Issue…")
+        assert "No companion token yet" in h.text and h.buttons() == ["Issue", "Revoke", "Done"]
+        await h.press("Issue")
         await h.submit(label="Jon's PC")
         assert "DMed to them once" in h.text
         await h.pick_member("Pick the raid leader", leader)
@@ -582,7 +582,7 @@ def test_the_hub_revokes_with_the_decide_screen(reg, rs, in_server):
     async def go():
         await FLOWS["companion"](h.command(), reg)
         assert "**Jon's PC** · never connected" in h.text
-        await h.press("Revoke…")
+        await h.press("Revoke")
         await h.pick("Pick the token to revoke", rec.id)
         assert "stops working" in h.text and "Revoke" in h.buttons() and "Back" in h.buttons()
         await h.press("Revoke")
@@ -597,7 +597,7 @@ def test_a_dm_that_cant_be_delivered_issues_nothing(reg, rs, in_server):
 
     async def go():
         await FLOWS["companion"](h.command(), reg)
-        await h.press("Issue…")
+        await h.press("Issue")
         await h.submit(label="Jon's PC")
         await h.pick_member("Pick the raid leader", leader)
         await h.press("Issue and DM")
@@ -616,7 +616,7 @@ def test_any_dm_failure_withdraws_the_token_audits_and_says_nothing_is_active(re
 
     async def go():
         await FLOWS["companion"](h.command(), reg)
-        await h.press("Issue…")
+        await h.press("Issue")
         await h.submit(label="Jon's PC")
         await h.pick_member("Pick the raid leader", leader)
         await h.press("Issue and DM")
@@ -635,7 +635,7 @@ def test_the_hub_refuses_a_bot_a_bad_label_and_non_owners(reg, rs, in_server):
 
     async def go():
         await FLOWS["companion"](h.command(), reg)
-        await h.press("Issue…")
+        await h.press("Issue")
         await h.submit(label="jon's pc")
         assert "already in use" in h.text and "Pick another label" in h.buttons()
         await h.press("Pick another label")

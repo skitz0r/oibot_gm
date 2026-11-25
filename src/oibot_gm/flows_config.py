@@ -1681,7 +1681,7 @@ class TimezoneWizard(OwnerWizard):
         cur = self.reg.config.timezone
         items = [self.button(f"{name} · {city_words(z)}", self._chooser(z), discord.ButtonStyle.primary if z == cur else discord.ButtonStyle.secondary)
                  for z, name in COMMON_ZONES]
-        items += [self.button("Another zone…", self.regions), self.button("Cancel", self.cancel)]
+        items += [self.button("Another zone", self.regions), self.button("Cancel", self.cancel)]
         await self.show(i, f"Now **{cur}** — it's {fmt12(self.reg.now_local())} there. Every run time, lock and lockout is in this zone.", *items)
 
     def _chooser(self, zone: str):
@@ -2314,7 +2314,7 @@ class OfficersWizard(OwnerWizard):
                          + " — map each to a role.")
         items: list = [_role_select("Officer roles (pick every role that counts)", self.picked, current=self.ids())]
         for name in pending[:3]:
-            items.append(self.button(f"Map {name[:40]}…", self._mapper(name)))
+            items.append(self.button(f"Map {name[:40]}", self._mapper(name)))
         dirty = self.want is not None or bool(self.mapped)
         items.append(self.button("Review", self.review, discord.ButtonStyle.primary, disabled=not dirty))
         items.append(self.button("Cancel" if dirty else "Done", self.cancel))
@@ -2416,8 +2416,8 @@ class CompanionsWizard(OwnerWizard):
         text = ("The loot companion on a raid leader's PC streams drops and awards from their chat log. Each token feeds "
                 f"**{discord.utils.escape_markdown(self.reg.config.name)}** only; a revoked one stops at its next message.\n\n" + "\n".join(lines)
                 + (f"\n-# {gone} revoked — the site lists them" if gone else "") + reach + (f"\n\n{note}" if note else ""))
-        await self.show(i, text, self.button("Issue…", self.issue_form, discord.ButtonStyle.primary, disabled=len(active) >= FEED_TOKEN_MAX),
-                        self.button("Revoke…", self.pick_revoke, discord.ButtonStyle.secondary, disabled=not active),
+        await self.show(i, text, self.button("Issue", self.issue_form, discord.ButtonStyle.primary, disabled=len(active) >= FEED_TOKEN_MAX),
+                        self.button("Revoke", self.pick_revoke, discord.ButtonStyle.secondary, disabled=not active),
                         self.button("Done", self.done))
 
     async def done(self, i: discord.Interaction) -> None:
@@ -2545,7 +2545,7 @@ class ArmoryGuildWizard(OwnerWizard):
 
         esc = discord.utils.escape_markdown
         lines = [f"This server's guild in the armory: {esc(self.reg.armory_guild_words())}."]
-        items = [self.button("Change…", self.change, discord.ButtonStyle.primary), self.button("Unlink…", self.unlink_decide)]
+        items = [self.button("Change", self.change, discord.ButtonStyle.primary), self.button("Unlink", self.unlink_decide)]
         if auctions.available(self.reg):  # the auction house: a version with auction houses, a linked guild (this hub)
             if self.reg.config.market is not None:
                 lines.append(f"Prices come from the {esc(self.reg.market_words())}.")
@@ -2553,9 +2553,9 @@ class ArmoryGuildWizard(OwnerWizard):
                     lines.append(status if status.endswith(".") else status + ".")  # "Prices as of …" has none; waiting / old do
             else:
                 lines.append("No auction house is picked, so prices are off. Press Auction house… to pick the one the guild trades on.")
-            items.append(self.button("Auction house…", self.houses))
+            items.append(self.button("Auction house", self.houses))
             if self.reg.config.market is not None:
-                items.append(self.button("Turn prices off…", self.prices_off_decide))
+                items.append(self.button("Turn prices off", self.prices_off_decide))
         await self.show(i, "\n".join(lines) + (f"\n\n{note}" if note else ""), *items, self.button("Done", self.done))
 
     # ---- the guild's auction house (auction prices §4.1): owner only, the same verbs as the Config page

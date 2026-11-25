@@ -146,9 +146,9 @@ def test_plan_only_skips_the_name_step(reg):
 
     async def go():
         await FLOWS["register"](h.command(), reg, slot="main", plan_only=True)
-        assert h.buttons() == ["Confirm…", "Cancel"]
+        assert h.buttons() == ["Confirm", "Cancel"]
         await pick_class_specs(h, cls, specs[0], specs[2])
-        await h.press("Confirm…")
+        await h.press("Confirm")
         assert h.modal is None and h.buttons() == ["Confirm", "Change", "Cancel"]
         assert NEW_ID not in reg.members  # nothing written before Confirm
         await h.press("Confirm")

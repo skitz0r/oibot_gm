@@ -39,20 +39,20 @@ def test_me_professions_adds_a_profession_a_skill_and_a_recipe(reg):
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
         assert LABEL in h.text and "no professions on record" in h.text
-        await h.press("Add profession…")
+        await h.press("Add profession")
         await h.pick("Pick the profession", "leatherworking")
         await h.pick("Pick the skill", "300")
-        assert "Your Leatherworking is recorded at 300." in h.text and h.buttons() == ["Do it", "Back"]  # no note: the character verb keeps none
-        await h.press("Do it")
+        assert "Your Leatherworking is recorded at 300." in h.text and h.buttons() == ["Save", "Back"]  # no note: the character verb keeps none
+        await h.press("Save")
         assert "✅" in h.text
         await FLOWS["me_professions"](h.command(), reg)
         assert "Leatherworking 300" in h.text
-        await h.press("Add recipe…")
+        await h.press("Add recipe")
         assert h.modal.title == "Leatherworking: add a recipe", "never 'A Alchemy recipe'"
         assert [f.label for f in h.modal._fields] == ["The recipe's name"]
         await h.submit(h.modal, recipe="Devilsaur Gauntlets")
         assert "Your Leatherworking is recorded at 300 with 1 recipe." in h.text
-        await h.press("Do it")
+        await h.press("Save")
         assert "✅" in h.text
     asyncio.run(go())
     c = _char(reg, UID, LABEL)
@@ -68,22 +68,22 @@ def test_add_recipe_searches_the_list_within_the_profession(reg):
 
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
-        await h.press("Add recipe…")
+        await h.press("Add recipe")
         await h.pick("Which profession makes it?", "leatherworking")
         assert h.modal.title == "Leatherworking: add a recipe" and [f.label for f in h.modal._fields] == ["Part of the recipe's name"]
         await h.submit(h.modal, recipe="mooncloth")  # a Tailoring recipe: not in this profession
-        assert "That isn't a recipe in the game's list." in h.text and "Search again…" in h.buttons() and "Back" in h.buttons()
-        await h.press("Search again…")
+        assert "That isn't a recipe in the game's list." in h.text and "Search again" in h.buttons() and "Back" in h.buttons()
+        await h.press("Search again")
         await h.submit(h.modal, recipe="devilsaur")
         sel = next(s for s in h._items() if isinstance(s, discord.ui.Select) and s.placeholder == "Pick the recipe")
         assert [(o.value, o.label, o.description) for o in sel.options] == [("10789", "Devilsaur Gauntlets", "Leather Gauntlets"),
                                                                              ("10798", "Devilsaur Leggings", "Leather Legguards")]
         await h.pick("Pick the recipe", "10789")
-        assert "Your Leatherworking is recorded at 300 with 1 recipe." in h.text and h.buttons() == ["Do it", "Back"]
-        await h.press("Do it")
+        assert "Your Leatherworking is recorded at 300 with 1 recipe." in h.text and h.buttons() == ["Save", "Back"]
+        await h.press("Save")
         assert "✅" in h.text
         await FLOWS["me_professions"](h.command(), reg)
-        await h.press("Add recipe…")
+        await h.press("Add recipe")
         await h.pick("Which profession makes it?", "alchemy")
         await h.submit(h.modal, recipe="lesser arcane elixir")
         sel = next(s for s in h._items() if isinstance(s, discord.ui.Select) and s.placeholder == "Pick the recipe")
@@ -99,13 +99,13 @@ def test_add_recipe_leaves_out_what_the_character_already_has(reg):
 
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
-        await h.press("Add recipe…")
+        await h.press("Add recipe")
         await h.submit(h.modal, recipe="devilsaur")
         assert _options(h, "Pick the recipe") == ["10798"], "Devilsaur Gauntlets is already on the record"
-        await h.press("Search again…")
+        await h.press("Search again")
         await h.submit(h.modal, recipe="devilsaur gauntlets")
         assert f"{LABEL} already has every Leatherworking recipe that matches. Search again for another one." in h.text
-        assert "Search again…" in h.buttons() and "Pick the recipe" not in h.selects()
+        assert "Search again" in h.buttons() and "Pick the recipe" not in h.selects()
     asyncio.run(go())
 
 
@@ -115,7 +115,7 @@ def test_add_recipe_says_how_many_match_past_a_select(reg):
 
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
-        await h.press("Add recipe…")
+        await h.press("Add recipe")
         await h.submit(h.modal, recipe="robe")
         sel = next(s for s in h._items() if isinstance(s, discord.ui.Select) and s.placeholder == "Pick the recipe")
         assert len(sel.options) == 25
@@ -131,7 +131,7 @@ def test_a_full_trade_list_offers_only_secondary_professions(reg):
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
         assert "Two trades are taken. Cooking, First Aid and Fishing are open." in h.text
-        await h.press("Add profession…")
+        await h.press("Add profession")
         values = _options(h, "Pick the profession")
         assert "leatherworking" not in values and "herbalism" not in values
         assert set(values) == {"cooking", "first_aid", "fishing"}
@@ -144,23 +144,23 @@ def test_change_skill_and_remove_end_on_the_consequence(reg):
 
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
-        await h.press("Change skill…")
+        await h.press("Change skill")
         await h.pick("Pick the profession", "alchemy")
         await h.pick("Pick the skill", "150")
         assert "already as given" in h.text and "Back" in h.buttons()  # unchanged: refused before the decide screen
         await h.press("Back")
-        await h.press("Change skill…")
+        await h.press("Change skill")
         await h.pick("Pick the profession", "alchemy")
         await h.pick("Pick the skill", "225")
         assert "Your Alchemy is recorded at 225 with 1 recipe." in h.text
-        await h.press("Do it")
+        await h.press("Save")
         await FLOWS["me_professions"](h.command(), reg)
-        await h.press("Remove…")
+        await h.press("Remove")
         sel = next(x for x in h._items() if isinstance(x, discord.ui.Select) and x.placeholder == "Pick what to remove")
         assert {o.description for o in sel.options if o.value.startswith("r:")} == {"Alchemy recipe"}
         await h.pick("Pick what to remove", "p:fishing")
         assert "Your Fishing is removed from your record." in h.text
-        await h.press("Do it")
+        await h.press("Save")
     asyncio.run(go())
     c = _char(reg, UID, LABEL)
     assert [(p.id, p.skill) for p in c.professions] == [("alchemy", 225)] and c.professions[0].recipes[0].name == "Elixir of Fortitude"
@@ -172,15 +172,15 @@ def test_add_recipe_asks_which_profession_and_refuses_a_gatherer_only_character(
 
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
-        assert "Add recipe…" in h.buttons(), "R7: the game's list gives Mining its smelting"
-        await h.press("Add recipe…")
+        assert "Add recipe" in h.buttons(), "R7: the game's list gives Mining its smelting"
+        await h.press("Add recipe")
         assert set(_options(h, "Which profession makes it?")) == {"mining", "fishing"}
     asyncio.run(go())
     _give(reg, UID, LABEL, [{"id": "alchemy", "skill": 300}, {"id": "cooking", "skill": 300}])
 
     async def go2():
         await FLOWS["me_professions"](h.command(), reg)
-        await h.press("Add recipe…")
+        await h.press("Add recipe")
         assert set(_options(h, "Which profession makes it?")) == {"alchemy", "cooking"}
         await h.pick("Which profession makes it?", "cooking")
         await h.submit(h.modal, recipe="Smoked Desert Dumplings")
@@ -192,7 +192,7 @@ def test_add_recipe_asks_which_profession_and_refuses_a_gatherer_only_character(
 
     async def go3():
         await FLOWS["me_professions"](h.command(), reg)
-        assert "Add recipe…" not in h.buttons()  # without a list: nothing on the record makes things
+        assert "Add recipe" not in h.buttons()  # without a list: nothing on the record makes things
     asyncio.run(go3())
 
 
@@ -207,11 +207,11 @@ def test_roster_professions_is_the_officers_form(reg, monkeypatch):
     async def go():
         await FLOWS["roster_professions"](h.command(), reg, member=target)
         assert other.display_name in h.text and OTHER_LABEL in h.text
-        await h.press("Add profession…")
+        await h.press("Add profession")
         await h.pick("Pick the profession", "tailoring")
         await h.pick("Pick the skill", "275")
         assert f"{other.display_name}'s Tailoring is recorded at 275." in h.text
-        await h.press("Do it")
+        await h.press("Save")
         assert "✅" in h.text
     asyncio.run(go())
     assert [(p.id, p.skill) for p in _char(reg, OTHER_UID, OTHER_LABEL).professions] == [("tailoring", 275)]
@@ -421,12 +421,12 @@ def test_a_skill_may_be_left_not_said_and_the_hub_says_so(reg):
 
     async def go():
         await FLOWS["me_professions"](h.command(), reg)
-        await h.press("Add profession…")
+        await h.press("Add profession")
         await h.pick("Pick the profession", "leatherworking")
         assert _options(h, "Pick the skill")[0] == "unsaid", "Not said yet is the first choice"
         await h.pick("Pick the skill", "unsaid")
         assert "Your Leatherworking is recorded." in h.text
-        await h.press("Do it")
+        await h.press("Save")
         await FLOWS["me_professions"](h.command(), reg)
         assert "Leatherworking** · skill not said yet" in h.text
     asyncio.run(go())
