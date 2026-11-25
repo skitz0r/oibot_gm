@@ -145,7 +145,10 @@ async def _press_end(interaction, bot, reg, session, btn) -> None:
     if ev is None:
         await say(interaction, "This council's run was removed, so its cards no longer work.")
         return
-    await end_decide(interaction, bot, reg, rs, ev)
+    from .raid_buttons import end_decide
+    from .raid_views import raid_name
+
+    await end_decide(interaction, bot, reg, rs, ev, wiz=loot_wizard(bot, reg, interaction, f"End {raid_name(reg, ev)}"))
 
 
 async def _refreshed(bot, reg, session, interaction, e: BaseException) -> None:
@@ -1017,33 +1020,6 @@ async def open_loot_distribute(interaction: discord.Interaction, reg: Registry, 
 
 # ---------------------------------------------------------------- End
 
-async def end_decide(interaction: discord.Interaction, bot, reg: Registry, rs, ev, wiz: Wizard | None = None) -> None:
-    """End the run and its council: the server's box (LootMixin.end_box over end_sentences — the site's End the run
-    and Loot › Tonight's End print the same) through Wizard.decide_box, End the run · Back; a council that changed
-    while the box was open is shown again. End archives every council of the run, posts the summary, marks it done."""
-    from .raid_views import raid_name
-
-    wiz = wiz or loot_wizard(bot, reg, interaction, f"End {raid_name(reg, ev)}")
-    key = ev.key
-
-    def box() -> dict:
-        return bot.end_box(reg, rs, rs.events.get(key) or ev)
-
-    async def do(i: discord.Interaction, _values: dict) -> None:
-        cur = rs.events.get(key)
-        if cur is None or cur.state in ("done", "cancelled"):
-            await wiz.finish(i, "That run already closed — nothing was changed.")
-            return
-        try:
-            text = await bot.end_run(reg, rs, cur, by=i.user.display_name, by_id=i.user.id)
-        except RegistryError as e:
-            await wiz.finish(i, _err(e))
-            return
-        await wiz.finish(i, text[:1800])
-
-    await wiz.decide_box(interaction, box(), do=do, refresh=box)
-
-
 @flow("loot_end")
 async def open_loot_end(interaction: discord.Interaction, reg: Registry, *, key: str | None = None, **_seed) -> None:
     """/raid end: the locked run (the one with a council first; a picker when several), then the decide screen."""
@@ -1061,6 +1037,8 @@ async def open_loot_end(interaction: discord.Interaction, reg: Registry, *, key:
         if ev is None or ev.state != "locked":
             await wiz.finish(i, "No locked run to end.")
             return
+        from .raid_buttons import end_decide
+
         await end_decide(i, bot, reg, rs, ev, wiz=wiz)
 
     if key:
@@ -1122,5 +1100,5 @@ async def open_gm_precedents(interaction: discord.Interaction, reg: Registry, **
     await start(interaction)
 
 
-__all__ = ["loot_press", "loot_pick", "loot_modal_submit", "loot_modal_raw", "LootModal", "reason_modal", "distribute_press", "end_decide",
+__all__ = ["loot_press", "loot_pick", "loot_modal_submit", "loot_modal_raw", "LootModal", "reason_modal", "distribute_press",
            "recipient_opts", "TickWizard"]

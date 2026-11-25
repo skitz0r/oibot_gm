@@ -839,6 +839,25 @@ def test_end_council_shows_the_decide_screen_then_archives_and_closes_the_thread
     assert not n.bot.dms, "the council sends no DMs"
 
 
+def test_end_council_is_the_one_end_screen_and_a_run_closed_meanwhile_says_so(night):
+    """Final fix 3: the council card's End council opens raid_buttons.end_decide (flows_loot keeps no copy); a run
+    ended elsewhere before the press is the fresh refusal box, a full sentence, nothing changed."""
+    from oibot_gm import flows_loot
+
+    assert not hasattr(flows_loot, "end_decide")
+    n = night
+    tick(n)
+    h = officer_h(n)
+
+    async def go():
+        await button(card(n), "End council").callback(h.card_press())
+        n.ev.state = "done"
+        await h.press("End the run")
+    run(go())
+    assert "This run is already finished." in h.text and h.buttons() == ["Back"], "the press meets the fresh box"
+    assert "—" not in h.text and "already closed" not in h.text
+
+
 def test_raid_end_prefers_the_run_with_a_council(night, officer):
     n = night
     other = rc.open_run(n.reg, n.rs, "barrow_deeps", (n.reg.now_local() + timedelta(days=6)).replace(second=0, microsecond=0), by="t")

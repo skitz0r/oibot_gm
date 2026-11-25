@@ -264,19 +264,24 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
     await wiz.decide_box(interaction, box(), do=do, refresh=box, note=note)
 
 
-async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
-    """End the run (the lock card): the server's box (LootMixin.end_box over end_sentences — the site's End the run and
-    Loot › Tonight's End print the same) through Wizard.decide_box, then LootMixin.end_run — the verb /raid end, the
-    site, MCP and the scheduler share (its loot council is archived with its summary). Before the start
-    (rc.end_refusal) the refusal box. Reopen stays possible for an hour (an end by mistake)."""
+async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
+    """THE End screen — the lock card's End, the council card's End council and /raid end alike: the server's box
+    (LootMixin.end_box over end_sentences — the site's End the run and Loot › Tonight's End print the same) through
+    Wizard.decide_box, then LootMixin.end_run — the verb the site, MCP and the scheduler share (every council of the run
+    is archived with its summary). Before the start (rc.end_refusal) the refusal box, unless a loot council is open on
+    the run (LootMixin.end_box decides then, as the site's Loot › Tonight). The line after names the run and
+    how long Reopen works, then each council's summary. `wiz`: the caller's wizard (the loot flows' guard)."""
     from .consequences import refusal_box_for
 
-    wiz = officer_wizard(bot, reg, interaction, f"End {raid_name(reg, ev)}")
+    wiz = wiz or officer_wizard(bot, reg, interaction, f"End {raid_name(reg, ev)}")
     key = ev.key
+
+    def council() -> bool:
+        return any(s.guild == reg.key and s.run_key == key for s in getattr(bot, "events", {}).values())
 
     def box() -> dict:
         cur = rs.events.get(key) or ev
-        why = rc.end_refusal(cur)
+        why = None if council() else rc.end_refusal(cur)
         if why:
             return refusal_box_for(why)
         return bot.end_box(reg, rs, cur)
@@ -286,12 +291,14 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None
         if not cur or cur.state in ("done", "cancelled"):
             await wiz.finish(i, f"{rc.run_words(reg, cur or ev)} closed before your press, so nothing was changed.")
             return
+        had = council()
         try:
-            await bot.end_run(reg, rs, cur, by=i.user.display_name, by_id=i.user.id, via="discord")
+            text = await bot.end_run(reg, rs, cur, by=i.user.display_name, by_id=i.user.id, via="discord")
         except RegistryError as e:
             await wiz.finish(i, str(e))
             return
-        await wiz.finish(i, ended_line(reg, cur))
+        line = ended_line(reg, cur)
+        await wiz.finish(i, (f"{line}\n\n{text}" if had and text else line)[:1800])
 
     await wiz.decide_box(interaction, box(), do=do, refresh=box)
 
