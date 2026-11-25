@@ -120,6 +120,22 @@ def test_same_role_respec_follows_the_seat(reg, rs, bot):
     assert ev.signups[str(healer.discord_id)].spec == "Discipline" and not bot.fills
 
 
+def test_a_respec_that_swaps_spec_and_offspec_follows_the_seat(reg, rs, bot):
+    """Final fix 2: Holy / Discipline → Discipline / Holy is a respec, never read as a role switch: the signup and the
+    seat follow the new spec."""
+    ev, ms = seated(reg, rs)
+    healer = ms[0]
+    label = healer.main.label
+    healer.main.offspec = "Discipline"
+    ev.signups[str(healer.discord_id)].offspec = "Discipline"
+    run(bot.save_characters(reg, healer.discord_id, [{"label": label, "cls": "Priest", "spec": "Discipline", "offspec": "Holy"}],
+                            healer.display_name, by_id=healer.discord_id))
+    assert reg.members[healer.discord_id].main.spec == "Discipline"
+    seat = ev.seat_of(healer)
+    assert seat is not None and (seat[1].spec, seat[1].role) == ("Discipline", "healer")
+    assert ev.signups[str(healer.discord_id)].spec == "Discipline"
+
+
 def test_retiring_your_own_seated_character_writes_you_no_notice_but_an_officer_doing_it_does(reg, rs, bot):
     """A member's own retire / delete frees the seat with no "seat released" notice about their own act; the same
     change saved by an officer tells them (by id: who saved decides, never a name)."""

@@ -2730,13 +2730,14 @@ def seated_switch_refusal(reg: Registry, ev: RaidEvent, m: Member, c: Registered
 
 
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None,
-               *, spec: str | None = None, by: str | None = None) -> Signup:
+               *, spec: str | None = None, by: str | None = None, respec: bool = False) -> Signup:
     """THE answer write on a first part. `spec` (an officer's role switch): the spec the character plays tonight — its
     own, its offspec or a flex role's (spec_role, refused otherwise); the signup's spec and role follow, its own spec
     becomes the offspec (as a yes to a switch ask leaves it). Refused (seated_switch_refusal: SPEC_SEATED) once the run
     is locked and they hold a seat whose ROLE it would change: that switch is an ask. No `spec` for the character
     already on a seat of a locked run keeps the signup's spec (a switch stays on Bench as on the seat). `by`: who
-    switched them, for the run's log."""
+    switched them, for the run's log. `respec` (after_character_change's rewrite): the character's own spec changed,
+    so the signup always follows it — a swap of spec and offspec is never read as a switch."""
     if ev.follows:  # D1: one Join for the night — the follow-on is never answered on its own
         lead = rs.events.get(ev.follows)
         raise RegistryError(FOLLOW_ANSWER_REFUSAL.format(lead=reg.raid_def(lead.instance if lead else None).get("name", "first raid")))
@@ -2756,7 +2757,7 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     s = carry_joined(old, _signup(reg, m, c, status, source, note))
     if spec and spec != c.spec:
         s.spec, s.offspec, s.role = spec, c.spec, role
-    elif (not spec and status != "out" and ev.state != "open" and old is not None and old.character == c.label and ev.seat_of(m)
+    elif (not spec and not respec and status != "out" and ev.state != "open" and old is not None and old.character == c.label and ev.seat_of(m)
           and old.spec != c.spec and old.offspec == c.spec):  # a switch keeps the character's own spec as its offspec
         s.spec, s.offspec, s.role = old.spec, old.offspec, old.role  # no spec picked: a seated switch stays (the seat keeps it too);
         # a respec of the character (its own spec changed) is not a switch: the signup follows the new spec
@@ -5896,7 +5897,8 @@ def after_character_change(reg: Registry, rs: RaidStore, m: Member, changes: lis
             elif act == "rewrite" and sg is not None:
                 c = next((x for x in m.active() if x.label == now_label), None)
                 if c is not None:
-                    s = set_signup(reg, rs, ev, m, c.label, sg.status, source=sg.source if sg.status == "out" else "respec", note=sg.note)
+                    s = set_signup(reg, rs, ev, m, c.label, sg.status, source=sg.source if sg.status == "out" else "respec", note=sg.note,
+                                   respec=ch["kind"] == "spec")
                     if ev.seat_of(m) is not None:
                         _reseat(ev, s, reg.key)
                         rs.save(ev, f"{m.display_name} seat follows {c.label}")
