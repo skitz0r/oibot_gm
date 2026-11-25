@@ -1196,7 +1196,7 @@ def test_the_events_page_asks_with_the_servers_box_and_lives():
     assert "spec" in some and 'label="Character"' in some and 'label="Answer"' in some and 'label="Member"' in some
     sign = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
     assert all(w in sign for w in ('"Joined"', '"Bench"', '"No thanks"', '"No answer yet"')) and "<MemberMenu" in sign and "<SomeoneElse" in sign
-    assert "aria-expanded" in sign and 'kind="spec"' in sign
+    assert 'useState<Row>("in")' in sign and "<Tabs.Tab" in sign and 'kind="spec"' in sign and 'kind="class"' in sign, "tabs, Joined first, grouped by class"
     act = _code_only((SRC / "components" / "events" / "ActivitySection.tsx").read_text())
     assert "Activity · " in act and "aria-expanded" in act
 
@@ -1264,7 +1264,7 @@ def test_the_events_page_fix_round_one():
     assert "if (n !== seq.current) return;" in page and "useAnyBoxOpen()" in page and "held && lastLive.current" in page
     confirm = _code_only((SRC / "components" / "ConfirmBox.tsx").read_text())
     assert "setChanged(fresh.verb !== null)" in confirm and "setChanged(true); } else close(true)" not in confirm
-    assert '<Text fw={700} px={7} className={css.countZero}>{n}</Text>' in sign, "a 0 is plain text, never a greyed button"
+    assert "{t.empty}" in sign and "disabled" not in sign, "an empty tab says so in a sentence, never a greyed tab"
     assert "const first = await preview(now);\n      setBusy(false);" in menu, "the button behind an open box is not busy"
 
 

@@ -946,8 +946,8 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   or No thanks. Anyone with a recorded absence covering the day — regular or not — is marked away (No thanks, the
   *Away* row) automatically: when the sheet opens, and on a sheet already open when the absence is recorded; clearing
   the absence puts them back to unanswered.
-- **Officers see who hasn't answered**: an event's Signups on the Events page counts *No answer yet* and unfolds the
-  names (one per line, spec icon + character); the officer
+- **Officers see who hasn't answered**: an event's Signups on the Events page has a *No answer yet* tab with its count and the
+  names (grouped by class, one per line, spec icon + character); the officer
   health card's **No answer** names them; MCP `get_run` and an officer's `/ask` carry the same list. The list is
   officer-only: a member's `/ask` gets the count of who hasn't answered, never the names (nor the names of who could
   cover a short role but hasn't signed).
@@ -1097,8 +1097,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    are paused; once locked, that raid's *Open seats* sentence says it (*Automatic asks paused by Jon. 3 seats are
    open.*), once. Any time it shows *Also on another event* (who joined another event that night) and *Away that day* (each with the reason
    recorded). The list says once which time zone every time on the page is in (*Times in Berlin.*), and a test run's
-   page carries a *test run* chip beside its state. **Signups** has four counts — *Joined*, *Bench*, *No thanks*, *No answer yet*
-   — and each count unfolds its names, one per line, each with its spec icon and the row **⋮** (the same on-behalf
+   page carries a *test run* chip beside its state. **Signups** has four tabs, each with its count — *Joined* (shown first), *Bench*, *No thanks*, *No answer yet*
+   — and a tab lists its names grouped by class, a class per column under its icon as on the Discord sheet, one per
+   line, each with its spec icon and the row **⋮** (the same on-behalf
    list the Test bench's cards have). **Answer for someone** opens the bot's box with *Member* (someone with no answer yet),
    *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays, *Tavi, Holy*); every pick
    shows the bot's sentences again, and **Record answer** writes. **Role switches** (only while a raid is short) and
