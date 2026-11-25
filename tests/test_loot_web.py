@@ -932,7 +932,7 @@ def test_end_refuses_an_unlocked_run_on_the_web_mcp_and_plain_text(w):
     start = (w.reg.now_local() + timedelta(days=9)).replace(second=0, microsecond=0)
     sheet = rc.open_run(w.reg, w.rs, "barrow_deeps", start, by="t")  # next week's open signup sheet
     r = w.c.post(f"/api/loot/{sheet.key}/end", json={}, headers=H)
-    assert r.status_code == 400 and "No locked run to end" in r.json()["error"], r.text  # web/api_loot.py: Task 5 rewords it
+    assert r.status_code == 400 and "No locked event to end" in r.json()["error"], r.text
     assert w.c.post(f"/api/loot/{sheet.key}/end", json={"preview": True}, headers=H).status_code == 400
     op = ConfigOp(op="loot", field="end", target=sheet.key)
     from oibot_gm import loot_ops
@@ -940,7 +940,7 @@ def test_end_refuses_an_unlocked_run_on_the_web_mcp_and_plain_text(w):
     with pytest.raises(RegistryError, match="No locked event to end"):
         loot_ops.describe(w.reg, op)
     assert "No locked event to end" in configops.describe(w.reg, op), "the plain-text diff says so before Apply"
-    with pytest.raises(RegistryError, match="No locked run to end"):  # discord_loot.end_run: Task 5 rewords it
+    with pytest.raises(RegistryError, match="No locked event to end"):
         run(configops.apply_async(w.reg, op, "Officer", False, bot=w.bot, by_id=OFFICER, via="chat"))  # Apply: the verb refuses too
     assert w.rs.events[sheet.key].state == "open", "the signup sheet lives on"
     assert w.c.post(f"/api/loot/{w.ev.key}/end", json={}, headers=H).status_code == 200, "a locked run still ends"

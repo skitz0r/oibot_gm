@@ -754,7 +754,7 @@ def test_a_council_on_a_run_that_is_not_locked_is_not_live(duo, raiding):
     bot = FeedBot(duo.guilds, [raiding.b], raiding.stores)
     assert bot.active_raid(comp("", bound=GUILD2)) is raiding.b
     raiding.ev_b.state = "done"
-    assert bot.active_raid(comp("", bound=GUILD2)) is None and bot.loot_route(comp("", bound=GUILD2))[1] == "no run live"
+    assert bot.active_raid(comp("", bound=GUILD2)) is None and bot.loot_route(comp("", bound=GUILD2))[1] == "no live event"
 
 
 def test_feed_tokens_bind_a_companion_to_its_guild():

@@ -248,7 +248,7 @@ class FeedMixin:
             # tonight's council instead of landing in last week's run
             real = [s for s in real if not self._past_close(reg, s)]
             if not real:
-                return None, "no run live"
+                return None, "no live event"
             tester = self._is_tester_companion(reg, comp)
             pool = [s for s in real if s.test] if tester else [s for s in real if not s.test]
             if tester and not pool:
@@ -270,7 +270,7 @@ class FeedMixin:
             if not pool:
                 return None, ("only a test council is live; a rehearsal takes drops from a puppet's or the tester's companion only"
                               if not tester else "no test council is live")
-        return None, "no run live"
+        return None, "no live event"
 
     def _past_close(self, reg, session) -> bool:
         """For routing only: past the run's close, or a lead whose follow-on has started AND has a live, non-test loot
@@ -359,10 +359,10 @@ class FeedMixin:
         if kind == "heartbeat":
             return None
         if raid is None:
-            if why == "no run live":
+            if why == "no live event":
                 if gk and kind in ("drop", "loot", "kill"):
                     self.feed_buffer(gk, ev, comp)  # persisted: survives a restart; what expires unrecorded is announced
-                    return {"note": "no run live; held for 10 minutes — open the loot council (/raid loot), or the ops channel lists it as not recorded", "held": True}
+                    return {"note": "no live event; held for 10 minutes — open the loot council (/raid loot), or the ops channel lists it as not recorded", "held": True}
                 return {"note": "no active raid; event ignored"}
             if cfg and self._feed_warn_due(gk, comp.character, why):  # the companion retries a refusal: one warn per 10 min
                 await self.ops.emit(cfg, "warn", f"companion {comp.character}: {why}")

@@ -982,7 +982,7 @@ def test_drops_with_no_run_live_prompt_an_ad_hoc_run_once(reg, rs):
     assert held(bot, reg)["held"]
     run(bot.loot_scheduler_step(reg))
     run(bot.loot_scheduler_step(reg))
-    prompts = [m for m in bot.officer_ch.sent if "no run is live" in (m.content or "")]
+    prompts = [m for m in bot.officer_ch.sent if "no event is live" in (m.content or "")]
     assert len(prompts) == 1 and "Lootmaster's log" in prompts[0].content
     (b,) = prompts[0].view.children
     assert b.item.label == "Start a one-off event" and b.item.custom_id == f"lootstart.{GUILD}:open"
@@ -998,7 +998,7 @@ def test_the_ad_hoc_prompt_goes_to_the_officer_channel_never_the_public_loot_log
     reg.config.loot_channel_id, reg.config.loot_log = log_ch.id, True
     held(bot, reg)
     run(bot.loot_scheduler_step(reg))
-    assert [m for m in bot.officer_ch.sent if "no run is live" in (m.content or "")], "the officer channel has the prompt"
+    assert [m for m in bot.officer_ch.sent if "no event is live" in (m.content or "")], "the officer channel has the prompt"
     assert not log_ch.sent, "the public loot log carries award lines only"
 
 
@@ -1011,7 +1011,7 @@ def test_an_award_after_the_council_ended_dms_the_officers_once(night, monkeypat
     run(n.bot.loot_scheduler_step(n.reg))
     assert sorted(u for u, _ in n.bot.dms) == [555, OFFICER], "one DM per officer: they must record or correct it"
     assert "after the loot council" in n.bot.dms[0][1] and "Shard → Bob" in n.bot.dms[0][1]
-    assert not [m for m in n.ch.sent if "no run is live" in (m.content or "")], "an award after the end is not an ad hoc run"
+    assert not [m for m in n.ch.sent if "no event is live" in (m.content or "")], "an award after the end is not an ad hoc run"
 
 
 def test_the_presence_chip_has_three_states(reg):

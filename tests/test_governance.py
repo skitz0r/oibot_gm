@@ -168,8 +168,8 @@ def test_a_profile_approval_names_every_served_server_and_each_busy_one(duo):
     busy = {GUILD: {"raiding": False}, GUILD2: {"raiding": True, "why": "Barrow Deeps Tue 7:30 PM is locked"}}
     lines = news.consequence(p, duo.a, "approved", guilds=duo.guilds, busy=busy, next_run="Tue 7:45 PM")
     assert lines[0] == "At the apply job's next run, Tue 7:45 PM, Claude edits the game data for forever."
-    assert lines[1] == "The tests run, then the bot restarts for about two minutes for Demo Guild and Duo Guild."
-    assert lines[2] == "⚠ Duo Guild has a run right now, so the job waits until it's over."
+    assert lines[1] == "After the tests, the bot restarts for about two minutes for Demo Guild and Duo Guild."
+    assert lines[2] == "⚠ Duo Guild is raiding right now, so the job waits until the raid is over."
 
 
 # ---------------------------------------------------------------- D33: busy per guild

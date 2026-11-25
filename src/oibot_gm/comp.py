@@ -293,7 +293,7 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
     note = (rd.get("tank_needs") or {}).get("note")
     for role in ("tank", "healer"):
         src = "the raid's minimum" if role in (rd.get("minimums") or {}) else "the game's minimum"
-        ic.lines.append(CompLine(role, bounds[role]["min"], 0, f"{src}: {bounds[role]['min']} for a {size}-player run" + (f" ({note})" if note and role == "tank" else "")))
+        ic.lines.append(CompLine(role, bounds[role]["min"], 0, f"{src}: {bounds[role]['min']} for a {size}-player raid" + (f" ({note})" if note and role == "tank" else "")))
     # class wants from the buff matrix: party auras worth having (max benefit ≥ 3) want one provider per group
     # that has beneficiaries; the pool tells us how many such groups there are (else assume by role share)
     wants: dict[str, tuple[int, str]] = {}

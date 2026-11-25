@@ -276,10 +276,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if len(evs) == 1:
             return evs[0]
         if len(evs) > 1:
-            raise HTTPException(400, f"{reg.raid_def(raids[0]).get('name', raids[0])} has several live runs: " + ", ".join(dr.run_title(reg, e) for e in evs) + ". Say which one.")
+            raise HTTPException(400, f"{reg.raid_def(raids[0]).get('name', raids[0])} has several live events: " + ", ".join(dr.run_title(reg, e) for e in evs) + ". Say which one.")
         if len(raids) > 1:
             raise HTTPException(400, f"{key}: which raid? " + ", ".join(raids))
-        raise HTTPException(404, "That run is closed." if key in rs.events else "There is no live run by that name." + (" Live now: " + ", ".join(dr.run_title(reg, e) for e in rs.live()) + "." if rs.live() else ""))
+        raise HTTPException(404, "That event is closed." if key in rs.events else "There is no live event by that name." + (" Live now: " + ", ".join(dr.run_title(reg, e) for e in rs.live()) + "." if rs.live() else ""))
 
     async def body(request: Request, officer: bool = False):
         if request.headers.get("x-requested-with") != "oibot":
@@ -603,11 +603,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             # the Members page read "confirm BD-0917-1919?" — the key's tail is the 24-hour start)
             past = sorted((e for e in rs.events.values() if e.team == team_key), key=lambda e: e.starts_at)
             if not past:
-                return {"raid": "a run that has ended", "when": "", "key": None}
+                return {"raid": "an event that has ended", "when": "", "key": None}
             ev = past[-1]
-            return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "a run", "when": t12(reg, ev.starts_at), "key": None}
+            return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "an event", "when": t12(reg, ev.starts_at), "key": None}
         ev = evs[0]
-        return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "a run", "when": t12(reg, ev.starts_at), "key": ev.key}
+        return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "an event", "when": t12(reg, ev.starts_at), "key": ev.key}
 
     def seat_runs(reg, rs, m) -> dict[str, list[str]]:
         """character label -> the locked live runs it holds a seat on (from the run files: rc.rostered_runs), as a
@@ -1133,7 +1133,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "reasons": sum(len(s.pending_reasons) for s in sessions), "may_open": False,
                 "bosses": {"done": prog["done"], "total": prog["total"], "all_down": prog["all_down"],
                            "text": f"Bosses {prog['done']}" + (f" / {prog['total']}" if prog["total"] else "")
-                                   + (" · all down — End the run on the loot council" if prog["all_down"] else "")} if prog else None}
+                                   + (" · all down — End the event on the loot council" if prog["all_down"] else "")} if prog else None}
 
     def health_json(reg, ev, t) -> dict:
         """The open sheet's health card as data (MCP get_run, the help context): headcount against the seats the run
@@ -1825,7 +1825,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         ev = event_of(v.reg, rs, key)
         lineup = d.get("lineup")
         if not isinstance(lineup, list) or not all(isinstance(e, dict) for e in lineup):  # never a 500 on a malformed body
-            return JSONResponse({"error": "Name the run's raids, its first raid first, each with its rosters."}, status_code=400)
+            return JSONResponse({"error": "Name the event's raids, its first raid first, each with its rosters."}, status_code=400)
         try:
             if d.get("preview"):
                 lines = await bot.edit_lineup(v.reg, rs, ev, lineup, by=v.name, by_id=v.uid, via=v.via, preview=True)
@@ -1851,7 +1851,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rs = bot.raids.store(v.reg)
         ev = rs.events.get(key)
         if ev is None:
-            return JSONResponse({"error": f"no run {key}"}, status_code=404)
+            return JSONResponse({"error": f"no event {key}"}, status_code=404)
         try:
             line = await bot.reopen_run(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
@@ -2027,7 +2027,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             w = rc.which_run(reg, rid, start, sid)  # the run is (schedule, occurrence): both must be the preview's
             asked = (str(d.get("schedule") or "").strip().lower() or None, (d.get("occurrence") or "").strip() or None)
             if w["occurrence"] != asked[1] or (asked[0] is not None and w["schedule"] != asked[0]):
-                return JSONResponse({"error": "That time now opens a different run than the preview showed — check it and open again.",
+                return JSONResponse({"error": "That time now opens a different event than the preview showed — check it and open again.",
                                      "preview": rc.open_preview(reg, bot.raids.store(reg), rid, start.isoformat(), sid)}, status_code=409)
         rs = bot.raids.store(reg)
         if d.get("seen"):  # Open the sheet now asks first (§7b): a box whose facts changed is refused with the fresh one
@@ -2154,13 +2154,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if ref not in (None, ""):
             ev = find_live(reg, rs, str(ref))
             if not rc.is_test_run(reg, ev):
-                raise HTTPException(400, f"{dr.run_title(reg, ev)} is a real run: test members answer test runs only")
+                raise HTTPException(400, f"{dr.run_title(reg, ev)} is a real event: test members answer test events only.")
             return ev
         live = test_runs(reg, rs)
         if not live:
-            raise HTTPException(400, "no live test run: open one first")
+            raise HTTPException(400, "No test event is live. Open one first.")
         if len(live) > 1:
-            raise HTTPException(400, "Several test runs are live: " + ", ".join(dr.run_title(reg, e) for e in live) + ". Say which one.")
+            raise HTTPException(400, "Several test events are live: " + ", ".join(dr.run_title(reg, e) for e in live) + ". Say which one.")
         return live[0]
 
     async def test_seed_do(v, d) -> dict:
@@ -2185,7 +2185,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                                                   dm=bool(d.get("dm_open") or d.get("dm")), by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"The test run {test_run_row(reg, ev)['title']} is open. It locks in {start_in - lock_in} min and starts in {start_in} min.",
+        return {"message": f"The test event {test_run_row(reg, ev)['title']} is open. It locks in {start_in - lock_in} min and starts in {start_in} min.",
                 "key": ev.key, "week": tempo_week(start_in, nudge_in, lock_in, confirm_in)}
 
     async def test_answer_do(v, d) -> dict:
@@ -2242,7 +2242,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def test_title(reg, rs, key: str) -> str:
         """A test run's title for the feed: '<raid> · <12-hour start>' (test_run_row's), or words for one already gone."""
         ev = rs.events.get(key) if rs is not None else None
-        return test_run_row(reg, ev)["title"] if ev is not None and ev.instance else "a test run that has ended"
+        return test_run_row(reg, ev)["title"] if ev is not None and ev.instance else "a test event that has ended"
 
     @app.get("/api/test")
     async def test_state(request: Request):
@@ -2340,7 +2340,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         out = []
         for ev in sorted((e for e in rs.live() if e.instance == rid and not e.test), key=lambda e: e.starts_at):
             sched = next((s for s in reg.schedules(rid) if s["id"] == rc.run_schedule_id(reg, ev)), None)
-            name = "ad hoc" if rc.run_kind(reg, ev) == "adhoc" else (sched.get("name") or sched["id"]) if sched else "its schedule"
+            name = "one-off" if rc.run_kind(reg, ev) == "adhoc" else (sched.get("name") or sched["id"]) if sched else "its schedule"
             out.append({"key": ev.key, "when": t12(reg, ev.starts_at), "state": ev.state, "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state), "schedule": name})
         return out
 
@@ -2420,7 +2420,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 continue
             how = "web" if a.get("channel") == "web" or m.dm_opt_out else "dm"
             words = rc.run_on(reg, ev)
-            out.append({"roster": a["roster"], "answer": None, "raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "a run",
+            out.append({"roster": a["roster"], "answer": None, "raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "an event",
                         "when": t12(reg, ev.starts_at), "key": ev.key, "words": words, "line": f"{words} waits for their Confirm",
                         "how": how, "how_words": ASK_CHANNEL[how]})
         return out

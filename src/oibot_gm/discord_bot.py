@@ -1095,7 +1095,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         if reg is None:
             return None
         await self.guild_added(reg)
-        await self.ops.emit(reg.config, "warn", f"the bot is back in {getattr(guild, 'name', 'the server')}: {reg.config.name} is served again (runs, the scheduler, the site)")
+        await self.ops.emit(reg.config, "warn", f"the bot is back in {getattr(guild, 'name', 'the server')}: {reg.config.name} is served again (events, the scheduler, the site)")
         return reg
 
     async def on_guild_remove(self, guild) -> None:

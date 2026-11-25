@@ -823,5 +823,5 @@ def migrate_sessions(store, dry_run: bool = False) -> list[str]:
                     if f.exists() and f != target:
                         f.unlink()
     if lines and not dry_run:
-        store.commit(f"loot sessions migrated to run keys and drop ids ({len(lines)} file(s))")
+        store.commit(f"loot sessions migrated to raid keys and drop ids ({len(lines)} file(s))")
     return lines

@@ -1420,7 +1420,7 @@ def test_end_redraws_the_sheet_and_refuses_a_run_that_isnt_locked(council):
     assert drawn == [(c.ev.key, "done")], "the sheet and lock card leave their live buttons"
     start = (c.reg.now_local() + timedelta(days=9)).replace(second=0, microsecond=0)
     sheet = rc.open_run(c.reg, c.rs, "barrow_deeps", start, by="t")
-    with pytest.raises(RegistryError, match="No locked run to end"):
+    with pytest.raises(RegistryError, match="No locked event to end"):
         run(c.bot.end_run(c.reg, c.rs, sheet, by="Mira"))
     assert c.rs.events[sheet.key].state == "open", "next week's signup sheet is never killed by End"
     with pytest.raises(RegistryError, match="already done"):

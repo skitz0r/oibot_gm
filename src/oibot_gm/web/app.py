@@ -285,7 +285,7 @@ def schedule_sections(reg) -> list[dict]:
         for sc in reg.schedules(rid):
             title = sc.get("name") if len(reg.schedules(rid)) > 1 and sc.get("name") else None
             if sc.get("kind") == "pickup":
-                rows.append({"title": title, "label": "Ad hoc: an officer opens these runs when there's interest — first come, first served", "runs": []})
+                rows.append({"title": title, "label": "Opened by an officer when there's interest — first come, first served", "runs": []})
                 continue
             if not sc.get("active", True):
                 # schedule_label ends ' · paused'; the page says it once, in its own words ('paused for now')
@@ -313,7 +313,7 @@ def schedule_block(reg) -> str:
             rows.append(f"<li>{head}" + (f'<br><span class="when">{nxt}</span>' if nxt else "") + "</li>")
         parts.append(f'<h2>{html.escape(sec["raid"])}<span class="size">{size}</span></h2><ul>' + "".join(rows) + "</ul>")
     tz = html.escape(reg.config.timezone.replace("_", " "))
-    return ("".join(parts) or "<p>No raid times set yet.</p>") + f'<p class="small">Times are guild time ({tz}). Each run gets a signup sheet in the Discord.</p>'
+    return ("".join(parts) or "<p>No raid times set yet.</p>") + f'<p class="small">Times are guild time ({tz}). Each event gets a signup sheet in the Discord.</p>'
 
 
 SCHEDULE_CSS = ("h2{font:700 18px Manrope,sans-serif;margin:18px 0 6px}h2 .size{font:400 14px 'Source Sans 3',sans-serif;color:#8C97A8}"

@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 NOT_SET_UP = ("This server isn't set up for oibot_GM yet. The server owner (or someone with Manage Server) sets it up with "
               "`/gm config owner`.")
-NO_GUILDS = "I'm not set up for any server yet. Run `/gm config owner` in the server you want me to look after."
+NO_GUILDS = "I'm not set up for any server yet. Use `/gm config owner` in the server you want me to look after."
 # someone in none of the servers when no served guild is listed (B10): no guild named, no invite — ask whoever invited you
 NOT_IN_ANY_UNLISTED = "You're not in any server I look after. If someone invited you, ask them for the server's invite."
 GONE = "This button's server isn't served by the bot any more."

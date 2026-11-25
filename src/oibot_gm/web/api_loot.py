@@ -112,14 +112,14 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
                 return s
             if ended_ok and (want == ev.key or want.startswith(ev.key + "-r")):
                 return want
-            raise HTTPException(404, f"No loot council {want} on this run.")
+            raise HTTPException(404, f"No loot council {want} on this raid.")
         if len(sessions) == 1:
             return sessions[0]
         if not sessions:
             if ended_ok:
                 return ev.key
-            raise HTTPException(404, "No loot council is open on this run — open it first.")
-        raise HTTPException(400, "This run has one council per roster — say which: session = " + ", ".join(s.id for s in sessions))
+            raise HTTPException(404, "No loot council is open on this raid — open it first.")
+        raise HTTPException(400, "This raid has one council per roster — say which: session = " + ", ".join(s.id for s in sessions))
 
     def cand_json(c) -> dict:
         return {"character": c.character, "cls": c.cls, "spec": c.spec, "rank": c.rank, "tier": c.tier, "offspec": c.offspec, "upgrade": c.upgrade_value,
@@ -404,8 +404,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
 
         v, d = await writer(request)
         rs, ev, sessions = run_of(v.reg, run)
-        if ev.state != "locked" and not sessions:  # the verb's rule, shown at the preview too (Discord: "No locked run to end.")
-            return JSONResponse({"error": "No locked run to end." if ev.state not in ("done", "cancelled") else f"That run is already {ev.state}.",
+        if ev.state != "locked" and not sessions:  # the verb's rule, shown at the preview too (Discord: "No locked event to end.")
+            return JSONResponse({"error": "No locked event to end." if ev.state not in ("done", "cancelled") else f"That event is already {ev.state}.",
                                  "box": bot.end_box(v.reg, rs, ev)}, status_code=400)
         if d.get("preview"):
             return {"preview": bot.end_consequence(v.reg, rs, ev), "box": bot.end_box(v.reg, rs, ev)}

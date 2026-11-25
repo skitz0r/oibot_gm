@@ -134,7 +134,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
             return JSONResponse({"error": NO_EVENT}, status_code=404)
         lineup = d.get("lineup")
         if not isinstance(lineup, list) or not all(isinstance(e, dict) for e in lineup):
-            return JSONResponse({"error": "Name the run's raids, its first raid first, each with its rosters."}, status_code=400)
+            return JSONResponse({"error": "Name the event's raids, its first raid first, each with its rosters."}, status_code=400)
         return await asyncio.to_thread(event_view.lineup_draft_json, v.reg, rs, ev, lineup)
 
     @app.post("/api/run/{key}/switch")

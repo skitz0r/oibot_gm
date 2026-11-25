@@ -32,6 +32,7 @@ import discord
 from . import raidcycle as rc
 from .loot import session as ls
 from .loot.session import DISENCHANT, Drop, LootBusy, LootChanged, LootSession, Override, now_iso
+from .raid_buttons import RUN_WORDS
 from .registry import RegistryError, parse_bool
 
 log = logging.getLogger(__name__)
@@ -138,7 +139,7 @@ class LootMixin:
         except Exception:  # noqa: BLE001 — a test double without a raid store
             ev = None
         m = re.search(r"-r(\d+)$", sid or "")
-        return (rc.run_words(reg, ev) if ev is not None else "an earlier run") + (f" roster {m.group(1)}" if m else "")
+        return (rc.run_words(reg, ev) if ev is not None else "an earlier event") + (f" roster {m.group(1)}" if m else "")
 
     def loot_live(self, session: LootSession) -> bool:
         """A session is live iff its run is locked (no separate session state)."""
@@ -237,7 +238,7 @@ class LootMixin:
     async def loot_closing(self, reg, session: LootSession) -> None:
         """The scheduler's one notice before an auto-end, with a Keep open button."""
         owed = len(session.pending_reasons) + len(session.conflicts)
-        await self.loot_post(session, f"⏳ This council closes in {CLOSING_NOTICE_MIN} min — the run is over and no pick is waiting."
+        await self.loot_post(session, f"⏳ This council closes in {CLOSING_NOTICE_MIN} min — the raid is over and no pick is waiting."
                              + (f" {owed} award(s) still need a reason or a correction; they stay fixable after the end." if owed else ""),
                              view=self.loot_view(reg, session, "closing"))
 
@@ -286,7 +287,7 @@ class LootMixin:
         if ev.instance not in reg.profile.raids:
             raise RegistryError(f"No raid definition for {ev.instance} in profile {reg.profile.name}.")
         if roster is not None and not 0 <= roster < len(ev.all_rosters):
-            raise RegistryError(f"This run has {len(ev.all_rosters)} roster(s).")
+            raise RegistryError(f"This raid has {len(ev.all_rosters)} roster(s).")
         sid = ev.key if roster is None else f"{ev.key}-r{roster + 1}"
         have = None
         async with self.loot_lock(reg.key, sid):
@@ -501,7 +502,7 @@ class LootMixin:
                 raise RegistryError("Nothing to distribute — tick what dropped first (every ticked drop is proposed or awarded).")
             roster = self.loot_roster(session)
             if not roster:
-                raise RegistryError("Nobody is rostered on this run, so there is nobody to judge for.")
+                raise RegistryError("Nobody is rostered on this raid, so there is nobody to judge for.")
             ctx = self.loot_ctx(session)
             fkey = ",".join(sorted(todo))
             scores_only = bool(session.scores_only) or session.failures.get(fkey, 0) >= 2 or ctx.provider is None
@@ -1046,7 +1047,8 @@ class LootMixin:
                 "undistributed": undist, "reasons_pending": list(session.pending_reasons), "conflicts": list(session.conflicts),
                 "test": session.test, "ended_at": now_iso(), "text": "\n".join(lines)}
 
-    ALL_DOWN_LINE = "☠ All bosses down — End the run? The lock card's End the run asks once more, then closes it (or /raid end)."
+    ALL_DOWN_LINE = (f"☠ All bosses down — {RUN_WORDS['end']}? The lock card's {RUN_WORDS['end']} asks once more, "
+                     "then closes it (or /raid end).")
 
     async def loot_boss_down(self, reg, session: LootSession, boss: str) -> bool:
         """After a NEW kill of `boss` was recorded on `session` (design §3.5 L12): when it brings down the raid's last
@@ -1115,7 +1117,7 @@ class LootMixin:
         run = rc.run_on(reg, ev)  # the run is named: /raid end may pick one of several
         if not sessions or ev.state in ("done", "cancelled"):
             lines = consequence("end", reg, ev)
-            return [f"{run} is finished."] + lines[1:] if lines[:1] == ["The run is finished."] else lines
+            return [f"{run} is finished."] + lines[1:] if lines[:1] == ["The event is finished."] else lines
 
         def n_of(n: int, one: str, many: str) -> str:
             return f"{n} {one if n == 1 else many}"
@@ -1145,7 +1147,7 @@ class LootMixin:
         whose council is still open) ends, and never while a Distribute is judging (wait or retry)."""
         sessions = [s for s in list(self.events.values()) if s.guild == reg.key and s.run_key == ev.key]
         if ev.state != "locked" and not sessions:
-            raise RegistryError("No locked run to end." if ev.state not in ("done", "cancelled") else f"That run is already {ev.state}.")
+            raise RegistryError("No locked event to end." if ev.state not in ("done", "cancelled") else f"That event is already {ev.state}.")
         self._end_busy(sessions)
         texts = []
         for s in sessions:
@@ -1227,7 +1229,7 @@ class LootMixin:
                 for s in sessions:
                     async with self.loot_lock(*s.key):
                         s.held_notice_at = stamp
-                        s.save(f"{reg.key}: loot {s.id}: still pending past the run's close", touch=False)  # not activity
+                        s.save(f"{reg.key}: loot {s.id}: still pending past the raid's close", touch=False)  # not activity
                     if s.blocks_close():
                         await self.loot_held(reg, s)
             return False
@@ -1424,7 +1426,7 @@ class LootMixin:
         ended = self.loot_recent_end(guild_key, FEED_AFTER_END_S)
         if ended is not None:
             row["after_end"] = ended
-        self._held_write(guild_key, self._held_rows(guild_key) + [row], f"companion event held (no run live): {ev.get('type')}")
+        self._held_write(guild_key, self._held_rows(guild_key) + [row], f"companion event held (no live event): {ev.get('type')}")
         try:
             self._spawn(self._feed_expire_later(guild_key))
         except RuntimeError:  # no running loop (offline tools): the next ready / replay sweeps it
@@ -1492,12 +1494,12 @@ class LootMixin:
 
         def row_what(r: dict) -> str:
             ended = r.get("after_end")
-            return what(r.get("ev") or {}) + (f" (after {ended}'s council ended — record it on that run)" if ended else "")
+            return what(r.get("ev") or {}) + (f" (after {ended}'s council ended — record it on that raid)" if ended else "")
         chars = ", ".join(sorted({(r.get("comp") or {}).get("character", "?") for r in rows}))
         head = (f"companion events from {chars}'s log were held, and their companion token was revoked before a council took them — NOT recorded: "
                 if why == "revoked" else
                 f"companion events from {chars}'s log waited {FEED_BUFFER_S // 60} min with no loot council taking them and were NOT recorded: ")
-        text = head + "; ".join(row_what(r) for r in rows) + " — record them by hand (the run's loot council, or the site)."
+        text = head + "; ".join(row_what(r) for r in rows) + " — record them by hand (the raid's loot council, or the site)."
         cfg_for = getattr(self.registries, "cfg_for", None)
         cfg = cfg_for(guild_key) if cfg_for else None
         if cfg is not None and getattr(self, "ops", None) is not None:
@@ -1518,7 +1520,7 @@ class LootMixin:
         if t is None or t < ev.start - timedelta(seconds=FEED_LEAD_S) or t > rc.run_close_at(reg, ev):
             from .raid_views import run_title
 
-            return f"outside {run_title(reg, ev)}'s run window"
+            return f"outside the window of {run_title(reg, ev)}"
         return None
 
     async def feed_replay(self, reg, ev=None) -> int:

@@ -153,4 +153,4 @@ def test_a_gone_run_is_not_echoed_by_key(reg, rs, monkeypatch):
     monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
     c = TestClient(web.create_app(FakeBot(reg, rs)))
     r = c.get("/api/run/zz-qq7x2k", headers={"Authorization": f"Bearer {TOKEN}"})
-    assert r.status_code == 404 and "zz-qq7x2k" not in r.text and "no live run by that name" in r.text, r.text
+    assert r.status_code == 404 and "zz-qq7x2k" not in r.text and "no live event by that name" in r.text, r.text

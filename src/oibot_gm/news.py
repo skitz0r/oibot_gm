@@ -570,11 +570,11 @@ def consequence(p: Proposal, reg, state: str, guilds=None, *, busy: dict[str, di
             version = getattr(reg.base_profile, "name", None) or reg.config.game_profile
             served = served_names(guilds, reg)
             lines = [f"{at}, Claude edits the game data for {version}.",
-                     f"The tests run, then the bot restarts for about two minutes for {join_words(served) if len(served) <= 3 else f'all {len(served)} servers it serves'}."]
+                     f"After the tests, the bot restarts for about two minutes for {join_words(served) if len(served) <= 3 else f'all {len(served)} servers it serves'}."]
             ordered = getattr(guilds, "ordered", None)
             busy_names = [r.config.name for r in (list(ordered()) if ordered else [reg]) if ((busy or {}).get(r.key) or {}).get("raiding")]
             if busy_names:
-                lines.append(f"⚠ {join_words(busy_names)} {'has' if len(busy_names) == 1 else 'have'} a run right now, so the job waits until it's over.")
+                lines.append(f"⚠ {join_words(busy_names)} {'is' if len(busy_names) == 1 else 'are'} raiding right now, so the job waits until the raid is over.")
             return lines
         return ["This one needs a developer, so the apply job can't do it."]
     if state == "interrupted":

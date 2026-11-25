@@ -452,7 +452,7 @@ def test_answer_route_mix_one_puppet_asks_and_the_real_run_refusal(reg, rs, site
     assert r.status_code == 200 or "no open ask" in r.text
     real = rc.open_run(reg, rs, "barrow_deeps", start_in(reg, 700), by="t")
     r = client.post("/api/test/answer", json={"run": real.key, "join": 1}, headers=bearer())
-    assert r.status_code == 400 and "real run" in r.text and not real.signups  # discord_pool.test_answer: Task 5 rewords it
+    assert r.status_code == 400 and "is a real event: test members answer test events only." in r.text and not real.signups
 
 
 def test_clear_route_previews_the_consequence_then_clears(reg, rs, site):

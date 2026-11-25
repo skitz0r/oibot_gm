@@ -1900,7 +1900,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
         what.append(f"{reg.raid_def(p.instance).get('name', p.instance)} split by {v}, set by {by}")
     first.log.extend(what)
     line = "; ".join(what) or f"saved by {by}"
-    with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
+    with reg.store.batch(f"{reg.key}: event {first.key} {line}"):
         reg.save_config(f"event {first.key} {line}", notify=False)
         for p in sorted(parts, key=lambda e: e is first):  # the first raid last: its save copies its answers onto the later raids
             rs.save(p, line)
@@ -2105,7 +2105,7 @@ def apply_lineup(reg: Registry, rs: "RaidStore", ev: "RaidEvent", change: Lineup
         p = first if key == first.key else later.get(key)
         if p is not None and n < int((reg.config.team(p.team) or {}).get("rosters") or 1):
             trims[key] = roster_trim(reg, p, int(n))
-    with reg.store.batch(f"{reg.key}: run {first.key} {line}"):
+    with reg.store.batch(f"{reg.key}: event {first.key} {line}"):
         for key, (keep, pins, places, npins) in trims.items():
             p = first if key == first.key else later[key]
             # always cut to the rosters that stay: the board saves PADDED layouts, so an empty roster that goes would
@@ -2413,7 +2413,7 @@ def stamp_runs(reg: Registry, rs: "RaidStore", commit: bool = True) -> list[str]
         return done
     if dicts:
         reg.save_config(f"live events stamped with their schedule and occurrence ({len(done)})", notify=False)
-    reg.store.commit(f"{rs.key}: live runs stamped with their schedule and occurrence: {', '.join(done)}")
+    reg.store.commit(f"{rs.key}: live events stamped with their schedule and occurrence: {', '.join(done)}")
     return done
 
 

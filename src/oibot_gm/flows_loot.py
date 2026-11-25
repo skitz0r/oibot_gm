@@ -143,7 +143,7 @@ async def _press_scores(interaction, bot, reg, session, btn) -> None:
 async def _press_end(interaction, bot, reg, session, btn) -> None:
     rs, ev = bot.loot_run(session)
     if ev is None:
-        await say(interaction, "This council's run was removed, so its cards no longer work.")
+        await say(interaction, "This council's event was removed, so its cards no longer work.")
         return
     from .raid_buttons import end_decide
     from .raid_views import raid_name
@@ -595,7 +595,7 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
                 stash[(reg.key, sid, drop, by_id, "guest")] = {"ids": tuple(ids), "who": who, "reason": reason}
                 view = discord.ui.View(timeout=None)
                 view.add_item(LootButton(reg.key, sid, drop, "guest", label=f"Record {who} as a guest"[:80]))
-                await say(interaction, f"Nobody called **{who}** signed up for this run, is registered or was recorded as a guest before — "
+                await say(interaction, f"Nobody called **{who}** signed up for this event, is registered or was recorded as a guest before — "
                                        "check the spelling (Override… again), or record them as a new guest.", view=view)
                 return
         if kind == "ovr":
@@ -1035,7 +1035,7 @@ async def open_loot_end(interaction: discord.Interaction, reg: Registry, *, key:
 
     async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
         if ev is None or ev.state != "locked":
-            await wiz.finish(i, "No locked run to end.")
+            await wiz.finish(i, "No locked event to end.")
             return
         from .raid_buttons import end_decide
 
@@ -1043,9 +1043,9 @@ async def open_loot_end(interaction: discord.Interaction, reg: Registry, *, key:
 
     if key:
         rs = bot.raids.store(reg)
-        await body(interaction, loot_wizard(bot, reg, interaction, "End the run"), rs, rs.events.get(key))
+        await body(interaction, loot_wizard(bot, reg, interaction, "End the event"), rs, rs.events.get(key))
         return
-    await with_run(interaction, reg, title="End the run", then=body, states=("locked",), officer=True, prefer=has_session)
+    await with_run(interaction, reg, title="End the event", then=body, states=("locked",), officer=True, prefer=has_session)
 
 
 # ---------------------------------------------------------------- /gm precedents → Retire

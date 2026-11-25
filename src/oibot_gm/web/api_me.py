@@ -155,7 +155,7 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
         ref = ask_id.removeprefix("place:")
         ev = rs.events.get(ref) or rs.for_team(ref)
         if ev is None:
-            return JSONResponse({"error": "That run is closed — nothing to answer."}, status_code=400)
+            return JSONResponse({"error": "That event is closed, so this ask no longer needs an answer."}, status_code=400)
         if d.get("answer") not in ("yes", "no"):
             return JSONResponse({"error": "answer: yes or no"}, status_code=400)
         try:

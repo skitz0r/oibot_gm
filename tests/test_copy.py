@@ -26,7 +26,19 @@ PY = ROOT / "src" / "oibot_gm"
 # repo's rev) and code a person types or pastes (an install line, a run key shown as a key). Text in backticks, URLs and
 # Discord mentions / stamps are dropped before matching (_reads), so none of them needs an entry today; an entry is added
 # only when one of those surfaces carries a hit, scoped to the substring that is the operator's or the code's word.
-ALLOW: list[tuple[str, str, str]] = []
+ALLOW: list[tuple[str, str, str]] = [
+    # operator surfaces (CLAUDE.md's Copy rule): a news-review job's "run" is one pass of the apply job, not a raid event;
+    # the proposal cards sit in the ops channel and on the Agents page, both read by the owner and officers who run them
+    ("oibot_gm/news.py", "next run", "the apply job's next pass on the owner's proposal screens, a job run and never a raid event"),
+    ("oibot_gm/news.py", "apply run", "one pass of the apply job named on the Agents page's recovery screen, a job run not an event"),
+    ("oibot_gm/news.py", "run the jobs", "the verb: the owner's MCP token starts the news jobs, the lint's verb list misses this phrasing"),
+    ("oibot_gm/discord_news.py", "next run", "the apply job's next pass on an ops-channel proposal card, a job run and never a raid event"),
+    ("oibot_gm/discord_news.py", "has the full run", "the job's transcript on the Agents page, an operator surface where a run is one job pass"),
+    # the listening gate's inputs stay on the old wording on purpose (tests/test_listen.py pins them; the gate was tuned on
+    # them and scripts/listen_probe.py would need a retune for any change) — members still say "run" in chat
+    ("oibot_gm/discord_bot.py", "a raid or run happens",
+     "the listening gate's question and criteria are tuned model inputs pinned by test_listen, kept on members' own word"),
+]
 # Every entry must still suppress at least one extracted string (test_allow_list_entries_have_reasons_and_still_match):
 # a whole-file "" entry is not allowed — it would hide an empty state or a future offender along with the operator words.
 
@@ -74,11 +86,7 @@ WORDS_PENDING: set[str] = {
     "frontend/src/components/board/FillModal.tsx", "frontend/src/components/board/SheetCard.tsx",
     "frontend/src/components/board/shared.tsx", "frontend/src/components/loot/History.tsx",
     "frontend/src/components/loot/Tonight.tsx", "frontend/src/pages/Agents.tsx", "frontend/src/pages/Config.tsx",
-    "frontend/src/pages/Me.tsx", "src/oibot_gm/discord_bot.py", "src/oibot_gm/discord_feed.py",
-    "src/oibot_gm/discord_loot.py", "src/oibot_gm/discord_loot_surface.py", "src/oibot_gm/discord_news.py",
-    "src/oibot_gm/flows_loot.py", "src/oibot_gm/guild_routing.py", "src/oibot_gm/news.py",
-    "src/oibot_gm/web/api_events.py", "src/oibot_gm/web/api_loot.py", "src/oibot_gm/web/api_me.py",
-    "src/oibot_gm/web/app.py",
+    "frontend/src/pages/Me.tsx",
 }
 # a dash in a table cell (under its column's header) is a cell, not an empty state: the Iconography rule keeps icon
 # columns free of words, and "no offspec" beside every row is noise. The empty-state sentence is for a whole list, card or

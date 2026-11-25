@@ -452,7 +452,7 @@ class LootSurfaceMixin:
         from .discord_loot import CLOSING_NOTICE_MIN
 
         owed = len(session.pending_reasons) + len(session.conflicts)
-        msg = await self.loot_post(session, f"⏳ This council closes in {CLOSING_NOTICE_MIN} min — the run is over and no pick is waiting."
+        msg = await self.loot_post(session, f"⏳ This council closes in {CLOSING_NOTICE_MIN} min — the raid is over and no pick is waiting."
                                    + (f" {owed} award(s) still need a reason or a correction; they stay fixable after the end." if owed else ""),
                                    view=self.loot_view(reg, session, "closing"))
         if msg is not None and getattr(msg, "id", None):
@@ -523,7 +523,7 @@ class LootSurfaceMixin:
             view = discord.ui.View(timeout=None)
             view.add_item(LootStartButton(reg.key))
             try:
-                msg = await ch.send(f"{guild_prefix(reg)}📡 Drops arriving from {who}'s log but no run is live — start an ad hoc run for tonight? "
+                msg = await ch.send(f"{guild_prefix(reg)}📡 Drops arriving from {who}'s log but no event is live — start a one-off event for tonight? "
                                     "They're held 10 minutes; a loot council opened by then takes them (/raid loot).", view=view)
             except Exception as e:  # noqa: BLE001
                 log.warning("loot no-run prompt failed: %s", e)
