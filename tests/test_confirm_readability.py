@@ -904,6 +904,7 @@ def box_cases(reg, rs, runs, ms, dump):
                             ("one day early", reg.now_local() + timedelta(days=1, minutes=5), {}),
                             ("five hours early", reg.now_local() + timedelta(hours=5, minutes=5), {}),
                             ("due now", reg.now_local(), {}), ("no signup channel", reg.now_local() + timedelta(days=2), {"channel": False}),
+                            ("no signup channel, asked in a channel", reg.now_local() + timedelta(days=2), {"channel": False, "here": True}),
                             ("a raid first opens after it", reg.now_local() + timedelta(days=2),
                              {"lineup": [{"raid": RID, "rosters": 1}, {"raid": ony, "rosters": 1}]})):
         was = reg.raid_def(ony).get("first_open")

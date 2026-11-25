@@ -1055,7 +1055,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    signup sheet, seats, priority, confirmation, each raid's time) with **Locks** (2 or 24 hours before) and the first
    raid's **Rosters**; **Open the sheet** opens it, **Change** goes back to the lineup. On a daylight-saving night it
    says which time it used (2:30 AM on the spring-forward night becomes 3:30 AM; on the fall-back night the first 1:30
-   AM is taken). With no signup channel set, the sheet waits until one is; `/raid sheet` posts it where you run it. A
+   AM is taken). With no signup channel set, the sheet is posted in the channel where you ran `/raid open` (from a DM it waits until
+   one is set; `/raid sheet` posts it where you run it). A
    raid with no schedule yet says so and points at the Schedules page. On the Events page
    *Coming up* lists each active schedule's next three nights however far ahead, and every one of them opens with **Open
    the sheet now** (one press, then its box). The sheet goes up at once and stays until the event; its lock, reminder

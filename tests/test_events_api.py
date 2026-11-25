@@ -436,6 +436,21 @@ def test_a_coming_up_nights_box_opens_on_the_first_press(web_bot, reg, rs):
     assert ev.occurrence == o["occurrence"] and rc.schedule_stamp(rc.run_schedule_id(reg, ev)) == sid
 
 
+def test_a_coming_up_box_with_a_later_raids_own_start_is_the_open_routes(web_bot, reg, rs):
+    """A later raid set to its own start (not when the raid before it ends): the Coming up box and the open route's
+    box read the same start, so the same first-open sentence and the same fp."""
+    c, h = web_bot.c, H()
+    sid = weekly(reg, HYJAL, "Tue 18:30", sid="tue")
+    reg.set_schedule(sid, {"lineup": [{"raid": HYJAL, "rosters": 1}, {"raid": RID, "rosters": 1, "starts": 300}]}, "t")
+    night = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
+    # Barrow Deeps first opens between its default start (when Hyjal ends, 180 minutes in) and its own (300)
+    reg.set_raid_overrides(RID, {"first_open": (night + timedelta(minutes=240)).astimezone(reg.tz).replace(tzinfo=None).isoformat()}, "t")
+    j = c.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, night)}", headers=h).json()
+    p = c.post(f"/api/raid/{HYJAL}/open/preview", json={"start": night.isoformat(), "schedule": sid}, headers=h).json()
+    assert j["box"] is not None and j["box"] == p["box"]
+    assert not any("first opens" in s for s in p["box"]["sentences"])
+
+
 def test_reschedule_starts_from_the_pick_box_with_the_guilds_date(officer_client, reg, rs):
     """Reschedule opens on the server's own box before anything is picked (its title names the event, one sentence,
     only Back); the Day picker's lower bound is the GUILD's date and the Locks choices carry the event's own lock."""

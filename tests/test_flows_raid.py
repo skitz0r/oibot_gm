@@ -170,13 +170,13 @@ def test_open_next_slot_is_one_press_after_the_raid(reg, rs, officer, channel):
         assert "19:30" not in h.text and "19:30" not in label
         await h.press(label)
         assert "19:30" not in h.text and reg.local12(want, "%a %d %b") in h.text  # box 11 (test_flows_open has it whole)
-        assert "No signup channel is set, so the sheet waits until one is." in h.text  # none is set: say where the sheet goes
+        assert "No signup channel is set, so the sheet posts in this channel." in h.text  # none is set: say where the sheet goes
         assert not bot.calls  # nothing before the press
         await h.press("Open the sheet")
     asyncio.run(go())
     assert bot.calls[0][:3] == ("open_run_and_post", "barrow_deeps", want)
-    assert len(bot.calls) == 1, "the box said the sheet waits: it is never posted here"
-    assert "✅ Opened" in h.text and "/raid sheet" in h.text
+    assert ("post_sheet", bot.calls[1][1], channel.id) == bot.calls[1]
+    assert "✅ Opened" in h.text and "posted in this channel" in h.text
 
 
 def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):

@@ -72,7 +72,7 @@ a new module also gets its name in the list below.
 - **`docs/layout/armory-prices.md`** — The armory link, professions, auction prices and the price watch.
   `battlenet.py` · `armory.py` · `discord_armory.py` · `auctions.py` · `discord_auctions.py` · `price_history.py` · `price_reference.py` · `armory_seed.py` · `professions.py` · `prices.py` · `web/api_armory.py` · `web/api_professions.py` · `web/api_prices.py`
 - **`docs/layout/discord.md`** — The Discord client, the wizard core and every flows_* file, the kept-current channels, the test bench, help, policy.
-  `discord_bot.py` · `policy.py` · `discord_pool.py` · `testfeed.py` · `help.py` · `discord_help.py` · `wizard.py` · `wizard_opts.py` · `wizard_flows.py` · `flows_event.py` · `discord_policy.py` · `pending_views.py`
+  `discord_bot.py` · `policy.py` · `discord_pool.py` · `testfeed.py` · `help.py` · `discord_help.py` · `wizard.py` · `wizard_opts.py` · `wizard_flows.py` · `flows_event.py` · `flows_lineup.py` · `discord_policy.py` · `pending_views.py`
 - **`docs/layout/ops-paths.md`** — Plain-text changes and the structured ops path (configops), the MCP server and its tools.
   `configops.py` · `mcp_server.py`
 - **`docs/layout/agents-news.md`** — News review, proposals, the local jobs.

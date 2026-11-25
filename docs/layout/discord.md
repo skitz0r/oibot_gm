@@ -93,13 +93,17 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        `heading = False` (a screen is its text alone, no bold title — /price) and `mentions` (AllowedMentions on every send/edit);
                        the defaults leave every other wizard unchanged
   wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)
-  wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow + AbsenceClearWizard = I'm back) · flows_raid (OpenWizard = /raid open, built by
-                       OpenWizard.make — flows_event.LineupBlock mixed in at first use, flows_event imports flows_raid —: a schedule's night (Next,
-                       another upcoming one, a one-off minute rc.which_run calls scheduled) = decide_box(consequences.open_box_for) refreshed
-                       from rc.open_preview, its refusals (closed, already open, past, OPEN_UNREAD) as boxes; a one-off = when_fields(step=15)
-                       → lineup_hub → Locks (event_view.NEW_EVENT_LOCKS) + Rosters beside What this makes (event_view.new_event_view: facts,
-                       notes, lineup) = its confirmation, Open the sheet · Change · Back → open_run_and_post(lineup=, lock_hours=,
-                       first_rosters=); a pickup template keeps its own confirm and its post-here fallback; no horizon words) ·
+  wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow + AbsenceClearWizard = I'm back) · flows_raid (OpenWizard(Wizard, LineupBlock) = /raid open: a schedule's night (Next,
+                       another upcoming one, a one-off minute rc.which_run calls scheduled — then hint = event_view.SCHEDULED_NIGHT) =
+                       decide_box(consequences.open_box_for(here=)) refreshed from rc.open_preview, its refusals (closed, already open, past,
+                       OPEN_UNREAD) as boxes; a one-off = when_fields(step=15) → lineup_hub → Locks (event_view.lock_choices) + Rosters beside
+                       What this makes (event_view.new_event_view: facts, notes, lineup) = its confirmation, Open the sheet · Change · Back →
+                       open_run_and_post(lineup=, lock_hours=, first_rosters=); a pickup template keeps its own confirm; draft["here"] = asked
+                       in a server channel (in_server_channel, open_test_run's test): with no signup channel every path says the sheet posts
+                       here (consequences.no_channel_sentence) and opened() — THE outcome of every open — posts it there (POSTED_HERE); from
+                       a DM it waits, as the site's box says; no horizon words) ·
+                       flows_lineup (no @flow; imports no flows_* module, so any wizard mixes it in at class definition — flows_event
+                       re-exports LineupBlock / REVIEW / STEP / START_CHOICES / EVERY_RAID_IN): LineupBlock, below ·
                        flows_event (phase 5, Task 3: pick_event = THE event picker — live FIRST raids, soonest first, ≤ 25, one goes straight in,
                        none = NO_EVENT —; EventWizard (ev() re-read, act = working → the verb's ✅ line or its refusal); flow raid_reschedule =
                        RescheduleWizard: reschedule_pick_box's text + Pick the day and time → when_fields(step=15) (Later than this… → the week)
@@ -108,7 +112,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        (event_value_words, old → new once drafted; edit_locked / edit_over), Change a setting → one screen each (hours trimmed
                        to 25 keeping the value, on / off, First to join / By priority, the weights = one Form of five selects, a split select
                        per live raid), Review changes → decide_box(reschedule_box(edit=True)) Save → reschedule_event(timing=, rev=);
-                       Task 4: LineupBlock = THE lineup draft mixed into a Wizard (no event knowledge — Tasks 5 and 6 reuse it): self.lineup
+                       Task 4 (moved to flows_lineup.py): LineupBlock = THE lineup draft mixed into a Wizard (no event knowledge — Tasks 5 and 6 reuse it): self.lineup
                        [{raid, rosters[, starts]}], the host's lineup_start() (None = a schedule: 'N h M min after the first') and
                        lineup_done(i), and lineup_back(i) (the hub's Back; default the wizard's cancel — a host returns to its previous
                        screen); lineup_hub = a line per step + Pick a step + Add a raid (OwnerWizard.paged over 25; disabled at

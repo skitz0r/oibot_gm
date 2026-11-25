@@ -1088,10 +1088,20 @@ def answer_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: str | No
     return box("Answer for someone", action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id), "Record answer", rev=rev)
 
 
-def open_now_box(reg: Registry, start, opens, lock_at, *, lineup: list[dict] | None = None, channel: bool = True, rev: str = "") -> dict:
+def no_channel_sentence(here: bool) -> str:
+    """Where the sheet goes with no signup channel set: where /raid open was asked (`here`, a server channel — Discord
+    only), else nowhere until one is set (the site, a DM)."""
+    return ("No signup channel is set, so the sheet posts in this channel." if here
+            else "No signup channel is set, so the sheet waits until one is.")
+
+
+def open_now_box(reg: Registry, start, opens, lock_at, *, lineup: list[dict] | None = None, channel: bool = True, rev: str = "",
+                 here: bool = False) -> dict:
     """Box 11: Open the sheet now, on a coming-up event, however far ahead (no horizon since the owner's tweaks,
     2026-11-24): how early and that the sheet stays up until the event, where it posts (or C9's line when a raid of the
-    `lineup` first opens after it starts), and when it still locks — with the schedule not opening that night again."""
+    `lineup` first opens after it starts), and when it still locks — with the schedule not opening that night again.
+    `here`: asked in a Discord server channel, so with no signup channel the sheet posts there (no_channel_sentence);
+    the site never passes it."""
     hours = (opens - reg.now_local()).total_seconds() / 3600
     if hours >= 24:
         d = round(hours / 24)
@@ -1102,7 +1112,7 @@ def open_now_box(reg: Registry, start, opens, lock_at, *, lineup: list[dict] | N
     else:
         head = "The sheet opens now."
     where = (before_first_open_sentence(reg, lineup, start) if lineup else None) or (
-        "It posts in the signup channel." if channel else "No signup channel is set, so the sheet waits until one is.")
+        "It posts in the signup channel." if channel else no_channel_sentence(here))
     last = f"It locks {reg.local12(lock_at)}, and the schedule won't open that night again." if hours >= 1 else f"It still locks {reg.local12(lock_at)}."
     return box(f"Open the sheet for {reg.local12(start, '%a %d %b')}?", [head, where, last], "Open the sheet", rev=rev)
 
@@ -1110,17 +1120,21 @@ def open_now_box(reg: Registry, start, opens, lock_at, *, lineup: list[dict] | N
 OPEN_UNREAD = "The bot couldn't read when this sheet opens and locks, so nothing was opened and the event stays coming up."
 
 
-def open_box_for(reg: Registry, rid: str, p: dict) -> dict:
+def open_box_for(reg: Registry, rid: str, p: dict, *, here: bool = False) -> dict:
     """Box 11 from rc.open_preview's answer `p` — the one box /raid open and the site's open routes print: how early
     against the schedule's own opening, where it posts, when it still locks. Its rev is the night's occurrence, so a
     press that would open another night sees a fresh box. Never a number the schedule doesn't hold: a missing lead or
-    lock raises KeyError / TypeError / ValueError, and the caller refuses with OPEN_UNREAD."""
+    lock raises KeyError / TypeError / ValueError, and the caller refuses with OPEN_UNREAD. A later raid keeps its own
+    `starts` (as event_view.coming_json's lineup does), so both build the same box. `here`: /raid open asked in a server
+    channel (open_now_box)."""
     start = datetime.fromisoformat(p["start"])
     sd = reg.schedule_def(rid, p.get("schedule"))
-    lineup = [{"raid": rid, "rosters": int(sd.get("rosters") or 1)}] + [{"raid": e["raid"], "rosters": int(e.get("rosters") or 1)} for e in p.get("later") or []]
+    lineup = [{"raid": rid, "rosters": int(sd.get("rosters") or 1)}] + [
+        {"raid": e["raid"], "rosters": int(e.get("rosters") or 1), **({"starts": int(e["starts"])} if e.get("starts") is not None else {})}
+        for e in p.get("later") or []]
     lead, lock = float(sd["signup_lead_hours"]), float(sd["lock_hours_before"])
     return open_now_box(reg, start, start - timedelta(hours=lead), start - timedelta(hours=lock), lineup=lineup,
-                        channel=bool(p.get("channel")), rev=p.get("occurrence") or "")
+                        channel=bool(p.get("channel")), rev=p.get("occurrence") or "", here=here)
 
 
 def already_open_sentence(reg: Registry, ev) -> "rc.Refusal":
