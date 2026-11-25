@@ -82,15 +82,17 @@ def test_no_discord_module_builds_an_event_address_by_hand():
     """One builder: an event's address (/app/events/<key>, or the older /app/me?g=…#run-<key>) appears only inside
     raid_views.event_url. The site's own modules (web/) are not Discord surfaces."""
     found = []
-    for f in sorted(SRC.glob("*.py")):
+    for f in sorted(SRC.rglob("*.py")):
+        if "web" in f.relative_to(SRC).parts:
+            continue
         text = f.read_text()
-        if f.name == "raid_views.py":
+        if f.relative_to(SRC).as_posix() == "raid_views.py":
             start = text.index("def event_url(")
             end = text.index("\ndef ", start + 1)
             text = text[:start] + text[end:]
         for n, line in enumerate(text.splitlines(), 1):
             if "/app/events/" in line or ("/app/me?g=" in line and "#run-" in line):
-                found.append(f"{f.name}:{n}")
+                found.append(f"{f.relative_to(SRC)}:{n}")
     assert not found, found
     assert not hasattr(raid_views, "me_url") and not hasattr(raid_views, "board_url")
 
