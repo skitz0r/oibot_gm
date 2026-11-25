@@ -44,14 +44,14 @@ understands; it answers in the words below.
   keeps your other seats; *I'm staying* on the Me page undoes it. Cancelling any raid of the event cancels the whole
   event.
 - **One-off** — an event an officer opens for one night: with **New event**, or from a schedule an officer opens
-  (*Opened by an officer*). It is first come, has no regulars, locks 2 hours before and, by default, asks nobody to
-  confirm.
+  (*Opened by an officer*). It has no regulars; by default it is first come and locks 2 hours before, and it asks
+  nobody to confirm.
 - **Minimum** — the fewest of a role (tank, healer, melee, ranged), a class or a spec an event's raid takes: one number,
   with an optional reason, and no upper limit (*"at least 3 healers"*). The lock fills every minimum first and never
   stops on one: an event that joiners can't fill to a minimum still gets its roster, and the event shows what it is short. A
   tank or healer past the minimum gets a seat only when nobody else can take it. Until the guild sets its own, a raid's
-  tank and healer minimums come from the game, scaled to the event's size and rounded up. A smaller event (a 10-player event
-  of a 20-player raid) scales the guild's own minimums too, to the nearest whole number with a half rounded up, and a
+  tank and healer minimums come from the game, scaled to the roster's size and rounded up. A smaller roster (a 10-player
+  roster of a 20-player raid) scales the guild's own minimums too, to the nearest whole number with a half rounded up, and a
   minimum of 1 or more never scales below 1. A class or spec short is shown on the event (*short 1 Paladin*) and nobody is
   asked to fill it; only a short tank or healer gets fill asks. Set minimums with **Edit** in the Raids page's Rules view, with `/roster comp`, in `/gm config raid` › *Minimums* or in plain text ("at least 3 healers in Barrow Deeps"). They belong to the raid,
   never to one event. A minimum is never 0: picking 0 takes away the guild's own minimum for that role, class or spec.

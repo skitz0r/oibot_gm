@@ -47,21 +47,22 @@ DASH_ALONE = re.compile(r"^\s*[—–-]\s*$")
 # recurring run → a schedule's event, the lead run → the first raid, Who gets a seat → Priority. "Rehearse" stays.
 RETIRED = re.compile(r"\b(?:recurring runs?|lead runs?|runs?|follow[- ]ons?|ad[- ]hoc|adhoc|pickups?|who gets a seat)\b",
                      re.I)
-# "run" the verb stays ("it runs hourly", "run the command"). Only these explicit verb phrases are taken out before
-# RETIRED looks; a determiner just before ("the run again", "the runs on Tuesday", "3 runs at") keeps the noun caught.
-_NOUN_BEFORE = (r"(?<!\bthe )(?<!\ba )(?<!\bthis )(?<!\bthat )(?<!\beach )(?<!\bnext )(?<!\btest )(?<!\bone )"
-                r"(?<!\ball )(?<!\bthese )(?<!\bthose )(?<![0-9] )")
+# "run" the verb stays ("it runs hourly", "run the command"). Only these verb phrases are taken out before RETIRED
+# looks, each with a POSITIVE verb context — a subject that does the running, an auxiliary, a sentence start for the
+# imperative — never "anything but a determiner": "Open runs on Tuesday", "Keep runs at their moment", "the schedule
+# has run times" and "Tonight's run again" keep the noun caught.
+_RUNNER = (r"it|that|which|who|whoever|bot|check|import|reminder|job|scheduler|clock|launchd|pc|leader|companion|"
+           r"sweep|review|loop")
+_AUX = r"can|can['’]t|cannot|could|will|won['’]t|would|must|should|may|has|have|had|do|does|did|didn['’]t"
+# a sentence start (or after a dash, colon, bracket), or "or" / "and" / "then": where an imperative "Run …" begins
+_IMPERATIVE = r"(?:^|(?<=[.!?:;—–(\n])|\b(?:or|and|then)\b)\s*"
 VERB_RUN = re.compile("|".join((
-    r"\bit runs\b",                                                       # it runs
-    _NOUN_BEFORE + r"\bruns (?:on|at|every|hourly)\b",                    # runs on / at / every / hourly
-    _NOUN_BEFORE + r"\bruns (?:it|the|that|raid)\b",                      # whose PC runs it, runs the companion
-    r"\b(?:bot|clock|launchd|who|whoever|pc|schedule|leader) runs\b",     # the bot runs, no schedule runs
-    r"\b(?:you|we|they) run\b",                                           # lets you run your purchase
-    r"\bto run\b",                                                        # to run
-    r"\b(?:can|can['’]t|cannot|could|will|would|must|should|may|has|have|had|do|does|did) (?:not )?run\b",  # can run
-    _NOUN_BEFORE + r"\brun (?:it|this|the command|again)\b",              # run it / this / the command / again
-    _NOUN_BEFORE + r"\bruns? /",                                           # run /raid sheet
-    r"\bis running\b", r"\bran\b")), re.I)
+    rf"\b(?:{_RUNNER}) runs\b",                                           # it runs, the check runs hourly, whose PC runs it
+    r"\b(?:you|we|they) run\b",                                           # lets you run your purchase, if they run out
+    r"\bto run (?=the\b|it\b|your\b|a\b|again\b|/)",                      # to run the check
+    rf"\b(?:{_AUX}) (?:not )?run\b(?!\s+times\b)",                        # can run, once it has run — not "has run times"
+    _IMPERATIVE + r"run (?:it\b|this\b(?!\s+(?:week|month|night|evening|time)\b)|the command\b|again\b|/)",
+    r"\bis running\b", r"\bran\b")), re.I | re.M)
 # The files that still hold a retired word (repo-relative). Each phase-6 task rewords its files and takes them out;
 # test_retired_words_are_gone fails for a hit anywhere else, and for a file here that has none left (the list only
 # shrinks). Computed by running the lint, never by hand.
@@ -511,28 +512,51 @@ def g(cid, new):
 
 def test_retired_words_take_the_noun_not_the_verb():
     """Phase 6 (event words): 'run' the dated occasion is retired for 'event'; 'run' the verb stays. VERB_RUN takes out
-    only the explicit verb phrases, so each of them goes quiet while the noun beside it is still caught."""
-    pairs = [  # (a verb that stays, a noun that is retired)
-        ("The check runs hourly.", "the run"),
-        ("It runs on Tuesdays at 7:30 PM.", "this run"),
-        ("The import runs at noon.", "runs this week"),
-        ("A reminder runs every hour.", "3 runs"),
-        ("Ask the bot to run the check.", "a run's roster"),
-        ("Run it again later.", "test run"),
-        ("Run this from the Members page.", "the run this week"),
-        ("Run the command in your server.", "the run again"),
-        ("The lock is running.", "a recurring run"),
-        ("The import ran overnight.", "the lead run"),
-        ("Run again after the lock.", "this run's sheet"),
-        ("Whose PC runs the companion?", "the runs the bot opened"),
-        ("No schedule runs this raid yet.", "these runs this month"),
-        ("The bot runs each check before it posts.", "the bot's runs"),
-        ("Whoever runs that companion needs a new token.", "Live runs"),
-        ("A bot can't run the companion.", "Can't make this run"),
-        ("Once it has run, it is listed here.", "Open a new run instead."),
+    only verb phrases with a positive verb context, so each of them goes quiet while a noun directly followed by the
+    alternative's own word is still caught."""
+    pairs = [  # (a verb that stays, a noun that is retired) — per alternative: its verb, then the noun beside its word
+        # a subject that runs: it / that / who / the bot / the check / the import / a reminder / PC / leader …
+        ("The check runs hourly.", "Open runs on Tuesday are listed."),
+        ("It runs on Tuesdays at 7:30 PM.", "Two runs on Wednesday."),
+        ("The import runs at noon.", "Locked runs at 8 PM."),
+        ("A reminder runs every hour.", "Upcoming runs every Tuesday"),
+        ("Whose PC runs the companion?", "Both runs the same night"),
+        ("The bot runs each check before it posts.", "Your runs on the Me page."),
+        ("Whoever runs that companion needs a new token.", "Past runs that ended."),
+        ("The raid leader runs it next to the game.", "one-off runs on Fridays"),
+        ("A 12-hour clock runs 1–12.", "Save · keep runs at their moment"),
+        ("The job runs every 15 minutes.", "Keep runs at their real moment"),
+        ("It runs raid signups.", "Pausing stops new schedule runs."),
+        # you / we / they run
+        ("This lets you run your purchase there.", "We'll show you runs this week."),
+        ("Fewer if they run out.", "your run"),
+        # to run + an object
+        ("Ask the bot to run the check.", "Move them to run 2."),
+        # an auxiliary + run, never "run times"
+        ("A bot can't run the companion.", "No event opens until the schedule has run times."),
+        ("Once it has run, it is listed here.", "Can't make this run"),
+        ("A schedule can't run the same raid twice.", "a run's roster"),
+        # the imperative at a sentence start (or after a dash, "or", "and", "then")
+        ("Run it again later.", "Tonight's run again needs a tank."),
+        ("Run this from the Members page.", "Every run this week is short."),
+        ("Run the command in your server.", "Open a new run this week."),
+        ("Run again after the lock.", "the run again"),
         ("Run /raid sheet in a server channel.", "the run /raid open made"),
-        ("The raid leader runs it next to the game.", "the leader's runs"),
-        ("This lets you run your purchase there.", "your run"),
+        ("I can't post here — run /raid sheet in a channel.", "this run's sheet"),
+        ("It is pending, or run /raid loot again.", "the runs the bot opened"),
+        # is running / ran
+        ("The lock is running.", "The run is running late."),
+        ("The import ran overnight.", "The run ran long."),
+        # nouns with no verb near
+        ("Run this in the server you want to set up.", "the run"),
+        ("A reminder runs every hour.", "3 runs"),
+        ("Run it again later.", "test run"),
+        ("The check runs hourly.", "Live runs"),
+        ("The check runs hourly.", "a recurring run"),
+        ("The check runs hourly.", "the lead run"),
+        ("The check runs hourly.", "the bot's runs"),
+        ("The check runs hourly.", "the leader's runs"),
+        ("The check runs hourly.", "these runs this month"),
     ]
     for verb, noun in pairs:
         assert not retired_words(verb), verb
