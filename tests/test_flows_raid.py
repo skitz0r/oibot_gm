@@ -168,7 +168,7 @@ def test_open_next_slot_is_one_press_after_the_raid(reg, rs, officer, channel):
         assert h.selects() == ["Pick the raid"]
         await h.pick("Pick the raid", "barrow_deeps")
         label = f"Next event — {reg.local12(want)}"
-        assert h.buttons() == [label, "Another coming event", "One-off event", "Cancel"]
+        assert h.buttons() == [label, "Another upcoming event", "One-off event", "Cancel"]
         assert "19:30" not in h.text and "19:30" not in label
         await h.press(label)
         assert "19:30" not in h.text and reg.local12(want, "%a %d %b") in h.text  # box 11 (test_flows_open has it whole)
@@ -189,7 +189,7 @@ def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Another coming event")
+        await h.press("Another upcoming event")
         sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the event")
         assert [o.value for o in sel.options] == [f"{t.isoformat()}|barrow-deeps" for t in starts[1:23]]  # each names its schedule
         assert all(":" in o.label and ("AM" in o.label or "PM" in o.label) for o in sel.options)

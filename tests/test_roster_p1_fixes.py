@@ -183,7 +183,7 @@ def test_raid_open_another_upcoming_run_keeps_its_schedules_series(reg, rs, raid
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", RID)
-        await h.press("Another coming event")
+        await h.press("Another upcoming event")
         await h.pick("Pick the event", f"{alt_t.isoformat()}|alt")
         await h.press("Open the sheet")
     asyncio.run(go())

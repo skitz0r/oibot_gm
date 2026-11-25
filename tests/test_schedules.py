@@ -476,8 +476,8 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", RID)
         s0, t0 = ups[0]
-        assert h.buttons() == [f"Next event — {reg.local12(t0)} · {s0['name']}", "Another coming event", "One-off event", "Cancel"]
-        await h.press("Another coming event")
+        assert h.buttons() == [f"Next event — {reg.local12(t0)} · {s0['name']}", "Another upcoming event", "One-off event", "Cancel"]
+        await h.press("Another upcoming event")
         sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the event")
         alt_opt = next(o for o in sel.options if o.value.endswith("|alt"))
         assert alt_opt.description.startswith("Alt run · ") and "20:00" not in alt_opt.label

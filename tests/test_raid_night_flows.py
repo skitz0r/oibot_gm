@@ -156,8 +156,8 @@ def test_more_than_three_templates_become_one_select(reg, rs, officer, channel):
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         await h.press("One-off event")
-        assert "Pick a template" in h.selects() and not any(b.endswith("pick a time") for b in h.buttons())
-        await h.pick("Pick a template", "pug2")
+        assert "Pick the schedule" in h.selects() and not any(b.endswith("pick a time") for b in h.buttons())
+        await h.pick("Pick the schedule", "pug2")
         assert h.modal is not None and "Pug 2" in h.modal.title
     run(go())
 
@@ -170,7 +170,7 @@ def test_another_upcoming_run_pages_by_week(reg, rs, officer, channel):  # noqa:
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Another coming event")
+        await h.press("Another upcoming event")
         assert "Week of" in h.text and "← Earlier week" in h.buttons() and "Later week →" in h.buttons()
         first = [o.value for o in next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the event").options]
         assert len(first) <= 14

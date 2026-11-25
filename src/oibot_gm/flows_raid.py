@@ -170,7 +170,7 @@ class OpenWizard(Wizard, LineupBlock):
         if len(tpls) > 3:
             async def picked(interaction: discord.Interaction, values: list[str]) -> None:
                 await self._template(values[0])(interaction)
-            return [self.select("Pick a template", [Opt(s["id"], s["name"], "pick a day and time next") for s in tpls], picked)]
+            return [self.select("Pick the schedule", [Opt(s["id"], s["name"], "pick a day and time next") for s in tpls], picked)]
         return [self.button(f"{s['name']} — pick a time", self._template(s["id"])) for s in tpls]
 
     def is_adhoc(self, sid: str | None) -> bool:
@@ -214,7 +214,7 @@ class OpenWizard(Wizard, LineupBlock):
         s0, t0 = ups[0]
         items: list[discord.ui.Item] = [self.button(f"Next event — {self.reg.local12(t0)}" + (f" · {s0['name']}" if many else ""), self.next_picked, discord.ButtonStyle.primary)]
         if len(ups) > 1:
-            items.append(self.button("Another coming event", self.another))
+            items.append(self.button("Another upcoming event", self.another))
         items += [self.button("One-off event", self.adhoc), self.button("Cancel", self.cancel)]
         await self.show(interaction, f"**{self.name()}** — which event?\n-# A one-off event opens at a time you pick: {rc.FIRST_COME}, no regulars, no reminder.", *items)
 
@@ -229,7 +229,7 @@ class OpenWizard(Wizard, LineupBlock):
             return
         many = self.many()
         page_btns: list[discord.ui.Item] = []
-        head = f"**{self.name()}** — which coming event?"
+        head = f"**{self.name()}** — which upcoming event?"
         if len(others) > OTHER_STARTS:
             tz = self.reg.tz
             weeks = sorted({(t.astimezone(tz).date() - timedelta(days=t.astimezone(tz).weekday())) for _s, t in others})
@@ -264,7 +264,7 @@ class OpenWizard(Wizard, LineupBlock):
     def no_slot_reason(self) -> str:
         """Why the raid offers no night to open, after its name: no schedule yet, else its first opening (no horizon)."""
         if not [s for s in self.reg.schedules(self.rid) if s["kind"] != "pickup" and s.get("active", True)]:
-            return "has no schedule yet." + (" Its schedules opened by an officer open at a time you pick." if self.templates() else "")
+            return "has no schedule yet." + (" Its on-demand schedules open at a time you pick." if self.templates() else "")
         fo = self.reg.first_open(self.rid)
         if fo is not None:
             return f"first opens {self.reg.local12(fo)}, and no schedule of it has a night after that yet."

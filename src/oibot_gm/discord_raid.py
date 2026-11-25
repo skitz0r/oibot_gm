@@ -556,7 +556,7 @@ class RaidMixin:
                               + ("" if ev.state == "locked" else f" — the event was {ev.state} meanwhile; nobody after that was asked"))
                 rs.save(ev, f"fill asked {len(sent)}")
             elif batch and ev.state != "locked":
-                rs.save(ev, f"fill stopped: the run is {ev.state}")  # the unsent asks closed by _send_asks
+                rs.save(ev, f"fill stopped: the event is {ev.state}")  # the unsent asks closed by _send_asks
         if sent:
             return sent, nd
         if ev.state != "locked":

@@ -109,7 +109,7 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             return
         rs = bot.raids.store(reg)
         live = rs.live()
-        await interaction.response.send_message("\n".join(f"• {run_label(reg, e)} · {sheet_state(e)} · {len(e.seated()) if sheet_state(e) == 'locked' else len(e.by_status('in'))} {'rostered' if sheet_state(e) == 'locked' else 'joined'}" for e in live) or "No event is live. Open one with /raid open.", ephemeral=True)
+        await interaction.response.send_message("\n".join(f"• {run_label(reg, e)} · {sheet_state(e)} · {len(e.seated()) if sheet_state(e) == 'locked' else len(e.by_status('in'))} {'rostered' if sheet_state(e) == 'locked' else 'joined'}" for e in live) or "No event is live. An officer opens one with /raid open.", ephemeral=True)
 
     @raid.command(name="out", description="Can't make an event you joined (frees your seat if the roster is locked)")
     async def callout_cmd(interaction: discord.Interaction):
