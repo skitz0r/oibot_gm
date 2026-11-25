@@ -322,7 +322,7 @@ Schedules or Raids; each still works elsewhere. A cancel's reason and its line i
 split like this*) and **Clear** of every officer's moves on a board: plain text, MCP `propose_split` / `set_layout`, a
 test run's card on the Test bench (on the Events page **Undo my moves** takes back your own). Opening a pickup
 template's event: `/raid open` › *Ad hoc run…*, plain text, MCP `open_run` (New event opens one-offs and schedules'
-nights). Setting one timing value of a schedule back to the game's suggestion: `/gm config raid`, plain text, MCP
+nights). Setting one timing value of a schedule back to the game's suggestion: plain text, MCP
 `schedule_set`. A start at a minute that isn't a quarter hour (the site's pickers step by 15 minutes): plain text or
 MCP. On the Raids page, a minimum's reason (*why*), a raid's notes and its split policy: `/roster comp` or
 `/gm config raid`, plain text, MCP `raid_set`.
@@ -873,9 +873,11 @@ removed, the ops feed says so once an hour, naming the schedule and the raid; bo
   on open); every timing field shows the schedule's own value, and a new template starts from *the pickup default*. An
   officer opens a template's event with `/raid open` in Discord, in plain text or over MCP; the site's New event page opens one-offs and schedules' nights. Officers can change any of them per schedule, including **confirmations**
   (on/off) and the **who gets a seat** weights — on the Schedules page, in plain text, over MCP, or in `/gm config raid`
-  (*Schedules* › a schedule › *Switches and split* → *Change a switch*: the game's suggestion, on or off).
+  (*Schedules* › a schedule › *Change* › the four switches: Signup Reminder, Lock Confirmation, Automated Fill Requests and
+  Sheet Opening DM, each on or off).
 
-**More raids the same night (follow-ons).** A schedule (Schedules page › the editor's *Lineup*; plain text `<schedule>.follow = barrow_deeps x2`) or a one-off (the lineup on the site's **New
+**More raids the same night (follow-ons).** A schedule (Schedules page › the editor's *Lineup*; in Discord `/gm config raid` ›
+*Schedules* › a schedule › *Change* › *Lineup*, where each later raid's start reads *1 h 30 min after the first*; plain text `<schedule>.follow = barrow_deeps x2`) or a one-off (the lineup on the site's **New
 event** page; plain text *"set up an ad hoc Hyjal raid for 6:30 on Dec 10 with
 10-man Barrow Deeps splits afterwards"*) names a follow-on: another raid with its own rosters per run, starting when the
 one before it ends (that raid's length: a 6:30 PM Hyjal Summit of 3 hours is followed at 9:30 PM, and a Barrow Deeps of
@@ -1678,8 +1680,8 @@ edits that new family and leaves the one it shared alone.
 
 ## 7. Officers: day-to-day commands
 
-- Raids and schedules: `/gm config raid` — a raid's rules (its schedules with each one's sheet timing, its minimums,
-  seat weights, lockout and length, first lockout, how one night's groups are made, notes, reset), §8 *Raid rules*.
+- Raids and schedules: `/gm config raid` — a raid's rules (its schedules, each with its lineup and sheet timing, its
+  minimums, priority, lockout and length, first opens, the split, notes, reset), §8 *Raid rules* and *Schedules*.
   Every officer may; so may the plain-text policy's *Raids, schedules and policy* group (§8c).
 - Registry: `/roster list|confirm|rank|set-main|char|professions|armory|add|remove|members|absences|absent|back|comp` (`comp` = the
   raid's minimums, §6). They take at most a member
@@ -2071,26 +2073,35 @@ card as it will look. Under Channels the **News** card keeps the news **keywords
 shows the terms that are **always matched** (the game version's names and the raids'), the news channel's state (*Last item
 kept … · N recent items kept*, or *Nothing received yet — is the webhook pointed at the news channel?*) and **Re-read the
 channel** — and per raid
-**Raid rules (officers).** `/gm config raid`: pick the raid, then a section — Schedules (each with its own sheet
-timing), Minimums, Selection weights, Lockout & length, First lockout opens, How one night's groups are made (the
-split), Notes, Reset. Sheet timing is never the raid's: when a sheet opens, the nudge, the lock, the confirm-by time,
-how long a fill ask waits and the four switches belong to each schedule (*"Sheet timing belongs to each schedule now.
+**Raid rules (officers).** `/gm config raid`: pick the raid, then a section — Schedules, Minimums, Priority, Lockout
+and length, First opens, When one night fills two rosters (the split), Notes, Reset. Sheet timing is never the raid's: when a sheet opens, the
+reminder, the lock, the confirm-by time, how long a fill ask waits and the four switches belong to each schedule (*"Sheet timing belongs to each schedule now.
 Change it on the schedule."* answers a try on the raid, on every surface). *Minimums* is the same screen as
 `/roster comp`: a number for a role, class or spec and an optional reason, saved on its own with **Save minimums**
 (a role's old *tank min* in plain text is answered *"Set a role's minimum as a minimum: at least 3 tanks."*). The
-other changes collect in a draft; Save shows them as sentences with the next three runs (per schedule) and writes them
-as one change. Nothing opens until a raid has run times. The same settings are on the Raids and Schedules pages and in plain text
-(`raid_set`, `schedule_set`).
-**Schedules** in `/gm config raid`: a raid with only its own run times opens straight on them (✕ a time to drop it,
-*Add a run time* = nights + hour + minutes, *Add another schedule*); with several, pick one from the list. *Add a
-schedule* asks the kind (weekly nights, days of each lockout, pickup template) and then one form (name, nights or
-lockout days, hour, minutes). The schedule's screen shows its own sheet timing in full. *Change this schedule*
-renames it, sets its rosters per run (1–4), *A run's week* (Standard / Short notice / Same week, or *Each step…*: each
-step its own hours or *The game's suggestion* — what a new schedule starts with; a pickup template's is *The pickup
-default*), *Switches and split* (each switch the game's suggestion, on or off; the split the raid's or its own), pauses/resumes it or
-removes it. A paused schedule says *Paused — would next run Sat 24 Oct 8:00 PM · nothing opens* (never "Next runs"), and
-changing the rosters per run says *From the next run: the sheet advertises 2 × 10 seats. The run already open keeps its 1 ×
-10.* On the site: the **Schedules** page lists each raid's schedules in words with the next three runs (a
+other changes collect in a draft; **Review changes** shows the Raids page's own Save box (*"Save Barrow Deeps?"*, each
+change as *Rank: 3 → 5*, and when it takes effect) and **Save** writes them as one change. If another officer saved
+the raid meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."* and a Save then is refused with
+your draft kept. The same settings are on the Raids and Schedules pages and in plain text (`raid_set`, `schedule_set`).
+**Schedules** in Discord: `/gm config raid` › *Schedules* opens the schedule wizard on that raid's schedules (its
+Back returns to the raid's sections with your draft as it was). The list is grouped **Active** and **Paused**, each
+schedule by its name and when it repeats; an empty one says *"No schedule runs Barrow Deeps yet. Add one with New
+schedule."* Pick one to open its screen: Repeats, Lineup, Sheet timing (Sheet opens, Signup Reminder and when it goes
+out, Locks, Lock Confirmation and Confirm by, Automated Fill Requests and how long An ask waits, Sheet Opening DM),
+Priority and When one night fills two rosters, in the Schedules page's words, and its next event (a paused one says
+*"Paused, so no event opens. Resume it to open events again."*). **Change** edits one thing at a time: the name; the
+run times (a day, an hour and the minutes in quarter hours; ✕ a time to drop it) or a lockout schedule's days and
+start; the lineup (the same lineup screen as `/raid lineup`: add a raid, its rosters, its start after the first); Sheet
+timing (a preset — Standard, Short notice, Same week — or one setting's hours); the four switches; Priority (five
+picks, each a number or *Same as the raid*); the split. Each change shows as *was → now* until you save. **Review
+changes** shows the Schedules page's Save box (*"Save Alt run?"* with each change and what it reaches: *"The change
+starts with the Tue 15 Dec event. The Tue 8 Dec event is already open and keeps its timing."*); **Pause**, **Resume**
+and **Remove** show theirs (Remove's is red: a removed schedule cannot be brought back). **New schedule** asks the kind
+(Weekly, Day N of each lockout, Opened by an officer) and a name, then opens the same screen; its box is *"Create Alt
+run?"*. A value the schedule refuses (a reminder after the lock) is the box's one sentence with Back, the draft kept.
+If someone changed the schedule meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."* and a Save
+then is refused, nothing written.
+On the site: the **Schedules** page lists each raid's schedules in words with the next three runs (a
 paused one: *Paused — nothing opens; it would next run …*); officers add, edit (the editor opens in place of the
 schedule's row: weekday + 12-hour time pickers, lockout-day picks; every timing field shows the schedule's own value
 and the draft's week as a timeline above them — a field left empty says *the game's suggestion* (a pickup template's:

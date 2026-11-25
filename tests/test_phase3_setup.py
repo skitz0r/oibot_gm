@@ -620,6 +620,10 @@ def test_the_raid_wizards_minimums_section_is_the_minimums_block(reg, rs, office
 
 
 def test_the_schedule_screen_says_paused_never_next_runs(reg, rs, officer_only):
+    """The raid wizard's Schedules hands off to the schedule wizard: a paused schedule says so, never its next event;
+    a run's rosters are its lineup's (flows_schedule, tests/test_flows_schedule.py)."""
+    from oibot_gm.constants import PAGE_WORDS
+
     alt_schedule(reg)
     reg.set_schedule("alt", {"active": False}, "t")
     h = Harness(reg, rs)
@@ -629,10 +633,11 @@ def test_the_schedule_screen_says_paused_never_next_runs(reg, rs, officer_only):
         await h.pick("Pick a raid", "barrow_deeps")
         await h.pick("Pick a section", "times")
         await h.pick("Pick a schedule", "alt")
-        assert "⏸ Paused — would next run " in h.text and "· nothing opens" in h.text and "Next runs:" not in h.text
-        await h.pick("Change this schedule", "rosters")
-        await h.pick("Rosters per run", "2")
-        assert "From the next run: the sheet advertises 2 × 10 seats." in h.text
+        assert PAGE_WORDS["paused_next"] in h.text and "Next event" not in h.text and "Resume" in h.buttons()
+        await h.pick("Change", "lineup")
+        await h.pick("Pick a step", "1")
+        await h.pick("Rosters", "2")
+        assert "Barrow Deeps · 2 rosters" in h.text
     run(go())
 
 

@@ -1,16 +1,14 @@
 """The `/gm config` wizards: raid rules (officers, design D8), aura facts, the guild's timezone and the about blurb (owner).
 
-`raid_config` is the flagship. It picks a raid, then a HUB of sections (schedules with each one's sheet timing, the
-minimums, weights, lockout and length, first lockout, how one night's groups are made, notes, reset). Every section
-but the minimums edits a working copy (`self.draft`, in the exact field names `Registry._apply_raid_override` accepts)
-and returns to the hub; nothing is written until Save, which shows the diff as sentences plus the next three runs
-computed from the DRAFT and then makes ONE `reg.set_raid_overrides` call — one commit, all or nothing. The minimums
-(CompTargetsBlock) are saved on their own, through configops' `comp` kind (Registry.set_minimums).
+`raid_config` is the flagship. It picks a raid, then a HUB of sections (schedules, the minimums, priority, lockout and
+length, first opens, the split, notes, reset). Schedules hands the screen to the schedule wizard (flows_schedule, flow
+`schedule`: boxes 13–17), whose list's Back returns here. Every other section but the minimums edits a working copy
+(`self.draft`) and returns to the hub; nothing is written until Review changes shows box 19 (configops: ops_from_fields
+"raid" → describe_ops(…).box, the Raids page's Save) and its Save runs apply_ops against the raid's rev — one write, all
+or nothing. The minimums (CompTargetsBlock) are saved on their own, through configops' `comp` kind (Registry.set_minimums).
 
 A section refuses a bad combination on the spot rather than at Save: `RaidConfigWizard.preview` applies the draft with
-the registry's own validators (`_apply_raid_override(commit=False)` + `_check_raid`) and restores the config
-immediately, exactly as `set_raid_overrides` does on a refusal — so the wizard never re-implements a rule and can never
-drift from it.
+the registry's own validators on a throw-away copy (Registry.preview) — so the wizard never re-implements a rule.
 
 No value here is typed except prose (notes, an aura note, the about blurb): hours are preset selects worded "5 days
 before", run times are nights + hour + minutes, dates are day/hour/minute selects narrowed by week, and the timezone is a
@@ -18,8 +16,6 @@ region then a paged city list.
 """
 from __future__ import annotations
 
-import copy
-import re
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, available_timezones
@@ -27,10 +23,10 @@ from zoneinfo import ZoneInfo, available_timezones
 import discord
 
 from .constants import hours_words  # noqa: F401 — moved to constants (registry's lift words); re-exported here
-from .presets import PRESETS  # (key, name, opens, nudge, lock, confirm), shared with plain text
-from .registry import (DEFAULT_RAID_SIZE, MAX_SCHEDULE_ROSTERS, SCHEDULE_NAMES, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
-                       RegistryError, parse_slots, schedule_def_of, schedule_value, schedules_of)
-from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, fmt12, hour_opts, minute_opts, week_opts, when_fields, when_note
+from .constants import PAGE_WORDS
+from .presets import PRESETS  # noqa: F401 — (key, name, opens, nudge, lock, confirm), shared with plain text; re-exported here
+from .registry import DEFAULT_RAID_SIZE, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry, RegistryError
+from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, fmt12, week_opts, when_fields, when_note  # noqa: F401
 
 # ---------------------------------------------------------------- shared pieces
 
@@ -114,41 +110,24 @@ class OwnerWizard(Wizard):
 
 # ---------------------------------------------------------------- raid rules
 
-DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before")
 WEIGHTS = tuple(RAID_WEIGHT_DEFAULTS)
-WEIGHT_LABEL = {"rank": "Rank", "main": "Main over alt", "sat_out": "Sat out last time", "signup_order": "Signed up early", "regular": "Regular of the schedule"}
 WEIGHT_HINT = {"rank": "core > raider > trial", "main": "a main is picked over an alt", "sat_out": "benched in the last lockout",
                "signup_order": "an earlier signup", "regular": "being one of the schedule's regulars (on their regular character)"}  # the Raids page's WEIGHT_HINT, in words
 WEIGHT_WORDS = {0: "doesn't count", 1: "a little", 2: "some", 3: "a lot", 4: "more", 5: "the most"}
 SPLIT_WORDS = {"balanced": ("Balanced", "both runs equal in synergy, tanks, healers and seats"),
                "first": ("Raid one first", "roster 1 gets the best, roster 2 the rest"),
                "rotation": ("Rotation", "whoever sat out or was in the weaker run moves up")}
-BOOL_WORDS = {"nudge": "Nudge the unanswered", "autofill": "Fill seats automatically", "open_dm": "DM everyone on open",
-              "confirm": "Ask the rostered to confirm"}  # registry.RAID_BOOL_FIELDS, in words
-SECTIONS = [  # (key, label, fields it edits). Sheet timing is each schedule's own (C7): under Schedules, never the raid's.
-    ("times", "Schedules", ("schedules",)),
+_RF = PAGE_WORDS["raid_fields"]
+SECTIONS = [  # (key, label, fields it edits). Each schedule — its run times, lineup and sheet timing — is the schedule wizard's.
+    ("times", "Schedules", ()),  # flows_schedule (flow `schedule`) takes the screen over; saved on its own boxes 13–17
     ("comp", "Minimums", ()),  # CompTargetsBlock: saved on its own (Registry.set_minimums), never in the hub's draft
-    ("weights", "Selection weights", tuple(f"weight_{k}" for k in WEIGHTS)),
-    ("length", "Lockout & length", ("lockout_days", "duration_hours")),
-    ("first_open", "First lockout opens", ("first_open",)),
-    ("behaviour", "How one night's groups are made", ("split_policy",)),
+    ("weights", PAGE_WORDS["schedule_fields"]["weights"], tuple(f"weight_{k}" for k in WEIGHTS)),
+    ("length", f"{_RF['lockout_days']} and {_RF['duration_hours'].lower()}", ("lockout_days", "duration_hours")),
+    ("first_open", _RF["first_open"], ("first_open",)),
+    ("behaviour", PAGE_WORDS["schedule_fields"]["split_policy"], ("split_policy",)),
     ("notes", "Notes", ("notes",)),
     ("reset", "Reset to defaults", ()),
 ]
-MAX_SCHEDULES = 10
-FIELD_WORDS = {"slots": "Run times", "schedules": "Schedules", "signup_lead_hours": "Sheet opens", "nudge_hours_before": "Nudge", "lock_hours_before": "Roster locks",
-               "confirm_hours_before": "Confirm by", "fill_ask_hours": "A fill ask expires after", "nudge": "Nudge the unanswered",
-               "autofill": "Fill seats automatically", "open_dm": "DM everyone on open", "confirm": "Ask the rostered to confirm",
-               "split_policy": "Split policy", "lockout_days": "Lockout",
-               "duration_hours": "Raid length", "first_open": "First lockout opens", "notes": "Notes",
-               **{f"weight_{k}": f"Weight · {WEIGHT_LABEL[k].lower()}" for k in WEIGHTS}}
-
-
-def slot_key(slot: str) -> tuple[int, str]:
-    day, hm = slot.split()
-    return DAYS.index(day[:3].title()), f"{int(hm.split(':')[0]):02d}:{hm.split(':')[1]}"
 
 
 def length_words(h) -> str:
@@ -164,16 +143,10 @@ def lockout_words(d) -> str:
 
 def field_value(eff: dict, field: str, tz: str):
     """A raid field's effective value, in the form the draft holds it."""
-    if field == "slots":
-        return list(eff.get("slots") or [])
-    if field == "schedules":
-        return copy.deepcopy(list(eff.get("schedules") or []))
-    if field in CADENCE or field == "fill_ask_hours" or field == "duration_hours":
+    if field == "duration_hours":
         return float(eff[field])
     if field == "lockout_days":
         return int(eff["lockout_days"])
-    if field in BOOL_WORDS:
-        return bool(eff[field])
     if field == "split_policy":
         return eff.get("split_policy") or "balanced"
     if field.startswith("weight_"):
@@ -407,7 +380,8 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         super().__init__(reg, owner_id, title="Raid rules", guard=_officer_guard(reg))
         self.raid = raid
         self.draft: dict = {}
-        self.sid: str | None = None  # the schedule the Schedules section is on
+        self.rev: str | None = None  # the raid's rev when its hub opened: a save over another officer's is refused
+        self._ops: list = []
         self._attempt: dict = {}  # values a section refused, prefilled when the person presses Fix this
         self._fo_day0: date = reg.now_local().date()
         self.targets_back = self.to_hub  # the Minimums section is the block itself (CompTargetsBlock); Back = the hub
@@ -450,12 +424,8 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
     def say(self, field: str, v) -> str:
         """A field's value as a sentence fragment a person reads (12-hour, words)."""
-        if field == "slots":
-            return ", ".join(self.reg.slot_label(s) for s in v) or "no run times (add one under Schedules)"
-        if field == "schedules":
-            return "; ".join(f"{s['name']}: {self.reg.schedule_label(self.raid, s)}" for s in schedules_of({**self.sview(), "schedules": v})) or "no schedules (add one under Schedules)"
         if field == "split_policy":
-            return SPLIT_WORDS.get(v, (v,))[0]
+            return PAGE_WORDS["split"].get(v, v)
         if field.startswith("weight_"):
             return f"{v} ({WEIGHT_WORDS.get(int(v), '')})".replace(" ()", "")
         if field == "lockout_days":
@@ -474,24 +444,26 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         def fv(f):
             return field_value(eff, f, tz)
         if key == "times":
-            scheds = schedules_of(eff)
+            from .registry import schedule_name
+
+            scheds = [s for s in self.reg.all_schedules() if s["raid"] == self.raid]
             if scheds:
-                return f"{len(scheds)} schedule{'s' if len(scheds) > 1 else ''}: " + ", ".join(s["name"] for s in scheds)
-            return "no schedules yet: add one to set when this raid runs"
+                return f"{len(scheds)} schedule{'s' if len(scheds) > 1 else ''}: " + ", ".join(schedule_name(s) for s in scheds)
+            return "No schedule runs this raid yet. Add one here."
         if key == "comp":
             from .registry import slot_words
 
             mins = self.reg.minimums(self.raid)
             return ("at least " + ", ".join(slot_words(k, n) for k, n in mins.items())) if mins else "no minimum set"
         if key == "weights":
-            return " · ".join(f"{WEIGHT_LABEL[k].lower()} {fv(f'weight_{k}')}" for k in WEIGHTS)
+            return " · ".join(f"{PAGE_WORDS['priority'][k]} {fv(f'weight_{k}')}" for k in WEIGHTS)
         if key == "length":
             return f"lockout {lockout_words(fv('lockout_days'))} · {length_words(fv('duration_hours'))} long"
         if key == "first_open":
             return self.say("first_open", fv("first_open"))
         if key == "behaviour":
             split = SPLIT_WORDS.get(fv("split_policy"), ("?", ""))
-            return f"{split[0]} — {split[1]}"
+            return f"{PAGE_WORDS['split'].get(fv('split_policy'), split[0])}: {split[1]}"
         if key == "notes":
             return self.say("notes", fv("notes"))
         return "drop this guild's changes for the raid" if self.reg.raid_override(self.raid) else "already on the game's defaults"
@@ -526,12 +498,15 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         lines = [f"**{rd.get('name', self.raid)}** · {rd.get('size', '?')}-player"]
         if note:
             lines.append(note)
-        lines.append(f"✎ **{n} unsaved change{'' if n == 1 else 's'}** — nothing is saved until you press Save." if n else "Pick a section to change. Nothing is saved until you press Save.")
+        lines.append(f"✎ **{n} unsaved change{'' if n == 1 else 's'}**. Nothing is saved until you review and save them." if n
+                     else "Pick a section to change. Nothing is saved until you review and save it.")
         if err:
             lines.append(f"⚠️ {err}")
+        if self.rev is None:
+            self.rev = self.reg.config_rev(f"raids:{self.raid}")
         await self.show(i, "\n".join(lines),
                         self.select("Pick a section", opts, self.section_picked),
-                        self.button("Save", self.review, discord.ButtonStyle.success, disabled=not n),
+                        self.button("Review changes", self.review, discord.ButtonStyle.primary, disabled=not n),
                         self.button("Cancel", self.cancel))
 
     async def to_hub(self, i: discord.Interaction) -> None:
@@ -560,392 +535,22 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self._attempt = {}
         await self.hub(i, note)
 
-    # ---- Schedules (the "times" section): WHEN the raid runs. Every schedule lives in the draft field "schedules" (the
-    # raid's stored list, in the exact form Registry.set_raid_overrides takes); a raid has no run times of its own.
-    def sview(self) -> dict:
-        """The raid as the draft would make it — schedules included even while another section's change is refused."""
-        eff, _ = self.preview()
-        base = eff or self.reg.raid_def(self.raid)
-        return {**base, "schedules": copy.deepcopy(self.cur("schedules"))}
+    # ---- Schedules (the "times" section): the schedule wizard (flows_schedule, flow `schedule`) takes this screen over;
+    # its list's Back returns to this raid's hub with the draft as it was.
+    async def times(self, i: discord.Interaction) -> None:
+        from . import flows_schedule  # noqa: F401 — registers the flow (it imports this module: never at the top)
+        from .wizard import FLOWS
 
-    def scheds(self) -> list[dict]:
-        return schedules_of(self.sview())
+        draft, raid, reg = dict(self.draft), self.raid, self.reg
 
-    def sched(self, sid: str) -> dict:
-        return next((s for s in self.scheds() if s["id"] == sid), None) or {
-            "id": sid, "name": SCHEDULE_NAMES["weekly"], "kind": "weekly", "active": True, "rosters": 1, "slots": [], "days": [], "time": None}
+        async def back(it: discord.Interaction, message_id: int | None) -> None:
+            w = RaidConfigWizard(reg, it.user.id, raid)
+            w.draft, w.message_id = draft, message_id
+            await w.hub(it)
+        self._closed = True
+        self.stop()
+        await FLOWS["schedule"](i, reg, raid=raid, message_id=self.message_id, back=back)
 
-    def sched_runs(self, s: dict) -> list[datetime]:
-        from .raidcycle import next_runs_of
-
-        return next_runs_of(self.reg, self.raid, s, rd=self.sview())
-
-    def entry_put(self, sid: str, **changes) -> None:
-        """Set (value) or clear (None) settings of one stored schedule entry in the draft."""
-        rows = copy.deepcopy(self.cur("schedules"))
-        e = next((r for r in rows if r.get("id") == sid), None)
-        if e is None:
-            e = {"id": sid}
-            rows.append(e)
-        for k, v in changes.items():
-            if v is None:
-                e.pop(k, None)
-            else:
-                e[k] = v
-        self.put("schedules", rows)
-
-    async def sched_checked(self, i: discord.Interaction, snapshot: dict, sid: str, note: str) -> None:
-        """After a schedule change: back to that schedule — or, if the registry would refuse the draft, undo and say why."""
-        _, err = self.preview()
-        if err:
-            self.draft = snapshot
-
-            async def back(it: discord.Interaction) -> None:
-                await self.schedule(it, sid)
-            await self.refuse_here(i, err, back)
-            return
-        self._attempt = {}
-        await self.schedule(i, sid, note)
-
-    def sched_cadence(self, sid: str) -> str:
-        """The schedule's own sheet timing — all nine values (C7) — in words, and its rosters per run."""
-        from .registry import SCHEDULE_TIMING, timing_words
-
-        view = self.sview()
-        try:
-            sd = schedule_def_of(view, sid)
-        except RegistryError:
-            return ""
-        week = timing_words({k: sd[k] for k in SCHEDULE_TIMING})
-        return ("-# " + week[:1].upper() + week[1:]
-                + (f" · **{sd['schedule']['rosters']} rosters** per run" if int(sd["schedule"].get("rosters") or 1) > 1 else ""))
-
-    def suggestion(self, sid: str) -> tuple[str, dict]:
-        """What a sheet-timing value set back goes to, and its name: the game's suggestion, or a pickup template's
-        defaults — exactly what the save seeds (registry.write_out_timing)."""
-        from .registry import write_out_timing
-
-        kind = self.sched(sid).get("kind") or "weekly"
-        vals = write_out_timing({"id": sid, "kind": kind}, self.reg._seed_raid(self.raid))
-        return ("The pickup default" if kind == "pickup" else "The game's suggestion"), vals
-
-    async def times(self, i: discord.Interaction, note: str = "") -> None:
-        scheds = self.scheds()
-        lines = [note] if note else []
-        if not scheds:
-            lines.append("**Schedules** — this raid has none yet, so no run opens on its own. Add one to set when it runs.")
-            await self.show(i, "\n".join(lines), self.button("Add a schedule", self.add_schedule, discord.ButtonStyle.primary),
-                            self.button("Back to the sections", self.to_hub))
-            return
-        lines.append("**Schedules** — when this raid runs (guild time):")
-        for s in scheds:
-            runs = self.sched_runs(s) if s["kind"] != "pickup" else []
-            lines.append(f"• **{s['name']}** — {self.reg.schedule_label(self.raid, s)}" + (f" · next {self.reg.local12(runs[0])}" if runs else ""))
-        opts = [Opt(s["id"], s["name"], self.reg.schedule_label(self.raid, s)) for s in scheds]
-        await self.show(i, "\n".join(lines), self.select("Pick a schedule", opts, self.schedule_picked),
-                        self.button("Add a schedule", self.add_schedule, discord.ButtonStyle.primary, disabled=len(scheds) >= MAX_SCHEDULES),
-                        self.button("Back to the sections", self.to_hub))
-
-    async def to_times(self, i: discord.Interaction) -> None:
-        await self.times(i)
-
-    async def schedule_picked(self, i: discord.Interaction, values: list[str]) -> None:
-        await self.schedule(i, values[0])
-
-    async def schedule(self, i: discord.Interaction, sid: str, note: str = "") -> None:
-        """One schedule: its times (weekly: the run-time chips; lockout: days + time), cadence, the next three runs."""
-        self.sid = sid
-        s = self.sched(sid)
-        many = len(self.scheds()) > 1
-        lines = [note] if note else []
-        if s["kind"] == "weekly":
-            lines.append(("**Run times**" if not many else f"**{s['name']}** · run times") + " (guild time): "
-                         + (", ".join(self.reg.slot_label(x) for x in s["slots"]) or "none yet — nothing opens until a raid has one."))
-        else:
-            lines.append(f"**{s['name']}** · {self.reg.schedule_label(self.raid, s)}")
-        paused = not s.get("active", True)
-        cad = self.sched_cadence(sid)
-        if cad:
-            lines.append(cad)
-        if s["kind"] != "pickup":
-            runs = self.sched_runs(s)
-            if paused:  # never "Next runs" on a paused schedule: it would contradict the pause (design §3.4 RD-10)
-                lines.append(f"⏸ Paused — would next run {self.reg.local12(runs[0])} · nothing opens" if runs else "⏸ Paused · nothing opens")
-            else:
-                lines.append(("Next runs: " + " · ".join(self.reg.local12(t) for t in runs)) if runs else "-# No run comes up yet.")
-        elif paused:
-            lines.append("⏸ Paused · /raid open doesn't offer it")
-        else:
-            lines.append("-# A template: `/raid open` offers it, and the run opens at the day and time you pick there.")
-        if s["kind"] == "weekly":
-            lines.append("-# Press a time to drop it.")
-        items: list = [self.select("Change this schedule", self.change_opts(s), self.change_picked)]
-        if s["kind"] == "weekly":
-            items += [self.button(f"✕ {self.reg.slot_label(x)}", self._dropper(x)) for x in s["slots"][:14]]
-            items.append(self.button("Add a run time", self.add_time_form, discord.ButtonStyle.primary, disabled=len(s["slots"]) >= 14))
-        elif s["kind"] == "lockout":
-            items.append(self.button("Pick the days and time", self.lockout_form_open, discord.ButtonStyle.primary))
-        items.append(self.button("All schedules", self.to_times) if many else self.button("Add another schedule", self.add_schedule))
-        items.append(self.button("Back to the sections", self.to_hub))
-        await self.show(i, "\n".join(lines), *items)
-
-    def change_opts(self, s: dict) -> list[Opt]:
-        n = int(s.get("rosters") or 1)
-        return [Opt("name", "Rename", f"now “{s['name']}”"),
-                Opt("rosters", "Rosters per run", f"{n} now — the sheet advertises {n} × {self.size()} seats from the next run"),
-                Opt("cadence", "A run's week", "when its sheet opens, nudges, locks and must be confirmed by"),
-                Opt("behaviour", "Switches and split", "nudge, fill, DM on open, confirmations, how a night splits"),
-                Opt("active", "Resume" if not s.get("active", True) else "Pause", "nothing opens from it while paused"),
-                Opt("remove", "Remove this schedule", "runs already open keep their times")]
-
-    async def change_picked(self, i: discord.Interaction, values: list[str]) -> None:
-        sid, what = self.sid, values[0]
-        if what == "name":
-            await self.open_form(i, Form("Rename the schedule", [Field("name", "Name", required=False, default=self.sched(sid)["name"], max_length=40,
-                                                                         description="what officers and members read, e.g. Main night, Alt run")], self.renamed))
-        elif what == "rosters":
-            cur = int(self.sched(sid).get("rosters") or 1)
-            opts = [Opt(str(n), f"{n} roster{'s' if n > 1 else ''}", f"{n} × {self.size()} seats on the sheet", default=n == cur) for n in range(1, MAX_SCHEDULE_ROSTERS + 1)]
-            await self.show(i, f"**{self.sched(sid)['name']}** — how many rosters does a run expect? The sheet advertises that many × {self.size()} seats, "
-                               "the health check measures against it, and the lock aims for it (as far as tanks and healers allow).",
-                            self.select("Rosters per run", opts, self.rosters_picked), self.button("Back", self._to_sched))
-        elif what == "cadence":
-            await self.sched_week(i)
-        elif what == "behaviour":
-            await self.sched_behaviour(i)
-        elif what == "active":
-            snapshot = dict(self.draft)
-            on = not self.sched(sid).get("active", True)
-            self.entry_put(sid, active=None if on else False)
-            await self.sched_checked(i, snapshot, sid, f"{self.sched(sid)['name']} {'resumed' if on else 'paused'}.")
-        else:
-            s = self.sched(sid)
-            await self.show(i, f"Remove **{s['name']}** ({self.reg.schedule_label(self.raid, s)})?\n-# Runs already open keep their times. Nothing is saved until Save.",
-                            self.button("Remove", self.remove_sched, discord.ButtonStyle.danger), self.button("Back", self._to_sched))
-
-    async def _to_sched(self, i: discord.Interaction) -> None:
-        await self.schedule(i, self.sid)
-
-    async def renamed(self, i: discord.Interaction, v: dict[str, str]) -> None:
-        snapshot = dict(self.draft)
-        self.entry_put(self.sid, name=v.get("name", "").strip()[:40] or None)
-        await self.sched_checked(i, snapshot, self.sid, f"Renamed to {self.sched(self.sid)['name']}.")
-
-    async def rosters_picked(self, i: discord.Interaction, values: list[str]) -> None:
-        from .raidcycle import rosters_copy
-
-        snapshot, n = dict(self.draft), int(values[0])
-        self.entry_put(self.sid, rosters=None if n == 1 else n)
-        await self.sched_checked(i, snapshot, self.sid, f"{n} roster{'s' if n > 1 else ''} per run. {rosters_copy(self.reg, self.raid, self.sid, n)}")
-
-    async def remove_sched(self, i: discord.Interaction) -> None:
-        sid, name = self.sid, self.sched(self.sid)["name"]
-        self.put("schedules", [r for r in copy.deepcopy(self.cur("schedules")) if r.get("id") != sid])
-        self.sid = None
-        await self.times(i, f"Removed {name}.")
-
-    async def sched_week(self, i: discord.Interaction) -> None:
-        """A schedule's week: a preset (the four hours together), or each step by hand."""
-        sd = schedule_def_of(self.sview(), self.sid)
-        cur = [sd[f] for f in CADENCE]
-        words = lambda lead, nudge, lock, confirm: (f"opens {hours_words(lead)} · nudge {hours_words(nudge)} · "  # noqa: E731
-                                                    f"locks {hours_words(lock)} · confirm by {hours_words(confirm)} before")
-        opts = [Opt("keep", "Keep this week", words(*cur), default=True)]
-        opts += [Opt(key, name, words(*hs)) for key, name, *hs in PRESETS]
-        opts.append(Opt("custom", "Each step…", "pick each step yourself, or the game's suggestion"))
-
-        async def picked(it: discord.Interaction, values: list[str]) -> None:
-            key = values[0]
-            if key == "custom":
-                await self.open_form(it, self.sched_cadence_form())
-                return
-            if key == "keep":
-                await self.schedule(it, self.sid)
-                return
-            _, name, *hs = next(p for p in PRESETS if p[0] == key)
-            snapshot = dict(self.draft)
-            self.entry_put(self.sid, **dict(zip(CADENCE, (float(h) for h in hs))))
-            await self.sched_checked(it, snapshot, self.sid, f"A run's week → **{name}**: {words(*hs)}.")
-        text = (f"**{sd['schedule']['name']}** · a run's week, counted back from each run's start:\n"
-                f"• the sheet opens **{hours_words(cur[0])} before**\n• the unanswered are nudged **{hours_words(cur[1])} before**\n"
-                f"• the roster locks **{hours_words(cur[2])} before**\n• rostered members confirm by **{hours_words(cur[3])} before**")
-        await self.show(i, text, self.select("Pick a run's week", opts, picked), self.button("Back", self._to_sched))
-
-    def sched_cadence_form(self) -> Form:
-        sd = schedule_def_of(self.sview(), self.sid)
-        own = sd["schedule"]["own"]
-        word, base = self.suggestion(self.sid)
-        fields = []
-        for f, label, desc in (("signup_lead_hours", "The sheet opens", "before the run starts"), ("nudge_hours_before", "Nudge the unanswered", "between opening and the lock"),
-                               ("lock_hours_before", "The roster locks", "before the run starts"), ("confirm_hours_before", "Confirm by", "no later than the lock"),
-                               ("fill_ask_hours", "A fill ask expires after", "no answer counts as no")):
-            suffix = "" if f == "fill_ask_hours" else " before"
-            inherit = Opt("inherit", f"{word} ({hours_words(base[f])}{suffix})", default=f not in own)
-            fields.append(Field(f, label, [inherit] + [Opt(o.value, o.label, default=f in own and o.default) for o in hours_opts(own.get(f), suffix=suffix)][:MAX_OPTIONS - 1], description=desc))
-        return Form(f"A run's week · {sd['schedule']['name']}"[:45], fields, self.sched_cadence_submitted)
-
-    async def sched_cadence_submitted(self, i: discord.Interaction, v: dict[str, str]) -> None:
-        snapshot = dict(self.draft)
-        self.entry_put(self.sid, **{f: (None if not v.get(f) or v[f] == "inherit" else schedule_value(f, v[f]))
-                                    for f in ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours")})
-        await self.sched_checked(i, snapshot, self.sid, "A run's week updated.")
-
-    async def sched_behaviour(self, i: discord.Interaction, note: str = "") -> None:
-        sd = schedule_def_of(self.sview(), self.sid)
-        own, view = sd["schedule"]["own"], self.sview()
-        lines = [note] if note else []
-        word, base = self.suggestion(self.sid)  # a switch set back goes to the game's suggestion (a pickup: its defaults)
-        lines.append(f"**{sd['schedule']['name']}** · switches and split — pick one to change. “{word.lower()}” is what a new schedule starts with.")
-        inherit = word.lower()
-        lines += [f"• {w}: **{('on' if own[f] else 'off') if f in own else inherit + (' (on)' if base[f] else ' (off)')}**" for f, w in BOOL_WORDS.items()]
-        # one select for every switch (a select per switch would need more rows than a message has): field=value
-        opts = [Opt(f"{f}={v}", f"{w}: " + (f"{inherit} ({'on' if base[f] else 'off'})" if v == "inherit" else v))
-                for f, w in BOOL_WORDS.items() for v in ("inherit", "on", "off")]
-        items: list = [self.select("Change a switch", opts, self._switch_setter)]
-        split = [Opt("inherit", f"Split: the raid's ({SPLIT_WORDS.get(view.get('split_policy') or 'balanced', ('?',))[0]})", default="split_policy" not in own)]
-        split += [Opt(p, f"Split: {SPLIT_WORDS[p][0]}", SPLIT_WORDS[p][1], default=own.get("split_policy") == p) for p in SPLIT_POLICIES]
-        items.append(self.select("How to split a full run", split, self._behaviour_setter("split_policy")))
-        items.append(self.button("Back", self._to_sched))
-        await self.show(i, "\n".join(lines), *items)
-
-    async def _switch_setter(self, i: discord.Interaction, values: list[str]) -> None:
-        field, v = values[0].split("=", 1)
-        await self._behaviour_setter(field)(i, [v])
-
-    def _behaviour_setter(self, field: str):
-        async def pick(i: discord.Interaction, values: list[str]) -> None:
-            v = values[0]
-            val = None if v == "inherit" else (v == "on" if field in BOOL_WORDS else v)
-            self.entry_put(self.sid, **{field: val})
-            back = ("the raid’s" if field == "split_policy" else self.suggestion(self.sid)[0].lower())
-            await self.sched_behaviour(i, f"{FIELD_WORDS.get(field, field)} → {back if val is None else ('on' if val is True else 'off' if val is False else SPLIT_WORDS[val][0])}.")
-        return pick
-
-    # ---- a new schedule: its kind, then one form
-    async def add_schedule(self, i: discord.Interaction) -> None:
-        opts = [Opt("weekly", "Weekly nights", "e.g. Saturdays 8:00 PM — its own timing and rosters"),
-                Opt("lockout", "Days of each lockout", f"e.g. day 1 of each {lockout_words(self.sview().get('lockout_days') or 7)} lockout"),
-                Opt("pickup", "Pickup template", "never opens by itself; /raid open offers it with a day and time")]
-        await self.show(i, "**Add a schedule** — what kind?", self.select("What kind of schedule?", opts, self.kind_picked), self.button("Back", self.to_times))
-
-    async def kind_picked(self, i: discord.Interaction, values: list[str]) -> None:
-        kind = values[0]
-        name = Field("name", "Name", required=False, max_length=40, placeholder={"weekly": "Alt run", "lockout": "Reset night", "pickup": "Pickup"}[kind],
-                     description="what officers and members read")
-        if kind == "pickup":
-            await self.open_form(i, Form("New pickup template", [name], self._new_submitted("pickup")))
-            return
-        if kind == "lockout":
-            days = int(self.sview().get("lockout_days") or 7)
-            await self.open_form(i, MultiForm("New lockout schedule", [
-                name,
-                Field("days", "Which day(s) of each lockout", [Opt(str(d), f"Day {d}", "the reset day" if d == 1 else None) for d in range(1, min(days, MAX_OPTIONS) + 1)],
-                      description=f"day 1 = the day the {lockout_words(days)} lockout resets"),
-                Field("hour", "Start time — hour", hour_opts(20), description=f"guild time ({self.reg.config.timezone}), 12-hour clock"),
-                Field("minute", "Minutes", minute_opts(5, 0)),
-            ], self._new_submitted("lockout"), multi={"days": days}))
-            return
-        await self.open_form(i, MultiForm("New weekly schedule", [
-            name,
-            Field("nights", "Nights", [Opt(d, n) for d, n in zip(DAYS, DAY_NAMES)], description="one or more nights, same start time"),
-            Field("hour", "Start time — hour", hour_opts(20), description=f"guild time ({self.reg.config.timezone}), 12-hour clock"),
-            Field("minute", "Minutes", minute_opts(5, 0)),
-        ], self._new_submitted("weekly"), multi={"nights": 7}))
-
-    def new_id(self, name: str, kind: str) -> str:
-        base = re.sub(r"[^a-z0-9]+", "-", (name or kind).lower()).strip("-")[:12] or kind
-        from .registry import RESERVED_SCHEDULE_IDS
-
-        # guild-unique (phase 3): another raid's schedules count too
-        taken = {s["id"] for s in self.scheds()} | {r.get("id") for r in self.cur("schedules")} | {s["id"] for s in self.reg.all_schedules()}
-        sid, n = base, 2
-        while sid in taken or sid in RESERVED_SCHEDULE_IDS:
-            sid, n = f"{base[:12]}-{n}", n + 1
-        return sid
-
-    def _new_submitted(self, kind: str):
-        async def done(i: discord.Interaction, v: dict[str, str]) -> None:
-            snapshot = dict(self.draft)
-            name = (v.get("name") or "").strip()[:40]
-            sid = self.new_id(name, kind)
-            entry: dict = {"kind": kind, "name": name or None}
-            try:
-                if kind == "weekly":
-                    h, m = int(v.get("hour") or 0), int(v.get("minute") or 0)
-                    entry["slots"] = sorted(parse_slots([f"{n} {h:02d}:{m:02d}" for n in (v.get("nights") or "").split(",") if n]), key=slot_key)
-                elif kind == "lockout":
-                    entry["days"] = [int(d) for d in (v.get("days") or "").split(",") if d]
-                    entry["time"] = f"{int(v.get('hour') or 0):02d}:{int(v.get('minute') or 0):02d}"
-            except RegistryError as e:
-                await self.refuse_here(i, str(e), self.add_schedule)
-                return
-            self.entry_put(sid, **entry)
-            await self.sched_checked(i, snapshot, sid, f"Added **{self.sched(sid)['name']}**: {self.reg.schedule_label(self.raid, self.sched(sid))}.")
-        return done
-
-    # ---- a lockout schedule's days and time
-    async def lockout_form_open(self, i: discord.Interaction) -> None:
-        s = self.sched(self.sid)
-        days = int(self.sview().get("lockout_days") or 7)
-        h, m = (int(x) for x in (s.get("time") or "20:00").split(":"))
-        await self.open_form(i, MultiForm(f"Days · {s['name']}"[:45], [
-            Field("days", "Which day(s) of each lockout", [Opt(str(d), f"Day {d}", "the reset day" if d == 1 else None, default=d in (s.get("days") or []))
-                                                             for d in range(1, min(days, MAX_OPTIONS) + 1)], description=f"day 1 = the day the {lockout_words(days)} lockout resets"),
-            Field("hour", "Start time — hour", hour_opts(h), description=f"guild time ({self.reg.config.timezone}), 12-hour clock"),
-            Field("minute", "Minutes", minute_opts(5, m)),
-        ], self.lockout_submitted, multi={"days": days}))
-
-    async def lockout_submitted(self, i: discord.Interaction, v: dict[str, str]) -> None:
-        snapshot = dict(self.draft)
-        self.entry_put(self.sid, days=[int(d) for d in (v.get("days") or "").split(",") if d] or None,
-                       time=f"{int(v.get('hour') or 0):02d}:{int(v.get('minute') or 0):02d}")
-        await self.sched_checked(i, snapshot, self.sid, f"{self.sched(self.sid)['name']}: {self.reg.schedule_label(self.raid, self.sched(self.sid))}.")
-
-    # ---- a weekly schedule's run times
-    def sched_slots(self, sid: str) -> list[str]:
-        return list(self.sched(sid).get("slots") or [])
-
-    def put_slots(self, sid: str, slots: list[str]) -> None:
-        self.entry_put(sid, slots=slots)
-
-    def _dropper(self, slot: str):
-        async def drop(i: discord.Interaction) -> None:
-            sid, snapshot = self.sid, dict(self.draft)
-            self.put_slots(sid, [s for s in self.sched_slots(sid) if s != slot])
-            await self.sched_checked(i, snapshot, sid, f"Dropped {self.reg.slot_label(slot)}.")
-        return drop
-
-    def time_form(self) -> MultiForm:
-        a = self._attempt
-        nights = set((a.get("nights") or "").split(","))
-        return MultiForm("Add a run time", [
-            Field("nights", "Nights", [Opt(d, n, default=d in nights) for d, n in zip(DAYS, DAY_NAMES)], description="one or more nights, same start time"),
-            Field("hour", "Start time — hour", hour_opts(int(a.get("hour", 19))), description=f"guild time ({self.reg.config.timezone}), 12-hour clock"),
-            Field("minute", "Minutes", minute_opts(5, int(a.get("minute", 0)))),
-        ], self.time_added, multi={"nights": 7})
-
-    async def add_time_form(self, i: discord.Interaction) -> None:
-        await self.open_form(i, self.time_form())
-
-    async def time_added(self, i: discord.Interaction, v: dict[str, str]) -> None:
-        sid = self.sid
-        nights = [n for n in (v.get("nights") or "").split(",") if n]
-        h, m = int(v.get("hour") or 0), int(v.get("minute") or 0)
-        new = [f"{n} {h:02d}:{m:02d}" for n in nights]
-        cur = self.sched_slots(sid)
-        try:
-            slots = sorted(parse_slots(cur + new), key=slot_key)  # the registry's own check, on a machine-built list
-        except RegistryError as e:
-            self._attempt = dict(v)
-            dup = [s for s in new if s in cur]
-            await self.refuse_here(i, f"{', '.join(self.reg.slot_label(s) for s in dup)} is already a run time." if dup else str(e), self.add_time_form)
-            return
-        if not new:
-            await self.schedule(i, sid)
-            return
-        snapshot = dict(self.draft)
-        self.put_slots(sid, slots)
-        await self.sched_checked(i, snapshot, sid, f"Added {', '.join(self.reg.slot_label(s) for s in new)}.")
 
     # ---- Selection weights
     async def weights_form(self, i: discord.Interaction) -> None:
@@ -953,7 +558,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         for k in WEIGHTS:
             cur = int(self.cur(f"weight_{k}"))
             vals = sorted(set(range(7)) | {cur})
-            fields.append(Field(k, WEIGHT_LABEL[k], [Opt(str(n), f"{n} · {WEIGHT_WORDS.get(n, 'even more')}", default=n == cur) for n in vals],
+            fields.append(Field(k, PAGE_WORDS["priority"][k], [Opt(str(n), f"{n} · {WEIGHT_WORDS.get(n, 'even more')}", default=n == cur) for n in vals],
                                 description=f"how much {WEIGHT_HINT[k]} counts when seats are short"))
         await self.open_form(i, Form("Selection weights", fields, self.weights_submitted))
 
@@ -962,7 +567,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         for k in WEIGHTS:
             if v.get(k):
                 self.put(f"weight_{k}", int(v[k]))
-        await self.checked(i, snapshot, self.weights_form, "Weights → " + " · ".join(f"{WEIGHT_LABEL[k].lower()} {self.cur(f'weight_{k}')}" for k in WEIGHTS) + ".")
+        await self.checked(i, snapshot, self.weights_form, f"{PAGE_WORDS['schedule_fields']['weights']}: " + ", ".join(f"{PAGE_WORDS['priority'][k]} {self.cur(f'weight_{k}')}" for k in WEIGHTS) + ".")
 
     # ---- Lockout & length
     async def length_form(self, i: discord.Interaction) -> None:
@@ -1087,99 +692,61 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self.draft = {}
         await self.finish(i, f"✅ **{name}** is back to the game's defaults.")
 
-    # ---- Save: the diff as sentences, the next three runs from the DRAFT, then ONE write
-    def diff_lines(self) -> list[str]:
-        out = []
-        for _, _, fields in SECTIONS:
-            for f in fields:
-                if f == "schedules" and f in self.draft:
-                    out += self.schedule_diff()
-                elif f in self.draft:
-                    out.append(f"• {FIELD_WORDS[f]}: {self.say(f, self.stored(f))} → **{self.say(f, self.draft[f])}**")
-        return out
+    # ---- Save: the raid's draft as raid_set ops (configops, like the Raids page) on box 19, then ONE write
+    def raid_ops(self) -> list:
+        """The draft as raid_set ops: ops_from_fields for what it can say, and a clear of the notes or the first opening
+        (a value it leaves out) as the op the Raids page's clear is."""
+        from .configops import ConfigOp, ops_from_fields
 
-    def schedule_diff(self) -> list[str]:
-        """The Schedules draft as sentences: added, removed, and per schedule what changed (times, name, rosters, cadence);
-        a schedule whose times or week change with runs already open says they keep theirs (C10, the ops' own sentence)."""
-        from .configops import SCHEDULE_TIME_SETTINGS
-        from .consequences import schedule_keeps_sentence
+        clears = [f for f in ("notes", "first_open") if f in self.draft and not self.draft[f]]
+        ops = ops_from_fields(self.reg, "raid", self.raid, {f: v for f, v in self.draft.items() if f not in clears})
+        return ops + [ConfigOp(op="raid_set", target=self.raid, field=f, value="") for f in clears if self.stored(f)]
 
-        stored_rd, view = self.reg.raid_def(self.raid), self.sview()
-        before = {s["id"]: s for s in schedules_of(stored_rd)}
-        after = {s["id"]: s for s in schedules_of(view)}
-        label = lambda s: self.reg.schedule_label(self.raid, s)  # noqa: E731
+    def box(self) -> dict:
+        """BLOCKING: box 19 for the draft (describe_ops), or RegistryError with the line's refusal."""
+        from .configops import describe_ops
 
-        def words(f: str, v) -> str:
-            if v is None:
-                return "the raid's" if f in ("split_policy", "weights") else "the game's suggestion"
-            if f in BOOL_WORDS:
-                return "on" if v else "off"
-            if f == "split_policy":
-                return SPLIT_WORDS.get(v, (v,))[0]
-            return hours_words(v) + ("" if f == "fill_ask_hours" else " before")
-        out = []
-        for sid, s in after.items():
-            b = before.get(sid)
-            if b is None:
-                out.append(f"• New schedule **{s['name']}**: {label(s)}")
-                continue
-            changes = []
-            if label(b) != label(s):
-                changes.append(f"{label(b)} → **{label(s)}**")
-            if b["name"] != s["name"]:
-                changes.append(f"renamed **{s['name']}**")
-            ob, oa = schedule_def_of(stored_rd, sid)["schedule"]["own"], schedule_def_of(view, sid)["schedule"]["own"]
-            timing = [f for f in ob.keys() | oa.keys() if ob.get(f) != oa.get(f)]
-            changes += [f"{FIELD_WORDS.get(f, f).lower()} {words(f, ob.get(f))} → **{words(f, oa.get(f))}**" for f in timing]
-            if changes:
-                out.append(f"• {b['name']}: " + "; ".join(changes))
-            if label(b) != label(s) or any(f in SCHEDULE_TIME_SETTINGS for f in timing):  # C10: its open runs keep theirs
-                keeps = schedule_keeps_sentence(len(self.reg.schedule_runs_open(sid)))
-                if keeps:
-                    out.append(f"-# {keeps}")
-        out += [f"• Remove schedule **{b['name']}**" for sid, b in before.items() if sid not in after]
-        return out
+        ops = self.raid_ops()
+        if not ops:
+            raise RegistryError("Nothing has changed yet, so there is nothing to save.")
+        d = describe_ops(self.reg, ops, by_id=self.owner_id)
+        err = next((ln.error for ln in d.lines if ln.error), None) or (d.refused[0] if d.refused else None)
+        if err or d.box is None:
+            raise RegistryError(err or "Nothing has changed yet, so there is nothing to save.")
+        self._ops, self._diff = ops, list(d.box.get("diff") or [])
+        return d.box
 
     async def review(self, i: discord.Interaction) -> None:
+        import asyncio
+
+        from .consequences import refusal_box_for
+
         if not self.draft:
             await self.hub(i)
             return
-        eff, err = self.preview()
-        if err:
-            await self.show(i, f"❌ {err}\nYour changes are kept.", self.button("Back to the sections", self.to_hub, discord.ButtonStyle.primary),
-                            self.button("Cancel", self.cancel))
-            return
-        name = eff.get("name", self.raid)
-        scheds = [s for s in schedules_of(eff) if s["kind"] != "pickup" and s.get("active", True)]
-        per = [(s, self.sched_runs(s)) for s in scheds]
-        runs = [t for _s, ts in per for t in ts]
-        lines = [f"Save these changes to **{name}**?", *self.diff_lines(), "",
-                 "Next runs with these rules:" if runs else "-# No run times, so nothing will open."]
-        if len(per) <= 1:
-            lines += [f"• {both_clocks(self.reg, t)}" for t in runs]
-        else:  # the next three runs of every schedule
-            lines += [f"• {s['name']}: " + (" · ".join(self.reg.local12(t) for t in ts) or "none coming up") for s, ts in per]
-        await self.show(i, "\n".join(lines), self.button("Save", self.save, discord.ButtonStyle.success),
-                        self.button("Back to the sections", self.to_hub), self.button("Cancel", self.cancel))
 
-    async def save(self, i: discord.Interaction) -> None:
-        await self.working(i, "Saving…")
-        diff = self.diff_lines()
+        async def refresh() -> dict:
+            return await asyncio.to_thread(self.box)
+        await self.working(i)
         try:
-            self.reg.set_raid_overrides(self.raid, dict(self.draft), i.user.display_name)  # one call, one commit, all or nothing
+            box = await refresh()
         except RegistryError as e:
-            await self.show(i, f"❌ {e}\nNothing was saved; your changes are kept.", self.button("Back to the sections", self.to_hub, discord.ButtonStyle.primary),
-                            self.button("Cancel", self.cancel))
-            return
-        feed = getattr(getattr(i, "client", None), "ops", None)
-        if feed is not None:  # the one audit line of the save (the schedules list is not an op: written by the verb directly)
-            from . import ops as ops_mod
+            box = refusal_box_for(str(e))
+        await self.decide_box(i, box, do=self.save, refresh=refresh, back=self.to_hub)
 
-            name = self.reg.raid_def(self.raid).get("name", self.raid)
-            await ops_mod.audited(feed, self.reg, i.user.display_name, f"{name} raid rules: " + "; ".join(d.lstrip("• ").replace("**", "") for d in diff if not d.startswith("-#")),
-                                  via="discord", by_id=i.user.id)
+    async def save(self, i: discord.Interaction, _v: dict) -> None:
+        from .configops import CONFIG_REV, apply_ops
+
+        res = await apply_ops(self.reg, list(self._ops), by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None),
+                              via="discord", revs={f"{CONFIG_REV}raids:{self.raid}": self.rev})
+        bad = [r["line"] for r in res["results"] if not r["ok"]]
+        if bad or not res["applied"]:  # the draft is kept: Back to the sections shows it again
+            await self.show(i, "❌ " + " ".join(bad or [res.get("error") or "Nothing was changed."]),
+                            self.button("Back to the sections", self.to_hub, discord.ButtonStyle.primary), self.button("Cancel", self.cancel))
+            return
         self.draft = {}
-        await self.finish(i, f"✅ Saved **{self.reg.raid_def(self.raid).get('name', self.raid)}**:\n" + "\n".join(diff))
+        name = self.reg.raid_def(self.raid).get("name", self.raid)
+        await self.finish(i, "\n".join([f"✅ **{name}** is saved.", *getattr(self, "_diff", [])]))
 
 
 class CompTargetsWizard(CompTargetsBlock, OwnerWizard):

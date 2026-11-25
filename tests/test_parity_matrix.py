@@ -64,8 +64,8 @@ SURFACES: dict[str, dict[str, str]] = {
     "policy_append": {"discord": "flow:rule", "web": "POST /api/policy/{doc}/append", "mcp": "policy_append"},  # the one append verb (design §5.45)
     "raid_set": {"discord": "flow:raid_config", "web": "POST /api/admin/raid", "mcp": "raid_set"},
     "raid_reset": {"discord": "flow:raid_config", "web": "POST /api/admin/raid/reset", "mcp": "raid_reset"},
-    "schedule_set": {"discord": "flow:raid_config", "web": "POST /api/admin/raid/schedule", "mcp": "schedule_set"},
-    "schedule_remove": {"discord": "flow:raid_config", "web": "POST /api/admin/raid/schedule/remove", "mcp": "schedule_remove"},
+    "schedule_set": {"discord": "flow:schedule", "web": "POST /api/admin/raid/schedule", "mcp": "schedule_set"},
+    "schedule_remove": {"discord": "flow:schedule", "web": "POST /api/admin/raid/schedule/remove", "mcp": "schedule_remove"},
     "aura_set": {"discord": "flow:aura", "web": "POST /api/admin/aura", "mcp": "aura_set"},
     "family_set": {"discord": "flow:aura", "web": "POST /api/admin/family", "mcp": "family_set"},
     "aura_reset": {"discord": "flow:aura", "web": "POST /api/admin/aura/reset", "mcp": "aura_reset"},

@@ -124,8 +124,22 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        removal clears the later starts back to their default; _tidy drops a start no longer after the one before;
                        flow raid_lineup = EditLineupWizard(LineupBlock, EventWizard) from rc.run_lineup, rc.lineup_fixed → its refusal box at
                        once, Review changes → decide_box(lineup_box, refresh) Save lineup → edit_lineup(rev=)) ·
+                       flows_schedule (phase 5, Task 6, D4: flow `schedule` = ScheduleWizard(LineupBlock, OwnerWizard), officers re-checked per
+                       press; /gm config raid › Schedules hands its screen over (message_id + a `back` that rebuilds the raid's hub with its
+                       draft); the list = Active · Paused by registry.schedule_name + New schedule (kind → a name Form → the same hub, a
+                       create-shaped draft seeded from timing_suggestion / the pickup's, its id new_id(name), never shown); one schedule's hub =
+                       stored_entry(row) as the draft, a 'label: was → now' line per setting in PAGE_WORDS["schedule_fields"] (a pickup hides
+                       what it never uses), its next event or paused_next; Change: Name (prose) · Repeats (run times = day + hour + 15-minute
+                       Form, ✕ to drop; a lockout schedule's days + start) · Lineup (LineupBlock; lineup_done / lineup_back = the hub) · Sheet
+                       timing (editor_options presets, or one setting's hours trimmed to 25) · the four switches (one select field=on|off) ·
+                       Priority (a Form of five selects, "Same as the raid") · the split; Review changes / Pause / Resume / Remove = configops
+                       ops_from_fields (an edit sends only what differs, with config:schedule:<id> read when the hub opened) → describe_ops in
+                       a thread behind working → decide_box(box 13 / 14 / 15 / 16 / 17, refresh = describe again; a line's refusal = its
+                       refusal box, Back to the hub) → apply_ops(revs=) → the ✅ line or the refusal's line) ·
                        flows_config (+ OwnerTransferWizard; AuraWizard = a draft hub per buff, one Save this buff through configops.apply_ops; CompTargetsBlock = the
-                       Minimums block (officers), in RaidConfigWizard (officers; no sheet timing) and in CompTargetsWizard = /roster comp; ChannelsWizard
+                       Minimums block (officers), in RaidConfigWizard (officers; no sheet timing; Schedules = the hand-off to flow `schedule`;
+                       Review changes = raid_ops (ops_from_fields "raid" + a notes / first opens clear) → decide_box(box 19, refresh) → apply_ops
+                       with config:raids:<id>; set_raid_overrides only previews) and in CompTargetsWizard = /roster comp; ChannelsWizard
                        (/gm config channels: ChannelSelect / — not set — → draft → Review → apply_ops), ChannelSetWizard (the eight shortcuts' one confirm),
                        OfficersWizard (/gm config officers: RoleSelect, Map <legacy name>…), CompanionsWizard (/gm config companion: the hub → Issue… label
                        modal → member picker → decide → the DM; Revoke… → decide), ArmoryGuildWizard (/gm config armory = flow armory_guild, §5.1: unlinked → the name

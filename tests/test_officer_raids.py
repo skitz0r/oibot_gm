@@ -321,7 +321,7 @@ def test_the_raid_wizard_writes_one_audit_line_per_save_and_reset(reg, store, mo
         await h.pick("Pick a raid", RID)
         await h.pick("Pick a section", "notes")
         await h.submit(h.modal, notes="Bring fire resistance.")
-        await h.press("Save")
+        await h.press("Review changes")
         await h.press("Save")
         assert "✅" in h.text
         await FLOWS["raid_config"](h.command(), reg)
@@ -331,4 +331,4 @@ def test_the_raid_wizard_writes_one_audit_line_per_save_and_reset(reg, store, mo
         assert "✅" in h.text
     asyncio.run(go())
     assert len(client.ops.lines) == 2, client.ops.lines
-    assert "Barrow Deeps raid rules: Notes" in client.ops.lines[0] and RID not in reg.config.raids
+    assert "Bring fire resistance." in client.ops.lines[0] and RID not in reg.config.raids

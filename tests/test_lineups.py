@@ -339,13 +339,11 @@ def test_the_raid_wizard_keeps_a_third_raid_it_does_not_show(reg, monkeypatch):
     h = Harness(reg)
 
     async def go():
-        await FLOWS["raid_config"](h.command(), reg, raid=H, section="times")
-        if "Pick a schedule" in h.selects():
-            await h.pick("Pick a schedule", "tue")
-        await h.pick("Change this schedule", "name")
+        await FLOWS["raid_config"](h.command(), reg, raid=H, section="times")  # the schedule wizard takes it over
+        await h.pick("Pick a schedule", "tue")
+        await h.pick("Change", "name")
         await h.submit(h.modal, name="Main night")
-        await h.press("Back to the sections")
-        await h.press("Save")
+        await h.press("Review changes")
         await h.press("Save")
     run(go())
     s = reg.schedule_entry("tue")
