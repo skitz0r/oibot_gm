@@ -326,6 +326,8 @@ nights). Setting one timing value of a schedule back to the game's suggestion: p
 `schedule_set`. A start at a minute that isn't a quarter hour (the site's pickers step by 15 minutes): plain text or
 MCP. On the Raids page, a minimum's reason (*why*), a raid's notes and its split policy: `/roster comp` or
 `/gm config raid`, plain text, MCP `raid_set`.
+On the Events page and the Test bench, every pick in a row's **⋮** (a callout with its note, a pin, *Keep off the roster*,
+Confirm or Can't for someone, a fill answer) asks in the same box as every other press: the bot's own sentences, then its verb.
 Me, Events, Schedules, Members, Loot, the Loot log, Ops, Agents, Raids, Auras and Config update live the moment something changes (a press on a sheet, a drag by another
 officer, a change in Discord); a 45-second refresh is only the fallback when the live connection drops. A page in edit mode is never
 reloaded under you: the Config page's Settings say *Someone changed the settings since you opened them* with **Reload (keeps your
@@ -1527,7 +1529,7 @@ ahead. What the bot would refuse — a
 spec the character doesn't play, a switch for someone rostered on the locked roster — is that one sentence with
 **Back** alone. On your own record it is your own answer, so the screen promises no notice. On
 the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
-list, and **Answer for someone** beside the run's headcount does it for anyone who hasn't answered yet (its Member list leaves out everyone with an answer on the sheet): the bot's box with *Member*, *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays), each pick shown in the bot's sentences before **Record answer**; a callout stays on the row's ⋮. Plain text ("Kestrel can't make it tonight,
+list, and **Answer for someone** beside the run's headcount does it for anyone who hasn't answered yet (its Member list leaves out everyone with an answer on the sheet): the bot's box with *Member*, *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays), each pick shown in the bot's sentences before **Record answer**; a callout stays on the row's ⋮, in the same box with a *Note for the officers* field. Plain text ("Kestrel can't make it tonight,
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
 `callout=false`) do the same. Whatever an officer records for someone reaches them as a **notice** on their Me page and
 in `/me view` ("Jon set you to No thanks for Barrow Deeps Tue 7:30 PM"), and an open DM card of theirs is edited to

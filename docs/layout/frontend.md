@@ -18,7 +18,8 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        in 15-minute steps; StepNodes and the connectors) + LineupPicture.tsx (read-only), components/events/* (EventBoard = the raid
                        switch, Rosters / Placed / Short and BoardView variant="event" over the server's picture — working dimmed, failed with its
                        sentence, Undo my moves greyed with the server's reason; RoleSwitches; SignupsSection (counts that unfold, the row ⋮ through the
-                       answer box); EventDetails; ActivitySection; EventMore = the ⋯ More menu: Suggest… / Fill seats…, Remind, Pause / Resume, Re-post
+                       answer box; board/MemberMenu's useRecord = every other ⋮ pick — callouts with a note field, pins, the confirm / fill
+                       answers — through POST /api/admin/action preview → the server's box → seen, the Test bench's SheetCard too); EventDetails; ActivitySection; EventMore = the ⋯ More menu: Suggest… / Fill seats…, Remind, Pause / Resume, Re-post
                        the sheet…, Split strategy…, Loot, the asks out, End, Reopen — Remind and End print the server's box (remind_box, end_box) and
                        press with `seen`; a locked board's Move to / swap / take off (BoardView) asks POST /move's preview box and presses with `seen`
                        (a 409 draws the fresh box and board); New event / New schedule count edits that differ from their seed (the leave guard); RescheduleBox.tsx (useRescheduleBox: the picker inside box 3, Locks only while open); shared.tsx EventHead;

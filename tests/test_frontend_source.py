@@ -1232,14 +1232,12 @@ def test_the_event_board_draws_the_servers_picture_and_never_fights_a_drag():
 
 def test_the_events_page_fix_round_one():
     """Phase 4, Task 8 fix round 1. (1) The Signups row ⋮ sends Join / Bench / No thanks through the SERVER's answer box
-    (useAnswerBox, the member fixed); MemberMenu's page-made confirm (useRecord) stays only for callouts, pins and the
-    confirm / fill answers — deferred to the Discord-confirms phase — and the Rosters page and the Test bench pass no
-    `onAnswer`, so they keep the old menu at this commit. (2a) Reschedule starts from the server's start_day /
+    (useAnswerBox, the member fixed); the rest of the menu (useRecord) asks in the server's box since phase 5, Task 8
+    (test_the_row_menu_prints_the_servers_box), and the Test bench passes no `onAnswer`. (2a) Reschedule starts from the server's start_day /
     start_time. (2d) Answer for someone stays mounted while live, the rows' box lives on the section, and EventPane keeps
     the live view while a box is open. (2e) the latest GET wins. (2f) the "changed" line only for a 409's fresh box."""
     menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
-    assert "onAnswer && ANSWERS.has(it.a.key) ? onAnswer(it.a.key, it.character) : record(uid, name, list, it)" in menu
-    assert "phase 5" in (SRC / "components" / "board" / "MemberMenu.tsx").read_text(), "the deferral is said in a comment"
+    assert "onAnswer && ANSWERS.has(it.a.key) ? onAnswer(it.a.key, it.character) : record(uid, it)" in menu
     assert "meta.classes" not in menu and "c.plays" in menu, "only the specs the server takes"
     sign = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
     assert "useAnswerBox(ev.key, onDone)" in sign and "onAnswer={answerFor(p)}" in sign and "{answerDialog}" in sign
@@ -1256,6 +1254,18 @@ def test_the_events_page_fix_round_one():
     assert "setChanged(fresh.verb !== null)" in confirm and "setChanged(true); } else close(true)" not in confirm
     assert '<Text fw={700} px={7} className={css.countZero}>{n}</Text>' in sign, "a 0 is plain text, never a greyed button"
     assert "const first = await preview(now);\n      setBusy(false);" in menu, "the button behind an open box is not busy"
+
+
+def test_the_row_menu_prints_the_servers_box():
+    """Phase 5, Task 8: the row ⋮ menu's callouts, pins, Keep off the roster and the confirm / fill answers ask in the
+    SERVER's box (consequences.member_action_box through POST /api/admin/action `preview`) and write with `seen` — on the
+    Events page and on the Test bench's SheetCard alike (it passes no `onAnswer`). No page-made title, message or verb."""
+    menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
+    rec = menu[menu.index("function useRecord"):menu.index("export type MoveTarget")]
+    assert "useConfirmBox(" in rec and "preview: true" in rec and "seen: fp" in rec
+    assert "useConfirm(" not in menu and "confirmLabel" not in menu and "message: consequence" not in menu
+    assert 'it.a.key === "callout" ? <NoteField' in rec and "<Textarea" in menu, "a callout's note is a field inside the box"
+    assert "rev: list.rev" not in menu, "the box's fp is the check, never the list's older rev"
 
 
 def test_the_event_board_fix_round_one():

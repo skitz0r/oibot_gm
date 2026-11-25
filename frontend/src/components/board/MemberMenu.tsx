@@ -1,18 +1,17 @@
 import { useEffect, useState } from "react";
-import { ActionIcon, Button, Group, Loader, Menu, Modal, Select, Stack, Text } from "@mantine/core";
+import { ActionIcon, Button, Group, Loader, Menu, Modal, Select, Stack, Text, Textarea } from "@mantine/core";
 import { IconArrowsMove, IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, IconUserPlus } from "@tabler/icons-react";
 import { api, type Box, type MemberAction, type MemberActions, type Person } from "../../api";
 import { fail, ok } from "../Page";
-import { useConfirm } from "../ConfirmModal";
 import { pageWords, useConfirmBox } from "../ConfirmBox";
 import { boxOf } from "../events/shared";
 import css from "./board.module.css";
 
 /** Officers record anything a member can do on a run, for them (design B5) — the SAME filtered list the Discord SetWizard
  *  shows (GET /api/admin/actions → rc.member_actions): their open Confirm ask, their fill ask, Record a callout… (with a note),
- *  Join "as <alt>", Bench, No thanks, the pins. Each pick shows the server's consequence sentence (who is told and how — a
- *  notice, their open DM card edited; never a new DM) and writes through POST /api/admin/action with the list's `rev`: a
- *  member who changed meanwhile is a 409 naming what they changed to, nothing written. */
+ *  Join "as <alt>", Bench, No thanks, the pins. Each pick prints the SERVER's box (who is told and how — a notice, their
+ *  open DM card edited; never a new DM) and writes through POST /api/admin/action with the box's fp as `seen`: a member
+ *  who changed meanwhile brings the fresh box back, nothing written. */
 
 type Item = { a: MemberAction; character: string | null; label: string };
 
@@ -29,18 +28,37 @@ function items(acts: MemberAction[]): Item[] {
 const DANGER = new Set(["callout", "confirm_no", "fill_no", "no_thanks"]);
 const ICON: Record<string, React.ReactNode> = { pin_in: <IconPin size={14} />, pin_out: <IconUserOff size={14} />, unpin: <IconPinnedOff size={14} />, join: <IconUserPlus size={14} /> };
 
-/** Pick → the consequence (+ the note box for a callout) → the write: the row ⋮ menu. */
+/** A callout's note, inside the box: the officers' own words, never on the public sheet. `into` keeps what is typed. */
+function NoteField({ into }: { into: { note: string } }) {
+  const [note, setNote] = useState(into.note);
+  return <Textarea label="Note for the officers (optional)" maxLength={300} autosize minRows={2} value={note}
+    onChange={(e) => { into.note = e.currentTarget.value; setNote(e.currentTarget.value); }} />;
+}
+
+/** Pick → the SERVER's box (consequences.member_action_box through POST /api/admin/action `preview`; a callout adds
+ *  its note field) → the write with the fp on screen as `seen`: a member who changed meanwhile brings the fresh box
+ *  back (409), a pick that no longer applies is the refusal box (400). The live topics refresh an open box. */
 function useRecord(run: string, onDone: () => Promise<void> | void) {
-  const [ask, dialog] = useConfirm();
-  async function record(uid: string, name: string, list: MemberActions, it: Item) {
-    const consequence = (it.character && it.a.by_character?.[it.character]) || it.a.consequence;
-    const r = await ask({ title: `${it.label} — ${name}?`, message: consequence, confirmLabel: it.a.key === "callout" ? "Record the callout" : it.label.replace(/…$/, ""),
-      color: DANGER.has(it.a.key) ? "red" : undefined, note: it.a.needs === "note" ? { label: "Note for the officers (optional — never on the public sheet)", maxLength: 300 } : undefined });
-    if (!r) return;
+  const [ask, dialog] = useConfirmBox(["run:", "member"]);
+  async function record(uid: string, it: Item) {
+    const body = { run, member: uid, action: it.a.key, character: it.character };
+    const preview = async (): Promise<Box> => {
+      try { return (await api.post<{ box: Box }>("/api/admin/action", { ...body, preview: true })).box; } catch (e) { const b = boxOf(e); if (b) return b; throw e; }
+    };
     try {
-      const x = await api.post<{ message: string }>("/api/admin/action", { run, member: uid, action: it.a.key, character: it.character, note: typeof r === "object" ? r.note : null, rev: list.rev });
-      ok(x.message);
-    } catch (e) { fail(e); } finally { await onDone(); }
+      const typed = { note: "" };
+      let said = "";
+      const done = await ask({
+        box: await preview(),
+        fields: it.a.key === "callout" ? <NoteField into={typed} /> : undefined,
+        refresh: preview,
+        act: async (fp) => {
+          try { said = (await api.post<{ message: string }>("/api/admin/action", { ...body, note: typed.note.trim() || null, seen: fp })).message; return null; }
+          catch (e) { const b = boxOf(e); if (b) return b; throw e; }
+        },
+      });
+      if (done) { ok(said); await onDone(); }
+    } catch (e) { fail(e); }
   }
   return [record, dialog] as const;
 }
@@ -53,9 +71,8 @@ export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?
  *  opened, so it is always the member's state now. `moves` (the board's chips): "Move to…" first — every group with room
  *  and Not placed / Not rostered — the board's tap-and-keyboard path (a drag needs a mouse; design §5.56 phase 3).
  *  `onAnswer` (the Events page): Join / Join as… / Bench / No thanks open the SERVER's answer box (useAnswerBox, the member
- *  fixed) instead of the page-made confirm below. Callouts, pins and the confirm / fill answers keep useRecord's confirm
- *  for now — deferred to the Discord-confirms phase (phase 5), as is the Test bench, which passes no
- *  `onAnswer`. */
+ *  fixed) with its fields. Callouts, pins and the confirm / fill answers ask in the server's box too (useRecord), and so
+ *  does every pick on the Test bench, which passes no `onAnswer`. */
 export function MemberMenu({ run, uid, name, onDone, moves, onAnswer }: {
   run: string; uid: string | null | undefined; name: string; onDone: () => Promise<void> | void; moves?: MoveTarget[];
   onAnswer?: (action: string, character: string | null) => void;
@@ -82,7 +99,7 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer }: {
           {uid && list && list.actions.length === 0 && <Menu.Item disabled>{pageWords().nothing_applies}</Menu.Item>}
           {uid && list && items(list.actions).map((it) => (
             <Menu.Item key={`${it.a.key}:${it.character || ""}`} leftSection={ICON[it.a.key]} color={DANGER.has(it.a.key) ? "red" : undefined}
-              onClick={() => (onAnswer && ANSWERS.has(it.a.key) ? onAnswer(it.a.key, it.character) : record(uid, name, list, it))}>{it.label}</Menu.Item>
+              onClick={() => (onAnswer && ANSWERS.has(it.a.key) ? onAnswer(it.a.key, it.character) : record(uid, it))}>{it.label}</Menu.Item>
           ))}
         </Menu.Dropdown>
       </Menu>
