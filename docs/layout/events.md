@@ -126,7 +126,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Role switches: event_switches(reg, rs, first, viewer=) → {short [{raid, roles, why}], rows, revs} composed from each live raid's
                        role_plan (before the lock a row merges across raids — switch_raids —, after it is its raid's own, the officer's own row left
                        out); switch_box_for → (box, button Switch | Answer for them | Ask); _short_why; spec_role; set_signup(spec=) refuses SPEC_SEATED
-                       once the member holds a seat on the locked roster (every surface); pick_asks / send_batch(seats=); member_state_rev
+                       through seated_switch_refusal(reg, ev, m, c, spec) = THE guard (member_action_box reads it too): an explicit spec of
+                       ANOTHER ROLE than the seat on the locked roster (same role allowed; another character's own spec = the reseat);
+                       no spec on the seated character keeps the signup's switched spec; a row whose box refuses is left out (every surface); pick_asks / send_batch(seats=); member_state_rev
                        The final fix wave (§5.67 phase 4): earlier_counts(reg, rs, ev) = a later raid's `earlier` while a raid before it is OPEN
                        (Preview lock on a later raid solves the earlier raids through event_board_preview; BLOCKING); open_schedule matches a
                        schedule's night at ANY distance (never a one-off beside the run the schedule opens later); open_refusal(reg, rs, instance,
@@ -214,6 +216,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        stay out)
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
+                       event_url(reg, ev) = THE address of an event on the site ({web}/app/events/<first raid's key>?g=<guild>, None off http(s)):
+                       the sheet's title in every state, Open the board on the health / lock cards, Open the event on the closed card, the test bench's
+                       sandbox line — no Discord module builds an event address by hand (tests/test_event_links.py);
                        run_times, run_label/run_title/clock12, gaps_text/ask_line, leftover_block, split_away (the sheet's Away row); BotProto = what the mixins expect from the client;
                        the loot council: loot_layout (session card) / batch_layout + loot_chunks (proposal cards) / item_layout (the ephemeral item card) /
                        loot_closed_layout / loot_stub_layout, loot_status_text + presence_line (the companion chip), why_not_text;

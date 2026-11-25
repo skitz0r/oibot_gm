@@ -206,8 +206,8 @@ to read before you press.
   (newcomers start here), *Register / plan my main*, *Add an alt*, *My status*. Anyone can press them. The card
   says when applications are closed and shows the recruitment note; the bot edits it in place when those change.
 - **Signup channel** — one sheet per run. An **open** sheet has **Join / Bench / No thanks** buttons (Bench =
-  call me if you need me). The sheet's title is a link to that run's row on your Me page, so you can answer on the
-  site from Discord. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
+  call me if you need me). The sheet's title is a link to that event on the site: officers land on its event page,
+  everyone else on their own row for it on the Me page, so you can answer on the site from Discord. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
   joiners grouped by class with real class/spec/role icons, Bench and No thanks as member rows, lock and confirm
   times; it updates in place on every answer, and every live sheet is redrawn when the bot starts, so a change to
   the sheet's look reaches sheets already posted. With more than one character, Join, Bench and No thanks each ask which
@@ -276,7 +276,7 @@ its own icon, name, about text, **Join our Discord** (its own invite) and **Log 
 in, a **server selector** at the top of the left rail lists the servers you can use (you're in that Discord server, or
 you own its guild) with your role in each; pick one and every page, save and live update is for that server only. Your
 choice is remembered in this browser. Links the bot posts in Discord (a sheet's title, Open the board, Members, Raid rules) open the
-right server. If you leave the server you had selected, the site opens on another one you're in and tells you so; if
+right server, and after a Discord login you land on the page the link named. If you leave the server you had selected, the site opens on another one you're in and tells you so; if
 you're in none of them you get the not-a-member page with every server's Join button. A link to a server you aren't
 in opens one you are in, with a note saying so. If Discord doesn't answer whether you're in a server (it happens for
 a few seconds now and then), the site says so with a **Try again** button rather than switching you to the other
@@ -887,9 +887,9 @@ one before it ends (that raid's length: a 6:30 PM Hyjal Summit of 3 hours is fol
 follow-ons, in order (a fifth is refused: *"A run holds at most 4 raids."*). Each is another raid, never one twice in a
 run, and each starts after the one before it (*"Each raid starts after the one before it."*). A schedule of three or four raids is made on the
 site's Schedules page (its editor is the lineup builder) or over MCP (`schedule_set` with `fields = {lineup: [{raid,
-rosters}, …]}`, the first raid first); Discord and plain text set the second raid only. The site's **New event** page and the Schedules page's editor take the
+rosters}, …]}`, the first raid first) or in Discord (`/gm config raid` › *Schedules* › *Change* › *Lineup*, up to four raids); plain text sets the second raid only. The site's **New event** page and the Schedules page's editor take the
 whole lineup, up to four raids, and at four they say *"A run holds at most 4 raids."* in place of the empty step; a
-schedule's Save there writes the whole lineup. Editing a schedule in Discord or plain text changes only the lead and
+schedule's Save there, and in Discord, writes the whole lineup. Editing a schedule in plain text changes only the lead and
 the second raid; the raids after them stay as they are, and clearing the second raid moves the third up into its place. Two runs at the same time each keep their
 own follow-ons. A schedule never opens a night on which a follow-on would start before that raid first opens: the
 schedule's next runs skip it. An ad hoc Open on such a night says so before you press (*"Barrow Deeps first opens Wed 9
@@ -1515,11 +1515,14 @@ when an officer presses Apply on your request for you.
 **Officers record anything a member can do, for them, from one place per surface.** In Discord: `/raid set
 member:<someone>` (optionally `what:` to go straight to one thing) picks the run first — only runs where something
 applies to that person, never a test run (answer for puppets with `/gm test answer` or the Test bench) — then offers **only what applies to them on that run**, in the members' own words, raid-night
-first: *Confirm for them* / *Can't make it for them* (their open Confirm ask) · *Confirm their fill* / *No to their fill*
+first: *Confirm for them* / *Can't make it for them* (their open Confirm ask; the box's title names it) · *Confirm their fill* / *No to their fill*
 (their open seat or swap question) · *Record a callout…* (with an optional note; before lock it is No thanks + the
 callout) · *Join* (as which character, "as <alt>") · *Bench* · *No thanks* · *Pin to roster* / *Keep off the roster* /
-*Unpin* (open sheet). *Join* and *Bench* then ask **Plays which spec?** — the character's spec is picked already, and
-another spec it plays is a role switch (below). The confirm screen is the bot's box, the same one the site's ⋮ menu
+*Unpin* (open sheet). *Join* and *Bench* then ask **Plays which spec?** — only the specs that character plays (its spec,
+its offspec, an extra role's; a character with one spec skips the question), the one it plays now picked already, and
+another spec it plays is a role switch (below). For someone rostered on a locked run a spec of the same role is fine
+(their seat stays a healer seat); *Play another character* on a character of another role moves their seat to that
+role, and the box says so first (*"Kestrel plays Thornpaw and moves from healer to melee on the roster."*). The confirm screen is the bot's box, the same one the site's ⋮ menu
 shows: what happens and who is told — *"Kestrel goes to No thanks for Barrow Deeps on Tue 9 Dec. No callout is
 recorded. They see it on their Me page."* — under a title that names them (*Record a callout for Kestrel?*, *Keep
 Kestrel off the roster?*; an answer is *Answer for someone*), and its button says what it does (*Record answer*,
@@ -1558,7 +1561,7 @@ you opened it, the press is refused and the fresh list shows. The spec must be o
 offspec or an extra role's); anything else is refused (*"Nyx doesn't play Fire."*). In Discord, `/raid set` → *Join*
 (or *Bench*) → **Plays which spec?** does it. Plain text ("set Nyx to Join as Holy"), **Answer for someone** and MCP
 `set_answer` with `spec` do the same before the lock; once the run is locked,
-someone who holds a seat is never switched that way (*"Nyx holds a seat on the locked roster, so use Switch under the
+someone who holds a seat is never switched to another role that way (*"Nyx holds a seat on the locked roster, so use Switch under the
 event's Role switches to ask them to play Holy."*) — `fill_seats` with `seats` sends one seat's ask instead. Every
 switch is in the run's log and the ops feed with who made it.
 
@@ -2090,8 +2093,8 @@ Change it on the schedule."* answers a try on the raid, on every surface). *Mini
 (a role's old *tank min* in plain text is answered *"Set a role's minimum as a minimum: at least 3 tanks."*). The
 other changes collect in a draft; **Review changes** shows the Raids page's own Save box (*"Save Barrow Deeps?"*, each
 change as *Rank: 3 → 5*, and when it takes effect) and **Save** writes them as one change. If another officer saved
-the raid meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."* and a Save then is refused with
-your draft kept. The same settings are on the Raids and Schedules pages and in plain text (`raid_set`, `schedule_set`).
+the raid meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."*, nothing is
+written and your draft is kept; **Save** on that box saves it. **Reset** shows the Raids page's own Reset box (*"Reset Barrow Deeps?"*, what goes back to the game's defaults), red, before it does. The same settings are on the Raids and Schedules pages and in plain text (`raid_set`, `schedule_set`).
 **Schedules** in Discord: `/gm config raid` › *Schedules* opens the schedule wizard on that raid's schedules (its
 Back returns to the raid's sections with your draft as it was). The list is grouped **Active** and **Paused**, each
 schedule by its name and when it repeats; an empty one says *"No schedule runs Barrow Deeps yet. Add one with New
@@ -2105,11 +2108,12 @@ timing (a preset — Standard, Short notice, Same week — or one setting's hour
 picks, each a number or *Same as the raid*); the split. Each change shows as *was → now* until you save. **Review
 changes** shows the Schedules page's Save box (*"Save Alt run?"* with each change and what it reaches: *"The change
 starts with the Tue 15 Dec event. The Tue 8 Dec event is already open and keeps its timing."*); **Pause**, **Resume**
-and **Remove** show theirs (Remove's is red: a removed schedule cannot be brought back). **New schedule** asks the kind
+and **Remove** show theirs (Remove's verb is red: a removed schedule cannot be brought back). Pause, Resume, Remove or
+Back with changes not saved first ask *Leave without saving?* with **Discard edits** and **Keep editing**. **New schedule** asks the kind
 (Weekly, Day N of each lockout, Opened by an officer) and a name, then opens the same screen; its box is *"Create Alt
 run?"*. A value the schedule refuses (a reminder after the lock) is the box's one sentence with Back, the draft kept.
-If someone changed the schedule meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."* and a Save
-then is refused, nothing written.
+If someone changed the schedule meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."*,
+nothing is written and your changes are kept; pressing the verb on that box saves them.
 On the site: the **Schedules** page lists each raid's schedules in words with the next three runs (a
 paused one: *Paused — nothing opens; it would next run …*); officers add, edit (the editor opens in place of the
 schedule's row: weekday + 12-hour time pickers, lockout-day picks; every timing field shows the schedule's own value
