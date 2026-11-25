@@ -5529,7 +5529,7 @@ class Registry:
                 entry["nudge_hours_before"] = full["nudge_hours_before"]
         self._write_schedules(instance, stored, message=f"schedule {sid} ({instance}): {', '.join(fields)} (by {by})")
         after = next((s for s in self.schedules(instance) if s["id"] == sid), None) or {"id": sid}
-        return [f"{rd.get('name', instance)} · {after.get('name') or sid}: " + ("new schedule, " if before is None else "") + self.schedule_label(instance, after)]
+        return [f"{rd.get('name', instance)} · {schedule_name(after)}: " + ("new schedule, " if before is None else "") + self.schedule_label(instance, after)]
 
     def schedule_regulars(self, sid: str) -> list[tuple[Member, RegisteredCharacter]]:
         """Everyone holding a regular spot on schedule `sid` on any character (retired ones too) — what removing the

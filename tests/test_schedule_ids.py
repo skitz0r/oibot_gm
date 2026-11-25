@@ -529,3 +529,12 @@ def test_a_refused_new_schedule_leaves_the_aliases_as_they_were(reg):
 def test_an_applicants_stray_key_goes_at_the_first_lift(old_store_with, open_registry):
     store = old_store_with(OI, applicants={ANA: ("Ana", ["main", "barrow_deeps:default"])})
     assert open_registry(store).applicants[ANA].schedules == ["barrow-deeps"]
+
+
+def test_an_unnamed_schedules_applied_line_names_its_kind_never_its_id(reg):
+    """Final fix 5: Discord's new-schedule form may leave the name empty; the applied line then reads the kind's name
+    (registry.schedule_name), never the id."""
+    lines = reg.set_schedule("zq9", {"kind": "weekly", "slots": "Wed 19:30"}, "t", raid=RID)
+    assert lines and lines[0].startswith(f"{reg.raid_def(RID)['name']} · {R.SCHEDULE_NAMES["weekly"]}: new schedule")
+    assert "zq9" not in lines[0]
+    assert "zq9" not in reg.set_schedule("zq9", {"slots": "Thu 19:30"}, "t")[0]
