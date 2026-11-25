@@ -175,7 +175,7 @@ export function RegularsSection({ view, meta, onReload }: { view: ScheduleView; 
                 </Tooltip>
                 <ShortIcons meta={meta} short={f.short} />
                 {f.away_words && <Tooltip label={f.away.join(", ")}><Text span size="sm" c="dimmed">{f.away_words}</Text></Tooltip>}
-                {!f.key && f.can_open && Object.keys(f.short).length > 0 && <Button size="compact-sm" variant="default" loading={opening === f.occurrence} onClick={() => openEarly(f)}>Open this run early</Button>}
+                {!f.key && f.can_open && Object.keys(f.short).length > 0 && <Button size="compact-sm" variant="default" loading={opening === f.occurrence} onClick={() => openEarly(f)}>Open this event early</Button>}
               </Group>
               {!f.key && !f.can_open && f.why && Object.keys(f.short).length > 0 && <Text size="xs" c="dimmed">{f.why}</Text>}
               {said[f.occurrence] && <Text size="xs" c="dimmed">{said[f.occurrence]}</Text>}

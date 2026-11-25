@@ -23,7 +23,7 @@ function slotKey(slot: string): number {
 /** Weekly run slots, picked — never typed. The value is the machine form the API stores ('Tue 19:30'); every label is
  *  12-hour ('Tue 7:30 PM'). Chips carry an × to remove; the add row is a weekday select and a select of 15-minute steps
  *  (the Clock rule: QUARTER_HOURS, labelled with clock12). `empty` = what the list says while it holds no slot. */
-export function SlotEditor({ value, onChange, label = "Run times", description, empty = "No run times yet. Pick a day and a time, then Add." }: { value: string[]; onChange: (v: string[]) => void; label?: string; description?: string; empty?: string }) {
+export function SlotEditor({ value, onChange, label = "Event times", description, empty = "No event times yet. Pick a day and a time, then Add." }: { value: string[]; onChange: (v: string[]) => void; label?: string; description?: string; empty?: string }) {
   const [day, setDay] = useState<string | null>("Tue");
   const [time, setTime] = useState<string | null>("19:30");
   const hm = /^(\d{1,2}):(\d{2})/.exec(time || "");

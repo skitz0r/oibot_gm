@@ -137,9 +137,9 @@ export function ConfigPage({ meta }: { meta: Meta }) {
             <Recruitment channels={data.guild_channels} />
 
             <Card>
-              <CardHeader title="Test bench" hint="rehearse the whole cycle with puppet members" action={data.test_bench.members > 0 ? <Badge color="yellow" variant="light">{data.test_bench.members} test members · {data.test_bench.runs.length} test run{data.test_bench.runs.length === 1 ? "" : "s"}</Badge> : <Badge color="gray" variant="outline">idle</Badge>} />
+              <CardHeader title="Test bench" hint="rehearse the whole cycle with puppet members" action={data.test_bench.members > 0 ? <Badge color="yellow" variant="light">{data.test_bench.members} test members · {data.test_bench.runs.length} test event{data.test_bench.runs.length === 1 ? "" : "s"}</Badge> : <Badge color="gray" variant="outline">idle</Badge>} />
               <Box p="md">
-                <Text size="sm">The test bench lives on the Members page: seed or compose puppets, open a test run, answer as them and follow the live feed. <Anchor component={Link} to="/members#test-bench">Open the test bench</Anchor> · in Discord: <Code>/gm test</Code>.</Text>
+                <Text size="sm">The test bench lives on the Members page: seed or compose puppets, open a test event, answer as them and follow the live feed. <Anchor component={Link} to="/members#test-bench">Open the test bench</Anchor> · in Discord: <Code>/gm test</Code>.</Text>
               </Box>
             </Card>
 
@@ -308,7 +308,7 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
               {cons.map((c, i) => <Text key={`c${i}`} size="xs" c="yellow">⚠ {c}</Text>)}
               {cons.length > 0 && (
                 <SegmentedControl size="xs" mt={4} value={tzRuns} onChange={(v) => setTzRuns(v as "keep" | "move")}
-                  data={[{ value: "keep", label: "Keep runs at their real moment" }, { value: "move", label: "Move open runs with the clock" }]} />
+                  data={[{ value: "keep", label: "Keep events at their real moment" }, { value: "move", label: "Move open events with the clock" }]} />
               )}
             </Stack>
           )}

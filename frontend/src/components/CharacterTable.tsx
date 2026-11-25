@@ -172,7 +172,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
       </Table.ScrollContainer>
       {editing && (
         <Group p="sm" px="md" justify="flex-end" gap="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)", background: "var(--mantine-color-slate-6)" }}>
-          <Text size="sm" c="dimmed" mr="auto">Nothing changes until you save, and the bot says first what it does to your runs.</Text>
+          <Text size="sm" c="dimmed" mr="auto">Nothing changes until you save, and the bot says first what it does to your events.</Text>
           <Button variant="default" size="sm" onClick={() => { setEditing(false); onChanged(); }}>Cancel</Button>
           <Button size="sm" loading={busy === "save"} onClick={save}>Save changes</Button>
         </Group>

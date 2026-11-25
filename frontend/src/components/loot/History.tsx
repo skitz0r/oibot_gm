@@ -26,7 +26,7 @@ export function History() {
       <CardHeader title="Ended councils" hint="newest first" />
       <Table.ScrollContainer minWidth={620}>
         <Table highlightOnHover>
-          <Table.Thead><Table.Tr><Table.Th>Run</Table.Th><Table.Th>Awards</Table.Th><Table.Th>Overrides</Table.Th><Table.Th>Left undecided</Table.Th><Table.Th>Ended</Table.Th></Table.Tr></Table.Thead>
+          <Table.Thead><Table.Tr><Table.Th>Raid</Table.Th><Table.Th>Awards</Table.Th><Table.Th>Overrides</Table.Th><Table.Th>Left undecided</Table.Th><Table.Th>Ended</Table.Th></Table.Tr></Table.Thead>
           <Table.Tbody>
             {rows.length === 0 && <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="dimmed">No council has ended yet.</Text></Table.Td></Table.Tr>}
             {rows.map((r) => (

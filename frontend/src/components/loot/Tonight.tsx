@@ -36,11 +36,11 @@ export function Tonight({ meta, goItems }: { meta: Meta; goItems: () => void }) 
         <Text size="xs" c="dimmed" ml="auto">{data.log.text}</Text>
       </Group>
       {data.feed_waiting && (
-        <Alert color="yellow" title={`${data.feed_waiting.count} drop(s) arriving with no run live`}>
-          From {data.feed_waiting.characters.join(", ")}'s log — held for 10 minutes. Open the council on tonight's run (or lock it first) and they go in; anything still held after that is listed in the ops channel as not recorded.
+        <Alert color="yellow" title={`${data.feed_waiting.count} drop(s) arriving with no live event`}>
+          From {data.feed_waiting.characters.join(", ")}'s log — held for 10 minutes. Open the council on tonight's raid (or lock it first) and they go in; anything still held after that is listed in the ops channel as not recorded.
         </Alert>
       )}
-      {data.runs.length === 0 && <Text c="dimmed">No locked run right now. A council opens on a locked run — lock it on the Events page first.</Text>}
+      {data.runs.length === 0 && <Text c="dimmed">No locked event right now. A council opens on a locked raid — lock it on the Events page first.</Text>}
       {data.runs.map((run) => <RunCard key={run.key} meta={meta} run={run} onState={setRun} goItems={goItems} reload={load} />)}
       {(ended.length > 0 || endedConflicts.length > 0) && (
         <Card>

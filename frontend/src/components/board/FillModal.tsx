@@ -147,7 +147,7 @@ export function FillModal({ e, meta, opened, onClose, onSent }: { e: Sheet; meta
         {notice && <Text size="sm" c="dimmed">{notice}</Text>}
         {p && plan && <Suggestions plan={plan} meta={meta} picks={picks} short={p.short} setPick={(i, k) => setPicks((x) => ({ ...x, [i]: k }))} />}
         <Text size="xs" c="dimmed">{suggest
-          ? "Each ask is a DM with Yes / No. A yes changes their signup (spec or character); the lock still builds the roster. One ask per member per run; unanswered asks close at lock."
+          ? "Each ask is a DM with Yes / No. A yes changes their signup (spec or character); the lock still builds the roster. One ask per member per raid; unanswered asks close at lock."
           : "Each ask is a DM with Yes / No; no answer by the deadline counts as no. Tied pairs (a swap and its backfill) go out together. Your Send sends exactly the asks listed, role swaps included."}</Text>
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onClose}>Cancel</Button>

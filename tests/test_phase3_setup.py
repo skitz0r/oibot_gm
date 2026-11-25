@@ -489,7 +489,7 @@ def test_help_snapshot_has_the_config_summary_for_officers_only(reg, rs, monkeyp
 def test_config_settings_edit_mode_settles_clashes_and_carries_the_runs_choice():
     src = (FRONT / "pages" / "Config.tsx").read_text()
     assert "Keep mine" in src and "Take theirs" in src and "disabled={conflicts.length > 0}" in src
-    assert "timezone_runs: tzRuns" in src and "Move open runs with the clock" in src
+    assert "timezone_runs: tzRuns" in src and "Move open events with the clock" in src
 
 
 # ---- /api/ask (the officers' Tell the bot box; members get the member view)

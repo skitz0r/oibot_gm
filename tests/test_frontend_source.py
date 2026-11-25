@@ -1059,7 +1059,7 @@ def test_the_schedules_page_keeps_every_old_lever():
         assert "useConfirm(" not in code and "toISOString" not in code, f
         assert not re.search(r">\s*(Yes|No|OK|Cancel|Confirm)\s*<", code), f
     assert "view.next_empty" in details and "/events/coming/" in details and "/events/${" in details
-    for needle in ("Open this run early", "r.forecast", "f.can_open", "f.why", "/api/event/coming/", "searchable", "view.people",
+    for needle in ("Open this event early", "r.forecast", "f.can_open", "f.why", "/api/event/coming/", "searchable", "view.people",
                    "Add a member", "search members", "/api/admin/raid/regulars", "r.outlook", "r.expected"):
         assert needle in regs, needle
     assert "<LevelChip" not in regs, "the mockup's Regulars: facts, no chip (spec §7)"

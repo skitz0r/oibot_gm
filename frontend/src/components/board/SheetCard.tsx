@@ -110,14 +110,14 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           <Text size="lg" fw={800}>{e.when}</Text>
           {badge}
           <Badge variant="light" color={locked ? "gray" : "teal"} tt="none" leftSection={locked ? <IconLock size={12} /> : undefined}>{meta.run_states[e.state] || e.state}</Badge>
-          {e.kind === "adhoc" && <Badge variant="light" color="gray" tt="none">ad hoc</Badge>}
+          {e.kind === "adhoc" && <Badge variant="light" color="gray" tt="none">one-off</Badge>}
           {e.early_warning && <Tooltip label="the regulars can't cover a tank or healer minimum — see the suggestions"><Badge variant="light" color="red" tt="none">early warning</Badge></Tooltip>}
           {e.autofill_paused && <Tooltip label={`${W.auto_asks_paused}${e.autofill_paused_by ? ` by ${e.autofill_paused_by}` : ""} — your ${L.fill} still sends`}><Badge variant="light" color="gray" tt="none">{W.auto_asks_paused.toLowerCase()}</Badge></Tooltip>}
           {facts && <Text size="sm" c="dimmed">{facts}</Text>}
         </Group>
         <Group gap={8} wrap="wrap">
           <RunLinks e={e} />
-          {e.live && <Button size="compact-xs" variant="subtle" color="gray" leftSection={<IconMessageCircle size={12} />} onClick={() => setTellOpen((x) => !x)}>Tell the bot about this run</Button>}
+          {e.live && <Button size="compact-xs" variant="subtle" color="gray" leftSection={<IconMessageCircle size={12} />} onClick={() => setTellOpen((x) => !x)}>Tell the bot about this raid</Button>}
           <RunMenu e={e} busy={busy} onRepost={() => setRepostOpen(true)} onReschedule={() => setMoveOpen(true)} />
         </Group>
       </Group>
@@ -145,8 +145,8 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           : !anyone && <Text size="sm" c="dimmed">Nobody has joined yet — the sheet is in Discord, or answer for someone here.</Text>}
         {(e.double_booked || []).length > 0 && <Tooltip label={e.double_booked!.join(", ")}><Badge variant="light" color="gray" tt="none">double-booked {e.double_booked!.length}</Badge></Tooltip>}
         {!locked && joined.length > 0 && missing.length > 0 && (
-          <Tooltip label={`Nobody in the run brings: ${missing.map((b) => b.name).join(", ")}`} multiline maw={320}>
-            <Group gap={4} p={3} wrap="nowrap" aria-label="party buffs nobody in the run brings" style={{ border: "1px dashed var(--mantine-color-slate-4)", borderRadius: 7 }}>
+          <Tooltip label={`Nobody in the raid brings: ${missing.map((b) => b.name).join(", ")}`} multiline maw={320}>
+            <Group gap={4} p={3} wrap="nowrap" aria-label="party buffs nobody in the raid brings" style={{ border: "1px dashed var(--mantine-color-slate-4)", borderRadius: 7 }}>
               {missing.map((b) => <BuffMark key={b.id} b={b} />)}
             </Group>
           </Tooltip>
@@ -258,7 +258,7 @@ function RunMenu({ e, busy, onRepost, onReschedule }: { e: NightSheet; busy: str
   if (!e.live) return null;
   return (
     <Menu shadow="md" width={260} position="bottom-end" classNames={{ item: css.menuItem }}>
-      <Menu.Target><ActionIcon variant="subtle" color="gray" aria-label={`run actions for ${e.when}`} loading={busy === `repost${e.key}`}><IconDotsVertical size={16} /></ActionIcon></Menu.Target>
+      <Menu.Target><ActionIcon variant="subtle" color="gray" aria-label={`event actions for ${e.when}`} loading={busy === `repost${e.key}`}><IconDotsVertical size={16} /></ActionIcon></Menu.Target>
       <Menu.Dropdown>
         <Menu.Item leftSection={<IconCalendarTime size={14} />} onClick={onReschedule}>Reschedule…</Menu.Item>
         <Menu.Item leftSection={<IconSend size={14} />} onClick={onRepost}>Re-post sheet…</Menu.Item>
@@ -356,7 +356,7 @@ function RescheduleModal({ e, opened, onClose, onPick }: { e: NightSheet; opened
   return (
     <Modal opened={opened} onClose={onClose} title={`Reschedule ${runName(e as unknown as Sheet)}`} centered>
       <Stack gap="md">
-        <WhenPicker label="the run's new start" dayLabel="New day" dayFormat="ddd D MMM YYYY" day={day} time={time} onDay={setDay} onTime={setTime} />
+        <WhenPicker label="the event's new start" dayLabel="New day" dayFormat="ddd D MMM YYYY" day={day} time={time} onDay={setDay} onTime={setTime} />
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={onClose}>Back</Button>
           <Button size="sm" loading={busy} disabled={!when} onClick={async () => { if (!when) return; setBusy(true); try { await onPick(when); } finally { setBusy(false); } }}>Next</Button>
@@ -376,11 +376,11 @@ function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: 
     <Modal opened={opened} onClose={close} title={`Cancel ${runName(e as unknown as Sheet)}?`} centered>
       <Stack gap="md">
         <Text size="sm" style={{ whiteSpace: "pre-line" }}>{e.consequences?.cancel}</Text>
-        <Textarea label="Why? (optional)" description={`officers only: the run's thread and the ops feed — never the signup channel · ${reason.length}/300`} value={reason} maxLength={300} autosize minRows={2} onChange={(ev) => setReason(ev.currentTarget.value)} />
+        <Textarea label="Why? (optional)" description={`officers only: the event's thread and the ops feed — never the signup channel · ${reason.length}/300`} value={reason} maxLength={300} autosize minRows={2} onChange={(ev) => setReason(ev.currentTarget.value)} />
         {e.cancel_tells_channel !== false && <Checkbox label="Tell the channel — a fixed line, no reason" checked={notify} onChange={(ev) => setNotify(ev.currentTarget.checked)} />}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={close}>Back</Button>
-          <Button color="red" size="sm" onClick={async () => { const r = reason.trim(), nf = notify; close(); await onCancel(r, nf); }}>Cancel the run</Button>
+          <Button color="red" size="sm" onClick={async () => { const r = reason.trim(), nf = notify; close(); await onCancel(r, nf); }}>Cancel the event</Button>
         </Group>
       </Stack>
     </Modal>

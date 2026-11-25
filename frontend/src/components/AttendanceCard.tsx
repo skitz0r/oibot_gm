@@ -26,18 +26,18 @@ export function AttendanceCard({ meta }: { meta: Meta }) {
     <Card>
       <CardHeader title="Attendance" hint={d.sentence} />
       <Stack p="md" gap={6}>
-        {d.runs.length === 0 && <Text size="sm" c="dimmed">{d.tracked ? `No runs for you in the last ${d.window_days} days.` : "Counts from the first run that ends."}</Text>}
+        {d.runs.length === 0 && <Text size="sm" c="dimmed">{d.tracked ? `No raids for you in the last ${d.window_days} days.` : "Counts from the first raid that ends."}</Text>}
         {d.runs.map((r) => (
           <Group key={r.key} justify="space-between" wrap="nowrap" style={{ opacity: r.counted ? 1 : 0.6 }}>
             <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
               <Text size="xs" c="dimmed" w={78} style={{ flex: "none" }}>{r.when}</Text>
               {r.cls && r.spec && <Tooltip label={`${r.character} · ${r.spec} ${r.cls}`}><Box style={{ display: "inline-flex", flex: "none" }}><GameIcon meta={meta} kind="spec" id={`${r.cls}:${r.spec}`} size={18} title={`${r.spec} ${r.cls}`} /></Box></Tooltip>}
-              <Text size="sm" truncate>{r.raid}{r.kind === "adhoc" ? " · ad hoc" : ""}</Text>
+              <Text size="sm" truncate>{r.raid}{r.kind === "adhoc" ? " · one-off" : ""}</Text>
             </Group>
             <Badge size="sm" variant="light" color={COLOUR[r.outcome] || "gray"} style={{ flex: "none" }}>{r.outcome_label}</Badge>
           </Group>
         ))}
-        {d.runs.length > 0 && <Text size="xs" c="dimmed">The last {d.window_days} days. Rostered and benched runs count as attended here; an away day isn't counted.</Text>}
+        {d.runs.length > 0 && <Text size="xs" c="dimmed">The last {d.window_days} days. Rostered and benched raids count as attended here; an away day isn't counted.</Text>}
       </Stack>
     </Card>
   );

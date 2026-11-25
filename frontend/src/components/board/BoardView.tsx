@@ -221,7 +221,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
         <Group gap="sm" wrap="wrap">
           {!event && <Text fw={700}>Board</Text>}
           {!event && !readOnly && <Legend meta={meta} locked={locked} />}
-          {canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}{board.balance ? ` · ${board.balance}` : ""}</Text>}
+          {canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} rosters this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}{board.balance ? ` · ${board.balance}` : ""}</Text>}
           {canSplit && reason && <SplitReasonLine meta={meta} r={reason} />}
           {placing ? <Text size="xs" c="dimmed">placing the rest…</Text> : saving && <Text size="xs" c="dimmed">saving…</Text>}
         </Group>
@@ -326,7 +326,7 @@ function Legend({ meta, locked }: { meta: Meta; locked: boolean }) {
           {row(<Box style={{ width: 30, height: 16, border: "1px dashed var(--mantine-color-slate-4)", borderRadius: 5 }} />, "an open seat — the lock fills it, or a fill ask after the lock")}
           {row(sq({ background: "var(--mantine-color-teal-7)" }), "a raid buff someone in the group brings")}
           {row(sq({ border: "2px solid var(--mantine-color-red-5)", opacity: 0.6 }), "greyed with a red edge: wanted in this group, and the one who brings it is in another")}
-          {row(sq({ border: "2px solid var(--mantine-color-slate-5)", opacity: 0.6 }), "plain grey: nobody in the run brings it (hover for its name)")}
+          {row(sq({ border: "2px solid var(--mantine-color-slate-5)", opacity: 0.6 }), "plain grey: nobody in the raid brings it (hover for its name)")}
           {row(sq({ border: "2px solid var(--mantine-color-teal-4)", opacity: 0.8 }), "teal edge: covered by a raid-wide buff of the same family")}
           {row(<PinMark meta={meta} pin="in" />, meta.run_words.pins.in)}
           {row(<PinMark meta={meta} pin="out" />, meta.run_words.pins.out)}

@@ -92,7 +92,7 @@ export function RoleCounts({ meta, counts, size = 16, need }: { meta: Meta; coun
 
 export function Aura({ a, missing, who }: { a: { abbr: string; colour: string; art: string | null; name: string; in_run?: boolean; covered?: boolean }; missing?: boolean; who?: string }) {
   const fixable = missing && a.in_run;  // a provider is rostered in another group: regrouping can fix it
-  const tip = `${a.name}${missing ? (fixable ? " — wanted here; the provider is in another group" : " — wanted here; nobody in this run brings it") : who ? ` — ${who}` : ""}`;
+  const tip = `${a.name}${missing ? (fixable ? " — wanted here; the provider is in another group" : " — wanted here; nobody in this raid brings it") : who ? ` — ${who}` : ""}`;
   const edge = fixable ? "var(--mantine-color-red-5)" : a.covered ? "var(--mantine-color-teal-4)" : "transparent";
   return (
     <Tooltip label={tip}>
@@ -126,8 +126,8 @@ const NTH = ["first", "second", "third", "fourth", "fifth"];
  *  shortfall is role icon + number, never "2 tank". */
 export function SplitReasonLine({ meta, r }: { meta: Meta; r: SplitReason }) {
   const lead = r.roles_allow === 0
-    ? (r.bodies_allow <= 1 ? "1 run is short" : `Enough people for ${r.bodies_allow} runs — even one is short`)
-    : `Enough people for ${r.bodies_allow} runs — a ${NTH[r.run - 1] || `run ${r.run}`} is short`;
+    ? (r.bodies_allow <= 1 ? "1 roster is short" : `Enough people for ${r.bodies_allow} rosters — even one is short`)
+    : `Enough people for ${r.bodies_allow} rosters — a ${NTH[r.run - 1] || `roster ${r.run}`} is short`;
   return (
     <Group gap={6} wrap="wrap">
       <Text size="xs" c={r.roles_allow === 0 ? "red.5" : "dimmed"}>{lead}</Text>

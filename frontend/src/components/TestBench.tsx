@@ -111,7 +111,7 @@ export function TestBench({ meta, rows, onChanged }: { meta: Meta; rows: MemberR
       <Stack gap="md" p="md">
         <Group gap="sm" align="baseline" wrap="wrap">
           <Title order={2} size="h4">Test bench</Title>
-          <Text size="sm" c="dimmed">puppet members to rehearse a run with, which real members never see</Text>
+          <Text size="sm" c="dimmed">puppet members to rehearse an event with, which real members never see</Text>
         </Group>
 
         <Stack gap="sm">
@@ -160,7 +160,7 @@ export function TestBench({ meta, rows, onChanged }: { meta: Meta; rows: MemberR
               )}
             </Group>
           </Group>
-          {dirty ? <Why>Save or cancel the change to the puppets first. Seeding and the test runs wait until then.</Why>
+          {dirty ? <Why>Save or cancel the change to the puppets first. Seeding and the test events wait until then.</Why>
             : !puppets.length && <Why>No puppets yet. Seed some or add one by class and spec, and the raid's analytics cards pause while they exist.</Why>}
         </Stack>
 
@@ -188,24 +188,24 @@ function Rehearse({ meta, state, raid, raidName, setRaid, puppets, busy, onPost,
   const [tempo, setTempo] = useState(state.default_tempo);
   const [dm, setDm] = useState(false);
   const t = state.tempos.find((x) => x.id === tempo);
-  const where = raidName ? `The ${raidName} test run's card then shows under Test runs below, and its sheet refuses real members.` : "";
+  const where = raidName ? `The ${raidName} test event's card then shows under Test events below, and its sheet refuses real members.` : "";
   return (
     <Stack gap="sm" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
       <Group gap="sm" wrap="wrap" align="center">
         <Eyebrow plain>Rehearse with</Eyebrow>
         <Select size="sm" w={240} aria-label="Rehearse with" data={meta.raids.map((r) => ({ value: r.id, label: `${r.name} · ${r.size}-player` }))} value={raid} onChange={setRaid} allowDeselect={false} />
-        <Text size="sm" c="dimmed">the raid for Try a comp and the test run alike</Text>
+        <Text size="sm" c="dimmed">the raid for Try a comp and the test event alike</Text>
       </Group>
       <Group gap="sm" wrap="wrap" align="center">
-        <Text size="sm" fw={700}>Open a test run</Text>
+        <Text size="sm" fw={700}>Open a test event</Text>
         <SegmentedControl size="sm" value={tempo} onChange={setTempo} data={state.tempos.map((x) => ({ value: x.id, label: x.label }))} />
         <Switch size="sm" label="DM every puppet when it opens" checked={dm} onChange={(e) => setDm(e.currentTarget.checked)} />
         <Group gap="sm" ml="auto" wrap="wrap">
-          <Tooltip label="Opens a test run two weeks out with every puppet joined, never posted in Discord. On its event page, Auto-fill groups shows the best comp from them.">
+          <Tooltip label="Opens a test event two weeks out with every puppet joined, never posted in Discord. On its event page, Auto-fill groups shows the best comp from them.">
             <Button size="sm" variant="default" leftSection={<IconFlask size={15} />} disabled={!puppets || !raid} loading={busy === "comp"} onClick={onComp}>Try a comp</Button>
           </Tooltip>
           <Button size="sm" disabled={!raid || !!state.open_refusal || !puppets} loading={busy === "run"}
-            onClick={() => onPost("run", "/api/test/run", { raid, tempo, dm_open: dm })}>Open the test run</Button>
+            onClick={() => onPost("run", "/api/test/run", { raid, tempo, dm_open: dm })}>Open the test event</Button>
         </Group>
       </Group>
       {t?.week && <Box px="md"><RunStrip steps={t.week} still /></Box>}
@@ -234,7 +234,7 @@ function AnswerAsPuppets({ meta, state, puppets, busy, onPost }: { meta: Meta; s
     <Stack gap={6} pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
       <Group gap="sm" justify="space-between" wrap="wrap">
         <Eyebrow plain>Answer as puppets</Eyebrow>
-        {state.runs.length > 1 && <Select size="sm" w={260} aria-label="Which test run" value={r.key} onChange={setRun} allowDeselect={false} data={state.runs.map((x) => ({ value: x.key, label: `${x.title} · ${meta.run_states[x.state] || x.state}` }))} />}
+        {state.runs.length > 1 && <Select size="sm" w={260} aria-label="Which test event" value={r.key} onChange={setRun} allowDeselect={false} data={state.runs.map((x) => ({ value: x.key, label: `${x.title} · ${meta.run_states[x.state] || x.state}` }))} />}
       </Group>
       <Text size="sm" c="dimmed">{r.title} · {meta.run_states[r.state] || r.state} · {locked ? `${r.rostered} rostered${r.asks ? ` · ${r.asks} puppet ask${r.asks === 1 ? "" : "s"} open` : ""}` : `${r.joined} joined`}</Text>
       <Group gap="sm" wrap="wrap" align="flex-end">
@@ -286,7 +286,7 @@ function TestRuns({ meta, keys }: { meta: Meta; keys: string }) {
   if (!runs.length) return null;
   return (
     <Stack gap="sm" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
-      <Eyebrow plain>Test runs</Eyebrow>
+      <Eyebrow plain>Test events</Eyebrow>
       {runs.map(({ e, raid }) => (
         <Stack key={e.key} gap={4}>
           <Group gap="sm" justify="space-between" wrap="wrap">

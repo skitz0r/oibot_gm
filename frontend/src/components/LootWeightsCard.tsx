@@ -63,7 +63,7 @@ export function LootWeightsCard() {
     <Card>
       <CardHeader title="Loot scoring" hint={data.owner ? "the weights behind every candidate's score" : "read-only — the owner edits"} action={
         <Group gap="xs">
-          <Button size="xs" variant="default" loading={busy && !draft} onClick={runRescore}>Re-score last run</Button>
+          <Button size="xs" variant="default" loading={busy && !draft} onClick={runRescore}>Re-score the last raid</Button>
           {data.owner && !draft && <Button size="xs" variant="default" leftSection={<IconPencil size={14} />} onClick={() => { setDraft({}); setRescore(null); }}>Edit</Button>}
         </Group>} />
       <Stack p="md" gap="md">
@@ -112,7 +112,7 @@ export function LootWeightsCard() {
         {draft && (
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={() => { setDraft(null); setStale(false); setRescore(null); }} disabled={busy}>Cancel</Button>
-            <Button variant="default" onClick={runRescore} loading={busy} disabled={!Object.keys(diff).length}>Re-score last run with these</Button>
+            <Button variant="default" onClick={runRescore} loading={busy} disabled={!Object.keys(diff).length}>Re-score the last raid with these</Button>
             <Button onClick={doSave} loading={busy} disabled={!Object.keys(diff).length}>Save {Object.keys(diff).length || ""} change{Object.keys(diff).length === 1 ? "" : "s"}</Button>
           </Group>
         )}

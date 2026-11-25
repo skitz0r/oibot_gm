@@ -33,7 +33,7 @@ export function TestFeed({ run, height = 320 }: { run?: string; height?: number 
     <Box>
       <Eyebrow plain>Test feed</Eyebrow>
       {error && events === null ? <Text size="sm" c="red">Couldn't load the feed: {error}</Text> : events === null ? <Text size="sm" c="dimmed">Loading…</Text> : rows.length === 0 ? (
-        <Text size="sm" c="dimmed">Nothing yet. Open a test run: its cards, the puppets' DMs and every step show up here as they happen.</Text>
+        <Text size="sm" c="dimmed">Nothing yet. Open a test event: its cards, the puppets' DMs and every step show up here as they happen.</Text>
       ) : (
         <ScrollArea.Autosize mah={height} type="auto" mt={4}>
           <Stack gap={4}>

@@ -34,6 +34,19 @@ ALLOW: list[tuple[str, str, str]] = [
     ("oibot_gm/news.py", "run the jobs", "the verb: the owner's MCP token starts the news jobs, the lint's verb list misses this phrasing"),
     ("oibot_gm/discord_news.py", "next run", "the apply job's next pass on an ops-channel proposal card, a job run and never a raid event"),
     ("oibot_gm/discord_news.py", "has the full run", "the job's transcript on the Agents page, an operator surface where a run is one job pass"),
+    # the Agents page (operator surface, owner only): a run is one pass of the review or apply job on the host, never a
+    # raid event — the job's own word, the same as launchd's and the transcripts' (out/agents/runs/)
+    ("pages/Agents.tsx", "at its next run", "the apply job's next pass after an approval, said on the owner's proposal screen"),
+    ("pages/Agents.tsx", "Live run", "the card's title over the job pass being streamed now, a job run not an event"),
+    ("pages/Agents.tsx", "no runs yet", "the job card's hint before either news job has made a pass on this host"),
+    ("pages/Agents.tsx", "in this run yet", "a job pass with no transcript step yet, the operator's own word for it"),
+    ("pages/Agents.tsx", "haven't run on this Mac", "the verb: the jobs have not been started on the host, the verb list misses it"),
+    ("pages/Agents.tsx", "Past runs", "the table of the job's last thirty passes and their transcripts, never raid events"),
+    ("pages/Agents.tsx", "each review or apply run", "the empty table names the passes of the two news jobs it will list"),
+    ("pages/Agents.tsx", "Last run failed", "a job's state line: its last pass failed, read by the owner who installed the job"),
+    ("pages/Agents.tsx", "never run", "a job's state line before its first pass: the verb, the job has never been started"),
+    ("pages/Agents.tsx", "Follow this run", "opens the transcript of the job pass running now, an operator action"),
+    ("pages/Agents.tsx", "Open the last run", "opens the transcript of the job's last pass, an operator action"),
     # the listening gate's inputs stay on the old wording on purpose (tests/test_listen.py pins them; the gate was tuned on
     # them and scripts/listen_probe.py would need a retune for any change) — members still say "run" in chat
     ("oibot_gm/discord_bot.py", "a raid or run happens",
@@ -78,16 +91,7 @@ VERB_RUN = re.compile("|".join((
 # The files that still hold a retired word (repo-relative). Each phase-6 task rewords its files and takes them out;
 # test_retired_words_are_gone fails for a hit anywhere else, and for a file here that has none left (the list only
 # shrinks). Computed by running the lint, never by hand.
-WORDS_PENDING: set[str] = {
-    "frontend/src/components/AttendanceCard.tsx", "frontend/src/components/CharacterTable.tsx",
-    "frontend/src/components/LootWeightsCard.tsx", "frontend/src/components/PlainPermissions.tsx",
-    "frontend/src/components/RaidCard.tsx", "frontend/src/components/SlotEditor.tsx",
-    "frontend/src/components/TestBench.tsx", "frontend/src/components/TestFeed.tsx",
-    "frontend/src/components/board/FillModal.tsx", "frontend/src/components/board/SheetCard.tsx",
-    "frontend/src/components/board/shared.tsx", "frontend/src/components/loot/History.tsx",
-    "frontend/src/components/loot/Tonight.tsx", "frontend/src/pages/Agents.tsx", "frontend/src/pages/Config.tsx",
-    "frontend/src/pages/Me.tsx",
-}
+WORDS_PENDING: set[str] = set()
 # a dash in a table cell (under its column's header) is a cell, not an empty state: the Iconography rule keeps icon
 # columns free of words, and "no offspec" beside every row is noise. The empty-state sentence is for a whole list, card or
 # section. Only a bare dash is carved out: "none yet" in a cell still names nothing.

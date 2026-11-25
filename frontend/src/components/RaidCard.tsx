@@ -32,7 +32,7 @@ export function RunStrip({ steps, still = false }: { steps: WeekStep[]; still?: 
     if (at[i] <= t && t < at[i + 1]) { now = (i + (t - at[i]) / Math.max(1, at[i + 1] - at[i])) / (n - 1); break; }
   }
   return (
-    <div className={css.strip} aria-label="the run's week">
+    <div className={css.strip} aria-label="the event's week">
       <span className={css.stripLine} />
       <span className={css.stripDone} style={{ width: `${(now ?? (t >= at[n - 1] ? 1 : 0)) * 100}%` }} />
       {steps.map((s, i) => {
