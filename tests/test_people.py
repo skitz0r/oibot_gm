@@ -324,7 +324,7 @@ def test_join_while_away_says_the_absence_stands(reg, rs, bot):
     day = rc.run_day(reg, ev)
     reg.add_absence(m.discord_id, day, None, None, m.display_name)
     line = run(bot.set_answer(reg, rs, ev, m, "in", None, by=m.display_name, by_id=m.discord_id))
-    assert "joined for this run" in line and "still stands" in line
+    assert "joined for this event" in line and "still stands" in line
     assert ev.signups[str(m.discord_id)].status == "in" and reg.members[m.discord_id].absences  # Join is pure; the record stands
 
 

@@ -160,7 +160,7 @@ class EndBot(LootBot):
 
 
 def test_the_end_prompt_press_goes_through_the_decide_screen_to_end_run(reg, rs, bosses):
-    """Harness: the lock card's End the run (shown once all bosses are down) → the decide screen → End the run now →
+    """Harness: the lock card's End the event (shown once all bosses are down) → the decide screen → End the event now →
     LootMixin.end_run (the council archived, the run done)."""
     ev, _ = real_run(reg, rs)
     ev.starts_at = (reg.now_local() - timedelta(hours=2)).replace(second=0, microsecond=0).isoformat()
@@ -176,8 +176,8 @@ def test_the_end_prompt_press_goes_through_the_decide_screen_to_end_run(reg, rs,
 
     async def go():
         await RunButton(reg.key, ev.key, "end").callback(h.card_press())
-        assert h.buttons() == ["End the run", "Back"] and "End " in h.text
-        await h.press("End the run")
+        assert h.buttons() == ["End the event", "Back"] and "End " in h.text
+        await h.press("End the event")
     run(go())
     assert rs.events[ev.key].state == "done"
     assert (GUILD, ev.key) not in bot.events, "the council ended with the run (one verb)"

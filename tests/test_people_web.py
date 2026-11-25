@@ -228,7 +228,7 @@ def test_members_set_previews_the_generators_sentences_and_takes_a_rev(w):
     assert "Spareling" not in [c.label for c in w.reg.members[n.discord_id].characters]
     # a rank preview, the same rank refused in one sentence, never alt
     p = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "rank": "core", "preview": True}, headers=h).json()
-    assert p["sentences"] == [f"{n.display_name}'s rank goes from trial to core.", "It lives on their main and counts for who gets a seat from the next lock."]
+    assert p["sentences"] == [f"{n.display_name}'s rank goes from trial to core.", "It lives on their main and counts toward priority from the next lock."]
     r = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "rank": "trial", "preview": True}, headers=h)
     assert r.status_code == 400 and r.json()["error"] == f"{n.display_name}'s rank is already trial."
     r = w.c.post("/api/members/set", json={"uid": str(n.discord_id), "rank": "alt"}, headers=h)

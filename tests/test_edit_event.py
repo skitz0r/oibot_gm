@@ -318,7 +318,7 @@ def test_an_empty_switch_is_refused_and_the_new_refusals_read_aloud(reg, rs):
     said = cq.reschedule_consequence(reg, rs, ev, None, {"first_come": True})
     assert said[0].startswith("For this event,") and said[2] == cq.SEATING_WORDS[True]
     one = open_one_off(reg, rs, days=6)
-    assert cq.reschedule_consequence(reg, rs, one, None, {"first_come": False})[2] == "Join order no longer decides who gets a seat."
+    assert cq.reschedule_consequence(reg, rs, one, None, {"first_come": False})[2] == "Join order no longer decides the seats."
 
 
 def test_turning_confirmation_on_names_the_first_raid_on_an_event_of_several(reg, rs):

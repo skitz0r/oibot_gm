@@ -220,7 +220,7 @@ def test_a_moved_run_never_blocks_or_repeats_an_occurrence(reg, rs, monkeypatch)
 
 
 def test_a_schedules_time_edited_with_its_run_open_opens_no_second_sheet(reg, rs, monkeypatch):
-    """The confirm promised "The open run keeps its old times.": that night's 8:00 PM is the 7:30 PM run, and the next
+    """The confirm promised "The open event keeps its old times.": that night's 8:00 PM is the 7:30 PM run, and the next
     week opens at 8:00 PM."""
     sid, t1 = _tuesdays(reg)
     bot, opened = _scheduler(reg, rs)
@@ -292,7 +292,7 @@ def test_lockout_and_conflicts_read_the_moved_start(reg, rs):
 # ---------------------------------------------------------------- refusals
 
 @pytest.mark.parametrize("case, sentence", [("past", "in the past"), ("closed", "finished or cancelled"),
-                                            ("clash", "already has a run at"), ("same", "already starts then")])
+                                            ("clash", "already has an event at"), ("same", "already starts then")])
 def test_refusals_are_one_sentence(reg, rs, case, sentence):
     bot = NightBot(reg, rs)
     ev = open_one_off(reg, rs, days=3)
@@ -518,10 +518,10 @@ def test_a_run_moved_onto_its_schedules_unopened_night_says_it_stands_for_it(reg
     ev = rc.open_run(reg, rs, RID, t1, schedule=sid)
     t2 = t1 + timedelta(days=7)
     lines = cq.reschedule_consequence(reg, rs, ev, t2, None)
-    assert lines[-1] == "That night's Raid nights run is this one." and len(lines) == 3
+    assert lines[-1] == "That night's Raid nights event is this one." and len(lines) == 3
     rc.reschedule(reg, rs, ev, start=t2, by="o")
     assert rc.event_of_occurrence(rs, sid, rc.occurrence_stamp(reg, t2), reg=reg) is ev
-    assert cq.reschedule_consequence(reg, rs, ev, t2 + timedelta(hours=1), None)[-1] != "That night's Raid nights run is this one."
+    assert cq.reschedule_consequence(reg, rs, ev, t2 + timedelta(hours=1), None)[-1] != "That night's Raid nights event is this one."
 
 
 # ---------------------------------------------------------------- fix round 2: decided at the schedule write

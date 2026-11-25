@@ -186,7 +186,7 @@ def test_cadence_preset(reg):
     configops.apply(reg, op, "Owner", True)
     sd = reg.schedule_def("barrow_deeps", "alt")
     assert {f: float(sd[f]) for f in presets.CADENCE_FIELDS} == {f: float(v) for f, v in presets.preset_fields("short").items()}
-    assert "a run's week is one of the presets: " in configops.describe(reg, ConfigOp(op="schedule_set", target="alt", field="cadence", value="lazy"))
+    assert "an event's week is one of the presets: " in configops.describe(reg, ConfigOp(op="schedule_set", target="alt", field="cadence", value="lazy"))
 
 
 def test_coalesce_saves_settings_that_only_work_together(reg):

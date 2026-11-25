@@ -84,7 +84,7 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     assert consequences.consequence("clear", reg, ev)[:2] == ["All 5 seats are released.", "The 5 rostered see it on their Confirm card and their Me page."]
     assert consequences.consequence("release", reg, ev, name="Jonny")[:2] == ["Jonny's seat is released.", "They see it on their card and their Me page."]
     assert consequences.consequence("release", reg, ev)[0] == "The seat is released."
-    assert consequences.consequence("lock", reg, ev) == ["This run is already locked."]
+    assert consequences.consequence("lock", reg, ev) == ["This event is already locked."]
     assert consequences.consequence("nonsense", reg, ev) == []
     assert set(consequences.consequences_json(reg, ev)) == set(consequences.VERBS) | {"release_named"}
 

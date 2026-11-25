@@ -124,13 +124,13 @@ def test_a_schedule_edit_says_open_runs_keep_their_times(reg, rs):
     assert reg.schedule_def(RID, "tue")["lock_hours_before"] == 30
     assert reg.config.roster(ev.team)["cutoff_hard_hours"] == before["cutoff_hard_hours"]
     # a pause says what it says already; a name changes no time
-    assert "The open run keeps its old times." not in configops.op_consequences(reg, ConfigOp(op="schedule_set", target="tue", field="name", value="Tue"))
+    assert "The open event keeps its old times." not in configops.op_consequences(reg, ConfigOp(op="schedule_set", target="tue", field="name", value="Tue"))
 
 
 def test_schedule_keeps_sentence():
     assert cq.schedule_keeps_sentence(0) is None
-    assert cq.schedule_keeps_sentence(1) == "The open run keeps its old times."
-    assert cq.schedule_keeps_sentence(3) == "The 3 open runs keep their old times."
+    assert cq.schedule_keeps_sentence(1) == "The open event keeps its old times."
+    assert cq.schedule_keeps_sentence(3) == "The 3 open events keep their old times."
 
 
 def test_mcp_schedule_tools_take_no_raid():

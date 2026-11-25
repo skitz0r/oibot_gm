@@ -195,7 +195,7 @@ def test_a_one_off_at_a_scheduled_minute_opens_as_that_run(reg, rs, officer, cha
         await h.press("Ad hoc run")
         local = nxt.astimezone(reg.tz)
         await h.submit(h.modal, day=local.date().isoformat(), hour=str(local.hour), minute=str(local.minute))
-        assert "The sheet opens now" in h.text and "ad hoc run" not in h.text  # box 11: that schedule's night
+        assert "The sheet opens now" in h.text and "one-off event" not in h.text  # box 11: that schedule's night
         await h.press("Open the sheet")
     run(go())
     assert bot.calls[0][:3] == ("open_run_and_post", "barrow_deeps", nxt) and bot.calls[0][4:] == ("barrow-deeps",), "the schedule's run, not a one-off"
@@ -244,9 +244,9 @@ def test_lock_card_remind_pause_end_and_reopen(reg, rs, monkeypatch):
         assert "hasn't started yet" in h.text, "End is for after the start"
         monkeypatch.setattr(rc, "end_refusal", lambda ev_, at=None: None)
         await RunButton(reg.key, ev.key, "end").callback(h.card_press())
-        assert "is finished.\nThe sheet and the lock card close" in h.text and h.buttons() == ["End the run", "Back"]
+        assert "is finished.\nThe sheet and the lock card close" in h.text and h.buttons() == ["End the event", "Back"]
         assert h.screen["view"].children[0].style == discord.ButtonStyle.success, "not red: Reopen works for an hour"
-        await h.press("End the run")
+        await h.press("End the event")
         assert ev.state == "done" and "Reopen on the closed card works for an hour" in h.text
         await RunButton(reg.key, ev.key, "reopen").callback(h.card_press())
         assert ev.state == "locked" and "Reopened" in h.text

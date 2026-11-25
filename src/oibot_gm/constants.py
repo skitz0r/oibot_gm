@@ -147,7 +147,7 @@ PAGE_WORDS = {
                         "open_dm": "Sheet Opening DM", "split_policy": "When one night fills two rosters",
                         "weights": "Priority",
                         # an event's own (Edit event, the owner's tweaks B): first to join or by priority
-                        "first_come": "Priority"},
+                        "first_come": "Seat order"},
     # the (?) beside each switch of Sheet timing (the schedule editor and Edit event): exactly who gets what, when and
     # where — read from discord_raid.post_health / dm_on_open / lock_run / confirm_one / run_fill, raidcycle.fill_batch
     # (FILL_OVERASK one more than the shortfall, FILL_MAX_OPEN asks out at once) and expire_confirmation_asks

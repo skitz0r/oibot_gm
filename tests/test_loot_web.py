@@ -1063,7 +1063,7 @@ def test_a_preview_flag_never_skips_the_actor_on_a_decision_route(w):
 
 
 def test_end_the_run_asks_with_the_servers_box_and_a_council_that_changed_is_a_fresh_box(w):
-    """The final review: End the run's box was page-written and the end took no `seen`, so a council that changed
+    """The final review: End the event's box was page-written and the end took no `seen`, so a council that changed
     while it was open ended on a stale sentence. preview → {box} (LootMixin.end_box); a drop ticked meanwhile → 409
     with the fresh box, nothing ended; the fresh box's fp ends it."""
     from oibot_gm import consequences as cq
@@ -1072,7 +1072,7 @@ def test_end_the_run_asks_with_the_servers_box_and_a_council_that_changed_is_a_f
     opened(w)
     pv = w.c.post(f"/api/loot/{w.ev.key}/end", json={"preview": True}, headers=H).json()
     b = pv["box"]
-    assert b["verb"] == "End the run" and not b["danger"] and b["sentences"] == w.bot.end_sentences(w.reg, w.rs, w.ev)
+    assert b["verb"] == "End the event" and not b["danger"] and b["sentences"] == w.bot.end_sentences(w.reg, w.rs, w.ev)
     assert b["title"] == f"End {cq.event_title(w.reg, w.ev)}?" and pv["preview"] == " ".join(b["sentences"])
     tick(w, "Shard of Doom")  # the council changed while the box was open
     r = w.c.post(f"/api/loot/{w.ev.key}/end", json={"seen": b["fp"]}, headers=H)

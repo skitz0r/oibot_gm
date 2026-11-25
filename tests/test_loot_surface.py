@@ -827,8 +827,8 @@ def test_end_council_shows_the_decide_screen_then_archives_and_closes_the_thread
     async def go():
         await button(card(n), "End council").callback(h.card_press())
         assert "is finished and its loot council closes with 1 award." in h.text.split("\n")[1] and "1 proposal never confirmed" in h.text
-        assert h.buttons() == ["End the run", "Back"] and n.ev.state == "locked"
-        await h.press("End the run")
+        assert h.buttons() == ["End the event", "Back"] and n.ev.state == "locked"
+        await h.press("End the event")
     run(go())
     assert n.rs.events[n.ev.key].state == "done" and (GUILD, n.s.id) not in n.bot.events
     assert "1 proposal(s) never confirmed" in h.text
@@ -852,9 +852,9 @@ def test_end_council_is_the_one_end_screen_and_a_run_closed_meanwhile_says_so(ni
     async def go():
         await button(card(n), "End council").callback(h.card_press())
         n.ev.state = "done"
-        await h.press("End the run")
+        await h.press("End the event")
     run(go())
-    assert "This run is already finished." in h.text and h.buttons() == ["Back"], "the press meets the fresh box"
+    assert "This event is already finished." in h.text and h.buttons() == ["Back"], "the press meets the fresh box"
     assert "—" not in h.text and "already closed" not in h.text
 
 
@@ -865,7 +865,7 @@ def test_raid_end_prefers_the_run_with_a_council(night, officer):
     lock_with_board(n.reg, n.rs, other, [m.display_name for m in n.members])
     h = officer_h(n)
     run(FLOWS["loot_end"](h.command(), n.reg))
-    assert f"{rc.run_on(n.reg, n.ev)} is finished" in h.text and h.buttons() == ["End the run", "Back"]
+    assert f"{rc.run_on(n.reg, n.ev)} is finished" in h.text and h.buttons() == ["End the event", "Back"]
 
 
 def test_raid_distribute_judges_the_live_council(night):

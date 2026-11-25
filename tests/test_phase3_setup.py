@@ -128,13 +128,13 @@ def test_schedule_removal_effects_names_regulars_and_open_runs(reg, rs):
 
 def test_rosters_copy_reaches_the_next_run_only(reg, rs):
     alt_schedule(reg)
-    assert rc.rosters_copy(reg, "barrow_deeps", "alt", 2, rs) == "From the next run: the sheet advertises 2 × 10 seats."
+    assert rc.rosters_copy(reg, "barrow_deeps", "alt", 2, rs) == "From the next event: the sheet advertises 2 × 10 seats."
     open_real(reg, rs)
-    assert rc.rosters_copy(reg, "barrow_deeps", "alt", 2, rs) == "From the next run: the sheet advertises 2 × 10 seats. The run already open keeps its 1 × 10."
+    assert rc.rosters_copy(reg, "barrow_deeps", "alt", 2, rs) == "From the next event: the sheet advertises 2 × 10 seats. The event already open keeps its 1 × 10."
     text = configops.describe(reg, ConfigOp(op="schedule_set", target="alt", field="rosters", value="2"))
-    assert "From the next run: the sheet advertises 2 × 10 seats." in text
+    assert "From the next event: the sheet advertises 2 × 10 seats." in text
     d = configops.describe_ops(reg, [ConfigOp(op="schedule_set", target="alt", field="rosters", value="2")])
-    assert any("The run already open keeps its 1 × 10." in n for n in d.lines[0].notes)
+    assert any("The event already open keeps its 1 × 10." in n for n in d.lines[0].notes)
 
 
 def test_pause_sentence_names_the_open_run(reg, rs):
@@ -416,7 +416,7 @@ def test_raids_route_schedule_words_paused_and_sentences(owner_client, reg, rs):
     s = next(x for r in raids if r["id"] == "barrow_deeps" for x in r["schedules"] if x["id"] == "alt")
     assert s["next"] == [] and len(s["next_if_active"]) == 3 and not any(MILITARY.search(x) for x in s["next_if_active"])
     assert s["pause_sentence"].startswith("Nothing new opens from Alt run") and s["resume_sentence"].startswith("Alt run opens its sheets again")
-    assert s["removal_sentence"].startswith("The Alt run schedule is removed.") and s["rosters_copy"]["2"] == "From the next run: the sheet advertises 2 × 10 seats."
+    assert s["removal_sentence"].startswith("The Alt run schedule is removed.") and s["rosters_copy"]["2"] == "From the next event: the sheet advertises 2 × 10 seats."
 
 
 def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypatch):

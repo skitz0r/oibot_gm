@@ -292,7 +292,7 @@ def test_adding_a_raid_before_it_first_opens_is_allowed_and_said(bot, reg, rs):
     later = first.start + timedelta(days=30)
     reg.set_raid_overrides("extra_b", {"first_open": later.isoformat()}, "t")
     said = cq.lineup_consequence(reg, rs, first, L(H, BD, "extra_b"))
-    assert said[-1] == f"Extra B first opens {reg.local12(reg.first_open('extra_b'))}, after this run starts."
+    assert said[-1] == f"Extra B first opens {reg.local12(reg.first_open('extra_b'))}, after this event starts."
     assert len(said) <= 3
     edit(bot, reg, rs, first, L(H, BD, "extra_b"))
     assert [p.instance for p in rc.event_parts(rs, first)] == [H, BD, "extra_b"]

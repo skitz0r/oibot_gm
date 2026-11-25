@@ -21,15 +21,15 @@ def test_reason_second_run_short(reg, rs):
     ev, _ = _thin(reg, rs)
     reason = rc.run_split_reason(reg, ev)
     assert reason == {"bodies_allow": 2, "roles_allow": 1, "run": 2, "short": {"tank": 2, "healer": 2}}
-    assert rc.split_reason_text(reason) == "Enough people for 2 runs — a second is short 2 tanks and 2 healers"
-    assert rc.split_reason_text(reason, lambda r, n: f"<{r}> {n}") == "Enough people for 2 runs — a second is short <tank> 2   <healer> 2"
+    assert rc.split_reason_text(reason) == "Enough people for 2 rosters — a second is short 2 tanks and 2 healers"
+    assert rc.split_reason_text(reason, lambda r, n: f"<{r}> {n}") == "Enough people for 2 rosters — a second is short <tank> 2   <healer> 2"
 
 
 def test_reason_not_even_one(reg, rs):
     ev, _ = _thin(reg, rs, tanks=2, healers=1, dps=8)
     reason = rc.run_split_reason(reg, ev)
     assert reason["roles_allow"] == 0 and reason["short"] == {"healer": 1}
-    assert rc.split_reason_text(reason) == "1 run is short 1 healer"
+    assert rc.split_reason_text(reason) == "1 roster is short 1 healer"
 
 
 def test_no_reason_when_roles_keep_up(reg, rs):
@@ -122,7 +122,7 @@ def test_run_payload_carries_reason_and_leftovers(reg, rs, monkeypatch):
     d = client.get(f"/api/run/{ev.key}", headers=bearer()).json()
     assert d["split"]["runs"] == 1
     assert d["split"]["reason"] == {"bodies_allow": 2, "roles_allow": 1, "run": 2, "short": {"tank": 2, "healer": 2}}
-    assert d["split"]["reason_text"].startswith("Enough people for 2 runs")
+    assert d["split"]["reason_text"].startswith("Enough people for 2 rosters")
     assert d["board"]["leftovers"] == [] and d["board"]["another"] is None, "an empty board has nothing left over yet"
     players = rc.players_for(reg, ev)
     ev.layout = [[p.signup_name for p in players[:5]], [p.signup_name for p in players[5:10]]]
@@ -142,7 +142,7 @@ def test_health_and_lock_cards_say_why(reg, rs):
     team = rc.run_team(reg, ev)
     text = lambda view: "\n".join(c.content for c in view.walk_children() if c.__class__.__name__ == "TextDisplay")  # noqa: E731
     health = text(views.health_layout(reg, rs, ev, team, tag))
-    assert "Enough people for 2 runs — a second is short <role:tank> 2   <role:healer> 2" in health
+    assert "Enough people for 2 rosters — a second is short <role:tank> 2   <role:healer> 2" in health
     assert "2 tank" not in health and "seated" not in health
     players = rc.players_for(reg, ev)
     lock_with_board(reg, rs, ev, [p.signup_name for p in players[:10]])

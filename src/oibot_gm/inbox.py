@@ -242,7 +242,7 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
     longer applies (rc.member_actions re-read). The verbs write the notice, edit cards and write the audit line. `spec`
     (Join / Bench): the spec the character plays (set_answer's role switch; Answer for someone's pick)."""
     if not rc.on_bench_side(reg, ev, m):  # a puppet on a real run, a real member on a test run: never
-        raise RegistryError(f"{m.display_name} isn't on this run's side of the test bench — a test run takes its puppets and its tester only.")
+        raise RegistryError(f"{m.display_name} isn't on this event's side of the test bench — a test event takes its puppets and its tester only.")
     allowed = {a["key"] for a in rc.member_actions(reg, ev, m)}
     if key not in allowed:
         raise RegistryError(no_longer_applies(reg, ev, m))

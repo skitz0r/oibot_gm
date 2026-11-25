@@ -138,7 +138,7 @@ def test_a_later_part_never_locks_first(bot, reg, rs):
     p2 = rc.event_parts(rs, first)[2]
     with pytest.raises(RegistryError) as e:
         run(bot.lock_run(reg, rs, p2, by="Jon"))
-    assert str(e.value) == f"Lock Hyjal Summit {reg.local12(first.start)} first. Its lock builds every raid of the run."
+    assert str(e.value) == f"Lock Hyjal Summit {reg.local12(first.start)} first. Its lock builds every raid of the event."
     assert all(p.state == "open" for p in rc.event_parts(rs, first))
 
 
@@ -276,7 +276,7 @@ def test_a_one_off_before_first_open_says_so(reg, rs):
     reg.set_raid_overrides("extra_a", {"first_open": fo.strftime("%Y-%m-%dT%H:%M")}, "t")
     when = start.astimezone(reg.tz).strftime("%Y-%m-%d %H:%M")
     p = rc.open_preview(reg, rs, H, when, rc.ADHOC_SCHEDULE, lineup=LINEUP)
-    assert p["before_open"] == f"Extra A first opens {reg.local12(reg.first_open('extra_a'))}, after this run starts."
+    assert p["before_open"] == f"Extra A first opens {reg.local12(reg.first_open('extra_a'))}, after this event starts."
     assert [x["name"] for x in p["later"]] == ["Barrow Deeps", "Extra A", "Extra B"]
     assert p["follow_line"].startswith("Then Barrow Deeps ×2 at ") and p["follow_line"].endswith(", from the same signup.")
     first = rc.open_run(reg, rs, H, start, by="t", schedule=rc.ADHOC_SCHEDULE, lineup=LINEUP)  # a one-off still opens

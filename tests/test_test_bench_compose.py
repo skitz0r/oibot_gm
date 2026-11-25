@@ -62,7 +62,7 @@ def test_compose_refuses_a_puppet_rostered_on_a_locked_run(client, reg, rs):  # 
     join(reg, rs, ev, ms)
     lock_with_board(reg, rs, ev, [m.display_name for m in ms])
     r = client.post("/api/admin/test", json={"action": "compose", "remove": [str(ms[0].discord_id)]}, headers=bearer())
-    assert r.status_code == 400 and "locked run" in r.json()["error"] and ms[0].discord_id in reg.members
+    assert r.status_code == 400 and "locked event" in r.json()["error"] and ms[0].discord_id in reg.members
 
 
 def test_comp_sandbox_joins_every_puppet_and_posts_nothing(client, reg, rs):  # noqa: F811

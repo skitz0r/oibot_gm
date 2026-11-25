@@ -727,7 +727,7 @@ def test_cancel_dismissed_box_writes_nothing_and_a_closed_run_is_refused(reg, rs
         ev.state = "done"
         rs.save(ev, "done")
         await h.submit(form)
-        assert "This run is already finished." in h.text and h.buttons() == ["Back"], "the refusal box, Back alone"
+        assert "This event is already finished." in h.text and h.buttons() == ["Back"], "the refusal box, Back alone"
     asyncio.run(go())
     assert not bot.calls
 

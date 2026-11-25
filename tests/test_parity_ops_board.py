@@ -266,7 +266,7 @@ def test_open_time_matches_a_listed_run_to_its_schedule(reg):
     assert (start, sid) == (nxt, "alt"), "a listed time opens that schedule's run, not a one-off"
     start, sid = configops._open_time(reg, "barrow_deeps", "20:00")
     assert (start, sid) == (nxt, "alt")
-    with pytest.raises(RegistryError, match="no upcoming run at 6:15 AM"):
+    with pytest.raises(RegistryError, match="no upcoming event at 6:15 AM"):
         configops._open_time(reg, "barrow_deeps", "06:15")
     assert configops._open_time(reg, "barrow_deeps", "2030-01-08 19:30")[1] == "adhoc", "any other time is a one-off (ad hoc)"
 

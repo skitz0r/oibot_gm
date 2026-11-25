@@ -169,7 +169,7 @@ CONFIRM_DM = "the Confirm or Can't make it DM"
 
 
 def _closed_sentence(state: str) -> str:
-    return f"This run is already {rc.RUN_STATE_WORDS[state]}."
+    return f"This event is already {rc.RUN_STATE_WORDS[state]}."
 
 
 def _closed(ev: rc.RaidEvent) -> list[str] | None:
@@ -213,7 +213,7 @@ def _lock(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
     from .raid_views import run_times
 
     if ev.state != "open":
-        return _closed(ev) or ["This run is already locked."]
+        return _closed(ev) or ["This event is already locked."]
     off = set(rc.lock_forces(reg, None, ev).kept_off)  # THE solve's kept-off list: the count never promises them a DM
     joined = [s for s in ev.by_status("in") if s.display_name not in off]
     seats = rc.run_size(reg, ev) * max(1, rc.run_rosters(reg, ev))
@@ -222,7 +222,7 @@ def _lock(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
     test = rc.is_test_run(reg, ev)
     if not rc.run_confirms(reg, ev):  # a one-off (D5): Join is the commitment
         lines.append("Nobody is asked to confirm.")
-        lines.append("On a test run the puppets' messages come to the tester." if test else "You can still move people after the lock.")
+        lines.append("On a test event the puppets' messages come to the tester." if test else "You can still move people after the lock.")
         return lines
     if n == 0:
         lines.append("Nobody has joined yet, so nobody is asked to confirm.")
@@ -314,7 +314,7 @@ def before_first_open_sentence(reg: Registry, lineup: list[dict], start, only: s
             continue
         fo = reg.first_open(e["raid"])
         if fo is not None and fo > rc.after_minutes(start, at):
-            return f"{reg.raid_def(e['raid']).get('name', e['raid'])} first opens {reg.local12(fo)}, after this run starts."
+            return f"{reg.raid_def(e['raid']).get('name', e['raid'])} first opens {reg.local12(fo)}, after this event starts."
     return None
 
 
@@ -428,7 +428,7 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     elif mv.seating is not None:  # the seating switched: what decides a seat now, in its own sentence (SEATING_WORDS)
         out.append(SEATING_WORDS[mv.seating])
     elif absorbed:
-        out.append(f"That night's {absorbed} run is this one.")
+        out.append(f"That night's {absorbed} event is this one.")
     elif not moves and first.state == "locked":  # only the automatic asks and an ask's wait change after the lock
         out.append("You can change it again until the event starts.")
     elif not moves:  # the start stays: nobody's night changes, and the timing is fixed at the lock
@@ -438,7 +438,7 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
         sg = first.signups.get(str(uid))
         who = sg.display_name if sg else "Someone"
         other = rs.events.get(key)
-        title = f"{reg.raid_def(other.instance).get('name', other.instance)} {reg.local12(other.start)}" if other else "another run"
+        title = f"{reg.raid_def(other.instance).get('name', other.instance)} {reg.local12(other.start)}" if other else "another event"
         k = len(mv.conflicts) - 1
         out.append(f"{who} is also on {title} that night." if k == 0 else f"{who} and {_n(k, 'other')} are also on {title} that night.")
     elif mv.absence_cleared or mv.absence_written:
@@ -450,7 +450,7 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
 
 # the seating switched by an Edit event: what decides who gets a seat from now on
 SEATING_WORDS = {True: "The first to join now get the seats, whatever the priority.",
-                 False: "Join order no longer decides who gets a seat."}
+                 False: "Join order no longer decides the seats."}
 
 
 def reschedule_pick_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
@@ -734,7 +734,7 @@ def leave_follow_consequence(reg: Registry, ev: rc.RaidEvent, seated: bool, lead
     first = f"You stay on the {lead_name} roster." if lead_seated else f"Your {lead_name} answer stands."
     if seated:
         return [first, f"Your {mine} place is freed.", rc.refill_sentence(reg, ev)]
-    return [first, f"You are out of the {mine} follow-on."]
+    return [first, f"You are out of {mine}, the later raid."]
 
 
 def _clear(reg: Registry, ev: rc.RaidEvent) -> list[str]:
@@ -798,8 +798,8 @@ def _board(verb: str, reg: Registry, ev: rc.RaidEvent, name: str, other: str, to
                 "The seat is theirs once they say yes."]
     # substitute: the seat goes straight to the newcomer, so the bench is not asked for it
     if not confirms:
-        return [f"{name} takes {other}'s seat in {to}.", "On an ad hoc run they aren't asked to confirm." if rc.run_kind(reg, ev) == "adhoc"
-                else "On this run they aren't asked to confirm.", f"{other} sees the seat was released on {_seen(reg, ev)}."]
+        return [f"{name} takes {other}'s seat in {to}.", "On a one-off event they aren't asked to confirm." if rc.run_kind(reg, ev) == "adhoc"
+                else "On this event they aren't asked to confirm.", f"{other} sees the seat was released on {_seen(reg, ev)}."]
     return [f"{name} takes {other}'s seat in {to} and gets {CONFIRM_DM}.", "With DMs off it waits on their Me page.",
             f"{other} sees the seat was released on {_seen(reg, ev)}."]
 
@@ -826,7 +826,7 @@ def _end(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     is marked finished, its sheet and lock card close, and Reopen works for rc.REOPEN_GRACE_HOURS (rc.reopen_window)."""
     if (closed := _closed(ev)):
         return closed
-    return ["The run is finished.", "The sheet and the lock card close and no more fill asks go out.", reopen_sentence()]
+    return ["The event is finished.", "The sheet and the lock card close and no more fill asks go out.", reopen_sentence()]
 
 
 def reopen_sentence() -> str:
@@ -845,8 +845,8 @@ def schedule_keeps_sentence(n: int) -> str | None:
     if n <= 0:
         return None
     if n == 1:
-        return "The open run keeps its old times."
-    return f"The {n} open runs keep their old times."
+        return "The open event keeps its old times."
+    return f"The {n} open events keep their old times."
 
 
 def series_words(reg: Registry, key: str) -> str:
@@ -968,7 +968,7 @@ def remind_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
                rev=rc.event_rev(reg, rs, ev) if rs is not None else "")
 
 
-END_REFUSAL = "No locked run to end."
+END_REFUSAL = "No locked event to end."
 
 
 def end_box(reg: Registry, ev: rc.RaidEvent, sentences: list[str], rev: str = "") -> dict:
@@ -977,7 +977,7 @@ def end_box(reg: Registry, ev: rc.RaidEvent, sentences: list[str], rev: str = ""
     a council that changed while the box was open answers 409 with the fresh box. A run that can't end: the refusal."""
     if (closed := _closed(ev)):
         return refusal_box_for(closed[0])
-    return box(f"End {event_title(reg, ev)}?", sentences, "End the run", rev=rev)
+    return box(f"End {event_title(reg, ev)}?", sentences, "End the event", rev=rev)
 
 
 BOARD_MOVE_TITLES = {"move": "Move {name}?", "roster": "Put {name} on the roster?", "swap": "Swap {name} and {other}?",
@@ -1251,12 +1251,12 @@ def schedule_create_box(reg: Registry, entry: dict) -> dict:
         lines = ["It opens no event by itself.", "An officer opens each event from it with Open the sheet.",
                  "You can edit or remove the schedule at any time."]
     elif rep is None:
-        lines = ["No event opens until the schedule has run times.", "You can pause or edit the schedule at any time."]
+        lines = ["No event opens until the schedule has event times.", "You can pause or edit the schedule at any time."]
     else:
         first = (rc.next_runs_of(reg, entry["raid"], entry, n=1) or [None])[0]
         head = f"An event opens {rep}" + (f", starting {_day(reg, first)}." if first else ".")
         if _words(head) > 20:
-            head = f"An event opens at each of its run times, starting {_day(reg, first)}." if first else "An event opens at each of its run times."
+            head = f"An event opens at each of its times, starting {_day(reg, first)}." if first else "An event opens at each of its times."
         lines = [head]
         if first is not None:
             opens = first - timedelta(hours=_lead_hours(reg, entry))
@@ -1540,7 +1540,7 @@ def flex_consequence(reg: Registry, rs, m, label: str, roles: list[str], *, by_i
         raise RegistryError(f"{c.label} can already play {join_words(extra)} when asked." if extra else f"{c.label} already plays only what its spec and offspec give.")
     if extra:
         return [f"{v.Whose} character {c.label} could also play {join_words(extra)} when asked.",
-                "Fill seats can ask it to cover those roles when a run is short."]
+                "Fill seats can ask it to cover those roles when an event is short."]
     return [f"{v.Whose} character {c.label} plays only what its spec and offspec give.", "Fill seats stops asking it to cover other roles."]
 
 
@@ -1594,7 +1594,7 @@ def rank_consequence(reg: Registry, m, rank: str, *, by_id: int | None = None) -
         raise RegistryError(f"{m.display_name if m else 'They'} has no main yet, and rank lives on the main.")
     if m.rank == rank:
         raise RegistryError(f"{v.Whose} rank is already {rank}.")
-    return [f"{v.Whose} rank goes from {m.rank} to {rank}.", f"It lives on {v.their} main and counts for who gets a seat from the next lock."]
+    return [f"{v.Whose} rank goes from {m.rank} to {rank}.", f"It lives on {v.their} main and counts toward priority from the next lock."]
 
 
 def confirm_consequence(reg: Registry, m, label: str, *, by_id: int | None = None) -> list[str]:

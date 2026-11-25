@@ -77,7 +77,7 @@ def test_a_stale_diff_is_refused_and_nothing_moves(reg, rs):
     revs = configops.board_revs(reg, [op], rs)
     run(bot.reschedule_event(reg, rs, ev, start=ev.start + timedelta(hours=3), by="Other", by_id=OWNER))  # someone else, meanwhile
     moved_to = ev.start
-    with pytest.raises(RegistryError, match="Someone changed this run"):
+    with pytest.raises(RegistryError, match="Someone changed this event"):
         run(configops.apply_async(reg, op, "Officer", True, bot=bot, by_id=OWNER, rev=configops.op_rev(op, ev.key, revs), via="chat"))
     assert ev.start == moved_to
 

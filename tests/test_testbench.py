@@ -234,7 +234,7 @@ def test_a_second_tester_in_the_same_minute_is_refused_never_handed_the_first_on
     other = reg.members[TESTER + 1]
     ev, _ = run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=40, nudge_in=32, lock_in=25, confirm_in=15, dm=False, by="Tess", by_id=TESTER))
     rosters, sheets = len(reg.config.rosters), len(bot.channels[55].sent)
-    with pytest.raises(RegistryError, match=r"Tess opened a test run at .* join theirs or clear it"):
+    with pytest.raises(RegistryError, match=r"Tess opened a test event at .* join theirs or clear it"):
         run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=40, nudge_in=32, lock_in=25, confirm_in=15, dm=False, by="Other", by_id=other.discord_id))
     assert len(reg.config.rosters) == rosters and len(bot.channels[55].sent) == sheets
     assert str(reg.config.roster(ev.team)["test_by"]) == str(TESTER), "the run is still the first tester's"

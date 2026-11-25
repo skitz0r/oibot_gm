@@ -72,7 +72,7 @@ def test_a_rehearsal_never_meets_a_real_run_and_belongs_to_its_tester(reg, rs):
     cut = {"soft": 2, "hard": 1.5, "confirm": 1, "test_by": 41}
     test = rc.open_run(reg, rs, RID, t, cutoffs=cut)
     assert test is not real and test.test and rc.open_run(reg, rs, RID, t, cutoffs=cut) is test
-    with pytest.raises(rc.RegistryError, match="opened a test run at"):
+    with pytest.raises(rc.RegistryError, match="opened a test event at"):
         rc.open_run(reg, rs, RID, t, cutoffs={**cut, "test_by": 42})
     rc.end_run(reg, rs, test, "t")
     test.state = "cancelled"
@@ -94,7 +94,7 @@ def test_a_closed_occurrence_is_refused_and_a_follow_on_gets_its_own_key(reg, rs
     lead.state = "cancelled"
     rs.save(lead, "cancelled")
     n = len(rs.events)
-    with pytest.raises(rc.RegistryError, match="cancelled run isn't opened again"):
+    with pytest.raises(rc.RegistryError, match="cancelled event isn't opened again"):
         rc.open_run(reg, rs, HYJAL, t, schedule=sid)
     assert len(rs.events) == n
 

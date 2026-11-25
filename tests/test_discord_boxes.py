@@ -132,9 +132,9 @@ def test_remind_and_end_print_their_boxes(reg, rs, monkeypatch):
         assert why and h.buttons() == ["Back"] and why in h.text, "before the start End is the refusal box"
         monkeypatch.setattr(rc, "end_refusal", lambda ev_, at=None: None)
         await RunButton(reg.key, ev.key, "end").callback(h.card_press())
-        assert h.buttons() == ["End the run", "Back"]
+        assert h.buttons() == ["End the event", "Back"]
         assert all(s in h.text for s in bot.end_sentences(reg, rs, ev)) and bot.end_box(reg, rs, ev)["title"] in h.text
-        await h.press("End the run")
+        await h.press("End the event")
         assert ev.state == "done" and ("end_run", ev.key, "Tester") in bot.calls
     run(go())
 

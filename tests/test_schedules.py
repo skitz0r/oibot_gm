@@ -357,7 +357,7 @@ def test_run_open_takes_a_schedule(reg, rs):
     reg.set_schedule("pug", {"kind": "pickup"}, "t", raid=RID)
     line = configops.describe(reg, ConfigOp(op="run_open", target=RID, field="alt"))
     assert line.startswith("open Barrow Deeps · Weekly Sat ")
-    assert "pickup template" in configops.describe(reg, ConfigOp(op="run_open", target=RID, field="pug"))
+    assert "is a schedule opened by an officer" in configops.describe(reg, ConfigOp(op="run_open", target=RID, field="pug"))
     assert configops.describe(reg, ConfigOp(op="run_open", target=RID, field="pug", value="2030-01-08 19:30")).startswith("open Barrow Deeps · Pickup Tue 8 Jan")
 
 

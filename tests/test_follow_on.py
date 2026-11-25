@@ -233,7 +233,7 @@ def test_a_follow_on_cannot_lock_before_its_lead(reg, rs):
     reg.seed_test_members(24, "t")
     bot = NightBot(reg, rs)
     lead, fev = open_pair(reg, rs)
-    with pytest.raises(RegistryError, match="first. Its lock builds every raid of the run."):
+    with pytest.raises(RegistryError, match="first. Its lock builds every raid of the event."):
         run(bot.lock_run(reg, rs, fev, by="Jon"))
     assert fev.state == "open" and lead.state == "open"
 
@@ -272,7 +272,7 @@ def test_a_refused_scheduled_open_never_stops_the_guilds_minute(reg, rs, monkeyp
 
     def refused(reg_, instance, start, *a, **k):
         if instance == LEAD and start == t:  # that one night only
-            raise RegistryError("That time's run was cancelled, and a cancelled run isn't opened again. Pick another time.")
+            raise RegistryError("That time's run was cancelled, and a cancelled event isn't opened again. Pick another time.")
         return real_ensure(reg_, instance, start, *a, **k)
 
     monkeypatch.setattr(rc, "ensure_run", refused)
@@ -457,7 +457,7 @@ def test_the_sentences(reg, rs, monkeypatch):
     refill = rc.refill_sentence(reg, fev)
     assert cq.leave_follow_consequence(reg, fev, True, True) == ["You stay on the Hyjal Summit roster.", "Your Barrow Deeps place is freed.", refill]
     assert cq.leave_follow_consequence(reg, fev, True, False) == ["Your Hyjal Summit answer stands.", "Your Barrow Deeps place is freed.", refill]
-    assert cq.leave_follow_consequence(reg, fev, False, False) == ["Your Hyjal Summit answer stands.", "You are out of the Barrow Deeps follow-on."]
+    assert cq.leave_follow_consequence(reg, fev, False, False) == ["Your Hyjal Summit answer stands.", "You are out of Barrow Deeps, the later raid."]
     rc.run_team(reg, fev)["autofill"] = True
     assert cq.leave_follow_consequence(reg, fev, True, True)[2] == "The bench is asked to fill it."  # never "an officer may" when the bot asks
     fx = rc.cancel_effects(reg, lead)
@@ -581,7 +581,7 @@ def test_me_rows_offer_leaving_and_staying(reg, rs, monkeypatch):
     f = r[fev.key]
     assert f["lead_raid"] == "Hyjal Summit" and f["then"] is None and f["may_answer"] is False and f["may_cant"] is False
     assert f["may_leave"] is True and f["may_stay"] is False
-    assert f["leave_consequence"] == "Your Hyjal Summit answer stands. You are out of the Barrow Deeps follow-on."
+    assert f["leave_consequence"] == "Your Hyjal Summit answer stands. You are out of Barrow Deeps, the later raid."
     rc.leave_follow(reg, rs, rs.events[fev.key], m)
     f = rows()[fev.key]
     assert f["may_leave"] is False and f["may_stay"] is True
@@ -808,7 +808,7 @@ def test_open_on_a_run_already_open_never_claims_a_follow_on(reg, rs, monkeypatc
     assert ", then" not in first.json()["message"]
     p = fc.post(f"/api/raid/{LEAD}/open/preview", json={"when": when, "schedule": "adhoc", "follow": "barrow_deeps x2"}, headers=bearer()).json()
     assert p["exists"] == "open" and p["follow"] is None
-    assert p["follow_line"] == "A follow-on can't be added to a run that is already open."
+    assert p["follow_line"] == "A later raid can't be added to an event that is already open."
     r = fc.post(f"/api/raid/{LEAD}/open", json={"when": when, "schedule": "adhoc", "follow": "barrow_deeps x2"}, headers=bearer())
     assert r.status_code == 200, r.text
     assert r.json()["key"] == first.json()["key"] and ", then" not in r.json()["message"]

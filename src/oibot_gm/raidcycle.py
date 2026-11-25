@@ -51,7 +51,7 @@ LEAVING_NOTE = "leaving after the first raid"  # the follow-on's out row for som
 FOLLOW_ANSWER_REFUSAL = "Answer on the {lead} sheet. It covers the whole night."
 LEAD_SEAT_BONUS = 1000  # a follow-on's solve: the lead's rostered beat every seat weight combined, so the splits are the lead's roster split
 # a later raid of a run (part ≥ 1) is never locked by itself while an earlier raid is open: the first raid's lock builds them all
-LATER_PART_LOCK = "Lock {first} first. Its lock builds every raid of the run."
+LATER_PART_LOCK = "Lock {first} first. Its lock builds every raid of the event."
 # a member's own Join / Bench after lock: the sheet's SignupButton and plain text (configops.authorize) refuse it in these words
 LOCKED_JOIN = "The roster is locked — answer your confirmation DM, or press Can't make it on the sheet."
 STATES = ("open", "locked", "done", "cancelled")
@@ -1145,7 +1145,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     full = parse_lineup([{"raid": instance, "rosters": first_n}, *later])  # LINEUP_MAX_WORDS, a raid twice, 1 to 4 rosters
     for e in full[1:]:
         if e["raid"] not in reg.profile.raids or e["raid"] == instance:
-            raise RegistryError(f"a follow-on is another raid of the profile (one of {', '.join(reg.profile.raids)})")
+            raise RegistryError(f"a later raid is another raid of this game (one of {', '.join(reg.profile.raids)})")
     offsets = reg.lineup_offsets(full)  # LINEUP_ORDER
     key = new_run_key(reg, rs, instance)
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
@@ -1229,8 +1229,8 @@ def closed_run_refusal(rs: "RaidStore", ev: "RaidEvent | None") -> str | None:
     if ev is None or ev.state not in ("done", "cancelled"):
         return None
     if ev.state == "cancelled":
-        return "That time's run was cancelled, and a cancelled run isn't opened again. Pick another time."
-    return (f"That time's run already ended. Reopen works for {reopen_window()} after the end if that was a mistake. "
+        return "That time's event was cancelled, and a cancelled event isn't opened again. Pick another time."
+    return (f"That time's event already ended. Reopen works for {reopen_window()} after the end if that was a mistake. "
             "Otherwise pick another time.")
 
 
@@ -1256,7 +1256,7 @@ def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by:
         if test and mine is not None and theirs is not None and str(mine) != str(theirs):
             # a rehearsal belongs to its tester (its pool, its buttons, its DMs): a second tester never inherits it
             who = reg.members.get(int(theirs)) if str(theirs).isdigit() else None
-            raise RegistryError(f"{who.display_name if who else 'Another officer'} opened a test run at {reg.local12(start)} — "
+            raise RegistryError(f"{who.display_name if who else 'Another officer'} opened a test event at {reg.local12(start)} — "
                                 "join theirs or clear it (nothing was opened)")
         complete_parts(reg, rs, have)  # an open cut off between its parts (a restart) is finished, once
         return have
@@ -1309,7 +1309,7 @@ def forget_test_members(reg: Registry, rs: "RaidStore", uids: list[int], by: str
     names = set(by_uid.values())
     held = [(by_uid[u], e.key) for e in rs.live() for u in sorted(by_uid, key=by_uid.get) if e.seat_of(u)]  # seats by id
     if held:
-        raise RegistryError(f"{', '.join(n for n, _ in held)} {'is' if len(held) == 1 else 'are'} rostered on a locked run "
+        raise RegistryError(f"{', '.join(n for n, _ in held)} {'is' if len(held) == 1 else 'are'} rostered on a locked event "
                             f"({', '.join(sorted({k for _, k in held}))}): cancel it or clear the whole bench")
     reg.remove_test_members(uids, by)
     ids, changed = {str(u) for u in uids}, []
@@ -1412,7 +1412,7 @@ def next_runs_lines(reg: Registry, instance: str, **kw) -> list[str]:
     """next_runs_preview as one line per schedule: 'Barrow Deeps · Default: next Tue 6 Oct 7:30 PM, Thu 8 Oct 7:30 PM'."""
     name = reg.raid_def(instance).get("name", instance)
     rows = next_runs_preview(reg, instance, **kw)
-    return [f"{name}" + (f" · {r['name']}" if len(rows) > 1 else "") + ": next " + (", ".join(r["labels"]) or "none (no run times yet)")
+    return [f"{name}" + (f" · {r['name']}" if len(rows) > 1 else "") + ": next " + (", ".join(r["labels"]) or "none (no event times yet)")
             for r in rows]
 
 
@@ -1495,25 +1495,25 @@ class Refusal(str):
         return obj
 
 
-MOVE_CLOSED = "This run is finished or cancelled, so it can't move."
-MOVE_STARTED = "This run has started, so it can't move."
-TIMING_SAME = "The run already has that timing."
-MOVE_CLASH = "{raid} already has a run at {when}. Pick another time."
-MOVE_SAME = "The run already starts then."
+MOVE_CLOSED = "This event is finished or cancelled, so it can't move."
+MOVE_STARTED = "This event has started, so it can't move."
+TIMING_SAME = "The event already has that timing."
+MOVE_CLASH = "{raid} already has an event at {when}. Pick another time."
+MOVE_SAME = "The event already starts then."
 TIMING_LOCKED = "The sheet timing is fixed once the roster locks. Move the start instead."
 CONFIRM_LOCKED = "Asking the rostered to confirm is fixed once the roster locks."
 SWITCH_EMPTY = "Say on or off for that setting."
 PRIORITY_LOCKED = "The priority is fixed once the roster locks, because the roster is already chosen."
 TIMING_ORDER = "The Signup Reminder must go out before Locks, and Confirm by can't come before Locks."
 TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, confirm-by, asks, confirmation, priority and split.")
-MOVE_OFFICER_ONLY = "Only an officer moves a run or changes its timing."
+MOVE_OFFICER_ONLY = "Only an officer moves an event or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
 
 MOVE_GAP = "That time doesn't exist that night because the clocks go forward. Pick another time."
 MOVE_TWICE = "That time happens twice that night because the clocks go back. Pick another time."
 MOVE_WHEN = "Pick the new day and time with the picker."
-RUN_CHANGED = "Someone changed this run a moment ago, so nothing was saved. Check it and try again."
+RUN_CHANGED = "Someone changed this event a moment ago, so nothing was saved. Check it and try again."
 
 
 def move_start(reg: Registry, value) -> datetime:
@@ -1910,11 +1910,11 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
 # ---------------------------------------------------------------- the lineup of an open run (phase 3, Task 6)
 
 LINEUP_LOCKED = "The lineup is fixed once the roster locks."
-LINEUP_CLOSED = "This run is finished or cancelled, so its raids can't change."
-LINEUP_FIRST = "The first raid of a run can't change. Start a new run instead."
+LINEUP_CLOSED = "This event is finished or cancelled, so its raids can't change."
+LINEUP_FIRST = "The first raid of an event can't change. Start a new event instead."
 LINEUP_GONE = "This game has no raid called {raid}. Pick another raid."
-LINEUP_SAME = "The run already has that lineup."
-LINEUP_OFFICER_ONLY = "Only an officer changes the raids of a run."
+LINEUP_SAME = "The event already has that lineup."
+LINEUP_OFFICER_ONLY = "Only an officer changes the raids of an event."
 
 
 class LineupChange(BaseModel):
@@ -2186,16 +2186,16 @@ def rosters_copy(reg: Registry, instance: str, sid: str, n: int, rs=None) -> str
     except RegistryError:  # a schedule that doesn't exist yet: the raid's size
         size = int(reg.raid_def(instance).get("size") or DEFAULT_RAID_SIZE)
     n = max(1, int(n or 1))
-    text = f"From the next run: the sheet advertises {n} × {size} seats."
+    text = f"From the next event: the sheet advertises {n} × {size} seats."
     try:
         live = reg.schedule_runs_open(sid, rs)
     except Exception:  # noqa: BLE001 — the first sentence is still true without the run store
         live = []
     have = sorted({int(t.get("rosters") or 1) for t in live})
     if len(live) == 1:
-        text += f" The run already open keeps its {have[0]} × {int(live[0].get('size') or size)}."
+        text += f" The event already open keeps its {have[0]} × {int(live[0].get('size') or size)}."
     elif live:
-        text += f" The {len(live)} runs already open keep theirs ({', '.join(f'{m} × {size}' for m in have)})."
+        text += f" The {len(live)} events already open keep theirs ({', '.join(f'{m} × {size}' for m in have)})."
     return text
 
 
@@ -2365,7 +2365,7 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
     if not ev.follows:  # a follow-on's answers come from its lead (sync_follow), absences included
         prefill(reg, ev, team)
     ev.log.append(f"opened ({run_kind(reg, ev)}); {len(ev.signups)} marked away from absences" if not ev.follows
-                  else "opened as a follow-on: its answers are the lead's")
+                  else "opened as a later raid: its answers are the first raid's")
     rs.save(ev, "opened")
     return ev
 
@@ -2868,7 +2868,7 @@ def stay_for_follow(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member) -> b
     if m.discord_id not in ev.leaving:
         return False
     ev.leaving = [u for u in ev.leaving if u != m.discord_id]
-    ev.log.append(f"{m.display_name} is staying for the follow-on")
+    ev.log.append(f"{m.display_name} is staying for the later raid")
     rs.save(ev, f"staying: {m.display_name}")
     lead = lead_of(rs, ev)
     if lead is not None:
@@ -3769,7 +3769,7 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
         ev.log.append(f"{'suggestion' if ev.state == 'open' else 'fill'}: {ask.display_name}'s yes not taken ({'away that day' if away else 'answered No thanks'})")
         rs.save(ev, f"fill {ask.display_name} yes refused")
         return (f"{ask.display_name} is marked away that day, so the yes wasn't taken — clear the absence first, then answer the sheet" if away
-                else f"{ask.display_name} answered No thanks for this run, so the yes wasn't taken — change the answer on the sheet first")
+                else f"{ask.display_name} answered No thanks for this event, so the yes wasn't taken — change the answer on the sheet first")
     ask.answer, ask.answered_at = ("yes" if yes else "no"), now()
     if not yes or not m:
         ev.log.append(f"{'suggestion' if ev.state == 'open' else 'fill'}: {ask.display_name} declined ({ask.kind})")
@@ -4163,9 +4163,9 @@ def split_reason_text(reason: dict, role=None) -> str:
     else:
         need = " and ".join(f"{n} {r}{'s' if n != 1 else ''}" for r, n in reason["short"].items())
     if reason["roles_allow"] == 0:
-        return f"1 run is short {need}" if reason["bodies_allow"] <= 1 else f"Enough people for {reason['bodies_allow']} runs — even one is short {need}"
-    nth = ORDINALS[reason["run"] - 1] if reason["run"] <= len(ORDINALS) else f"run {reason['run']}"
-    return f"Enough people for {reason['bodies_allow']} runs — a {nth} is short {need}"
+        return f"1 roster is short {need}" if reason["bodies_allow"] <= 1 else f"Enough people for {reason['bodies_allow']} rosters — even one is short {need}"
+    nth = ORDINALS[reason["run"] - 1] if reason["run"] <= len(ORDINALS) else f"roster {reason['run']}"
+    return f"Enough people for {reason['bodies_allow']} rosters — a {nth} is short {need}"
 
 
 def run_split_reason(reg: Registry, ev: "RaidEvent") -> dict | None:
@@ -4221,7 +4221,7 @@ def another_run_hint(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult]
     if len(any_role) < size or not _can_cover(any_role, need):
         return None
     how = "" if _can_cover(main_only, need) else " with offspecs or alts"
-    return f"Leftovers, Bench and everyone else who could play ({len(any_role)}) are enough for another run{how}."
+    return f"Leftovers, Bench and everyone else who could play ({len(any_role)}) are enough for another roster{how}."
 
 
 EXTRA_ROLES = ("tank", "healer")  # a role past its minimum waits for everyone else (no role has an upper limit — D16)
@@ -4728,7 +4728,7 @@ def apply_move(reg: Registry, ev: RaidEvent, name: str, to: tuple[int, int] | No
     place, or go to the bank when the mover came from it). Raises ValueError when the group is full or the name
     is not a joiner. Returns the new flat layout; the caller saves it the way a whole-board write would be."""
     if signup_by_name(ev, name) is None or signup_by_name(ev, name).status != "in":
-        raise ValueError(f"{name} hasn't joined this run")
+        raise ValueError(f"{name} hasn't joined this event")
     layout = board_layout(reg, ev)
     gsize = int(reg.profile.comp_rules["group_size"])
     origin = next(((gi, g.index(name)) for gi, g in enumerate(layout) if name in g), None)
@@ -5147,16 +5147,16 @@ def reopen_refusal(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> 
     within REOPEN_GRACE_HOURS of the end, before its scheduled close, and only back to the state it ended from. A
     cancelled run is never reopened — open a new one."""
     if ev.state == "cancelled":
-        return "A cancelled run can't be reopened. Open a new run instead."
+        return "A cancelled event can't be reopened. Open a new event instead."
     if ev.state != "done":
-        return "This run hasn't ended, so there is nothing to reopen."
+        return "This event hasn't ended, so there is nothing to reopen."
     t = at or datetime.now(ev.start.tzinfo)
     if not closed_recently(ev, at=t):
-        return f"It ended more than {reopen_window()} ago. Reopen is only for a run ended by mistake."
+        return f"It ended more than {reopen_window()} ago. Reopen is only for an event ended by mistake."
     if t >= run_close_at(reg, ev):
-        return "Its scheduled close has passed, so the run is over."
+        return "Its scheduled close has passed, so the event is over."
     if not reg.config.team(ev.team):
-        return "Its roster settings are already cleaned up. Open a new run instead."
+        return "Its roster settings are already cleaned up. Open a new event instead."
     return None
 
 
@@ -5281,7 +5281,7 @@ def remind_refusal(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> 
     and not within the hour of the last reminder."""
     if ev.state != "locked" or not ev.all_rosters:
         return ("Remind is for a locked roster, and this sheet is still open." if ev.state == "open" else
-                f"This run is already {RUN_STATE_WORDS.get(ev.state, ev.state)}.")
+                f"This event is already {RUN_STATE_WORDS.get(ev.state, ev.state)}.")
     if not run_confirms(reg, ev):
         return no_confirm_sentence(reg, ev, "there is nothing to remind")
     t = at or datetime.now(ev.start.tzinfo)
@@ -5383,7 +5383,7 @@ def open_when(reg: Registry, instance: str, value: str | None, schedule: str | N
         if re.fullmatch(r"\d{1,2}:\d{2}", when):  # a bare time: the next upcoming run at that clock time
             hit = next(((s, t) for s, t in nxt if t.astimezone(reg.tz).strftime("%H:%M") == when.zfill(5)), None)
             if hit is None:
-                raise RegistryError(f"{instance} has no upcoming run at {reg.time_label(when.zfill(5))} — give the date too")
+                raise RegistryError(f"{instance} has no upcoming event at {reg.time_label(when.zfill(5))} — give the date too")
             return hit[1], hit[0]["id"], ""
         try:
             parsed = datetime.fromisoformat(when.replace(" ", "T", 1))
@@ -5397,15 +5397,15 @@ def open_when(reg: Registry, instance: str, value: str | None, schedule: str | N
             sid = open_schedule(reg, instance, start, None)
         return start, sid, note
     if sid == ADHOC_SCHEDULE:
-        raise RegistryError("an ad hoc run starts at the day and time you pick — pick one")
+        raise RegistryError("a one-off event starts at the day and time you pick — pick one")
     if sched is not None and sched["kind"] == "pickup":
-        raise RegistryError(f"{sched['name']} is a pickup template — pick the date and time it starts")
+        raise RegistryError(f"{sched['name']} is a schedule opened by an officer — pick the date and time it starts")
     if not nxt:
         fo = reg.first_open(instance)
         has = [s for s in reg.schedules(instance) if s["kind"] != "pickup" and (sched is None or s["id"] == sid)]
         later_fo = [t for s in has for e in schedule_lineup(instance, s)[1:] if (t := reg.first_open(e["raid"])) and t > reg.now_local()]
         why = (f"its slots all fall before it opens on {reg.local12(fo)}" if has and fo and fo > reg.now_local()
-               else f"a later raid of its run first opens {reg.local12(min(later_fo))}" if later_fo  # C8: those nights are skipped
+               else f"a later raid of its lineup first opens {reg.local12(min(later_fo))}" if later_fo  # C8: those nights are skipped
                else "it has no recurring slots yet")
         raise RegistryError(f"No next slot for this raid: {why}. Pick a date and time instead, or set it up on the Raids page.")
     return nxt[0][1], nxt[0][0]["id"], ""
@@ -5414,13 +5414,13 @@ def open_when(reg: Registry, instance: str, value: str | None, schedule: str | N
 def dst_words(reg: Registry, note: str, start: datetime) -> str:
     """The DST note in words for a person (the wizard's when_note, the site's preview): "" on an ordinary night."""
     if note == "gap":
-        return f"That time doesn't exist that night because the clocks go forward. The run uses {reg.local12(start, '%I:%M %p')} instead."
+        return f"That time doesn't exist that night because the clocks go forward. The event uses {reg.local12(start, '%I:%M %p')} instead."
     if note == "ambiguous":
-        return f"{reg.local12(start, '%I:%M %p')} happens twice that night because the clocks go back. The run uses the first one."
+        return f"{reg.local12(start, '%I:%M %p')} happens twice that night because the clocks go back. The event uses the first one."
     return ""
 
 
-OPEN_FOLLOW_REFUSAL = "A follow-on can't be added to a run that is already open."
+OPEN_FOLLOW_REFUSAL = "A later raid can't be added to an event that is already open."
 
 
 def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | None = None, schedule: str | None = None, follow: dict | None = None,
@@ -5675,7 +5675,7 @@ def fill_state_text(reg: Registry, ev: RaidEvent) -> str:
     if ev.state == "open":
         return "Open seats are asked for after the lock; before it, Suggest… shows who could cover a minimum."
     if ev.state in ("done", "cancelled"):
-        return f"The run is {RUN_STATE_WORDS[ev.state]}."
+        return f"The event is {RUN_STATE_WORDS[ev.state]}."
     words = FILL_STATE_WORDS.get(ev.fill_state, ev.fill_state)
     if ev.fill_state == "idle" and (n := open_seat_count(reg, ev)):
         words = open_seats_words(reg, ev, n)  # "No seat to fill yet." is false while seats are open
@@ -5717,10 +5717,10 @@ def end_refusal(ev: RaidEvent, at: datetime | None = None) -> str | None:
     """Why "End the run now" can't go (the lock card, the SheetCard): only a locked run, and only after its scheduled
     start — before then, Cancel is the verb. None = it may."""
     if ev.state != "locked":
-        return (f"This run is already {RUN_STATE_WORDS[ev.state]}." if ev.state in ("done", "cancelled") else
-                "End is for a locked run, and this sheet is still open.")
+        return (f"This event is already {RUN_STATE_WORDS[ev.state]}." if ev.state in ("done", "cancelled") else
+                "End is for a locked event, and this sheet is still open.")
     if (at or datetime.now(ev.start.tzinfo)) < ev.start:
-        return "The run hasn't started yet. Before the start, use Cancel instead."
+        return "The event hasn't started yet. Before the start, use Cancel instead."
     return None
 
 
@@ -5818,7 +5818,7 @@ def character_effects(reg: Registry, rs: RaidStore, m: Member, change: dict) -> 
             elif kind == "spec":
                 out.append({"ev": ev, "kind": "seat", "action": "free",
                             "text": f"{label}'s {role} seat for {words} is released, because {change['spec']} plays {change['role']}. "
-                                    "On an ad hoc run, Join again to queue."})
+                                    "On a one-off event, Join again to queue."})
             elif kind == "name":
                 out.append({"ev": ev, "kind": "seat", "action": "rewrite", "text": f"The seat for {words} now reads {change['new_label']}."})
             continue
@@ -5915,7 +5915,7 @@ def join_while_away(reg: Registry, ev: RaidEvent, m: Member, mine: bool = True) 
         return None
     who = "You're" if mine else f"{m.display_name} is"
     their = "your" if mine else "their"
-    return (f"{who} marked away {reg.day_label(day)} — joined for this run; {their} absence {reg.span_label(a.start, a.end)} "
+    return (f"{who} marked away {reg.day_label(day)} — joined for this event; {their} absence {reg.span_label(a.start, a.end)} "
             "still stands for the other sheets (I'm back clears it).")
 
 # ---------------------------------------------------------------- the member inbox (dual interfaces phase 2 B, design §5.40)
@@ -5970,7 +5970,7 @@ def refill_sentence(reg: Registry, ev: RaidEvent, it: str = "it") -> str:
 
 def no_confirm_sentence(reg: Registry, ev: RaidEvent, tail: str = "nobody is asked to confirm") -> str:
     """Why nobody confirms on this run (D5): 'On an ad hoc run Join is the commitment, so nobody is asked to confirm.'"""
-    where = "On an ad hoc run" if run_kind(reg, ev) == "adhoc" else "On this run"
+    where = "On a one-off event" if run_kind(reg, ev) == "adhoc" else "On this event"
     return f"{where} Join is the commitment, so {tail}."
 
 
@@ -5984,10 +5984,10 @@ def open_rules(reg: Registry, instance: str, sid: str | None, kind: str) -> list
     sd = reg.schedule_def(instance, sid)
     lock = hours_words(float(sd["lock_hours_before"]))
     if kind == "adhoc":
-        return [f"It's an ad hoc run, so seats go {FIRST_COME}.",
+        return [f"It's a one-off event, so seats go {FIRST_COME}.",
                 "There are no regulars or reminders" + (", and the rostered are asked to confirm." if sd.get("confirm") else ", and Join is the commitment."),
                 f"It locks {lock} before the start, and a role swap waits for an officer."]
-    return ["It's a scheduled run, so its regulars are expected." + (" The rostered are asked to confirm." if sd.get("confirm", True) else ""),
+    return ["It's a scheduled event, so its regulars are expected." + (" The rostered are asked to confirm." if sd.get("confirm", True) else ""),
             f"It locks {lock} before the start."]
 
 
@@ -6252,7 +6252,7 @@ def member_change_words(reg: Registry, ev: RaidEvent, m: Member) -> str:
     """'Kestrel is now Bench as Kestrel (since 5:12 PM)' — the member's answer as it is now, for the re-read screen."""
     s = ev.signups.get(str(m.discord_id))
     if s is None:
-        return f"{m.display_name} has no answer on this run now"
+        return f"{m.display_name} has no answer on this event now"
     seat = " and rostered" if ev.state != "open" and ev.seat_of(m) else ""
     return f"{m.display_name} is now {LABELS.get(s.status, s.status)} as {s.character}{seat} (since {reg.local12(s.updated_at, '%I:%M %p')})"
 

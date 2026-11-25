@@ -170,7 +170,7 @@ def test_the_fill_state_reads_in_sentences(reg, rs):
     ev.autofill_paused, ev.autofill_paused_by = True, "Jon"
     assert rc.fill_state_text(reg, ev).startswith("Automatic asks paused by Jon. ") and "autofill" not in rc.fill_state_text(reg, ev).lower()
     rc.end_run(reg, rs, ev, "t")
-    assert rc.fill_state_text(reg, ev) == "The run is finished."
+    assert rc.fill_state_text(reg, ev) == "The event is finished."
 
 
 def test_the_me_badge_says_not_rostered_for_a_joiner_the_lock_left_out(reg, rs):
@@ -276,21 +276,21 @@ def test_board_moves_after_the_lock_on_an_ad_hoc_run_promise_no_dm(reg, rs):
     roster, sub = said("roster", reg, ev), said("substitute", reg, ev)
     for text in (roster, sub):
         assert "Confirm or Can't make it" not in text and "DM" not in text, text
-    assert roster == "Nettle takes an open seat in Group 2. On an ad hoc run Join is the commitment, so the seat is theirs now."
-    assert sub == ("Nettle takes Ivy's seat in Group 2. On an ad hoc run they aren't asked to confirm. "
+    assert roster == "Nettle takes an open seat in Group 2. On a one-off event Join is the commitment, so the seat is theirs now."
+    assert sub == ("Nettle takes Ivy's seat in Group 2. On a one-off event they aren't asked to confirm. "
                    "Ivy sees the seat was released on their Me page.")
-    assert said("remind", reg, ev) == "On an ad hoc run Join is the commitment, so there is nothing to remind."
+    assert said("remind", reg, ev) == "On a one-off event Join is the commitment, so there is nothing to remind."
     assert "card" not in said("release", reg, ev)
 
 
 def test_end_reads_the_reopen_window_from_code(reg, rs, monkeypatch):
     ev, _ = locked_ten(reg, rs)
-    assert said("end", reg, ev) == ("The run is finished. The sheet and the lock card close and no more fill asks go out. "
+    assert said("end", reg, ev) == ("The event is finished. The sheet and the lock card close and no more fill asks go out. "
                                     "Reopen works for an hour if this was a mistake.")
     monkeypatch.setattr(rc, "REOPEN_GRACE_HOURS", 2)
     assert said("end", reg, ev).endswith("Reopen works for 2 hours if this was a mistake.")
     rc.end_run(reg, rs, ev, "t")
-    assert said("end", reg, ev) == "This run is already finished."
+    assert said("end", reg, ev) == "This event is already finished."
 
 
 def test_ev_json_carries_every_board_sentence_with_tokens_for_the_names(reg, rs, c):

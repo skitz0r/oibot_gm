@@ -579,7 +579,7 @@ def test_a_cancelled_run_is_never_reopened_and_its_entry_goes_at_once(reg, rs):
     bot = NightBot(reg, rs)
     ev = open_test_run(reg, rs)
     run(bot.cancel_run(reg, rs, ev, "Jon", None, notify=False))
-    with pytest.raises(RegistryError, match="cancelled run can't be reopened"):
+    with pytest.raises(RegistryError, match="cancelled event can't be reopened"):
         run(bot.reopen_run(reg, rs, ev, by="Jon"))
     run(bot.cleanup_ephemeral(reg, rs))
     assert not reg.config.team(ev.team)
@@ -595,7 +595,7 @@ def test_open_preview_resolves_dst_nights_and_matches_a_scheduled_run(reg, rs):
     assert "clocks go back" in amb["when_note"] and datetime.fromisoformat(amb["start"]).utcoffset() == timedelta(hours=-7), "the first 1:30 (still PDT)"
     wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)  # a Wednesday 1–2 weeks out
     plain = rc.open_preview(reg, rs, "barrow_deeps", f"{wed.isoformat()} 20:00", "adhoc")
-    assert plain["when_note"] == "" and "8:00 PM" in plain["label"] and "ad hoc run" in plain["rules"]
+    assert plain["when_note"] == "" and "8:00 PM" in plain["label"] and "one-off event" in plain["rules"]
     reg.set_raid_overrides("barrow_deeps", {"first_open": "2026-01-01T00:00"}, "t")
     weekly(reg, "barrow_deeps", "Wed 20:00")
     hit = rc.open_preview(reg, rs, "barrow_deeps", f"{wed.isoformat()} 20:00", None)
@@ -725,7 +725,7 @@ def test_cancel_reopen_remind_pause_withdraw_routes(reg, rs, web_bot):
     assert r.status_code == 200 and ev.state == "cancelled" and "Nobody was DMed" in r.json()["message"]
     assert c.post(f"/api/run/{ev.key}/cancel", json={}, headers=H()).status_code == 400, "already cancelled"
     r = c.post(f"/api/run/{ev.key}/reopen", json={}, headers=H())
-    assert r.status_code == 400 and "cancelled run can't be reopened" in r.json()["error"]
+    assert r.status_code == 400 and "cancelled event can't be reopened" in r.json()["error"]
     assert any(t.startswith("[mcp]") and "cancelled" in t for _, t in web_bot.bot.ops.lines), "the audit line names the surface"
 
 
