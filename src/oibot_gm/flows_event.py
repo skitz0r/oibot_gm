@@ -411,13 +411,15 @@ async def open_raid_edit(interaction: discord.Interaction, reg: Registry, **_see
 
 STEP = 15  # a later raid's start is picked in 15-minute steps
 START_CHOICES = 24  # after the previous raid's start: 15 minutes to 6 hours
+EVERY_RAID_IN = "Every raid of the game is in this lineup."
 
 
 class LineupBlock:
     """A lineup drafted on one screen, mixed into a Wizard: `self.lineup` = [{raid, rosters[, starts]}], entry 0 the
     first raid (it never changes — rc.LINEUP_FIRST), a later entry's `starts` in minutes after the first (absent = the
     Registry.lineup_offsets default: when the raid before it ends). It knows nothing of events: the host gives
-    `lineup_start()` (the first raid's start for clock words; None for a schedule) and `lineup_done(i)` (Review)."""
+    `lineup_start()` (the first raid's start for clock words; None for a schedule), `lineup_done(i)` (Review) and, when
+    the hub's Back should return to the host's previous screen, `lineup_back(i)` (default: the wizard's cancel)."""
 
     lineup: list[dict]
     lineup_page: int = 0
@@ -427,6 +429,9 @@ class LineupBlock:
 
     async def lineup_done(self, interaction: discord.Interaction) -> None:
         raise NotImplementedError
+
+    async def lineup_back(self, interaction: discord.Interaction) -> None:
+        await self.cancel(interaction)
 
     # ---- words
     def _raid_name(self, rid: str) -> str:
@@ -476,6 +481,8 @@ class LineupBlock:
         steps = [Opt(str(n + 1), f"{n + 1}. {self._raid_name(e['raid'])}") for n, e in enumerate(self.lineup)]
         taken = {e["raid"] for e in self.lineup}
         free = [Opt(rid, self._raid_name(rid)) for rid in self.reg.profile.raids if rid not in taken]
+        if not full and not free:
+            lines.append(EVERY_RAID_IN)
 
         async def goto(i: discord.Interaction, page: int) -> None:
             self.lineup_page = page
@@ -488,7 +495,7 @@ class LineupBlock:
             add[0].disabled = True
         text = "\n".join(([note] if note else []) + lines + ([page_note] if page_note else []))
         await self.show(interaction, text, self.select("Pick a step", steps, self._lineup_pick), *add,
-                        self.button(REVIEW, self.lineup_done, discord.ButtonStyle.primary), self.button("Back", self.cancel))
+                        self.button(REVIEW, self.lineup_done, discord.ButtonStyle.primary), self.button("Back", self.lineup_back))
 
     async def _lineup_add(self, interaction: discord.Interaction, values: list[str]) -> None:
         rid = values[0]
@@ -528,25 +535,31 @@ class LineupBlock:
 
     def _start_opts(self, n: int, offsets: list[int]) -> list[Opt]:
         """The default first ("When <previous raid> ends · 9:15 PM"), then 24 starts in 15-minute steps from the
-        previous raid's start plus 15 minutes. Values are minutes after the first raid; "end" = the default."""
+        previous raid's start plus 15 minutes. Values are minutes after the first raid; "end" = the default. A start
+        already set that is not among them (off the 15-minute grid, or later) is added in its place, so it shows picked."""
         e = self.lineup[n]
         default = self.reg.lineup_offsets([*self.lineup[:n], {k: v for k, v in e.items() if k != "starts"}])[n]
         prev = offsets[n - 1]
         out = [Opt("end", f"When {self._raid_name(self.lineup[n - 1]['raid'])} ends · {self._at_words(default)}",
                    default=e.get("starts") is None)]
-        for s in range(1, START_CHOICES + 1):
-            at = prev + STEP * s
-            out.append(Opt(str(at), self._at_words(at), default=e.get("starts") is not None and int(e["starts"]) == at))
-        return out[:MAX_OPTIONS]
+        steps = [prev + STEP * s for s in range(1, START_CHOICES + 1)][: MAX_OPTIONS - 1]
+        own = int(e["starts"]) if e.get("starts") is not None else None
+        if own is not None and own not in steps:
+            steps = sorted([*steps[:-1], own])  # the last step gives way, still ≤ 25 options
+        out += [Opt(str(at), self._at_words(at), default=at == own) for at in steps]
+        return out
 
     def _set_start(self, n: int):
         async def picked(i: discord.Interaction, vals: list[str]) -> None:
+            was = self._offsets()[n]
             if vals[0] == "end":
                 self.lineup[n].pop("starts", None)
             else:
                 self.lineup[n]["starts"] = int(vals[0])
-            for e in self.lineup[n + 1:]:  # a later raid follows from here again
-                e.pop("starts", None)
+            delta = self._offsets()[n] - was
+            for e in self.lineup[n + 1:]:  # a later raid set to its own start keeps its gap (LineupBuilder setStart)
+                if e.get("starts") is not None:
+                    e["starts"] = int(e["starts"]) + delta
             await self.lineup_step(i, n)
         return picked
 

@@ -176,3 +176,86 @@ def test_the_command_takes_no_typed_value(reg):  # noqa: F811
     cmd = next(c for c in raid.commands if c.name == "lineup")
     assert cmd.parameters == [] and cmd.description == "Officer: change the raids of an open event before it locks"
     assert flows_event.EditLineupWizard.__mro__[1] is flows_event.LineupBlock
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def test_a_new_start_shifts_the_later_raids_and_keeps_their_gaps(reg, rs, officer):  # noqa: F811
+    first = open_one_off(reg, rs, days=3, lineup=[{"raid": RAID_B, "rosters": 1, "starts": 120},
+                                                  {"raid": RAID_C, "rosters": 1, "starts": 300}])
+    h = harness(reg, rs)
+    run(FLOWS["raid_lineup"](h.command(), reg))
+    run(h.pick("Pick a step", "2"))
+    run(h.pick("Starts", "150"))
+    run(h.press("Back"))
+    run(h.press("Review changes"))
+    run(h.press("Save lineup"))
+    parts = rc.event_parts(rs, first)
+    assert parts[1].start == rc.after_minutes(first.start, 150)
+    assert parts[2].start == rc.after_minutes(first.start, 330), "raid 3 keeps its gap of 3 hours"
+
+
+def test_tidy_drops_a_later_start_no_longer_after_the_one_before(reg, rs):  # noqa: F811
+    class Block(flows_event.LineupBlock):
+        pass
+
+    b = Block()
+    b.reg = reg
+    b.lineup = [{"raid": "x", "rosters": 1, "starts": 30}, {"raid": RAID_B, "rosters": 1, "starts": 120},
+                {"raid": RAID_C, "rosters": 1, "starts": 120}, {"raid": RAID_D, "rosters": 1, "starts": 400}]
+    b.lineup[0]["raid"] = next(iter(reg.profile.raids))
+    b._tidy()
+    assert "starts" not in b.lineup[0], "the first raid starts the event"
+    assert b.lineup[1]["starts"] == 120 and "starts" not in b.lineup[2], "not after the one before: back to its default"
+    assert b.lineup[3]["starts"] == 400
+
+
+def test_back_on_the_hub_goes_through_the_hosts_hook(reg, rs, officer):  # noqa: F811
+    open_one_off(reg, rs, days=3)
+    h = harness(reg, rs)
+    wiz = flows_event.EditLineupWizard
+    called = []
+
+    async def back(self, i):
+        called.append(True)
+        await self.lineup_hub(i, "Back to where it came from.")
+
+    wiz.lineup_back = back  # a host's own Back (a one-off's /raid open, a schedule's lineup step)
+    try:
+        run(FLOWS["raid_lineup"](h.command(), reg))
+        run(h.press("Back"))
+    finally:
+        del wiz.lineup_back
+    assert called and "Back to where it came from." in h.text
+
+
+def test_add_a_raid_says_why_when_every_raid_is_in(reg, rs, officer):  # noqa: F811
+    first = open_one_off(reg, rs, days=3)
+    h = harness(reg, rs)
+    run(FLOWS["raid_lineup"](h.command(), reg))
+    others = [r for r in reg.profile.raids if r != first.instance]
+    for rid in others[:2]:
+        run(h.pick("Add a raid", rid))
+    saved = dict(reg.profile.raids)
+    try:  # a game of three raids: every one is in, under LINEUP_MAX
+        for rid in list(reg.profile.raids):
+            if rid not in {first.instance, *others[:2]}:
+                del reg.profile.raids[rid]
+        run(h.pick("Pick a step", "1"))
+        run(h.press("Back"))
+        assert child(h, "Add a raid").disabled
+        assert flows_event.EVERY_RAID_IN in h.text and LINEUP_MAX_WORDS not in h.text
+    finally:
+        reg.profile.raids.clear()
+        reg.profile.raids.update(saved)
+
+
+def test_a_start_off_the_list_is_kept_as_its_own_option(reg, rs, officer):  # noqa: F811
+    open_one_off(reg, rs, days=3, lineup=[{"raid": RAID_B, "rosters": 1, "starts": 500}])
+    h = harness(reg, rs)
+    run(FLOWS["raid_lineup"](h.command(), reg))
+    run(h.pick("Pick a step", "2"))
+    starts = child(h, "Starts")
+    assert len(starts.options) <= 25
+    picked = [o for o in starts.options if o.default]
+    assert [o.value for o in picked] == ["500"]

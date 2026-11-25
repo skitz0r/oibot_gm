@@ -104,11 +104,14 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        per live raid), Review changes → decide_box(reschedule_box(edit=True)) Save → reschedule_event(timing=, rev=);
                        Task 4: LineupBlock = THE lineup draft mixed into a Wizard (no event knowledge — Tasks 5 and 6 reuse it): self.lineup
                        [{raid, rosters[, starts]}], the host's lineup_start() (None = a schedule: 'N h M min after the first') and
-                       lineup_done(i); lineup_hub = a line per step + Pick a step + Add a raid (OwnerWizard.paged over 25; disabled at
-                       LINEUP_MAX with LINEUP_MAX_WORDS) + Review changes · Back; lineup_step(n) = Rosters 1–MAX_SCHEDULE_ROSTERS, for n ≥ 1
-                       Starts (the lineup_offsets default 'When <raid> ends · 9:15 PM' first, then 24 in 15-minute steps after the previous
-                       start), Move earlier (n ≥ 2) / Move later / Remove — step 1 never changes (LINEUP_FIRST); a move or a removal (and a
-                       new start) clears the later starts back to their default, _tidy drops a start no longer after the one before;
+                       lineup_done(i), and lineup_back(i) (the hub's Back; default the wizard's cancel — a host returns to its previous
+                       screen); lineup_hub = a line per step + Pick a step + Add a raid (OwnerWizard.paged over 25; disabled at
+                       LINEUP_MAX with LINEUP_MAX_WORDS, or with EVERY_RAID_IN when the game has no raid left) + Review changes · Back;
+                       lineup_step(n) = Rosters 1–MAX_SCHEDULE_ROSTERS, for n ≥ 1 Starts (the lineup_offsets default 'When <raid> ends ·
+                       9:15 PM' first, then 24 in 15-minute steps after the previous start, a start already set off that list added in
+                       its place), Move earlier (n ≥ 2) / Move later / Remove — step 1 never changes (LINEUP_FIRST); a new start shifts
+                       every later SET start by the same delta (they keep their gaps, as the site's LineupBuilder setStart); a move or a
+                       removal clears the later starts back to their default; _tidy drops a start no longer after the one before;
                        flow raid_lineup = EditLineupWizard(LineupBlock, EventWizard) from rc.run_lineup, rc.lineup_fixed → its refusal box at
                        once, Review changes → decide_box(lineup_box, refresh) Save lineup → edit_lineup(rev=)) ·
                        flows_config (+ OwnerTransferWizard; AuraWizard = a draft hub per buff, one Save this buff through configops.apply_ops; CompTargetsBlock = the

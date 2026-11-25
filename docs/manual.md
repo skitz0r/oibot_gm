@@ -1478,7 +1478,8 @@ event when several are open and lists its raids, one line each with its rosters 
 9:30 PM*). **Add a raid** picks one the run doesn't hold yet, until it holds four (*"A run holds at most 4 raids."*).
 **Pick a step** opens one raid: its rosters, its start (*When Hyjal Summit ends · 9:30 PM* first, then quarter hours after
 the raid before it), **Move earlier**, **Move later** and **Remove** — the first raid offers its rosters alone. Moving or
-removing a raid puts every raid after it back to starting when the one before it ends. **Review changes** shows the
+removing a raid puts every raid after it back to starting when the one before it ends. A new start for one raid moves
+every raid after it by as much, so they keep their gaps. **Review changes** shows the
 same box as the site with **Save lineup**; if the roster locked meanwhile, the box says the lineup is fixed, with
 **Back** alone, and nothing is saved. A locked event's `/raid lineup` says so at once.
 
