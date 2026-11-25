@@ -31,7 +31,6 @@ ALLOW: list[tuple[str, str, str]] = [
     # the proposal cards sit in the ops channel and on the Agents page, both read by the owner and officers who run them
     ("oibot_gm/news.py", "next run", "the apply job's next pass on the owner's proposal screens, a job run and never a raid event"),
     ("oibot_gm/news.py", "apply run", "one pass of the apply job named on the Agents page's recovery screen, a job run not an event"),
-    ("oibot_gm/news.py", "run the jobs", "the verb: the owner's MCP token starts the news jobs, the lint's verb list misses this phrasing"),
     ("oibot_gm/discord_news.py", "next run", "the apply job's next pass on an ops-channel proposal card, a job run and never a raid event"),
     ("oibot_gm/discord_news.py", "has the full run", "the job's transcript on the Agents page, an operator surface where a run is one job pass"),
     # the Agents page (operator surface, owner only): a run is one pass of the review or apply job on the host, never a
@@ -40,7 +39,6 @@ ALLOW: list[tuple[str, str, str]] = [
     ("pages/Agents.tsx", "Live run", "the card's title over the job pass being streamed now, a job run not an event"),
     ("pages/Agents.tsx", "no runs yet", "the job card's hint before either news job has made a pass on this host"),
     ("pages/Agents.tsx", "in this run yet", "a job pass with no transcript step yet, the operator's own word for it"),
-    ("pages/Agents.tsx", "haven't run on this Mac", "the verb: the jobs have not been started on the host, the verb list misses it"),
     ("pages/Agents.tsx", "Past runs", "the table of the job's last thirty passes and their transcripts, never raid events"),
     ("pages/Agents.tsx", "each review or apply run", "the empty table names the passes of the two news jobs it will list"),
     ("pages/Agents.tsx", "Last run failed", "a job's state line: its last pass failed, read by the owner who installed the job"),
@@ -78,7 +76,8 @@ RETIRED = re.compile(r"\b(?:recurring runs?|lead runs?|runs?|follow[- ]ons?|ad[-
 # has run times" and "Tonight's run again" keep the noun caught.
 _RUNNER = (r"it|that|which|who|whoever|bot|check|import|reminder|job|scheduler|clock|launchd|pc|leader|companion|"
            r"sweep|review|loop")
-_AUX = r"can|can['’]t|cannot|could|will|won['’]t|would|must|should|may|has|have|had|do|does|did|didn['’]t"
+_AUX = (r"can|can['’]t|cannot|could|will|won['’]t|would|must|should|may|has|have|had|hasn['’]t|haven['’]t|hadn['’]t|"
+        r"do|does|did|didn['’]t")
 # a sentence start (or after a dash, colon, bracket), or "or" / "and" / "then": where an imperative "Run …" begins
 _IMPERATIVE = r"(?:^|(?<=[.!?:;—–(\n])|\b(?:or|and|then)\b)\s*"
 VERB_RUN = re.compile("|".join((
@@ -86,12 +85,8 @@ VERB_RUN = re.compile("|".join((
     r"\b(?:you|we|they) run\b",                                           # lets you run your purchase, if they run out
     r"\bto run (?=the\b|it\b|your\b|a\b|again\b|/)",                      # to run the check
     rf"\b(?:{_AUX}) (?:not )?run\b(?!\s+times\b)",                        # can run, once it has run — not "has run times"
-    _IMPERATIVE + r"run (?:it\b|this\b(?!\s+(?:week|month|night|evening|time)\b)|the command\b|again\b|/)",
+    _IMPERATIVE + r"run (?:it\b|this\b(?!\s+(?:week|month|night|evening|time)\b)|the command\b|the jobs?\b|again\b|/)",
     r"\bis running\b", r"\bran\b")), re.I | re.M)
-# The files that still hold a retired word (repo-relative). Each phase-6 task rewords its files and takes them out;
-# test_retired_words_are_gone fails for a hit anywhere else, and for a file here that has none left (the list only
-# shrinks). Computed by running the lint, never by hand.
-WORDS_PENDING: set[str] = set()
 # a dash in a table cell (under its column's header) is a cell, not an empty state: the Iconography rule keeps icon
 # columns free of words, and "no offspec" beside every row is noise. The empty-state sentence is for a whole list, card or
 # section. Only a bare dash is carved out: "none yet" in a cell still names nothing.
@@ -237,11 +232,15 @@ PY_FILES = ["raid_views.py", "wizard.py", "inbox.py", "consequences.py", "discor
 LOG_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical"}
 # calls whose string arguments are machine-facing (patterns, keys, ids), not words a person reads
 MACHINE_CALLS = {"compile", "match", "search", "fullmatch", "sub", "findall", "finditer", "split", "startswith", "endswith",
-                 "get", "getattr", "setattr", "hasattr", "pop", "setdefault", "strftime", "strptime", "join", "replace",
+                 "get", "getattr", "setattr", "hasattr", "pop", "setdefault", "strftime", "strptime", "join",
                  "removeprefix", "removesuffix", "index", "count", "find", "rfind", "lstrip", "rstrip", "strip", "encode",
-                 "decode", "open", "Path", "glob", "rglob", "getenv", "environ", "isinstance", "partition", "rpartition",
-                 # commit messages: the data repo's git log is the operator's audit trail, not a surface a member reads
-                 "batch", "save", "commit"}
+                 "decode", "open", "Path", "glob", "rglob", "getenv", "environ", "isinstance", "partition", "rpartition"}
+# Not machine calls, though they look it: `.replace(old, new)` is read (a sentence rewritten in place — "A run can't
+# hold…" hid there), and so is the message of a store save / batch / commit (`rs.save(ev, "…")`, `save_quiet(m, "…")`):
+# phase 6 rewords the data repo's commit messages too. _py_prose still drops their code-shaped arguments (a path, a key).
+# A commit message is held to the retired words only: the copy rule's other words (FORBIDDEN, the empty states) are for
+# the site and Discord, and the git log is the operator's audit trail.
+COMMIT_CALLS = {"save", "save_quiet", "save_many", "batch", "commit"}
 # module-level names that hold text for the model or for machines (prompts, schemas), not words a person reads
 MACHINE_NAMES = re.compile(r"(PROMPT|SYSTEM|SCHEMA|INSTRUCTIONS|_RE$|PATTERN|TEMPLATE_ID|_RULES$|EXEMPT|PARITY_PENDING|BY_DESIGN)", re.I)
 # a review diff's before / after values ("not set → #loot", "none → 3"): a value in a diff, not an empty state. Only the
@@ -260,6 +259,8 @@ class _Collector(ast.NodeVisitor):
         self.skip: set[int] = set()
         self.shown: set[int] = set()  # fallback positions where a bare dash is what a person reads
         self.diff: set[int] = set()  # values in a review diff (before / after): an empty word there is a value, not a state
+        self.commits: set[int] = set()  # a store save's / batch's / commit's message (COMMIT_CALLS): the retired words only
+        self.inline: set[int] = set()  # inside an f-string's braces: an empty word there is spliced into a sentence
 
     def visit_BoolOp(self, node):  # `x or "—"`
         self.shown.update(id(v) for v in node.values[1:]); self.generic_visit(node)
@@ -329,6 +330,9 @@ class _Collector(ast.NodeVisitor):
         f = node.func
         name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
         owner = f.value.id if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) else ""
+        if name in COMMIT_CALLS:
+            for a in node.args:
+                self.commits.update(id(n) for n in ast.walk(a))
         if name in MACHINE_CALLS or (name in LOG_CALLS and owner in {"log", "logger", "logging", "LOG"}):
             for a in node.args:
                 self._skip_tree(a)
@@ -351,14 +355,25 @@ class _Collector(ast.NodeVisitor):
                     parts.append(v.value)
                 else:
                     parts.append("…")
-            self.out.append((node.lineno, "".join(parts)))
-        self._skip_tree(node)  # its constants are covered by the joined text
+            self.out.append((node.lineno, "".join(parts), id(node) in self.commits))
+        # its own constants are covered by the joined text; an expression inside the braces is read on its own, so a
+        # quoted string there (f"{'live run' if live else 'closed run'} …") is extracted, both branches. A format spec
+        # (`:>10`) is code.
+        for v in node.values:
+            if isinstance(v, ast.FormattedValue):
+                if v.format_spec is not None:
+                    self._skip_tree(v.format_spec)
+                self.inline.update(id(n) for n in ast.walk(v.value))
+                self.visit(v.value)
+            else:
+                self.skip.add(id(v))
 
     def visit_Constant(self, node):
         if id(node) not in self.skip and isinstance(node.value, str):
-            if EMPTY_ALONE.match(node.value) and (id(node) not in self.shown or id(node) in self.diff):
+            if EMPTY_ALONE.match(node.value) and (id(node) not in self.shown or id(node) in self.diff
+                                                  or id(node) in self.inline):
                 return  # a dash as an argument or an id part (`LootButton(gk, run, "-", …)`), not a cell a person reads
-            self.out.append((node.lineno, node.value))
+            self.out.append((node.lineno, node.value, id(node) in self.commits))
 
 
 def _py_prose(s: str) -> bool:
@@ -373,10 +388,16 @@ def _py_prose(s: str) -> bool:
     return True
 
 
-def py_strings(path: Path) -> list[tuple[int, str]]:
+def py_strings(path: Path, commits: bool = True) -> list[tuple[int, str]]:
+    """The person-read strings of a module; `commits=False` leaves out the data repo's commit messages (COMMIT_CALLS)."""
     c = _Collector()
     c.visit(ast.parse(path.read_text()))
-    return [(n, s) for n, s in c.out if _py_prose(s)]
+    return [(n, s) for n, s, commit in c.out if _py_prose(s) and (commits or not commit)]
+
+
+def py_shown(path: Path) -> list[tuple[int, str]]:
+    """What the site and Discord show: py_strings without the commit messages (the copy rule's FORBIDDEN / empty states)."""
+    return py_strings(path, commits=False)
 
 
 # ---------------------------------------------------------------------------------------------------------- the check
@@ -395,16 +416,19 @@ def _reads(text: str) -> str:
 
 
 def retired_words(text: str) -> list[str]:
-    """The retired words a reader would see in `text` (the verb phrases of VERB_RUN taken out first)."""
+    """The retired words a reader would see in `text` (the verb phrases of VERB_RUN taken out first). A backticked
+    slash command keeps its slash, so "or run `/apply`" still reads as the imperative before _reads drops the code."""
+    text = re.sub(r"`/[^`]*`", "/", text)
     return sorted({" ".join(m.group(0).lower().split()) for m in RETIRED.finditer(VERB_RUN.sub(" ", _reads(text)))})
 
 
 _HELP_TAIL = " (in the data the help answer is written from — the answer repeats it)"
 
 
-def _strings():
-    """(path, line, text) for every user-visible string, each once, the ALLOW entries left out."""
-    for f, extract in _sources():
+def _strings(commits: bool = True):
+    """(path, line, text) for every user-visible string, each once, the ALLOW entries left out (`commits=False`: the
+    data repo's commit messages too)."""
+    for f, extract in _sources(commits):
         rel = str(f.relative_to(ROOT))
         seen: set[tuple[int, str]] = set()
         for line, text in extract(f):
@@ -418,7 +442,7 @@ def _strings():
 def findings() -> list[tuple[str, int, str, str]]:
     """(path, line, text, why) for every user-visible string that breaks the copy rule."""
     rows: list[tuple[str, int, str, str]] = []
-    for rel, line, text in _strings():
+    for rel, line, text in _strings(commits=False):
         words = sorted({m.group(0).lower() for m in FORBIDDEN.finditer(_reads(text))})
         if words:
             why = "internal word: " + ", ".join(words)
@@ -514,6 +538,51 @@ def g(cid, new):
     assert got == ["The solver seated … of ….", "Nothing to do here.", "Roster channel", "none"], got
 
 
+def test_extractors_read_fstring_branches_replace_and_save_messages(tmp_path):
+    """Phase 6 closed three gaps where a retired word hid from the Python extractor: a quoted string inside an f-string's
+    braces (both branches of a conditional), the sentences of `.replace(old, new)`, and the message of a store save /
+    batch / commit (the data repo's commit messages). The exclusions stay: dict keys, custom_ids, log calls, prompts,
+    docstrings, a format spec — and a commit message is held to the retired words only, never to FORBIDDEN."""
+    py = '''
+"""Docstring with a closed run."""
+import logging
+log = logging.getLogger(__name__)
+SYSTEM_PROMPT = f"{'a run' if x else 'the runs'} for the model."
+def f(ev, rs, reg, m, live, e, n):
+    """Docstring: the live run."""
+    log.info(f"{'run locked' if live else 'run open'}: %s", ev.key)
+    head = f"{'live run' if live else 'closed run'} on Tuesday"
+    cid = f"raid.{ev.key}:{'lock' if live else 'open'}"
+    cell = f"Offspec {ev.off or '—'}"
+    width = f"{n:>10} raids"
+    d = {f"{'key run' if live else 'key two'}": 1}
+    msg = str(e).replace("A run can't hold the same raid twice.", "An event can't hold the same raid twice.")
+    rs.save(ev, f"{ev.key}: run reopened by {m}")
+    reg.store.save(m, "the series of a member")
+    reg.save_quiet(m, "test run cleared")
+    with reg.store.batch("runs stamped with their schedule"):
+        reg.store.commit("lead run moved")
+    return head, cell, msg, width
+'''
+    q = tmp_path / "gaps.py"
+    q.write_text(py)
+    got = [s for _, s in py_strings(q)]
+    assert "live run" in got and "closed run" in got and "… on Tuesday" in got, got  # (a) both branches
+    assert "A run can't hold the same raid twice." in got and "An event can't hold the same raid twice." in got, got  # (b)
+    for commit in ("…: run reopened by …", "the series of a member", "test run cleared", "runs stamped with their schedule",
+                   "lead run moved"):  # (c)
+        assert commit in got, (commit, got)
+    # the exclusions stay: a prompt, a log call, a dict key, a docstring, a custom_id's parts, a format spec
+    assert not any(w in " | ".join(got) for w in ("a run", "the runs", "run locked", "run open", "key run", "Docstring",
+                                                  "lock", ">10")), got
+    # an empty word spliced into a sentence by an f-string is a value, not an empty state
+    assert "—" not in got and "Offspec …" in got, got
+    # a commit message is the git log's, not the site's: the retired words find it, FORBIDDEN does not
+    shown = [s for _, s in py_shown(q)]
+    assert "the series of a member" not in shown and "test run cleared" not in shown and "live run" in shown, shown
+    assert retired_words("test run cleared") and retired_words("…: run reopened by …")
+
+
 def test_retired_words_take_the_noun_not_the_verb():
     """Phase 6 (event words): 'run' the dated occasion is retired for 'event'; 'run' the verb stays. VERB_RUN takes out
     only verb phrases with a positive verb context, so each of them goes quiet while a noun directly followed by the
@@ -539,15 +608,19 @@ def test_retired_words_take_the_noun_not_the_verb():
         # an auxiliary + run, never "run times"
         ("A bot can't run the companion.", "No event opens until the schedule has run times."),
         ("Once it has run, it is listed here.", "Can't make this run"),
+        ("The jobs haven't run on this Mac yet.", "The schedule hasn't run times yet."),
         ("A schedule can't run the same raid twice.", "a run's roster"),
         # the imperative at a sentence start (or after a dash, "or", "and", "then")
         ("Run it again later.", "Tonight's run again needs a tank."),
         ("Run this from the Members page.", "Every run this week is short."),
         ("Run the command in your server.", "Open a new run this week."),
         ("Run again after the lock.", "the run again"),
+        ("Read proposals, post them and run the jobs.", "the run the jobs opened"),
+        ("Run the job from the Agents page.", "Every run the job made"),
         ("Run /raid sheet in a server channel.", "the run /raid open made"),
         ("I can't post here — run /raid sheet in a channel.", "this run's sheet"),
         ("It is pending, or run /raid loot again.", "the runs the bot opened"),
+        ("Press Apply to join, or run `/apply`.", "the run `/raid open` made"),
         # is running / ran
         ("The lock is running.", "The run is running late."),
         ("The import ran overnight.", "The run ran long."),
@@ -574,20 +647,53 @@ def test_retired_words_take_the_noun_not_the_verb():
 
 
 def test_retired_words_are_gone():
-    """The retired words (the plan's word table) are out of every user-visible string, but for the files still in
-    WORDS_PENDING — and that list only shrinks: a file in it with no hit left must leave it."""
+    """The retired words (the plan's word table) are out of every user-visible string in every scanned file — the
+    site's, Discord's and the data repo's commit messages."""
     rows = retired_findings()
-    hit = {p for p, *_ in rows}
-    stray = [r for r in rows if r[0] not in WORDS_PENDING]
-    assert not stray, (f"{len(stray)} user-visible strings carry a retired word (event, lineup, one-off, Priority — the "
-                       "plan's word table; docs/manual.md §1a):\n"
-                       + "\n".join(f"{p}:{n}: {_one_line(t)}  [{why}]" for p, n, t, why in stray))
-    done = sorted(WORDS_PENDING - hit)
-    assert not done, f"these files hold no retired word any more — take them out of WORDS_PENDING: {done}"
+    assert not rows, (f"{len(rows)} user-visible strings carry a retired word (event, lineup, one-off, Priority — the "
+                      "plan's word table; docs/manual.md §1a):\n"
+                      + "\n".join(f"{p}:{n}: {_one_line(t)}  [{why}]" for p, n, t, why in rows))
 
 
-def _sources() -> list[tuple[Path, object]]:
-    return [(f, tsx_strings) for f in sorted(SRC.rglob("*.tsx"))] + [(f, py_strings) for f in _flowfiles()]
+# The manual's lines that may name a retired word (exact substring of the line, reason): only §1a's paragraph that
+# tells a reader the older words and what they are now. Everything else in the manual says event, lineup, one-off.
+MANUAL = ROOT / "docs" / "manual.md"
+MANUAL_ALLOW: list[tuple[str, str]] = [
+    ("Older words: *run* is now **event**",
+     "§1a's older-words paragraph names each retired word once so a reader who still says it finds the new one"),
+    ("is **Priority**. People may still say \"run\"",
+     "§1a's older-words paragraph goes on: Who gets a seat is Priority, and people may still say run in chat"),
+]
+
+
+def manual_findings() -> list[tuple[int, str, list[str]]]:
+    """(line number, line, retired words) for each line of docs/manual.md that says a retired word, backticked text
+    (a command or a typed example) dropped as _reads drops it, MANUAL_ALLOW's lines left out."""
+    rows = []
+    for n, line in enumerate(MANUAL.read_text().splitlines(), 1):
+        if any(sub in line for sub, _ in MANUAL_ALLOW):
+            continue
+        words = retired_words(line)
+        if words:
+            rows.append((n, line, words))
+    return rows
+
+
+@pytest.mark.xfail(strict=False, reason="the manual sweep lands in the next commit")
+def test_the_manual_uses_the_new_words():
+    """docs/manual.md is what the bot answers from: it says event, later raid, one-off and Priority (the plan's word
+    table), never run, follow-on, ad hoc, pickup or Who gets a seat — but where §1a names the older words."""
+    for sub, why in MANUAL_ALLOW:
+        assert len(why.split()) >= 8, f"{sub!r}: say why in a sentence a reviewer could disagree with"
+        assert sub in MANUAL.read_text(), f"stale MANUAL_ALLOW entry: {sub!r} is not in the manual"
+    rows = manual_findings()
+    assert not rows, (f"{len(rows)} manual lines say a retired word (docs/manual.md §1a has the new ones):\n"
+                      + "\n".join(f"docs/manual.md:{n}: {_one_line(t)}  [{', '.join(w)}]" for n, t, w in rows))
+
+
+def _sources(commits: bool = True) -> list[tuple[Path, object]]:
+    return ([(f, tsx_strings) for f in sorted(SRC.rglob("*.tsx"))]
+            + [(f, py_strings if commits else py_shown) for f in _flowfiles()])
 
 
 def test_allow_list_entries_have_reasons_and_still_match():
@@ -625,8 +731,8 @@ def write_findings(path: Path) -> int:
     out = ["# Copy findings — the sweep list (2026-10-24)", "",
            "Generated by `uv run python tests/test_copy.py` from tests/test_copy.py (the copy rule, CLAUDE.md; the glossary is",
            "docs/manual.md §1a *The words*). Each line is a user-visible string to rewrite in the reader's words; when the sweep",
-           "is done, this test is the gate. A \"retired word\" line is phase 6's (event words): its file stays in",
-           "WORDS_PENDING until the word is gone.", "",
+           "is done, this test is the gate. A \"retired word\" line is phase 6's (event words): reword it per the",
+           "plan's word table (docs/superpowers/plans/2026-11-25-event-words.md).", "",
            f"**{len(rows)} hits in {len(by)} files.**", "", "| file | hits |", "|---|---|"]
     out += [f"| {p} | {len(v)} |" for p, v in sorted(by.items(), key=lambda kv: -len(kv[1]))]
     for p, v in sorted(by.items(), key=lambda kv: -len(kv[1])):

@@ -6178,6 +6178,30 @@ older pages' Apply N changes. Tests: `tests/test_wizard_box.py`, `tests/test_dis
 `tests/test_discord_boxes.py`, `tests/test_flows_event.py`, `tests/test_flows_lineup.py`, `tests/test_flows_open.py`,
 `tests/test_flows_schedule.py`, `tests/test_set_box.py`, `tests/test_event_links.py`, `tests/test_parity_matrix.py`.
 
+**Phase 6 built (2026-11-25): the words.** Plan `docs/superpowers/plans/2026-11-25-event-words.md`. Every string a
+person reads — the site, Discord, the confirm sentences, plain text's answers, help, the manual and the data repo's commit
+messages — says the new word: a *run* is an **event** ("Cancel event…", "End the event", "Open this event early", "test
+event"), a run's week an **event's week**, run times **event times**, an *ad hoc* run a **one-off**, a *pickup template* a
+schedule **opened by an officer**, a recurring run **a schedule's event**, a *follow-on* a **later raid** of the event (the
+whole is its **lineup**), the lead run its **first raid**, and *Who gets a seat* **Priority**. "Run" the verb stays ("it
+runs hourly", "run the command"), and so does a news job's run on the Agents page and the Host card (operator surfaces).
+*What stays:* slash command and option names (`/raid open`, `run:`), plain-text op kinds (`run_open` …), MCP tool names
+and fields, routes, JSON keys, `custom_id`s, PAGE_WORDS / RUN_WORDS keys, identifiers, `log.*` lines, docstrings and
+comments, and the data repo's history (nothing stored is rewritten; a recogniser of a stored sentence reads the old and
+the new wording). People still say "run": configops' schema text, help's SYSTEM and the listening state say the old words
+mean event, one-off and later raid, and the answer is in the new ones. *The rulings:* the parts of one split event are its
+**rosters**; a loot council's scope is a **raid**; attendance counts **raids** (once per raid of an event, as
+`Registry.attendance` counts), never events; the first-come setting reads **Seat order** beside **Priority**; an unnamed
+officer-opened schedule reads **On demand**; data-repo commit messages are reworded with the rest; the listening gate's
+question and glossary (`discord_bot.LISTEN_QUESTION`, `LISTEN_GLOSSARY`) stay on the old words until a
+`scripts/listen_probe.py` run shows the gate keeps its scores with the new ones; `consequences.END_FIRST` is the one End
+sentence `LootMixin.end_sentences` swaps for the event's name, after a second copy of it went stale. *The lint keeps them
+out:* `tests/test_copy.py`'s `RETIRED` (after `VERB_RUN` takes the verb phrases out) finds no retired word in any scanned
+string — the Python extractor now also reads quoted strings inside an f-string's braces, `.replace(old, new)`'s sentences
+and store save / batch / commit messages (held to the retired words only) — and `test_the_manual_uses_the_new_words` runs
+the same check over `docs/manual.md` line by line, backticked text dropped, with `MANUAL_ALLOW` holding only §1a's
+older-words paragraph. The pending-files list is gone.
+
 **Later phases** (spec §9): the words (phase 6). Phases 1 and 2's tests:
 `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`, `tests/test_minimums.py`, `tests/test_minimums_solver.py`,
 `tests/test_officer_raids.py`.

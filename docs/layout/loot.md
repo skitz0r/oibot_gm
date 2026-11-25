@@ -26,8 +26,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   discord_loot_surface.py  LootSurfaceMixin (OibotGM, before LootMixin; design §5.36): the council's Discord surface replacing those hooks —
                        a PUBLIC thread on officer_channel (refused when none), the pinned session card (raid_views.loot_layout) and the proposal
                        cards (batch_layout: ≤5 items, per boss, Confirm the rest · Discard on the newest) edited after every write from any surface,
-                       session.cards = message ids; persistent thread-line buttons; distribute's card ticker; loot_scheduler_step ("Start an ad hoc
-                       run…" prompt in the officer channel, the one after-end DM to officers); addressed-only thread chat (loot_addressed / loot_chat →
+                       session.cards = message ids; persistent thread-line buttons; distribute's card ticker; loot_scheduler_step ("Start a one-off
+                       event" prompt in the officer channel, the one after-end DM to officers); addressed-only thread chat (loot_addressed / loot_chat →
                        help_answer(data=) or `loot` ConfigOps in LootChatConfirmView = ConfigConfirmView + Give the reason…; the revs carry the batch /
                        the drop's pick as the officer saw them); loot_cards_restore on ready
   flows_loot.py        every LootButton / LootPick press and lootmodal submit (loot_press / loot_pick / loot_modal_submit; loot_modal_raw =
