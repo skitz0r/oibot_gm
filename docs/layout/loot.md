@@ -32,7 +32,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        the drop's pick as the officer saw them); loot_cards_restore on ready
   flows_loot.py        every LootButton / LootPick press and lootmodal submit (loot_press / loot_pick / loot_modal_submit; loot_modal_raw =
                        the restart path from on_interaction); wizards loot_tick (TickWizard), loot_override (grouped select → reason modal,
-                       also Correct…), loot_distribute (/raid distribute), loot_end (/raid end + End council: the decide screen), gm_precedents
+                       also Correct…), loot_distribute (/raid distribute), loot_end (/raid end + End council: LootMixin.end_box through Wizard.decide_box, End the run · Back), gm_precedents
   appeals.py           loot appeals (L32, design §5.49): Appeal / AppealStore (<guild>/appeals/<award id>.yaml — ONE per award, id =
                        award_id = a hash of lootctx.award_ref); open_appeal (the member's OWN award only; words validated, never parsed, quoted
                        and escaped; the card + a PUBLIC thread "loot · <member> · <item>" on officer_channel; no channel → waits on Loot › Appeals)

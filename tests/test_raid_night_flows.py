@@ -57,8 +57,19 @@ class NightFlowBot(FakeBot):
         ev.autofill_paused = paused
         return "paused" if paused else "on"
 
+    def end_sentences(self, reg, rs, ev):
+        return [f"{rc.run_on(reg, ev)} is finished.", "The sheet and the lock card close and no more fill asks go out."]
+
     def end_consequence(self, reg, rs, ev):
-        return f"{rc.run_on(reg, ev)} is finished. The sheet and the lock card close and no more fill asks go out."
+        return " ".join(self.end_sentences(reg, rs, ev))
+
+    def end_box(self, reg, rs, ev):
+        from oibot_gm.consequences import end_box
+        return end_box(reg, ev, self.end_sentences(reg, rs, ev), rev=ev.state)
+
+    async def cancel_run(self, reg, rs, ev, by, reason, notify=True, by_id=None, via="discord"):
+        self.calls.append(("cancel_run", ev.key, reason, notify))
+        return f"Cancelled {rc.run_on(reg, ev)}."
 
     async def end_run(self, reg, rs, ev, *, by, by_id=None, via="discord", refresh=True):
         self.calls.append(("end_run", ev.key, by))
@@ -101,7 +112,7 @@ def test_raid_lock_preview_draws_the_roster_one_member_per_line_then_locks(reg, 
 
     async def go():
         await FLOWS["raid_lock"](h.command(), reg)
-        assert h.buttons() == ["Lock now", "Preview lock", "Back"]
+        assert h.buttons() == ["Lock", "Preview lock", "Back"]
         await h.press("Preview lock")
         emb = h.screen["embed"]
         assert emb is not None and emb.title.startswith("Preview")
@@ -109,10 +120,10 @@ def test_raid_lock_preview_draws_the_roster_one_member_per_line_then_locks(reg, 
         assert len(groups) == 2 and all(len(f.value.splitlines()) == 5 for f in groups), "the full roster, one member per line"
         left = next(f for f in emb.fields if f.name.startswith("Leftovers"))
         assert left.name == "Leftovers (2)"
-        assert h.buttons() == ["Lock now", "Back"] and ("lock_preview", ev.key, "Tester") in bot.calls
+        assert h.buttons() == ["Lock", "Back"] and ("lock_preview", ev.key, "Tester") in bot.calls
         await h.press("Back")
-        assert h.buttons() == ["Lock now", "Preview lock", "Back"]
-        await h.press("Lock now")
+        assert h.buttons() == ["Lock", "Preview lock", "Back"]
+        await h.press("Lock")
     run(go())
     assert ("lock_run", ev.key, "Tester") in bot.calls
 
@@ -130,7 +141,7 @@ def test_card_lock_preview_refusal_offers_back(reg, rs):
         await h.press("Preview lock")
         assert "already being built" in h.text and h.buttons() == ["Back", "Cancel"]
         await h.press("Back")
-        assert h.buttons() == ["Lock now", "Preview lock", "Back"]
+        assert h.buttons() == ["Lock", "Preview lock", "Back"]
     run(go())
 
 
@@ -223,9 +234,9 @@ def test_lock_card_remind_pause_end_and_reopen(reg, rs, monkeypatch):
         # Remind DMs people: the decide screen first, with the site's confirm's sentence (consequences "remind")
         await RunButton(reg.key, ev.key, "remind").callback(h.card_press())
         from oibot_gm.consequences import consequence
-        assert consequence("remind", reg, ev)[0] in h.text and h.buttons() == ["Remind the unanswered", "Back"]
+        assert consequence("remind", reg, ev)[0] in h.text and h.buttons() == ["Send reminder", "Back"]
         assert ("remind", ev.key, "Tester") not in bot.calls, "nothing is sent before the press"
-        await h.press("Remind the unanswered")
+        await h.press("Send reminder")
         assert "Reminded 3 by DM." in h.text and ("remind", ev.key, "Tester") in bot.calls
         await RunButton(reg.key, ev.key, "pause").callback(h.card_press())
         assert ev.autofill_paused and ("pause", ev.key, True, "Tester") in bot.calls
@@ -233,8 +244,8 @@ def test_lock_card_remind_pause_end_and_reopen(reg, rs, monkeypatch):
         assert "hasn't started yet" in h.text, "End is for after the start"
         monkeypatch.setattr(rc, "end_refusal", lambda ev_, at=None: None)
         await RunButton(reg.key, ev.key, "end").callback(h.card_press())
-        assert "is finished. The sheet and the lock card close" in h.text and h.buttons() == ["End the run", "Back"]
-        assert h.screen["view"].children[0].style == discord.ButtonStyle.danger
+        assert "is finished.\nThe sheet and the lock card close" in h.text and h.buttons() == ["End the run", "Back"]
+        assert h.screen["view"].children[0].style == discord.ButtonStyle.success, "not red: Reopen works for an hour"
         await h.press("End the run")
         assert ev.state == "done" and "Reopen on the closed card works for an hour" in h.text
         await RunButton(reg.key, ev.key, "reopen").callback(h.card_press())

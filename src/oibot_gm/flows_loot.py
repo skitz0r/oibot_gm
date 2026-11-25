@@ -1018,14 +1018,18 @@ async def open_loot_distribute(interaction: discord.Interaction, reg: Registry, 
 # ---------------------------------------------------------------- End
 
 async def end_decide(interaction: discord.Interaction, bot, reg: Registry, rs, ev, wiz: Wizard | None = None) -> None:
-    """End the run and its council: the decide screen with LootMixin.end_consequence ('End <run>: 6 awards, 1
-    override, 2 drops never distributed…'); End archives every council of the run, posts the summary, marks it done."""
+    """End the run and its council: the server's box (LootMixin.end_box over end_sentences — the site's End the run
+    and Loot › Tonight's End print the same) through Wizard.decide_box, End the run · Back; a council that changed
+    while the box was open is shown again. End archives every council of the run, posts the summary, marks it done."""
     from .raid_views import raid_name
 
     wiz = wiz or loot_wizard(bot, reg, interaction, f"End {raid_name(reg, ev)}")
     key = ev.key
 
-    async def do(i: discord.Interaction, _note: str | None) -> None:
+    def box() -> dict:
+        return bot.end_box(reg, rs, rs.events.get(key) or ev)
+
+    async def do(i: discord.Interaction, _values: dict) -> None:
         cur = rs.events.get(key)
         if cur is None or cur.state in ("done", "cancelled"):
             await wiz.finish(i, "That run already closed — nothing was changed.")
@@ -1037,8 +1041,7 @@ async def end_decide(interaction: discord.Interaction, bot, reg: Registry, rs, e
             return
         await wiz.finish(i, text[:1800])
 
-    text = bot.end_consequence(reg, rs, ev)  # THE End sentence (council + run, consequences.consequence("end")), as the lock card's End
-    await wiz.decide(interaction, text, do=do, do_label="End", danger=True, back_label="Not yet")
+    await wiz.decide_box(interaction, box(), do=do, refresh=box)
 
 
 @flow("loot_end")

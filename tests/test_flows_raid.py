@@ -479,8 +479,8 @@ def test_lock_with_one_run_needs_no_picker(reg, rs, officer, channel):
     async def go():
         # THE lock confirm screen (phase 2): the consequence from code, Lock now · Preview lock · Back — nothing before the press
         await FLOWS["raid_lock"](h.command(), reg)
-        assert h.buttons() == ["Lock now", "Preview lock", "Back"] and "The lock builds the roster for Barrow Deeps from those who joined." in h.text and not bot.calls
-        await h.press("Lock now")
+        assert h.buttons() == ["Lock", "Preview lock", "Back"] and "The lock builds the roster for Barrow Deeps from those who joined." in h.text and not bot.calls
+        await h.press("Lock")
         assert bot.calls[0] == ("lock_run", ev.key, "Tester") and bot.calls[1][0] == "emit"
         assert h.text.endswith(f"{ev.key}: locked")
     asyncio.run(go())
@@ -517,8 +517,8 @@ def test_lock_with_two_runs_shows_the_picker_and_cancel_does_nothing(reg, rs, of
         h2, bot2 = harness(reg, rs)
         await FLOWS["raid_lock"](h2.command(), reg)
         await h2.pick("Pick the run", b.team)
-        assert not bot2.calls and "Lock now" in h2.buttons()
-        await h2.press("Lock now")
+        assert not bot2.calls and "Lock" in h2.buttons()
+        await h2.press("Lock")
         assert bot2.calls[0] == ("lock_run", b.key, "Tester")
     asyncio.run(go())
 
@@ -674,8 +674,8 @@ def test_cancel_shows_the_consequence_then_one_form_with_reason_and_notify(reg, 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
         # THE cancel screen (phase 2): the consequence from code, then one Form — nothing written before Submit
-        assert h.buttons() == ["Cancel the run", "Back"] and "nobody gets a DM" in h.text and not bot.calls
-        await h.press("Cancel the run")
+        assert h.buttons() == ["Cancel event", "Cancel event with a note", "Back"] and "nobody gets a DM" in h.text and not bot.calls
+        await h.press("Cancel event with a note")
         assert h.modal is not None and set(h.modal._items) == {"reason", "notify"}
         await h.submit(reason="tank flu", notify="post")
     asyncio.run(go())
@@ -697,7 +697,7 @@ def test_cancel_on_a_later_raid_after_the_first_finished_offers_no_channel_line(
 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
-        await h.press("Cancel the run")
+        await h.press("Cancel event with a note")
         assert h.modal is not None and set(h.modal._items) == {"reason"}
         await h.submit(reason="")
     asyncio.run(go())
@@ -710,13 +710,13 @@ def test_cancel_dismissed_box_writes_nothing_and_a_closed_run_is_refused(reg, rs
 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
-        await h.press("Cancel the run")  # the box opens; closing it sends nothing back
+        await h.press("Cancel event with a note")  # the box opens; closing it sends nothing back
         assert h.modal is not None and not bot.calls
         form = h.modal
         ev.state = "done"
         rs.save(ev, "done")
         await h.submit(form)
-        assert "already closed" in h.text
+        assert "This run is already finished." in h.text and h.buttons() == ["Back"], "the refusal box, Back alone"
     asyncio.run(go())
     assert not bot.calls
 
@@ -729,7 +729,7 @@ def test_cancel_with_two_runs_picks_then_opens_the_box(reg, rs, officer, channel
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
         await h.pick("Pick the run", b.team)
-        await h.press("Cancel the run")
+        await h.press("Cancel event with a note")
         assert h.modal is not None
         await h.submit(reason="", notify="quiet")
     asyncio.run(go())

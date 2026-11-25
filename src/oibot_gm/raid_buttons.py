@@ -171,17 +171,23 @@ def officer_wizard(bot, reg, interaction: discord.Interaction, title: str):
 
 
 async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
-    """Lock — the card's Lock now and /raid lock alike: the consequence sentence (consequences.consequence — the same
-    words the site's confirm shows), then Lock now · Preview lock · Back. Preview lock draws the roster the lock would
-    build now (rc.split_preview under the run's solver single flight; nothing saved but `ev.last_proposal`), one member
-    per line with the spec icon, and offers Lock now / Back from there. The lock itself is RaidMixin.lock_run, after the
-    screen has acknowledged the press."""
+    """Lock — the card's Lock and /raid lock alike: the server's box (consequences.lock_box, boxes 1–2 — the site's
+    Lock now prints the same) through Wizard.decide_box, then Lock · Preview lock · Back. Preview lock draws the roster
+    the lock would build now (rc.split_preview under the run's solver single flight; nothing saved but
+    `ev.last_proposal`), one member per line with the spec icon, under the same box; its Lock goes back through
+    decide_box, so a box that changed during the preview is shown again. The lock itself is RaidMixin.lock_run, after
+    the screen has acknowledged the press."""
     from .configops import report_error
+    from .consequences import lock_box
+    from .wizard import box_text
 
     wiz = wiz or officer_wizard(bot, reg, interaction, f"Lock {raid_name(reg, ev)}")
     key = ev.key
 
-    async def do(i: discord.Interaction, _note: str | None) -> None:
+    def box() -> dict:
+        return lock_box(reg, rs.events.get(key) or ev, rs)
+
+    async def do(i: discord.Interaction, _values: dict) -> None:
         cur = rs.events.get(key)  # re-read: the scheduler or another officer may have locked it meanwhile
         if not cur or cur.state in ("done", "cancelled"):
             await wiz.finish(i, "That run is closed — nothing was changed.")
@@ -202,94 +208,97 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
         if not cur.lock_error:
             await bot.ops.emit(reg.config, "info", line)
 
-    async def lock_now(i: discord.Interaction) -> None:
-        await wiz.working(i, "Locking…")
-        await do(i, None)
+    def again(i: discord.Interaction):
+        return lock_decide(i, bot, reg, rs, rs.events.get(key) or ev, wiz=wiz)
 
     async def preview(i: discord.Interaction) -> None:
         cur = rs.events.get(key)
         if not cur or cur.state != "open":
-            await wiz.finish(i, "That run is no longer open — nothing to preview.")
+            await wiz.decide_box(i, box(), do=do, refresh=box)  # the refusal box: Back alone
             return
         await wiz.working(i, "Building the preview. It can take up to half a minute…")
         try:
             rosters = await bot.lock_preview(reg, rs, cur, by=i.user.display_name, by_id=i.user.id)
         except RegistryError as e:  # the solver is busy on this run, or no roster satisfies the rules
-            await wiz.refuse(i, str(e), retry=lambda ri: lock_decide(ri, bot, reg, rs, rs.events.get(key) or cur, wiz=wiz), retry_label="Back")
+            await wiz.refuse(i, str(e), retry=again, retry_label="Back")
             return
-        await wiz.show(i, f"{run_label(reg, cur)}\n" + "\n".join(consequence("lock", reg, cur, rs=rs)), wiz.button("Lock now", lock_now, discord.ButtonStyle.success),
-                       wiz.button("Back", lambda bi: lock_decide(bi, bot, reg, rs, rs.events.get(key) or cur, wiz=wiz)),
-                       embed=lock_preview_embed(reg, cur, rosters, bot.ico))
+        shown = box()
 
-    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("lock", reg, ev, rs=rs)), do=do, do_label="Lock now",
-                     extra=[wiz.button(RUN_WORDS["preview_lock"], preview)])
+        async def lock(li: discord.Interaction) -> None:  # through the box: changed during the preview → shown again
+            fresh = box()
+            if fresh.get("fp") != shown.get("fp"):
+                await wiz.decide_box(li, fresh, do=do, refresh=box, extra=[wiz.button(RUN_WORDS["preview_lock"], preview)],
+                                     changed=fresh.get("verb") is not None)
+                return
+            await wiz.working(li)
+            await do(li, {})
+
+        items = [wiz.button(shown["verb"], lock, discord.ButtonStyle.danger if shown.get("danger") else discord.ButtonStyle.success)
+                 ] if shown.get("verb") else []
+        heading, wiz.heading = wiz.heading, False  # one heading: the box's title
+        try:
+            await wiz.show(i, box_text(shown), *items, wiz.button("Back", again), embed=lock_preview_embed(reg, cur, rosters, bot.ico))
+        finally:
+            wiz.heading = heading
+
+    await wiz.decide_box(interaction, box(), do=do, refresh=box, extra=[wiz.button(RUN_WORDS["preview_lock"], preview)])
 
 
 async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
-    """Cancel — ONE screen on every Discord path (the card's Cancel run, /raid cancel): the consequence (who is rostered,
-    which asks close — rc.cancel_effects through consequences.consequence), then Cancel the run… · Back. The button opens
-    one Form: the optional reason (officers only: the run's thread and the ops feed — never the public channel) and
-    "Tell the channel?" (post a fixed line in the signup channel — the default — or not). Nobody is DMed (the DM rule).
-    Submit cancels (RaidMixin.cancel_run)."""
-    from .wizard import Field, Form, Opt
+    """Cancel — ONE screen on every Discord path (the card's Cancel run, /raid cancel): the server's box
+    (consequences.cancel_box, box 5, red) through Wizard.decide_box, then Cancel event · Cancel event with a note · Back.
+    A plain press cancels with no reason and posts the channel line (D3). The note opens one Form: the optional reason
+    (officers only: the run's thread and the ops feed — never the public channel) and, when rc.cancel_tells_channel,
+    "Tell the channel?". Nobody is DMed (the DM rule). The write is RaidMixin.cancel_run. A closed run is the refusal box."""
+    from .consequences import cancel_box
+    from .wizard import Field, Opt
 
     wiz = wiz or officer_wizard(bot, reg, interaction, f"Cancel {raid_name(reg, ev)}")
     key = ev.key
 
-    async def submitted(si: discord.Interaction, v: dict[str, str]) -> None:
-        if si.user.id != wiz.owner_id:
-            await si.response.send_message("This belongs to someone else's wizard.", ephemeral=True)
-            return
-        why = await wiz.guard(si) if wiz.guard else None
-        if why:
-            await wiz.finish(si, why)
-            return
+    def box() -> dict:
+        return cancel_box(reg, rs.events.get(key) or ev, rs)
+
+    async def do(i: discord.Interaction, v: dict) -> None:
         cur = rs.events.get(key)  # re-read: it may have closed while the box was open
-        if not cur or cur.state in ("done", "cancelled"):
-            await wiz.finish(si, "That run already closed — nothing was changed.")
-            return
-        await wiz.working(si, "Cancelling…")
-        try:
-            line = await bot.cancel_run(reg, rs, cur, by=si.user.display_name, reason=(v.get("reason") or "").strip() or None,
-                                        notify=v.get("notify", "post") != "quiet", by_id=si.user.id)
-        except RegistryError as e:
-            line = str(e)
-        await wiz.finish(si, line)
-
-    def form() -> Form:
-        fields = [Field("reason", "Why? (optional)", required=False, paragraph=True, max_length=300,
-                        description="Officers only: the run's thread and the ops feed.", placeholder="never posted in the signup channel")]
-        if rc.cancel_tells_channel(rs, rs.events.get(key) or ev):  # a later raid once its first has finished: no sheet, no channel line
-            fields.append(Field("notify", "Tell the channel?", [Opt("post", "Post a line in the signup channel", "fixed text, no reason", default=True),
-                                                                Opt("quiet", "No line — the sheet and the thread show it")]))
-        return Form(f"Cancel {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", fields, submitted)
-
-    async def open_box(i: discord.Interaction) -> None:
-        cur = rs.events.get(key)
         if not cur or cur.state in ("done", "cancelled"):
             await wiz.finish(i, "That run already closed — nothing was changed.")
             return
-        await wiz.open_form(i, form())
+        try:
+            line = await bot.cancel_run(reg, rs, cur, by=i.user.display_name, reason=(v.get("reason") or "").strip() or None,
+                                        notify=v.get("notify", "post") != "quiet", by_id=i.user.id)
+        except RegistryError as e:
+            line = str(e)
+        await wiz.finish(i, line)
 
-    async def back(i: discord.Interaction) -> None:
-        await wiz.finish(i, "Nothing was changed.")
-
-    await wiz.show(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("cancel", reg, ev, rs=rs)),
-                   wiz.button("Cancel the run", open_box, discord.ButtonStyle.danger), wiz.button("Back", back))
+    note = [Field("reason", "Why? (optional)", required=False, paragraph=True, max_length=300,
+                  description="Officers only: the run's thread and the ops feed.", placeholder="never posted in the signup channel")]
+    if rc.cancel_tells_channel(rs, rs.events.get(key) or ev):  # a later raid once its first has finished: no sheet, no channel line
+        note.append(Field("notify", "Tell the channel?", [Opt("post", "Post a line in the signup channel", "fixed text, no reason", default=True),
+                                                          Opt("quiet", "No line — the sheet and the thread show it")]))
+    await wiz.decide_box(interaction, box(), do=do, refresh=box, note=note)
 
 
 async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
-    """End the run (the lock card, after the scheduled start): the decide screen, then LootMixin.end_run — the verb
-    /raid end, the site, MCP and the scheduler share (its loot council is archived with its summary). Reopen stays
-    possible for an hour (an end by mistake)."""
-    why = rc.end_refusal(ev)
-    if why:
-        await interaction.response.send_message(why, ephemeral=True)
-        return
+    """End the run (the lock card): the server's box (LootMixin.end_box over end_sentences — the site's End the run and
+    Loot › Tonight's End print the same) through Wizard.decide_box, then LootMixin.end_run — the verb /raid end, the
+    site, MCP and the scheduler share (its loot council is archived with its summary). Before the start
+    (rc.end_refusal) the refusal box. Reopen stays possible for an hour (an end by mistake)."""
+    from .consequences import end_box, refusal_box_for
+
     wiz = officer_wizard(bot, reg, interaction, f"End {raid_name(reg, ev)}")
     key = ev.key
 
-    async def do(i: discord.Interaction, _note: str | None) -> None:
+    def box() -> dict:
+        cur = rs.events.get(key) or ev
+        why = rc.end_refusal(cur)
+        if why:
+            return refusal_box_for(why)
+        if hasattr(bot, "end_box"):
+            return bot.end_box(reg, rs, cur)
+        return end_box(reg, cur, consequence("end", reg, cur))
+
+    async def do(i: discord.Interaction, _values: dict) -> None:
         cur = rs.events.get(key)
         if not cur or cur.state in ("done", "cancelled"):
             await wiz.finish(i, "That run already closed — nothing was changed.")
@@ -301,25 +310,23 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None
             return
         await wiz.finish(i, ended_line(reg, cur))
 
-    # THE End sentence (LootMixin.end_consequence: the council's part + consequences.consequence("end")) — the site's
-    # End the run and Loot › Tonight's End print the same words
-    told = bot.end_consequence(reg, rs, ev) if hasattr(bot, "end_consequence") else " ".join(consequence("end", reg, ev))
-    await wiz.decide(interaction, f"{run_label(reg, ev)}\n{told}", do=do, do_label=RUN_WORDS["end"], danger=True)
+    await wiz.decide_box(interaction, box(), do=do, refresh=box)
 
 
 async def remind_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
-    """Remind the unanswered (the lock card's button): the decide screen with consequences.consequence("remind") — how
-    many get their Confirm / Can't DM again, how many wait on the site — the same sentence the site's confirm prints,
-    then RaidMixin.remind. It DMs people, so it asks first on both surfaces (design §5.56 phase 3). A refusal
-    (rc.remind_refusal: within the hour, nobody to remind, an ad hoc run) is said at once."""
-    why = rc.remind_refusal(reg, ev)
-    if why:
-        await interaction.response.send_message(why, ephemeral=True)
-        return
+    """Remind the unanswered (the lock card's button): the server's box (consequences.remind_box — how many get their
+    Confirm / Can't DM again, how many wait on the site; the site's More › Remind prints the same) through
+    Wizard.decide_box, then RaidMixin.remind. It DMs people, so it asks first on both surfaces (design §5.56 phase 3).
+    A refusal (rc.remind_refusal: within the hour, nobody to remind, an ad hoc run) is the refusal box, Back alone."""
+    from .consequences import remind_box
+
     wiz = officer_wizard(bot, reg, interaction, f"Remind · {raid_name(reg, ev)}")
     key = ev.key
 
-    async def do(i: discord.Interaction, _note: str | None) -> None:
+    def box() -> dict:
+        return remind_box(reg, rs.events.get(key) or ev, rs)
+
+    async def do(i: discord.Interaction, _values: dict) -> None:
         cur = rs.events.get(key)
         if not cur or cur.state != "locked":
             await wiz.finish(i, "That run is no longer locked — nothing was sent.")
@@ -330,7 +337,7 @@ async def remind_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> N
             line = str(e)
         await wiz.finish(i, line)
 
-    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("remind", reg, ev)), do=do, do_label=RUN_WORDS["remind"])
+    await wiz.decide_box(interaction, box(), do=do, refresh=box)
 
 
 async def reopen_press(interaction: discord.Interaction, bot, reg, rs, ev) -> None:

@@ -229,7 +229,7 @@ def test_a_sheet_join_and_an_officer_lock_land_in_their_own_guild(duo):
     screen = i.views[-1]
     press = Itx(bot)
     press.message = types.SimpleNamespace(id=screen.message_id)
-    run(next(b for b in screen.children if b.label == "Lock now").callback(press))
+    run(next(b for b in screen.children if b.label == "Lock").callback(press))
     assert [d for d in bot.did if d[0] in ("signup", "lock")] == [("signup", GUILD2, "in"), ("lock", GUILD2)]
 
 

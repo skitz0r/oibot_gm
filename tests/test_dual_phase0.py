@@ -315,12 +315,12 @@ def test_cancel_card_button_is_the_one_cancel_screen_with_reason_and_notify(reg,
 
     async def go():
         await RunButton(reg.key, ev.key, "cancel").callback(h.card_press())
-        assert "The 3 who joined see it on the sheet, and nobody gets a DM." in h.text and h.buttons() == ["Cancel the run", "Back"]
+        assert "The 3 who joined see it on the sheet, and nobody gets a DM." in h.text and h.buttons() == ["Cancel event", "Cancel event with a note", "Back"]
         assert h.screen["view"].children[0].style == discord.ButtonStyle.danger
         await h.press("Back")
         assert calls == [] and "Nothing was changed." in h.text
         await RunButton(reg.key, ev.key, "cancel").callback(h.card_press())
-        await h.press("Cancel the run")
+        await h.press("Cancel event with a note")
         await h.submit(reason="server down", notify="quiet")  # one Form: the optional reason + "Tell the channel?"
         assert calls == [(ev.key, "Officer", "server down", False)] and h.text.endswith(f"Cancelled {ev.key}")
         # the old 60-second plain View is gone: nothing else answers a cancel press
@@ -351,12 +351,12 @@ def test_lock_card_button_locks_on_the_press_and_reports_a_bug_with_the_generic_
         state["fail"] = True
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
         assert "The 3 rostered get the Confirm or Can't make it DM" in h.text
-        await h.press("Lock now")
+        await h.press("Lock")
         assert configops.GENERIC_ERROR in h.text and "solver exploded" not in h.text
         assert any(lvl == "error" and "solver exploded" in text for lvl, text in bot.ops.lines)
         state["fail"] = False
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
-        await h.press("Lock now")
+        await h.press("Lock")
         assert "locked by Officer" in h.text and ("info", f"{ev.key}: locked by Officer, 1 roster(s), 3 confirmation DM(s)") in bot.ops.lines
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
         assert h.text == "Already locked."

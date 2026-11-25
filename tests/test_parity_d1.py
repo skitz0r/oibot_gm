@@ -656,8 +656,8 @@ def test_card_lock_button_answers_a_busy_or_locked_run_quietly(reg, rs, why):
 
     async def go():
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())  # the decide screen (consequence · Lock now · Back)
-        assert "The lock builds the roster for Barrow Deeps from those who joined." in h.text and h.buttons() == ["Lock now", "Preview lock", "Back"]
-        await h.press("Lock now")
+        assert "The lock builds the roster for Barrow Deeps from those who joined." in h.text and h.buttons() == ["Lock", "Preview lock", "Back"]
+        await h.press("Lock")
 
     asyncio.run(go())
     assert "lock failed" not in h.text, h.text

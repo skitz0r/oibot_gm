@@ -1271,8 +1271,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    signup channel — "🛑 Barrow Deeps … is cancelled. Rostered seats are released — nothing to do." — on by default, or
    no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
    the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel run** and `/raid cancel` show
-   the sentence with *Cancel the run…* (the box with the reason and the channel choice) and *Back*; a test run's card
-   on the Test bench has the same three parts; plain text takes the reason and "…, no announcement" for no channel
+   the same box as the Events page with **Cancel event** (red: no reason, and the channel line is posted), **Cancel event
+   with a note** (the form with the reason and the channel choice) and **Back**; a test run's card on the Test bench has
+   the reason and the channel choice too; plain text takes the reason and "…, no announcement" for no channel
    line, MCP takes `reason` and `notify`. The Events page's **Cancel event** is the box alone: no reason and no channel
    line (use Discord, plain text or MCP for either). A cancel waits for a lock that is being built and then cancels the locked run — the lock
    stops asking people the moment the run is cancelled, and so do fill asks, suggestions and a Remind that are going
@@ -1300,9 +1301,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    close now. Every rostered member gets a DM: **Confirm** / **Can't make it** — showing the spec they're rostered as
    ("You're rostered as **Protection**, your offspec"). The Me page shows the same ask; with DMs off, or when the DM
    can't be delivered, the ask waits there instead (same deadline — a failed DM never counts as an answer) and the lock
-   card marks them *(site)*. **Preview lock**: the lock's confirm screen (the card's *Lock now* and `/raid lock`) has a
-   *Preview lock* button that draws the roster(s) the lock would build right now — every group, one member per line
-   with the spec icon, then the leftovers (the first 15) — without saving anything; *Lock now* or *Back* from there.
+   card marks them *(site)*. **Preview lock**: the lock's confirm screen (the card's *Lock now* and `/raid lock`: the same box as the
+   site's, with **Lock**) has a *Preview lock* button that draws the roster(s) the lock would build right now — every group, one member per line
+   with the spec icon, then the leftovers (the first 15) — without saving anything; **Lock** or *Back* from there (a box that changed during the preview is shown again first).
    It can take up to half a minute: on a later raid whose first raid is still open, the bot places the first raid too,
    so the preview counts who that raid will roster, as the lock will.
    On the Events page **Auto-fill groups** writes that preview into the board; a test run's
@@ -1565,8 +1566,10 @@ a second row: **Remind the unanswered** · **Pause automatic asks** · **End the
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
 a news proposal, the bot shows one sentence computed from the run as it stands — for a lock: *"Everyone on the board keeps
 their place, and the lock fills the open seats from Not placed. 16 of the 18 rostered get the Confirm or Can't make it DM and 2 see it on the site. They have until Tue 9 Dec
-6:30 PM to answer."*; on an ad hoc run: *"On an ad hoc run Join is the commitment, so nobody is asked to confirm."* — then **Do it** (named for the verb: *Lock now*,
-*Cancel the run*, *Approve*…), **… with a note…** where a note makes sense, and **Back**. The site's dialogs print the
+6:30 PM to answer."*; on an ad hoc run: *"On an ad hoc run Join is the commitment, so nobody is asked to confirm."* — then the verb's own button (*Lock*, *Cancel event*, *Send reminder*, *End the run*, *Approve*…), **<verb> with a
+note** where a note makes sense, and **Back**. In Discord, Lock, Cancel event, Send reminder and End the run print the very
+box the site's confirm shows — its title, its sentences, its verb; a box that changed while it was open is shown again
+first, and one that can't go ahead says why with Back alone. The site's dialogs print the
 very same sentence (it comes from the bot, the page never writes its own), so no surface promises a DM the bot would
 not send. Tables (Me, Members, Raids, Auras)
 share one edit mode: an Edit button in the header, then a footer with any reset far left and *Cancel* / *Save changes*
@@ -2731,7 +2734,8 @@ for whoever presses it. When the bot can't read sentences (Claude unavailable) i
 
 `/raid end` (with several locked runs it asks which, the one with a council first), **End council** on the card or on
 Loot › Tonight, "end tonight's run" in plain text, or MCP `end_loot` first shows what ending means — *"End <run>: 6
-awards, 1 override, 2 drops never distributed, 1 award waiting for a reason"* — with **End** / **Not yet**. End posts
+awards, 1 override, 2 drops never distributed, 1 award waiting for a reason"* — with **End the run** / **Back** (in
+Discord the same box the site prints; a council that changed while it was open is shown again first). End posts
 the summary in the thread (the awards, the overrides and anything left undecided — proposals never confirmed, drops
 never distributed, awards still waiting for a reason — so nothing anyone decided disappears), turns the card into the
 summary, archives the thread, marks the run done and redraws its sheet and lock card closed. On every surface only a
