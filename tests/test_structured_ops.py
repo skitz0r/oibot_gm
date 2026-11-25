@@ -381,7 +381,7 @@ def test_admin_raid_translator(owner_client, reg):
     body = {"instance": "barrow_deeps", "lockout_days": 5,
             "weights": {"rank": int(cur["weights"].get("rank", 0)) + 1}, "notes": "bring pots"}
     want = {"lockout_days": "5", "notes": "bring pots", "weight_rank": str(body["weights"]["rank"])}
-    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid", body, lambda sh: "; ".join(sh.set_raid_overrides("barrow_deeps", want, "x")))
+    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid", body, lambda sh: "; ".join(configops.raid_line(sh, "barrow_deeps", ln) for ln in sh.set_raid_overrides("barrow_deeps", want, "x")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
     assert owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lockout_days": 5}, headers=bearer()).json()["message"] == "barrow_deeps: no changes"
     for lock in (cur["lock_hours_before"], cur["lock_hours_before"] + 2):  # present = refused, changed or not (a raid holds no timing)
@@ -403,7 +403,7 @@ def test_admin_schedule_translators(owner_client, reg):
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/schedule/remove", {"id": "alt"},
                           lambda sh: sh.remove_schedule("alt", "x"))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
-    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/reset", {"instance": "barrow_deeps"}, lambda sh: sh.clear_raid_override("barrow_deeps", "x"))
+    sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid/reset", {"instance": "barrow_deeps"}, lambda sh: configops.raid_line(sh, "barrow_deeps", sh.clear_raid_override("barrow_deeps", "x")))  # the raid by its name
     assert "barrow_deeps" not in reg.config.raids and reg.raid_rows("barrow_deeps") == []
 
 

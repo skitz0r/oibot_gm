@@ -398,7 +398,7 @@ def test_owner_gating_unchanged(reg, rs):
     bot = FakeBot(rs)
     with pytest.raises(RegistryError, match="needs the owner"):
         run(configops.apply_async(reg, ConfigOp(op="aura_set", target="blood_pact", field="note", value="x"), "Officer", False, bot=bot))
-    assert run(configops.apply_async(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="x"), "Officer", False, bot=bot)) == "barrow_deeps: notes = x"
+    assert run(configops.apply_async(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="x"), "Officer", False, bot=bot)) == "Barrow Deeps: notes = x"
     m = reg.test_members()[0]
     assert run(configops.apply_async(reg, ConfigOp(op="dm", member=m.display_name, value="off"), "Officer", False, bot=bot)).endswith("DMs off")
 

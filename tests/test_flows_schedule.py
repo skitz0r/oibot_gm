@@ -186,7 +186,7 @@ def test_priority_split_and_name_save_in_one_box(reg, rs, officer):  # noqa: F81
     run(h.pick("Change", "name"))
     run(h.submit(h.modal, name="Main night"))
     run(h.press("Review changes"))
-    assert "Save Main night?" in h.text or "Save Raid nights?" in h.text
+    assert "Save Raid nights?" in h.text, "the box names the schedule as it is stored"
     run(h.press("Save"))
     s = reg.schedule_entry(sid)
     assert s["name"] == "Main night" and s["weights"] == {"rank": 5}
@@ -197,6 +197,7 @@ def test_remove_is_box_17_and_red_only_if_the_box_says_so(reg, rs, officer):  # 
     sid = weekly(reg)
     h = harness(reg, rs)
     open_hub(h, reg, sid)
+    assert button(h, "Remove").style == discord.ButtonStyle.secondary, "only a box's verb is red"
     run(h.press("Remove"))
     assert "Remove Raid nights?" in h.text and h.buttons() == ["Remove schedule", "Back"]
     assert button(h, "Remove schedule").style == discord.ButtonStyle.danger
@@ -207,7 +208,7 @@ def test_remove_is_box_17_and_red_only_if_the_box_says_so(reg, rs, officer):  # 
     assert "✅" in h.text and not any(s["id"] == sid for s in reg.all_schedules())
 
 
-def test_another_officer_saved_first(reg, rs, officer):  # noqa: F811
+def test_another_officer_saved_first(reg, rs, store, officer):  # noqa: F811
     sid = weekly(reg)
     h = harness(reg, rs)
     open_hub(h, reg, sid)
@@ -216,12 +217,15 @@ def test_another_officer_saved_first(reg, rs, officer):  # noqa: F811
     run(h.press("Review changes"))
     run(h.press("Review changes"))
     reg.set_schedule(sid, {"name": "Other"}, "t")
+    n0 = commits(store)
     run(h.press("Save"))
-    assert h.text.startswith(CONFIRM_WORDS["changed"])
-    run(h.press("Save"))
-    assert "✅" not in h.text and h.screen["view"] is None
+    assert h.text.startswith(CONFIRM_WORDS["changed"]) and "Save Other?" in h.text
+    assert commits(store) == n0 and [e["raid"] for e in reg.schedule_entry(sid)["lineup"]] == ["barrow_deeps"], "nothing written"
+    assert "Lineup:" in h.text, "the draft is kept"
+    run(h.press("Save"))  # the box shown again is the one that saves
+    assert "✅" in h.text and h.screen["view"] is None
     s = reg.schedule_entry(sid)
-    assert s["name"] == "Other" and [e["raid"] for e in s["lineup"]] == ["barrow_deeps"]
+    assert s["name"] == "Other" and [e["raid"] for e in s["lineup"]] == ["barrow_deeps", RAID_B]
 
 
 def test_an_open_event_keeps_its_timing_says_the_box(reg, rs, officer):  # noqa: F811
@@ -265,6 +269,13 @@ def test_back_from_the_list_writes_nothing(reg, rs, store, officer):  # noqa: F8
     run(h.pick("Change", "name"))
     run(h.submit(h.modal, name="Never saved"))
     run(h.press("Back"))
+    assert CONFIRM_WORDS["leave_title"] in h.text and "Your one edit to Never saved is not saved yet." in h.text
+    assert h.buttons() == [CONFIRM_WORDS["discard"], CONFIRM_WORDS["keep"]]
+    assert button(h, CONFIRM_WORDS["discard"]).style == discord.ButtonStyle.danger
+    run(h.press(CONFIRM_WORDS["keep"]))
+    assert h.text.startswith("**Never saved**") and "Change" in h.selects(), "Keep editing: the hub with the draft"
+    run(h.press("Back"))
+    run(h.press(CONFIRM_WORDS["discard"]))
     assert "Pick a schedule" in h.selects()
     run(h.press("Back"))
     assert h.screen["view"] is None and commits(store) == n0 and reg.schedule_entry(sid)["name"] == "Raid nights"
@@ -291,7 +302,7 @@ def test_the_raid_wizards_save_is_box_19_and_its_schedules_section_hands_off(reg
     assert reg.raid_def("barrow_deeps")["weights"]["rank"] == 5
 
 
-def test_the_raid_wizard_clears_notes_and_a_stale_save_is_refused(reg, rs, officer):  # noqa: F811
+def test_the_raid_wizard_clears_notes_and_a_changed_box_saves_at_its_press(reg, rs, officer):  # noqa: F811
     reg.set_raid_override("barrow_deeps", "notes", "old", "t")
     h = harness(reg, rs)
     run(FLOWS["raid_config"](h.command(), reg))
@@ -310,3 +321,109 @@ def test_the_raid_wizard_clears_notes_and_a_stale_save_is_refused(reg, rs, offic
     reg.set_raid_override("barrow_deeps", "notes", "someone else", "t")
     run(h.press("Save"))
     assert h.text.startswith(CONFIRM_WORDS["changed"])
+    assert reg.raid_def("barrow_deeps").get("lockout_days") != 5, "nothing written at the first press"
+    run(h.press("Save"))  # the box shown again saves
+    assert "✅" in h.text
+    rd = reg.raid_def("barrow_deeps")
+    assert rd["lockout_days"] == 5 and rd["notes"] == "someone else"
+
+
+def test_a_box_that_changes_in_the_gap_before_the_write_is_shown_again(reg, rs, store, officer, monkeypatch):  # noqa: F811
+    """apply_ops `expect`: the write re-describes the box under config_lock; another officer's save between the press's
+    check and the write is the changed box, nothing written, and its own press saves."""
+    from oibot_gm import configops
+
+    sid = weekly(reg)
+    real, gap = configops.apply_ops, []
+
+    async def racing(*a, **kw):
+        if not gap:
+            gap.append(True)
+            reg.set_schedule(sid, {"name": "Other"}, "t")
+        return await real(*a, **kw)
+    monkeypatch.setattr(configops, "apply_ops", racing)
+    h = harness(reg, rs)
+    open_hub(h, reg, sid)
+    run(h.pick("Change", "split_policy"))
+    run(h.pick(PAGE_WORDS["schedule_fields"]["split_policy"], "rotation"))
+    run(h.press("Back"))
+    run(h.press("Review changes"))
+    n0 = commits(store)
+    run(h.press("Save"))
+    assert h.text.startswith(CONFIRM_WORDS["changed"]) and "Save Other?" in h.text
+    assert commits(store) == n0 + 1, "the other officer's save alone"
+    assert reg.schedule_def("barrow_deeps", sid).get("split_policy") != "rotation"
+    run(h.press("Save"))
+    assert "✅" in h.text and reg.schedule_def("barrow_deeps", sid)["split_policy"] == "rotation"
+
+
+def test_pause_and_remove_with_unsaved_edits_ask_first(reg, rs, store, officer):  # noqa: F811
+    sid = weekly(reg)
+    h = harness(reg, rs)
+    n0 = commits(store)
+    open_hub(h, reg, sid)
+    run(h.pick("Change", "name"))
+    run(h.submit(h.modal, name="Draft name"))
+    run(h.press("Pause"))
+    assert CONFIRM_WORDS["leave_title"] in h.text and commits(store) == n0
+    run(h.press(CONFIRM_WORDS["keep"]))
+    assert "Pause" in h.buttons() and "Draft name" in h.text
+    run(h.press("Remove"))
+    assert CONFIRM_WORDS["leave_title"] in h.text
+    run(h.press(CONFIRM_WORDS["discard"]))
+    assert "Remove Raid nights?" in h.text, "the edits dropped, then Remove's own box"
+    assert commits(store) == n0 and reg.schedule_entry(sid)["name"] == "Raid nights"
+
+
+def test_remove_carries_the_schedules_rev(reg, rs, store, officer):  # noqa: F811
+    sid = weekly(reg)
+    h = harness(reg, rs)
+    open_hub(h, reg, sid)
+    run(h.press("Remove"))
+    reg.set_schedule(sid, {"name": "Other"}, "t")
+    n0 = commits(store)
+    run(h.press("Remove schedule"))
+    assert h.text.startswith(CONFIRM_WORDS["changed"]) and "Remove Other?" in h.text and commits(store) == n0
+    run(h.press("Remove schedule"))
+    assert "✅" in h.text and not any(s["id"] == sid for s in reg.all_schedules())
+
+
+def test_pause_on_a_schedule_removed_meanwhile_returns_to_the_list(reg, rs, officer):  # noqa: F811
+    sid = weekly(reg)
+    keep = weekly(reg, "barrow_deeps", "Thu 20:00")
+    h = harness(reg, rs)
+    open_hub(h, reg, sid)
+    reg.remove_schedule(sid, "t")
+    run(h.press("Pause"))
+    assert "Pick a schedule" in h.selects() and h.screen["view"] is not None
+    assert reg.schedule_entry(keep)
+
+
+def test_the_lists_text_is_paged_with_its_select(reg, rs, officer):  # noqa: F811
+    from oibot_gm.registry import schedule_name
+
+    for n in range(27):
+        reg.set_schedule(f"s{n:02d}", {"slots": f"Mon {n % 24:02d}:00", "name": f"Night {n:02d}"}, "t", raid="barrow_deeps")
+    rows = [s for s in reg.all_schedules() if s["raid"] == "barrow_deeps"]
+    h = harness(reg, rs)
+    run(FLOWS["schedule"](h.command(), reg, raid="barrow_deeps"))
+    first = [o.label for s in h.screen["view"].children if isinstance(s, discord.ui.Select) for o in s.options]
+    assert len(first) == 25 and all(f"• {name} ·" in h.text for name in first)
+    rest = [schedule_name(s) for s in rows if schedule_name(s) not in first]
+    assert rest and not any(f"• {name} ·" in h.text for name in rest)
+    run(h.press("More →"))
+    assert all(f"• {name} ·" in h.text for name in rest)
+
+
+def test_a_new_pickup_sends_only_what_its_screen_shows():
+    from oibot_gm.flows_schedule import PICKUP_HIDDEN, ScheduleWizard
+
+    class R:  # the few Registry reads seed_new / changed make
+        profile = SimpleNamespace(raids={"barrow_deeps": {}})
+
+        def all_schedules(self):
+            return []
+    wiz = ScheduleWizard.__new__(ScheduleWizard)
+    wiz.reg = R()
+    wiz.seed_new("barrow_deeps", "pickup", "Pickup")
+    assert not PICKUP_HIDDEN & set(wiz.changed())

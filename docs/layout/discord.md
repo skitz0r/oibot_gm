@@ -133,13 +133,17 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Form, ✕ to drop; a lockout schedule's days + start) · Lineup (LineupBlock; lineup_done / lineup_back = the hub) · Sheet
                        timing (editor_options presets, or one setting's hours trimmed to 25) · the four switches (one select field=on|off) ·
                        Priority (a Form of five selects, "Same as the raid") · the split; Review changes / Pause / Resume / Remove = configops
-                       ops_from_fields (an edit sends only what differs, with config:schedule:<id> read when the hub opened) → describe_ops in
-                       a thread behind working → decide_box(box 13 / 14 / 15 / 16 / 17, refresh = describe again; a line's refusal = its
-                       refusal box, Back to the hub) → apply_ops(revs=) → the ✅ line or the refusal's line) ·
+                       ops_from_fields (an edit sends only what differs; a new pickup never its hidden settings) → box_of = describe_ops AND
+                       config:schedule:<id> read together under config_lock in a thread behind working → decide_box(box 13 / 14 / 15 / 16 /
+                       17, refresh = box_of again; a line's refusal = its refusal box, Back to the hub) → apply_ops(revs = the rev of the box
+                       LAST SHOWN, expect = that box's fp re-described under the lock; stale_box → the box again) → the ✅ line or the
+                       refusal's line; Pause / Resume / Remove / Back with unsaved edits ask box 20 first (Discard edits · Keep editing); the
+                       list's text is paged with its select) ·
                        flows_config (+ OwnerTransferWizard; AuraWizard = a draft hub per buff, one Save this buff through configops.apply_ops; CompTargetsBlock = the
                        Minimums block (officers), in RaidConfigWizard (officers; no sheet timing; Schedules = the hand-off to flow `schedule`;
                        Review changes = raid_ops (ops_from_fields "raid" + a notes / first opens clear) → decide_box(box 19, refresh) → apply_ops
-                       with config:raids:<id>; set_raid_overrides only previews) and in CompTargetsWizard = /roster comp; ChannelsWizard
+                       with the config:raids:<id> read with the box last shown + expect; Reset = decide_box(raid_reset_box, raid_all:<id>, built
+                       in a thread); set_raid_overrides only previews) and in CompTargetsWizard = /roster comp; ChannelsWizard
                        (/gm config channels: ChannelSelect / — not set — → draft → Review → apply_ops), ChannelSetWizard (the eight shortcuts' one confirm),
                        OfficersWizard (/gm config officers: RoleSelect, Map <legacy name>…), CompanionsWizard (/gm config companion: the hub → Issue… label
                        modal → member picker → decide → the DM; Revoke… → decide), ArmoryGuildWizard (/gm config armory = flow armory_guild, §5.1: unlinked → the name

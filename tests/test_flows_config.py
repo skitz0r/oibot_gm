@@ -111,7 +111,7 @@ def test_a_refused_section_is_caught_in_its_section_and_writes_nothing(reg, stor
     assert reg.config.raids == before and commits(store) == n0
 
 
-def test_a_save_after_another_officers_is_refused_and_keeps_the_draft(reg, store, owner):
+def test_a_save_after_another_officers_shows_the_box_again_and_its_press_saves(reg, store, owner):
     h = Harness(reg)
 
     async def go():
@@ -123,13 +123,13 @@ def test_a_save_after_another_officers_is_refused_and_keeps_the_draft(reg, store
         n, stored = commits(store), copy.deepcopy(reg.config.raids)
         await h.press("Save")
         assert h.text.startswith(CONFIRM_WORDS["changed"])  # the box again: what it said changed
-        await h.press("Save")
-        assert "❌" in h.text and h.buttons() == ["Back to the sections", "Cancel"]
-        assert commits(store) == n and reg.config.raids == stored  # refused as a whole
-        await h.press("Back to the sections")
-        assert "unsaved change" in h.text  # the draft is kept
+        assert commits(store) == n and reg.config.raids == stored  # nothing written at the first press
+        assert "Notes" in h.text  # the draft is kept: the box still names it
+        await h.press("Save")  # the box shown again is the one that saves
+        assert "✅" in h.text
     asyncio.run(go())
-    assert reg.raid_def("barrow_deeps").get("notes") != "Mine."
+    rd = reg.raid_def("barrow_deeps")
+    assert rd.get("notes") == "Mine." and rd["lockout_days"] == 2
 
 
 def test_cancel_from_the_hub_writes_nothing(reg, store, owner):
@@ -216,6 +216,38 @@ def test_reset_clears_the_raid_override(reg, store, owner):
         assert "✅" in h.text
     asyncio.run(go())
     assert "barrow_deeps" not in reg.config.raids
+
+
+def test_reset_prints_the_servers_reset_box(reg, store, owner):
+    from oibot_gm import consequences as cq
+
+    reg.set_raid_override("barrow_deeps", "notes", "old", "t")
+    h = Harness(reg)
+    want = cq.raid_reset_box(reg, "barrow_deeps")
+    n0 = commits(store)
+
+    async def go():
+        await open_raid(h, reg)
+        await h.pick("Pick a section", "reset")
+        assert f"**{want['title']}**" in h.text and all(x in h.text for x in want["sentences"])
+        assert h.buttons() == ["Reset", "Back"] and h.screen["view"].children[0].style is discord.ButtonStyle.danger
+        reg.set_raid_override("barrow_deeps", "lockout_days", 2, "someone else")  # the stored changes move under the box
+        n1 = commits(store)
+        await h.press("Reset")
+        assert h.text.startswith(CONFIRM_WORDS["changed"]) and commits(store) == n1, "the box again, nothing written"
+        await h.press("Back")
+        assert "Pick a section" in h.selects()
+    asyncio.run(go())
+    assert reg.raid_def("barrow_deeps").get("notes") == "old" and commits(store) == n0 + 1
+
+    reg.clear_raid_override("barrow_deeps", "t")
+    h = Harness(reg)
+
+    async def again():
+        await open_raid(h, reg)
+        await h.pick("Pick a section", "reset")
+        assert "already on the game's defaults" in h.text and h.buttons() == ["Back"]
+    asyncio.run(again())
 
 
 def test_raid_config_is_officers_only(reg, store):

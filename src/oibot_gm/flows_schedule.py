@@ -4,8 +4,9 @@ save (14), pause (15), resume (16), remove (17) (configops.describe_ops(…).box
 
 A list (Active · Paused, named by registry.schedule_name, never an id) → one schedule's hub. The hub's draft starts as
 schedule_view.stored_entry(row) and holds every setting the editor holds; the Save sends only what differs from it, with
-the schedule's rev read when the hub opened (`config:schedule:<id>`), so another officer's save meanwhile is shown again
-under CONFIRM_WORDS["changed"] (the box's fp carries the rev) and refused at the write (ConfigChanged). A new schedule is
+the schedule's rev read with the box (`config:schedule:<id>`, under config_lock), so another officer's save meanwhile is
+shown again under CONFIRM_WORDS["changed"] (the box's fp carries the rev) and the next press saves what that box said;
+the write re-describes under config_lock (apply_ops `expect`) and a box changed in the gap is shown again. A new schedule is
 create-shaped (its kind and lineup, no rev). The lineup is flows_event.LineupBlock. Every word a person reads here is
 the site's: PAGE_WORDS["schedule_fields"] for each setting, hours from schedule_view.editor_options."""
 from __future__ import annotations
@@ -71,6 +72,9 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         self.rev: str | None = None
         self.lineup: list[dict] = []
         self._ops: list = []
+        self._box_rev: str | None = None  # the schedule's rev read with the box last shown
+        self._fp: str | None = None  # that box's fingerprint (apply_ops `expect`)
+        self._make: Callable[[], list] = lambda: []
 
     # ---- the list
     def rows(self) -> list[dict]:
@@ -80,19 +84,22 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         from .schedule_view import repeats_words
 
         self.sid, self.new, self.draft, self.lineup = None, False, {}, []
-        rows = self.rows()
+        rows = sorted(self.rows(), key=lambda s: not s.get("active", True))  # Active, then Paused: the text and the select agree
         lines = [note] if note else []
         if not rows:
             lines.append(EMPTY_RAID.format(raid=self.raid_name(self.raid)) if self.raid else PAGE_WORDS["schedules_empty"])
+        pages = max(1, -(-len(rows) // MAX_OPTIONS))
+        self.page = max(0, min(getattr(self, "page", 0), pages - 1))
+        shown = rows[self.page * MAX_OPTIONS:(self.page + 1) * MAX_OPTIONS]  # the page the select holds, and only it
         for head, active in (("Active", True), ("Paused", False)):
-            group = [s for s in rows if bool(s.get("active", True)) == active]
+            group = [s for s in shown if bool(s.get("active", True)) == active]
             if group:
                 lines.append(f"**{head}**")
                 lines += [f"• {schedule_name(s)} · {repeats_words(self.reg, s)}" for s in group]
         items: list[discord.ui.Item] = []
         if rows:
             opts = [Opt(s["id"], schedule_name(s), None if s.get("active", True) else PAGE_WORDS["paused"]) for s in rows]
-            sel, page_note = self.paged("Pick a schedule", opts, self.picked, getattr(self, "page", 0), self._goto)
+            sel, page_note = self.paged("Pick a schedule", opts, self.picked, self.page, self._goto)
             items += sel
             if page_note:
                 lines.append(page_note)
@@ -208,8 +215,9 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
     # ---- the hub
     def changed(self) -> dict:
         """What the Save sends: an edit's fields that differ from the schedule as the hub loaded it; a new one whole."""
-        if self.new:
-            out = {k: v for k, v in self.draft.items() if v not in (None, [], "") and k != "active"}
+        if self.new:  # only what the screen shows: a pickup's hidden reminder settings are left to the server
+            hidden = PICKUP_HIDDEN if self.draft.get("kind") == "pickup" else set()
+            out = {k: v for k, v in self.draft.items() if v not in (None, [], "") and k != "active" and k not in hidden}
             out["lineup"] = [dict(e) for e in self.lineup]
             return out
         out = {k: v for k, v in self.draft.items() if v != self.base.get(k)}
@@ -244,14 +252,39 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
                                         self.button(REVIEW, self.review, discord.ButtonStyle.primary, disabled=not self.changed())]
         if not self.new:
             active = self.reg.schedule_entry(self.sid).get("active", True)
-            items += [self.button("Pause" if active else "Resume", self.pause_or_resume),
-                      self.button("Remove", self.remove, discord.ButtonStyle.danger)]
-        items.append(self.button("Back", self.start))
+            items += [self.button("Pause" if active else "Resume", self.unsaved_first(self.pause_or_resume)),
+                      self.button("Remove", self.unsaved_first(self.remove), discord.ButtonStyle.secondary)]
+        items.append(self.button("Back", self.unsaved_first(self.start)))
         heading, self.heading = self.heading, False  # the schedule's name is the screen's title
         try:
             await self.show(i, "\n".join(head), *items)
         finally:
             self.heading = heading
+
+    def unsaved_first(self, then: Callable[[discord.Interaction], Awaitable[None]]):
+        """Leaving the hub (Pause, Resume, Remove, Back) with edits not saved: box 20 first — Discard edits (red) drops
+        them and goes on, Keep editing returns to the hub with them."""
+        async def press(i: discord.Interaction) -> None:
+            n = len(self.changed())
+            if not n:
+                await then(i)
+                return
+            from .constants import CONFIRM_WORDS
+            from .wizard import box_text
+
+            async def discard(it: discord.Interaction) -> None:
+                if not self.new:
+                    self.draft = {k: (list(v) if isinstance(v, list) else v) for k, v in self.base.items() if k != "lineup"}
+                    self.lineup = [dict(e) for e in self.base["lineup"]]
+                await then(it)
+            heading, self.heading = self.heading, False
+            try:
+                await self.show(i, box_text(cq.leave_box(n, self.name())),
+                                self.button(CONFIRM_WORDS["discard"], discard, discord.ButtonStyle.danger),
+                                self.button(CONFIRM_WORDS["keep"], self.hub))
+            finally:
+                self.heading = heading
+        return press
 
     async def change(self, i: discord.Interaction, values: list[str]) -> None:
         what = values[0]
@@ -431,10 +464,12 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
                         self.select(F["split_policy"], opts, picked), self.button("Back", self.hub))
 
     # ---- the boxes: the Save (13 / 14), Pause (15), Resume (16), Remove (17)
-    def revs(self) -> dict:
+    def revs(self, rev: str | None = None) -> dict:
+        """The schedule's rev as a write carries it: `rev` (the one read with the box shown), else the hub's."""
         from .configops import CONFIG_REV
 
-        return {f"{CONFIG_REV}schedule:{self.sid}": self.rev} if not self.new and self.rev else {}
+        rev = rev or self.rev
+        return {f"{CONFIG_REV}schedule:{self.sid}": rev} if not self.new and rev else {}
 
     def save_ops(self) -> list:
         from .configops import ops_from_fields
@@ -448,20 +483,24 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
 
     def box_of(self, make_ops: Callable[[], list]) -> dict:
         """BLOCKING: the server's box for these ops (describe_ops on a shadow copy), or RegistryError with the line's
-        refusal — the ops kept for the press."""
+        refusal. The schedule's rev is read with it under config_lock and kept with the ops, so the write carries the
+        rev of the box LAST SHOWN: a box shown again after another officer's save goes through at its press."""
         from .configops import describe_ops
 
-        ops = make_ops()
-        d = describe_ops(self.reg, ops, by_id=self.owner_id)
+        with self.reg.config_lock:
+            ops = make_ops()
+            rev = None if self.new else self.reg.config_rev(f"schedule:{self.sid}")
+            d = describe_ops(self.reg, ops, by_id=self.owner_id)
         err = next((ln.error for ln in d.lines if ln.error), None) or (d.refused[0] if d.refused else None)
         if err or d.box is None:
             raise RegistryError(err or NOTHING_TO_SAVE)
-        self._ops = ops
+        self._ops, self._box_rev, self._fp = ops, rev, d.box.get("fp")
         return d.box
 
     async def ask(self, i: discord.Interaction, make_ops: Callable[[], list]) -> None:
         async def refresh() -> dict:
             return await asyncio.to_thread(self.box_of, make_ops)
+        self._make = make_ops
         await self.working(i)
         try:
             box = await refresh()
@@ -470,10 +509,23 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         await self.decide_box(i, box, do=self.apply, refresh=refresh, back=self.hub)
 
     async def apply(self, i: discord.Interaction, _v: dict) -> None:
-        from .configops import apply_ops
+        from .configops import apply_ops, describe_ops
 
-        res = await apply_ops(self.reg, list(self._ops), by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None),
-                              via="discord", revs=self.revs())
+        ops, fp, by_id = list(self._ops), self._fp, self.owner_id
+
+        def same_box() -> bool:  # under config_lock, in the write's step (the site's token apply)
+            d = describe_ops(self.reg, ops, by_id=by_id)
+            return d.box is not None and d.box.get("fp") == fp
+        res = await apply_ops(self.reg, ops, by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None),
+                              via="discord", revs=self.revs(self._box_rev), expect=same_box)
+        if res.get("stale_box"):  # it changed in the gap: the new box, nothing written
+            try:
+                box = await asyncio.to_thread(self.box_of, self._make)
+            except RegistryError as e:
+                box = cq.refusal_box_for(str(e))
+            await self.decide_box(i, box, do=self.apply, refresh=lambda: asyncio.to_thread(self.box_of, self._make),
+                                  back=self.hub, changed=box.get("verb") is not None)
+            return
         bad = [r["line"] for r in res["results"] if not r["ok"]]
         if bad or not res["applied"]:
             await self.finish(i, "❌ " + " ".join(bad or [res.get("error") or NOTHING_TO_SAVE]))
@@ -486,13 +538,17 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
     async def pause_or_resume(self, i: discord.Interaction) -> None:
         from .configops import ops_from_fields
 
-        on = not self.reg.schedule_entry(self.sid).get("active", True)
+        try:
+            on = not self.reg.schedule_entry(self.sid).get("active", True)
+        except RegistryError as e:  # removed meanwhile: the list, with its sentence
+            await self.start(i, str(e))
+            return
         await self.ask(i, lambda: ops_from_fields(self.reg, "schedule", self.sid, {"active": on}, revs=self.revs()))
 
     async def remove(self, i: discord.Interaction) -> None:
         from .configops import ops_from_fields
 
-        await self.ask(i, lambda: ops_from_fields(self.reg, "schedule_remove", self.sid, {}))
+        await self.ask(i, lambda: ops_from_fields(self.reg, "schedule_remove", self.sid, {}, revs=self.revs()))
 
 
 @flow("schedule")

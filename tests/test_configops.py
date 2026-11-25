@@ -16,7 +16,7 @@ def test_raid_set_describe_and_apply(reg):
     with pytest.raises(RegistryError, match="Change it on the schedule"):
         configops.apply(reg, op, "officer", is_owner=False)  # officers edit raids (D8): the refusal is the timing's, not the owner's
     assert configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="weight_rank", value="5")) == "raid barrow_deeps weight_rank: 3 → 5"
-    assert configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="weight_rank", value="5"), "officer", is_owner=False) == "barrow_deeps: weight_rank = 5"
+    assert configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="weight_rank", value="5"), "officer", is_owner=False) == "Barrow Deeps: weight_rank = 5"
     assert configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="healer_max", value="4")) == \
         "raid barrow_deeps healer_max: Set a role's minimum as a minimum: at least 4 healers."
     slots = configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Tue 19:30"))

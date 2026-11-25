@@ -1254,6 +1254,13 @@ def coalesce(ops: list[ConfigOp]) -> list[ConfigOp]:
     return out
 
 
+def raid_line(reg: Registry, rid: str, line: str) -> str:
+    """A raid write's applied line as a person reads it (the ops line, the site's result sheet, Discord's ✅): the raid
+    by its name, never its id ('Barrow Deeps: notes = …')."""
+    name = reg.raid_def(rid).get("name") if rid in reg.profile.raids else None
+    return f"{name}: {line[len(rid) + 2:]}" if name and line.startswith(f"{rid}: ") else line
+
+
 def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) -> str:
     if op.op == "loot_weights":  # several weights of one Save: ONE Registry.set_loot_weights write
         from . import loot_ops
@@ -1263,7 +1270,7 @@ def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) 
         fields: dict = {}
         for p in op.parts:
             fields.update(_raid_fields(p))
-        return "; ".join(reg.set_raid_overrides(op.target or "", fields, by, rev=rev))
+        return "; ".join(raid_line(reg, op.target or "", ln) for ln in reg.set_raid_overrides(op.target or "", fields, by, rev=rev))
     if op.op == "aura_set":
         return "; ".join(reg.set_buff_overrides(op.target or "", {(p.field or ""): p.value for p in op.parts}, by, rev=rev))
     if op.op == "family_set":
@@ -3009,9 +3016,9 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         return f"{run_words(reg, ev)}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op == "raid_set":
         _raid_fields(op)  # a run's week preset is a schedule's: refused here, as the registry refuses each timing field
-        return reg.set_raid_override(op.target or "", op.field or "", op.value, by, rev=rev)
+        return raid_line(reg, op.target or "", reg.set_raid_override(op.target or "", op.field or "", op.value, by, rev=rev))
     if op.op == "raid_reset":
-        return reg.clear_raid_override(op.target or "", by, rev=rev)
+        return raid_line(reg, op.target or "", reg.clear_raid_override(op.target or "", by, rev=rev))
     if op.op == "schedule_set":
         return _schedule_write(reg, op, by, rev=rev)
     if op.op == "schedule_remove":

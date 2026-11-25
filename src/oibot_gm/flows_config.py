@@ -380,8 +380,12 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         super().__init__(reg, owner_id, title="Raid rules", guard=_officer_guard(reg))
         self.raid = raid
         self.draft: dict = {}
-        self.rev: str | None = None  # the raid's rev when its hub opened: a save over another officer's is refused
+        self.rev: str | None = None  # the raid's rev when its hub opened (the write's fallback)
         self._ops: list = []
+        self._box_rev: str | None = None  # the raid's rev read with the box last shown: the Save carries it
+        self._fp: str | None = None  # that box's fingerprint (apply_ops `expect`)
+        self._reset_rev: str | None = None  # the Reset box's: raid_all:<rid> read with it, and its fingerprint
+        self._reset_fp: str | None = None
         self._attempt: dict = {}  # values a section refused, prefilled when the person presses Fix this
         self._fo_day0: date = reg.now_local().date()
         self.targets_back = self.to_hub  # the Minimums section is the block itself (CompTargetsBlock); Back = the hub
@@ -653,38 +657,48 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self.put("notes", v.get("notes", ""))
         await self.hub(i, "Notes updated." if v.get("notes") else "Notes cleared.")
 
-    # ---- Reset: the same raid_reset op as the site and plain text (configops.apply_ops: its consequences shown first,
-    # one audit line, the raid's rev checked at the write)
+    # ---- Reset: the same raid_reset op as the site and plain text, on the server's box (consequences.raid_reset_box,
+    # checked against `raid_all:<rid>`: the raid AND its schedules), one audit line (configops.apply_ops)
     def reset_op(self):
         from .configops import ConfigOp
 
         return ConfigOp(op="raid_reset", target=self.raid)
 
+    def reset_box(self) -> dict:
+        """BLOCKING: the Reset box, its rev read with it under config_lock (the write carries the rev of the box last shown)."""
+        from .consequences import raid_reset_box
+
+        with self.reg.config_lock:
+            self._reset_rev = self.reg.config_rev(f"raid_all:{self.raid}")
+            box = raid_reset_box(self.reg, self.raid, unsaved=len(self.draft))
+        self._reset_fp = box.get("fp")
+        return box
+
     async def reset(self, i: discord.Interaction) -> None:
+        import asyncio
+
+        await self.working(i)
+        box = await asyncio.to_thread(self.reset_box)
+        await self.decide_box(i, box, do=self.do_reset, refresh=lambda: asyncio.to_thread(self.reset_box), back=self.to_hub)
+
+    async def do_reset(self, i: discord.Interaction, _v: dict | None = None) -> None:
+        import asyncio
+
         from . import configops
-        from .consequences import raid_reset_consequence
+        from .consequences import raid_reset_box
 
-        has = bool(self.reg.raid_override(self.raid))
+        rid, fp, unsaved = self.raid, self._reset_fp, len(self.draft)
+
+        def same_box() -> bool:  # under config_lock, in the write's step
+            return raid_reset_box(self.reg, rid, unsaved=unsaved).get("fp") == fp
         name = self.reg.raid_def(self.raid).get("name", self.raid)
-        self._reset_rev = self.reg.config_rev(f"raid_all:{self.raid}")  # the raid AND its schedules, as the screen showed them
-        d = configops.describe_ops(self.reg, [self.reset_op()]) if has else None
-        goes = d.lines[0].before if d and d.lines else None  # the same words the site's and plain text's preview print
-        text = (" ".join(raid_reset_consequence(self.reg, self.raid, unsaved=len(self.draft)))
-                + (f"\n-# What goes: {goes}." if goes else "")
-                + "".join(f"\n{c}" for c in (d.consequences if d else []))) if has else f"**{name}** is already on the game's defaults."
-        await self.show(i, text, self.button("Reset", self.do_reset, discord.ButtonStyle.danger, disabled=not has),
-                        self.button("Back to the sections", self.to_hub))
-
-    async def do_reset(self, i: discord.Interaction) -> None:
-        from . import configops
-
-        await self.working(i, "Resetting…")
-        name = self.reg.raid_def(self.raid).get("name", self.raid)
-        if not self.reg.raid_override(self.raid):  # re-read: someone may have reset it meanwhile
-            await self.finish(i, f"**{name}** was already on the game's defaults; nothing changed.")
-            return
         res = await configops.apply_ops(self.reg, [self.reset_op()], by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None), via="discord",
-                                        revs={f"{configops.CONFIG_REV}raid_all:{self.raid}": getattr(self, "_reset_rev", None) or self.reg.config_rev(f"raid_all:{self.raid}")})
+                                        revs={f"{configops.CONFIG_REV}raid_all:{self.raid}": self._reset_rev}, expect=same_box)
+        if res.get("stale_box"):  # it changed in the gap: the new box, nothing written
+            box = await asyncio.to_thread(self.reset_box)
+            await self.decide_box(i, box, do=self.do_reset, refresh=lambda: asyncio.to_thread(self.reset_box), back=self.to_hub,
+                                  changed=box.get("verb") is not None)
+            return
         if not res["applied"]:
             bad = "; ".join(r["line"] for r in res["results"] if not r["ok"]) or "Nothing was changed."
             await self.show(i, f"❌ {bad}", self.button("Back to the sections", self.to_hub, discord.ButtonStyle.primary), self.button("Cancel", self.cancel))
@@ -703,42 +717,60 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         return ops + [ConfigOp(op="raid_set", target=self.raid, field=f, value="") for f in clears if self.stored(f)]
 
     def box(self) -> dict:
-        """BLOCKING: box 19 for the draft (describe_ops), or RegistryError with the line's refusal."""
+        """BLOCKING: box 19 for the draft (describe_ops), or RegistryError with the line's refusal. The raid's rev is read
+        with it under config_lock and kept with the ops: the write carries the rev of the box LAST SHOWN, so a box shown
+        again after another officer's save goes through at its press."""
         from .configops import describe_ops
 
-        ops = self.raid_ops()
-        if not ops:
-            raise RegistryError("Nothing has changed yet, so there is nothing to save.")
-        d = describe_ops(self.reg, ops, by_id=self.owner_id)
+        with self.reg.config_lock:
+            ops = self.raid_ops()
+            if not ops:
+                raise RegistryError("Nothing has changed yet, so there is nothing to save.")
+            rev = self.reg.config_rev(f"raids:{self.raid}")
+            d = describe_ops(self.reg, ops, by_id=self.owner_id)
         err = next((ln.error for ln in d.lines if ln.error), None) or (d.refused[0] if d.refused else None)
         if err or d.box is None:
             raise RegistryError(err or "Nothing has changed yet, so there is nothing to save.")
-        self._ops, self._diff = ops, list(d.box.get("diff") or [])
+        self._ops, self._diff, self._box_rev, self._fp = ops, list(d.box.get("diff") or []), rev, d.box.get("fp")
         return d.box
 
-    async def review(self, i: discord.Interaction) -> None:
+    async def boxed(self) -> dict:
+        """The box in a thread; a refusal as its box."""
         import asyncio
 
         from .consequences import refusal_box_for
 
+        try:
+            return await asyncio.to_thread(self.box)
+        except RegistryError as e:
+            return refusal_box_for(str(e))
+
+    async def review(self, i: discord.Interaction) -> None:
+        import asyncio
+
         if not self.draft:
             await self.hub(i)
             return
-
-        async def refresh() -> dict:
-            return await asyncio.to_thread(self.box)
         await self.working(i)
-        try:
-            box = await refresh()
-        except RegistryError as e:
-            box = refusal_box_for(str(e))
-        await self.decide_box(i, box, do=self.save, refresh=refresh, back=self.to_hub)
+        await self.decide_box(i, await self.boxed(), do=self.save, refresh=lambda: asyncio.to_thread(self.box), back=self.to_hub)
 
     async def save(self, i: discord.Interaction, _v: dict) -> None:
-        from .configops import CONFIG_REV, apply_ops
+        import asyncio
 
-        res = await apply_ops(self.reg, list(self._ops), by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None),
-                              via="discord", revs={f"{CONFIG_REV}raids:{self.raid}": self.rev})
+        from .configops import CONFIG_REV, apply_ops, describe_ops
+
+        ops, fp, by_id = list(self._ops), self._fp, self.owner_id
+
+        def same_box() -> bool:  # under config_lock, in the write's step (the site's token apply)
+            d = describe_ops(self.reg, ops, by_id=by_id)
+            return d.box is not None and d.box.get("fp") == fp
+        res = await apply_ops(self.reg, ops, by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None),
+                              via="discord", revs={f"{CONFIG_REV}raids:{self.raid}": self._box_rev or self.rev}, expect=same_box)
+        if res.get("stale_box"):  # it changed in the gap: the new box, nothing written
+            box = await self.boxed()
+            await self.decide_box(i, box, do=self.save, refresh=lambda: asyncio.to_thread(self.box), back=self.to_hub,
+                                  changed=box.get("verb") is not None)
+            return
         bad = [r["line"] for r in res["results"] if not r["ok"]]
         if bad or not res["applied"]:  # the draft is kept: Back to the sections shows it again
             await self.show(i, "❌ " + " ".join(bad or [res.get("error") or "Nothing was changed."]),

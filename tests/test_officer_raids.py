@@ -278,9 +278,11 @@ def test_the_raid_wizards_reset_goes_through_the_one_op_with_its_effects(reg, st
 
     m = real(reg, 0)
     reg.regular_add(m.discord_id, "alt", "t")
-    d = configops.describe_ops(reg, [ConfigOp(op="raid_reset", target=RID)])
-    want = [d.lines[0].before, *d.consequences]  # the site's and plain text's raid_reset preview: what goes, in words
-    assert "Alt run" in want[0]
+    from oibot_gm.consequences import raid_reset_box
+
+    box = raid_reset_box(reg, RID)  # the Raids page's Reset box, the same in Discord (§7b)
+    want = [f"**{box['title']}**", *box["sentences"]]
+    assert "No sheet opens for this raid until someone adds a schedule again." in want
     h = Harness(reg)
     calls = []
     real = configops.apply_ops
