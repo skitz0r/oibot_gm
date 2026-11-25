@@ -1062,6 +1062,16 @@ def test_a_preview_flag_never_skips_the_actor_on_a_decision_route(w):
     assert [(p.drop_id, p.to, p.override) for p in s.proposals] == pending, "nothing changed in memory either"
 
 
+def test_end_with_no_council_names_the_event(w):
+    """Phase 6: the End sentence names the event (/raid end may pick one of several). The swap compares against
+    consequences.END_FIRST — a second copy of the sentence went stale once and the suite stayed green."""
+    from oibot_gm import consequences as cq
+    from oibot_gm import raidcycle as rc
+
+    lines = w.bot.end_sentences(w.reg, w.rs, w.ev)
+    assert lines[0] == f"{rc.run_on(w.reg, w.ev)} is finished." and cq.END_FIRST not in lines and lines[1:] == cq.consequence("end", w.reg, w.ev)[1:]
+
+
 def test_end_the_run_asks_with_the_servers_box_and_a_council_that_changed_is_a_fresh_box(w):
     """The final review: End the event's box was page-written and the end took no `seen`, so a council that changed
     while it was open ended on a stale sentence. preview → {box} (LootMixin.end_box); a drop ticked meanwhile → 409

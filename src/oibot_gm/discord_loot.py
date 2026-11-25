@@ -1108,7 +1108,7 @@ class LootMixin:
         several). No council: the run's own (consequences.consequence("end")). A council: 'Barrow Deeps on Tue 9 Dec is
         finished and its loot council closes with 6 awards and 1 override.', what its summary still lists, and Reopen's
         window (rc.REOPEN_GRACE_HOURS)."""
-        from .consequences import consequence, reopen_sentence
+        from .consequences import END_FIRST, consequence, reopen_sentence
         from .registry import join_words
 
         sessions = [s for s in self.events.values() if s.guild == reg.key and s.run_key == ev.key]
@@ -1117,7 +1117,7 @@ class LootMixin:
         run = rc.run_on(reg, ev)  # the run is named: /raid end may pick one of several
         if not sessions or ev.state in ("done", "cancelled"):
             lines = consequence("end", reg, ev)
-            return [f"{run} is finished."] + lines[1:] if lines[:1] == ["The event is finished."] else lines
+            return [f"{run} is finished."] + lines[1:] if lines[:1] == [END_FIRST] else lines
 
         def n_of(n: int, one: str, many: str) -> str:
             return f"{n} {one if n == 1 else many}"

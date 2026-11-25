@@ -821,12 +821,16 @@ def _remind(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     return lines
 
 
+# the End sentence with no event named; LootMixin.end_sentences swaps it for one naming the event (never a second copy)
+END_FIRST = "The event is finished."
+
+
 def _end(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     """End the run (LootMixin.end_run; the loot council's part of the sentence is LootMixin.end_consequence's): the run
     is marked finished, its sheet and lock card close, and Reopen works for rc.REOPEN_GRACE_HOURS (rc.reopen_window)."""
     if (closed := _closed(ev)):
         return closed
-    return ["The event is finished.", "The sheet and the lock card close and no more fill asks go out.", reopen_sentence()]
+    return [END_FIRST, "The sheet and the lock card close and no more fill asks go out.", reopen_sentence()]
 
 
 def reopen_sentence() -> str:
