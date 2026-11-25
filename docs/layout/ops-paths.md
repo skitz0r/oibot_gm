@@ -25,7 +25,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        preview is a 409), raids:<rid> otherwise; _schedule_raid / _schedule_write = THE schedule write (Registry.schedule_raid's create
                        rule: ID_TAKEN / SCHEDULE_EXISTS); _schedule_ops: a structured `lineup` naming no raid and no kind on an EXISTING id is an EDIT
                        (one `lineup` field) when it names no CREATE_SHAPED field or carries the schedule's rev; with run times, no rev and its own first
-                       raid → SCHEDULE_EDIT_SPLIT ("… Change its raids and its run times in two saves, one after the other." — MCP's schedule_set
+                       raid → SCHEDULE_EDIT_SPLIT ("… Change its raids and its event times in two saves, one after the other." — MCP's schedule_set
                        carries no rev), another first raid → ID_TAKEN; else it creates (3–4 raids travel as one `lineup` field); a plain-text lineup
                        edit keeps a kept raid's start while the raid before it is unchanged; the C10 sentence is box 14's (op_box). Runs:
                        run_reschedule (target = run key; field `start` = 'YYYY-MM-DD HH:MM' guild time through rc.move_start, or an rc.EVENT_TIMING

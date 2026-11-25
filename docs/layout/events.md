@@ -160,7 +160,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        refresh_cards per part, every open confirmation and fill-ask card re-rendered through edit_live_card, a `moved` notice per
                        answered_ids, one run-thread line naming the raid, one ops.audited line; NO DM) · edit_lineup(reg, rs, ev, lineup, …)
                        (LINEUP_OFFICER_ONLY; plan_lineup + apply_lineup under the board locks; a removed raid's pending asks closed under its plan_lock
-                       and their cards edited "… was taken out of the … run, so this ask is closed."; the `moved` notice when a kept raid's start
+                       and their cards edited "… was taken out of the … event, so this ask is closed."; the `moved` notice when a kept raid's start
                        changes; NO DM). cleanup_ephemeral drops a first part's dict with no run file after rc.DICT_WITHOUT_RUN_HOURS
                        Phase 4 (§5.67): solving(reg, key, lock=) = the solver's single flight per run AND the lock first: lock=True (lock_run) stops
                        every running Auto-fill (stop_all), a preview only its event's (stop_event) — wrapped so an auto-fill fault never touches the lock; board_move(…, by_id=) (before the lock
@@ -238,7 +238,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        phase 3): rc.occurrences(lead=True), skipped when rc.event_of_occurrence finds that (schedule, occurrence) in any state — never
                        by a key, so a cancelled occurrence never opens again —, else open_run_and_post(schedule=); _warn_unopened / _warn_open_refused
                        keyed by (guild, schedule id, occurrence); _warn_gone_raids = one ops warn per (guild, schedule) per hour for a schedule naming a
-                       raid the game lacks ("… opens no runs: … Change its raids on the Schedules page, or remove it there."); a later raid gets no
+                       raid the game lacks ("… opens no events: … Change its raids on the Schedules page, or remove it there."); a later raid gets no
                        health card or lock of its own while a raid before it is open; an occurrence whose minute a live ONE-OFF holds
                        (rc.one_off_at) is skipped with one ops warn naming both (_warn_night_taken) — another schedule's run there never blocks it
   raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|loot|distribute|end|set|cancel|reschedule|edit|lineup|list|out|fill

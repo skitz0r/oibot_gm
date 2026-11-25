@@ -149,7 +149,7 @@ Auras (owner): aura_set: what the guild learns about a buff. target=<buff id, e.
   family_set (owner): who benefits from a stacking family and how much. target=<family id, e.g. fortitude|arcane_intellect|stamina (new ids are created)>,
     field=<name|status|note|value (whole map: "all: 3, mana: 2")|value:<all|physical|spell|mana|melee|ranged|healer|tank|spec:Name> (one entry; 0 removes it)>, value.
   aura_reset (owner): target=<buff or family id, blank = everything> — back to the game defaults.
-Runs (officer; target = the run key like bd-1209-1930 from the live-events list, or the raid id when only one of its events is live):
+Runs (officer; target = the event key like bd-k7m2qx from the live-events list, or the raid id when only one of its events is live):
   run_open: target=<raid id>, value=<optional "YYYY-MM-DD HH:MM" in guild time — one of the raid's upcoming runs listed below, or any
     other time for a one-off; a bare "HH:MM" = the next listed run at that time; blank = the raid's next run>, field=<optional schedule id:
     its next run, or with a time its settings (a pickup template needs the time)>, text=<optional later raids "<raid id> x<N>, <raid id>"

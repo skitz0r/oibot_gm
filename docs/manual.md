@@ -850,8 +850,7 @@ schedule sets its own. Three kinds:
 - **Days of each lockout** — "Day 1 of each 3-day lockout, 8:00 PM": day 1 is the day the lockout resets, counted
   from the raid's first opening every `lockout_days`, so a 3- or 5-day reset is followed exactly (and daylight saving
   never moves the wall-clock time; a time the clocks skip that night moves past the gap).
-- **Opened by an officer** — never opens by itself. `/raid open` → *One-off event* offers it (*On demand — pick a
-  time*, by the schedule's name); the event gets the schedule's settings. (The site's **New event** page makes
+- **Opened by an officer** — never opens by itself. `/raid open` → *One-off event* offers it (*<its name> — pick a time*; an unnamed one reads *On demand — pick a time*); the event gets the schedule's settings. (The site's **New event** page makes
   one-offs; a schedule opened by an officer opens from Discord, plain text or MCP.)
 Each schedule also says how many **rosters** an event expects (1–4). With 2, the sheet advertises 2 × the raid's size
 (20 seats for a 10-player raid), the health check and the fill engine measure against two rosters, and the lock builds
@@ -873,8 +872,7 @@ removed, the ops feed says so once an hour, naming the schedule and the raid; bo
 **A schedule's event or a one-off.** Every event is one or the other, and nobody sets it by hand — it follows the schedule's kind:
 - **A schedule's event** — weekly nights and days of each lockout. Opens by itself on its
   week, has **regulars**, and its lock weighs being a regular (below). Confirmations on by default.
-- **One-off** — the event of a schedule opened by an officer, or a **one-off** event at a time an officer picks
-  (*One-off event* in `/raid open`, **New event** on the site, or plain text / MCP with a time that is none of the
+- **One-off** — the event of a schedule opened by an officer, or an event with no schedule at a time an officer picks (*One-off event* › *Own settings* in `/raid open`, **New event** on the site, or plain text / MCP with a time that is none of the
   raid's upcoming events).
   It takes the raid's size, comp, lockout and length but none of its schedules' timing — its own lighter defaults: no
   reminder, no DM on open, **no confirmations** (Join is the commitment; *Can't make it* frees your seat), locks
@@ -1060,7 +1058,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    builder* below. `/raid open` does the same in Discord: pick the raid,
    then **Next event — <time>**, **Another upcoming event** (the next three weeks, and each schedule's next three nights
    however far ahead) (each labelled with its schedule's name when there are several)
-   or **One-off event** (a schedule an officer opens, or *Own settings — pick a day and time*: day, hour and minutes in
+   or **One-off event** (each schedule an officer opens as *<its name> — pick a time*, or *Own settings — pick a day and time*: day, hour and minutes in
    15-minute steps from lists; nothing typed; more than three schedules opened by an officer come as one *Pick the
    schedule* select). **Another upcoming event** pages by week (*← Earlier week* / *Later week →*) when the raid has
    more upcoming events than one list holds.
@@ -1295,9 +1293,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    nobody gets a DM. A cancelled event cannot be reopened."*; after the lock *"The 10 rostered see it on their cards…"*)
    — then an optional **reason** (officers only: it goes to the
    event's updates thread and the ops feed, never to the signup channel) and **Tell the channel?** (a fixed line in the
-   signup channel — "🛑 Barrow Deeps … is cancelled. Rostered seats are released." — on by default, or
+   signup channel — "🛑 Barrow Deeps … is cancelled." (after the lock, "Rostered seats are released." too) — on by default, or
    no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
-   the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel event** and `/raid cancel` show
+   the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel event…** and `/raid cancel` show
    the same box as the Events page with **Cancel event** (red: no reason, and the channel line is posted), **Cancel event
    with a note** (the form with the reason and the channel choice) and **Back**; a test event's card on the Test bench has
    the reason and the channel choice too; plain text takes the reason and "…, no announcement" for no channel
@@ -1399,10 +1397,10 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    one-off too), a banner above the roster says *Waiting on you: …* with Fill seats…, and the fill state is a sentence
    ("Asking for open seats — waiting for answers (1 on the site)."; a closed event's is "The event is finished.").
 7. **Raid** — `/raid loot` (or the lock card's **Loot**, or Loot › Tonight on the site) opens the loot council;
-   `/raid end` ends the event and its council (§9) — so does **End the event** on the lock card's second row and on the
+   `/raid end` ends that raid and its council (§9) — so does **End the event** on the lock card's second row and on the
    site's locked event (**More › End the event**), both after the scheduled start and both through one confirm screen with the same sentence
-   (*"Barrow Deeps on Tue 9 Dec is finished and its loot council closes with 6 awards and 1 override. The summary posts in the council's
-   thread. Reopen works for an hour if this was a mistake."*; with no council: *"Barrow Deeps on Tue 9 Dec is finished. The sheet and the
+   (*"Barrow Deeps on Wed 9 Dec is finished and its loot council closes with 6 awards and 1 override. The summary posts in the council's
+   thread. Reopen works for an hour if this was a mistake."*; with no council: *"Barrow Deeps on Wed 9 Dec is finished. The sheet and the
    lock card close and no more fill asks go out. Reopen works for an hour if this was a mistake."*). Ended by mistake? The closed
    officer card keeps a **Reopen** button (and the event under History on the Events page has **More › Reopen**) for an hour: the event goes back to
    locked with its roster and asks as they were (the loot council stays archived — open it again with /raid loot).
@@ -1843,8 +1841,7 @@ edits that new family and leaves the one it shared alone.
   Summit with Barrow Deeps ×2 as its later raid (*"…, then Barrow Deeps ×2 at Thu 10 Dec 9:30 PM"*) and sets the weekly Tuesday
   schedule — one diff, one Apply. Its first event follows the raid's first opening (Hyjal Summit's is Wed 9 Dec, so the
   first Tuesday is the 15th); a later start for the whole raid is its *first opening* ("Hyjal opens first on Dec 15"),
-  as no single schedule has a start date of its own. An event already open takes or drops a later raid with **Edit lineup** on its page or
-  `/raid lineup`, until its roster locks (§4 *Changing the raids of an open event*).
+  as no single schedule has a start date of its own. An event already open takes or drops a later raid with **Edit lineup** on its page, `/raid lineup` or plain text ("add onyxia after tonight's Barrow Deeps"), until its roster locks (§4 *Changing the raids of an open event*).
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, the news review — last run,
   its result, the next run, proposals waiting — and the apply job: idle, running, busy with another server's proposal or
   failed with why, recent ops),
@@ -1871,10 +1868,8 @@ channel: the change in words, what it touches, the sentence from the news it res
 confidence (low / medium / high). Most days there is no card: nothing new, or nothing that contradicts anything.
 
 - **Approve** first shows what approving does, then *Approve* / *Approve with a note* / *Back* — the press itself never
-  writes. A **guild setting** (a raid's lockout, what the guild knows about a buff, a minimum) reads "the apply
-  job carries it out at its next run (the time), no restart:" and the change as a diff line; it is applied like the same
-  change on the Raids or Auras page. A **game data** change reads "Claude edits the game data for <version>, the tests
-  run, and the bot restarts for every server it serves (every name) for about two minutes", plus "⚠ <server> is raiding
+  writes. A **guild setting** (a raid's lockout, what the guild knows about a buff, a minimum) reads "The apply job makes this change at its next run, Tue 7:45 PM. The bot doesn't restart for it." (or "…within 15 minutes") and the change as a diff line; it is applied like the same
+  change on the Raids or Auras page. A **game data** change reads "At the apply job's next run, Tue 7:45 PM, Claude edits the game data for <version>. After the tests, the bot restarts for about two minutes for <every server it serves, by name>.", plus "⚠ <server> is raiding
   right now, so the job waits until the raid is over." for each server that is raiding. **Only the owner approves a game-data change** (it
   restarts the whole bot, for every server), even when the bot serves one guild; an officer's press is refused at once
   and says so. The same holds for a guild setting that only the owner may change on any surface — a buff, a stacking
@@ -2090,8 +2085,7 @@ set —*, **Save** → one review of every change and what it does → the resul
 and the page says so instead of calling channels "not found"; *Webhook URL* beside the news channel), and **Settings**: press **Edit settings**, change any of the timezone, who may ask the bot, the officer roles and the
 about text, then one **Save settings**. The **timezone** is picked from a searchable list grouped by region (type a city to
 find it; never an IANA name to spell); under it the bot shows each raid's next event under the new zone and on today's clock,
-and every event already open or locked whose time reads differently on the new clock (*"Barrow Deeps Tue 20 Oct 8:00 PM stays
-at its real moment (now 11:00 PM in America/New_York) — move open events with the clock to keep its time"*). Then you pick:
+and every event already open or locked whose time reads differently on the new clock (*"Barrow Deeps Tue 20 Oct 8:00 PM stays at its real moment. That reads Tue 20 Oct 11:00 PM in America/New_York. Move open events with the clock to keep its time."*). Then you pick:
 **Keep events at their real moment**, or **Move open events with the clock** — an open event keeps its 8:00 PM on the new clock,
 same sheet, same signups, nobody asked again. A **locked** event never moves (its roster confirmed that moment), and while one
 is affected the change only goes through once you've picked. `/gm config timezone` offers the same two Saves. A timezone or officer-role change is reviewed before
@@ -2130,13 +2124,9 @@ Back with changes not saved first ask *Leave without saving?* with **Discard edi
 night?"*. A value the schedule refuses (a reminder after the lock) is the box's one sentence with Back, the draft kept.
 If someone changed the schedule meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."*,
 nothing is written and your changes are kept; pressing the verb on that box saves them.
-On the site: the **Schedules** page lists each raid's schedules in words with the next three events (a
-paused one: its *Next event if resumed*); officers add, edit (the editor opens in place of the
-schedule's row: weekday + 12-hour time pickers, lockout-day picks; every timing field shows the schedule's own value
-and the draft's week as a timeline above them — a field left empty says *the game's suggestion* (on a schedule an officer opens:
-*the default for a schedule opened by an officer*), which it takes when saved, and its step isn't drawn until it has a number; the **Standard / Short notice / Same week** presets fill the hours and the one the
-hours match lights up; under the form *With these rules* shows the next three events the bot computes from the draft, or
-the refusal the Save would give) and remove them. **Pause / Resume** sits beside Edit with one confirm (*"Nothing new opens from Alt night.
+On the site: the **Schedules** page lists every schedule under *Active* and *Paused*, each with when it repeats; one
+schedule shows its *Next events* (a paused one its *Next event if resumed*). Officers add and edit them with **New
+schedule** and **Edit** (the lineup builder, §2a) and remove them. **Pause / Resume** sits beside Edit with one confirm (*"Nothing new opens from Alt night.
 … is already open and keeps its sheet. Its regulars stay."*). The editor saves only the fields you changed, so a pause made in
 Discord a moment ago is never undone by a Save on the site. **Remove** confirms with what goes: *"The Alt night schedule is
 removed. Ana, Bo and Cy come off its regulars and see a notice on their Me page. Barrow Deeps Sat 12 Dec 8:00 PM is already
@@ -2487,7 +2477,7 @@ is a callout. Puppets answer test events only — naming a real event is refused
 **Try a comp.** `/gm test comp` (pick the raid, then **Try a comp**) or **Try a comp** on the site opens a *comp
 sandbox*: a test event two weeks out with every puppet joined, never posted in Discord; Discord answers with a link to
 its event page and the site takes you there, where **Auto-fill groups** shows the best comp from that mix (its card
-under the Test bench's *Test events* keeps **Propose roster**, with Leftovers and "what a second roster would need"). Change the mix and try again; the old sandbox goes with the next clear.
+under the Test bench's *Test events* keeps **Propose roster**, with Leftovers and what another roster is short). Change the mix and try again; the old sandbox goes with the next clear.
 
 **Clearing.** `/gm test clear` shows what it does — "1 test event is cancelled, 12 puppets are deleted and the
 analytics cards resume." — then *Clear the test bench* / *Back*; the site's **Clear the test bench** asks with the same words.
@@ -2548,11 +2538,11 @@ news post says can make the review read or write another server.
 | `list_companions` · `revoke_companion` | the loot-companion tokens (label, connected or not, last seen, who issued it — never a value) · revoke one by label or id (`preview=true` says what it does first). Issuing is not a tool: a token is issued on the site or with `/gm config companion` (§8) |
 | `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), each raid's week, live events, test bench, and `summary`: the configuration in words by section (as `config_summary`) |
 | `list_runs` · `get_run` | live sheets per raid with upcoming slots · one event in full (a schedule's or a one-off, and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
-| `list_raids` · `get_raid` | each raid's settings (the game's defaults + the guild's changes); each schedule's class (recurring / one-off), regulars count, where each inherited value comes from, seat weights |
+| `list_raids` · `get_raid` | each raid's settings (the game's defaults + the guild's changes); each schedule's `class` (`recurring` / `adhoc` — a one-off), regulars count, where each inherited value comes from, seat weights |
 | `set_regular` | add or remove a regular of a recurring schedule (member, character, schedule; the Schedules page's route) |
 | `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record, with its `attendance` (the sentence, the count the site shows, the loot factor's count — null while unknown — and a row per raid) |
 | `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buffs table · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and award log (up to 100) from the Loot pages, `member` narrowing both to one person |
-| `get_loot` · `open_loot` · `loot_tick` · `loot_distribute` · `loot_discard` · `end_loot` | the councils (every locked event, or one council in full: drops by boss, picks with their candidate tables, pending overrides, awards, reasons owed, the roster, `batch_rev` / `drops_rev`, the End sentence) · open the council on a locked event · tick drops by name or id (`remove` un-ticks) · judge the ticked drops · drop pending picks (`batch_rev`, or `only` some = decide later; `preview`) · end the event and its council (`preview` = the sentence) |
+| `get_loot` · `open_loot` · `loot_tick` · `loot_distribute` · `loot_discard` · `end_loot` | the councils (every locked event, or one council in full: drops by boss, picks with their candidate tables, pending overrides, awards, reasons owed, the roster, `batch_rev` / `drops_rev`, the End sentence) · open the council on a locked raid · tick drops by name or id (`remove` un-ticks) · judge the ticked drops · drop pending picks (`batch_rev`, or `only` some = decide later; `preview`) · end the raid and its council (`preview` = the sentence) |
 | `loot_confirm` · `loot_award` · `loot_reason` · `loot_correct` | **decisions — need `OIBOT_MCP_ACTOR`**: record picks (one with `expect_to`, or the rest with `batch_rev`; `preview` needs no actor) · override a pick with a reason · the reason for an in-game award (an ended council too) · fix a recorded award |
 | `list_appeals` · `resolve_appeal` | members' questions about their own awards (open oldest first, then the resolved; the officers' record of each award, the outcome choices) · close one with an outcome (stands · corrected · noted · withdrawn) and an officers-only note — **a decision: needs `OIBOT_MCP_ACTOR`** (`preview` = the sentence, no actor); the member gets a notice, never a DM. No tool opens one |
 | `loot_history` · `loot_log` · `list_precedents` · `retire_precedent` | ended councils (one in full) · the award log (`scores` for officers' columns) · precedents with their refs and the awards still needing a reason · retire or restore one (actor) |
@@ -2637,7 +2627,7 @@ Discord cards show only numbers.
 
 ### In Discord: the thread and its cards
 
-**Open the council** on a locked event with `/raid loot`, the **Loot** button on the raid's lock card (the raid-night
+**Open the council** on a locked raid with `/raid loot`, the **Loot** button on the raid's lock card (the raid-night
 hub; it opens that card's own raid, even when another event is locked too), **Open loot council** on Loot › Tonight or
 **Loot** in a locked event's **More** on the Events page (the lock card's word; once open the same **Loot** is a link to Loot › Tonight), "open the
 loot council for tonight" in plain text, or MCP `open_loot`. It lives in one thread under the officer channel (the
@@ -2762,8 +2752,7 @@ that wrote it), so the thread's *"☠ Gatekeeper down (8:15 PM)"* shows in each 
 toward **Bosses 3 / 6** on the lock card, a test event's card on the Test bench and Loot › Tonight, and a killed boss's
 drops are judged first. When the raid's **last boss** goes down the thread says once *"All bosses down — End the event?"*
 (on a split raid, each roster's thread — once every roster's last boss is down) and the lock card shows the same
-line with its End button reading **End the event** — the same End as always (the confirm screen first, then the event and
-its council close). A raid whose bosses the game profile doesn't list yet shows *Bosses 3* and never asks. A companion
+line with its End button reading **End the event** — the same End as always (the confirm screen first, then the raid and its council close). A raid whose bosses the game profile doesn't list yet shows *Bosses 3* and never asks. A companion
 older than the one in the repo sends kills with a clock time only; the bot refuses those (it won't guess which time zone
 the raider's PC was in) — the companion prints *"companion too old"* and the ops channel says so once. Update the file
 from the repo's `companion/` folder.
@@ -2792,12 +2781,11 @@ for whoever presses it. When the bot can't read sentences (Claude unavailable) i
 ### End
 
 `/raid end` (with several locked events it asks which, the one with a council first), **End council** on the card or on
-Loot › Tonight, "end tonight's event" in plain text, or MCP `end_loot` first shows what ending means — *"End <event>: 6
-awards, 1 override, 2 drops never distributed, 1 award waiting for a reason"* — with **End the event** / **Back** (in
+Loot › Tonight, "end tonight's event" in plain text, or MCP `end_loot` first shows what ending means — a box titled *End Wed 9 Dec 7:30 PM?* that says *"Barrow Deeps on Wed 9 Dec is finished and its loot council closes with 6 awards and 1 override. The summary in its thread lists 2 drops never distributed and 1 award awaiting a reason. Reopen works for an hour if this was a mistake."* — with **End the event** / **Back** (in
 Discord the same box the site prints; a council that changed while it was open is shown again first). End posts
 the summary in the thread (the awards, the overrides and anything left undecided — proposals never confirmed, drops
 never distributed, awards still waiting for a reason — so nothing anyone decided disappears), turns the card into the
-summary, archives the thread, marks the event done and redraws its sheet and lock card closed. On every surface only a
+summary, archives the thread, marks the raid done and redraws its sheet and lock card closed. On every surface only a
 locked event ends (*"No locked event to end."*), and not while a Distribute is judging (*"Distributing already (…) — wait
 for it, or retry End"*). The bot ends a council by itself only after its raid's scheduled end, once it has been idle
 for 30 minutes with no pick waiting for Confirm and no drop nobody judged — after one *"closing in 15 min"* notice with
@@ -2809,7 +2797,7 @@ the raid itself is over either way (no more fill asks, nobody shows as rostered 
 On every loot page — Tonight, History, Items, Wishlists, the Loot log, My loot and your wishlist — an item's name with an
 id is a link to its page on Wowhead (in a new tab); an item ticked or imported by name only stays plain text.
 
-**Tonight** is the same council as a table, live: every locked event (with **Open loot council** until it has one), its
+**Tonight** is the same council as a table, live: every locked raid (with **Open loot council** until it has one), its
 drops per boss (the *Drops* block ticks by item name, a boss and how many copies; un-tick a false drop), every proposal
 with **Confirm** / **Override…** / **Decide later** — a row opens its whole candidate table (tier, upgrade, attendance,
 rank, wishlist place, recent loot, score; no model call to browse it) — **Confirm the rest** and **Discard batch**,

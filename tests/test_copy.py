@@ -74,8 +74,8 @@ RETIRED = re.compile(r"\b(?:recurring runs?|lead runs?|runs?|follow[- ]ons?|ad[-
 # looks, each with a POSITIVE verb context — a subject that does the running, an auxiliary, a sentence start for the
 # imperative — never "anything but a determiner": "Open runs on Tuesday", "Keep runs at their moment", "the schedule
 # has run times" and "Tonight's run again" keep the noun caught.
-_RUNNER = (r"it|that|which|who|whoever|bot|check|import|reminder|job|scheduler|clock|launchd|pc|leader|companion|"
-           r"sweep|review|loop")
+_RUNNER = (r"it|that|who|whoever|bot|check|import|reminder|job|scheduler|clock|launchd|pc|leader|companion|"
+           r"sweep|loop")
 _AUX = (r"can|can['’]t|cannot|could|will|won['’]t|would|must|should|may|has|have|had|hasn['’]t|haven['’]t|hadn['’]t|"
         r"do|does|did|didn['’]t")
 # a sentence start (or after a dash, colon, bracket), or "or" / "and" / "then": where an imperative "Run …" begins
@@ -634,6 +634,8 @@ def test_retired_words_take_the_noun_not_the_verb():
         ("The check runs hourly.", "the bot's runs"),
         ("The check runs hourly.", "the leader's runs"),
         ("The check runs hourly.", "these runs this month"),
+        ("The check runs hourly.", "Pick which runs to cancel."),
+        ("The check runs hourly.", "Review runs before the lock."),
     ]
     for verb, noun in pairs:
         assert not retired_words(verb), verb
@@ -659,11 +661,12 @@ def test_retired_words_are_gone():
 # tells a reader the older words and what they are now. Everything else in the manual says event, lineup, one-off.
 MANUAL = ROOT / "docs" / "manual.md"
 MANUAL_ALLOW: list[tuple[str, str]] = [
+    ("you see your server's review runs only", "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
     ('what the current run is doing step by s', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
     ('the news review — last run,', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
     ('its result, the next run, proposals waiting', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
-    ('job carries it out at its next run', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
-    ('  run, and the bot restarts for every server it serves', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ('The apply job makes this change at its next run', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
+    ("At the apply job's next run, Tue 7:45 PM", "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
     ('If an apply run died part-way', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
     ('the apply run was interrupted; approve again to retry', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),
     ('only the restart waits". A run', "the review and apply jobs' own run on the owner's operator surfaces is not a raid event"),

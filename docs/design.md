@@ -6173,8 +6173,8 @@ no `by_id` (both older than this phase). The lock box's `fp` ignores a joiner pa
 "Play another character" after the lock still reseats, and now says the role change first. Bench with an explicit
 same-role spec on a seated member changes the signup's spec, not the seat's.
 
-Phase 6 still owes the words: "run" renamed to "event" in the existing strings, the activity log's code nouns, and the
-older pages' Apply N changes. Tests: `tests/test_wizard_box.py`, `tests/test_discord_labels.py`,
+Phase 6 (below) renamed "run" to "event" in the existing strings. Still owed, in no plan yet: the activity log's code
+nouns and the older pages' Apply N changes. Tests: `tests/test_wizard_box.py`, `tests/test_discord_labels.py`,
 `tests/test_discord_boxes.py`, `tests/test_flows_event.py`, `tests/test_flows_lineup.py`, `tests/test_flows_open.py`,
 `tests/test_flows_schedule.py`, `tests/test_set_box.py`, `tests/test_event_links.py`, `tests/test_parity_matrix.py`.
 
@@ -6202,6 +6202,6 @@ and store save / batch / commit messages (held to the retired words only) — an
 the same check over `docs/manual.md` line by line, backticked text dropped, with `MANUAL_ALLOW` holding only §1a's
 older-words paragraph. The pending-files list is gone.
 
-**Later phases** (spec §9): the words (phase 6). Phases 1 and 2's tests:
+**Later** (in no plan yet): the activity log's code nouns, the older pages' Apply N changes. Phases 1 and 2's tests:
 `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`, `tests/test_minimums.py`, `tests/test_minimums_solver.py`,
 `tests/test_officer_raids.py`.

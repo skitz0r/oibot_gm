@@ -380,7 +380,7 @@ function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: 
         {e.cancel_tells_channel !== false && <Checkbox label="Tell the channel — a fixed line, no reason" checked={notify} onChange={(ev) => setNotify(ev.currentTarget.checked)} />}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" size="sm" onClick={close}>Back</Button>
-          <Button color="red" size="sm" onClick={async () => { const r = reason.trim(), nf = notify; close(); await onCancel(r, nf); }}>Cancel the event</Button>
+          <Button color="red" size="sm" onClick={async () => { const r = reason.trim(), nf = notify; close(); await onCancel(r, nf); }}>Cancel event</Button>
         </Group>
       </Stack>
     </Modal>
