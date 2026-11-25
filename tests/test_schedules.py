@@ -1,7 +1,7 @@
 """Schedules (design.md §5.27): WHEN a raid runs as entries under the raid — weekly, day N of each lockout, pickup
 templates — each with its own cadence and the rosters a run expects. A raid has no run times of its own (phase 3): every
 schedule has an id of its own across the guild. Then the registry's refusals, the cycle (keys, cutoffs,
-health against N rosters), the /gm config Schedules section, plain-text ops, the web API and the MCP tools."""
+health against N rosters), the schedule wizard (flow `schedule`), plain-text ops, the web API and the MCP tools."""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import by_role, join, weekly
 from fastapi.testclient import TestClient
-from test_flows_config import open_raid, submit_multi
 from test_mcp import TOKEN, FakeBot, bearer
 from wizard_harness import Harness
 from web_helpers import post_confirmed
@@ -225,83 +224,101 @@ def test_schedule_labels_are_words_never_24_hour(reg):
     assert reg.time_label("00:05") == "12:05 AM"
 
 
-# ---------------------------------------------------------------- /gm config raid → Schedules
+# ---------------------------------------------------------------- /gm config raid → Schedules (the schedule wizard)
 
-def test_config_schedules_add_edit_and_save_in_one_commit(reg, store, owner):
+def schedule_harness(reg, rs):
+    from types import SimpleNamespace
+
+    from test_reschedule import OFFICER_ID
+
+    return Harness(reg, rs, user=SimpleNamespace(id=OFFICER_ID, display_name="Officer", mention="@Officer"))
+
+
+def test_config_schedules_add_edit_and_save_in_one_commit(reg, rs, store, owner):
+    """A new schedule with its run time, its own timing and two rosters is ONE commit at Create, nothing before it."""
+    from oibot_gm import flows_schedule  # noqa: F401 — registers the flow
+    from oibot_gm.wizard import FLOWS
+
     opened(reg)
-    h = Harness(reg)
+    h = schedule_harness(reg, rs)
     n0 = commits(store)
 
     async def go():
-        await open_raid(h, reg)
-        await h.pick("Pick a section", "times")
-        assert h.buttons() == ["Add a schedule", "Back to the sections"] and "has none yet" in h.text  # no run times of its own
-        await h.press("Add a schedule")
-        await h.pick("What kind of schedule?", "weekly")
-        await submit_multi(h, name="Raid nights", nights=["Tue"], hour="19", minute="30")
-        assert "Add a run time" in h.buttons() and "Add another schedule" in h.buttons()
-        await h.press("Add another schedule")
-        await h.pick("What kind of schedule?", "weekly")
-        await submit_multi(h, name="Alt run", nights=["Sat"], hour="20", minute="0")
-        assert "Added **Alt run**: Saturdays 8:00 PM" in h.text and "Next runs" in h.text and "20:00" not in h.text
-        await h.pick("Change this schedule", "cadence")
-        await h.pick("Pick a run's week", "custom")
-        assert "The game's suggestion (6 hours before)" in [o.label for o in h.modal._items["confirm_hours_before"].options]
-        await h.submit(h.modal, signup_lead_hours="inherit", nudge_hours_before="inherit", lock_hours_before="12", confirm_hours_before="inherit", fill_ask_hours="2")
-        assert "locks 12 hours before" in h.text and "confirm-by 6 hours before" in h.text and "the raid's" not in h.text  # its own nine values
-        await h.pick("Change this schedule", "rosters")
-        await h.pick("Rosters per run", "2")
-        assert "2 rosters" in h.text and "the sheet advertises 2 × 10 seats" in h.text  # rc.rosters_copy (phase 3)
-        await h.press("All schedules")
-        assert "Raid nights" in h.text and "Alt run" in h.text and h.selects() == ["Pick a schedule"]
-        await h.press("Add a schedule")
-        await h.pick("What kind of schedule?", "lockout")
-        await submit_multi(h, name="Reset night", days=["1"], hour="21", minute="0")
-        assert "Day 1 of each 3-day lockout, 9:00 PM" in h.text
-        await h.press("Back to the sections")
-        assert commits(store) == n0  # nothing before Save
-        await h.press("Save")
-        assert "New schedule **Raid nights**: Tuesdays 7:30 PM" in h.text
-        assert "New schedule **Alt run**: Saturdays 8:00 PM · 2 rosters" in h.text and "New schedule **Reset night**" in h.text
-        assert "Next runs with these rules:" in h.text and "Alt run: " in h.text and "19:30" not in h.text
-        await h.press("Save")
+        await FLOWS["schedule"](h.command(), reg, raid=RID)
+        await h.press("New schedule")
+        await h.pick("Repeats", "weekly")
+        await h.submit(h.modal, name="Alt run")
+        await h.pick("Change", "repeats")
+        await h.press("Add a run time")
+        await h.submit(h.modal, day="Sat", hour="20", minute="0")
+        assert "8:00 PM" in h.text and "20:00" not in h.text
+        await h.press("Back")
+        await h.pick("Change", "timing")
+        await h.pick("Pick a setting", "lock_hours_before")
+        await h.pick("Locks", "12")
+        await h.pick("Pick a setting", "fill_ask_hours")
+        await h.pick("An ask waits", "2")
+        await h.press("Back")
+        await h.pick("Change", "lineup")
+        await h.pick("Pick a step", "1")
+        await h.pick("Rosters", "2")
+        await h.press("Back")
+        await h.press("Review changes")  # the lineup block's: back to the hub
+        assert commits(store) == n0  # nothing before the box's verb
+        await h.press("Review changes")
+        assert "Create Alt run?" in h.text and "20:00" not in h.text
+        await h.press("Create schedule")
         assert "✅" in h.text
     asyncio.run(go())
     assert commits(store) == n0 + 1
-    by_id = {s["id"]: s for s in reg.schedules(RID)}
-    assert set(by_id) == {"raid-nights", "alt-run", "reset-night"} and by_id["raid-nights"]["slots"] == ["Tue 19:30"]
-    assert by_id["alt-run"]["rosters"] == 2 and reg.schedule_def(RID, "alt-run")["lock_hours_before"] == 12
-    assert reg.schedule_def(RID, "alt-run")["fill_ask_hours"] == 2 and by_id["reset-night"]["days"] == [1] and by_id["reset-night"]["time"] == "21:00"
+    s = next(s for s in reg.all_schedules() if s["name"] == "Alt run")
+    assert s["slots"] == ["Sat 20:00"] and s["lineup"][0]["rosters"] == 2
+    d = reg.schedule_def(RID, s["id"])
+    assert d["lock_hours_before"] == 12 and d["fill_ask_hours"] == 2
 
 
-def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, store, owner):
+def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, rs, store, owner):
+    """A weekly schedule without a run time is the box's refusal with Back alone and the draft kept; Pause and Remove
+    are their boxes; Back from the list writes nothing (tests/test_flows_schedule.py pins each box's words)."""
+    from oibot_gm import flows_schedule  # noqa: F401 — registers the flow
+    from oibot_gm.wizard import FLOWS
+
     opened(reg)
     reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     weekly(reg, RID, "Tue 19:30")
-    h = Harness(reg)
-    before = copy.deepcopy((reg.config.raids, reg.config.schedules))
+    h = schedule_harness(reg, rs)
+    n0 = commits(store)
 
     async def go():
-        await open_raid(h, reg)
-        await h.pick("Pick a section", "times")
+        await FLOWS["schedule"](h.command(), reg, raid=RID)
         await h.pick("Pick a schedule", "alt")
-        await h.press("✕ Sat 8:00 PM")  # the last run time of a weekly schedule: the registry's rule, on the spot
-        assert "❌" in h.text and "at least one run time" in h.text
-        await h.press("Fix this")
-        assert "Sat 8:00 PM" in h.text
-        await h.pick("Change this schedule", "active")
-        assert "Paused" in h.text
-        await h.pick("Change this schedule", "behaviour")
-        await h.pick("Change a switch", "nudge=off")
-        assert "Nudge the unanswered → off." in h.text and "the game's suggestion" in h.text  # a switch set back goes to the game's suggestion
+        await h.pick("Change", "repeats")
+        await h.press("✕ Sat 8:00 PM")  # the last run time of a weekly schedule: the registry's rule, at the box
         await h.press("Back")
-        await h.pick("Change this schedule", "remove")
-        await h.press("Remove")
-        assert "Removed Alt run" in h.text
-        await h.press("Back to the sections")
-        await h.press("Cancel")
+        await h.press("Review changes")
+        assert "at least one run time" in h.text and h.buttons() == ["Back"]
+        await h.press("Back")
+        assert "Every Saturday at 8:00 PM → " in h.text, "the draft is kept"
+        await h.press("Back")  # leaving with edits: box 20
+        await h.press("Discard edits")
+        assert commits(store) == n0
+        await h.pick("Pick a schedule", "alt")
+        await h.press("Pause")
+        await h.press("Pause")
+        assert "✅" in h.text
     asyncio.run(go())
-    assert (reg.config.raids, reg.config.schedules) == before  # Cancel: nothing written
+    assert not reg.schedule_entry("alt")["active"] and commits(store) == n0 + 1
+
+    h = schedule_harness(reg, rs)
+
+    async def remove():
+        await FLOWS["schedule"](h.command(), reg, raid=RID)
+        await h.pick("Pick a schedule", "alt")
+        await h.press("Remove")
+        await h.press("Remove schedule")
+        assert "✅" in h.text
+    asyncio.run(remove())
+    assert not any(s["id"] == "alt" for s in reg.all_schedules()) and commits(store) == n0 + 2
 
 
 # ---------------------------------------------------------------- plain text
