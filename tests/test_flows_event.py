@@ -5,11 +5,13 @@ client is test_raid_night's NightBot: the real RaidMixin.reschedule_event, nothi
 from __future__ import annotations
 
 import asyncio
+import copy
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import discord
-from conftest import join, lock_with_board
+import pytest
+from conftest import GUILD, TEST_MEMBERS, join, lock_with_board
 from discord import app_commands
 from test_flows_raid import officer  # noqa: F401 — the fixture
 from test_raid_night import NightBot
@@ -20,7 +22,9 @@ from oibot_gm import flows_event
 from oibot_gm import raidcycle as rc
 from oibot_gm.constants import CONFIRM_WORDS, PAGE_WORDS
 from oibot_gm.event_view import EDIT_AFTER_LOCK
-from oibot_gm.wizard import FLOWS
+from oibot_gm.help import page_words
+from oibot_gm.registry import Registry
+from oibot_gm.wizard import FLOWS, MAX_OPTIONS
 from wizard_harness import Harness
 
 F = PAGE_WORDS["schedule_fields"]
@@ -147,6 +151,32 @@ def test_pick_event_lists_first_raids_only(reg, rs, officer):  # noqa: F811
     assert cq.reschedule_pick_box(reg, rs, first)["title"] in h.text, "one event: straight in, its later raid not offered"
 
 
+def test_an_event_gone_before_the_time_is_picked_is_a_refusal_box(reg, rs, officer):  # noqa: F811
+    first = open_one_off(reg, rs, days=3)
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_reschedule"](h.command(), reg))
+    run(h.press("Pick the day and time"))
+    day = (first.start + timedelta(days=1)).astimezone(reg.tz).date().isoformat()
+    rs.events.pop(first.key)  # it left the store while the form was open
+    run(h.submit(day=day, hour="20", minute="15"))
+    assert h.buttons() == ["Back"] and rc.MOVE_CLOSED in h.text, "a refusal box, never an exception"
+
+
+def test_more_events_than_the_picker_holds_says_where_the_rest_are(reg, rs, officer):  # noqa: F811
+    evs = [open_one_off(reg, rs, days=1 + n) for n in range(MAX_OPTIONS + 1)]
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_reschedule"](h.command(), reg))
+    sel = h.screen["view"].children[0]
+    assert len(sel.options) == MAX_OPTIONS and evs[-1].key not in [o.value for o in sel.options]
+    assert page_words(reg, "events") in h.text and str(MAX_OPTIONS) in h.text
+    for e in evs:
+        rs.events.pop(e.key)
+    open_one_off(reg, rs, days=3)
+    open_one_off(reg, rs, days=5)
+    run(FLOWS["raid_reschedule"](h.command(), reg))
+    assert page_words(reg, "events") not in h.text, "said only when some are left out"
+
+
 # ---------------------------------------------------------------- /raid edit
 
 def pick_setting(h, field, value):
@@ -235,6 +265,40 @@ def test_the_weights_are_one_modal_of_five_selects(reg, rs, officer):  # noqa: F
     assert rc.run_timing(reg, first)["weights"]["rank"] == (w["rank"] + 1) % 7
 
 
+def test_a_weight_draft_keeps_another_officers_change_to_another_weight(reg, rs, officer):  # noqa: F811
+    first = open_one_off(reg, rs, days=4)
+    w = dict(rc.run_timing(reg, first)["weights"])
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_edit"](h.command(), reg))
+    run(h.pick("Change a setting", "weights"))
+    run(h.submit(**{**{k: str(v) for k, v in w.items()}, "rank": str((w["rank"] + 1) % 7)}))
+    other = (w["main"] + 2) % 7
+    rc.reschedule(reg, rs, first, timing={"weights": {**w, "main": other}}, by="Other")
+    rs.save(first, "another officer's weight")
+    run(h.press("Review changes"))
+    main = PAGE_WORDS["priority"]["main"]
+    assert not any(line.lstrip("-• ").startswith(main) for line in h.text.splitlines()), "no line for the other weight"
+    run(h.press("Save"))
+    now = rc.run_timing(reg, first)["weights"]
+    assert now["rank"] == (w["rank"] + 1) % 7 and now["main"] == other, "the other officer's value stays"
+
+
+def test_a_draft_a_lock_removed_is_named_once(reg, rs, officer):  # noqa: F811
+    first = open_one_off(reg, rs, days=4)
+    people = real_people(reg, 3)
+    join(reg, rs, first, people)
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_edit"](h.command(), reg))
+    pick_setting(h, "lock_hours_before", "24")
+    lock_with_board(reg, rs, first, [p.main.label for p in people])
+    run(h.pick("Change a setting", "autofill"))  # allowed after the lock: back to the hub through its Back
+    run(h.press("Back"))
+    assert F["lock_hours_before"] in h.text and "dropped" in h.text
+    run(h.pick("Change a setting", "autofill"))
+    run(h.press("Back"))
+    assert "dropped" not in h.text, "said once"
+
+
 def test_the_split_is_one_select_per_raid(reg, rs, officer):  # noqa: F811
     for r in ("barrow_deeps", "onyxias_lair"):
         reg.set_raid_overrides(r, {"first_open": "2026-01-01T00:00"}, "t")
@@ -250,6 +314,38 @@ def test_the_split_is_one_select_per_raid(reg, rs, officer):  # noqa: F811
     run(h.press("Review changes"))
     run(h.press("Save"))
     assert rc.run_strategy(reg, later) == other
+
+
+# ---------------------------------------------------------------- a four-raid event (test_lineups' widened profile)
+
+@pytest.fixture
+def wide(store, profile):
+    """test_lineups' reg: conftest's guild on a profile copy with two more raids, every raid open."""
+    p = copy.deepcopy(profile)
+    for rid, name in (("extra_a", "Extra A"), ("extra_b", "Extra B")):
+        p.raids[rid] = {**copy.deepcopy(p.raids["barrow_deeps"]), "id": rid, "name": name, "duration_hours": 2}
+    r = Registry(store, GUILD, p)
+    r.seed_test_members(TEST_MEMBERS, "t")
+    for rid in r.profile.raids:
+        r.set_raid_overrides(rid, {"first_open": "2026-01-01T00:00"}, "t")
+    return r
+
+
+def test_a_four_raid_event_fits_every_screen(wide, rs, officer):  # noqa: F811
+    lineup = [{"raid": r, "rosters": 1} for r in ("extra_a", "extra_b", "onyxias_lair")]
+    first = open_one_off(wide, rs, days=4, lineup=lineup)
+    open_one_off(wide, rs, days=6)
+    assert len(rc.event_parts(rs, first)) == 4
+    h, _bot = harness(wide, rs)  # the harness lints every screen against Discord's limits
+    run(FLOWS["raid_edit"](h.command(), wide))
+    run(h.pick(h.selects()[0], first.key))  # the picker
+    run(h.pick("Change a setting", "split_policy"))
+    assert len(h.selects()) == 4 and h.buttons() == ["Back"]
+    run(h.pick(h.selects()[3], next(p for p in ("balanced", "first", "rotation") if p != rc.run_strategy(wide, rc.event_parts(rs, first)[3]))))
+    run(h.press("Back"))
+    assert h.text.count(F["split_policy"]) == 4
+    run(h.press("Review changes"))
+    assert h.buttons() == ["Save", "Back"]
 
 
 # ---------------------------------------------------------------- the commands

@@ -15,7 +15,7 @@ from . import raidcycle as rc
 from .constants import PAGE_WORDS, schedule_line_label
 from .flows_raid import officer_guard, officer_only
 from .raid_views import run_title
-from .registry import LINEUP_MAX, LINEUP_MAX_WORDS, MAX_SCHEDULE_ROSTERS, Registry, RegistryError
+from .registry import LINEUP_MAX, LINEUP_MAX_WORDS, MAX_SCHEDULE_ROSTERS, Registry, RegistryError, join_words
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, box_text, flow, week_opts, when_fields
 
 NO_EVENT = "No event is open. Open one with /raid open."
@@ -34,7 +34,8 @@ async def pick_event(interaction: discord.Interaction, reg: Registry, *, title: 
     One → straight to `then`; several → one select (run_title as the label, the key as the value only); none →
     NO_EVENT."""
     rs = interaction.client.raids.store(reg)
-    evs = sorted((ev for ev in rs.live() if ev.state in states and rc.first_part(rs, ev) is ev), key=lambda e: e.start)[:MAX_OPTIONS]
+    every = sorted((ev for ev in rs.live() if ev.state in states and rc.first_part(rs, ev) is ev), key=lambda e: e.start)
+    evs = every[:MAX_OPTIONS]
     wiz = wizard(reg, interaction.user.id, title=title, guard=officer_guard(reg))
     if not evs:
         await wiz.finish(interaction, NO_EVENT)
@@ -46,7 +47,10 @@ async def pick_event(interaction: discord.Interaction, reg: Registry, *, title: 
     async def picked(i: discord.Interaction, values: list[str]) -> None:
         await then(i, wiz, rs, rs.events.get(values[0]))  # re-read: it may have closed since the list was drawn
 
-    await wiz.show(interaction, "Which event?", wiz.select("Pick the event", [Opt(ev.key, run_title(reg, ev)) for ev in evs], picked),
+    from .help import page_words
+
+    more = f"\nThe {MAX_OPTIONS} soonest are listed here. The rest are on the {page_words(reg, 'events')}." if len(every) > MAX_OPTIONS else ""
+    await wiz.show(interaction, "Which event?" + more, wiz.select("Pick the event", [Opt(ev.key, run_title(reg, ev)) for ev in evs], picked),
                    wiz.button("Back", wiz.cancel))
 
 
@@ -125,7 +129,12 @@ class RescheduleWizard(EventWizard):
         except RegistryError as e:
             await self.decide_box(interaction, cq.refusal_box_for(str(e)), do=self._nothing, back=self.start)
             return
-        await self.decide_box(interaction, self.box(start), do=lambda i, _v: self.move(i, start), refresh=lambda: self.box(start),
+        try:
+            box = self.box(start)
+        except RegistryError as e:  # the event left the store while the form was open
+            await self.decide_box(interaction, cq.refusal_box_for(str(e)), do=self._nothing, back=self.start)
+            return
+        await self.decide_box(interaction, box, do=lambda i, _v: self.move(i, start), refresh=lambda: self.box(start),
                               extra=[self.button(PICK_AGAIN, self.pick)], back=self.start)
 
     async def week_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
@@ -186,7 +195,8 @@ def _num(v: str):
 class EditEventWizard(EventWizard):
     """Edit event (the owner's tweaks, B) as a hub: a line per setting allowed now (old → new once drafted), Change a
     setting → one screen per setting, Review changes → box 3 with `edit` (Save). The draft `timing` holds only what
-    differs from the event now: EVENT_TIMING's keys, the weights whole, the split as {raid key: strategy}."""
+    differs from the event now: EVENT_TIMING's keys, the weights THIS officer changed (merged over the event's own at
+    the box and the Save, so another officer's change to another weight stands), the split as {raid key: strategy}."""
 
     def __init__(self, reg: Registry, rs: rc.RaidStore, owner_id: int, key: str, *, title: str):
         super().__init__(reg, rs, owner_id, key, title=title)
@@ -200,7 +210,26 @@ class EditEventWizard(EventWizard):
         return edit_options(self.reg, self.rs, ev, rc.run_timing(self.reg, ev))
 
     def value(self, opts: dict, field: str):
+        if field == "weights":
+            return {**(opts["values"].get("weights") or {}), **(self.timing.get("weights") or {})}
         return self.timing.get(field, opts["values"].get(field))
+
+    def prune_weights(self, opts: dict) -> None:
+        """A drafted weight the event already holds (put back, or set the same by someone else) is no change."""
+        now = opts["values"].get("weights") or {}
+        mine = {k: v for k, v in (self.timing.get("weights") or {}).items() if now.get(k) != v}
+        if mine:
+            self.timing["weights"] = mine
+        else:
+            self.timing.pop("weights", None)
+
+    def outgoing(self, opts: dict) -> dict:
+        """The draft as the box and the Save send it: the weights whole, this officer's over the event's own."""
+        self.prune_weights(opts)
+        out = dict(self.timing)
+        if "weights" in out:
+            out["weights"] = self.value(opts, "weights")
+        return out
 
     def set(self, opts: dict, field: str, v) -> None:
         now = opts["values"].get(field)
@@ -244,8 +273,12 @@ class EditEventWizard(EventWizard):
             return
         opts = self.options(ev)
         allowed = set(opts["fields"])
+        dropped = [setting_label(k) for k in self.timing if k not in allowed]
         self.timing = {k: v for k, v in self.timing.items() if k in allowed}  # a lock meanwhile narrows the draft
+        self.prune_weights(opts)
         head = [f"**{run_title(self.reg, ev)}**"] + ([PAGE_WORDS["edit_locked"]] if ev.state != "open" else [])
+        if dropped:  # said once: the next hub has nothing left to drop
+            head.append(f"The roster locked while you edited, so your change to {join_words(dropped)} was dropped.")
         choices = [Opt(f, setting_label(f)) for f in opts["fields"]]
         await self.plain(interaction, "\n".join(head + self.lines(opts)),
                          self.select(CHANGE, choices, self.setting),
@@ -291,7 +324,7 @@ class EditEventWizard(EventWizard):
     def weights_form(self, opts: dict) -> Form:
         from .schedule_view import MAX_WEIGHT
 
-        w = self.value(opts, "weights") or {}
+        w = self.value(opts, "weights")  # the values the form opens with: a weight left as it was is not this officer's
         fields = [Field(k, label, [Opt(str(n), str(n), default=n == w.get(k)) for n in range(MAX_WEIGHT + 1)])
                   for k, label in PAGE_WORDS["priority"].items()]
 
@@ -299,8 +332,11 @@ class EditEventWizard(EventWizard):
             ev = self.ev()
             if ev is not None:
                 o = self.options(ev)
-                now = o["values"].get("weights") or {}
-                self.set(o, "weights", {k: int(values[k]) if values.get(k) not in (None, "") else now.get(k) for k in PAGE_WORDS["priority"]})
+                mine = dict(self.timing.get("weights") or {})
+                mine.update({k: int(values[k]) for k in PAGE_WORDS["priority"]
+                             if values.get(k) not in (None, "") and int(values[k]) != w.get(k)})
+                self.timing["weights"] = mine
+                self.prune_weights(o)
             await self.hub(i)
 
         return Form(setting_label("weights"), fields, submitted)
@@ -342,7 +378,7 @@ class EditEventWizard(EventWizard):
         if ev is None:
             raise RegistryError(rc.MOVE_CLOSED)
         self.rev = rc.event_rev(self.reg, self.rs, ev)
-        return cq.reschedule_box(self.reg, self.rs, ev, None, dict(self.timing), edit=True)
+        return cq.reschedule_box(self.reg, self.rs, ev, None, self.outgoing(self.options(ev)), edit=True)
 
     async def review(self, interaction: discord.Interaction) -> None:
         try:
@@ -352,7 +388,8 @@ class EditEventWizard(EventWizard):
         await self.decide_box(interaction, box, do=self.save, refresh=self.box, back=self.hub)
 
     async def save(self, i: discord.Interaction, _v: dict) -> None:
-        ev, rev, timing = self.ev(), self.rev, dict(self.timing)
+        ev, rev = self.ev(), self.rev
+        timing = self.outgoing(self.options(ev)) if ev is not None else dict(self.timing)
         await self.act(i, lambda: i.client.reschedule_event(self.reg, self.rs, ev, timing=timing, by=i.user.display_name, by_id=i.user.id, rev=rev))
 
 
