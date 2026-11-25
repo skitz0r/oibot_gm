@@ -218,3 +218,43 @@ def test_the_confirm_no_box_names_the_ask(reg, rs):
     title, verb = cq.MEMBER_ACTION_WORDS["confirm_no"]
     assert "(" not in verb and "Confirm ask" in title
     assert "fill ask" in cq.MEMBER_ACTION_WORDS["fill_no"][0]
+
+
+# ---------------------------------------------------------------- final fix: re-picking a switch keeps it
+
+def test_bench_leaving_the_switched_spec_keeps_the_switch_on_an_open_run(reg, rs, officer):  # noqa: F811
+    """Final fix 1: an officer switched a Holy priest to Shadow on the open sheet; /raid set → Bench with Shadow left
+    picked records Bench as Shadow, never silently back to Holy."""
+    ev = open_real_run(reg, rs)
+    m = healer(reg)
+    rc.set_signup(reg, rs, ev, m, None, "in", spec=DPS)
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="bench"))
+    sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Plays which spec?")
+    assert next(o for o in sel.options if o.default).value == DPS, "the switched spec is picked already"
+    run(h.pick("Plays which spec?", DPS))
+    run(h.press("Record answer"))
+    s = ev.signups[str(m.discord_id)]
+    assert (s.status, s.spec, s.role) == ("sub", DPS, "ranged")
+
+
+def test_on_a_locked_run_the_switched_spec_passes_and_the_own_spec_of_another_role_is_refused(reg, rs, officer):  # noqa: F811
+    ev = open_real_run(reg, rs)
+    pool = [healer(reg, k) for k in range(3)]
+    join(reg, rs, ev, pool)
+    m = pool[0]
+    rc.set_signup(reg, rs, ev, m, None, "in", spec=DPS)
+    lock_with_board(reg, rs, ev, [p.display_name for p in pool])
+    assert ev.seat_of(m)[1].spec == DPS
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="bench"))
+    run(h.pick("Plays which spec?", HEAL))
+    assert h.buttons() == ["Back"] and rc.SPEC_SEATED.format(name=m.display_name, spec=HEAL) in h.text
+    run(h.press("Back"))
+    h, _bot = harness(reg, rs)
+    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="bench"))
+    run(h.pick("Plays which spec?", DPS))
+    assert h.buttons() == ["Record answer", "Back"], h.text
+    run(h.press("Record answer"))
+    s = ev.signups[str(m.discord_id)]
+    assert (s.status, s.spec, ev.seat_of(m)[1].spec) == ("sub", DPS, DPS)

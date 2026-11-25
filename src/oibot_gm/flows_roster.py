@@ -1068,7 +1068,9 @@ class SetWizard(OfficerWizard):
 
     async def spec_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         c = self.plays()
-        self.draft["spec"] = None if c is not None and values[0] == self.current_spec(c) else values[0]  # what they play now is no switch
+        # the character's own spec with no switch on the sheet is no switch; re-picking a switch keeps it (set_signup
+        # writes a fresh signup from the character's own spec on an open run)
+        self.draft["spec"] = None if c is not None and values[0] == c.spec and self.current_spec(c) == c.spec else values[0]
         await self.confirm(interaction)
 
     def box(self) -> dict:
