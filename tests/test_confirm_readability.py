@@ -958,6 +958,14 @@ def box_cases(reg, rs, runs, ms, dump):
     for case, nxt in (("the schedule's next night", 0), ("a night further ahead", 5)):  # /raid open and the site's open routes
         start = [t for s_, t in rc.upcoming(reg, RID, reg.now_local(), 24 * 60) if s_["id"] == sid][nxt]
         add("open_box_for", case, cq.open_box_for(reg, RID, rc.open_preview(reg, rs, RID, start.isoformat(), sid)))
+    # /raid open on a scheduled night three days ahead, a lineup of two, asked in a server channel (phase 5)
+    p = next(p for p in (rc.open_preview(reg, rs, RID, t.isoformat(), sid, lineup=[{"raid": ony, "rosters": 1}])
+                         for s_, t in rc.upcoming(reg, RID, reg.now_local(), 24 * 60)
+                         if s_["id"] == sid and t - reg.now_local() >= timedelta(days=3))
+             if p["exists"] is None and p["refusal"] is None)  # a night not open yet
+    assert [e["raid"] for e in p["later"]] == [ony]
+    b = cq.open_box_for(reg, RID, p, here=True)
+    add("open_box_for", "a scheduled night three days ahead, a lineup of two, asked in a channel", b)
     entry = reg.schedule_entry(sid)
     add("schedule_create_box", "three nights a week", cq.schedule_create_box(reg, entry))
     reg.set_schedule("tue", {"kind": "weekly", "slots": ["Tue 18:30"], "name": "Tuesday raid night"}, "t", raid=hy)

@@ -523,7 +523,7 @@ OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other op
 # missing from BY DESIGN and why. {op: {surface: reason}}; surfaces are "discord" | "web" | "mcp". Adding a verb to one
 # surface fails the test until its exemption is written down.
 BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
-    "run_board": {"discord": "the board is web-only (§2.1): Discord gets the lock card as a read-only mirror, never a second editor"},
+    "run_board": {"discord": "The board is the site's: an officer drags names on the Events page; Discord shows the roster the lock made."},
     "run_move": {"discord": "the board is web-only (§2.1): a drag has no Discord shape", "mcp": "MCP writes the whole layout (set_layout); single moves are the browser's drags"},
     "run_propose": {"discord": "the board's Propose / Use this split is web-only (§2.1); the lock does the same solve"},
     "run_strategy": {"discord": "a board setting (web-only, §2.1); the lock card shows the split it produced"},
@@ -535,11 +535,10 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
 # ops a surface is still missing from, with the plan that adds it — temporary, unlike BY_DESIGN_EXEMPT; the parity test
 # accepts these too but lists them apart, so the gap is written down rather than silent
 PARITY_PENDING: dict[str, dict[str, str]] = {
-    "run_reschedule": {"discord": "phase 5: the Reschedule wizard (date and time from selects); until then /gm change reaches it as plain text"},
-    "run_lineup": {"discord": "phase 5: the lineup wizard; until then /gm change reaches it as plain text"},
-    # (phase 3 closed the comp-target rows: /roster comp, the Readiness page / Raids page's Desired comp through
-    # POST /api/ops/change `comp` changes, MCP set_minimum — Registry.set_minimums underneath. comp_groups stays
-    # plain text only on every surface — D48 — so its row names the plain-text paths.)
+    # (phase 5 closed the last rows: run_reschedule = /raid reschedule and /raid edit (flows_event.EventWizard), run_lineup
+    # = /raid lineup. Phase 3 closed the comp-target rows: /roster comp, the Raids page's make-up through POST
+    # /api/ops/change `comp` changes, MCP set_minimum — Registry.set_minimums underneath. comp_groups stays plain text
+    # only on every surface — D48 — so its row names the plain-text paths.)
 }
 # features that live on ONE surface by design (§2.1) and are not ops at all — written down so the parity test can refuse a
 # second editor appearing elsewhere, and so the reason is read, not remembered. {feature: {surface, path, reason}}; `path`

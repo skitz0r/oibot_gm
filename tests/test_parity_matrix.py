@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import inspect
 
 import discord
 import pytest
@@ -52,9 +53,9 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_pause": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/pause", "mcp": "pause_autofill"},
     "run_withdraw": {"discord": "flow:raid_suggest", "web": "POST /api/run/{key}/withdraw", "mcp": "withdraw_ask"},
     "run_reopen": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/reopen", "mcp": "reopen_run"},
-    # phase 3: move / re-time a run and change its raids — plain text and the site / MCP; Discord's wizards are phase 5 (PARITY_PENDING)
-    "run_reschedule": {"web": "POST /api/run/{key}/reschedule", "mcp": "reschedule_run"},
-    "run_lineup": {"web": "POST /api/run/{key}/lineup", "mcp": "edit_lineup"},
+    # move / re-time an event and change its raids: phase 3's routes and tools, phase 5's /raid reschedule | edit | lineup
+    "run_reschedule": {"discord": "flow:raid_reschedule", "web": "POST /api/run/{key}/reschedule", "mcp": "reschedule_run"},
+    "run_lineup": {"discord": "flow:raid_lineup", "web": "POST /api/run/{key}/lineup", "mcp": "edit_lineup"},
     # comp targets (phase 3, RD-12): /roster comp, the Readiness page + the Raids page's Desired comp (typed `comp` changes), MCP;
     # comp_groups is plain text only on every surface (D48): /gm change, the officer pages' Tell the bot box, plain_change
     "comp_target": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_minimum"},
@@ -437,18 +438,38 @@ def test_auction_prices_have_web_routes_mcp_tools_and_written_gaps(mcp_tools, we
 RUN_SWITCH: dict[str, dict] = {
     "run_switch": {"web": "POST /api/run/{key}/switch", "mcp": ["set_answer", "fill_seats"], "discord": "flow:raid_set"},
 }
-RUN_SWITCH_DISCORD_PENDING: dict[str, str] = {}
 
 
-def test_role_switches_have_the_web_route_mcp_tools_and_a_dated_discord_gap(mcp_tools, web_routes, slash_paths):
+def test_role_switches_have_the_web_route_mcp_tools_and_the_discord_flow(mcp_tools, web_routes, slash_paths):
     import inspect
 
     for action, row in RUN_SWITCH.items():
         assert row["web"] in web_routes, f"run switch {action}/web: {row['web']!r}"
         assert set(row["mcp"]) <= set(mcp_tools), f"run switch {action}/mcp: {row['mcp']!r}"
-        if "discord" in row:
-            assert action not in RUN_SWITCH_DISCORD_PENDING and discord_path_exists(row["discord"], slash_paths), action
-        else:
-            assert "phase" in RUN_SWITCH_DISCORD_PENDING.get(action, ""), f"run switch {action}: no Discord path — name the phase that lands it"
+        assert discord_path_exists(row["discord"], slash_paths), f"run switch {action}/discord: {row['discord']!r}"
     assert "spec" in inspect.signature(ms.set_answer).parameters and "seats" in inspect.signature(ms.fill_seats).parameters
     assert "run_answer: the spec they play" in configops.ConfigOp.model_fields["field"].description
+
+
+def test_no_parity_is_pending():
+    assert configops.PARITY_PENDING == {}, "phase 5 closed the last Discord rows"
+    assert "RUN_SWITCH_DISCORD_PENDING" not in globals()
+
+
+def test_the_new_flows_are_registered_and_commands_take_no_typed_value(slash_paths):
+    for f in ("raid_reschedule", "raid_edit", "raid_lineup", "schedule"):
+        assert f in FLOWS
+    for p in ("raid reschedule", "raid edit", "raid lineup"):
+        assert p in slash_paths
+    from oibot_gm import raid_commands
+
+    src = inspect.getsource(raid_commands)
+    for name in ("raid_reschedule", "raid_edit", "raid_lineup"):  # the Wizard rule: the event, day and time are picked inside
+        assert f"async def {name}(interaction: discord.Interaction):" in src, name
+
+
+def test_the_board_stays_the_sites_with_one_written_reason():
+    """Tweak C: the board's ops have no Discord path, each with its reason; run_board's names the Events page."""
+    for op in ("run_strategy", "run_autofill", "run_board", "run_move", "run_propose"):
+        assert "discord" not in SURFACES[op] and configops.BY_DESIGN_EXEMPT[op]["discord"], op
+    assert "Events page" in configops.BY_DESIGN_EXEMPT["run_board"]["discord"]
