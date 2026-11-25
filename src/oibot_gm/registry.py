@@ -779,6 +779,23 @@ def recent_changes(guild_key: str | None = None, limit: int = 50) -> list[dict]:
 # outsider can still win a role seat, but between equals the regular sits)
 RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1, "regular": 4}
 RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before", "nudge_hours_before", "fill_ask_hours")
+# a schedule's timing refused, in the editors' own labels (PAGE_WORDS schedule_fields / constants.schedule_line_label):
+# what must come before what, never the field names (the owner, 2026-11-24). No schedule name: every surface prints a
+# refusal under its own line's label ("Hyjal Summit · Tuesday raid night"), so a name here said it twice
+TIMING_REFUSALS = {
+    "confirm": "Confirm by can't come before Locks.",
+    "opens": "Sheet opens must come before Locks.",
+    "reminder": "The Signup Reminder must go out between Sheet opens and Locks.",
+    "hours": "{label} takes a number of hours.",
+    "negative": "{label} can't be less than 0 hours.",
+}
+
+
+def hours_label(field: str) -> str:
+    """A timing field by the label a person saw it under ('Signup Reminder goes out', 'Locks'), never its key."""
+    from .constants import schedule_line_label
+
+    return schedule_line_label(field) or field.replace("_", " ").capitalize()
 # true/false raid settings (command + API layers parse them the same way). `confirm`: the lock asks everyone rostered to
 # Confirm / Can't make it (off: Join is the commitment, nobody is asked and no seat expires — the ad hoc default, D5)
 RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm", "confirm")
@@ -1342,9 +1359,9 @@ def schedule_value(field: str, value):
         try:
             num = float(value)
         except (TypeError, ValueError):
-            raise RegistryError(f"{field} must be a number of hours")
+            raise RegistryError(TIMING_REFUSALS["hours"].format(label=hours_label(field)))
         if num < 0:
-            raise RegistryError(f"{field} can't be negative")
+            raise RegistryError(TIMING_REFUSALS["negative"].format(label=hours_label(field)))
         return int(num) if num == int(num) else num
     if field in RAID_BOOL_FIELDS:
         return parse_bool(value)
@@ -5756,11 +5773,11 @@ class Registry:
             name = s.get("name") or s["id"]
             se = schedule_def_of(eff, s["id"])
             if se["lock_hours_before"] < se["confirm_hours_before"]:
-                raise RegistryError(f"{name}: lock must come before the confirmation deadline (lock_hours_before ≥ confirm_hours_before)")
+                raise RegistryError(TIMING_REFUSALS["confirm"])
             if se["signup_lead_hours"] <= se["lock_hours_before"]:
-                raise RegistryError(f"{name}: signups must open before they lock (signup_lead_hours > lock_hours_before)")
+                raise RegistryError(TIMING_REFUSALS["opens"])
             if not (se["lock_hours_before"] <= float(se["nudge_hours_before"]) <= se["signup_lead_hours"]):
-                raise RegistryError(f"{name}: the nudge must fall between signup opening and lock (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)")
+                raise RegistryError(TIMING_REFUSALS["reminder"])
             if not 1 <= int(s.get("rosters") or 1) <= MAX_SCHEDULE_ROSTERS:
                 raise RegistryError(f"{name}: a run holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
             later = ([s["follow"]] if s.get("follow") else []) + list(s.get("then") or [])

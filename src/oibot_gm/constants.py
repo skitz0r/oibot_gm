@@ -145,16 +145,19 @@ PAGE_WORDS = {
                         # an event's own (Edit event, the owner's tweaks B): first to join or by priority
                         "first_come": "Who gets a seat"},
     # the (?) beside each switch of Sheet timing (the schedule editor and Edit event): exactly who gets what, when and
-    # where — read from discord_raid.post_health / dm_on_open / lock_run / run_fill and raidcycle.expire_confirmation_asks
+    # where — read from discord_raid.post_health / dm_on_open / lock_run / confirm_one / run_fill, raidcycle.fill_batch
+    # (FILL_OVERASK one more than the shortfall, FILL_MAX_OPEN asks out at once) and expire_confirmation_asks
     "schedule_field_help": {
         "nudge": "When the reminder goes out, each regular with no answer gets a DM with Join, Bench and No thanks. "
                  "With no regulars yet, every member with no answer gets it, and nobody with DMs off is sent one. "
                  "One-off events remind nobody, and the officers' health card goes out then either way.",
         "confirm": "At the lock, everyone rostered on the event's first raid gets a DM to Confirm or say Can't make it. "
                    "With DMs off the ask waits on their Me page, and a seat unanswered by Confirm by is freed. "
+                   "Someone who takes a seat by confirming a fill request isn't asked again. "
                    "With this off, the roster stands as locked and nobody is asked.",
-        "autofill": "After the lock, the bot DMs a player of each open seat's role, bench first, then anyone with no answer. "
-                    "Confirm takes the seat, and Can't make it or no answer within An ask waits asks the next person. "
+        "autofill": "After the lock, the bot DMs players of each open seat's role, bench first, then anyone with no answer. "
+                    "It asks one more person than there are open seats, up to three at once. "
+                    "The first Confirm takes the seat, and Can't make it or no answer within An ask waits asks the next. "
                     "A role switch waits for an officer, and with this off officers fill seats from More › Fill seats.",
         "open_dm": "When the sheet opens, each regular gets a DM with their answer so far and the sheet's buttons. "
                    "The DM also says when the roster locks. "

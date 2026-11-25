@@ -195,7 +195,7 @@ def test_coalesce_saves_settings_that_only_work_together(reg):
            ConfigOp(op="schedule_set", target="alt", field="signup_lead_hours", value="100"),
            ConfigOp(op="dm", value="off"),
            ConfigOp(op="schedule_set", target="alt", field="name", value="Alt run")]
-    with pytest.raises(RegistryError, match="signups must open before they lock"):
+    with pytest.raises(RegistryError, match="Sheet opens must come before Locks"):
         configops.apply(reg, ops[0], "Owner", True)  # alone, the first can't apply
     merged = configops.coalesce(ops)
     assert [type(o).__name__ for o in merged] == ["MergedOp", "ConfigOp", "ConfigOp"], "only consecutive ops on one schedule merge"

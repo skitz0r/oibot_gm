@@ -120,7 +120,7 @@ def test_a_refused_cadence_is_caught_in_its_section_and_writes_nothing(reg, stor
         await h.pick("Change this schedule", "cadence")
         await h.pick("Pick a run's week", "custom")
         await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="24", lock_hours_before="48", confirm_hours_before="6", fill_ask_hours="inherit")
-        assert h.text.startswith("**Raid rules**\n❌") and "nudge" in h.text
+        assert h.text.startswith("**Raid rules**\n❌") and "Signup Reminder must go out" in h.text and "nudge" not in h.text
         assert h.buttons() == ["Fix this", "Back to the sections", "Cancel"]
         await h.press("Fix this")  # back to the schedule, the refused week dropped
         await h.pick("Change this schedule", "cadence")

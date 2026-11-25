@@ -4,6 +4,7 @@ the "label: old → new" lines and a fingerprint the action route re-checks (`se
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import timedelta
 
 import pytest
@@ -234,7 +235,9 @@ def test_open_the_sheet_now(reg, rs):
         "The sheet opens now, five hours early, and stays up until the event."
     far = start_in(reg, 42)  # no horizon (the owner's tweaks): six weeks out says the same, in days
     b = cq.open_now_box(reg, far, far - timedelta(days=5), far - timedelta(hours=24))
-    assert b["sentences"][0] == "The sheet opens now, 37 days early, and stays up until the event."
+    # the sheet's opening is 6:30 PM 37 days from today: run before 6:30 AM that is more than 37 and a half days away,
+    # and the sentence rounds to the nearer day (38) — the count depends on the clock when the suite runs
+    assert re.fullmatch(r"The sheet opens now, 3[78] days early, and stays up until the event\.", b["sentences"][0]), b["sentences"][0]
     assert cq.open_now_box(reg, start, reg.now_local(), lock_at)["sentences"][2] == f"It still locks {reg.local12(lock_at)}."
 
 

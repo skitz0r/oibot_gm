@@ -53,10 +53,11 @@ Deeps on Wed 4 Nov. The bot records a callout and how late it came. They see it 
     names its time *Signup Reminder goes out*.
   - **Lock Confirmation** — at the lock, everyone rostered on the event's first raid gets a DM to Confirm or say Can't
     make it (later raids of the event never ask). With DMs off the ask waits on their Me page, and a seat unanswered
-    by **Confirm by** is freed. With it off, the roster stands as locked and nobody is asked.
-  - **Automated Fill Requests** — after the lock, the bot DMs a player of each open seat's role, bench first, then
-    anyone with no answer. Confirm takes the seat, and Can't make it or no answer within **An ask waits** asks the next
-    person. A role switch waits for an officer, and with it off officers fill seats from **More › Fill seats…**.
+    by **Confirm by** is freed. Someone who takes a seat by confirming a fill request isn't asked again. With it off,
+    the roster stands as locked and nobody is asked.
+  - **Automated Fill Requests** — after the lock, the bot DMs players of each open seat's role, bench first, then
+    anyone with no answer. It asks one more person than there are open seats, up to three at once. The first Confirm
+    takes the seat, and Can't make it or no answer within **An ask waits** asks the next. A role switch waits for an officer, and with it off officers fill seats from **More › Fill seats…**.
   - **Sheet Opening DM** (the Schedules page only) — when the sheet opens, each regular gets a DM with their answer so
     far and the sheet's buttons, and when the roster locks. With no regulars yet, every member gets it, and nobody
     with DMs off is sent one.

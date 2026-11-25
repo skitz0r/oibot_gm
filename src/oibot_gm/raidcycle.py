@@ -1504,7 +1504,7 @@ TIMING_LOCKED = "The sheet timing is fixed once the roster locks. Move the start
 CONFIRM_LOCKED = "Asking the rostered to confirm is fixed once the roster locks."
 SWITCH_EMPTY = "Say on or off for that setting."
 PRIORITY_LOCKED = "The priority is fixed once the roster locks, because the roster is already chosen."
-TIMING_ORDER = "The reminder has to come before the lock, and confirm-by after it."
+TIMING_ORDER = "The Signup Reminder must go out before Locks, and Confirm by can't come before Locks."
 TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, confirm-by, asks, confirmation, priority and split.")
 MOVE_OFFICER_ONLY = "Only an officer moves a run or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)

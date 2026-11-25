@@ -1536,10 +1536,14 @@ def test_each_sheet_timing_switch_carries_the_servers_help():
     for sw, sel in (("nudge", "nudge_hours_before"), ("confirm", "confirm_hours_before"), ("autofill", "fill_ask_hours")):
         assert not set(F[sw].lower().split()) & set(F[sel].lower().split()), (sw, sel, "a switch and its select never say one word twice")
     assert schedule_line_label("nudge_hours_before") == "Signup Reminder goes out"
+    from oibot_gm import raidcycle as rc
+    assert (rc.FILL_OVERASK, rc.FILL_MAX_OPEN) == (1, 3) and "one more person than there are open seats, up to three at once" in help_["autofill"], \
+        "the help says the fill engine's over-ask and cap as they are"
+    assert "confirming a fill request isn't asked again" in help_["confirm"]
     assert set(help_) == {"nudge", "confirm", "autofill", "open_dm"}
     for k, text in help_.items():
         sentences = [x for x in text.split(". ") if x]
-        assert 1 <= len(sentences) <= 3 and text.endswith(".") and text[0].isupper(), (k, text)
+        assert 1 <= len(sentences) <= 4 and text.endswith(".") and text[0].isupper(), (k, text)
         assert all(len(x.split()) <= 20 for x in sentences), (k, text)
         assert not re.search(r"\b(nudge|autofill|solver|cadence|pool|seated|series)\b|:\d\d|\d{2}:\d{2}", text, re.I), (k, text)
     shared = _code_only((SRC / "components" / "schedules" / "SettingsFields.tsx").read_text())

@@ -172,8 +172,8 @@ def test_rosters_2_aims_the_lock_at_two_when_roles_allow(reg, rs):
 
 @pytest.mark.parametrize("sid, fields, why", [
     ("alt", {"kind": "weekly"}, "at least one run time"),
-    ("alt", {"slots": "Sat 20:00", "lock_hours_before": 200}, "open before they lock"),
-    ("alt", {"slots": "Sat 20:00", "lock_hours_before": 2, "confirm_hours_before": 6}, "confirmation deadline"),
+    ("alt", {"slots": "Sat 20:00", "lock_hours_before": 200}, "Sheet opens must come before Locks"),
+    ("alt", {"slots": "Sat 20:00", "lock_hours_before": 2, "confirm_hours_before": 6}, "Confirm by can.t come before Locks"),
     ("alt", {"slots": "Sat 20:00", "rosters": 5}, "1 to 4 rosters"),
     ("reset", {"kind": "lockout", "days": "4", "time": "20:00"}, "past the end of a 3-day lockout"),
     ("reset", {"kind": "lockout", "days": "1"}, "day(s) and a start time"),

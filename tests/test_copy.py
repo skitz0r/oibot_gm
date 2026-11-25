@@ -34,7 +34,10 @@ FORBIDDEN = re.compile(
     r"\b(?:solver|solving|bounds|(?:comp )?targets?|cadence|derived|ephemeral|seated|pool|"
     r"rev|series|ev|rc|ctx|matrix|"
     # "override(s)" as a config noun; the loot verb "Override…" stays
-    r"an override of|override(?:s|\(s\)|…)? go|overrides on)\b", re.I)
+    r"an override of|override(?:s|\(s\)|…)? go|overrides on|"
+    # a setting's key where a person reads (a schedule's timing refused as "lock_hours_before ≤ nudge_hours_before"):
+    # the editors' labels say it (Sheet opens, Locks, Signup Reminder goes out, Confirm by, An ask waits)
+    r"[a-z]+_hours(?:_before)?|signup_lead\w*|nudge_\w+)\b", re.I)
 # the whole text: "none yet" / "not set" / "none" / "nothing", or a bare dash (exactly — " — " with spaces is a separator,
 # not a cell)
 EMPTY_ALONE = re.compile(r"^(?:\s*(?:none yet|not set|none|nothing)\s*\.?\s*|—|–|-)$", re.I)
@@ -474,3 +477,32 @@ def write_findings(path: Path) -> int:
 if __name__ == "__main__":
     target = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "out" / "copy_findings.md"
     print(write_findings(target), "hits →", target)
+
+
+def test_a_schedules_timing_refusal_reads_in_the_editors_labels(reg):
+    """The owner, 2026-11-24: a schedule's timing refused ('the nudge must fall between signup opening and lock
+    (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)') says what must come before what in the labels the
+    editors show — Sheet opens, Locks, Signup Reminder goes out, Confirm by. FORBIDDEN catches a setting's key in any
+    person-facing string; here the refusals themselves, and no 'nudge' in a refusal the registry or the run code raises."""
+    from oibot_gm import raidcycle as rc
+    from oibot_gm.registry import TIMING_REFUSALS, RegistryError, hours_label
+
+    for text in (*TIMING_REFUSALS.values(), rc.TIMING_ORDER):
+        assert not FORBIDDEN.search(_reads(text)) and not re.search(r"\bnudg|[<>≤≥]", text), text
+        assert (text[0].isupper() or text.startswith("{")) and text.endswith("."), text
+    for key in ("lock_hours_before", "nudge_hours_before", "signup_lead_hours"):
+        assert FORBIDDEN.search(f"the nudge must fall ({key})"), key
+    assert hours_label("nudge_hours_before") == "Signup Reminder goes out" and hours_label("fill_ask_hours") == "An ask waits"
+    sid = "tue"
+    reg.set_schedule(sid, {"slots": "Tue 19:30", "name": "Tuesday raid"}, "t", raid="barrow_deeps")
+    for fields, key in (({"nudge_hours_before": 2}, "reminder"), ({"signup_lead_hours": 20}, "opens"),
+                        ({"confirm_hours_before": 30}, "confirm")):
+        with pytest.raises(RegistryError) as e:
+            reg.set_schedule(sid, fields, "t")
+        assert str(e.value) == TIMING_REFUSALS[key], (fields, str(e.value))
+    with pytest.raises(RegistryError) as e:
+        reg.set_schedule(sid, {"lock_hours_before": "soon"}, "t")
+    assert str(e.value) == "Locks takes a number of hours."
+    for mod in ("registry.py", "raidcycle.py", "consequences.py"):
+        said = [s for _n, s in py_strings(PY / mod) if re.search(r"\bnudg", s, re.I)]
+        assert not said, (mod, said)
