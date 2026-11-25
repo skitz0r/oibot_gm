@@ -400,7 +400,7 @@ def test_the_command_tree_still_builds_with_item_optional(reg, market_on):  # no
 
     tree = _offline_tree(reg)
     leaves = [c for c in tree.walk_commands() if isinstance(c, app_commands.Command)]
-    assert len(leaves) == 91
+    assert len(leaves) == 94  # phase 5 added /raid reschedule, edit and lineup
     cmd = tree.get_command("price")
     assert cmd._params["item"].required is False and len(cmd.description) <= 100
     # the command opens the flow: with no item, the list

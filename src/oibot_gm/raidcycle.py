@@ -2756,8 +2756,10 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     s = carry_joined(old, _signup(reg, m, c, status, source, note))
     if spec and spec != c.spec:
         s.spec, s.offspec, s.role = spec, c.spec, role
-    elif not spec and status != "out" and ev.state != "open" and old is not None and old.character == c.label and ev.seat_of(m):
-        s.spec, s.offspec, s.role = old.spec, old.offspec, old.role  # no spec picked: a seated switch stays (the seat keeps it too)
+    elif (not spec and status != "out" and ev.state != "open" and old is not None and old.character == c.label and ev.seat_of(m)
+          and old.spec != c.spec and old.offspec == c.spec):  # a switch keeps the character's own spec as its offspec
+        s.spec, s.offspec, s.role = old.spec, old.offspec, old.role  # no spec picked: a seated switch stays (the seat keeps it too);
+        # a respec of the character (its own spec changed) is not a switch: the signup follows the new spec
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"{m.display_name} {status} as {c.label}" + (f", {s.spec}" if spec else "") + f" ({source}" + (f", switched by {by})" if by else ")"))
     rs.save(ev, f"{m.display_name} {status}")

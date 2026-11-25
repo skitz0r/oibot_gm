@@ -278,7 +278,7 @@ def test_mcp_tools_preview_then_send_the_rev():
 
 
 def test_the_matrix_lists_both_ops():
-    assert set(configops.PARITY_PENDING) == {"run_reschedule", "run_lineup"}
+    assert not configops.PARITY_PENDING, "phase 5 closed both: /raid reschedule (and edit), /raid lineup"
     assert {"run_reschedule", "run_lineup"} <= configops.RUN_OPS and configops.OP_GROUP["run_reschedule"] == "runs"
 
 

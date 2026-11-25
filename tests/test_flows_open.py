@@ -143,7 +143,7 @@ def test_no_horizon_words_left(reg, rs, officer, channel):  # noqa: F811
     run(FLOWS["raid_open"](h.command(), reg))
     run(h.pick("Pick the raid", RID))
     assert "next 21 days" not in h.text and "in the next" not in h.text
-    assert "no schedule yet" in h.text and "Schedules page" in h.text
+    assert "no schedule yet" in h.text and "Add a schedule" in h.buttons()
     assert not bot.calls
 
 

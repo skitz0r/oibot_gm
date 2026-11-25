@@ -97,47 +97,38 @@ def test_help_snapshot_hides_not_answered_names_from_members(reg, rs):
 
 # ---------------------------------------------------------------- the raid wizard sets confirmations per schedule (C7)
 
-def test_raid_wizard_toggles_confirmations_for_each_schedule(reg, monkeypatch):
+def test_raid_wizard_toggles_confirmations_for_each_schedule(reg, rs, monkeypatch):
+    """Confirmations are each schedule's own switch (phase 5: the schedule wizard, flow `schedule`), never the raid's:
+    one schedule's change leaves the other as it was."""
     import asyncio
+    from types import SimpleNamespace
 
-    from test_flows_config import open_raid
+    from test_reschedule import OFFICER_ID
     from wizard_harness import Harness
 
     from oibot_gm import discord_registry
-    from oibot_gm import flows_config  # noqa: F401 — registers the flows
+    from oibot_gm import flows_schedule  # noqa: F401 — registers the flow
+    from oibot_gm.wizard import FLOWS
 
     monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: False)  # an officer (D8)
     monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
     opened(reg)
     reg.set_schedule("alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t", raid=RID)
     assert reg.schedule_def(RID, "barrow-deeps")["confirm"] is True and reg.schedule_def(RID, "alt")["confirm"] is True
-    h = Harness(reg)
+    h = Harness(reg, rs, user=SimpleNamespace(id=OFFICER_ID, display_name="Officer", mention="@Officer"))
 
     async def go():
-        await open_raid(h, reg)
-        await h.pick("Pick a section", "behaviour")
-        assert "Ask the rostered to confirm" not in h.text, "the switches are each schedule's own, not the raid's"
-        await h.press("Back to the sections")
-        await h.pick("Pick a section", "times")
+        await FLOWS["schedule"](h.command(), reg, raid=RID)
         await h.pick("Pick a schedule", "barrow-deeps")
-        await h.pick("Change this schedule", "behaviour")
-        assert "Ask the rostered to confirm: **on**" in h.text
-        await h.pick("Change a switch", "confirm=off")
-        assert "Ask the rostered to confirm → off" in h.text and "Ask the rostered to confirm: **off**" in h.text
+        await h.pick("Change", "switches")
+        await h.pick("Turn one on or off", "confirm=off")
         await h.press("Back")
-        await h.press("All schedules")
-        await h.pick("Pick a schedule", "alt")
-        await h.pick("Change this schedule", "behaviour")
-        await h.pick("Change a switch", "confirm=inherit")
-        assert "Ask the rostered to confirm → the game's suggestion" in h.text
-        await h.press("Back")
-        await h.press("Back to the sections")
+        await h.press("Review changes")
         await h.press("Save")
-        assert "ask the rostered to confirm on → **off**" in h.text  # the review names the change
-        await h.press("Save")
+        assert "✅" in h.text
     asyncio.run(go())
     assert reg.schedule_def(RID, "barrow-deeps")["confirm"] is False
-    assert reg.schedule_def(RID, "alt")["confirm"] is reg.timing_suggestion(RID)["confirm"]
+    assert reg.schedule_def(RID, "alt")["confirm"] is True, "the other schedule keeps its own"
 
 
 # ---------------------------------------------------------------- every open path stamps kind / series / key suffix
