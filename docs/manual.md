@@ -1473,7 +1473,14 @@ once the roster locks."*). **Where:** plain text (*"add onyxia after tonight's B
 Thursday's run"* — the later raids are named in order, *"barrow deeps x2, onyxia"*, or *"none"* for the first raid alone;
 a raid that stays after the same raid as before keeps its own start, so adding a raid at the end moves nobody's night)
 and MCP's `edit_lineup` (the whole lineup, previewed first, its `rev` sent back); a run changed meanwhile is refused as
-when it moves. On the site it is the event's **Edit lineup** (§4 *The Events page*); a Discord wizard comes later.
+when it moves. On the site it is the event's **Edit lineup** (§4 *The Events page*). In Discord, `/raid lineup` (officers) asks which
+event when several are open and lists its raids, one line each with its rosters and start (*2. Onyxia's Lair · 1 roster ·
+9:30 PM*). **Add a raid** picks one the run doesn't hold yet, until it holds four (*"A run holds at most 4 raids."*).
+**Pick a step** opens one raid: its rosters, its start (*When Hyjal Summit ends · 9:30 PM* first, then quarter hours after
+the raid before it), **Move earlier**, **Move later** and **Remove** — the first raid offers its rosters alone. Moving or
+removing a raid puts every raid after it back to starting when the one before it ends. **Review changes** shows the
+same box as the site with **Save lineup**; if the roster locked meanwhile, the box says the lineup is fixed, with
+**Back** alone, and nothing is saved. A locked event's `/raid lineup` says so at once.
 
 Seat selection at lock is deterministic: the raid's minimums (filled first, never a stop), buff synergy, the comp policy's
 standing instructions, officer pins, and the schedule's **weights** (the raid's unless the schedule sets its own) —
@@ -1734,9 +1741,10 @@ edits that new family and leaves the one it shared alone.
   goes and what stays: *"Orrin's record goes, with Wrenna, their absences, wishlists and notices. Loot already awarded
   stays in the ledger, and nobody gets a DM. …"*); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
   while they're still in the server or hold a seat on a live run. Members can't delete their own record.
-- Runs: `/raid open|sheet|health|fill|lock|set|cancel|reschedule|edit|list|loot|distribute|end` (officers) and `/raid out` (anyone).
+- Runs: `/raid open|sheet|health|fill|lock|set|cancel|reschedule|edit|lineup|list|loot|distribute|end` (officers) and `/raid out` (anyone).
   `/raid reschedule` moves an event to a day and time picked from lists, and `/raid edit` changes the event's own settings
-  (§4 *Moving a run, and its own sheet timing*).
+  (§4 *Moving a run, and its own sheet timing*); `/raid lineup` changes its raids before the lock (§4 *Changing the raids
+  of an open run*).
   They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member
   (and optionally `what`), then offers only what applies to them (§4 *Officers record anything…*). `/raid sheet`
   (anyone): an officer **moves** the live sheet here, or to `channel:` — its buttons and updates follow it and the old

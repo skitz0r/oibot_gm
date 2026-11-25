@@ -236,7 +236,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        raid the game lacks ("… opens no runs: … Change its raids on the Schedules page, or remove it there."); a later raid gets no
                        health card or lock of its own while a raid before it is open; an occurrence whose minute a live ONE-OFF holds
                        (rc.one_off_at) is skipped with one ops warn naming both (_warn_night_taken) — another schedule's run there never blocks it
-  raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|loot|distribute|end|set|cancel|reschedule|edit|list|out|fill
+  raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|loot|distribute|end|set|cancel|reschedule|edit|lineup|list|out|fill
                        (reschedule / edit → flows_event, no arguments)
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
