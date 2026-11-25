@@ -109,7 +109,7 @@ def guide_text(reg, key: str, user_id: int | None = None) -> str:
                 sd = reg.schedule_def(rid, s["id"])
                 me = reg.members.get(user_id) if user_id else None
                 mine = next((c.label for c in (me.active() if me else []) if s["id"] in c.rosters), None)
-                head = (f"  ◦ {s['name']} ({'ad hoc: first come' if s['kind'] == 'pickup' else 'recurring'}): {reg.schedule_label(rid, s)}"
+                head = (f"  ◦ {s['name']} ({'opened by an officer: first come' if s['kind'] == 'pickup' else 'recurring'}): {reg.schedule_label(rid, s)}"
                         + ("" if s["kind"] == "pickup" else f" ({cfg.timezone})") + (f" — you're a regular ({mine})" if mine else ""))
                 if s["kind"] == "pickup" or not s.get("active", True):
                     lines.append(head)

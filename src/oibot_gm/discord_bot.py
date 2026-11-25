@@ -141,7 +141,7 @@ LISTEN_BOT_WORDS = ("This is the guild's Discord bot for World of Warcraft raids
                     "and explains the guild's loot and roster rules. It answers questions about itself and how to use it. People call "
                     "it 'bot' or 'the bot'. It never joins chat between people, game talk or jokes.")
 LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or act on `message.text`? Yes when it asks something "
-                   "the bot knows (when or on what day a raid or event happens, who is rostered, what class or spec someone plays, a member's characters, rank or "
+                   "the bot knows (when or on what day a raid or run happens, who is rostered, what class or spec someone plays, a member's characters, rank or "
                    "attendance, who can make or craft something, which professions or recipes someone has, a loot or roster rule, "
                    "how the bot works) or tells the bot something it records (an absence, a signup answer, a character or spec "
                    "change), even without naming the bot. "
@@ -161,14 +161,14 @@ LISTEN_QUESTION = ("Would a reader expect this guild's Discord bot to answer or 
                    "`bot` says what the bot does; `channel` says where it was written (the bot's job there, the channel's own "
                    "topic and its category); `recent` is the chat just before, for context only.")
 LISTEN_CRITERIA = {"true": "The message speaks to the bot by calling it 'bot', or asks who can make something, whether someone "
-                           "has or knows a recipe, when or what day a raid or event happens, or what else the bot knows, or tells it an absence, a signup answer or a character change.",
+                           "has or knows a recipe, when or what day a raid or run happens, or what else the bot knows, or tells it an absence, a signup answer or a character change.",
                    "false": "The message is people talking to each other about the game itself, a joke, a link or a reply to "
                             "someone else, or someone saying what they have, learned, got or can now make."}
 # the glossary's words (docs/manual.md §1a) the guild's people use about the bot's things; listen_state adds the game
 # version's profession names from the profile (game version is data)
 LISTEN_GLOSSARY = ["sheet", "signup", "join", "bench", "no thanks", "roster", "rostered", "regular", "lock", "confirm",
                    "can't make it", "absence", "away", "main", "alt", "spec", "offspec", "loot council", "wishlist", "award",
-                   "attendance", "raid schedule", "event", "one-off", "later raid", "lineup", "profession", "skill", "recipe", "craft", "who can make", "enchant"]
+                   "attendance", "raid schedule", "profession", "skill", "recipe", "craft", "who can make", "enchant"]
 LISTEN_SURE = 0.8  # at or above: a reply channel answers it as an @mention would
 LISTEN_MAYBE = 0.5  # from here to SURE: unsure — a reply channel adds 👀 and the writer may click it to ask
 LISTEN_PER_HOUR = 600  # decisions per guild per hour; over it the rest are skipped (the monthly budget cap applies too)

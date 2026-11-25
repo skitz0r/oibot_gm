@@ -492,5 +492,6 @@ def test_the_listening_state_carries_the_older_words_line(gate):
     line = "run, ad hoc and follow-on are older words for event, one-off and a later raid; answer in the new words."
     dec = gate.run(0.93, message(gate.g.me.discord_id, text="when is tonight's run?"))
     assert dec.states[0]["guild"]["older_words"] == line
-    assert {"event", "one-off", "later raid", "lineup"} <= set(db.LISTEN_GLOSSARY)
-    assert "a raid or event happens" in db.LISTEN_QUESTION and "when a raid is on" in db.LISTEN_BOT_WORDS
+    # the gate's own question and glossary are NOT reworded here: "event" is a common chat word (in-game events), and a
+    # change to what the gate weighs needs scripts/listen_probe.py first
+    assert "event" not in db.LISTEN_GLOSSARY and "a raid or run happens" in db.LISTEN_QUESTION and "when a raid is on" in db.LISTEN_BOT_WORDS

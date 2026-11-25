@@ -1649,7 +1649,7 @@ def _pin_value(value: str | None) -> str | None:
 def run_words(reg: Registry, ev) -> str:
     """A run as a person reads it in a plain-text line or refusal: its raid and its start in 12-hour words ('Barrow
     Deeps Tue 8 Dec 7:30 PM') — never its key (random letters since phase 3; ops lines and MCP fields keep the key)."""
-    return f"{reg.raid_def(ev.instance).get('name', ev.instance) if ev.instance else 'The run'} {reg.local12(ev.start)}"
+    return f"{reg.raid_def(ev.instance).get('name', ev.instance) if ev.instance else 'The event'} {reg.local12(ev.start)}"
 
 
 def _live_event(reg: Registry, target: str | None, raids=None):

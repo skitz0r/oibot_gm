@@ -450,7 +450,7 @@ def test_snapshot_stays_under_the_ceiling_with_8_runs_and_40_members(reg, rs):
         s = state(reg, rs, uid, officer, q, extras_full())
         assert len(s) <= help_mod.MAX_STATE_CHARS, (officer, len(s))
         for ev in runs:
-            assert f"run {rc.run_words(reg, ev)}" in s, (officer, ev.key)
+            assert f"event {rc.run_words(reg, ev)}" in s, (officer, ev.key)
         assert "## Asker" in s
     full = help_mod.guild_state(reg, rs, OWNER, True, q, extras_full())
     assert "(snapshot truncated)" not in full, "the parts' own caps keep the snapshot under the ceiling"

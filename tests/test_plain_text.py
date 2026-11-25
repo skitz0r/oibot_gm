@@ -93,7 +93,7 @@ class FakeBot:
     async def test_bench_clear(self, reg, by, *, via="discord", by_id=None):
         self.calls.append(("test_bench_clear", by))
         gone = reg.clear_test_members(by)
-        return f"{gone} test member(s) removed, 0 test run(s) cancelled"
+        return f"{gone} test member(s) removed, 0 test event(s) cancelled"
 
     async def post_sheet(self, reg, rs, ev, channel):
         self.calls.append(("post_sheet", ev.key))
@@ -385,7 +385,7 @@ def test_test_bench(reg, rs):
     bot.calls.clear()
     with pytest.raises(RegistryError, match="unknown raid"):
         run(configops.apply_async(reg, ConfigOp(op="test", value="run nowhere"), "Officer", False, bot=bot))
-    assert run(configops.apply_async(reg, ConfigOp(op="test", value="clear"), "Officer", False, bot=bot)) == "test bench: 18 test member(s) removed, 0 test run(s) cancelled"
+    assert run(configops.apply_async(reg, ConfigOp(op="test", value="clear"), "Officer", False, bot=bot)) == "test bench: 18 test member(s) removed, 0 test event(s) cancelled"
     assert bot.calls == [("test_bench_clear", "Officer")] and not reg.test_members()
 
 
@@ -421,7 +421,7 @@ def test_guild_state_reads(reg, rs):
     rs.save(ev, "pin")
     reg.add_absence(ms[9].discord_id, ev.start.date().isoformat(), None, "wedding", "t")
     s = help_mod.guild_state(reg, rs, ms[0].discord_id, False)
-    assert f"live run {configops.run_words(reg, ev)}" in s and ev.key not in s and "TEST EVENT" in s and "state open" in s and "nudge " in s and "lock " in s
+    assert f"live event {configops.run_words(reg, ev)}" in s and ev.key not in s and "TEST EVENT" in s and "state open" in s and "nudge " in s and "lock " in s
     assert "answers: 6 joined / 2 bench / 0 no thanks / 8 not answered" in s and f"pinned in: {ms[0].display_name}" in s
     assert f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec} {ms[0].main.cls})" in s
     assert f"absent that day: {ms[9].display_name}" in s and "wedding" not in s, "reasons are officer-only"

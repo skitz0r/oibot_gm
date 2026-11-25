@@ -659,7 +659,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     spec_of = {s.display_name: f"{s.character} {s.spec} {s.cls}" for s in ev.signups.values()}
     test = " · TEST EVENT (puppets + the tester only)" if team.get("test") else ""
     live = ev.state in ("open", "locked")
-    head = (f"{'live run' if live else 'closed run'} {rd.get('name', ev.instance)} {reg.local12(ev.start, fmt)} ({ev.instance}, size {size}): state {ev.state}{test} · nudge {reg.local12(soft, fmt)} · lock {reg.local12(hard, fmt)} · confirmations expire {reg.local12(confirm, fmt)}"
+    head = (f"{'live event' if live else 'closed event'} {rd.get('name', ev.instance)} {reg.local12(ev.start, fmt)} ({ev.instance}, size {size}): state {ev.state}{test} · nudge {reg.local12(soft, fmt)} · lock {reg.local12(hard, fmt)} · confirmations expire {reg.local12(confirm, fmt)}"
             f" · split strategy {ev.split_strategy or rd.get('split_policy', 'balanced')} · fill {ev.fill_state} · health card {'posted' if ev.health_posted else 'not yet'}" + (f" · LAST LOCK FAILED: {ev.lock_error}" if ev.lock_error else ""))
     players = rc.players_for(reg, ev)
     rb = reg.role_bounds(ev.instance, size)
