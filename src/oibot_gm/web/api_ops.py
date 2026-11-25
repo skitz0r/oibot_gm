@@ -396,7 +396,7 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         v, d = await body(request, officer=True)
         inst = parse(d, InstanceBody).instance
         res = await translate(v, [{"kind": "raid", "target": inst, "fields": {k: x for k, x in d.items() if k not in ("instance", "revs", "confirmed")}}], d)
-        return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"]) or f"{inst}: no changes"}
+        return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"]) or configops.raid_line(v.reg, inst, f"{inst}: no changes")}
 
     @app.post("/api/admin/raid/reset")
     async def admin_raid_reset(request: Request):

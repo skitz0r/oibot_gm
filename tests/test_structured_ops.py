@@ -383,7 +383,7 @@ def test_admin_raid_translator(owner_client, reg):
     want = {"lockout_days": "5", "notes": "bring pots", "weight_rank": str(body["weights"]["rank"])}
     sh = _route_vs_shadow(owner_client, reg, "/api/admin/raid", body, lambda sh: "; ".join(configops.raid_line(sh, "barrow_deeps", ln) for ln in sh.set_raid_overrides("barrow_deeps", want, "x")))
     assert reg.config.raids.get("barrow_deeps") == sh.config.raids.get("barrow_deeps") and reg.config.schedules == sh.config.schedules
-    assert owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lockout_days": 5}, headers=bearer()).json()["message"] == "barrow_deeps: no changes"
+    assert owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lockout_days": 5}, headers=bearer()).json()["message"] == "Barrow Deeps: no changes"
     for lock in (cur["lock_hours_before"], cur["lock_hours_before"] + 2):  # present = refused, changed or not (a raid holds no timing)
         r = owner_client.post("/api/admin/raid", json={"instance": "barrow_deeps", "lock_hours_before": lock}, headers=bearer())
         assert r.status_code == 400 and r.json()["error"] == TIMING_ON_SCHEDULE  # sheet timing is a schedule's (C7)
