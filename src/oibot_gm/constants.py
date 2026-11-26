@@ -189,6 +189,12 @@ PAGE_WORDS = {
     # the Me page reached from a finished or cancelled event's sheet title (its run hash matches no row)
     "me_event_over": "That event has finished or was cancelled, so My sheets has no row for it.",
     "me_event_over_tail": "Your loot and attendance are further down this page.",
+    # the members' Events page (member_event_view.py, web/api_member_events.py): a key it doesn't list, an empty list,
+    # the No thanks mark's tooltip (the sheet's ⚑), and the answer box for someone with no character yet
+    "event_over_member": "That event has finished or was cancelled, so it is not on the Events list.",
+    "member_events_empty": "No event is open for signup. An event shows here once its sheet opens in Discord.",
+    "called_out": "Called out after answering",
+    "answer_needs_character": "Register a character on the Me page to answer.",
 }
 
 

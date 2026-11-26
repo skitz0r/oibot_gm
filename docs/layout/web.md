@@ -62,6 +62,8 @@ scripts/serve_scratch.py  THIS worktree's site on a throw-away copy of fixtures/
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
                        sets the selection; SSE is per guild (`publish(topic, guild)`; None = every page); Discord-side site URLs carry `?g=<key>`.
+                       GET /api/me's `sheets` rows = api_me.me_sheet_row (one per live raid; the members' event page reuses it); the members'
+                       Events routes = install_member_events_api (web/api_member_events.py, docs/layout/events.md)
                        Phase 3 (§5.44): POST /api/ask (TellTheBot's question half over HelpMixin.help_answer: officer view for officers, member view
                        otherwise; an officer's request to act → {act: true}), GET /api/config/summary, /api/readiness + minimums/minimum/rev/slots,
                        /api/meta timezones (grouped, picked never typed) + about_max + cadence_presets, schedule_json next_if_active + the server's sentences

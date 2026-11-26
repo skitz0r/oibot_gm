@@ -189,6 +189,18 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        COMING_GONE); new_event_options (raids, lineups to copy — no pickup templates —, NEW_EVENT_LOCKS (2, 24), lock_choices, the
                        guild's date), new_event_view (What this makes; SCHEDULED_NIGHT), lineup_edit_json (refused through rc.lineup_fixed) /
                        lineup_draft_json (nothing written), seats_words, tz_words, character_rows. The routes run these in a thread
+  member_event_view.py the members' Events page read model (2026-11-25 §2), PURE: what the Discord signup sheet shows everyone and nothing
+                       more, built from the sheet's own readers (by_status, raid_views.split_away / OUT_MARK / run_times, all_rosters' groups,
+                       rc.confirmations marks only while locked and rc.run_confirms, Not rostered = rosters[0].benched ∩ the joiners) — never
+                       from event_json. visible(reg, e, viewer) (a first raid, not dropped, no rehearsal but the viewer's own: its run dict's
+                       test_by); member_event_list(reg, rs, now, viewer) → {open [{key, title, subtitle (the raids), state, chip, answer
+                       (rc.answer_word)}] (live only, soonest first; no History), coming [{title, subtitle}] (event_view.coming_nights),
+                       tz_words, empty}; member_event_json(reg, rs, ev, viewer) → {key (first raid's), title, subtitle, state, chip, test_chip,
+                       details (Lineup, Priority, Locks, Confirm by when confirmations, Signup sheet), signups {counts, rows {in, sub, out, away:
+                       [{display_name, character, cls, spec, callout}]}}, rosters [{key, raid_name, label, rosters [{n, groups [[{display_name,
+                       character, cls, spec, role, answer (only when marks)}]]}], not_rostered, marks}] (locked / done raids only; [] before the
+                       lock), part_keys}; NotListed (LookupError) for what visible refuses, a finished or cancelled event. Never: who has not
+                       answered, absence reasons, callout notes, pins, fill asks, the officers' board, role switches, the log, scores
   event_board.py       Auto-fill groups (§5.67, the owner's tweaks C): the Events board before the lock is the OFFICERS' layout and nothing
                        solves until the button. AutoFill (autofill_of(bot)), keyed (guild key, raid key): start(reg, rs, ev, by=, by_id=, via=) refuses
                        in one sentence (PAGE_WORDS autofill_locked / autofill_nobody / autofill_busy while a lock-side solve runs) or starts ONE task
@@ -247,7 +259,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409; `spec`; §5.67 phase 4: `preview` → {box} =
                        consequences.member_action_box for every action (fp over rc.member_state_rev; phase 5 Task 7), `seen` → 409 with
-                       the fresh box, a refusal → 400 {error, box}); sheet_row_extras
+                       the fresh box, a refusal → 400 {error, box}); sheet_row_extras; me_sheet_row(reg, rs, ev, m, uid) = GET /api/me's
+                       `sheets` row (+ sheet_row_extras), shared with the members' event page's `answers`
   web/api_events.py    install_events_api (called from api.py; §5.67 phase 4) = thin callers of event_view, officers, each in a thread (GET
                        /api/events stays the live stream): GET /api/event-list?history_offset=, GET /api/event-new, GET /api/event/{key} (any part's
                        key; the officers' boards, each open raid's Auto-fill line from event_board.AutoFill.state — nothing solves; NO_EVENT 404
@@ -258,6 +271,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        switches row: before the lock RaidMixin.set_answer(spec=) on the first raid, after it send_plan(seats=[seat]) on its raid; a row
                        no longer listed → 409 {error: SWITCH_GONE, switches}; answers {message (rc.site_words), switches}. The page reloads on run:,
                        member and config
+  web/api_member_events.py  install_member_events_api(app, bot, *, who) (called from api.py; 2026-11-25 §2), ANY member of the selected guild
+                       (an officer gets the same member view), in a thread: GET /api/me/events → member_event_view.member_event_list; GET
+                       /api/me/event/{key} (any raid's key) → member_event_json + `answers` (api_me.me_sheet_row per live raid, the first
+                       first), `asks` (inbox.asks_of on this event's raids), `characters` [{label, is_main}] (main first); NotListed → 404
+                       {error: PAGE_WORDS event_over_member}. Nothing here writes: answers go through the Me page's routes
   web/api_schedules.py install_schedules_api (called from api.py; §5.67 phase 4), officers, in a thread: GET /api/schedules → schedule_list, GET
                        /api/schedules/{id} → schedule_json (404 NO_SCHEDULE_HERE). Writes stay elsewhere: POST /api/ops/change (kinds schedule /
                        schedule_remove, the box first) and POST /api/admin/raid/regulars by the schedule's id

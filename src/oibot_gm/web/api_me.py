@@ -67,6 +67,24 @@ def sheet_row_extras(reg, ev, m, rs=None) -> dict:
             "receipt": rc.answer_receipt(reg, ev, m).replace("**", "") if m else None}
 
 
+def me_sheet_row(reg, rs, ev, m, uid: int) -> dict:
+    """One My sheets row of GET /api/me (and each live raid's answer row on the members' event page): the viewer's own
+    answer on `ev`, its badge in words, the run's state, and sheet_row_extras (what makes it actionable). `m` = the
+    viewer's record (None before they register), `uid` their Discord id."""
+    s = ev.signups.get(str(uid))
+    team = reg.config.team(ev.team) or {"key": ev.team}
+    rd = reg.raid_def(team.get("instance")) if team.get("instance") else {}
+    seat = ev.seat_of(m) if m and ev.state != "open" else None
+    return {"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": reg.local12(ev.starts_at), "state": ev.state,
+            "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
+            "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None, "kind": rc.run_kind(reg, ev),
+            # the badge in words ("not rostered" for a joiner the lock left out — never "Join" on a locked run) and the run's state
+            "badge": rc.answer_word(ev, s.status if s else None, (seat[0] + 1) if seat else None), "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state),
+            "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
+            "confirms": rc.run_confirms(reg, ev), "then": rc.follow_words_of(reg, ev) or None, "lead_raid": rc.lead_name_of(reg, ev) or None,
+            **sheet_row_extras(reg, ev, m, rs)}
+
+
 def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -> None:
     def me_of(v):
         m = v.reg.members.get(v.uid)

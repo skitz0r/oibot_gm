@@ -34,7 +34,7 @@ from ..presets import DURATIONS, PRESETS
 from ..registry import ABSENCE_REASON_MAX, DECISION_NOTE_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged, is_superuser
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
-from .api_me import sheet_row_extras
+from .api_me import me_sheet_row
 from .api_memory import own_rows
 from .api_setup import discord_ready
 from .app import GUILD_COOKIE, NotMember, login_href, owner_name, set_guild_cookie
@@ -641,20 +641,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         v = await who(request)
         reg, m = v.reg, v.member
         rs = bot.raids.store(reg)
-        sheets = []
-        for ev in rs.live():
-            s = ev.signups.get(str(v.uid))
-            team = reg.config.team(ev.team) or {"key": ev.team}
-            rd = reg.raid_def(team.get("instance")) if team.get("instance") else {}
-            seat = ev.seat_of(m) if m and ev.state != "open" else None
-            sheets.append({"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "state": ev.state,
-                           "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
-                           "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None, "kind": rc.run_kind(reg, ev),
-                           # the badge in words ("not rostered" for a joiner the lock left out — never "Join" on a locked run) and the run's state
-                           "badge": rc.answer_word(ev, s.status if s else None, (seat[0] + 1) if seat else None), "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state),
-                           "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
-                           "confirms": rc.run_confirms(reg, ev), "then": rc.follow_words_of(reg, ev) or None, "lead_raid": rc.lead_name_of(reg, ev) or None,
-                           **sheet_row_extras(reg, ev, m, rs)})
+        sheets = [me_sheet_row(reg, rs, ev, m, v.uid) for ev in rs.live()]  # My sheets: one row per live raid (api_me.me_sheet_row)
         primary, flex = reg.roles_of(m) if m else (None, [])
         today = reg.now_local().date().isoformat()
         return {
@@ -2949,6 +2936,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_events import install_events_api  # the Events page's read model (phase 4: the list, one event, a coming-up night)
 
     install_events_api(app, bot, who=who, body=body, ev_json=ev_json)
+
+    from .api_member_events import install_member_events_api  # the members' Events page: what the signup sheet shows everyone
+
+    install_member_events_api(app, bot, who=who)
 
     from .api_schedules import install_schedules_api  # the Schedules page's read model (phase 4: the list, one schedule)
 
