@@ -9,7 +9,7 @@ import pathlib
 import re
 import types
 
-from oibot_gm import configops, discord_policy, guild_picker, pending_views, wizard
+from oibot_gm import answer_loop, configops, discord_policy, guild_picker, pending_views, wizard
 from oibot_gm.llm.provider import BudgetExceeded
 
 SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "oibot_gm"
@@ -85,7 +85,8 @@ def test_a_spent_budget_is_its_own_sentence_on_every_path():
 
 def test_edge_sentences_say_what_happened():
     texts = [discord_policy.TIMED_OUT, discord_policy.READING_TIMED_OUT, discord_policy.READING_DROPPED, discord_policy.EXPIRED_RESTART,
-             discord_policy.BUTTON_GONE, pending_views.RESTARTED, pending_views.RESTARTED_SAVED, guild_picker.EXPIRED, wizard.TIMED_OUT]
+             discord_policy.BUTTON_GONE, pending_views.RESTARTED, pending_views.RESTARTED_SAVED, guild_picker.EXPIRED, wizard.TIMED_OUT,
+             answer_loop.ANSWER_NOT_FOUND]
     for t in texts:
         assert t[0].isupper() and t.endswith(".") and not re.search(r"\b(expired|again|it)\b", t, re.I), t
 
