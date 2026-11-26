@@ -1,7 +1,7 @@
 """The live probe of the answer tools (design §10, §11): the REAL model answers every question of the bench
 (tests/answer_bench.py) through answer_loop.answer, on a scratch copy of the demo guild, and the probe reports per case
-and in total whether the answer held what it must, held nothing it must never, and how many rounds, requests, tokens,
-dollars and seconds it took. Its numbers are what the owner decides on before the switch (OIBOT_ANSWER_TOOLS) is turned
+and in total whether the answer said what a good answer must, held nothing it must never, and how many rounds,
+requests, tokens, dollars and seconds it took. Its numbers are what the owner decides on before the switch (OIBOT_ANSWER_TOOLS) is turned
 on for any guild. It is the retune check, as scripts/listen_probe.py is for listening.
 
     uv run python scripts/answer_probe.py                                   # the whole bench on the help route's model
@@ -15,24 +15,30 @@ on for any guild. It is the retune check, as scripts/listen_probe.py is for list
 The two settings to compare before the switch widens: `--model claude-sonnet-5 --effort low` and
 `--model claude-sonnet-5-5 --effort low` (or both in one run: `--compare`).
 
-WHAT "PASS" MEANS, for one run of one case on the new path — all four must hold:
-  1. MUST: every `must` fact of the case is in the FINAL ANSWER the person would read (the reply's text, its rendered
-     choices and its commands; never the lookups' results, never the start). Read as facts, not as a sentence: the
-     must is split into words; the joining words (made, by, lock, next, the, of, and, at, in, a, an) and punctuation
-     are dropped; every word left must appear in the answer, case-insensitive, markdown emphasis ignored, at the start
-     of a word ("Wed" is found in "Wednesday", "3:00" also as "3" before a non-digit). The JSON also records whether
-     the must appeared word for word (`must_literal_missing`), for reading — it does not decide.
+WHAT "PASS" MEANS, for one run of one case — all three must hold:
+  1. ANSWER: every `answer` fact of the case — what a GOOD answer to the question must say, as a person would judge
+     it (the name asked for, the price, the day and time, "officer" for an officer-only refusal; for a case that asks
+     back, the choices that must be offered) — is in the FINAL ANSWER the person would read (the reply's text, its
+     rendered choices and its commands; never the lookups' results, never the start). The bench's `must` (what the
+     lookups delivered, for the offline run) is NOT judged here. Read as facts, not as a sentence: the fact is split
+     into words; the joining words (made, by, lock, next, the, of, and, at, in, a, an) and punctuation are dropped;
+     every word left must appear in the answer, case-insensitive, markdown emphasis ignored, at the start of a word
+     ("Wed" is found in "Wednesday", "officer" in "officers", "3:00" also as "3" before a non-digit). The JSON also
+     records whether each fact appeared word for word (`answer_literal_missing`), for reading — it does not decide.
   2. NEVER: no `never` value of the case appears in the final answer (case-insensitive, emphasis ignored, word for
      word). A never hit is a visibility failure and fails the whole probe whatever the pass rate.
-  3. LOOKUPS: every lookup in the case's `expect_tools` was called (which lookups the model called is always shown).
-  4. ENDING: a case marked `asks_back` passes when the reply asked back — choices kept (ending "asked"), or an answer
+  3. ENDING: a case marked `asks_back` passes when the reply asked back — choices kept (ending "asked"), or an answer
      that is a question (holds "?"); any other case must end "answered" (asked, acts, acts_off, cap, budget and error
      fail).
-On today's path (`--baseline`, help.answer) rules 1, 2 and 4 apply the same way (an answer holding "?" counts as
-asking back; acts fails); rule 3 does not (today's path has no lookups) and its column shows "-".
+A case with no `answer` facts is NOT JUDGED: shown as "n/j", left out of the pass rate, never counted as a pass.
+LOOKUPS are reported, not judged: the "lookups" column says "ok" when every `expect_tools` lookup was called, else
+"-<names>" for the ones skipped, and each tag counts its runs that skipped one — a right answer reached another way
+(from the start, or through `find` then `recipe`) is still right. On today's path (`--baseline`, help.answer) the
+three rules apply the same way (an answer holding "?" counts as asking back; acts fails); it has no lookups, so its
+lookups and tools columns show "-".
 
 Exit codes: 0 every new-path setting at or over --pass-mark (default 0.8) with no never hit; 1 a new-path setting
-under the mark, or any never hit on the new path; 2 nothing run (no API key, an unknown case or tag, a refused work
+under the mark (or with nothing judged), or any never hit on the new path; 2 nothing run (no API key, an unknown case or tag, a refused work
 folder); 3 the probe's own budget was reached before the end (the runs so far are still reported and written).
 
 WHERE EVERYTHING GOES — nothing under the repo's out/, nothing of the live bot's, never the real guild data:
@@ -123,29 +129,32 @@ def never_hits(nevers: list[str], answer: str) -> list[str]:
 
 
 def score(case: BenchCase, fmt: dict, run: "Run", path: str) -> None:
-    """Fills run.passed and run.reasons by the four rules of the module's docstring."""
+    """Fills run.passed, run.judged and run.reasons by the three rules of the module's docstring; the lookups skipped
+    go to run.tools_missing (reported, never a reason)."""
     reasons: list[str] = []
     seen = run.answer + ("\n" + " ".join(run.commands) if run.commands else "")
-    for m in case.must:
-        want = m.format(**fmt)
+    run.judged = bool(case.answer)
+    for a in case.answer:
+        want = a.format(**fmt)
         miss = missing_facts(want, seen)
         if miss:
-            run.must_missing.append({"must": want, "words": miss})
-            reasons.append(f"must {want!r} lacks {', '.join(miss)}")
+            run.answer_missing.append({"fact": want, "words": miss})
+            reasons.append(f"answer {want!r} lacks {', '.join(miss)}")
         if _plain(want) not in _plain(seen):
-            run.must_literal_missing.append(want)
+            run.answer_literal_missing.append(want)
     run.never_hit = never_hits([n.format(**fmt) for n in case.never], seen)
     reasons += [f"NEVER {n!r} appeared" for n in run.never_hit]
     if path == "loop":
         run.tools_missing = [t for t in case.expect_tools if t not in run.tools]
-        reasons += [f"lookup {t} not called" for t in run.tools_missing]
     asked = run.ending == "asked" or (run.ending == "answered" and "?" in run.answer)
     if case.asks_back and not asked:
         reasons.append(f"should ask back, ended {run.ending_words()}")
     elif not case.asks_back and run.ending != "answered":
         reasons.append(f"ended {run.ending_words()}")
+    if not run.judged:
+        reasons.append("not judged: the case names no answer facts")
     run.reasons = reasons
-    run.passed = not reasons
+    run.passed = run.judged and not reasons
 
 
 # ---------------------------------------------------------------- metering
@@ -175,14 +184,24 @@ class Run:
     usage: dict = field(default_factory=lambda: {k: 0 for k in USAGE_KEYS})
     seconds: float = 0.0
     passed: bool = False
+    judged: bool = True
     reasons: list[str] = field(default_factory=list)
-    must_missing: list[dict] = field(default_factory=list)
-    must_literal_missing: list[str] = field(default_factory=list)
+    answer_missing: list[dict] = field(default_factory=list)
+    answer_literal_missing: list[str] = field(default_factory=list)
     never_hit: list[str] = field(default_factory=list)
     tools_missing: list[str] = field(default_factory=list)
 
     def ending_words(self) -> str:
         return f"{self.ending} ({self.error})" if self.error else self.ending
+
+    def lookups_words(self) -> str:
+        """'ok', '-recipe,find' (the expected lookups not called), or '-' on today's path."""
+        if self.path != "loop":
+            return "-"
+        return "-" + ",".join(self.tools_missing) if self.tools_missing else "ok"
+
+    def verdict(self) -> str:
+        return "n/j" if not self.judged else ("pass" if self.passed else "FAIL")
 
 
 def _api_error(e: BaseException) -> str | None:
@@ -396,16 +415,21 @@ def _med(xs):
 
 
 def config_totals(runs: list[Run]) -> dict:
+    """The setting's totals. The pass rate counts judged runs only (None when none was judged); `lookups_skipped` =
+    runs where an expected lookup was not called (reported, never judged)."""
     tags = sorted({t for r in runs for t in r.tags} | {"shorthand"})
     per_tag = {}
     for t in tags:
         rs_ = [r for r in runs if t in r.tags]
-        per_tag[t] = {"passed": sum(r.passed for r in rs_), "runs": len(rs_)}
+        per_tag[t] = {"passed": sum(r.passed for r in rs_), "runs": sum(r.judged for r in rs_),
+                      "not_judged": sum(not r.judged for r in rs_), "lookups_skipped": sum(bool(r.tools_missing) for r in rs_)}
     endings = {e: sum(r.ending == e for r in runs) for e in ENDINGS if any(r.ending == e for r in runs)}
     cost = [float(r.usage["cost"]) for r in runs]
+    judged = [r for r in runs if r.judged]
     return {
-        "runs": len(runs), "passed": sum(r.passed for r in runs),
-        "pass_rate": (sum(r.passed for r in runs) / len(runs)) if runs else 0.0,
+        "runs": len(judged), "passed": sum(r.passed for r in judged), "not_judged": len(runs) - len(judged),
+        "pass_rate": (sum(r.passed for r in judged) / len(judged)) if judged else None,
+        "lookups_skipped": sum(bool(r.tools_missing) for r in runs),
         "never_hits": sum(bool(r.never_hit) for r in runs), "per_tag": per_tag, "endings": endings,
         "rounds": {"median": _med([r.rounds for r in runs]), "worst": max([r.rounds for r in runs], default=0)},
         "requests": {"median": _med([r.requests for r in runs]), "worst": max([r.requests for r in runs], default=0)},
@@ -418,31 +442,38 @@ def config_totals(runs: list[Run]) -> dict:
 
 def print_config(label: str, runs: list[Run], cases: list[BenchCase], repeat: int, verbose: bool) -> None:
     print(f"\n== {label}")
-    print(f"{'case':<24} {'tags':<10} {'pass':>5} {'ending':<16} {'rnd':>3} {'req':>3} {'tools':<24} "
+    print(f"{'case':<24} {'tags':<10} {'pass':>5} {'ending':<16} {'rnd':>3} {'req':>3} {'lookups':<12} {'tools':<24} "
           f"{'in/out/cr/cw':<22} {'cost':>8} {'secs':>6}")
     for c in cases:
         for r in [x for x in runs if x.case == c.id]:
             tok = "/".join(str(int(r.usage.get(k) or 0)) for k in USAGE_KEYS[:4])
             tools = (",".join(r.tools) or "none") if r.path == "loop" else "-"
             idn = c.id if repeat == 1 else f"{c.id}#{r.repeat + 1}"
-            print(f"{idn[:24]:<24} {','.join(r.tags)[:10]:<10} {'pass' if r.passed else 'FAIL':>5} "
-                  f"{r.ending_words()[:16]:<16} {r.rounds:>3} {r.requests:>3} {tools[:24]:<24} {tok[:22]:<22} "
+            print(f"{idn[:24]:<24} {','.join(r.tags)[:10]:<10} {r.verdict():>5} "
+                  f"{r.ending_words()[:16]:<16} {r.rounds:>3} {r.requests:>3} {r.lookups_words()[:12]:<12} {tools[:24]:<24} {tok[:22]:<22} "
                   f"${float(r.usage['cost']):>7.4f} {r.seconds:>6.1f}")
             for why in r.reasons:
                 print(f"{'':<4}- {why}")
             if verbose:
                 print("    answer: " + (r.answer.replace("\n", "\n            ") or "(none)"))
     t = config_totals(runs)
-    print(f"pass rate {t['passed']}/{t['runs']} ({t['pass_rate']:.0%})" + (f" · NEVER HITS {t['never_hits']}" if t["never_hits"] else ""))
+    rate = f"{t['pass_rate']:.0%}" if t["pass_rate"] is not None else "nothing judged"
+    print(f"pass rate {t['passed']}/{t['runs']} ({rate})" + (f" · not judged {t['not_judged']}" if t["not_judged"] else "")
+          + (f" · NEVER HITS {t['never_hits']}" if t["never_hits"] else ""))
     for tag, v in t["per_tag"].items():
-        print(f"  tag {tag}: {v['passed']}/{v['runs']}" + ("" if v["runs"] else " (not run)"))
+        ran = v["runs"] + v["not_judged"]
+        print(f"  tag {tag}: {v['passed']}/{v['runs']}" + ("" if ran else " (not run)")
+              + (f" · not judged {v['not_judged']}" if v["not_judged"] else "")
+              + (f" · an expected lookup skipped in {v['lookups_skipped']}" if ran and runs and runs[0].path == "loop" else ""))
     if repeat > 1:
         print("  per case: " + " · ".join(f"{c.id} {sum(r.passed for r in runs if r.case == c.id)}/"
-                                          f"{sum(1 for r in runs if r.case == c.id)}" for c in cases))
+                                          f"{sum(r.judged for r in runs if r.case == c.id)}" for c in cases))
     print(f"  rounds median {t['rounds']['median']} worst {t['rounds']['worst']} · requests median {t['requests']['median']} "
           f"worst {t['requests']['worst']} · cost median ${t['cost']['median']:.4f} worst ${t['cost']['worst']:.4f} · "
           f"seconds median {t['seconds']['median']:.1f} worst {t['seconds']['worst']:.1f}")
     print("  endings: " + ", ".join(f"{k} {v}" for k, v in t["endings"].items()) + f" · final request forced in {t['final_forced']}")
+    if runs and runs[0].path == "loop":
+        print(f"  lookups: an expected lookup was skipped in {t['lookups_skipped']} of {len(runs)} runs (reported, not judged)")
     print(f"  spend ${t['cost']['total']:.4f}")
 
 
@@ -458,13 +489,15 @@ def print_side_by_side(configs: list[str], runs: list[Run], cases: list[BenchCas
                 continue
             cost = sum(float(r.usage["cost"]) for r in rs_) / len(rs_)
             req = sum(r.requests for r in rs_) / len(rs_)
-            cell = f"{sum(r.passed for r in rs_)}/{len(rs_)} ${cost:.4f} {req:.1f}"
+            judged = sum(r.judged for r in rs_)
+            cell = (f"{sum(r.passed for r in rs_)}/{judged}" if judged else "n/j") + f" ${cost:.4f} {req:.1f}"
             cells.append(f"{cell:<28}")
         print(f"{c.id[:24]:<24} " + " ".join(cells))
     tot = []
     for cf in configs:
         t = config_totals([r for r in runs if r.config == cf])
-        cell = f"{t['pass_rate']:.0%} med ${t['cost']['median']:.4f}"
+        rate = f"{t['pass_rate']:.0%}" if t["pass_rate"] is not None else "n/j"
+        cell = f"{rate} med ${t['cost']['median']:.4f}"
         tot.append(f"{cell:<28}")
     print(f"{'total':<24} " + " ".join(tot))
 
@@ -537,8 +570,8 @@ def main(argv: list[str] | None = None, provider=None) -> int:
             print(f"  model {m}: forced reply {'taken' if llm.forced_tool_ok(m) else 'not taken (auto on the last request)'}"
                   + ("" if known else " · NO PRICE ROW: cost counted at its family's or the dearest known price"))
         print(f"  work folder {work} · usage {work / 'llm_usage.jsonl'} · results {out}")
-        print("  pass = every must's fact words in the final answer, no never in it, every expected lookup called, "
-              "and it answered (or asked back where the case asks back).")
+        print("  pass = every answer fact's words in the final answer, no never in it, and it answered (or asked back "
+              "where the case asks back); lookups are reported, not judged; a case with no answer facts is not judged.")
 
         runs: list[Run] = []
         stopped = False
@@ -586,7 +619,8 @@ def main(argv: list[str] | None = None, provider=None) -> int:
 
         totals = {cf: config_totals([r for r in runs if r.config == cf]) for cf in order}
         failed = [cf for (m, p), cf in zip(configs, order)
-                  if p == "loop" and (totals[cf]["pass_rate"] < args.pass_mark or totals[cf]["never_hits"])]
+                  if p == "loop" and (totals[cf]["pass_rate"] is None or totals[cf]["pass_rate"] < args.pass_mark
+                                      or totals[cf]["never_hits"])]
         spend = meter.total
         result = {"cases": [c.id for c in cases], "repeat": args.repeat, "effort": effort, "budget": args.budget,
                   "pass_mark": args.pass_mark, "configs": order, "totals": totals, "spend": spend,

@@ -4,7 +4,13 @@ what the answer must hold, what it must never show, the tools it should reach fo
 "Ironfeather" names exactly three recipes in the forever profile's list (Breastplate 10790, Leggings 55073, Shoulders
 10769, all Leatherworking) while "leather" is in about 200 names.
 
-`question`, `candidates`, `must` and `never` are `str.format`-ed with the dict a case's `setup(reg, rs)` returns.
+`question`, `candidates`, `must`, `never` and `answer` are `str.format`-ed with the dict a case's `setup(reg, rs)`
+returns, and so is the scripted reply's text (`scripted`).
+`must` proves what the LOOKUPS delivered (the offline run searches the lookups' results, or the start); `answer` is what
+a GOOD ANSWER to the question must say, as a person would judge it under the answer rules (the fact first, nothing
+about what is not there, names never pinged): the smallest set of facts without which the reply is wrong or useless —
+never a fact a good reply may leave out (a second crafter, a skill, a member, a reagent, a role word). For an
+`asks_back` case it is the choices that must be offered. The live probe (scripts/answer_probe.py) judges on `answer`.
 Every setup makes sure its asker's record exists. Members, characters and items here are invented; no real guild data."""
 from __future__ import annotations
 
@@ -52,6 +58,7 @@ LOOT_REASON = "kept for the tank"
 LOOT_BOSS = "Gatekeeper"   # the boss an_award's row names: only the loot lookup gives it (the question names item and no boss)
 ARCANITE_BAR = 12360
 BAR_PRICE = Price(low=489998, qty=12)  # what the bench's auction house lists Arcanite Bars at: 48g 99s 98c each
+DAY_TIME = "%a %I:%M %p"  # a weekday and a 12-hour time ('Tue 7:30 PM'): what "when" asks for, through Registry.local12
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,39 @@ class BenchCase:
     asks_back: bool = False
     script: tuple = ()
     tags: tuple[str, ...] = ()  # a group the probe reports together: `shorthand` = the person wrote the game's short names
+    answer: tuple[str, ...] = ()  # the facts a good answer must hold (the probe's pass rule); see the module's docstring
+
+
+def scripted(case: BenchCase, fmt: dict[str, str]) -> list:
+    """The case's script with each reply's `answer` and `choices` formatted with the setup's values (a time the setup
+    computes, such as the next event's start, can only be written into the scripted reply this way)."""
+    out: list = []
+    for step in case.script:
+        if not isinstance(step, list):
+            out.append(step)
+            continue
+        calls = []
+        for c in step:
+            if c["name"] == "reply":
+                inp = dict(c["input"])
+                if isinstance(inp.get("answer"), str):
+                    inp["answer"] = inp["answer"].format(**fmt)
+                if isinstance(inp.get("choices"), list):
+                    inp["choices"] = [x.format(**fmt) for x in inp["choices"]]
+                c = {**c, "input": inp}
+            calls.append(c)
+        out.append(calls)
+    return out
+
+
+def final_reply(case: BenchCase, fmt: dict[str, str]) -> str:
+    """The script's last reply as a person reads it: its answer, its choices and its commands."""
+    for step in reversed(scripted(case, fmt)):
+        for c in reversed(step if isinstance(step, list) else []):
+            if c["name"] == "reply":
+                inp = c["input"]
+                return "\n".join([inp.get("answer") or "", *(inp.get("choices") or []), *(inp.get("commands") or [])])
+    return ""
 
 
 def asker_of(case: BenchCase) -> tuple[int, bool]:
@@ -127,7 +167,8 @@ def an_event(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     ev = next((e for e in rs.live() if e.instance == "barrow_deeps" and not rc.rehearsal_run(reg, e)), None)
     ev = ev or real_event(reg, rs)
     _soft, lock, _confirm = run_times(reg, ev, rc.run_team(reg, ev))
-    return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps", "lock": reg.local12(lock, CLOCK12)}
+    return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps", "lock": reg.local12(lock, CLOCK12),
+            "when": reg.local12(ev.start, DAY_TIME)}
 
 
 def a_schedule(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
@@ -135,7 +176,8 @@ def a_schedule(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     if not reg.schedules("barrow_deeps"):
         weekly(reg, "barrow_deeps", "Tue 19:30")
     nxt = rc.next_runs_of(reg, "barrow_deeps", reg.schedules("barrow_deeps")[0])[0]
-    return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps", "next": reg.local12(nxt)}
+    return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps", "next": reg.local12(nxt),
+            "night": reg.local12(nxt, DAY_TIME)}
 
 
 def an_award(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
@@ -188,14 +230,14 @@ def blacksmith(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     """Pellow's Briarwood knows Blacksmithing 285."""
     askers(reg)
     reg.set_professions(PELLOW, "Briarwood", [{"id": "blacksmithing", "skill": 285, "recipes": []}])
-    return {"crafter": "Briarwood (Pellow, 285)"}
+    return {"crafter": "Briarwood (Pellow, 285)", "name": "Briarwood"}
 
 
 def paladin_healer(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     """Pellow has a Holy Paladin alt, Dawnmere."""
     askers(reg)
     _ensure(reg, PELLOW, "Pellow", "Dawnmere", "Paladin", "Holy")
-    return {"healer": "Dawnmere Holy Paladin healer"}
+    return {"healer": "Dawnmere Holy Paladin healer", "character": "Dawnmere"}
 
 
 def leatherworkers(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
@@ -224,80 +266,100 @@ BENCH: list[BenchCase] = [
               # the start names Thornwick already (the asker's character, the matched recipe's maker): the lookup alone
               # gives the crafter's member and the reagents
               must=("Thornwick (Wrenfield, 300)", "Rugged Leather"),
+              # two readings: "who can make an Ironfeather piece" or "which Ironfeather recipes are there"; read as the
+              # first (it asks WHO), and with one crafter there is nothing to choose: the crafter's name is the answer
+              answer=("{crafter}",),
               script=([call("recipe", name="Ironfeather Breastplate")], [reply(answer="Thornwick can make the Ironfeather Breastplate.")])),
     BenchCase("ironfeather_breastplate", "member", "public", "bot who can make ironfeather breastplate", crafters,
               candidates=("Ironfeather Breastplate",), must=("made by Thornwick (300)",),  # from the start's matched names
+              answer=("{crafter}",),
               script=([reply(answer="Thornwick can make the Ironfeather Breastplate.")],)),
     BenchCase("ironfeather_pieces", "member", "public", "Bot who can make ironfeather leather working pieces", crafters,
               # the answer is in the start's matched names (a `find` would give back the same three recipe lines), so
               # the case expects no lookup and reads its facts off the start; find_flasks is the case `find` must prove
               candidates=IRONFEATHER, must=("Ironfeather Breastplate · Leatherworking", "made by Thornwick (300)"),
+              # "who can make … pieces" asks WHO: the one crafter; which piece he makes is a detail a good reply may add
+              answer=("{crafter}",),
               script=([reply(answer="Thornwick can make the Ironfeather Breastplate. Nobody has the leggings or shoulders yet.")],)),
     # a question naming nothing in the guild's names ("brew" matches none): the start holds no recipe, so only the
     # model's own search of one kind finds the guild's flasks and their maker
     BenchCase("find_flasks", "member", "public", "what can the guild brew?", alchemist,
               must=("Flask of the Titans", "made by Briarwood (300)"), expect_tools=("find",),
+              # asks WHAT, not who: both flasks the guild can make, never their maker
+              answer=("{flask}", "Flask of Supreme Power"),
               script=([call("find", text="flask", kinds=["recipe"])],
                       [reply(answer="Briarwood can make the Flask of the Titans and the Flask of Supreme Power.")])),
     BenchCase("ironfeather_choose", "member", "private", "who can make ironfeather?", two_crafters,
               candidates=IRONFEATHER, asks_back=True,
+              # two pieces have a maker, so the good answer asks which one: those two must be among the choices
+              answer=("Ironfeather Breastplate", "Ironfeather Leggings"),
               script=([reply(answer="Which one?", choices=["Ironfeather Breastplate", "Ironfeather Leggings"])],)),
 
     # one per tool
     BenchCase("crafters", "member", "public", "who are our leatherworkers?", crafters,
-              must=("Thornwick (Wrenfield, 300)",), expect_tools=("crafters",),
+              must=("Thornwick (Wrenfield, 300)",), expect_tools=("crafters",), answer=("{crafter}",),
               script=([call("crafters", profession="Leatherworking")], [reply(answer="Thornwick is our leatherworker, at 300.")])),
     BenchCase("price", "member", "public", "what does an arcanite bar go for?", priced_bar,
-              must=("{price}",), expect_tools=("price",),
+              must=("{price}",), expect_tools=("price",), answer=("{price}",),
               script=([call("price", name="Arcanite Bar")], [reply(answer="An Arcanite Bar goes for 48g 99s 98c.")])),
     # asked by another member: the start's matched names say "Hunter Survival", only the record adds the role
     BenchCase("member", "member2", "public", "what does Thornwick play?", crafters,
-              must=("Thornwick Survival Hunter ranged",), expect_tools=("member",),
+              must=("Thornwick Survival Hunter ranged",), expect_tools=("member",), answer=("Survival Hunter",),
               script=([call("member", name="Thornwick")], [reply(answer="Thornwick plays a Survival Hunter.")])),
     BenchCase("event", "member", "public", "when is the next event?", an_event,
               must=("lock {lock}",), expect_tools=("event",),  # the start's line has the raid and state, not the lock
-              script=([call("event", which="next")], [reply(answer="The next event is Barrow Deeps.")])),
+              answer=("{when}",),  # "when" asks for the start: its weekday and time (the raid and the lock may be left out)
+              script=([call("event", which="next")], [reply(answer="The next event is Barrow Deeps, {when}.")])),
     BenchCase("schedule", "member", "public", "when do we raid?", a_schedule,
               must=("next: {next}",), expect_tools=("schedule",),  # the start names the schedule, never its nights
+              answer=("{night}",),  # the raid night: its weekday and time ("Tuesdays at 7:30 PM"), not one date
               script=([call("schedule")], [reply(answer="We raid Barrow Deeps on Tuesdays at 7:30 PM.")])),
     BenchCase("loot", "member", "public", "who got {item}?", an_award,
               must=(LOOT_BOSS,), expect_tools=("loot",),  # the question names the item; the award's boss is the lookup's
+              answer=("{character}",),  # who got it; the boss is a detail a good reply may leave out
               script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"{LOOT_TO} got the {LOOT_ITEM} from the {LOOT_BOSS}.")])),
     BenchCase("attendance", "member", "private", "what's my attendance?", askers,
               must=("not tracked yet",), expect_tools=("attendance",),
+              # the fact is "nothing is counted yet": "yet" is the one word every phrasing of it shares
+              answer=("yet",),
               script=([call("attendance")], [reply(answer="Your attendance is not tracked yet.")])),
     BenchCase("manual", "member", "private", "how do I mark myself away?", askers,
               must=("I'll be away",), expect_tools=("manual",),  # the button's name, from the manual part's text
+              # the manual gives three ways (the card's button, /me absent add, telling the bot); judged on the button,
+              # the first it names: an answer giving only /me absent add is right yet fails here
+              answer=("I'll be away",),
               script=([call("manual", query="mark myself away")], [reply(answer="Press I'll be away on the absences card.")])),
     BenchCase("section", "officer", "private", "any applications waiting?", an_applicant,
-              must=("Newbie",), expect_tools=("section",),
+              must=("Newbie",), expect_tools=("section",), answer=("{applicant}",),
               script=([call("section", key="applications")], [reply(answer="Newbie has applied and waits for a decision.")])),
 
     # the game's shorthand (the owner, 2026-11-25: no alias table): the resolver finds nothing in "bs", "pally" or "lw";
     # the model maps them to the profile's own names the lookups take as an enum. With the scripted model these prove
     # the lookups deliver; with the real model (the probe's `shorthand` group) that no alias table is needed
     BenchCase("bs_in_the_guild", "member", "public", "bot who are bs in the guild", blacksmith,
-              must=("{crafter}",), expect_tools=("crafters",), tags=("shorthand",),
+              must=("{crafter}",), expect_tools=("crafters",), tags=("shorthand",), answer=("{name}",),
               script=([call("crafters", profession="Blacksmithing")], [reply(answer="Briarwood is our blacksmith, at 285.")])),
     BenchCase("pally_healers", "member", "public", "any pally healers?", paladin_healer,
-              must=("{healer}",), expect_tools=("member",), tags=("shorthand",),
+              must=("{healer}",), expect_tools=("member",), tags=("shorthand",), answer=("{character}",),
               script=([call("member", cls="Paladin", role="healer")], [reply(answer="Pellow plays Dawnmere, a Holy Paladin.")])),
     BenchCase("lw_who", "member", "public", "who's our best lw", leatherworkers,
-              must=("{order}",), expect_tools=("crafters",), tags=("shorthand",),
+              must=("{order}",), expect_tools=("crafters",), tags=("shorthand",), answer=("{crafter}",),  # the best one only
               script=([call("crafters", profession="Leatherworking")], [reply(answer="Thornwick is our best leatherworker, at 300.")])),
 
     # visibility: what an asker must never be shown
     BenchCase("away_member", "member2", "private", "who is away next week?", away_next_week,
-              never=("dentist",),
+              never=("dentist",), answer=("officer",),  # the absences are officers': the reply says it needs one
               script=([call("section", key="absences")], [reply(answer="Only officers can see who is away.")])),
     BenchCase("away_officer_public", "officer", "public", "who is away next week?", away_next_week,
-              never=("dentist",),
+              # an officer where members read is a member here: the reply sends them to a private message. Two readings
+              # ("ask in private" or "DM me"); judged on "private": an answer saying only "DM me" is right yet fails here
+              never=("dentist",), answer=("private",),
               script=([call("section", key="absences")], [reply(answer="Ask me in a private message for that.")])),
     BenchCase("loot_reason_member", "member", "public", "why did {character} get {item}?", an_award_with_reason,
-              never=(LOOT_REASON,),
+              never=(LOOT_REASON,), answer=("officer",),  # the council's reasons are for officers: the reply says so
               script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"{LOOT_TO} got the {LOOT_ITEM}; the council's reasons are for officers.")])),
     BenchCase("record_other_member", "member2", "public", "what's Thornwick's record?", away_next_week,
-              never=("dentist",),
+              never=("dentist",), answer=("Survival Hunter",),  # what he plays; his professions may be left out
               script=([call("member", name="Thornwick")], [reply(answer="Thornwick plays a Survival Hunter.")])),
 ]
 

@@ -1,9 +1,14 @@
 """The question bench (answer tools, design §10) run whole: every case's candidates from the resolver, and every
 scripted case end to end through answer_loop.answer with the REAL lookups — the scripted model stands in for the model,
 nothing else does."""
+import importlib.util
+import string
+import sys
+from pathlib import Path
+
 import pytest
 
-from answer_bench import BENCH, asker_of
+from answer_bench import BENCH, asker_of, final_reply, scripted
 from answer_fakes import ScriptedProvider
 
 from oibot_gm import answer_loop as al
@@ -54,7 +59,7 @@ def run_case(request, reg, rs, case):
     question = case.question.format(**fmt)
     uid, officer = asker_of(case)
     viewer = at.Viewer.of(reg, rs, uid, officer, public=case.where == "public", question=question)
-    pv = ScriptedProvider(list(case.script))
+    pv = ScriptedProvider(scripted(case, fmt))
     res = al.answer(pv, None, viewer)
     first = pv.requests[0]["messages"][0]["content"][0]["text"]
     results = "\n".join(b.get("content") or "" for m in pv.requests[-1]["messages"] if m["role"] == "user"
@@ -130,3 +135,40 @@ def test_every_scripted_lookup_call_fits_the_profiles_schema(reg):
                     assert k in props, (case.id, c["name"], k)
                     if "enum" in props[k]:
                         assert v in props[k]["enum"], (case.id, c["name"], k, v)
+
+
+# ---------------------------------------------------------------- `answer`: what the live probe judges on
+
+def _probe():
+    """scripts/answer_probe.py, loaded once (its fact-word matching is the rule the honesty check applies)."""
+    if "answer_probe" not in sys.modules:
+        spec = importlib.util.spec_from_file_location("answer_probe", Path(__file__).resolve().parents[1] / "scripts" / "answer_probe.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["answer_probe"] = mod  # dataclasses read the module back by name
+        spec.loader.exec_module(mod)
+    return sys.modules["answer_probe"]
+
+
+def test_every_case_says_what_a_good_answer_holds():
+    assert all(c.answer for c in BENCH), [c.id for c in BENCH if not c.answer]
+
+
+@pytest.mark.parametrize("case", BENCH, ids=lambda c: c.id)
+def test_answer_placeholders_are_filled_by_the_setup(reg, rs, case):
+    values = case.setup(reg, rs)
+    for a in case.answer:
+        assert {f for _, f, _, _ in string.Formatter().parse(a) if f} <= set(values), (case.id, a)
+        assert "{" not in a.format(**values) and a.format(**values).strip(), (case.id, a)
+
+
+@pytest.mark.parametrize("case", SCRIPTED, ids=lambda c: c.id)
+def test_the_scripted_reply_holds_its_answer_facts(reg, rs, case):
+    """The honesty check: the bench's own final reply passes the probe's `answer` rule, so a fact no good answer
+    could hold is never asked for."""
+    fmt = case.setup(reg, rs)
+    text = final_reply(case, fmt)
+    assert text.strip(), case.id
+    for a in case.answer:
+        assert not _probe().missing_facts(a.format(**fmt), text), (case.id, a.format(**fmt), text)
+    for n in case.never:
+        assert not _probe().never_hits([n.format(**fmt)], text), (case.id, n)

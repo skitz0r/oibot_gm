@@ -1,6 +1,7 @@
 """The live probe (answer tools, design §10) driven offline: scripts/answer_probe.main with the scripted stand-in in
 place of the real model — its table, its JSON, its exit codes, its temp-folder outputs (nothing under the repo's out/),
 the no-key exit, the budget stop, a 400 reported and carried past, and today's path beside the new one."""
+import dataclasses
 import importlib.util
 import json
 import os
@@ -46,17 +47,65 @@ def test_probe_scores_a_passing_case(work, capsys):
     assert "pass rate 1/1 (100%)" in text
     assert "tag shorthand: 0/0 (not run)" in text  # the owner's decision line is always printed
     r = res["runs"][0]
-    assert r["passed"] and r["ending"] == "answered" and r["requests"] == 1 and r["usage"]["cost"] == pytest.approx(0.001)
-    assert r["must_literal_missing"] == ["made by Thornwick (300)"]  # read as facts, not word for word
+    assert r["passed"] and r["judged"] and r["ending"] == "answered" and r["requests"] == 1 and r["usage"]["cost"] == pytest.approx(0.001)
+    assert r["answer_literal_missing"] == [] and r["answer_missing"] == []
     assert res["spend"] == pytest.approx(0.001) and res["totals"]["new · claude-sonnet-5"]["passed"] == 1
 
 
 def test_a_missing_fact_fails_with_its_reason(work, capsys):
     code, text, res = run(["--case", "ironfeather_breastplate"],
-                          ScriptedProvider([[reply(answer="**Thornwick** makes it.")]]), work, capsys)
+                          ScriptedProvider([[reply(answer="Nobody in the guild has that recipe yet.")]]), work, capsys)
     assert code == 1
-    assert "FAIL" in text and "lacks 300" in text and "UNDER THE MARK" in text
-    assert res["runs"][0]["must_missing"] == [{"must": "made by Thornwick (300)", "words": ["300"]}]
+    assert "FAIL" in text and "answer 'Thornwick' lacks thornwick" in text and "UNDER THE MARK" in text
+    assert res["runs"][0]["answer_missing"] == [{"fact": "Thornwick", "words": ["thornwick"]}]
+    assert res["runs"][0]["answer_literal_missing"] == ["Thornwick"]
+
+
+def test_a_skill_or_a_second_name_a_good_answer_leaves_out_does_not_fail_it(work, capsys):
+    """'who's our best lw' is answered by naming the best leatherworker: no skill, no second leatherworker, no member
+    — the bench's `must` (what the lookup delivered) is not what the probe judges."""
+    code, text, res = run(["--case", "lw_who"], ScriptedProvider([
+        [{"name": "crafters", "input": {"profession": "Leatherworking"}}], [reply(answer="Thornwick.")]]), work, capsys)
+    assert code == 0, text
+    assert res["runs"][0]["passed"] and "tag shorthand: 1/1" in text
+
+
+def test_a_skipped_lookup_is_reported_not_failed(work, capsys):
+    """The right answer from the start alone passes; the skipped lookup shows in the lookups column and the tag's count."""
+    code, text, res = run(["--case", "bs_in_the_guild"],
+                          ScriptedProvider([[reply(answer="Briarwood is our blacksmith.")]]), work, capsys)
+    assert code == 0, text
+    r = res["runs"][0]
+    assert r["passed"] and r["tools_missing"] == ["crafters"] and r["reasons"] == []
+    row = next(ln for ln in text.splitlines() if ln.startswith("bs_in_the_guild"))
+    assert "pass" in row and "-crafters" in row
+    assert "tag shorthand: 1/1 · an expected lookup skipped in 1" in text
+    assert "an expected lookup was skipped in 1 of 1 runs" in text
+    tot = res["totals"]["new · claude-sonnet-5"]
+    assert tot["lookups_skipped"] == 1 and tot["per_tag"]["shorthand"]["lookups_skipped"] == 1
+
+
+def test_a_case_without_answer_facts_is_not_judged(work, capsys, monkeypatch):
+    """A case naming no answer facts is shown 'n/j' and left out of the pass rate — never a pass."""
+    bench = [dataclasses.replace(c, answer=()) if c.id == "price" else c for c in probe.BENCH]
+    monkeypatch.setattr(probe, "BENCH", bench)
+    pv = ScriptedProvider([[reply(answer="Thornwick, 300.")], [reply(answer="Whatever it goes for.")]])
+    code, text, res = run(["--only", "ironfeather_breastplate", "--only", "price"], pv, work, capsys)
+    assert code == 0, text
+    judged, unjudged = res["runs"]
+    assert judged["passed"] and not unjudged["passed"] and not unjudged["judged"]
+    assert "pass rate 1/1 (100%) · not judged 1" in text
+    row = next(ln for ln in text.splitlines() if ln.startswith("price"))
+    assert "n/j" in row and "not judged" in text
+    tot = res["totals"]["new · claude-sonnet-5"]
+    assert tot["runs"] == 1 and tot["not_judged"] == 1 and tot["pass_rate"] == 1.0
+
+
+def test_nothing_judged_is_under_the_mark(work, capsys, monkeypatch):
+    monkeypatch.setattr(probe, "BENCH", [dataclasses.replace(c, answer=()) for c in probe.BENCH])
+    code, text, res = run(["--case", "price"], ScriptedProvider([[reply(answer="It goes for a lot.")]]), work, capsys)
+    assert code == 1 and "nothing judged" in text and "UNDER THE MARK" in text
+    assert res["totals"]["new · claude-sonnet-5"]["pass_rate"] is None
 
 
 def test_probe_fails_on_a_never_hit(work, capsys):
@@ -170,7 +219,7 @@ def test_compare_prints_two_columns_and_restores_the_route(work, capsys):
     route = dict(llm.ROUTES)
     code, text, res = run(["--case", "ironfeather_breastplate", "--model", "claude-sonnet-5", "--effort", "medium",
                            "--compare", "claude-sonnet-5-5"],
-                          ScriptedProvider([[reply(answer="Thornwick, 300.")], [reply(answer="Thornwick.")]]), work, capsys)
+                          ScriptedProvider([[reply(answer="Thornwick, 300.")], [reply(answer="Nobody can.")]]), work, capsys)
     assert res["configs"] == ["new · claude-sonnet-5", "new · claude-sonnet-5-5"] and res["effort"] == "medium"
     assert "== side by side" in text
     line = next(ln for ln in text.splitlines() if ln.startswith("ironfeather_breastplate") and "$" in ln and "/" in ln.split()[1])
