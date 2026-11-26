@@ -1608,3 +1608,11 @@ def test_me_page_says_when_the_event_link_matches_no_row():
     src = (SRC / "pages" / "Me.tsx").read_text()
     assert "meta.page_words.me_event_over" in src and "meta.page_words.me_event_over_tail" in src
     assert "finished or was cancelled" in PAGE_WORDS["me_event_over"] and "finished or was cancelled" not in src
+
+
+def test_tell_the_bot_preview_reply_keeps_its_line_breaks():
+    """Answer tools, Task 8 fix 2: the loop's answer in the preview frame carries "• choice" lines and a blank line
+    before its commands — the reply keeps line breaks, as the answer Alert does."""
+    src = (SRC / "components" / "TellTheBot.tsx").read_text()
+    line = next(ln for ln in src.splitlines() if "{p.reply &&" in ln)
+    assert 'whiteSpace: "pre-line"' in line, line

@@ -269,3 +269,30 @@ def test_the_system_text_says_what_to_do_when_the_bot_cannot_act(reg):
     text = st.system_text(None, reg.profile)
     assert st.CANNOT_ACT in text and text.count(st.CANNOT_ACT) == 1
     assert "never say a change was made" in st.CANNOT_ACT
+
+
+def test_acting_off_is_said_in_the_first_user_text_only_and_never_in_the_system_text(reg, rs, monkeypatch):
+    """Task 8 fix 2: with nothing changeable from this message (help_answer's may_act off) the start says so, per
+    request; acting on, the line is absent. The system text is the same string either way."""
+    monkeypatch.setattr(st, "_SYSTEM_CACHE", {})
+    on, off = viewer(reg, rs), viewer(reg, rs, may_act=False)
+    assert on.may_act is True and off.may_act is False
+    assert st.ACTING_OFF not in start(on)
+    text = start(off)
+    assert text.count(st.ACTING_OFF) == 1 and text.index(st.ACTING_OFF) < text.index("## Live events")
+    sent = []
+    for v in (on, off):
+        pv = ScriptedProvider([[reply(answer="Here.")]])
+        al.answer(pv, tree(), v)
+        sent.append(pv.requests[0])
+    assert sent[0]["system"] == sent[1]["system"] and st.ACTING_OFF not in sent[0]["system"]
+    first = lambda r: r["messages"][0]["content"] if isinstance(r["messages"][0]["content"], str) else str(r["messages"][0]["content"])  # noqa: E731
+    assert st.ACTING_OFF not in first(sent[0]) and st.ACTING_OFF in first(sent[1])
+    assert "never say a change was made" in st.ACTING_OFF
+
+
+def test_a_reply_that_still_acts_with_acting_off_ends_acts_off(reg, rs):
+    res = al.answer(ScriptedProvider([[reply(answer="I've marked you away.", acts=True)]]), tree(), viewer(reg, rs, may_act=False))
+    assert res.ending == "acts_off" and res.answer.acts is True
+    res = al.answer(ScriptedProvider([[reply(answer="I've marked you away.", acts=True)]]), tree(), viewer(reg, rs))
+    assert res.ending == "acts"

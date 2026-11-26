@@ -537,3 +537,309 @@ def test_site_box_a_change_missing_a_detail_keeps_its_question_and_its_follow_up
     turn = [{"request": "mark me away", "reply": d["reply"], "questions": d["questions"]}]
     c.post("/api/ops/change", json={"text": "friday to sunday", "conversation": turn}, headers=bearer())
     assert "mark me away" in seen[-1] and "Which dates?" in seen[-1]
+
+
+# ---------------------------------------------------------------- Task 8 fix 2
+
+def first_user_text(request) -> str:
+    content = request["messages"][0]["content"]
+    return content if isinstance(content, str) else json.dumps(content)
+
+
+def test_the_reask_is_told_acting_is_off_and_a_reply_that_still_acts_gets_its_words_alone(reg, rs, monkeypatch):
+    """(1) The re-ask's first user text says nothing can be changed from this message (the first answer's doesn't),
+    the system text is the same string, and a re-ask that still sets `acts` with words is posted as those words alone
+    (no commands, page or officer line appended) and counted in the answers log as ending acts_off."""
+    from oibot_gm import answer_start
+
+    switch(monkeypatch, True)
+    fake_parser(monkeypatch, ConfigRequest(kind="question", reply="the parser's line"))
+    says = "I've marked you away."
+    provider = ScriptedProvider([[reply(answer="Marking you away.", acts=True)],
+                                 [reply(answer=says, acts=True, commands=["/me absent add"], for_officer=True)]])
+    bot = owner_bot(reg, rs, provider)
+    msg, said = message(OWNER)
+    asyncio.run(bot.plain_text(msg, reg, "mark me away", GENERAL_CH))
+    assert [c for c, _ in said] == [says], "the words alone: nothing appended"
+    first, second = provider.requests
+    assert answer_start.ACTING_OFF not in first_user_text(first) and answer_start.ACTING_OFF in first_user_text(second)
+    assert first["system"] == second["system"] and answer_start.ACTING_OFF not in first["system"]
+    assert [r["ending"] for r in rows()] == ["acts", "acts_off"]
+    assert not reg.members[OWNER].absences
+
+
+def test_a_reask_that_still_acts_with_no_words_gets_the_fixed_sentence(reg, rs, monkeypatch):
+    switch(monkeypatch, True)
+    fake_parser(monkeypatch, ConfigRequest(kind="question", reply="the parser's line"))
+    provider = ScriptedProvider([[reply(answer="Marking you away.", acts=True)], [reply(answer="", acts=True, commands=["/me absent add"])]])
+    msg, said = message(OWNER)
+    asyncio.run(owner_bot(reg, rs, provider).plain_text(msg, reg, "mark me away", GENERAL_CH))
+    assert [c for c, _ in said] == [discord_help.ACTS_OFF_EMPTY]
+
+
+def test_switch_off_a_help_answer_with_acting_off_appends_as_today(reg, rs, monkeypatch):
+    """The twin: switch off, help.answer's `acts` with acting off is ignored and its commands are appended as today."""
+    from oibot_gm import help as help_mod
+
+    switch(monkeypatch, False)
+    bot = make_bot(reg, rs, ScriptedProvider([]))
+    monkeypatch.setattr(help_mod, "answer", lambda *a, **k: help_mod.HelpAnswer(answer="Use the command.", acts=True, commands=["/me absent add"]))
+    assert asyncio.run(bot.help_answer(reg, OWNER, True, "mark me away")) == "Use the command.\n\n`/me absent add`"
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_a_change_with_no_ops_and_no_questions_goes_to_the_loop(reg, monkeypatch, on):
+    """(2) kind=change with nothing in it: the parser's own words never reach a person alone (switch on); today's
+    line with the switch off."""
+    switch(monkeypatch, on)
+    log = []
+    asked, help_answer = recorder()
+    it = interaction(OWNER, log, help_answer=help_answer)
+    req = ConfigRequest(kind="change", reply="Done, you're away.", ops=[], questions=[])
+    asyncio.run(discord_policy.handle_change(it, reg, None, None, Feed(), "mark me away", bot=it.client, channel=GENERAL_CH, req=req))
+    if on:
+        assert log[-1][1] == "the loop's answer" and [a["may_act"] for a in asked] == [False] and asked[0]["entry"] == "change"
+    else:
+        assert not asked and log[-1][1] == "Done, you're away."
+
+
+def site_bot(reg, rs, monkeypatch, req):
+    from fastapi.testclient import TestClient
+    from test_mcp import TOKEN, bearer
+    from test_parity_verbs import Bot
+
+    from oibot_gm.web import app as web
+
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    bot = Bot(reg, rs)
+    bot.ctx = types.SimpleNamespace(provider=object())
+    asked = []
+
+    async def help_answer(reg_, uid, officer, text, **k):
+        asked.append(k)
+        return "the loop's answer"
+
+    bot.help_answer = help_answer
+    fake_parser(monkeypatch, req)
+    c = TestClient(web.create_app(bot))
+    return (lambda text: c.post("/api/ops/change", json={"text": text}, headers=bearer()).json()), asked
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_site_box_a_change_with_nothing_in_it_answers_from_the_loop(reg, rs, monkeypatch, on):
+    switch(monkeypatch, on)
+    post, asked = site_bot(reg, rs, monkeypatch, ConfigRequest(kind="change", reply="Done, you're away.", ops=[], questions=[]))
+    d = post("mark me away")
+    assert "token" not in d and not d["ops"]
+    if on:
+        assert d["reply"] == "the loop's answer" and asked == [{"may_act": False, "public": False, "link": False, "entry": "site"}]
+    else:
+        assert d["reply"] == "Done, you're away." and not asked
+
+
+def test_site_box_a_refused_change_keeps_its_refusals(reg, rs, monkeypatch):
+    """A change whose ops were all refused is not a bare change: its refusals stand, no loop."""
+    switch(monkeypatch, True)
+    req = ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="job", target="review")])
+    post, asked = site_bot(reg, rs, monkeypatch, req)
+    monkeypatch.setattr(configops, "authorize", lambda *a, **k: ([], ["Only the owner can run a job."]))
+    d = post("run the review")
+    assert d["refused"] == ["Only the owner can run a job."] and not asked and d["reply"] == ""
+
+
+def held_bot(reg, rs, provider):
+    bot = owner_bot(reg, rs, provider)
+    held = []
+
+    async def hold(req):
+        held.append(req)
+
+    return bot, held, hold
+
+
+@pytest.mark.parametrize("verdict", [ConfigRequest(kind="change", reply="", ops=[], questions=["Which dates?"]),
+                                     ConfigRequest(kind="change", reply="Sure.", ops=[], questions=[]),
+                                     ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="absence", start="2026-12-04", end="2026-12-06")])],
+                         ids=["questions-only", "nothing", "with-ops"])
+def test_an_overheard_change_is_held_whatever_it_carries(reg, rs, monkeypatch, verdict):
+    """(3) Listening, switch on: every change verdict goes to `hold` (👀 only) — nothing is posted in the channel."""
+    switch(monkeypatch, True)
+    fake_parser(monkeypatch, verdict)
+    bot, held, hold = held_bot(reg, rs, ScriptedProvider([[reply(answer="Marking you away.", acts=True)]]))
+    msg, said = message(OWNER)
+    asyncio.run(bot.plain_text(msg, reg, "mark me away", GENERAL_CH, hold=hold, entry="listen"))
+    assert said == [] and held == [verdict]
+    assert not conversation.recall(reg, GENERAL_CH, OWNER), "nothing said, nothing kept"
+
+
+def test_an_overheard_question_verdict_is_answered_by_the_loop(reg, rs, monkeypatch):
+    """(3, 9) Listening, switch on: the parser's question verdict is answered by the loop, as an overheard question is."""
+    switch(monkeypatch, True)
+    crafter(reg)
+    fake_parser(monkeypatch, ConfigRequest(kind="question", reply=PARSER_SAYS, questions=["Which recipe?"]))
+    bot, held, hold = held_bot(reg, rs, ScriptedProvider([[reply(answer="Changing it.", acts=True)], [reply(answer=LOOP_SAYS)]]))
+    msg, said = message(OWNER)
+    asyncio.run(bot.plain_text(msg, reg, "who can make ironfeather breastplate", GENERAL_CH, hold=hold, entry="listen"))
+    assert [c for c, _ in said] == [LOOP_SAYS] and held == []
+    assert [r["entry"] for r in rows()] == ["listen", "listen"]
+
+
+def test_switch_off_an_overheard_change_asking_a_detail_posts_its_question_as_today(reg, rs, monkeypatch):
+    switch(monkeypatch, False)
+    fake_parser(monkeypatch, ConfigRequest(kind="change", reply="", ops=[], questions=["Which dates?"]))
+    bot, held, hold = held_bot(reg, rs, ScriptedProvider([]))
+
+    async def old_help(*a, **k):
+        return discord_help.ACT
+
+    bot.help_answer = old_help
+    msg, said = message(OWNER)
+    asyncio.run(bot.plain_text(msg, reg, "mark me away", GENERAL_CH, hold=hold))
+    assert [c for c, _ in said] == ["\n• Which dates?"] and held == []
+
+
+def test_an_overheard_change_from_someone_outside_the_ask_audience_is_held(reg, rs, monkeypatch):
+    """plain_text's own parse (may act, may not ask): a change verdict asking a detail is held, not answered with the guide."""
+    switch(monkeypatch, True)
+    member = reg.test_members()[0]
+    reg.config.ask_audience = "confirmed"
+    reg.config.plain.channels[str(GENERAL_CH)] = "self"
+    monkeypatch.setattr(type(reg), "may_ask", lambda self, uid, officer: False)
+    monkeypatch.setattr(type(reg), "may_plain", lambda self, *a, **k: None)
+    verdict = ConfigRequest(kind="change", reply="", ops=[], questions=["Which dates?"])
+    fake_parser(monkeypatch, verdict)
+    bot, held, hold = held_bot(reg, rs, ScriptedProvider([]))
+    msg, said = message(member.discord_id)
+    asyncio.run(bot.plain_text(msg, reg, "mark me away", GENERAL_CH, hold=hold, entry="listen"))
+    assert said == [] and held == [verdict]
+    switch(monkeypatch, False)  # the twin: today the guide is posted
+    msg, said = message(member.discord_id, mid=8000)
+    asyncio.run(bot.plain_text(msg, reg, "mark me away", GENERAL_CH, hold=hold))
+    assert [c for c, _ in said] == [discord_help.guide_intro(reg)] and held == [verdict]
+
+
+def test_a_listened_message_in_an_act_channel_is_logged_as_listen(reg, monkeypatch):
+    """(8) plain_text's act branch passes the entry through: an overheard question there is answered as `listen`."""
+    switch(monkeypatch, True)
+    reg.config.plain.channels[str(ACT_CH)] = "act"
+    fake_parser(monkeypatch, ConfigRequest(kind="question", reply="Which event?"))
+
+    async def plain_identity(reg_, user, **_):
+        return True, []
+
+    asked, help_answer = recorder()
+    bot = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=Feed(),
+                                plain_identity=plain_identity, help_answer=help_answer, raids=None, reply_private=lambda r, ch: False)
+
+    async def hold(req):
+        raise AssertionError("a question is never held")
+
+    msg, said = message(OWNER, cid=ACT_CH)
+    asyncio.run(db.OibotGM.plain_text(bot, msg, reg, "who is rostered?", ACT_CH, hold=hold, entry="listen"))
+    assert [c for c, _ in said] == ["the loop's answer"] and asked[0]["entry"] == "listen"
+    msg, said = message(OWNER, cid=ACT_CH, mid=9000)  # an @mention there still names the act channel
+    asyncio.run(db.OibotGM.plain_text(bot, msg, reg, "who is rostered?", ACT_CH))
+    assert asked[1]["entry"] == "act"
+
+
+def test_the_reask_carries_the_judged_memory(reg, rs, monkeypatch):
+    """(5) The memory block the first answer had is in the re-ask's user text too."""
+    from oibot_gm import memory as mem
+
+    switch(monkeypatch, True)
+    fake_parser(monkeypatch, ConfigRequest(kind="question", reply="the parser's line"))
+    block = "<memory>\nMira said the raid moved to Thursday.\n</memory>"
+    monkeypatch.setattr(mem, "memory_block", lambda cands, tz=None: block if cands else "")
+    provider = ScriptedProvider([[reply(answer="Moving it.", acts=True)], [reply(answer="It moved to Thursday.")]])
+    msg, said = message(OWNER)
+    asyncio.run(owner_bot(reg, rs, provider).plain_text(msg, reg, "move the raid", GENERAL_CH, memory=[object()]))
+    assert [c for c, _ in said] == ["It moved to Thursday."]
+    assert all("Mira said the raid moved" in first_user_text(r) for r in provider.requests)
+
+
+def test_the_guide_reply_carries_apply_to_join_for_a_newcomer(reg, monkeypatch):
+    """(7) handle_change's guide (switch on, outside the ask audience) offers Apply to join, as plain_text's does."""
+    switch(monkeypatch, True)
+    log = []
+    _asked, help_answer = recorder(answer=None)
+
+    async def go():
+        it = interaction(42, log, help_answer=help_answer)
+        req = ConfigRequest(kind="question", reply="parser's short line")
+        await discord_policy.handle_change(it, reg, None, None, Feed(), "x?", bot=it.client, channel=GENERAL_CH, req=req)
+
+    asyncio.run(go())
+    _kind, content, kw = log[-1]
+    assert content == discord_help.guide_intro(reg)
+    assert [getattr(c, "custom_id", None) for c in kw["view"].children] == [f"guide.{reg.key}:menu", f"reg.{reg.key}:apply"]
+
+
+# ---------------------------------------------------------------- /ask keeps its answer private (4, 9)
+
+PRIVATE_CH, OTHER_CH = 920_101, 920_102
+
+
+def guild_ask(reg, bot, monkeypatch):
+    from discord import app_commands
+
+    async def identity(interaction, reg_):
+        return interaction.user.id == OWNER, []
+
+    monkeypatch.setattr(discord_help, "asker_identity", identity)
+    tree = app_commands.CommandTree(discord.Client(intents=discord.Intents.none()))
+    discord_help.register_help_commands(tree, types.SimpleNamespace(for_interaction=lambda i: reg), None, bot)
+    said = []
+
+    async def send(content=None, **kw):
+        said.append(content)
+
+    async def defer(**kw):
+        pass
+
+    def at(uid, cid):
+        return types.SimpleNamespace(guild_id=1, guild=types.SimpleNamespace(id=1), channel_id=cid, channel=types.SimpleNamespace(id=cid, guild=object()),
+                                     user=types.SimpleNamespace(id=uid, display_name="Oak"), client=bot,
+                                     response=types.SimpleNamespace(send_message=send, defer=defer), followup=types.SimpleNamespace(send=send))
+
+    return {c.name: c for c in tree.get_commands()}["ask"], at, said
+
+
+def test_ask_where_others_read_recalls_but_never_remembers_its_answer(reg, rs, monkeypatch):
+    switch(monkeypatch, True)
+    secret = "Your absence reason is the dentist."
+    provider = ScriptedProvider([[reply(answer=secret)], [reply(answer="Next event is Friday.")], [reply(answer="Asked back.")]])
+    bot = owner_bot(reg, rs, provider)
+    ask, at, said = guild_ask(reg, bot, monkeypatch)
+    asyncio.run(ask.callback(at(OWNER, GENERAL_CH), "why am I away?"))
+    assert said == [secret]
+    assert not conversation.recall(reg, GENERAL_CH, OWNER), "a channel others read: the /ask answer stays out of its ring"
+    msg, _said = message(OWNER)
+    asyncio.run(bot.plain_text(msg, reg, "when is the next event?", GENERAL_CH))
+    assert "dentist" not in first_user_text(provider.requests[1]) and "why am I away" not in first_user_text(provider.requests[1])
+    # it still recalls: the public exchange just made reaches a following /ask there
+    asyncio.run(ask.callback(at(OWNER, GENERAL_CH), "and after that?"))
+    assert "when is the next event?" in first_user_text(provider.requests[2])
+    assert [ex.request for ex in conversation.recall(reg, GENERAL_CH, OWNER)] == ["when is the next event?"]
+
+
+def test_ask_where_replies_are_private_remembers_and_never_feeds_another_channel(reg, rs, monkeypatch):
+    switch(monkeypatch, True)
+    provider = ScriptedProvider([[reply(answer="Your reason is the dentist.")], [reply(answer="Friday.")]])
+    bot = owner_bot(reg, rs, provider)
+    bot.reply_private = lambda reg_, ch: ch is None or getattr(ch, "id", None) == PRIVATE_CH
+    ask, at, said = guild_ask(reg, bot, monkeypatch)
+    asyncio.run(ask.callback(at(OWNER, PRIVATE_CH), "why am I away?"))
+    assert [ex.request for ex in conversation.recall(reg, PRIVATE_CH, OWNER)] == ["why am I away?"]
+    msg, _said = message(OWNER, cid=OTHER_CH)
+    asyncio.run(bot.plain_text(msg, reg, "when is the next event?", OTHER_CH))
+    assert "dentist" not in first_user_text(provider.requests[1]), "channel A never feeds channel B"
+    assert not any(ex.request == "why am I away?" for ex in conversation.recall(reg, OTHER_CH, OWNER))
+
+
+def test_ask_in_a_dm_remembers(reg, rs, monkeypatch):
+    switch(monkeypatch, True)
+    bot = owner_bot(reg, rs, ScriptedProvider([[reply(answer="Friday.")]]))
+    ask, dm, said = ask_tree(reg, bot)
+    asyncio.run(ask.callback(dm(OWNER), "when is the next event?"))
+    assert said == ["Friday."] and [ex.request for ex in conversation.recall(reg, None, OWNER)] == ["when is the next event?"]

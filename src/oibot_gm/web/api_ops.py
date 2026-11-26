@@ -313,9 +313,11 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         from ..answer_loop import enabled as answers_on
 
         answer_fn = getattr(bot, "help_answer", None)
-        if req.kind == "question" and not req.ops and answer_fn is not None and answers_on(v.reg.key):
+        bare_change = req.kind == "change" and not req.ops and not req.questions and not refused  # nothing to show but its words
+        if (req.kind == "question" or bare_change) and not req.ops and answer_fn is not None and answers_on(v.reg.key):
             # the switch on (design §8): the parser's words never answer a question — the help answer does, once,
-            # with acting off; the box prints `reply` as it always has
+            # with acting off; the box prints `reply` as it always has. A change with nothing in it (no ops, no
+            # question, no refusal) is answered the same way
             try:
                 ans = await answer_fn(v.reg, v.uid, bool(v.officer), text, may_act=False, public=False, link=False, entry="site",
                                       **({"conversation": convo} if convo else {}))

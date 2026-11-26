@@ -1340,8 +1340,9 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         officer, role_ids = await self.plain_identity(reg, message.author)
         provider, ps = self.ctx.provider, self.policies.store(reg)
         if mode == "act" and provider is not None:
-            async with message.channel.typing():
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, **hold_kw)
+            async with message.channel.typing():  # the answers log's entry: listening names itself, else the act channel
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, **hold_kw,
+                                    **(answer_loop.entry_kw(reg.key, entry) if entry else {}))
             return
         # the snapshot and the parser context follow who can READ the reply: an officer asking where members read it
         # gets the member view (help_answer adds where the officer view is)
@@ -1363,7 +1364,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
                 except Exception as e:  # noqa: BLE001 — the model being down is a reply + an ops error, never silence
                     await message.reply(await configops.report_error(self.ops, reg.config, e, "plain-text parse"), allowed_mentions=quiet)
                     return
-                if req.kind == "change" and req.ops:
+                # overheard with the answer tools on: any change verdict is held (👀 only), the questions-only one too
+                if req.kind == "change" and (req.ops or (hold is not None and answer_loop.enabled(reg.key))):
                     await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req, conversation=convo, **hold_kw)
                 else:
                     await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
@@ -1373,8 +1375,10 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             mem_kw = {"memory": mem.memory_block(memory, mem.guild_tz(reg))} if memory else {}
             entry_kw = answer_loop.entry_kw(reg.key, entry or ("mention" if message.guild else "dm"))  # the answers log's entry point
             answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw, **entry_kw)
-            if answer == HELP_ACT:  # the parser's question verdict comes back to the loop as this entry (switch on only)
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, **hold_kw, **entry_kw)
+            if answer == HELP_ACT:  # the parser's question verdict comes back to the loop as this entry (switch on only),
+                # with the judged memory the first answer had
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, **hold_kw, **entry_kw,
+                                    **(mem_kw if entry_kw else {}))
                 return
         if answer is None:  # outside the ask audience: static guide only
             await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)

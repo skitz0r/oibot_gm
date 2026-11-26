@@ -104,7 +104,7 @@ export function TellTheBot({ scope = "rail", prefill = "", guild = "", placehold
       {st.note && <Alert variant="light" color="blue" p="xs"><Text size="sm">{st.note}</Text></Alert>}
       {p && (
         <Stack gap="xs" p="xs" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8 }}>
-          {p.reply && <Text size="sm">{p.reply}</Text>}
+          {p.reply && <Text size="sm" style={{ whiteSpace: "pre-line" }}>{p.reply}</Text>}
           {(p.questions || []).map((q, i) => <Text key={i} size="sm" c="yellow">{q}</Text>)}
           {p.described ? <DescribedView d={p.described} /> : (p.describe || []).map((l, i) => <Text key={i} size="sm">• {l}</Text>)}
           {!p.described && (p.refused || []).map((r, i) => <Text key={`r${i}`} size="sm" c="red">⛔ {r}</Text>)}

@@ -421,7 +421,7 @@ def _reply_private(bot, reg: Registry, message: discord.Message) -> bool:
 
 async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.PolicyStore, provider, ops: Ops, text: str, *, bot, channel,
                         req: configops.ConfigRequest | None = None, to_help: bool | None = None, conversation: str | None = None,
-                        hold=None, entry: str = "act"):
+                        hold=None, entry: str = "act", memory: str | None = None):
     """Shared by /gm change, @mentions and DMs. `interaction_or_message` is an Interaction (deferred) or a Message;
     `channel`: where it was asked (channel id, None = DMs) — Registry.may_plain decides per op what may act there;
     `req`: an already parsed request (the router parsed first). Refused ops are listed; the rest can still apply.
@@ -437,7 +437,10 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     answer tools' switch on for the guild (answer_loop.enabled, design §8) the parser never answers a question: its
     verdict `question` with no ops — with or without questions of its own, whatever `to_help` says — goes to
     bot.help_answer once with acting off, and that answer is what the person reads. Its verdict `change` keeps
-    everything, its questions for a missing detail included."""
+    everything, its questions for a missing detail included — but a `change` with no ops and no questions is a
+    question too (the parser's own words never reach a person alone). Overheard (`hold`), every `change` verdict is
+    held, the questions-only one included; an overheard question is answered by the loop. `memory`: the judged
+    <memory> block the first answer had, carried into the re-ask (switch on only)."""
     from . import conversation as conv_mod
 
     is_msg = isinstance(interaction_or_message, discord.Message)
@@ -482,15 +485,22 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         to_help = not is_msg or reg.plain_mode(channel) == "act"
     from .answer_loop import enabled as answers_on
 
-    if req.kind == "question" and not req.ops and answers_on(reg.key) and getattr(bot, "help_answer", None) is not None:
+    loop_on = answers_on(reg.key) and getattr(bot, "help_answer", None) is not None
+    if loop_on and hold is not None and req.kind == "change":
+        # overheard (switch on): a change is never answered in the channel — with ops, or asking for a missing detail,
+        # or neither; 👀 only, and the writer's click brings it back here with `req`
+        await hold(req)
+        return
+    if loop_on and not req.ops and (req.kind == "question" or (req.kind == "change" and not req.questions)):
         # the switch on (design §8): the parser's words never answer a question — the loop does, once, with acting off
         # (so it can't hand the message back here); outside the ask audience the static guide, never the parser's line
-        where = "change" if not is_msg else "act" if reg.plain_mode(channel) == "act" else entry
-        answer = await bot.help_answer(reg, author.id, officer, text, may_act=False, public=public, **conv_kw, entry=where)
+        where = "change" if not is_msg else entry
+        answer = await bot.help_answer(reg, author.id, officer, text, may_act=False, public=public, **conv_kw,
+                                       **({"memory": memory} if memory else {}), entry=where)
         if not answer:
-            from .discord_help import guide_intro, guide_view
+            from .discord_help import apply_view, guide_intro, guide_view
 
-            await send(guide_intro(reg), view=guide_view(reg), ephemeral=True)
+            await send(guide_intro(reg), view=apply_view(reg, author.id, officer=officer, role_ids=role_ids, base=guide_view(reg)), ephemeral=True)
             return
         keep(await send(answer[:1950], ephemeral=True), answer[:1950])
         return

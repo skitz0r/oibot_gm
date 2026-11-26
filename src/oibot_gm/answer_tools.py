@@ -75,16 +75,17 @@ class Viewer:
     extras: help_mod.HelpExtras | None = None
     data: str | None = None
     name: str = ""  # the asker's name as Discord shows it, for an asker with no record (the start's asker line)
+    may_act: bool = True  # False: nothing can be changed from this message (help_answer's may_act); the start says so
 
     @classmethod
     def of(cls, reg, rs, user_id: int, officer: bool, *, public: bool, question: str, extras=None, data=None,
-           name: str = "") -> "Viewer":
+           name: str = "", may_act: bool = True) -> "Viewer":
         """help.guild_state's rule, exactly: the level follows who can READ the reply, not who asked."""
         audience_public = bool(public)
         public = bool(public and officer)
         officer = bool(officer and not public)
         return cls(reg, rs, int(user_id), officer, public, audience_public, bool(reg.is_owner_id(user_id)),
-                   question or "", extras, data, str(name or ""))
+                   question or "", extras, data, str(name or ""), bool(may_act))
 
     def ask(self) -> help_mod.Ask:
         """The same fields as help.Ask, for the snapshot's section builders."""

@@ -61,7 +61,7 @@ FINAL_NUDGE = "This is the last step: call reply now with the answer, or with ch
 KIND_PAGE = {"recipe": "professions", "profession": "professions", "item": "prices", "member": "members",
              "character": "members", "raid": "raids", "schedule": "schedules", "command": "help", "manual": "help"}
 
-Ending = Literal["answered", "asked", "acts", "cap", "budget", "error"]
+Ending = Literal["answered", "asked", "acts", "acts_off", "cap", "budget", "error"]
 USAGE_KEYS = ("input", "output", "cache_read", "cache_write", "cost")
 
 
@@ -276,7 +276,8 @@ def answer(provider, tree, viewer: Viewer, *, conversation: str | None = None, m
     start (answer_start.user_text) under the constant system text, then the loop — inside for_guild, so every usage
     row is the guild's. What help_answer hands help.answer today travels in the Viewer (who asks, where the reply is
     read, the question, the bot-side extras and the loot council's data); `conversation` / `memory` as help.answer
-    takes them. BLOCKING: callers run it in a thread. Never raises (run's endings; a failure before the first request
+    takes them. `viewer.may_act` off: the start says nothing can be changed from this message, and a reply that still
+    sets `acts` ends "acts_off". BLOCKING: callers run it in a thread. Never raises (run's endings; a failure before the first request
     ends "error" with ANSWER_FAILED)."""
     from .answer_names import resolve
     from .answer_start import system_text, user_text
@@ -292,5 +293,8 @@ def answer(provider, tree, viewer: Viewer, *, conversation: str | None = None, m
             log.exception("answer start failed")
             return AnswerResult(HelpAnswer(answer=ANSWER_FAILED), "error", 0, 0, [], {**{k: 0 for k in USAGE_KEYS}, "cost": 0.0},
                                 type(e).__name__)
-        return run(provider, system, first, viewer, known_kind=matches[0].kind if matches else None,
-                   names=[m.name for m in matches])
+        result = run(provider, system, first, viewer, known_kind=matches[0].kind if matches else None,
+                     names=[m.name for m in matches])
+        if result.ending == "acts" and not viewer.may_act:  # told nothing can change here, and it still said it acts:
+            result.ending = "acts_off"  # the answers log counts it (help_answer posts the words alone, never ACT)
+        return result

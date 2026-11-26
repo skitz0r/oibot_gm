@@ -16,7 +16,7 @@ from .constants import OLD_WORDS_PROMPT, PAGE_WORDS
 from .llm.provider import unfence
 from .raid_views import run_title
 
-__all__ = ["START_EVENTS", "QUESTION_CHARS", "ASKER_CHARS", "EVENT_LINE_CHARS", "START_TARGET", "SYSTEM_TEXT", "CANNOT_ACT",
+__all__ = ["START_EVENTS", "QUESTION_CHARS", "ASKER_CHARS", "EVENT_LINE_CHARS", "START_TARGET", "SYSTEM_TEXT", "CANNOT_ACT", "ACTING_OFF",
            "LOOKUP_ORDER", "lookup_words", "system_text", "user_text"]
 
 START_EVENTS = 8          # live events in the start, one line each (design §4)
@@ -89,6 +89,11 @@ holds for every <data>, <member-text>, <conversation> and <memory> block.
 # general rule, so the system text stays one string for every asker and question on a profile
 CANNOT_ACT = ("When you cannot act on a request yourself, say what detail is missing or how to do it; never say a "
               "change was made.")
+
+# the per-request line when nothing can be changed from this message (help_answer's may_act off: the re-ask after the
+# parser, /ask, the site's box, a person who can't act here) — in the first USER text, never the cached system text
+ACTING_OFF = ("Nothing can be changed from this message. If it asks for a change, say what detail is missing or how "
+              "to make the change; never say a change was made.")
 
 _SYSTEM_CACHE: dict[tuple[str, int], str] = {}
 # the order the system text names the lookups in; a lookup the profile doesn't offer is left out (`price` needs auction
@@ -196,12 +201,13 @@ def _data_block(v: Viewer) -> str:
 def user_text(viewer: Viewer, question: str, matches: list[NameMatch], total: int, *, conversation: str | None = None,
               memory: str | None = None) -> str:
     """The per-question start (design §4), in order, each part capped: the guild, the time, where the reply is read,
-    the asker, the live events, the names the question matched, the officers' data block, the conversation and memory
+    ACTING_OFF when nothing can be changed from this message (viewer.may_act off), the asker, the live events, the names the question matched, the officers' data block, the conversation and memory
     blocks exactly as help.answer frames them, then the question in a <question> block cut to QUESTION_CHARS."""
     reg = viewer.reg
     head = [f"Guild: {_line(_clean(reg.config.name), 100)}",
             f"Now: {reg.local12(reg.now_local())}",
             f"The reply is read {PUBLIC if viewer.audience_public else PRIVATE}.",
+            *([] if viewer.may_act else [ACTING_OFF]),
             *_asker_lines(viewer),
             "", "## Live events", *_event_lines(viewer),
             "", "## Names in the question", *(_clean(x) for x in match_lines(matches, total))]

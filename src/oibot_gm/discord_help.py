@@ -281,11 +281,31 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         convo = conversation.context_block(conversation.recall(reg, channel, uid))
         text = await bot.help_answer(reg, uid, officer, question, entry="ask", **({"conversation": convo} if convo else {}))
         await interaction.followup.send(text, ephemeral=True)
-        if text:  # the reply is ephemeral: no message id to reply to, the same person here within the window continues it
+        # the reply is ephemeral and built for the asker alone (an officer's view, their own private details): it joins
+        # the place's ring only where the place itself is private (a DM, a channel only officers read) — elsewhere a
+        # later public @mention would carry it. It still recalls above, so a question it asked back can be followed up.
+        if text and ask_private(bot, reg, interaction):  # no message id to reply to: the same person here continues it
             conversation.remember(reg, channel, uid, question, text)
 
 
+def ask_private(bot, reg, interaction) -> bool:
+    """Is the place /ask was used in private — a DM, or a channel where replies are private (HelpMixin.reply_private,
+    the predicate plain_text's `public` reads)? Anything unknown counts as public."""
+    if interaction.guild_id is None:
+        return True
+    channel = getattr(interaction, "channel", None)
+    check = getattr(bot, "reply_private", None)
+    if channel is None or getattr(channel, "guild", None) is None or check is None:
+        return False
+    try:
+        return bool(check(reg, channel))
+    except Exception:  # noqa: BLE001 — can't tell: public
+        return False
+
+
 ACT = "\x00act"  # help_answer's "this was a request to do something" (never shown)
+# what a person reads when the answer tools' reply, with acting off, says it acts and has no words of its own
+ACTS_OFF_EMPTY = "I can't make that change from this message. Name what should change, or use the slash commands or the site."
 
 
 def _bot_role(role) -> bool:
@@ -473,7 +493,8 @@ class HelpMixin:
                     from .answer_tools import Viewer
 
                     viewer = Viewer.of(reg, rs, user_id, officer, public=audience_public, question=question, extras=extras,
-                                       data=data if officer and not public else None, name=self._asker_name(reg, user_id))
+                                       data=data if officer and not public else None, name=self._asker_name(reg, user_id),
+                                       may_act=may_act)
                     result = await asyncio.to_thread(answer_loop.answer, provider, self.tree, viewer, conversation=conversation, memory=memory)
                 else:
                     ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, audience_public,
@@ -496,6 +517,9 @@ class HelpMixin:
             ans = result.answer
         if may_act and ans.acts:
             return ACT
+        if loop_on and ans.acts:  # acting off, and the reply still says it acts: its words alone, nothing appended
+            log.info("help answer: the reply said it acts with acting off in %s (%s)", reg.key, entry)
+            return ans.answer.strip()[:1950] or ACTS_OFF_EMPTY
         text = ans.answer.strip()
         if ans.commands:
             text += "\n\n" + " · ".join(f"`{c}`" for c in ans.commands[:4])
