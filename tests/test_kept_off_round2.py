@@ -49,7 +49,7 @@ def test_after_the_lock_automatic_asks_never_ask_a_name_kept_off(reg, rs):
     assert off.discord_id not in who and other.discord_id in who, "the other benched joiners are asked, the kept-off one never"
     sent, _ = rc.send_batch(plan)
     assert off.discord_id not in {a.discord_id for a in sent}
-    assert rc.fill_state_text(reg, ev) == "5 seats are open. Automatic asks will ask for them."
+    assert rc.fill_state_text(reg, ev) == "5 seats are open. Automated Fill Requests will ask for them."
 
 
 def test_before_the_lock_a_kept_off_joiner_is_neither_counted_nor_suggested(reg, rs):

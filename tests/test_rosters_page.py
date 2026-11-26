@@ -138,7 +138,7 @@ def test_the_run_vocabulary_reaches_the_site_from_python(c):
     for k in ("preview_lock", "lock", "fill", "suggest", "loot", "end", "reopen", "remind", "pause", "place_rest"):
         assert m["run_labels"][k], k
     assert (m["run_labels"]["fill"], m["run_labels"]["remind"], m["run_labels"]["pause"], m["run_labels"]["end"]) == (
-        "Fill seats…", "Remind the unanswered", "Pause automatic asks", "End the event")
+        "Fill seats…", "Remind the unanswered", "Pause Automated Fill Requests", "End the event")
     assert m["marks"]["yes"] == {"mark": MARK["yes"], "words": MARK_WORDS["yes"]} and m["marks"]["waiting"]["mark"] == MARK[None]
     assert m["ask_kinds"] == rc.ASK_HOW and m["ask_answers"]["waiting"] == rc.ASK_ANSWER_WORDS[None]
     assert m["level_words"] == {"green": "ready", "amber": "thin", "red": "short"}
@@ -168,7 +168,7 @@ def test_the_fill_state_reads_in_sentences(reg, rs):
         text = rc.fill_state_text(reg, ev)
         assert text[0].isupper() and text.endswith(".") and "engine" not in text and "fill:" not in text, text
     ev.autofill_paused, ev.autofill_paused_by = True, "Jon"
-    assert rc.fill_state_text(reg, ev).startswith("Automatic asks paused by Jon. ") and "autofill" not in rc.fill_state_text(reg, ev).lower()
+    assert rc.fill_state_text(reg, ev).startswith("Automated Fill Requests are paused by Jon. ") and "autofill" not in rc.fill_state_text(reg, ev).lower()
     rc.end_run(reg, rs, ev, "t")
     assert rc.fill_state_text(reg, ev) == "The event is finished."
 
@@ -262,7 +262,7 @@ def test_board_moves_after_the_lock_on_a_run_with_confirmations(reg, rs):
     assert "bench is asked" not in sub and "Ivy is told" not in sub, "the substitute takes the seat: nobody else is asked, Ivy is never DMed"
     assert "The bench is asked to fill it." in said("release", reg, ev)
     ev.autofill_paused = True
-    assert "Automatic asks are paused, so the seat waits for Fill seats." in said("release", reg, ev)
+    assert "Automated Fill Requests are paused, so the seat waits for Fill seats." in said("release", reg, ev)
     # Remind: who gets the card again, who waits on the site
     seated[0].dm_opt_out = True
     reg.save(seated[0], "dms off")

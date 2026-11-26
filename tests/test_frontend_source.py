@@ -1678,6 +1678,9 @@ def test_each_sheet_timing_switch_carries_the_servers_help():
     assert (rc.FILL_OVERASK, rc.FILL_MAX_OPEN) == (1, 3) and "one more person than there are open seats, up to three at once" in help_["autofill"], \
         "the help says the fill engine's over-ask and cap as they are"
     assert "confirming a fill request isn't asked again" in help_["confirm"]
+    # the cleanup after issue #13: the switch names itself, and its select reads as a phrase ("as long as An ask waits")
+    assert f"with {F['autofill']} off" in help_["autofill"] and "with this off" not in help_["autofill"]
+    assert f"no answer for as long as {F['fill_ask_hours']}, asks the next person" in help_["autofill"]
     assert set(help_) == {"nudge", "confirm", "autofill", "open_dm"}
     for k, text in help_.items():
         sentences = [x for x in text.split(". ") if x]
@@ -1768,3 +1771,13 @@ def test_the_event_board_draws_a_bench_section_from_the_servers_words():
     assert "bench?: Seat[]" in api
     assert 'zone("bench", () => drop("bank"))' in view, "a name dropped on the Bench section goes back to the bank"
     assert "bench_note" not in view and "bench_empty" not in view, "no filler text on the board (the owner)"
+
+
+def test_a_bench_names_move_to_says_bench():
+    """The cleanup after issue #13: before the lock a placed Bench answer's ⋮ Move to… names its way back with the
+    server's Bench word (run_words.bank.bench), since the name lands in the Bench section, not Not placed. Who is a Bench
+    answer comes from the sheet's own signups (status "sub"); a joiner, and any name once locked, keep the bank's word."""
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    moves = view[view.index("const movesFor"):view.index("const swapWith")]
+    assert 'answers[name] === "sub"' in view and "words.bank.bench" in moves, moves
+    assert "event && !locked" in moves, "a locked board has no Bench section: its bank word stays"

@@ -76,9 +76,10 @@ understands; it answers in the words below.
     make it (later raids of the event never ask). With DMs off the ask waits on their Me page, and a seat unanswered
     by **Confirm by** is freed. Someone who takes a seat by confirming a fill request isn't asked again. With it off,
     the roster stands as locked and nobody is asked.
-  - **Automated Fill Requests** — after the lock, the bot DMs players of each open seat's role, bench first, then
-    anyone with no answer. It asks one more person than there are open seats, up to three at once. The first Confirm
-    takes the seat, and Can't make it or no answer within **An ask waits** asks the next. A role switch waits for an officer, and with it off officers fill seats from **More › Fill seats…**.
+  - **Automated Fill Requests** — after the lock, the bot DMs players of each open seat's role, the bench first, then
+    anyone with no answer. It asks one more person than there are open seats, up to three at once, and the first
+    Confirm wins. Can't make it, or no answer for as long as **An ask waits**, asks the next person. A role switch waits
+    for an officer; with Automated Fill Requests off, officers use **More › Fill seats…**.
   - **Sheet Opening DM** (the Schedules page only) — when the sheet opens, each regular gets a DM with their answer so
     far and the sheet's buttons, and when the roster locks. With no regulars yet, every member gets it, and nobody
     with DMs off is sent one.
@@ -122,7 +123,7 @@ understands; it answers in the words below.
 - **Suggest… / Fill seats…** — the same screen under two names, on the site and in Discord: **Suggest…** before the
   lock (who could cover a tank or healer minimum — a yes changes their signup, nobody is seated until the lock) and
   **Fill seats…** after it (who to ask for an open place). Both show exactly the DMs **Send** will send. **Pause
-  automatic asks** stops the bot asking anyone on its own for that event; an officer's own Fill seats… still sends.
+  Automated Fill Requests** stops the bot asking anyone on its own for that event; an officer's own Fill seats… still sends.
 - **Schedule** — when a raid is played: weekly nights, days of each lockout, or opened by an officer, with its own sheet
   timing. Each schedule has an **id** of its own across the guild (*barrow-deeps*, *tuesday*), so one id always names one
   schedule. A raid has no event times of its own: its event times are an ordinary schedule (the one a guild had before is
@@ -1044,7 +1045,7 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
 - **The health card follows the sheet**: every answer, and an absence recorded or cleared, redraws it. Once the event
   locks it says *Locked* and points at the lock card — its *Suggested* block and **Ask** go (pressing an old Ask says
   the event has locked).
-- **After lock** the automatic asks (step 6 below) use the same list. On every event — a schedule's or a one-off — it asks people for the
+- **After lock** Automated Fill Requests (step 6 below) use the same list. On every event — a schedule's or a one-off — it asks people for the
   same role on its own, but a **role swap** (a flex role, an offspec or an alt, with or without someone covering)
   waits for an officer: the lock card shows it under *Suggested* with **Ask** — while it waits, a seat freed later
   (a missed confirmation) still gets its same-role asks automatically. An officer's Ask after lock counts the asks
@@ -1105,9 +1106,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    confirm) and the signup sheet (*Open in Discord*), with *In Discord* beside it: the officer card, the updates thread
    and the loot thread, those that exist. A locked event adds the confirmations (*Not sent yet. The bot sends them
    within a minute.* while they go out), each raid's open seats (*Open seats · Barrow Deeps* on an evening of several)
-   and *Reminded* (when, and by whom). Before the lock it says *Automatic asks: Paused by Jon* for a raid whose asks
-   are paused; once locked, that raid's *Open seats* sentence says it (*Automatic asks paused by Jon. 3 seats are
-   open.*), once. Any time it shows *Also on another event* (who joined another event that night) and *Away that day* (each with the reason
+   and *Reminded* (when, and by whom). Before the lock it says *Automated Fill Requests: Paused by Jon* for a raid whose asks
+   are paused; once locked, that raid's *Open seats* sentence says it (*Automated Fill Requests are paused by Jon. 3
+   seats are open.*), once. Any time it shows *Also on another event* (who joined another event that night) and *Away that day* (each with the reason
    recorded). The list says once which time zone every time on the page is in (*Times in Berlin.*), and a test event's
    page carries a *test event* chip beside its state. **Signups** has four tabs, each with its count — *Joined* (shown first), *Bench*, *No thanks*, *No answer yet*
    — and a tab lists its names grouped by class, a class per column under its icon as on the Discord sheet, one per
@@ -1179,8 +1180,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    member fixed; a callout and the pins keep their own confirm for now.
    **More** (the header's last button) keeps the raid-night levers on the event, a group per raid on an evening of
    several, each named as on the Discord card: **Suggest…** before the lock and **Fill seats…** after it (the fill
-   screen: each seat with its alternates, then *Send N asks*), **Remind the unanswered** and **Pause automatic asks** /
-   **Resume automatic asks** once locked, **Re-post the sheet…** (it moves the sheet to another channel), **Loot** (open
+   screen: each seat with its alternates, then *Send N asks*), **Remind the unanswered** and **Pause Automated Fill Requests** /
+   **Resume Automated Fill Requests** once locked, **Re-post the sheet…** (it moves the sheet to another channel), **Loot** (open
    the loot council; once open, a link to Loot › Tonight), **Asks and callouts…** (every fill ask with its answer, an
    ask still out with **Withdraw**, callouts with their notes) and **End the event** once locked. What can't be pressed
    yet is greyed with the bot's reason under it. Remind and End show the bot's own box first; when it changed while open
@@ -1390,7 +1391,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    **substitution** — *"Nettle takes Ivy's seat in Group 2 and gets the Confirm or Can't make it DM. … Ivy sees the seat
    was released on their card and their Me page."* (the bench isn't asked: the seat is taken); dragging someone out
    releases the seat — they see it on their card and their Me page, never a DM — and the bench is asked to fill it when
-   automatic asks are on (paused or off, the sentence says the seat waits for **Fill seats**). A
+   Automated Fill Requests are on (paused or off, the sentence says the seat waits for **Fill seats**). A
    drag started on the open board and dropped after the event locked is refused ("The event locked while you were
    dragging") and the board shows the roster — it is never applied as a change to the locked roster.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
@@ -1402,7 +1403,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    haven't answered get their Confirm or Can't make it DM again. One more waits on the site with DMs off. Remind works
    once an hour."* The older Confirm card loses its buttons and reads *Reminded — see the newer message
    below*, so only the newest card answers. Two officers pressing it at once send one round; the second is told who reminded.
-6. **Fill seats…** — the bot asks people on its own (*automatic asks*) only after lock (before lock an officer sends suggestions, see
+6. **Fill seats…** — the bot asks people on its own (*Automated Fill Requests*) only after lock (before lock an officer sends suggestions, see
    *Suggestions* above). Whenever a seat frees (decline, callout, absence, missed
    confirmation, officer removal) and `autofill` is on [on], the bot DMs the next best people, in the suggestions' cost
    order: joiners the lock left off and *Bench* answers first → the schedule's regulars who haven't answered (every
@@ -1415,9 +1416,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    a no (or silence) from either withdraws the other — its card is edited to "never mind". It asks the shortfall + 1 at a
    time, never more than 3 outstanding, and never asks someone who is rostered on another raid within 4 hours or
    absent. A fill DM that can't be delivered leaves the ask on the person's Me page (same deadline; the lock card counts
-   "N wait on the site") — never a no. **Pause automatic asks** (the lock card's second row, the same button on the site's
+   "N wait on the site") — never a no. **Pause Automated Fill Requests** (the lock card's second row, the same button on the site's
    locked event) stops the bot asking anyone on its own for that event; an officer's own *Fill seats…* / *Ask* still
-   sends, and *Resume automatic asks* picks up where it left off. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after
+   sends, and *Resume Automated Fill Requests* picks up where it left off. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after
    it was sent, never later than the event's start; the updates thread logs the timeout and the next person is
    asked. A yes goes straight into the freed seat (a swap changes the seat in place). A roster that is full but
    short a tank or healer has no seat for a newcomer, so only swaps are asked for it; a yes that finds every seat
@@ -1472,12 +1473,12 @@ ask — is edited to show the new time with its buttons, so the ask they hold st
 one the move would leave in the past is set to within the hour. A fill ask keeps its own deadline. Moving an event whose
 lock time is then past locks it at the scheduler's next minute, and the confirm says so first. Before the lock an event
 can also take its own settings, kept on that event alone (its schedule is never changed): the **sheet timing** — the
-reminder (on or off, and when), the lock, confirm-by, how long a fill ask waits and automatic asks —, whether the
+reminder (on or off, and when), the lock, confirm-by, how long a fill ask waits and Automated Fill Requests —, whether the
 rostered are **asked to confirm**, the **priority** (first to join, or the five weights: Regular, Rank, Main character,
 Sat out last time, Signed up early — a one-off can switch to priority and back) and each raid's **split**. An event
 carries its own priority from the moment it opens, so a later change to its schedule or its raid no longer changes it
-(an event already open when this came in keeps the priority it had). Once the roster locks only the start, the
-automatic asks and how long an ask waits can change; the rest is refused in one sentence each (*"Asking the rostered to
+(an event already open when this came in keeps the priority it had). Once the roster locks only the start,
+Automated Fill Requests and how long an ask waits can change; the rest is refused in one sentence each (*"Asking the rostered to
 confirm is fixed once the roster locks."*, *"The priority is fixed once the roster locks, because the roster is already
 chosen."*). Switching the seat order says what decides it now (*"Join order no longer decides the seats."* or
 *"The first to join now get the seats, whatever the priority."*), and the sheet, the member's own line, the Me page and
@@ -1487,7 +1488,7 @@ the lock. A new lock time is told to everyone who answered, as a new start is; a
 priority or the split tells nobody. The confirm
 reads, for example, *"The event moves to Wed 2 Dec 8:00 PM. All 7 answers stand, and each person gets a notice. The
 sheet in Discord shows the new time."*; it names people also on another event that night when there are any. The first
-sentence says only what really changes: the move, this event's own settings (*"For this event, automatic asks are off."*),
+sentence says only what really changes: the move, this event's own settings (*"For this event, Automated Fill Requests are off."*),
 or both (*"… moves to Wed 2 Dec 8:00 PM with its own lock time."*). An event is refused in one sentence when it is finished
 or cancelled, when it has already started (*"This event has started, so it can't move."* — its timing doesn't change
 either), when the start is in the past (*"Fri 20 Nov 7:00 PM is in the past, so the event stays at Thu 10 Dec 6:30
@@ -1511,7 +1512,7 @@ Confirm by, Automated Fill Requests and An ask waits, each switch with its (?) �
 picked from lists, the same labels as the Schedules page's editor. **Save** shows the bot's box first: each change as
 *label: old → new* (*Locks: 24 hours before → 12 hours before*), then what changes, who is told and what can still be
 undone; if the event changed meanwhile the box comes back with the new facts and waits again. After the lock the
-editor shows only the automatic asks and how long an ask waits. The split moved here from **More**. Plain text says it (*"move tonight's Barrow Deeps
+editor shows only Automated Fill Requests and how long an ask waits. The split moved here from **More**. Plain text says it (*"move tonight's Barrow Deeps
 to Wednesday 8 PM"*, *"lock Thursday's event 12 hours before"*; the diff prints the same confirm, and a time the clocks
 skip or pass twice that night is refused: *"That time doesn't exist that night because the clocks go forward. Pick
 another time."*). MCP's `reschedule_run` previews first and sends the preview's `rev` back. If someone changed the event
@@ -1646,11 +1647,11 @@ the Events page an event's header holds **Reschedule** · **Edit lineup** · **E
 below, §4 *The Events page*), with **Cancel event** at Activity's right. A test event's card on the Test bench keeps the
 older layout: its actions sit in one bar under its board and never move: *Cancel event…* far left (and, once locked, *End the event*),
 then on the right — before the lock **Suggest…** · **Preview lock** · **Lock now**; after it **Remind the unanswered** ·
-**Pause automatic asks** · **Fill seats…** · **Loot**; what does not apply yet is greyed with the reason. The card's
+**Pause Automated Fill Requests** · **Fill seats…** · **Loot**; what does not apply yet is greyed with the reason. The card's
 **⋮ menu** (top right) holds *Re-post sheet…*. The board's own tools sit above the groups: **Place the rest**, *Propose
 roster/splits…*, and *Clear* set apart. Officer cards in Discord use the same fixed order — Open the board · Lock now ·
 Fill seats… · Loot · Cancel event… (the *Suggested* block has its own row: **Ask** · **Suggest…**), and the lock card adds
-a second row: **Remind the unanswered** · **Pause automatic asks** · **End the event**. **One confirm screen, the same
+a second row: **Remind the unanswered** · **Pause Automated Fill Requests** · **End the event**. **One confirm screen, the same
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
 a news proposal, the bot shows one sentence computed from the event as it stands — for a lock: *"Everyone on the board keeps
 their place, and the lock fills the open seats from Not placed. 16 of the 18 rostered get the Confirm or Can't make it DM and 2 see it on the site. They have until Tue 9 Dec
@@ -2281,7 +2282,7 @@ next unopened events, so "groups for tonight" and "open Saturday's alt night" st
   before lock "suggest fixes for Tuesday's Barrow Deeps" (the suggestions, nothing sent) and "send them" (the diff
   shows exactly who will be asked; if the suggestions changed before you press Apply, nothing is sent); "split tonight's event
   first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock); "remind the
-  unconfirmed for tonight" (once an hour); "pause automatic asks on tonight's event" / "resume automatic asks"; "withdraw the ask
+  unconfirmed for tonight" (once an hour); "pause Automated Fill Requests on tonight's event" / "resume Automated Fill Requests"; "withdraw the ask
   to Kestrel"; "reopen bd-k7m2qx" (an end by mistake, within the hour — never a cancelled event).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
   one person, like a drag (after lock: in from *Not rostered* = asked to confirm, out to it = seat freed); "groups for

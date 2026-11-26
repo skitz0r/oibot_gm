@@ -29,7 +29,9 @@ src/oibot_gm/
                        `raid_fields` / `split` / `priority` = the settings' names the editors AND the Save box's diff lines share; `kinds` = a schedule's
                        Repeats choice and `what_this_makes` = the lineup pages' section title — the site and Discord's wizards read both;
                        field_help(setting, label) = a view's Details row's (?) {key, text, about} from `schedule_field_help` / `help_about`, the
-                       editors' own sentence — event_view / schedule_view `_fact(…, hint=)`)
+                       editors' own sentence — event_view / schedule_view `_fact(…, hint=)`); switch_words(setting, on) = a switch's value
+                       ONCE for a Details row and a Save box's diff line alike (Lock Confirmation Yes / No, Automated Fill Requests On / Off,
+                       another on / off — rc.confirmation_words, consequences.event_value_words, configops, flows_schedule read it)
   conversation.py      plain-text memory (design §5.51): a ring per (guild, channel|DM, uid) of the last 4 exchanges, IN MEMORY only (a restart
                        forgets); recall = a Discord reply to the bot's message (any age) else the same person + place within 20 min; context_block =
                        ONE fenced <conversation> data block (unfence) → configops.parse / help.answer(conversation=); handle_change, plain_text,

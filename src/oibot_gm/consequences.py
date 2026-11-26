@@ -444,7 +444,7 @@ def before_first_open_sentence(reg: Registry, lineup: list[dict], start, only: s
 
 
 TIMING_NAMES = {"cutoff_hard_hours": "lock time", "cutoff_soft_hours": "reminder time", "confirm_hours": "confirm-by",
-                "reminders": "reminder", "autofill": "automatic asks", "fill_ask_hours": "fill ask wait",
+                "reminders": "reminder", "autofill": "Automated Fill Requests", "fill_ask_hours": "fill ask wait",
                 # the owner's tweaks (B): an event's other own settings, named the same way
                 "confirm": "confirmation", "first_come": "seating", "weights": "priority", "split": "split"}
 TIMING_ORDER_OF = tuple(TIMING_NAMES)
@@ -478,7 +478,7 @@ def _timing_phrases(reg: Registry, start, changed: dict, team: dict, first_raid:
                 soft = float(rc.team_setting(team, "cutoff_soft_hours"))
                 out.append(f"the reminder goes out {reg.local12(start - timedelta(hours=soft))}")
         elif k == "autofill":
-            out.append("automatic asks are on" if v else "automatic asks are off")
+            out.append("Automated Fill Requests are on" if v else "Automated Fill Requests are off")
         elif k == "confirm":
             out.append(("the rostered are asked to confirm" if not first_raid else f"those rostered on {first_raid} are asked to confirm")
                        if v else "nobody is asked to confirm")
@@ -606,8 +606,9 @@ EDIT_LINE_ORDER = ("start", "lock_hours_before", "nudge", "nudge_hours_before", 
 
 def event_value_words(setting: str, v) -> str:
     """One of an event's own settings in the schedule editor's words (PAGE_WORDS): hours '12 hours before' (an ask's
-    wait '2 hours'), a switch 'on' / 'off', seating 'First to join' / 'By priority', a split 'Rotation'."""
-    from .constants import PAGE_WORDS, hours_words
+    wait '2 hours'), a switch as its Details row reads it (constants.switch_words: Lock Confirmation 'Yes' / 'No', Automated
+    Fill Requests 'On' / 'Off', another 'on' / 'off'), seating 'First to join' / 'By priority', a split 'Rotation'."""
+    from .constants import PAGE_WORDS, hours_words, switch_words
 
     if setting in ("lock_hours_before", "nudge_hours_before", "confirm_hours_before"):
         return f"{hours_words(v)} before"
@@ -617,7 +618,7 @@ def event_value_words(setting: str, v) -> str:
         return PAGE_WORDS["first_to_join"] if v else PAGE_WORDS["by_priority"]
     if setting == "split_policy":
         return PAGE_WORDS["split"].get(str(v), str(v))
-    return PAGE_WORDS["on" if v else "off"]
+    return switch_words(setting, v)
 
 
 def event_edit_lines(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | None) -> list[str]:

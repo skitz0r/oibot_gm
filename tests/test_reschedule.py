@@ -340,9 +340,9 @@ def test_timing_lives_on_the_run_alone(reg, rs):
     lines = run(bot.reschedule_event(reg, rs, ev, timing={"lock_hours_before": 6}, by="o", by_id=OFFICER_ID, preview=True))
     assert lines[0] == f"For this event, the sheet locks {reg.local12(t - timedelta(hours=6))}." and lines[1] == "Answers stand."
     only = cq.reschedule_consequence(reg, rs, ev, None, {"autofill": False})
-    assert only[0] == "For this event, automatic asks are off.", "the lock time didn't change, so it isn't named"
+    assert only[0] == "For this event, Automated Fill Requests are off.", "the lock time didn't change, so it isn't named"
     both = cq.reschedule_consequence(reg, rs, ev, t + timedelta(days=1), {"autofill": False, "lock_hours_before": 6})
-    assert both[0] == f"The event moves to {reg.local12(t + timedelta(days=1))} with its own lock time and automatic asks."
+    assert both[0] == f"The event moves to {reg.local12(t + timedelta(days=1))} with its own lock time and Automated Fill Requests."
     assert rc.reschedule_refusal(reg, rs, ev, None, {"lock_hours_before": rc.run_team(reg, ev)["cutoff_hard_hours"]}) == rc.TIMING_SAME
     run(bot.reschedule_event(reg, rs, ev, timing={"lock_hours_before": 6, "nudge": False, "autofill": False, "fill_ask_hours": 2},
                              by="o", by_id=OFFICER_ID))

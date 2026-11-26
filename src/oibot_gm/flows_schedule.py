@@ -19,7 +19,7 @@ import discord
 
 from . import consequences as cq
 from . import raidcycle as rc
-from .constants import PAGE_WORDS, hours_words, schedule_line_label
+from .constants import PAGE_WORDS, hours_words, schedule_line_label, switch_words
 from .flows_config import OFFICERS_ONLY, MultiForm, OwnerWizard, _officer_guard
 from .flows_event import REVIEW, LineupBlock, trim_hours
 from .registry import RESERVED_SCHEDULE_IDS, Registry, RegistryError, parse_lineup, parse_slots, schedule_name
@@ -184,7 +184,7 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         if f in HOUR_FIELDS:
             return PAGE_WORDS["suggested"] if v is None else hours_words(v) + ("" if f == "fill_ask_hours" else " before")
         if f in SWITCHES:
-            return PAGE_WORDS["suggested"] if v is None else PAGE_WORDS["on" if v else "off"]
+            return PAGE_WORDS["suggested"] if v is None else switch_words(f, v)
         if f == "split_policy":
             return PAGE_WORDS["split"].get(v, v) if v else PAGE_WORDS["raids_own"]
         if f == "weights":

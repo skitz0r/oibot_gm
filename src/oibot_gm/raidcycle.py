@@ -584,9 +584,9 @@ def priority_words(reg: Registry, ev_or_schedule_def) -> str:
 
 def confirmation_words(confirm: bool) -> str:
     """Whether the rostered are asked to confirm, as the Details' Lock Confirmation row reads: Yes / No (constants.PAGE_WORDS)."""
-    from .constants import PAGE_WORDS
+    from .constants import switch_words
 
-    return PAGE_WORDS["asked_at_lock"] if confirm else PAGE_WORDS["not_asked_at_lock"]
+    return switch_words("confirm", confirm)
 
 
 def lead_name_of(reg: Registry, ev: "RaidEvent") -> str:
@@ -5794,7 +5794,7 @@ FILL_STATE_WORDS = {"idle": "No seat to fill yet.", "asking": "Asking for open s
                     "exhausted": "Nobody left to ask — recruit, or move someone in on the board.",
                     "suggested": "Waiting for an officer: a role swap would cover a seat."}
 # Pause automatic asks (D18): the paused state's words, before the fill state
-AUTO_ASKS_PAUSED = "Automatic asks paused"
+AUTO_ASKS_PAUSED = "Automated Fill Requests are paused"
 
 
 def open_seat_count(reg: Registry, ev: RaidEvent) -> int:
@@ -5812,14 +5812,14 @@ def open_seats_words(reg: Registry, ev: RaidEvent, n: int) -> str:
     if ev.autofill_paused:
         return head
     if team_setting(run_team(reg, ev), "autofill"):
-        return head + (" Automatic asks will ask for it." if n == 1 else " Automatic asks will ask for them.")
-    return head + f" Automatic asks are off, so an officer fills {'it' if n == 1 else 'them'} with {fill_button_words()}."
+        return head + (" Automated Fill Requests will ask for it." if n == 1 else " Automated Fill Requests will ask for them.")
+    return head + f" Automated Fill Requests are off, so an officer fills {'it' if n == 1 else 'them'} with {fill_button_words()}."
 
 
 def fill_state_text(reg: Registry, ev: RaidEvent) -> str:
     """How open seats are being filled, in sentences (the lock card, the SheetCard, MCP get_run) — never the bare code
     and never "engine": 'Waiting for an officer: a role swap would cover a seat.', 'Asking for open seats — waiting for
-    answers (2 on the site).', 'Automatic asks paused by Jon. …'. A closed run says its state (RUN_STATE_WORDS)."""
+    answers (2 on the site).', 'Automated Fill Requests are paused by Jon. …'. A closed run says its state (RUN_STATE_WORDS)."""
     if ev.state == "open":
         return "Open seats are asked for after the lock; before it, Suggest… shows who could cover a minimum."
     if ev.state in ("done", "cancelled"):
@@ -6112,7 +6112,7 @@ def refill_sentence(reg: Registry, ev: RaidEvent, it: str = "it") -> str:
     if not team_setting(run_team(reg, ev), "autofill"):
         return f"The seat{'s wait' if it == 'them' else ' waits'} until an officer presses {fill_button_words()}."
     if ev.autofill_paused:
-        return f"Automatic asks are paused, so the seat{'s wait' if it == 'them' else ' waits'} for {fill_button_words()}."
+        return f"Automated Fill Requests are paused, so the seat{'s wait' if it == 'them' else ' waits'} for {fill_button_words()}."
     return f"The bench is asked to fill {it}."
 
 

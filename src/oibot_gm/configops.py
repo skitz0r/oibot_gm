@@ -14,7 +14,7 @@ import yaml
 from pydantic import BaseModel, Field, PrivateAttr
 
 from .llm.provider import Provider
-from .constants import OLD_WORDS_PROMPT, PAGE_WORDS, ROLES, schedule_line_label
+from .constants import OLD_WORDS_PROMPT, PAGE_WORDS, ROLES, schedule_line_label, switch_words
 from .loot_ops import SCHEMA as LOOT_SCHEMA
 from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError, join_words, readable_config, schedule_class
 
@@ -1613,7 +1613,7 @@ PIN_NOW = {"in": "pinned to the roster", "out": "kept on the bench"}  # what a m
 ACTION_WORDS = {"run_open": "Open", "run_answer": "An answer on", "run_lock": "Lock", "run_cancel": "Cancel", "run_fill": "Fill seats on",
                 "run_strategy": "The split on", "run_autofill": "Auto-fill", "run_board": "The board of", "run_move": "A board move on",
                 "run_propose": "Proposed groups for", "run_sheet": "The sheet of", "confirm_for": "A confirmation on", "run_remind": "A reminder on",
-                "run_pause": "Automatic asks on", "run_withdraw": "Withdrawing an ask on", "run_reopen": "Reopen",
+                "run_pause": "Automated Fill Requests on", "run_withdraw": "Withdrawing an ask on", "run_reopen": "Reopen",
                 "run_reschedule": "Move", "run_lineup": "The raids of", "pin": "A pin on",
                 "character": "Characters", "absence_clear": "An absence", "dm": "DMs", "regular": "Regulars", "test": "Test bench",
                 "loot": "Loot council", "wishlist": "Wishlist", "tier": "Item tiers", "loot_weights": "Loot scoring",
@@ -2839,8 +2839,8 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         if ev.state not in ("open", "locked"):
             raise RegistryError(f"{label} is {ev.state}")
         if bool(ev.autofill_paused) == paused:
-            return f"{label}: automatic asks are already {'paused' if paused else 'on'} — nothing changes"
-        return f"{label}: {'pause automatic asks — nothing goes out on its own; an officer’s Fill seats… still sends' if paused else 'resume automatic asks — open seats are asked for again on the next pass'}"
+            return f"{label}: Automated Fill Requests are already {'paused' if paused else 'on'} — nothing changes"
+        return f"{label}: {'pause Automated Fill Requests — nothing goes out on its own; an officer’s Fill seats… still sends' if paused else 'resume Automated Fill Requests — open seats are asked for again on the next pass'}"
     if op.op == "run_withdraw":
         m = _need_member(reg, op.member)
         ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.pending), None)
@@ -4916,7 +4916,7 @@ _SWITCH_FIELDS = ("nudge", "autofill", "open_dm", "confirm")
 
 
 def _schedule_value_words(reg: Registry, rid: str, setting: str, value, s: dict | None):
-    """A schedule setting's value in the Schedules page's words ('5 days before', 'on', 'Raid one first', 'Rank 5'):
+    """A schedule setting's value in the Schedules page's words ('5 days before', 'on', 'Yes', 'Raid one first', 'Rank 5'):
     (before, after) for an existing schedule `s`, the after alone for a new one (s None); None for a setting described
     elsewhere (run times, lineup)."""
     from .constants import hours_words
@@ -4928,7 +4928,7 @@ def _schedule_value_words(reg: Registry, rid: str, setting: str, value, s: dict 
                 return PAGE_WORDS["suggested"]
             return hours_words(v) if setting == "fill_ask_hours" else f"{hours_words(v)} before"
         if setting in _SWITCH_FIELDS or setting == "active":
-            return PAGE_WORDS["suggested"] if v is None else PAGE_WORDS["on" if v else "off"]
+            return PAGE_WORDS["suggested"] if v is None else switch_words(setting, v)
         if setting == "split_policy":
             return PAGE_WORDS["split"].get(str(v), str(v)) if v else PAGE_WORDS["raids_own"]
         if setting == "name":

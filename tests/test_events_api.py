@@ -268,7 +268,7 @@ def test_an_events_raid_night_facts_come_from_its_runs(officer_client, reg, rs, 
     ev.autofill_paused, ev.autofill_paused_by = True, "Jon"  # before the lock there is no Open seats sentence to say it
     rs.save(ev, "t")
     facts = {f["label"]: f["value"] for f in officer_client.get(f"/api/event/{ev.key}").json()["details"]}
-    assert facts["Automatic asks · Hyjal Summit"] == PAGE_WORDS["paused_by"].format(who="Jon")
+    assert facts["Automated Fill Requests · Hyjal Summit"] == PAGE_WORDS["paused_by"].format(who="Jon")
     lock_with_board(reg, rs, ev, [m.display_name for m in ms[:10]])
     ev.autofill_paused, ev.autofill_paused_by = True, "Jon"
     ev.reminded_at, ev.reminded_by = reg.now_local().isoformat(), "Jon"
@@ -278,8 +278,8 @@ def test_an_events_raid_night_facts_come_from_its_runs(officer_client, reg, rs, 
     j = officer_client.get(f"/api/event/{ev.key}").json()
     facts = {f["label"]: f for f in j["details"]}
     # once locked, the Open seats sentence already says who paused the automatic asks: said once, not in a second fact
-    assert facts["Open seats · Hyjal Summit"]["value"].startswith("Automatic asks paused by Jon. ")
-    assert "Automatic asks · Hyjal Summit" not in facts
+    assert facts["Open seats · Hyjal Summit"]["value"].startswith("Automated Fill Requests are paused by Jon. ")
+    assert "Automated Fill Requests · Hyjal Summit" not in facts
     assert sum("paused by Jon" in str(f["value"]) for f in j["details"]) == 1
     assert facts["Reminded"]["value"].endswith(", by Jon") and not re.search(r"\d{4}-\d\d", facts["Reminded"]["value"]), "words, never ISO"
     assert facts["Confirmations"]["value"] == PAGE_WORDS["confirm_pending"]

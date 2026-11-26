@@ -161,11 +161,12 @@ def test_the_edit_box_prints_the_schedule_editors_words_and_a_stale_one_is_409(r
     sid, ev = scheduled(reg, rs)
     c = web_bot.c
     url = f"/api/run/{ev.key}/reschedule"
-    body = {"edit": True, "timing": {"confirm": False, "weights": {"rank": 2}, "lock_hours_before": 12}}
+    body = {"edit": True, "timing": {"confirm": False, "autofill": False, "weights": {"rank": 2}, "lock_hours_before": 12}}
     b = c.post(url, json={**body, "preview": True}, headers=H()).json()["box"]
     F = PAGE_WORDS["schedule_fields"]
     assert b["verb"] == "Save" and b["title"].startswith("Change ")
-    assert f"{F['confirm']}: {PAGE_WORDS['on']} → {PAGE_WORDS['off']}" in b["diff"]
+    # the same values the event's Details rows show (Lock Confirmation Yes / No, Automated Fill Requests On / Off)
+    assert "Lock Confirmation: Yes → No" in b["diff"] and "Automated Fill Requests: On → Off" in b["diff"], b["diff"]
     assert any(x.startswith(f"{F['lock_hours_before']}: ") and x.endswith("→ 12 hours before") for x in b["diff"])
     assert f"{F['weights']}: {PAGE_WORDS['priority']['rank']} 5 → {PAGE_WORDS['priority']['rank']} 2" in b["diff"]
     assert ev.key not in json.dumps(b)
@@ -330,7 +331,7 @@ def test_turning_confirmation_on_names_the_first_raid_on_an_event_of_several(reg
     said = cq.reschedule_consequence(reg, rs, first, None, {"confirm": True})
     assert said[0] == "For this event, those rostered on Hyjal Summit are asked to confirm.", said
     many = cq.reschedule_consequence(reg, rs, first, None, {"confirm": True, "nudge": True, "autofill": False})
-    assert many[0] == "This event takes its own reminder, automatic asks and confirmation on Hyjal Summit.", many
+    assert many[0] == "This event takes its own reminder, Automated Fill Requests and confirmation on Hyjal Summit.", many
     sid, ev = scheduled(reg, rs, days=5)
     assert cq.reschedule_consequence(reg, rs, ev, None, {"confirm": False})[0] == "For this event, nobody is asked to confirm."
     one = open_one_off(reg, rs, days=6)

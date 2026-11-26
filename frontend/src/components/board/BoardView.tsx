@@ -66,6 +66,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
   const caps = meta.group_caps || {};
   const placed = board.rosters.reduce((n, r) => n + r.groups.reduce((m, g) => m + g.length, 0), 0);
   const pins = Object.fromEntries((e.signups || []).map((s) => [s.display_name, s.pin]));  // officers' pins: an icon on the chip
+  const answers = Object.fromEntries((e.signups || []).map((s) => [s.display_name, s.status]));  // "sub" = a Bench answer
   const words = meta.run_words;
 
   const layout = () => board.rosters.map((r) => r.groups.map((g) => g.map((s) => s.display_name)));
@@ -179,7 +180,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
     await place(d.name, d.from, target === "bank" ? null : target, "drag");
   }
   /** Move to…: every group with room (its first open seat — the same {r, g, i} a drop on that seat sends) and the list
-   *  of joiners without a place. A tap, a keyboard, a phone: no drag needed. */
+   *  of joiners without a place (a Bench answer's: the Bench section). A tap, a keyboard, a phone: no drag needed. */
   const movesFor = (name: string, from: From): MoveTarget[] => {
     const out: MoveTarget[] = [];
     board.rosters.forEach((r, ri) => r.groups.forEach((g, gi) => {
@@ -189,7 +190,9 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
       out.push({ key: `${ri}:${gi}`, label: groupName(ri, gi), disabled: full, hint: `${g.length}/${board.group_size}`, onPick: () => place(name, from, { r: ri, g: gi, i: g.length }, "menu") });
       if (event && full) g.forEach((o, oi) => out.push(swapWith(name, from, o.display_name, ri, gi, oi)));  // a phone can't drag onto someone
     }));
-    if (from) out.push({ key: "bank", label: bankWord, onPick: () => place(name, from, null, "menu") });
+    // a Bench answer taken off a group lands in the Bench section before the lock, so its entry says Bench
+    const back = event && !locked && answers[name] === "sub" ? words.bank.bench : bankWord;
+    if (from) out.push({ key: "bank", label: back, onPick: () => place(name, from, null, "menu") });
     return out;
   };
   /** The Events page's Move to… into a full group: one entry per person there — the same drop onto that person a drag

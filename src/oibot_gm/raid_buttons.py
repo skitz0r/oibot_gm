@@ -30,8 +30,8 @@ log = logging.getLogger(__name__)
 # buttons alike — /api/meta.run_labels carries this map, the web keeps no copy. The keys past the RunButton actions are the
 # render-time variants (Locked, Resume…) and the verbs only the site's board and lock screen have (Place the rest, Preview lock).
 RUN_WORDS = {"fill": "Fill seats…", "lock": "Lock now", "locked": "Locked", "preview_lock": "Preview lock", "cancel": "Cancel event…",
-             "loot": "Loot", "ask": "Ask", "suggest": "Suggest…", "remind": "Remind the unanswered", "pause": "Pause automatic asks",
-             "resume": "Resume automatic asks", "end": "End the event", "reopen": "Reopen", "place_rest": "Place the rest"}
+             "loot": "Loot", "ask": "Ask", "suggest": "Suggest…", "remind": "Remind the unanswered", "pause": "Pause Automated Fill Requests",
+             "resume": "Resume Automated Fill Requests", "end": "End the event", "reopen": "Reopen", "place_rest": "Place the rest"}
 
 
 class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot|remind|pause|end|reopen)(?::(?P<rev>[0-9a-f]{6,16}))?"):

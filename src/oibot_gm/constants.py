@@ -170,10 +170,10 @@ PAGE_WORDS = {
                    "With DMs off the ask waits on their Me page, and a seat unanswered by Confirm by is freed. "
                    "Someone who takes a seat by confirming a fill request isn't asked again. "
                    "With this off, the roster stands as locked and nobody is asked.",
-        "autofill": "After the lock, the bot DMs players of each open seat's role, bench first, then anyone with no answer. "
-                    "It asks one more person than there are open seats, up to three at once. "
-                    "The first Confirm takes the seat, and Can't make it or no answer within An ask waits asks the next. "
-                    "A role switch waits for an officer, and with this off officers fill seats from More › Fill seats.",
+        "autofill": "After the lock, the bot DMs players of each open seat's role, the bench first, then anyone with no answer. "
+                    "It asks one more person than there are open seats, up to three at once, and the first Confirm wins. "
+                    "Can't make it, or no answer for as long as An ask waits, asks the next person. "
+                    "A role switch waits for an officer; with Automated Fill Requests off, officers use More › Fill seats.",
         "open_dm": "When the sheet opens, each regular gets a DM with their answer so far and the sheet's buttons. "
                    "The DM also says when the roster locks. "
                    "With no regulars yet, every member gets it, and nobody with DMs off is sent one.",
@@ -183,7 +183,7 @@ PAGE_WORDS = {
     # Edit event's seating choice beside PAGE_WORDS["first_to_join"], and its one-line states: after the lock, and once the
     # event has started or is over (the page shows nothing to edit)
     "by_priority": "By priority",
-    "edit_locked": "The roster is locked, so only the automatic asks and how long an ask waits can change.",
+    "edit_locked": "The roster is locked, so only Automated Fill Requests and how long an ask waits can change.",
     "edit_over": "This event has started or is over, so its settings can't change.",
     # a raid's settings by name: the Raids page's Details labels and its Save box's lines
     "raid_fields": {"lockout_days": "Lockout", "duration_hours": "Length", "first_open": "First opens"},
@@ -217,6 +217,17 @@ def field_help(setting: str, label: str) -> dict | None:
     `about` the screen reader's name for it (help_about). None for a setting the editors have no (?) for."""
     text = PAGE_WORDS["schedule_field_help"].get(setting)
     return {"key": setting, "text": text, "about": PAGE_WORDS["help_about"].format(name=label)} if text else None
+
+
+def switch_words(setting: str, on) -> str:
+    """A switch's value as a person reads it, the same on a Details row and on a Save box's 'label: old → new' line:
+    Lock Confirmation Yes / No, Automated Fill Requests On / Off (the owner's words, issue #13), any other switch on / off.
+    event_view, schedule_view, rc.confirmation_words, consequences.event_value_words, configops and flows_schedule read it."""
+    if setting == "confirm":
+        return PAGE_WORDS["asked_at_lock" if on else "not_asked_at_lock"]
+    if setting == "autofill":
+        return PAGE_WORDS["bot_asks" if on else "officer_asks"]
+    return PAGE_WORDS["on" if on else "off"]
 
 
 def schedule_line_label(setting: str) -> str | None:

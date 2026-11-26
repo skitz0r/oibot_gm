@@ -112,7 +112,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           <Badge variant="light" color={locked ? "gray" : "teal"} tt="none" leftSection={locked ? <IconLock size={12} /> : undefined}>{meta.run_states[e.state] || e.state}</Badge>
           {e.kind === "adhoc" && <Badge variant="light" color="gray" tt="none">one-off</Badge>}
           {e.early_warning && <Tooltip label="the regulars can't cover a tank or healer minimum — see the suggestions"><Badge variant="light" color="red" tt="none">early warning</Badge></Tooltip>}
-          {e.autofill_paused && <Tooltip label={`${W.auto_asks_paused}${e.autofill_paused_by ? ` by ${e.autofill_paused_by}` : ""} — your ${L.fill} still sends`}><Badge variant="light" color="gray" tt="none">{W.auto_asks_paused.toLowerCase()}</Badge></Tooltip>}
+          {e.autofill_paused && <Tooltip label={`${W.auto_asks_paused}${e.autofill_paused_by ? ` by ${e.autofill_paused_by}` : ""} — your ${L.fill} still sends`}><Badge variant="light" color="gray" tt="none">{W.auto_asks_paused}</Badge></Tooltip>}
           {facts && <Text size="sm" c="dimmed">{facts}</Text>}
         </Group>
         <Group gap={8} wrap="wrap">

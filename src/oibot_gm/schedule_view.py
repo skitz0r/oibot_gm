@@ -11,7 +11,7 @@ from datetime import datetime
 
 from . import consequences as cq
 from . import raidcycle as rc
-from .constants import PAGE_WORDS, field_help, hours_words
+from .constants import PAGE_WORDS, field_help, hours_words, switch_words
 from .presets import CADENCE_FIELDS, PRESETS
 from .registry import (
     ADHOC_DEFAULTS,
@@ -276,7 +276,7 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
     details += [_fact("Priority", rc.priority_words(reg, {"kind": s.get("kind"), "weights": sd.get("weights")})),
                 _fact(F["confirm"], rc.confirmation_words(bool(sd.get("confirm"))), hint="confirm")]
     if not pickup:
-        details.append(_fact(F["autofill"], PAGE_WORDS["bot_asks" if sd.get("autofill") else "officer_asks"], hint="autofill"))
+        details.append(_fact(F["autofill"], switch_words("autofill", sd.get("autofill")), hint="autofill"))
     if len(lineup) > 1:
         details.append(_fact("Answers", PAGE_WORDS["answers_one"]))
 

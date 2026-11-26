@@ -11,7 +11,7 @@ from typing import Callable
 
 from . import consequences as cq
 from . import raidcycle as rc
-from .constants import MARK_WORDS, PAGE_WORDS, field_help
+from .constants import MARK_WORDS, PAGE_WORDS, field_help, switch_words
 from .registry import LINEUP_MAX, LINEUP_MAX_WORDS, Registry, RegistryError
 
 CLOSED = ("done", "cancelled")
@@ -102,7 +102,7 @@ def _confirm_fact(confirm: bool) -> dict:
 
 
 def _autofill_fact(on: bool) -> dict:
-    return _fact(F["autofill"], PAGE_WORDS["bot_asks" if on else "officer_asks"], hint="autofill")
+    return _fact(F["autofill"], switch_words("autofill", on), hint="autofill")
 
 
 def _sheet_url(reg: Registry, ev: "rc.RaidEvent") -> str | None:
@@ -252,7 +252,7 @@ def _night_facts(reg: Registry, parts: list, sheets: list[dict], state: str) -> 
     for s in sheets:
         if s.get("autofill_paused") and s.get("key") not in said:
             who = s.get("autofill_paused_by")
-            out.append(_fact(named("Automatic asks", s), PAGE_WORDS["paused_by"].format(who=who) if who else PAGE_WORDS["paused"]))
+            out.append(_fact(named(F["autofill"], s), PAGE_WORDS["paused_by"].format(who=who) if who else PAGE_WORDS["paused"]))
     if first.get("double_booked"):
         out.append(_fact("Also on another event", ", ".join(first["double_booked"])))
     away = first.get("absences") or []

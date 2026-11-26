@@ -407,9 +407,32 @@ def test_paused_autofill_sends_nothing_on_its_own_but_an_officers_send_goes(reg,
     assert run(bot.run_fill(reg, rs, ev, team))[0] == [], "the scheduler / a freed seat / an answer: nothing"
     sent, _ = run(bot.run_fill(reg, rs, ev, team, by="Jon", approved_by="Jon"))
     assert sent, "an officer's explicit send still works"
-    assert rc.fill_state_text(reg, ev).startswith("Automatic asks paused by Jon. "), "one name for the lever on every surface (design §5.56 phase 2)"
+    assert rc.fill_state_text(reg, ev).startswith("Automated Fill Requests are paused by Jon. "), "one name for the lever on every surface (design §5.56 phase 2)"
     assert "already paused" in run(bot.set_autofill_paused(reg, rs, ev, True, by="Jon"))
     assert "autofill" not in " ".join(ev.log[-2:]).lower() and "automatic asks paused by Jon" in ev.log
+
+
+def test_the_switch_has_one_name_wherever_a_person_reads_it(reg, rs):
+    """The cleanup after issue #13: the switch the editors and Details call Automated Fill Requests is never "automatic
+    asks" where a person reads it — the buttons, the paused words, Edit event's locked line, the bot's replies, the
+    plain-text preview and the confirm sentences. The event log's stored lines keep their words."""
+    from oibot_gm import configops
+    from oibot_gm import consequences as cq
+    from oibot_gm.constants import PAGE_WORDS
+    from oibot_gm.configops import ConfigOp
+    from oibot_gm.raid_buttons import RUN_WORDS
+
+    name = PAGE_WORDS["schedule_fields"]["autofill"]
+    assert (RUN_WORDS["pause"], RUN_WORDS["resume"]) == (f"Pause {name}", f"Resume {name}")
+    assert rc.AUTO_ASKS_PAUSED == f"{name} are paused" and name in PAGE_WORDS["edit_locked"]
+    assert cq.TIMING_NAMES["autofill"] == name
+    bot = NightBot(reg, rs)
+    ev, _seated = short_one(reg, rs)
+    said = [run(bot.set_autofill_paused(reg, rs, ev, True, by="Jon")), run(bot.set_autofill_paused(reg, rs, ev, True, by="Jon")),
+            configops.describe(reg, ConfigOp(op="run_pause", target=ev.key, value="resume")),
+            rc.refill_sentence(reg, ev)]
+    for line in said:
+        assert name in line and "automatic ask" not in line.lower(), line
 
 
 def test_a_failed_dm_is_a_channel_change_never_an_answer(reg, rs):
@@ -990,7 +1013,7 @@ def test_raid_night_levers_from_plain_text_call_the_same_verbs(reg, rs):
         return run(configops.apply_async(reg, op, "Jon", True, bot=bot, by_id=owner, via="chat"))
     assert "remind the unconfirmed" in configops.describe(reg, ConfigOp(op="run_remind", target=ev.key))
     assert "Reminded 10 by DM" in apply(ConfigOp(op="run_remind", target=ev.key)) and ev.reminded_by == "Jon"
-    assert "pause automatic asks" in configops.describe(reg, ConfigOp(op="run_pause", target=ev.key, value="pause"))
+    assert "pause Automated Fill Requests" in configops.describe(reg, ConfigOp(op="run_pause", target=ev.key, value="pause"))
     apply(ConfigOp(op="run_pause", target=ev.key, value="pause"))
     assert ev.autofill_paused
     apply(ConfigOp(op="run_pause", target=ev.key, value="resume"))

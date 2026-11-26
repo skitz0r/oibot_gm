@@ -76,11 +76,11 @@ def test_a_locked_run_with_open_seats_says_how_many_and_who_asks(reg, rs):
     assert ev.fill_state == "idle" and rc.open_seat_count(reg, ev) == 3
     team = rc.run_team(reg, ev)
     team["autofill"] = True
-    assert rc.fill_state_text(reg, ev) == "3 seats are open. Automatic asks will ask for them."
+    assert rc.fill_state_text(reg, ev) == "3 seats are open. Automated Fill Requests will ask for them."
     team["autofill"] = False
-    assert rc.fill_state_text(reg, ev) == f"3 seats are open. Automatic asks are off, so an officer fills them with {rc.fill_button_words()}."
+    assert rc.fill_state_text(reg, ev) == f"3 seats are open. Automated Fill Requests are off, so an officer fills them with {rc.fill_button_words()}."
     team["autofill"], ev.autofill_paused, ev.autofill_paused_by = True, True, "Jon"
-    assert rc.fill_state_text(reg, ev) == "Automatic asks paused by Jon. 3 seats are open."
+    assert rc.fill_state_text(reg, ev) == "Automated Fill Requests are paused by Jon. 3 seats are open."
     full = rc.open_run(reg, rs, BD, start_in(reg, 4), by="t", schedule=rc.ADHOC_SCHEDULE)
     join(reg, rs, full, reg.test_members()[:10])
     lock_with_board(reg, rs, full, [s.display_name for s in full.by_status("in")])

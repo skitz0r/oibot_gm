@@ -1560,8 +1560,9 @@ def test_a_save_boxs_diff_lines_are_the_pages_words(reg):
     assert _box_line(reg, sid, "lock_hours_before", 12) == "Locks: 24 hours before → 12 hours before"
     assert _box_line(reg, sid, "open_dm", True) == "Sheet Opening DM: off → on"
     assert _box_line(reg, sid, "nudge", False) == "Signup Reminder: on → off"
-    assert _box_line(reg, sid, "confirm", False) == "Lock Confirmation: on → off"
-    assert _box_line(reg, sid, "autofill", False) == "Automated Fill Requests: on → off"
+    # the two switches the Details rows show as Yes / No and On / Off print the same values here (issue #13 follow-up)
+    assert _box_line(reg, sid, "confirm", False) == "Lock Confirmation: Yes → No"
+    assert _box_line(reg, sid, "autofill", False) == "Automated Fill Requests: On → Off"
     assert _box_line(reg, sid, "nudge_hours_before", 12).startswith("Signup Reminder goes out: "), "the select's line names its switch"
     assert _box_line(reg, sid, "split_policy", "first") == "When one night fills two rosters: the raid's → Raid one first"
     for field, value, want in (("lockout_days", 5, "Lockout: 7 days → 5 days"), ("duration_hours", 2.5, "Length: 3 hours → 2.5 hours"),
