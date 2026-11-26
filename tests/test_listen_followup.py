@@ -112,8 +112,11 @@ def make(reg, rs, monkeypatch, tmp_path, verdicts):
 
     async def help_answer(*a, **k):
         bot.helped.append(a[3])
-        if k.get("may_act"):
+        bot.entries.append(k.get("entry"))
+        if k.get("may_act") and bot.acts(a[3]):
             return db.HELP_ACT
+        if a[3] in bot.answers:  # an ordinary answer that asks nothing
+            return bot.answers[a[3]]
         # the loop's re-ask (switch on) ends on a clarifying question with its choices; elsewhere a plain answer
         return discord_help.Asked(LOOP_ASKS, ["Ironvale", "Duskmere"]) if a[1] == OWNER else "Ask an officer."
 
@@ -123,7 +126,8 @@ def make(reg, rs, monkeypatch, tmp_path, verdicts):
     bot.plain_identity, bot.help_answer, bot.news_message = plain_identity, help_answer, news_message
     bot.saw_member = lambda gid, author: None
     bot.event_for = lambda cid: None
-    bot.helped = []
+    bot.helped, bot.entries, bot.answers = [], [], {}
+    bot.acts = lambda text: True  # the help answer's "this asks to act" verdict (the live fixture makes it honest)
     parsed = []
 
     def parse(provider, reg_, text, by=None, officer=False, **kw):
@@ -135,7 +139,7 @@ def make(reg, rs, monkeypatch, tmp_path, verdicts):
     return bot
 
 
-def say(bot, uid, text, cid=LISTEN_CH, *, p=None):
+def say(bot, uid, text, cid=LISTEN_CH, *, p=None, mentions=(), role_mentions=(), reference=None, mention_everyone=False):
     """One message on the real on_message; `p` = the gate's probability (a fresh fake service per message)."""
     said = []
 
@@ -147,8 +151,8 @@ def say(bot, uid, text, cid=LISTEN_CH, *, p=None):
         said.append(("react", emoji))
 
     msg = Msg(id=next(_ids), content=text, author=types.SimpleNamespace(id=uid, display_name=f"user{uid}", bot=False),
-              channel=Chan(cid), guild=types.SimpleNamespace(id=1, me=None), mentions=[], role_mentions=[], reference=None,
-              reply=reply, add_reaction=add_reaction)
+              channel=Chan(cid), guild=types.SimpleNamespace(id=1, me=None), mentions=list(mentions), role_mentions=list(role_mentions),
+              reference=reference, mention_everyone=mention_everyone, reply=reply, add_reaction=add_reaction)
     dec = Decide(0.0 if p is None else p)
     bot.decisions = dec
     asyncio.run(bot.on_message(msg))
@@ -180,6 +184,9 @@ def live(reg, rs, monkeypatch, tmp_path):
 
     bot.gate = gate
     bot.log = tmp_path / "listen.jsonl"
+    # honest, as a model would be: the request asks to act, a bare name or chat does not (the live fix never rests on
+    # the help answer judging a two-word reply)
+    bot.acts = lambda text: any(w in text for w in ("update", "make"))
     return bot
 
 
@@ -194,16 +201,16 @@ def rows(bot):
     return [json.loads(x) for x in bot.log.read_text().splitlines()] if bot.log.exists() else []
 
 
-@pytest.mark.parametrize("on", [False, True])
-def test_the_bare_answer_skips_the_gate_and_reaches_the_parser_with_its_question(live, monkeypatch, on):
-    """The live exchange end to end, with the answer tools' switch off (today) and on: the answer is not overheard, so no
-    decision is asked for it, no 👀, and the change card is shown."""
-    if on:
-        monkeypatch.setenv(answer_switch.SWITCH_ENV, "on")
+def test_the_bare_answer_skips_the_gate_and_reaches_the_parser_with_its_question(live):
+    """The live exchange end to end, the answer tools' switch off (today): the parser asked, so the bare answer goes
+    straight back to the parser — no decision request, no 👀, no help verdict (the help answer would not have called a
+    bare name a request to act) — and the change card is shown."""
     first_question(live)
+    assert live.helped == ["bot can you update ashgrove from shadow to holy"]
     dec = live.gate(0.12)  # what the gate scored the bare answer live
     said, _ = say(live, OWNER, "Duskmere")
     assert dec.calls == 0, "no decision request for the follow-up"
+    assert live.helped == ["bot can you update ashgrove from shadow to holy"], "the parser's question: no help step"
     assert live.parsed[1][0] == "Duskmere" and QUESTION in live.parsed[1][1] and "from shadow to holy" in live.parsed[1][1]
     assert ("react", "👀") not in said
     content, kw = said[-1]
@@ -215,6 +222,20 @@ def test_the_bare_answer_skips_the_gate_and_reaches_the_parser_with_its_question
     assert live.listen_recent(live.greg)[0]["did"] == "followup"
 
 
+def test_the_answer_to_the_loops_question_goes_back_to_the_loop(live, monkeypatch):
+    """Switch on: the parser's question verdict is answered by the loop, which asked with choices; the bare answer goes
+    to the loop (help_answer, as an @mention), not to the parser — and the answers log names it as listening."""
+    monkeypatch.setenv(answer_switch.SWITCH_ENV, "on")
+    first_question(live)
+    assert conversation.recall(live.greg, LISTEN_CH, OWNER)[-1].asked_by == conversation.LOOP
+    dec = live.gate(0.12)
+    said, _ = say(live, OWNER, "Duskmere")
+    assert dec.calls == 0 and live.helped[-1] == "Duskmere" and len(live.parsed) == 1, "the loop read it, not the parser"
+    assert live.entries[-1] == "listen", "a follow-up in a listened channel is logged with the listening entry"
+    assert len(said) == 1 and said[0][0].startswith("Which character")
+    assert [r["did"] for r in rows(live)] == ["replied", "followup"]
+
+
 def test_a_second_message_is_not_a_follow_up(live):
     first_question(live)
     say(live, OWNER, "Duskmere")
@@ -224,14 +245,55 @@ def test_a_second_message_is_not_a_follow_up(live):
 
 
 def test_a_follow_up_that_is_not_an_answer_still_takes_the_question(live):
-    """Whatever the one message says, it takes the question: the next one is judged by the gate again."""
+    """Ordinary chat after the PARSER's question reaches the parser, which says ignore: silence — the help answer, which
+    would have answered it, is never asked. The question is taken: the next message is judged by the gate again."""
     live.verdicts[1] = ConfigRequest(kind="ignore", reply="")
     first_question(live)
     said, _ = say(live, OWNER, "brb dinner")
     assert said == [] and len(live.parsed) == 2, "addressed once: the parser read it and said ignore, nothing posted"
+    assert "brb dinner" not in live.helped
     dec = live.gate(0.1)
     say(live, OWNER, "back")
     assert dec.calls == 1 and len(live.parsed) == 2
+
+
+def test_chat_after_the_loops_question_gets_one_reply_from_the_loop(live, monkeypatch):
+    """Ordinary chat after the LOOP's question is answered by the loop once, in public; the next message is judged."""
+    monkeypatch.setenv(answer_switch.SWITCH_ENV, "on")
+    first_question(live)
+    live.answers["brb dinner"] = "Enjoy your dinner."
+    said, _ = say(live, OWNER, "brb dinner")
+    assert len(said) == 1 and said[0][0] == "Enjoy your dinner." and said[0][1].get("embed") is None and live.helped[-1] == "brb dinner" and len(live.parsed) == 1
+    dec = live.gate(0.1)
+    said, _ = say(live, OWNER, "back")
+    assert dec.calls == 1 and said == []
+
+
+@pytest.mark.parametrize("meant", ["mention", "role", "everyone", "reply"])
+def test_a_message_meant_for_someone_else_only_closes_the_question(live, meant):
+    """A message that mentions another person or a role, or replies to a message that isn't the bot's, is not the
+    answer: the gate judges it as any other message, and the question is closed (the next message is judged too)."""
+    first_question(live)
+    kw = {"mention": {"mentions": [types.SimpleNamespace(id=BYSTANDER)]},
+          "role": {"role_mentions": [types.SimpleNamespace(id=4242)]},
+          "everyone": {"mention_everyone": True},
+          "reply": {"reference": types.SimpleNamespace(message_id=123_456, resolved=None)}}[meant]
+    dec = live.gate(0.1)
+    said, _ = say(live, OWNER, "Duskmere", **kw)
+    assert dec.calls == 1 and said == [] and len(live.parsed) == 1
+    dec = live.gate(0.1)
+    say(live, OWNER, "Duskmere")
+    assert dec.calls == 1 and len(live.parsed) == 1, "closed: no later message answers it"
+
+
+def test_a_message_with_no_words_closes_the_question(live):
+    """A sticker or an attachment alone from that person closes the question too."""
+    first_question(live)
+    said, _ = say(live, OWNER, "")
+    assert said == [] and len(live.parsed) == 1
+    dec = live.gate(0.1)
+    say(live, OWNER, "Duskmere")
+    assert dec.calls == 1 and len(live.parsed) == 1
 
 
 def test_another_person_is_not_the_answer(live):
@@ -277,6 +339,7 @@ def test_a_bot_never_answers_and_an_at_mention_takes_the_question(live):
                   guild=types.SimpleNamespace(id=1, me=None), mentions=[], role_mentions=[], reference=None)
     asyncio.run(live.on_message(bot_msg))
     assert len(live.parsed) == 1
+    live.acts = lambda text: True  # the @mention path is today's: the help answer says it asks to act
     # an @mention is the person's next message: it takes the question, so the message after it is judged again
     mention = Msg(id=next(_ids), content=f"<@{BOT_ID}> Duskmere", author=types.SimpleNamespace(id=OWNER, display_name="x", bot=False), channel=Chan(LISTEN_CH),
                   guild=types.SimpleNamespace(id=1, me=None), mentions=[live.user], role_mentions=[], reference=None,
@@ -290,11 +353,31 @@ def test_who_may_act_is_unchanged_for_a_follow_up(live):
     """The follow-up is authorised exactly as an @mention from that person: a member answering with a change to someone
     else's character is refused, no card."""
     reg = live.greg
-    conversation.remember(reg, LISTEN_CH, BYSTANDER, "make ashgrove holy", "Which?", [QUESTION], message_id=1)
+    conversation.remember(reg, LISTEN_CH, BYSTANDER, "make ashgrove holy", "Which?", [QUESTION], message_id=1, asked_by=conversation.PARSER)
     live.verdicts[0] = ANSWERED
     said, dec = say(live, BYSTANDER, "Duskmere")
-    assert dec.calls == 0 and len(live.parsed) == 1
+    assert dec.calls == 0 and len(live.parsed) == 1 and live.helped == []
     assert len(said) == 1 and said[0][1].get("embed") is None and "⛔" in said[0][0]
+
+
+def test_the_direct_route_runs_the_mention_checks(live, monkeypatch):
+    """The answer to the parser's question reaches the parser only where an @mention from that person would: in a
+    channel where they may not act it goes to the help answer, as an @mention does; someone who left the server gets the
+    guide; and the Apply under the card decides who presses it live, as ever."""
+    reg = live.greg
+    reg.may_plain = lambda *a, **k: "Not here."  # this person may act nowhere
+    conversation.remember(reg, LISTEN_CH, BYSTANDER, "make ashgrove holy", "Which?", [QUESTION], message_id=1, asked_by=conversation.PARSER)
+    said, _ = say(live, BYSTANDER, "Duskmere")
+    assert live.parsed == [] and live.helped == ["Duskmere"], "may not act here: the help answer, never the parser"
+    del reg.may_plain
+    conversation.remember(reg, LISTEN_CH, BYSTANDER, "make ashgrove holy", "Which?", [QUESTION], message_id=2, asked_by=conversation.PARSER)
+
+    async def gone(reg_, user):
+        return False
+
+    live.in_guild = gone
+    said, _ = say(live, BYSTANDER, "Duskmere")
+    assert live.parsed == [] and len(said) == 1 and said[0][1].get("embed") is None, "left the server: the guide, no parse"
 
 
 def test_a_slash_commands_private_question_is_not_answered_in_public(live):
@@ -430,9 +513,63 @@ def test_a_named_character_and_other_ops_are_left_alone(reg):
     named = ConfigOp(op="character", member="Ashgrove", character="Ironvale", field="spec", value="Holy")
     other = ConfigOp(op="character", member="Ashgrove", character="Duskmere", field="offspec", value="Holy")
     req = narrow(reg, named)
-    assert req.ops == [named] and req.ops[0].character == "Ironvale" and req.ops[0]._no_fit is None, "the registry decides"
+    assert req.ops == [named] and req.ops[0].character == "Ironvale", "never swapped for the priest"
+    with pytest.raises(configops.RegistryError, match=r"^Ironvale is a Warrior, which has no Holy spec\.$"):
+        configops.describe(reg, req.ops[0], strict=True, by_id=OWNER)
     req = narrow(reg, other)
     assert req.ops == [other]
+
+
+KAELITH = 700_000_000_000_000_103  # a member whose display name is also their Warrior main's name, with a Priest alt
+
+
+def test_a_name_that_is_the_member_and_their_character_keeps_that_character(reg):
+    """"make Kaelith Holy": Kaelith is the member AND their Warrior main — the request named that character, so it is
+    the one checked (it can't be Holy: one sentence), never swapped for the Priest alt."""
+    reg.add_character(KAELITH, "Kaelith", "Kaelith", "Warrior", "Arms", None, True)
+    reg.add_character(KAELITH, "Kaelith", "Duskveil", "Priest", "Shadow", None, False)
+    req = narrow(reg, ConfigOp(op="character", character="Kaelith", field="spec", value="Holy"))
+    (op,) = req.ops
+    assert op.character == "Kaelith" and op.member == "Kaelith" and req.questions == []
+    with pytest.raises(configops.RegistryError, match=r"^Kaelith is a Warrior, which has no Holy spec\.$"):
+        configops.describe(reg, op, strict=True, by_id=OWNER)
+    (op,) = narrow(reg, ConfigOp(op="character", character="Kaelith", field="spec", value="Fury")).ops
+    assert (op.character, op.value) == ("Kaelith", "Fury") and configops.describe(reg, op, strict=True, by_id=OWNER) == "Kaelith: spec Arms → Fury"
+
+
+def test_a_spec_it_changes_from_the_game_doesnt_know_narrows_nothing(reg):
+    """"from dps to holy": no class has a spec called dps, so the target spec alone narrows (never a refusal)."""
+    ashgrove(reg)
+    (op,) = narrow(reg, ConfigOp(op="character", member="Ashgrove", field="spec", value="Holy", text="dps")).ops
+    assert (op.character, op.value, op._no_fit) == ("Duskmere", "Holy", None)
+
+
+def test_the_spec_it_already_has_is_one_sentence(reg):
+    ashgrove(reg)
+    (op,) = narrow(reg, ConfigOp(op="character", member="Ashgrove", field="spec", value="shadow")).ops
+    with pytest.raises(configops.RegistryError, match=r"^Duskmere is already Shadow\.$"):
+        configops.describe(reg, op, strict=True, by_id=OWNER)
+
+
+def test_a_record_they_cant_change_is_refused_before_any_question(reg, rs, monkeypatch, tmp_path):
+    """A member asking to change someone else's character: the refusal comes first — no question naming that member's
+    characters, and no open question for a follow-up."""
+    ashgrove(reg, second_priest=True)
+    reg.add_character(BYSTANDER, "Fernhollow", "Fernhollow", "Mage", "Frost", None, True)
+    bot = make(reg, rs, monkeypatch, tmp_path, [])
+    said = []
+
+    async def reply(content=None, **kw):
+        said.append((content, kw))
+        return types.SimpleNamespace(id=next(_ids))
+
+    msg = Msg(id=next(_ids), content="x", author=types.SimpleNamespace(id=BYSTANDER, display_name="f", bot=False), channel=Chan(LISTEN_CH),
+              guild=types.SimpleNamespace(id=1), reference=None, reply=reply)
+    req = ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="character", member="Ashgrove", field="spec", value="Holy")])
+    asyncio.run(discord_policy.handle_change(msg, reg, None, object(), bot.ops, "make ashgrove holy", bot=bot, channel=LISTEN_CH, req=req))
+    assert len(said) == 1 and "⛔" in said[0][0] and "Duskmere" not in said[0][0] and "Gloamwick" not in said[0][0]
+    assert said[0][1].get("embed") is None
+    assert conversation.take_open_question(reg, LISTEN_CH, BYSTANDER, window_s=300) is None
 
 
 def test_the_parsers_prompt_carries_the_rule_in_both_variants(monkeypatch):

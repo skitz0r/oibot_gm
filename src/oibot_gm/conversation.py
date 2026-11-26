@@ -28,6 +28,7 @@ QUESTION_CAP = 300
 FENCE_TAGS = ("conversation", "request", "question", "data", "member-text")
 
 DM = "dm"
+PARSER, LOOP = "parser", "loop"  # Exchange.asked_by: the answer to the parser's question goes back to the parser, the loop's to the loop
 
 
 @dataclass
@@ -41,6 +42,7 @@ class Exchange:
     message_id: int | None = None  # the person's message (None for a slash command or the site)
     reply_message_id: int | None = None  # the bot's reply (what a Discord reply references)
     followed: bool = False  # the person's next message was taken as the answer to `questions` (take_open_question): once only
+    asked_by: str = ""  # who asked `questions`: PARSER (the change parser) or LOOP (the answer loop's choices); "" = neither said
 
 
 _rings: OrderedDict[tuple, deque] = OrderedDict()
@@ -53,11 +55,12 @@ def _key(reg_or_key, channel_id, uid) -> tuple:
 
 
 def remember(reg, channel_id, uid: int, request: str, reply: str = "", questions=None, *, message_id: int | None = None,
-             reply_message_id: int | None = None, at: float | None = None) -> Exchange:
-    """Keep one exchange (in memory only). The caller remembers after it replied, with the bot's reply message id."""
+             reply_message_id: int | None = None, at: float | None = None, asked_by: str = "") -> Exchange:
+    """Keep one exchange (in memory only). The caller remembers after it replied, with the bot's reply message id.
+    `asked_by`: who asked the questions (PARSER | LOOP), so the person's answer goes back to it."""
     ex = Exchange(at=time.time() if at is None else at, uid=int(uid), channel_id=channel_id, request=str(request or "")[:2000],
                   reply=str(reply or "")[:2000], questions=[str(q)[:QUESTION_CAP] for q in (questions or [])][:6],
-                  message_id=message_id, reply_message_id=reply_message_id)
+                  message_id=message_id, reply_message_id=reply_message_id, asked_by=asked_by if questions else "")
     k = _key(reg, channel_id, uid)
     with _lock:
         ring = _rings.get(k)

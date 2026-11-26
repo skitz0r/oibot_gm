@@ -1490,7 +1490,7 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
         main = slot == "main"
         return ([{"name": name, "surname": surname.strip() or None, "cls": cls, "spec": spec, "offspec": off, "main": main}],
                 f"{who}: add {label} ({what}, {'main' if main else 'alt'})")
-    if cur is None and op._no_fit:
+    if op._no_fit and f == "spec":  # narrow_characters found the change can't be made: its one sentence
         raise RegistryError(op._no_fit)
     if cur is None:
         raise RegistryError(f"{who} has no active character named {label or '?'} (theirs: {', '.join(c.label for c in m.active()) if m else 'none'})")
@@ -1540,14 +1540,17 @@ def _spec_named(reg: Registry, cls: str, word: str | None) -> str | None:
     return next((s for s in specs if s.casefold() == w or s.casefold() == alias.get(w, "").casefold()), None)
 
 
-def narrow_characters(reg: Registry, req: ConfigRequest, author_id: int) -> None:
+def narrow_characters(reg: Registry, req: ConfigRequest, author_id: int, *, may=None) -> None:
     """Never ask what the record answers (2026-11-25: "change X from shadow to holy" asked which of X's two characters,
     one a warrior). A spec change that names a member but not which of their characters: only a character whose class
-    HAS the new spec can take it (the profile's classes), and when the request names the spec it changes from (`text`),
-    only a character holding that spec now. One fits → the op names it; none → the op keeps the one sentence that
-    says why (_character_rows refuses with it); several → the op becomes a question listing only those. A character the
-    op already names (one of the member's) is left alone, and so is everything else. Mutates `req`; who may make the
-    change is still decided by authorize."""
+    HAS the new spec can take it (the profile's classes), and when the request names the spec it changes from (`text`,
+    ignored when no class in the profile has a spec by that name), only a character holding that spec now. One fits →
+    the op names it; none → the op keeps the one sentence that says why (_character_rows refuses with it); several →
+    the op becomes a question listing only those. A character the op names is the only one checked (a name that is
+    both the member's and one of their characters is that character, never another of theirs); a spec it already has
+    is one sentence. Everything else is left alone. Mutates `req`. `may(op)`: whether the asker may change the record
+    the op targets (configops.authorize) — when not, the op is left for authorize to refuse: no question naming that
+    member's characters. Who may make the change is still decided by authorize."""
     keep, asks = [], []
     for op in req.ops:
         if op.op != "character" or (op.field or "").strip().lower() != "spec" or not (op.value or "").strip():
@@ -1558,17 +1561,19 @@ def narrow_characters(reg: Registry, req: ConfigRequest, author_id: int) -> None
         if label and not (op.member or "").strip():  # the parser wrote the member's name where a character goes
             named = next((x for x in reg.members.values() if x.display_name.casefold() == label.casefold()), None)
             if named is not None and not (m and any(c.matches(label) for c in m.active())):
-                m, op.member, label = named, label, ""
+                m, op.member = named, label
+                if not any(c.matches(label) for c in named.active()):
+                    label = ""  # the member's name only: narrow across their characters
         if m is None:
             keep.append(op)
+            continue
+        if may is not None and not may(op):
+            keep.append(op)  # not theirs to change: authorize refuses it, nothing about that member's characters is said
             continue
         chars = m.active()
         if label and label.casefold() == m.display_name.casefold() and not any(c.matches(label) for c in chars):
             label = ""  # the member's own name, not a character's
         pool = [c for c in chars if c.matches(label)] if label else chars
-        if label and len(pool) == 1:
-            keep.append(op)  # already one character: the registry decides whether its class has that spec
-            continue
         if label and not pool:
             keep.append(op)  # a name that isn't theirs: _character_rows says so
             continue
@@ -1577,19 +1582,27 @@ def narrow_characters(reg: Registry, req: ConfigRequest, author_id: int) -> None
         to = (op.value or "").strip()
         fits = [c for c in pool if _spec_named(reg, c.cls, to)]
         word = _spec_named(reg, fits[0].cls, to) if fits else to[:1].upper() + to[1:]
-        why = f"None of {whose} characters is of a class with a {word} spec."
+        if label and len(pool) == 1:
+            why = f"{pool[0].label} is a {pool[0].cls}, which has no {word} spec."
+        else:
+            why = f"None of {whose} characters is of a class with a {word} spec."
         frm = (op.text or "").strip()
-        if fits and frm:
+        if fits and frm and any(_spec_named(reg, cls, frm) for cls in reg.profile.classes):  # a spec the game doesn't know narrows nothing
             held = [c for c in fits if _spec_named(reg, c.cls, frm) == c.spec]
             if not held:
-                why = f"None of {whose} characters that can play {word} is {frm[:1].upper() + frm[1:]} now."
+                frm_word = next(_spec_named(reg, cls, frm) for cls in reg.profile.classes if _spec_named(reg, cls, frm))
+                why = (f"{fits[0].label} is {fits[0].spec} now, not {frm_word}." if label and len(pool) == 1
+                       else f"None of {whose} characters that can play {word} is {frm_word} now.")
             fits = held
         if len(fits) == 1:
             c = fits[0]
             op.character, op.value = c.label, _spec_named(reg, c.cls, to)
+            if c.spec == op.value:
+                op._no_fit = f"{c.label} is already {c.spec}."
             keep.append(op)
         elif not fits:
-            op.character = None
+            if not (label and len(pool) == 1):
+                op.character = None
             op._no_fit = why
             keep.append(op)
         else:

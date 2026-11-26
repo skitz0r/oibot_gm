@@ -10,7 +10,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        OP_GROUP (every op in one capability group), bind_self (own-record scope decided in code, never by the model),
                        narrow_characters (Task 11: a `character` spec op naming a member but not which character binds the one whose class has
                        the new spec in the profile and holds the from-spec in `text`; none → ConfigOp._no_fit = the one-sentence refusal
-                       _character_rows raises; several → a question listing only those; run by handle_change and the site's text box before authorize),
+                       _character_rows raises; several → a question listing only those; a named character — even one that is also the member's
+                       display name — is the only one checked ("<X> is a Warrior, which has no Holy spec." / "<X> is already Shadow."); a
+                       from-spec no class has is ignored; may(op) = authorize first: a record the asker can't change is left for authorize to
+                       refuse, no question; run by handle_change and the site's text box before authorize),
                        authorize → Registry.may_plain; confirm_for (an officer records a member's Confirm/Can't through answer_placement_for);
                        user_error/report_error = THE refusal wording (§2.7); BY_DESIGN_EXEMPT / PARITY_PENDING / BY_DESIGN_ONLY (single-surface features, with their path) = the parity matrix's exemptions (tests/test_parity_matrix.py); config_summary = /gm config show in words.
                        THE structured ops path (design §5.43): ops_from_fields(reg, kind, target, fields) / ops_from_changes = typed drafts → ops server-side

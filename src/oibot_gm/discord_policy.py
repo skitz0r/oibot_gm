@@ -463,9 +463,9 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         conversation = conv_mod.context_block(conv_mod.recall(reg, channel, author.id, reply_to_message_id=conv_mod.reply_to_id(interaction_or_message) if is_msg else None))
     conv_kw = {"conversation": conversation} if conversation else {}
 
-    def keep(sent, reply: str, questions=()) -> None:  # the exchange, in memory only (a restart forgets)
+    def keep(sent, reply: str, questions=(), asked_by: str = "") -> None:  # the exchange, in memory only (a restart forgets)
         conv_mod.remember(reg, channel, author.id, text, reply, list(questions), message_id=getattr(interaction_or_message, "id", None) if is_msg else None,
-                          reply_message_id=getattr(sent, "id", None))
+                          reply_message_id=getattr(sent, "id", None), asked_by=asked_by)
     officer, role_ids = await bot.plain_identity(reg, author)  # decided in code, before the parser sees anything
     # who can READ the reply decides how much it may carry: a Message outside DMs and officer-only channels is public,
     # so the parser (whose reply and questions go back verbatim) and the help snapshot get the member-level context
@@ -481,7 +481,11 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
             return
     if req.kind == "ignore":
         return
-    configops.narrow_characters(reg, req, author.id)  # a spec change binds the one character it can mean, in code
+    raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
+
+    def may(op) -> bool:  # who may change that record decides first: no question about a record they can't change
+        return not configops.authorize(reg, [op.model_copy()], author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)[1]
+    configops.narrow_characters(reg, req, author.id, may=may)  # a spec change binds the one character it can mean, in code
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line
         to_help = not is_msg or reg.plain_mode(channel) == "act"
     from .answer_loop import enabled as answers_on
@@ -503,7 +507,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
 
             await send(guide_intro(reg), view=apply_view(reg, author.id, officer=officer, role_ids=role_ids, base=guide_view(reg)), ephemeral=True)
             return
-        keep(await send(answer[:1950], ephemeral=True), answer[:1950], getattr(answer, "questions", ()))
+        keep(await send(answer[:1950], ephemeral=True), answer[:1950], getattr(answer, "questions", ()), conv_mod.LOOP)
         return
     if req.kind == "question" and not req.ops and not req.questions and to_help and getattr(bot, "help_answer", None) is not None:
         from .answer_loop import entry_kw  # the answers log's entry point: an act channel, or /gm change
@@ -514,7 +518,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
             return
     if req.kind == "question" or req.questions:
         keep(await send((req.reply + ("\n" + "\n".join(f"• {q}" for q in req.questions) if req.questions else ""))[:1900] or "I couldn't tell what you want changed. Name the raid, person or setting, and what it should become.", ephemeral=True),
-             req.reply, req.questions)
+             req.reply, req.questions, conv_mod.PARSER)  # the answer to it goes back to the parser (discord_bot.listen_followup)
         return
     if not req.ops:
         keep(await send(req.reply[:1900] or "I didn't find a change to make in that message.", ephemeral=True), req.reply or "I didn't find a change to make in that message.")
@@ -522,7 +526,6 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if hold is not None:  # overheard: no diff and no refusal under a message that never spoke to the bot
         await hold(req)
         return
-    raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
     allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)
     # a people or run action the registry already refuses (an unknown field, a character that isn't theirs) is a refusal,
     # never a proposed change with an Apply button under it

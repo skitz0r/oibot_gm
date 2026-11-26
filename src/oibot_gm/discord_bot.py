@@ -476,25 +476,35 @@ class ListenMixin:
         """The answer to the bot's own question (2026-11-25: an officer answered the bot's "which character?" with a bare
         name and the gate scored it as chat). When the bot's last reply to this person in this channel asked them
         something (conversation.take_open_question: the ring's newest exchange has questions, younger than
-        LISTEN_FOLLOWUP_S, not taken before), their next message there goes to plain_text as an @mention would — no
-        decision request, no 👀, and no `hold`: it continues an exchange the bot already answered in public. plain_text
-        checks who may ask and act exactly as for an @mention. The question is taken by that one message whatever it says.
+        LISTEN_FOLLOWUP_S, not taken before), their next message there goes back to WHOEVER ASKED, as an @mention would —
+        no decision request, no 👀, and no `hold`: it continues an exchange the bot already answered in public. The parser's
+        question → plain_text(to_parser=True): straight to the parser (handle_change), never through a help verdict; the
+        loop's → plain_text as an @mention. plain_text checks who may ask and act exactly as for an @mention. The question
+        is taken by that one message whatever it says; a message meant for someone else (it mentions another person or a
+        role, or replies to a message that isn't the bot's) and one with no words (a sticker, an attachment) only close it.
         Never in a channel the bot only watches or ignores; a listened channel logs it (did "followup", no text)."""
         cid = message.channel.id
         mode = reg.listen_mode(cid)
         if mode == "watch" or getattr(message.author, "bot", False) or reg.plain_mode(cid) == "ignore":
             return False
-        text = mention_names(message, reg, getattr(self, "user", None))
-        if not text:
-            return False
         # only a question the bot posted under a message here: a /gm change's private question never makes a public reply
-        if conversation.take_open_question(reg, cid, message.author.id, window_s=LISTEN_FOLLOWUP_S, posted=True) is None:
+        ex = conversation.take_open_question(reg, cid, message.author.id, window_s=LISTEN_FOLLOWUP_S, posted=True)
+        if ex is None:
+            return False
+        me = getattr(self, "user", None)
+        others = [u for u in (getattr(message, "mentions", None) or ()) if getattr(u, "id", None) != getattr(me, "id", -1)]
+        ref = conversation.reply_to_id(message)
+        if others or getattr(message, "role_mentions", None) or getattr(message, "mention_everyone", False) or (ref is not None and ref != ex.reply_message_id):
+            return False  # meant for someone else: the question is closed, and the message is judged as any other
+        text = mention_names(message, reg, me)
+        if not text:
             return False
         if mode:  # the next decision in this channel still sees the answer as the chat before it
             recent = self._listen()["recent"].setdefault(cid, collections.deque(maxlen=LISTEN_RECENT))
             recent.append({"author": getattr(message.author, "display_name", "") or "", "text": text[:200]})
-        try:
-            await self.plain_text(message, reg, text, cid)
+        try:  # a listened channel's answers log names it as listening, as the gate's own replies do
+            await self.plain_text(message, reg, text, cid, to_parser=ex.asked_by == conversation.PARSER,
+                                  **(answer_loop.entry_kw(reg.key, "listen") if mode else {}))
         finally:
             if mode:
                 self._listen_record(reg, message, text, None, mode, "followup")
@@ -1345,7 +1355,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             return []
 
     async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None, hold=None,
-                         entry: str | None = None) -> None:
+                         entry: str | None = None, to_parser: bool = False) -> None:
         """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).
         An "act" channel (ops/analytics by default): configops.parse first — a change becomes the diff + Apply, a
         question gets the parser's own reply from the live config (one model call either way). Elsewhere (DMs and
@@ -1356,7 +1366,9 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         reply, so the application wizard opens straight from the chat (typed class/spec is never parsed).
         `hold`: set by the listening gate for a message that never addressed the bot — a change is held behind a 👀
         instead of shown (handle_change's `hold`). `entry`: where it came in, for the answers log (listening passes
-        "listen"; else a DM or an @mention)."""
+        "listen"; else a DM or an @mention). `to_parser`: the message answers the change parser's own question
+        (listen_followup): where the help answer would come first, the parser reads it instead (handle_change, with the
+        conversation) — every check above it still runs, and only a person who may act here gets there."""
         mode = reg.plain_mode(channel)
         hold_kw = {"hold": hold} if hold is not None else {}  # only the listening gate sets it: every other call is as before
         if mode == "ignore":
@@ -1399,6 +1411,10 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
                 else:
                     await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
                 return
+            if to_parser and may_act:  # the answer to the parser's question goes back to the parser, never via a help verdict
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo,
+                                    **answer_loop.entry_kw(reg.key, entry or ("mention" if message.guild else "dm")))
+                return
             if memory is None and provider is not None and reg.may_ask(uid, officer):  # an @mention or a DM: recall and judge here
                 memory = await self.recall_memories(reg, text, channel)  # (the listening gate hands its own judged list)
             mem_kw = {"memory": mem.memory_block(memory, mem.guild_tz(reg))} if memory else {}
@@ -1414,7 +1430,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         else:
             sent = await message.reply(answer, view=apply_button(), allowed_mentions=quiet)
             conversation.remember(reg, channel, uid, text, answer, getattr(answer, "questions", None), message_id=getattr(message, "id", None),
-                                  reply_message_id=getattr(sent, "id", None))
+                                  reply_message_id=getattr(sent, "id", None), asked_by=conversation.LOOP)
 
     async def on_message(self, message: discord.Message):
         if await self.news_message(message):  # the news webhook (a bot) is read before the bot filter below

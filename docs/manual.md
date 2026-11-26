@@ -2425,9 +2425,14 @@ Only Discord saying they are gone counts: a Discord outage never locks a member 
 **A follow-up is understood.** Reply to the bot's message, or write again in the same channel within 20 minutes, and
 "him", "that event" and answers to its questions refer to what you said before — answer "7:30 PM" to "What time should
 the event open?" and the diff carries both your first request and the answer. When the bot has just asked you
-something, your next message in that channel within five minutes is the answer even in a channel where it isn't tagged.
+something, your next message in that channel within five minutes is the answer even without tagging the bot. It goes
+back to whatever asked: an answer to a question about a change becomes that change, and anything else you say after
+such a question is read by the bot and, if it isn't for the bot, left alone. After a question the bot asked while
+answering you, it replies once to whatever you say next. A message that mentions someone else or replies to someone
+else's message is never taken as the answer; it only ends the wait, and so does a sticker or a picture on its own.
 A spec change that names a member but not which character goes to the one character whose class has that spec (and
-that plays the spec named as the old one); only when several fit does the bot ask, and it lists just those. The bot keeps this only in memory (a
+that plays the spec named as the old one); only when several fit does the bot ask, and it lists just those. A character
+you name is the one changed, never another of theirs; if it can't take that spec, or already has it, the bot says so. The bot keeps this only in memory (a
 restart forgets it) and only for the last few exchanges, per person and per place: someone else writing in the same
 channel is never read as continuing your conversation. On the site, the Tell the bot box remembers its own last few
 exchanges while the page is open.

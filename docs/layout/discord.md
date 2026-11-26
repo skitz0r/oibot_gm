@@ -24,8 +24,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        the 👀 comes off, nothing posted; an overheard question is answered as before; listen_followup (Task 11) = run in
                        on_message BEFORE the gate for an untagged message: when the bot's last reply to that person in that channel asked
                        something (conversation.take_open_question, LISTEN_FOLLOWUP_S 5 min, taken once — an @mention takes it too), the
-                       message goes to plain_text as an @mention (no decision request, no 👀, no hold; plain_text's own rights checks);
-                       never in a watch or ignore channel; a listened channel logs did "followup" (p null); LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
+                       message goes back to WHOEVER ASKED (Exchange.asked_by: conversation.PARSER = handle_change's question, LOOP = the
+                       answer loop's choices, discord_help.Asked): the parser's → plain_text(to_parser=True) → handle_change with the
+                       conversation, skipping the help-first step (only where an @mention could reach the parser: not ignore, in the
+                       server, may act there; then authorize, describe(strict), the live check at Apply); the loop's → plain_text as an
+                       @mention (no decision request, no 👀, no hold; entry "listen" in a listened channel). A message that mentions another
+                       user / a role / everyone, replies to a message that isn't the bot's, or has no words only CLOSES the question
+                       (then the gate judges it as any other); never in a watch or ignore channel; a listened channel logs did "followup" (p null); LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
                        50 verdicts (memory, text ≤120) and out/listen.jsonl rows WITHOUT text; no key → one ops warn per guild per hour. Never a DM;
                        LISTEN_LISTENERS fn(guild key) on every verdict → the web's officers-only `listen` topic (the Ops page's Recent decisions)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json (compiled_at, text_sha, confirmed_by), confirmed by an officer;
