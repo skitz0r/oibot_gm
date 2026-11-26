@@ -25,6 +25,13 @@ function items(acts: MemberAction[]): Item[] {
   return out;
 }
 
+/** The switches go after Join (and Join as…) and before Bench, No thanks and the pins; at the end when none of those is offered. */
+function withSwitches(list: Item[], switches: SwitchItem[]): (Item | SwitchItem)[] {
+  if (!switches.length) return list;
+  const at = list.findIndex((it) => AFTER_SWITCH.has(it.a.key));
+  return at < 0 ? [...list, ...switches] : [...list.slice(0, at), ...switches, ...list.slice(at)];
+}
+
 const DANGER = new Set(["callout", "confirm_no", "fill_no", "no_thanks"]);
 const ICON: Record<string, React.ReactNode> = { pin_in: <IconPin size={14} />, pin_out: <IconUserOff size={14} />, unpin: <IconPinnedOff size={14} />, join: <IconUserPlus size={14} /> };
 
@@ -70,15 +77,21 @@ function useRecord(run: string, onDone: () => Promise<void> | void) {
  *  board's own move — the same POST /api/run/{key}/move a drag sends, after the server's confirm sentence. */
 export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?: string; aria?: string; onPick: () => void };
 
+/** One role switch in a Signups row's ⋮ (the Events page, SignupsSection): that member's Role switches row — its spec
+ *  icon, the server's words for it and the section's own press (useSwitchPress). */
+export type SwitchItem = { key: string; icon: React.ReactNode; label: string; onPick: () => void };
+/** The menu's items a switch goes before: the member's answers after Join and the pins. */
+const AFTER_SWITCH = new Set(["bench", "no_thanks", "pin_in", "pin_out", "unpin"]);
+
 /** The row ⋮ menu on a sheet (joined, Bench, No thanks chips and the not-answered rows) and on a board chip: fetched when
  *  opened, so it is always the member's state now. `moves` (the board's chips): "Move to…" first — every group with room
  *  and Not placed / Not rostered — the board's tap-and-keyboard path (a drag needs a mouse; design §5.56 phase 3).
  *  `onAnswer` (the Events page): Join / Join as… / Bench / No thanks open the SERVER's answer box (useAnswerBox, the member
  *  fixed) with its fields. Callouts, pins and the confirm / fill answers ask in the server's box too (useRecord), and so
  *  does every pick on the Test bench, which passes no `onAnswer`. */
-export function MemberMenu({ run, uid, name, onDone, moves, onAnswer }: {
+export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches }: {
   run: string; uid: string | null | undefined; name: string; onDone: () => Promise<void> | void; moves?: MoveTarget[];
-  onAnswer?: (action: string, character: string | null) => void;
+  onAnswer?: (action: string, character: string | null) => void; switches?: SwitchItem[];
 }) {
   const [list, setList] = useState<MemberActions | null>(null);
   const [record, dialog] = useRecord(run, onDone);
@@ -99,11 +112,13 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer }: {
           )}
           {uid && <Menu.Label>{name}{list ? ` · ${list.now}` : ""}</Menu.Label>}
           {uid && !list && <Group justify="center" p="xs"><Loader size="xs" /></Group>}
-          {uid && list && list.actions.length === 0 && <Menu.Item disabled>{pageWords().nothing_applies}</Menu.Item>}
-          {uid && list && items(list.actions).map((it) => (
+          {uid && list && list.actions.length === 0 && !switches?.length && <Menu.Item disabled>{pageWords().nothing_applies}</Menu.Item>}
+          {uid && list && withSwitches(items(list.actions), switches || []).map((it) => ("onPick" in it ? (
+            <Menu.Item key={`switch:${it.key}`} leftSection={it.icon} onClick={it.onPick}>{it.label}</Menu.Item>
+          ) : (
             <Menu.Item key={`${it.a.key}:${it.character || ""}`} leftSection={ICON[it.a.key]} color={DANGER.has(it.a.key) ? "red" : undefined}
               onClick={() => (onAnswer && ANSWERS.has(it.a.key) ? onAnswer(it.a.key, it.character) : record(uid, it))}>{it.label}</Menu.Item>
-          ))}
+          )))}
         </Menu.Dropdown>
       </Menu>
       {dialog}

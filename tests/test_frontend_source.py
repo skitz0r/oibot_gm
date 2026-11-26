@@ -1269,6 +1269,29 @@ def test_role_switches_are_one_line_moves():
     assert 'aria-hidden' in sw
 
 
+def test_a_signups_row_menu_offers_that_members_role_switch():
+    """Issue #10 (the owner, 2026-11-25): a Signups row's ⋮ offers the Role switches row the server lists for that member,
+    after Join and before Bench, through THE section's own press (useSwitchPress: one route, one box) — the item reads
+    page_words.switch_item over the row's button word and `to`, with the spec icon; its box is mounted on the section so a
+    menu that closes (or a live reload) never takes it away. The Test bench's cards and the members' page gain nothing."""
+    routes = [f for f in SRC.rglob("*.tsx") if re.search(r"/api/run/[^`\"']*/switch", f.read_text())]
+    routes += [f for f in SRC.rglob("*.ts") if re.search(r"/api/run/[^`\"']*/switch", _code_only(f.read_text()))]
+    assert [f.name for f in routes] == ["RoleSwitches.tsx"], "the switch route is written in one place"
+    assert len(re.findall(r"/api/run/[^`\"']*/switch", (SRC / "components" / "events" / "RoleSwitches.tsx").read_text())) == 1
+    sw = _code_only((SRC / "components" / "events" / "RoleSwitches.tsx").read_text())
+    assert "export function useSwitchPress(" in sw and "useSwitchPress(view, onReload)" in sw, "the section's button presses through the shared hook"
+    sec = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
+    assert "useSwitchPress(ev, onDone)" in sec and "switchPress(r)" in sec and "{switchDialog}" in sec, "the menu item takes the same press; its box lives on the section"
+    assert "page_words.switch_item" in sec and "r.button" in sec and "r.to" in sec and 'kind="spec"' in sec and "r.uid === p.uid" in sec
+    assert not re.search(r"[\"'`>]\s*(Switch|Answer for them|Ask)\b", sec), "the item's words are the server's"
+    menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
+    assert "switches?: SwitchItem[]" in menu and "withSwitches(" in menu and '"bench"' in menu and "/switch" not in menu
+    assert "switches=" not in _code_only((SRC / "components" / "board" / "SheetCard.tsx").read_text()), "the Test bench's menu is unchanged"
+    tabs = _code_only((SRC / "components" / "events" / "SignupTabs.tsx").read_text())
+    members = _code_only((SRC / "pages" / "MemberEvents.tsx").read_text())
+    assert "switch" not in tabs.lower() and "useSwitchPress" not in members and "MemberMenu" not in members and "right=" not in members
+
+
 def test_the_event_board_draws_the_servers_picture_and_never_fights_a_drag():
     """Phase 4, Task 9 (Review Focus 3 on the page), as the owner's tweaks C left it: a drop sends ONE move and the page
     draws what the server answers (no optimistic place); a reload that lands mid-drag waits for the drop; open seats are

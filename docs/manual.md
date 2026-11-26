@@ -1101,7 +1101,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    page carries a *test event* chip beside its state. **Signups** has four tabs, each with its count — *Joined* (shown first), *Bench*, *No thanks*, *No answer yet*
    — and a tab lists its names grouped by class, a class per column under its icon as on the Discord sheet, one per
    line, each with its spec icon and the row **⋮** (the same on-behalf
-   list the Test bench's cards have). **Answer for someone** opens the bot's box with *Member* (someone with no answer yet),
+   list the Test bench's cards have). When **Role switches** has a line for that member, their **⋮** offers it too,
+   after *Join* and before *Bench*: the spec's icon with *Switch: Holy* (or *Answer for them: Holy*, *Ask: Holy*), and
+   it opens the same box as that line's button. **Answer for someone** opens the bot's box with *Member* (someone with no answer yet),
    *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays, *Tavi, Holy*); every pick
    shows the bot's sentences again, and **Record answer** writes. **Role switches** (only while a raid is short) and
    **Board** come next. The Board has a button per raid of the evening (*6:30 PM · Hyjal Summit*, *9:30 PM · Barrow
@@ -1572,7 +1574,8 @@ then). A swap that needs someone else to cover the role it leaves is not on this
 the lock and **Fill seats…** after it. When a raid is short but no line can help, the section says why in one
 sentence: the regulars who haven't answered are counted as coming, the asks already out cover it, the only switches
 need a cover (**Suggest…** / **Fill seats…** shows them), or nobody free can play the role. If the list changed since
-you opened it, the press is refused and the fresh list shows. The spec must be one the character plays (its spec, its
+you opened it, the press is refused and the fresh list shows. The same line is in that member's **⋮** under Signups
+(*Switch: Holy*), so you can switch them from their own name without opening the list. The spec must be one the character plays (its spec, its
 offspec or an extra role's); anything else is refused (*"Nyx doesn't play Fire."*). In Discord, `/raid set` → *Join*
 (or *Bench*) → **Plays which spec?** does it. Plain text ("set Nyx to Join as Holy"), **Answer for someone** and MCP
 `set_answer` with `spec` do the same before the lock; once the event is locked,

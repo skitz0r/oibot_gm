@@ -87,6 +87,8 @@ PAGE_WORDS = {
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
     # Role switches: each row's button (rc.event_switches `button`), and why a short raid has no switch to show (`why`)
     "switch_button": "Switch", "answer_button": "Answer for them", "ask_button": "Ask",
+    # a Signups row's ⋮ item for that member's Role switches row: the row's own button word and what they would play
+    "switch_item": "{button}: {to}",
     "short_cover": "The only switches here need someone to cover the role they leave, so {screen} shows them.",
     "short_asked": "The asks already out cover it until they are answered.",
     "short_counted": "Regulars who haven't answered are counted as coming, so nothing is suggested until they answer.",

@@ -12,22 +12,14 @@ import css from "../../pages/listpage.module.css";
 const FOLD = "oibot.events.switches";  // the viewer's own fold (a per-viewer convenience: localStorage)
 const same = (a: SwitchRow, b: SwitchRow) => a.uid === b.uid && a.character === b.character && a.spec === b.spec && a.part === b.part;
 
-/** Role switches (Main.dc.html): drawn only while a raid of the event is short of a minimum — one fact per short raid
- *  (`{Raid} is short`, role icon + number) with the server's `why` when it has no switch to offer, then the fold
- *  `Show {n} possible switches` / `Hide the {n} switches` (folded until opened; the viewer's choice kept), one line per
- *  switch: the role it fills, `{Name}: {from} → {to}`, a chip per raid it helps and the server's button word (Switch ·
- *  Answer for them · Ask). A press opens the row's own box from the server; the verb sends the row with its raid's plan
- *  rev and the box's fp as `seen`: a box that changed comes back fresh, a list that changed brings the row's fresh box
- *  (or, when the row is gone, says so in the server's words and the section redraws from the fresh rows). */
-export function RoleSwitches({ meta, view, onReload }: { meta: Meta; view: EventView; onReload: () => void }) {
-  const switches = view.switches;
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem(FOLD) === "1"; } catch { return false; } });
+/** THE press of one Role switches row — the section's button and a Signups row's ⋮ item (SignupsSection) both call it:
+ *  the row's own box from the server; the verb sends the row with its raid's plan rev (`view.switches.revs`) and the
+ *  box's fp as `seen`: a box that changed comes back fresh, a list that changed brings the row's fresh box (or, when the
+ *  row is gone, says so in the server's words and the page reloads). `dialog` is mounted by the caller, which stays
+ *  mounted while the box is open (a menu that closes never takes the box with it). */
+export function useSwitchPress(view: EventView, onReload: () => void): [(row: SwitchRow) => Promise<void>, React.ReactNode] {
   const [ask, dialog] = useConfirmBox(["run:", "member"]);
-  if (!switches || switches.short.length === 0) return null;
-  const words = meta.page_words;
-  const n = switches.rows.length;
-  const fold = () => setOpen((o) => { try { localStorage.setItem(FOLD, o ? "0" : "1"); } catch { /* private window: per visit */ } return !o; });
-
+  const switches = view.switches;
   async function press(first: SwitchRow) {
     let row = first;
     let said = "";
@@ -61,6 +53,24 @@ export function RoleSwitches({ meta, view, onReload }: { meta: Meta; view: Event
     if (gone) { fail(new Error(gone)); onReload(); return; }
     if (done) { ok(said); onReload(); }
   }
+  return [press, dialog];
+}
+
+/** Role switches (Main.dc.html): drawn only while a raid of the event is short of a minimum — one fact per short raid
+ *  (`{Raid} is short`, role icon + number) with the server's `why` when it has no switch to offer, then the fold
+ *  `Show {n} possible switches` / `Hide the {n} switches` (folded until opened; the viewer's choice kept), one line per
+ *  switch: the role it fills, `{Name}: {from} → {to}`, a chip per raid it helps and the server's button word (Switch ·
+ *  Answer for them · Ask). A press opens the row's own box from the server; the verb sends the row with its raid's plan
+ *  rev and the box's fp as `seen`: a box that changed comes back fresh, a list that changed brings the row's fresh box
+ *  (or, when the row is gone, says so in the server's words and the section redraws from the fresh rows). */
+export function RoleSwitches({ meta, view, onReload }: { meta: Meta; view: EventView; onReload: () => void }) {
+  const switches = view.switches;
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem(FOLD) === "1"; } catch { return false; } });
+  const [press, dialog] = useSwitchPress(view, onReload);
+  if (!switches || switches.short.length === 0) return null;
+  const words = meta.page_words;
+  const n = switches.rows.length;
+  const fold = () => setOpen((o) => { try { localStorage.setItem(FOLD, o ? "0" : "1"); } catch { /* private window: per visit */ } return !o; });
 
   return (
     <ViewSection title="Role switches" action={n > 0 ? (
