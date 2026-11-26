@@ -583,7 +583,7 @@ def priority_words(reg: Registry, ev_or_schedule_def) -> str:
 
 
 def confirmation_words(confirm: bool) -> str:
-    """Whether the rostered are asked to confirm, as the Details label's value reads (constants.PAGE_WORDS)."""
+    """Whether the rostered are asked to confirm, as the Details' Lock Confirmation row reads: Yes / No (constants.PAGE_WORDS)."""
     from .constants import PAGE_WORDS
 
     return PAGE_WORDS["asked_at_lock"] if confirm else PAGE_WORDS["not_asked_at_lock"]
