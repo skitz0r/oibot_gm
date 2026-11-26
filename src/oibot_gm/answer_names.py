@@ -167,6 +167,9 @@ def _people(reg: Registry):
         yield m, [c for c in m.active() if c.name]
 
 
+people = _people  # the public name (answer_tools' finders read the same population); `_people` keeps working
+
+
 def _guild_names(reg: Registry) -> set[str]:
     out = set()
     for m, chars in _people(reg):

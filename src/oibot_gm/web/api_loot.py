@@ -39,6 +39,7 @@ from ..raid_views import run_title
 from ..raidcycle import is_test_run
 from ..loot.session import DISENCHANT, LootBusy, LootChanged
 from ..loot_ops import LOG_MAX, award_is_members, log_row, log_rows
+from ..loot_ops import log_day as day
 from ..loot_ops import loot_log_state  # noqa: F401 — re-exported (web/api.py's Config)
 from ..registry import ROLES, TIER_VALUES, WISHLIST_MAX, RegistryError, WishlistChanged, item_key
 
@@ -82,12 +83,6 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
 
     def clock(reg, iso) -> str:
         return bot.loot_clock(reg, iso) if iso else ""
-
-    def day(reg, value) -> str:
-        try:
-            return reg.day_label(str(value)[:10], with_year=False) if value else ""
-        except Exception:  # noqa: BLE001 — a label is a courtesy
-            return str(value or "")
 
     def run_of(reg, ref: str):
         """(RaidStore, RaidEvent, its sessions) — any run by key (a done one too: reasons and corrections outlive the

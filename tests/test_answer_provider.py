@@ -13,6 +13,7 @@ import pytest
 from answer_bench import BENCH, LOOT_ITEM, LOOT_TO, asker_of
 from answer_fakes import ScriptedProvider, call, reply
 
+from oibot_gm import answer_tools as at
 from oibot_gm import prices
 from oibot_gm.llm import provider as pv
 
@@ -241,6 +242,11 @@ def test_bench_is_well_formed(reg, rs):
         for cand in case.candidates:
             cand = cand.format(**values)
             assert cand in recipes or cand in names or cand in items, f"{case.id}: candidate {cand!r} is no listed recipe, item or registry name"
+        if "event" in case.expect_tools:  # the event lookup leaves rehearsals out: the setup opens an event it returns
+            v = at.Viewer.of(reg, rs, uid, _officer, public=case.where == "public", question=case.question)
+            text, err = at.run_tool(v, "event", {"which": "next"})
+            assert not err and at.NO_MATCH.format(name="next") not in text, f"{case.id}: the event lookup finds no event"
+            assert values["raid"] in text, f"{case.id}: the next event is {values['raid']}"
     reached = {t for c in BENCH for t in c.expect_tools} | {t for c in BENCH for t in _steps_tools(c.script)}
     assert set(TOOL_NAMES) <= reached, set(TOOL_NAMES) - reached
     assert any(c.asks_back for c in BENCH) and any("manual" in c.expect_tools for c in BENCH)

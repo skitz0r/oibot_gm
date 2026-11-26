@@ -506,7 +506,8 @@ def member_awards(reg: Registry, ctx, m, limit: int = 50) -> list:
 LOG_MAX = 1000  # the award log's rows in one read (GET /api/loot/log's ceiling)
 
 
-def _log_day(reg: Registry, value) -> str:
+def log_day(reg: Registry, value) -> str:
+    """A ledger day as the loot pages print it ('Wed 2 Sep'); '' for none, the value itself when it isn't a day."""
     try:
         return reg.day_label(str(value)[:10], with_year=False) if value else ""
     except Exception:  # noqa: BLE001 — a label is a courtesy
@@ -546,7 +547,7 @@ def log_row(reg: Registry, a, memo: dict, officer: bool, scores: bool, ctx, view
     cls, spec = (c.cls, c.spec) if c is not None else (None, None)
     row = {"item": name, "item_id": a.item_id, "key": item_key(a.item_id, name), "character": "disenchant" if a.raider == DISENCHANT else a.raider,
            "disenchant": a.raider == DISENCHANT, "cls": cls, "spec": spec, "boss": a.boss, "instance": a.instance, "received": a.received.isoformat(),
-           "date_label": _log_day(reg, a.received.isoformat()), "offspec": a.offspec, "mine": award_is_members(reg, a, viewer_uid, memo)}
+           "date_label": log_day(reg, a.received.isoformat()), "offspec": a.offspec, "mine": award_is_members(reg, a, viewer_uid, memo)}
     if officer and scores:
         prec = ctx.precedent_for(a.import_id) if a.import_id else None
         row.update({"tier": a.tier, "weight": a.total_weight, "source": a.source, "bot": a.bot_pick, "by": a.by, "import_id": a.import_id,

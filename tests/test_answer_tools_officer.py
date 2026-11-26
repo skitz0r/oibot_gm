@@ -133,6 +133,48 @@ def test_loot_tool_officer_public_gets_the_member_rows_only(reg, rs):
     assert text.split("\n") == ["Awards from the loot log, newest first:", "Wed 9 Sep · Cloak of Quiet Steps · Briarwood · Warden · OS"]
 
 
+def long_awards(reg, n=40):
+    """`n` awards to Thornwick with long item names, and a precedent each: the officers' view overruns 1,500."""
+    for i in range(n):
+        name = f"Gauntlets of the Very Long Name Number {i:02d}"
+        reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {"raider": "Thornwick", "discord_id": WREN, "item_id": 0,
+                                                          "item_name": name, "tier": "B", "total_weight": 1.0,
+                                                          "received": f"2026-09-{1 + i % 28:02d}", "instance": "bd",
+                                                          "boss": "Warden", "offspec": False, "import_id": f"long-{i}"})
+        reg.store.append_jsonl(f"{reg.key}/precedents.jsonl", {"date": f"2026-09-{1 + i % 28:02d}", "item": name, "bot": "Briarwood",
+                                                              "human": "Thornwick", "reason": f"kept for the tank, case {i:02d}",
+                                                              "by": "Marrowby", "import_id": f"long-{i}"})
+
+
+def test_loot_tool_officer_in_private_takes_the_larger_cap_every_other_viewer_the_smaller(reg, rs):
+    awards(reg, rs)
+    long_awards(reg)
+    officer = body(at.run_tool(viewer(reg, rs, MARROW, True), "loot", {"member": "Thornwick"}))
+    assert at.RESULT_CAP + wrapper_len("loot") < len(officer) <= at.BIG_RESULT_CAP + wrapper_len("loot")
+    assert at.TOOLS["loot"].cap == at.BIG_RESULT_CAP, "the tool's largest cap: run_tool never passes it"
+    for uid, off, public in (MEMBER_PRIVATE, MEMBER_PUBLIC, OFFICER_PUBLIC):
+        text = body(at.run_tool(viewer(reg, rs, uid, off, public), "loot", {"item": "very long name"}))
+        assert len(text) <= at.RESULT_CAP + wrapper_len("loot"), (uid, public)
+    many = "\n".join(f"line {i} " + "x" * 60 for i in range(100))
+    assert len(at._loot_cut(viewer(reg, rs, PELLOW), many)) <= at.RESULT_CAP
+    assert at.RESULT_CAP < len(at._loot_cut(viewer(reg, rs, MARROW, True), many)) <= at.BIG_RESULT_CAP
+
+
+@pytest.mark.parametrize("who", (MEMBER_PRIVATE, MEMBER_PUBLIC, OFFICER_PRIVATE, OFFICER_PUBLIC),
+                         ids=["member", "member-public", "officer", "officer-public"])
+def test_loot_tool_own_awards_read_the_same_with_no_filter_and_with_me(reg, rs, who):
+    awards(reg, rs)
+    uid, officer, public = who
+    v = viewer(reg, rs, WREN if uid != MARROW else uid, officer, public)
+    me = inner(at.run_tool(v, "loot", {"member": "me"}))
+    assert me.split("\n")[0] in ("The asker's own awards, newest first:", "The asker has no award in the loot log yet.")
+    assert ("### Loot (officers" in me) == v.officer, "the council's view only for an officer in private"
+    if not v.officer:  # with no filter an officer in private gets the guild's latest instead
+        assert inner(at.run_tool(v, "loot", {})) == me
+    if uid != MARROW:
+        assert "Wed 2 Sep · Robe of the Bench · Thornwick · Gatekeeper · MS" in me
+
+
 def test_loot_tool_counts_what_it_leaves_out_and_says_when_nothing_matches(reg, rs):
     awards(reg, rs)
     for i in range(20):
@@ -150,15 +192,33 @@ def test_loot_tool_counts_what_it_leaves_out_and_says_when_nothing_matches(reg, 
 
 
 def test_attendance_tool_own_and_officers_only_for_others(reg, rs):
+    """The asker's own attendance shows only where nobody else reads the reply (design §7: even their own private
+    details stay out where others read); another member's only for an officer in private."""
     askers(reg)
     own = inner(at.run_tool(viewer(reg, rs, WREN), "attendance", {}))
     assert own == f"Wrenfield's attendance: {reg.attendance_text(reg.members[WREN])}."
-    assert inner(at.run_tool(viewer(reg, rs, WREN, public=True), "attendance", {"member": "Thornwick"})) == own
+    assert inner(at.run_tool(viewer(reg, rs, WREN), "attendance", {"member": "Thornwick"})) == own
+    assert inner(at.run_tool(viewer(reg, rs, WREN), "attendance", {"member": "me"})) == own
+    for v in (viewer(reg, rs, WREN, public=True), viewer(reg, rs, MARROW, True, True)):
+        for args in ({}, {"member": "me"}, {"member": "Thornwick" if v.user_id == WREN else "Marrowby"}):
+            assert inner(at.run_tool(v, "attendance", args)) == at.ATTENDANCE_PRIVATE, (v.user_id, args)
+    assert "/me view" in at.ATTENDANCE_PRIVATE
     for v in (viewer(reg, rs, WREN), viewer(reg, rs, WREN, public=True), viewer(reg, rs, MARROW, True, True)):
         assert inner(at.run_tool(v, "attendance", {"member": "Briarwood"})) == at.OFFICERS_ONLY
         assert inner(at.run_tool(v, "attendance", {"member": "Nobodyhere"})) == at.OFFICERS_ONLY, "never says who exists"
     officer = inner(at.run_tool(viewer(reg, rs, MARROW, True), "attendance", {"member": "Briarwood"}))
     assert officer == f"Pellow's attendance: {reg.attendance_text(reg.members[PELLOW])}."
+
+
+NO_RECORD_UID = 700_000_000_000_000_077
+
+
+@pytest.mark.parametrize("args", ({}, {"member": "me"}), ids=["no-argument", "me"])
+@pytest.mark.parametrize("public", (False, True), ids=["private", "public"])
+def test_attendance_tool_for_an_asker_with_no_record_says_so(reg, rs, args, public):
+    askers(reg)
+    assert NO_RECORD_UID not in reg.members
+    assert inner(at.run_tool(viewer(reg, rs, NO_RECORD_UID, public=public), "attendance", args)) == at.NO_RECORD
 
 
 # ---------------------------------------------------------------- manual
@@ -180,7 +240,7 @@ def test_manual_tool_reads_parts_and_marks_officer_sections_as_today(reg, rs):
     assert head in officer and at.MEMBER_READS not in officer
     plain = next(p for p in help_mod.manual_parts() if not help_mod.section_tier(p["title"]))
     text = inner(at.run_tool(viewer(reg, rs, WREN), "manual", {"ids": [plain["id"]]}))
-    assert text.startswith(f"### {plain['id']} ") or at.MEMBER_READS in text
+    assert text.startswith(f"### {plain['id']} ") and at.MEMBER_READS not in text, "a plain part carries no note"
     assert inner(at.run_tool(viewer(reg, rs, WREN), "manual", {"ids": ["99.9"], "query": "zzqx"})) == at.NO_MANUAL
 
 
@@ -227,3 +287,27 @@ def test_section_tool_builds_todays_section(reg, rs):
     assert "Newname" in text and "Friends here" in text
     assert at.NO_MATCH.format(name="nope") in inner(at.run_tool(v, "section", {"key": "nope"}))
 
+
+
+# ---------------------------------------------------------------- one copy of each shared reader
+
+
+def test_answer_tools_reads_the_resolvers_population_by_its_public_name():
+    import inspect
+
+    from oibot_gm import answer_names
+
+    assert answer_names.people is answer_names._people, "a pure alias: the private name keeps working"
+    src = inspect.getsource(at)
+    assert "_people" not in src and at.people is answer_names.people
+
+
+def test_the_loot_routes_day_label_is_loot_ops_one_copy(reg):
+    import inspect
+
+    from oibot_gm.web import api_loot
+
+    src = inspect.getsource(api_loot)
+    assert "def day(" not in src and "log_day" in src
+    assert not hasattr(loot_ops, "_log_day") and loot_ops.log_day(reg, "2026-09-02") == "Wed 2 Sep"
+    assert loot_ops.log_day(reg, None) == "" and loot_ops.log_day(reg, "not a day") == "not a day"

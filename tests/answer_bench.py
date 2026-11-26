@@ -17,7 +17,7 @@ from typing import Callable, Literal
 
 import yaml
 
-from conftest import GUILD, OFFICER_ROLE, OWNER, ROOT, TEST_MEMBERS, open_test_run, weekly
+from conftest import GUILD, OFFICER_ROLE, OWNER, ROOT, TEST_MEMBERS, at_schedule, weekly
 
 from answer_fakes import call, reply
 
@@ -97,9 +97,18 @@ def two_crafters(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     return out
 
 
+def real_event(reg: Registry, rs: rc.RaidStore, raid: str = "barrow_deeps", days: int = 3):
+    """A schedule's event a few days out (conftest.open_test_run's events are rehearsals, which the `event` lookup
+    leaves out)."""
+    start = (reg.now_local() + timedelta(days=days, hours=3)).replace(second=0, microsecond=0)
+    return rc.open_run(reg, rs, raid, start, by="t", schedule=at_schedule(reg, start, raid))
+
+
 def an_event(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
+    """A real Barrow Deeps event (idempotent: one already open stays the one)."""
     askers(reg)
-    open_test_run(reg, rs, "barrow_deeps")
+    if not any(e.instance == "barrow_deeps" and not rc.rehearsal_run(reg, e) for e in rs.live()):
+        real_event(reg, rs)
     return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps"}
 
 

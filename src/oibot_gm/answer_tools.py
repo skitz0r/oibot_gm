@@ -26,7 +26,7 @@ from . import help as help_mod
 from . import prices
 from . import professions
 from . import raidcycle as rc
-from .answer_names import KINDS, _people, match_lines, resolve
+from .answer_names import KINDS, match_lines, people, resolve
 from .constants import PAGE_WORDS
 from .llm.provider import unfence
 from .profiles import GameProfile
@@ -51,6 +51,8 @@ PROFESSION_OR_CHARACTER = "Name a profession or a character, one of the two."
 NO_SCHEDULES = "No raid has a schedule yet. Officers add one on the Schedules page."
 FENCES = ("data", "question", "conversation", "memory", "member-text")
 NO_RECORD = "The asker has no record in this guild yet. They add a character with /register or on the Me page."
+ATTENDANCE_PRIVATE = ("Attendance shows only where nobody else reads the reply. The asker sees theirs in a DM to the bot, "
+                      "with /me view or on the Me page.")
 UNKNOWN_SOURCE = "unknown"  # the wrapper's source for a lookup name that isn't one of TOOLS: never the model's own words
 
 
@@ -322,7 +324,7 @@ SELF_WORDS = frozenset({"me", "my", "myself", "mine", "i"})
 def _member_named(reg, name: str):
     """The member a name means, through help.mentioned_members (the snapshot's own finder); test puppets never. An
     exact display or character name wins over a part; several left → them all."""
-    here = {m.discord_id for m, _chars in _people(reg)}  # the resolver's population: no puppet, nobody who left
+    here = {m.discord_id for m, _chars in people(reg)}  # the resolver's population: no puppet, nobody who left
     hits = [m for m in help_mod.mentioned_members(reg, name) if m.discord_id in here]
     n = name.strip().lower()
     exact = [m for m in hits if n in {m.display_name.lower(), *(c.name.lower() for c in m.characters if c.name),
@@ -470,11 +472,35 @@ def _loot_line(r: dict) -> str:
     return " · ".join(str(x) for x in (r["date_label"], r["item"], r["character"], boss, "OS" if r["offspec"] else "MS") if x)
 
 
+def _council_view(v: Viewer) -> bool:
+    """An officer asking where nobody else reads the reply: the council's view and the larger cap."""
+    return v.officer and not v.audience_public
+
+
+def _loot_cut(v: Viewer, text: str) -> str:
+    """The loot result at the viewer's cap: BIG_RESULT_CAP for the council's view (fifteen rows and the precedents
+    overrun 1,500), RESULT_CAP for everyone else. The tool's own cap is the larger, so run_tool never cuts it again."""
+    return cut(text, BIG_RESULT_CAP if _council_view(v) else RESULT_CAP)
+
+
+def _loot_rows(rows: list[dict], head: str) -> list[str]:
+    out = [head] + [_loot_line(r) for r in rows[:LOOT_ROWS]]
+    if len(rows) > LOOT_ROWS:
+        out.append(f"And {len(rows) - LOOT_ROWS} more awards match.")
+    return out
+
+
+def _needle(item: str):
+    t = item.strip().casefold()
+    return lambda r: not t or t in str(r["item"]).casefold()
+
+
 @_register("loot", "Awards from the guild's loot log, newest first: day, item, character, boss and main or off spec. Give a "
                    "member or character, part of an item's name, or both; with neither, the asker's own awards. For an "
                    "officer asking in private, also the council's precedents and reasons.",
            _schema({"member": _string("A member's or a character's name, or 'me'."),
-                    "item": _string("An item's name, or part of it.")}))
+                    "item": _string("An item's name, or part of it.")}),
+           cap=BIG_RESULT_CAP)
 def _loot(v: Viewer, args: dict) -> str:
     from . import loot_ops
     from .lootctx import RegistryLootContext
@@ -482,52 +508,56 @@ def _loot(v: Viewer, args: dict) -> str:
     reg = v.reg
     ctx = RegistryLootContext(reg, reg.store, None)  # a fresh read in this worker thread, as help._loot does
     who, item = _arg(args, "member"), _arg(args, "item")
-    if not who and not item and not v.officer:  # the asker's own awards, as My loot lists them
+    council = help_mod._loot(v.ask()) if _council_view(v) else []  # precedents with their reasons, the ledger's last rows
+    if who.lower() in SELF_WORDS or (not who and not item and not _council_view(v)):
+        # the asker's own awards, as My loot finds them: no filter and 'me' read the same way
         me = reg.members.get(v.user_id)
         if me is None or me.test:
             return NO_RECORD
         memo: dict = {}
-        rows = [loot_ops.log_row(reg, a, memo, False, False, ctx, v.user_id) for a in loot_ops.member_awards(reg, ctx, me, LOOT_ROWS)]
+        rows = [r for r in (loot_ops.log_row(reg, a, memo, False, False, ctx, v.user_id)
+                            for a in loot_ops.member_awards(reg, ctx, me, loot_ops.LOG_MAX)) if _needle(item)(r)]
         if not rows:
-            return "The asker has no award in the loot log yet."
-        return "\n".join(["The asker's own awards, newest first:"] + [_loot_line(r) for r in rows])
+            out = ["The asker has no award in the loot log yet." if not item else "No award of the asker's matches that."]
+        else:
+            out = _loot_rows(rows, "The asker's own awards, newest first:")
+        return _loot_cut(v, "\n".join(out + council))
     uid = None
     if who:
-        if who.lower() in SELF_WORDS:
-            uid = v.user_id
-        else:
-            found = _member_named(reg, who)
-            if not found:
-                return _no_match(who)
-            if len(found) > 1:
-                return "\n".join([m.display_name for m in found] + [NAME_ONE])
-            uid = found[0].discord_id
+        found = _member_named(reg, who)
+        if not found:
+            return _no_match(who)
+        if len(found) > 1:
+            return "\n".join([m.display_name for m in found] + [NAME_ONE])
+        uid = found[0].discord_id
     rows = loot_ops.log_rows(reg, ctx, member_uid=uid, item=item or None, officer=False, scores=False, viewer_uid=v.user_id)
-    out = ["Awards from the loot log, newest first:"] + [_loot_line(r) for r in rows[:LOOT_ROWS]] if rows else \
-        ["No award in the loot log matches that."]
-    if len(rows) > LOOT_ROWS:
-        out.append(f"And {len(rows) - LOOT_ROWS} more awards match.")
-    if v.officer:  # an officer in private: the council's view too (precedents with their reasons, the ledger's last rows)
-        out += help_mod._loot(v.ask())
-    return "\n".join(out)
+    out = _loot_rows(rows, "Awards from the loot log, newest first:") if rows else ["No award in the loot log matches that."]
+    return _loot_cut(v, "\n".join(out + council))
 
 
 # ---------------------------------------------------------------- attendance
 
 
 @_register("attendance", "A member's attendance: how many of the guild's events they played in the window. The asker's "
-                         "own for anyone; another member's only for an officer.",
+                         "own where nobody else reads the reply; another member's only for an officer.",
            _schema({"member": _string("A member's or a character's name, or 'me'. Leave it out for the asker.")}))
 def _attendance(v: Viewer, args: dict) -> str:
     reg = v.reg
     who = _arg(args, "member")
-    found = [reg.members.get(v.user_id)] if not who or who.lower() in SELF_WORDS else _member_named(reg, who)
-    found = [m for m in found if m is not None]
+    if not who or who.lower() in SELF_WORDS:
+        me = reg.members.get(v.user_id)
+        found = [me] if me is not None and not me.test else []
+        if not found:  # the asker's own words: no record is said before any officer check
+            return NO_RECORD
+    else:
+        found = _member_named(reg, who)
     own = len(found) == 1 and found[0].discord_id == v.user_id
+    if own and v.audience_public:  # their own attendance stays out where others read the reply (design §7)
+        return ATTENDANCE_PRIVATE
     if not own and not v.officer:  # decided before saying whether the name matched anyone
         return OFFICERS_ONLY
     if not found:
-        return NO_RECORD if not who or who.lower() in SELF_WORDS else _no_match(who)
+        return _no_match(who)
     if len(found) > 1:
         return "\n".join([m.display_name for m in found] + [NAME_ONE])
     m = found[0]

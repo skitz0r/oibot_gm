@@ -8,9 +8,9 @@ from datetime import timedelta
 
 import pytest
 
-from conftest import OWNER, ROOT, at_schedule, open_test_run, weekly
+from conftest import OWNER, ROOT, open_test_run, weekly
 
-from answer_bench import MARROW, PELLOW, WREN, askers, crafters
+from answer_bench import MARROW, PELLOW, WREN, askers, crafters, real_event  # noqa: F401 — real_event: shared with the bench
 
 from oibot_gm import answer_tools as at
 from oibot_gm import discord_auctions, help as help_mod, prices, professions
@@ -37,14 +37,6 @@ def wrapper_len(name: str) -> int:
 def dentist(reg):
     day = (reg.now_local().date() + timedelta(days=7)).isoformat()
     reg.add_absence(WREN, day, None, "dentist", "t")
-
-
-def real_event(reg, rs, raid="barrow_deeps", days=3):
-    """A schedule's event a few days out (open_test_run's events are rehearsals, which the lookup leaves out)."""
-    from oibot_gm import raidcycle as rc
-
-    start = (reg.now_local() + timedelta(days=days, hours=3)).replace(second=0, microsecond=0)
-    return rc.open_run(reg, rs, raid, start, by="t", schedule=at_schedule(reg, start, raid))
 
 
 def many_crafters(reg, n=60):
@@ -356,15 +348,14 @@ def test_event_next_never_picks_a_rehearsal_but_the_tester_gets_their_own(reg, r
     real = real_event(reg, rs, days=3)
     assert test.test and not real.test and test.starts_at < real.starts_at
     member = body(at.run_tool(viewer(reg, rs, WREN), "event", {"which": "next"}))
-    assert at.run_title(reg, real) in member and PAGE_WORDS["test_run"] not in member.split("\n")[1]
-    assert "TEST EVENT" not in member
+    assert at.run_title(reg, real) in member and PAGE_WORDS["test_run"] not in member
     tonight = body(at.run_tool(viewer(reg, rs, WREN), "event", {"which": "Barrow Deeps"}))
     assert at.NAME_ONE not in tonight, "a raid's name finds the real event alone"
     tester = body(at.run_tool(viewer(reg, rs, MARROW, True), "event", {"which": "next"}))
     head = tester.split("\n")[1]
     assert head.endswith(f" · {PAGE_WORDS['test_run']}")
     other_officer = body(at.run_tool(viewer(reg, rs, OWNER, True), "event", {"which": "next"}))
-    assert "TEST EVENT" not in other_officer
+    assert at.run_title(reg, real) in other_officer and PAGE_WORDS["test_run"] not in other_officer
 
 
 def test_event_last_never_picks_a_closed_rehearsal_or_a_dropped_raid(reg, rs):
