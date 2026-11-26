@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 __all__ = ["MAX_ROUNDS", "MAX_CALLS_PER_ROUND", "RESULT_CAP", "BIG_RESULT_CAP", "TOTAL_RESULT_CHARS", "MAX_REQUESTS",
            "ANSWER_CHARS", "MAX_CHOICES", "REPLY", "reply_spec", "ANSWER_NOT_FOUND", "ANSWER_FAILED", "TOO_MANY_LOOKUPS", "RESULTS_FULL",
-           "FINAL_NUDGE", "KIND_PAGE", "AnswerResult", "run"]
+           "FINAL_NUDGE", "KIND_PAGE", "AnswerResult", "run", "answer"]
 
 MAX_ROUNDS = 3              # lookup rounds per answer (design §6)
 MAX_CALLS_PER_ROUND = 4     # lookups in one round; the rest are answered TOO_MANY_LOOKUPS
@@ -268,3 +268,28 @@ def run(provider, system: str, first_user: str, viewer: Viewer, *, known_kind: s
     except Exception as e:  # noqa: BLE001 — any failure ends with its own sentence, never a crash or a guess
         log.exception("answer loop failed")
         return done("error", error=type(e).__name__, sentence=ANSWER_FAILED)
+
+
+def answer(provider, tree, viewer: Viewer, *, conversation: str | None = None, memory: str | None = None) -> AnswerResult:
+    """One question, end to end (design §3): the names it holds resolved in code (answer_names.resolve), the small
+    start (answer_start.user_text) under the constant system text, then the loop — inside for_guild, so every usage
+    row is the guild's. What help_answer hands help.answer today travels in the Viewer (who asks, where the reply is
+    read, the question, the bot-side extras and the loot council's data); `conversation` / `memory` as help.answer
+    takes them. BLOCKING: callers run it in a thread. Never raises (run's endings; a failure before the first request
+    ends "error" with ANSWER_FAILED)."""
+    from .answer_names import resolve
+    from .answer_start import system_text, user_text
+    from .llm.provider import for_guild
+
+    reg = viewer.reg
+    with for_guild(reg.key):  # D45: the usage rows are this guild's
+        try:
+            matches, total = resolve(reg, viewer.question, tree=tree)
+            system = system_text(tree, reg.profile)
+            first = user_text(viewer, viewer.question, matches, total, conversation=conversation, memory=memory)
+        except Exception as e:  # noqa: BLE001 — nothing was asked yet: the failed-request sentence, never a crash
+            log.exception("answer start failed")
+            return AnswerResult(HelpAnswer(answer=ANSWER_FAILED), "error", 0, 0, [], {**{k: 0 for k in USAGE_KEYS}, "cost": 0.0},
+                                type(e).__name__)
+        return run(provider, system, first, viewer, known_kind=matches[0].kind if matches else None,
+                   names=[m.name for m in matches])

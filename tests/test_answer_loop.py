@@ -9,7 +9,6 @@ from answer_fakes import USAGE, ScriptedProvider, call, reply
 
 from oibot_gm import answer_loop as al
 from oibot_gm import answer_tools as at
-from oibot_gm.answer_names import match_lines, resolve
 from oibot_gm.llm.provider import BudgetExceeded, CutShort, Refused, ToolCall, Turn
 
 SYSTEM = "You answer questions about the guild."
@@ -266,18 +265,17 @@ def _bench(reg, rs, case_id):
     question = case.question.format(**fmt)
     uid, is_officer = asker_of(case)
     viewer = at.Viewer.of(reg, rs, uid, is_officer, public=case.where == "public", question=question)
-    first_user = "\n".join(match_lines(*resolve(reg, question))) + f"\n\n<question>\n{question}\n</question>"
     pv = ScriptedProvider(list(case.script))
-    res = al.run(pv, SYSTEM, first_user, viewer, known_kind="recipe")
-    sent = [first_user] + [b["content"] for r in pv.requests for m in r["messages"] if m["role"] == "user"
-                           for b in m["content"] if b.get("type") == "tool_result"]
+    res = al.answer(pv, None, viewer)
+    sent = [b.get("text") or b.get("content") or "" for r in pv.requests for m in r["messages"] if m["role"] == "user"
+            for b in m["content"]]
     return case, fmt, res, "\n".join(sent)
 
 
 def _reaches_the_crafter(reg, rs, case_id):
     case, fmt, res, sent = _bench(reg, rs, case_id)
-    # ironfeather_who_has's must sits inside a comment in the bench (a fix round repairs it): the crafter all the same
-    for m in case.must or ("Thornwick",):
+    assert case.must
+    for m in case.must:
         assert m.format(**fmt) in sent, (case.id, m)
     for n in case.never:
         assert n.format(**fmt) not in sent and n.format(**fmt) not in res.answer.answer, (case.id, n)
