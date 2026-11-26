@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import discord
@@ -12,6 +13,8 @@ from . import guild_routing, help as help_mod
 from .answer_loop import ANSWER_FAILED
 from .discord_registry import Guilds
 from .ops import Ops
+
+log = logging.getLogger(__name__)
 
 from .constants import TEAL  # noqa: E402
 # /help topic: ONE choice per manual section (a picker, never a word to spell); the label says what is in it
@@ -403,8 +406,23 @@ class HelpMixin:
         where = f"<#{reg.config.ops_channel_id}>" if reg.config.ops_channel_id else "the ops channel"
         return f"-# Posted where members read it, so this is the member view — officers can ask in {where} or by DM for the officer view."
 
+    def _asker_name(self, reg, user_id: int) -> str:
+        """The asker's name as Discord shows it, for the answer tools' start when they have no record (else "")."""
+        if user_id in reg.members:
+            return ""
+        try:
+            get_guild = getattr(self, "get_guild", None)
+            guild = get_guild(reg.config.discord_guild_id) if get_guild and reg.config.discord_guild_id else None
+            who = guild.get_member(user_id) if guild is not None and hasattr(guild, "get_member") else None
+            if who is None and getattr(self, "get_user", None) is not None:
+                who = self.get_user(user_id)
+            return str(getattr(who, "display_name", "") or "")
+        except Exception:  # noqa: BLE001 — the gateway cache only; unknown is "someone"
+            return ""
+
     async def help_answer(self, reg, user_id: int, officer: bool, question: str, may_act: bool = False, public: bool = False,
-                          data: str | None = None, conversation: str | None = None, memory: str | None = None, link: bool = True):
+                          data: str | None = None, conversation: str | None = None, memory: str | None = None, link: bool = True,
+                          entry: str = "ask"):
         """The answer text; None outside the ask audience (the caller shows the static guide). `may_act`: plain text
         may act for this person here — a message the model reads as a request to DO something returns ACT instead
         (the caller hands it to the change flow), so a plain question costs one model call. `public`: the reply is
@@ -414,7 +432,10 @@ class HelpMixin:
         `data`: a surface's own facts for the question (the loot council's proposals, asked in its thread) — an
         officer's private snapshot only, in a <data> block. `conversation`: the recent exchange with this person
         (conversation.context_block — one fenced data block, design §5.51). `memory`: the <memory> block
-        (memory.memory_block) of the memories a judge found relevant (design §5.61)."""
+        (memory.memory_block) of the memories a judge found relevant (design §5.61). `entry`: where the question came in
+        (answer_loop.ENTRIES), for the answers log. With the answer tools' switch on for this guild (answer_loop.enabled)
+        and a provider that converses, the lookup loop answers instead of help.answer; everything after the answer is
+        the same code for both."""
         audience_public = bool(public)  # anyone's reply in a channel others read: their own absence reasons stay out too
         public = bool(public and officer)
         if not reg.may_ask(user_id, officer):
@@ -430,18 +451,37 @@ class HelpMixin:
         if data and officer and not public:
             extras = extras or help_mod.HelpExtras()
             extras.data = data
+        from . import answer_loop
         from .llm.provider import for_guild
 
+        loop_on = answer_loop.enabled(reg.key) and hasattr(provider, "converse")  # the answer tools' switch (design §9)
         try:
             with for_guild(reg.key):  # D45: the usage row is this guild's (the cap is shared)
-                ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, audience_public,
-                                            **({"conversation": conversation} if conversation else {}),
-                                            **({"memory": memory} if memory else {}))
+                if loop_on:
+                    from .answer_tools import Viewer
+
+                    viewer = Viewer.of(reg, rs, user_id, officer, public=audience_public, question=question, extras=extras,
+                                       data=data if officer and not public else None, name=self._asker_name(reg, user_id))
+                    result = await asyncio.to_thread(answer_loop.answer, provider, self.tree, viewer, conversation=conversation, memory=memory)
+                else:
+                    ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, audience_public,
+                                                **({"conversation": conversation} if conversation else {}),
+                                                **({"memory": memory} if memory else {}))
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             if type(e).__name__ == "BudgetExceeded":  # its sentence is written for the asker (provider.complete): nothing "went wrong"
                 return str(e)
             return ANSWER_FAILED
+        if loop_on:  # the loop never raises: its ending says how it went, and the answer is already in its words
+            try:
+                answer_loop.log_answer(reg.key, entry, result)
+            except Exception:  # noqa: BLE001 — the log never costs the asker their answer
+                log.exception("answers log row failed")
+            if result.error:
+                await self.ops.emit(reg.config, "warn", f"help answer failed: {result.error}")
+            if result.ending == "budget":  # the provider's own sentence, as above
+                return result.answer.answer
+            ans = result.answer
         if may_act and ans.acts:
             return ACT
         text = ans.answer.strip()

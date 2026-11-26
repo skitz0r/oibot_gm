@@ -19,7 +19,7 @@ import discord
 import yaml
 from discord import app_commands
 
-from . import configops, conversation, guides, guild_routing, render
+from . import answer_loop, configops, conversation, guides, guild_routing, render
 from . import memory as mem
 from .constants import OLD_WORDS_PROMPT
 from . import registry as registry_mod
@@ -459,7 +459,7 @@ class ListenMixin:
 
         try:
             if did == "replied":
-                await self.plain_text(message, reg, text, cid, memory=judged, hold=hold)
+                await self.plain_text(message, reg, text, cid, memory=judged, hold=hold, **answer_loop.entry_kw(reg.key, "listen"))
                 if held:
                     did = "asked" if held[0] else "quiet"
         finally:
@@ -641,7 +641,7 @@ class ListenMixin:
             await handle_change(ask["message"], reg, self.policies.store(reg), self.ctx.provider, self.ops, ask["text"], bot=self,
                                 channel=ask["channel"], req=ask["req"])
             return
-        await self.plain_text(ask["message"], reg, ask["text"], ask["channel"], memory=ask.get("memory"))
+        await self.plain_text(ask["message"], reg, ask["text"], ask["channel"], memory=ask.get("memory"), **answer_loop.entry_kw(reg.key, "listen"))
 
 
 class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
@@ -1315,7 +1315,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             log.warning("memory: recall failed (%s)", type(e).__name__)
             return []
 
-    async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None, hold=None) -> None:
+    async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None, hold=None,
+                         entry: str | None = None) -> None:
         """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).
         An "act" channel (ops/analytics by default): configops.parse first — a change becomes the diff + Apply, a
         question gets the parser's own reply from the live config (one model call either way). Elsewhere (DMs and
@@ -1325,7 +1326,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         who must apply (Registry.must_apply) while applications are open gets the persistent Apply to join button on the
         reply, so the application wizard opens straight from the chat (typed class/spec is never parsed).
         `hold`: set by the listening gate for a message that never addressed the bot — a change is held behind a 👀
-        instead of shown (handle_change's `hold`)."""
+        instead of shown (handle_change's `hold`). `entry`: where it came in, for the answers log (listening passes
+        "listen"; else a DM or an @mention)."""
         mode = reg.plain_mode(channel)
         hold_kw = {"hold": hold} if hold is not None else {}  # only the listening gate sets it: every other call is as before
         if mode == "ignore":
@@ -1369,7 +1371,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             if memory is None and provider is not None and reg.may_ask(uid, officer):  # an @mention or a DM: recall and judge here
                 memory = await self.recall_memories(reg, text, channel)  # (the listening gate hands its own judged list)
             mem_kw = {"memory": mem.memory_block(memory, mem.guild_tz(reg))} if memory else {}
-            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw)
+            entry_kw = answer_loop.entry_kw(reg.key, entry or ("mention" if message.guild else "dm"))  # the answers log's entry point
+            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw, **entry_kw)
             if answer == HELP_ACT:
                 await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, **hold_kw)
                 return

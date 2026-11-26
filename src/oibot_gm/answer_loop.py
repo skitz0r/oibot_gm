@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Literal
 
 from . import help as help_mod
+from .answer_switch import ANSWERS_MAX_BYTES, ENTRIES, answers_log, enabled, entry_kw, log_answer  # noqa: F401 — the switch and the log (§9)
 from .answer_tools import BIG_RESULT_CAP, RESULT_CAP, Viewer, run_tool, tools_for
 from .help import HelpAnswer
 from .llm.provider import BudgetExceeded, CutShort, Refused

@@ -476,7 +476,9 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line
         to_help = not is_msg or reg.plain_mode(channel) == "act"
     if req.kind == "question" and not req.ops and not req.questions and to_help and getattr(bot, "help_answer", None) is not None:
-        answer = await bot.help_answer(reg, author.id, officer, text, public=public, **conv_kw)
+        from .answer_loop import entry_kw  # the answers log's entry point: an act channel, or /gm change
+
+        answer = await bot.help_answer(reg, author.id, officer, text, public=public, **conv_kw, **entry_kw(reg.key, "act" if is_msg else "change"))
         if answer:
             keep(await send(answer[:1950], ephemeral=True), answer[:1950])
             return

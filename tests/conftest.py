@@ -51,10 +51,12 @@ def _no_reference_price_reads(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_host_env(monkeypatch):
-    """A host's .env must not reach the suite: the site address and the per-workload budget caps are unset.
-    A test that wants one sets it itself."""
+def _no_host_env(monkeypatch, tmp_path):
+    """A host's .env must not reach the suite: the site address and the per-workload budget caps are unset, the
+    answer tools' switch is off and their answers log is the test's own. A test that wants one sets it itself."""
     monkeypatch.delenv("OIBOT_WEB_URL", raising=False)
+    monkeypatch.delenv("OIBOT_ANSWER_TOOLS", raising=False)
+    monkeypatch.setenv("OIBOT_ANSWERS_LOG", str(tmp_path / "out" / "answers.jsonl"))
     for name in list(os.environ):
         if name.startswith("OIBOT_BUDGET_USD_"):
             monkeypatch.delenv(name, raising=False)

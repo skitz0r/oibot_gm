@@ -1302,7 +1302,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             recall = getattr(bot, "recall_memories", None)
             judged = await recall(v.reg, q, None) if recall is not None and v.reg.may_ask(v.uid, officer) else []
             mem_kw = {"memory": mem.memory_block(judged, mem.guild_tz(v.reg))} if judged else {}
-            ans = await answer_fn(v.reg, v.uid, officer, q, may_act=officer, public=False, link=False, **({"conversation": convo} if convo else {}), **mem_kw)
+            from ..answer_loop import entry_kw  # the answers log's entry point
+
+            ans = await answer_fn(v.reg, v.uid, officer, q, may_act=officer, public=False, link=False, **({"conversation": convo} if convo else {}), **mem_kw,
+                                  **entry_kw(v.reg.key, "site"))
         except Exception as e:  # noqa: BLE001 — never a type name in a reply
             text = await report_error(bot.ops, v.reg.config, e, f"[{v.via}] {v.name} /api/ask")
             return JSONResponse({"error": text}, status_code=500 if text == GENERIC_ERROR else 400)

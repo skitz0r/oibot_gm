@@ -122,7 +122,7 @@ def _asker_lines(v: Viewer) -> list[str]:
     `member` lookup's who_line — public-safe, so it holds where others read the reply too)."""
     m = v.reg.members.get(v.user_id)
     if m is None or m.test:
-        return [f"Asker: {_line(_clean(getattr(m, 'display_name', '')) or 'someone', 80)} · {_role(v)} · {NO_RECORD_YET}"]
+        return [f"Asker: {_line(_clean(getattr(m, 'display_name', '') or v.name) or 'someone', 80)} · {_role(v)} · {NO_RECORD_YET}"]
     who = help_mod.who_line(v.reg, m)
     chars = _clean(who.removeprefix(f"- {help_mod._safe(m.display_name)}:")) if who else NO_CHARACTER
     return [f"Asker: {_line(_clean(m.display_name), 80)} · {_role(v)}",

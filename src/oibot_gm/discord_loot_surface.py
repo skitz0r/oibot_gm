@@ -647,13 +647,14 @@ class LootSurfaceMixin:
         parent = loot_parent(session, message.channel)  # plain_mode reads a thread as its parent channel
         # what this message continues (design §5.51): a reply to the bot's answer here, else this officer in this thread lately
         from . import conversation
+        from .answer_loop import entry_kw  # the answers log's entry point
 
         here = getattr(message.channel, "id", None)
         convo = conversation.context_block(conversation.recall(reg, here, uid, reply_to_message_id=conversation.reply_to_id(message)))
         async with message.channel.typing():
             try:
                 answer = await self.help_answer(reg, uid, True, text, may_act=True, public=False, data=loot_digest(session),
-                                                **({"conversation": convo} if convo else {}))
+                                                **({"conversation": convo} if convo else {}), **entry_kw(reg.key, "loot"))
             except Exception as e:  # noqa: BLE001
                 await message.reply(await configops.report_error(self.ops, reg.config, e, "loot chat"))
                 return
