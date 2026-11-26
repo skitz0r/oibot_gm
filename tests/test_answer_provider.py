@@ -13,6 +13,7 @@ import pytest
 from answer_bench import BENCH, LOOT_ITEM, LOOT_TO, asker_of
 from answer_fakes import ScriptedProvider, call, reply
 
+from oibot_gm import prices
 from oibot_gm.llm import provider as pv
 
 # the tools of answer tools' Tasks 3–4: the bench reaches each of them at least once
@@ -236,9 +237,10 @@ def test_bench_is_well_formed(reg, rs):
             assert "{" not in s.format(**values)
         recipes = {r.name for r in reg.profile.recipes.values()}
         names = {c.name for m in reg.members.values() for c in m.characters} | {m.display_name for m in reg.members.values()}
+        items = set(prices.names(reg).values())
         for cand in case.candidates:
             cand = cand.format(**values)
-            assert cand in recipes or cand in names, f"{case.id}: candidate {cand!r} is neither a listed recipe nor in the registry"
+            assert cand in recipes or cand in names or cand in items, f"{case.id}: candidate {cand!r} is no listed recipe, item or registry name"
     reached = {t for c in BENCH for t in c.expect_tools} | {t for c in BENCH for t in _steps_tools(c.script)}
     assert set(TOOL_NAMES) <= reached, set(TOOL_NAMES) - reached
     assert any(c.asks_back for c in BENCH) and any("manual" in c.expect_tools for c in BENCH)
