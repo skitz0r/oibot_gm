@@ -6,18 +6,25 @@ professions.who_can_make / crafters_of / answer_lines, prices.price_answer / cos
 who_line, schedule_view.schedule_sections): nothing here writes, sends or searches on its own. Who asks is fixed in
 code — the Viewer, built once with help.guild_state's rule — and is never read from a tool's arguments. Every result is
 cut to its cap on whole lines (`cut`), neutralised (`llm.provider.unfence`) and wrapped in one data block (`run_tool`).
-Times are guild words (Registry.local12), never a Discord stamp."""
+Times are guild words (Registry.local12), never a Discord stamp.
+
+Arguments are COERCED, not validated: each handler reads the keys it knows from the parsed dict (`_arg`), so a missing
+argument reads as empty, a number as its text and an unknown extra key is ignored; a string is cut to ARG_MAX. Nothing
+raises into the loop: run_tool never raises — an unknown lookup or a handler's exception is the TOOL_FAILED result.
+A cut list of matches ends "… and N more — narrow it"; a result that is ONE thing (an event, a member's record, one
+recipe, a manual part, a section — a handler returns it as `One`) ends "… and N more lines left out." instead."""
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from . import help as help_mod
 from . import prices
 from . import professions
 from . import raidcycle as rc
-from .answer_names import KINDS, match_lines, resolve
+from .answer_names import KINDS, _people, match_lines, resolve
+from .constants import PAGE_WORDS
 from .llm.provider import unfence
 from .profiles import GameProfile
 from .raid_views import run_title
@@ -26,9 +33,10 @@ from .registry import RegistryError
 log = logging.getLogger(__name__)
 
 RESULT_CAP = 1_500       # one lookup's result (design §6)
-BIG_RESULT_CAP = 4_000   # one manual part or one snapshot section (Task 4)
+BIG_RESULT_CAP = 4_000   # one manual part, one snapshot section or one event
 FIND_RECIPES = 5         # recipes the `recipe` lookup shows for one name
 CHARACTER_RECIPES = 40   # a character's recipe names the `crafters` lookup lists before a count
+RECIPE_CRAFTERS = 8      # crafters one recipe's line names, highest skill first, before "and N more"
 ARG_MAX = 200            # every string argument, cut in code as the schema says
 
 OFFICERS_ONLY = "Only officers can see this."
@@ -38,6 +46,7 @@ NAME_ONE = "Name one of these."
 PROFESSION_OR_CHARACTER = "Name a profession or a character, one of the two."
 NO_SCHEDULES = "No raid has a schedule yet. Officers add one on the Schedules page."
 FENCES = ("data", "question", "conversation", "memory", "member-text")
+UNKNOWN_SOURCE = "unknown"  # the wrapper's source for a lookup name that isn't one of TOOLS: never the model's own words
 
 
 # ---------------------------------------------------------------- who asks
@@ -120,18 +129,26 @@ def _register(name: str, description: str, schema: dict, *, cap: int = RESULT_CA
 # ---------------------------------------------------------------- the cut and the wrapper
 
 
-def _more(n: int) -> str:
-    return f"… and {n} more — narrow it"
+class One(str):
+    """A result that is ONE thing (an event, a member's record, one recipe, a manual part, a section): a cut says how
+    many lines it left out, never "narrow it", which only a list of matches can do."""
+
+
+def _more(n: int, one: bool = False) -> str:
+    return f"… and {n} more lines left out." if one else f"… and {n} more — narrow it"
 
 
 def cut(text: str, cap: int) -> str:
-    """`text` in at most `cap` characters, on whole lines: when lines are left out the last line says how many. A first
-    line longer than the cap is shortened with an ellipsis (nothing else would fit)."""
+    """`text` in at most `cap` characters, on whole lines: when lines are left out the last line says how many — "narrow
+    it" for a list of matches, "lines left out" for a `One`. A first line longer than the cap is shortened with an
+    ellipsis (nothing else would fit)."""
+    one = isinstance(text, One)
     text = str(text or "")
     if len(text) <= cap:
         return text
     lines = text.split("\n")
-    room = cap - len(_more(len(lines))) - 1  # the marker always fits, whatever the count
+    more = lambda n: _more(n, one)  # noqa: E731
+    room = cap - len(more(len(lines))) - 1  # the marker always fits, whatever the count
     out: list[str] = []
     used = 0
     for line in lines:
@@ -144,8 +161,8 @@ def cut(text: str, cap: int) -> str:
         if len(lines) == 1:
             return text[: cap - 1] + "…"
         out = [lines[0][: max(0, room - 1)] + "…"]
-        return "\n".join(out + [_more(len(lines) - 1)])
-    return "\n".join(out + [_more(len(lines) - len(out))])
+        return "\n".join(out + [more(len(lines) - 1)])
+    return "\n".join(out + [more(len(lines) - len(out))])
 
 
 def run_tool(viewer: Viewer, name: str, args: dict) -> tuple[str, bool]:
@@ -157,13 +174,14 @@ def run_tool(viewer: Viewer, name: str, args: dict) -> tuple[str, bool]:
             raise LookupError(f"no lookup {name!r} here")
         text = tool.handler(viewer, dict(args or {}))
     except Exception:  # noqa: BLE001 — a lookup's failure is a result the model reads, never a crash
-        log.exception("answer lookup %s failed", name)
-        return _wrap(name, TOOL_FAILED), True
-    return _wrap(name, cut(text, tool.cap)), False
+        log.exception("answer lookup %r failed", str(name)[:ARG_MAX])
+        return _wrap(tool.name if tool else UNKNOWN_SOURCE, TOOL_FAILED), True
+    return _wrap(tool.name, cut(text, tool.cap)), False
 
 
-def _wrap(name: str, text: str) -> str:
-    return f'<data source="{name}">\n{unfence(text, *FENCES)}\n</data>'
+def _wrap(source: str, text: str) -> str:
+    """`source` is a name from TOOLS or UNKNOWN_SOURCE — never a name the model wrote."""
+    return f'<data source="{source}">\n{unfence(text, *FENCES)}\n</data>'
 
 
 def _arg(args: dict, key: str) -> str:
@@ -204,7 +222,11 @@ def _recipe(v: Viewer, args: dict) -> str:
     name = _arg(args, "name")
     every = professions.who_can_make(reg, name, None)
     hits = every[:FIND_RECIPES]
-    out = professions.answer_lines(reg, hits, len(every))
+    shown = [replace(e, crafters=e.crafters[:RECIPE_CRAFTERS]) for e in hits]  # a crafter line the cut can't drop whole
+    out = professions.answer_lines(reg, shown, len(every))
+    for i, e in enumerate(hits):
+        if len(e.crafters) > RECIPE_CRAFTERS:
+            out[i] += f", and {len(e.crafters) - RECIPE_CRAFTERS} more."
     for e in hits:
         if e.recipe is None:
             continue
@@ -217,7 +239,7 @@ def _recipe(v: Viewer, args: dict) -> str:
         cost = prices.cost_line(reg, e.recipe)
         if cost:
             out.append(f"{e.name}: {cost}")
-    return "\n".join(out)
+    return One("\n".join(out)) if len(every) == 1 else "\n".join(out)
 
 
 # ---------------------------------------------------------------- crafters
@@ -269,8 +291,8 @@ def _crafters(v: Viewer, args: dict) -> str:
     if names:
         out.append("Recipes: " + ", ".join(names[:CHARACTER_RECIPES]) + ".")
         if len(names) > CHARACTER_RECIPES:
-            out.append(f"and {len(names) - CHARACTER_RECIPES} more recipes.")
-    return "\n".join(out)
+            out.append(f"And {len(names) - CHARACTER_RECIPES} more recipes.")
+    return One("\n".join(out))
 
 
 # ---------------------------------------------------------------- price
@@ -295,7 +317,8 @@ SELF_WORDS = frozenset({"me", "my", "myself", "mine", "i"})
 def _member_named(reg, name: str):
     """The member a name means, through help.mentioned_members (the snapshot's own finder); test puppets never. An
     exact display or character name wins over a part; several left → them all."""
-    hits = [m for m in help_mod.mentioned_members(reg, name) if not m.test]
+    here = {m.discord_id for m, _chars in _people(reg)}  # the resolver's population: no puppet, nobody who left
+    hits = [m for m in help_mod.mentioned_members(reg, name) if m.discord_id in here]
     n = name.strip().lower()
     exact = [m for m in hits if n in {m.display_name.lower(), *(c.name.lower() for c in m.characters if c.name),
                                        *(c.label.lower() for c in m.characters if c.name)}]
@@ -321,9 +344,9 @@ def _member(v: Viewer, args: dict) -> str:
         return "\n".join([m.display_name for m in found] + [NAME_ONE])
     m = found[0]
     if m.discord_id == v.user_id:  # their own record — but not the private parts where others read the reply
-        return "\n".join(help_mod.member_lines(reg, v.rs, m, "Your record", officer_view=not v.audience_public))
+        return One("\n".join(help_mod.member_lines(reg, v.rs, m, "Your record", officer_view=not v.audience_public)))
     if v.officer:
-        return "\n".join(help_mod.member_lines(reg, v.rs, m, "Member", officer_view=True))
+        return One("\n".join(help_mod.member_lines(reg, v.rs, m, "Member", officer_view=True)))
     return help_mod.who_line(reg, m) or f"{m.display_name} has no character on their record yet."
 
 
@@ -338,10 +361,23 @@ def _raid_of(reg, text: str) -> str | None:
     return None
 
 
-def _events(reg, rs, which: str) -> list:
+def _tester(reg, ev) -> int | None:
+    return (reg.config.team(ev.team) or {}).get("test_by")
+
+
+def _listed(reg, ev, viewer_id: int) -> bool:
+    """An event the lookup may pick: never a raid taken out of its event's lineup, never a rehearsal (rc.rehearsal_run,
+    as event_view leaves them out) — but the viewer's own rehearsal, which they are testing."""
+    if ev.dropped:
+        return False
+    return not rc.rehearsal_run(reg, ev) or _tester(reg, ev) == viewer_id
+
+
+def _events(reg, rs, which: str, viewer_id: int) -> list:
     w = which.strip().lower()
-    live = rs.live()
-    closed = sorted((e for e in rs.events.values() if e.state in ("done", "cancelled")), key=lambda e: e.starts_at, reverse=True)
+    live = [e for e in rs.live() if _listed(reg, e, viewer_id)]
+    closed = sorted((e for e in rs.events.values() if e.state in ("done", "cancelled") and _listed(reg, e, viewer_id)),
+                    key=lambda e: e.starts_at, reverse=True)
     if w in ("next", "the next", "next event", "the next event"):
         return live[:1]
     if w in ("tonight", "today"):
@@ -362,24 +398,26 @@ def _events(reg, rs, which: str) -> list:
 
 @_register("event", "One event as the asker may see it: its state, times, answers, rosters and recent activity. Name it "
                     "'next', 'tonight', a raid's name, an event's title as a list shows it, or 'last' and a raid's name.",
-           _schema({"which": _string("'next', 'tonight', a raid's name, an event's title, or 'last <raid>'.")}, ("which",)))
+           _schema({"which": _string("'next', 'tonight', a raid's name, an event's title, or 'last <raid>'.")}, ("which",)),
+           cap=BIG_RESULT_CAP)
 def _event(v: Viewer, args: dict) -> str:
     reg, rs = v.reg, v.rs
     which = _arg(args, "which")
-    found = _events(reg, rs, which) if rs is not None else []
+    found = _events(reg, rs, which, v.user_id) if rs is not None else []
     if not found:
         return _no_match(which)
     if len(found) > 1:
         return "\n".join([f"{run_title(reg, e)} · {rc.RUN_STATE_WORDS.get(e.state, e.state)}" for e in found] + [NAME_ONE])
     ev = found[0]
-    out = [f"{run_title(reg, ev)} · {rc.RUN_STATE_WORDS.get(ev.state, ev.state)}"]
+    out = [f"{run_title(reg, ev)} · {rc.RUN_STATE_WORDS.get(ev.state, ev.state)}"
+           + (f" · {PAGE_WORDS['test_run']}" if rc.rehearsal_run(reg, ev) else "")]
     me = reg.members.get(v.user_id)
     if me is not None and not me.test:
         s = ev.signups.get(str(v.user_id))
         seat = ev.seat_of(me) if ev.all_rosters else None
         out.append(f"The asker's answer: {rc.answer_word(ev, s.status if s else None, seat[0] + 1 if seat else None)}.")
     out += help_mod.run_lines(reg, rs, ev, v.officer, detail=True, viewer_id=v.user_id)
-    return "\n".join(out)
+    return One("\n".join(out))
 
 
 # ---------------------------------------------------------------- schedule
