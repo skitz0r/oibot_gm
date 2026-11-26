@@ -1,0 +1,417 @@
+"""The lookups the answer loop offers the model (answering questions with lookup tools, design §6, §7): the Viewer, the
+tool registry and its caps, and the members' tools — find, recipe, crafters, price, member, event, schedule.
+
+Every tool is a READ and a thin wrapper over a reader the site or the help snapshot already uses (answer_names.resolve,
+professions.who_can_make / crafters_of / answer_lines, prices.price_answer / cost_line, help.member_lines / run_lines /
+who_line, schedule_view.schedule_sections): nothing here writes, sends or searches on its own. Who asks is fixed in
+code — the Viewer, built once with help.guild_state's rule — and is never read from a tool's arguments. Every result is
+cut to its cap on whole lines (`cut`), neutralised (`llm.provider.unfence`) and wrapped in one data block (`run_tool`).
+Times are guild words (Registry.local12), never a Discord stamp."""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from . import help as help_mod
+from . import prices
+from . import professions
+from . import raidcycle as rc
+from .answer_names import KINDS, match_lines, resolve
+from .llm.provider import unfence
+from .profiles import GameProfile
+from .raid_views import run_title
+from .registry import RegistryError
+
+log = logging.getLogger(__name__)
+
+RESULT_CAP = 1_500       # one lookup's result (design §6)
+BIG_RESULT_CAP = 4_000   # one manual part or one snapshot section (Task 4)
+FIND_RECIPES = 5         # recipes the `recipe` lookup shows for one name
+CHARACTER_RECIPES = 40   # a character's recipe names the `crafters` lookup lists before a count
+ARG_MAX = 200            # every string argument, cut in code as the schema says
+
+OFFICERS_ONLY = "Only officers can see this."
+TOOL_FAILED = "This lookup failed and shows nothing."
+NO_MATCH = "Nothing in the guild matches {name}."
+NAME_ONE = "Name one of these."
+PROFESSION_OR_CHARACTER = "Name a profession or a character, one of the two."
+NO_SCHEDULES = "No raid has a schedule yet. Officers add one on the Schedules page."
+FENCES = ("data", "question", "conversation", "memory", "member-text")
+
+
+# ---------------------------------------------------------------- who asks
+
+
+@dataclass(frozen=True)
+class Viewer:
+    """Who asks and who reads the reply, fixed when the loop starts. `officer` is already downgraded where members read
+    the reply; `audience_public` = anyone else reads it, so even the asker's own private details stay out; `public` =
+    an officer asked where members read it (help.Ask's meaning)."""
+    reg: Any
+    rs: Any
+    user_id: int
+    officer: bool
+    public: bool
+    audience_public: bool
+    owner: bool
+    question: str
+    extras: help_mod.HelpExtras | None = None
+    data: str | None = None
+
+    @classmethod
+    def of(cls, reg, rs, user_id: int, officer: bool, *, public: bool, question: str, extras=None, data=None) -> "Viewer":
+        """help.guild_state's rule, exactly: the level follows who can READ the reply, not who asked."""
+        audience_public = bool(public)
+        public = bool(public and officer)
+        officer = bool(officer and not public)
+        return cls(reg, rs, int(user_id), officer, public, audience_public, bool(reg.is_owner_id(user_id)),
+                   question or "", extras, data)
+
+    def ask(self) -> help_mod.Ask:
+        """The same fields as help.Ask, for the snapshot's section builders."""
+        return help_mod.Ask(self.reg, self.rs, self.user_id, self.officer, self.question, self.extras,
+                            public=self.public, audience_public=self.audience_public)
+
+
+# ---------------------------------------------------------------- the registry
+
+
+def _always(profile: GameProfile) -> bool:
+    return True
+
+
+@dataclass(frozen=True)
+class Tool:
+    name: str
+    description: str
+    schema: dict
+    handler: Callable[[Viewer, dict], str]
+    cap: int
+    available: Callable[[GameProfile], bool] = field(default=_always)
+
+    def spec(self) -> dict:
+        return {"name": self.name, "description": self.description, "input_schema": self.schema}
+
+
+TOOLS: dict[str, Tool] = {}
+
+
+def tools_for(profile: GameProfile) -> list[Tool]:
+    """The lookups this game version offers, sorted by name: the same list for every request of a profile."""
+    return sorted((t for t in TOOLS.values() if t.available(profile)), key=lambda t: t.name)
+
+
+def _schema(props: dict, required: tuple[str, ...] = ()) -> dict:
+    return {"type": "object", "properties": props, "required": list(required), "additionalProperties": False}
+
+
+def _string(description: str) -> dict:
+    return {"type": "string", "maxLength": ARG_MAX, "description": description}
+
+
+def _register(name: str, description: str, schema: dict, *, cap: int = RESULT_CAP, available=_always):
+    def wrap(fn):
+        TOOLS[name] = Tool(name, description, schema, fn, cap, available)
+        return fn
+    return wrap
+
+
+# ---------------------------------------------------------------- the cut and the wrapper
+
+
+def _more(n: int) -> str:
+    return f"… and {n} more — narrow it"
+
+
+def cut(text: str, cap: int) -> str:
+    """`text` in at most `cap` characters, on whole lines: when lines are left out the last line says how many. A first
+    line longer than the cap is shortened with an ellipsis (nothing else would fit)."""
+    text = str(text or "")
+    if len(text) <= cap:
+        return text
+    lines = text.split("\n")
+    room = cap - len(_more(len(lines))) - 1  # the marker always fits, whatever the count
+    out: list[str] = []
+    used = 0
+    for line in lines:
+        n = len(line) + (1 if out else 0)
+        if used + n > room:
+            break
+        out.append(line)
+        used += n
+    if not out:  # one line alone is longer than the room
+        if len(lines) == 1:
+            return text[: cap - 1] + "…"
+        out = [lines[0][: max(0, room - 1)] + "…"]
+        return "\n".join(out + [_more(len(lines) - 1)])
+    return "\n".join(out + [_more(len(lines) - len(out))])
+
+
+def run_tool(viewer: Viewer, name: str, args: dict) -> tuple[str, bool]:
+    """One lookup → (its text in a data block, is_error). An unknown lookup, one this game version doesn't offer or a
+    handler that raises gives TOOL_FAILED; the exception is logged, never shown."""
+    tool = TOOLS.get(name)
+    try:
+        if tool is None or not tool.available(viewer.reg.profile):
+            raise LookupError(f"no lookup {name!r} here")
+        text = tool.handler(viewer, dict(args or {}))
+    except Exception:  # noqa: BLE001 — a lookup's failure is a result the model reads, never a crash
+        log.exception("answer lookup %s failed", name)
+        return _wrap(name, TOOL_FAILED), True
+    return _wrap(name, cut(text, tool.cap)), False
+
+
+def _wrap(name: str, text: str) -> str:
+    return f'<data source="{name}">\n{unfence(text, *FENCES)}\n</data>'
+
+
+def _arg(args: dict, key: str) -> str:
+    """A string argument as the schema allows it: stripped, at most ARG_MAX characters (code enforces the limit)."""
+    v = args.get(key)
+    return str(v).strip()[:ARG_MAX] if isinstance(v, (str, int)) and not isinstance(v, bool) else ""
+
+
+def _no_match(name: str) -> str:
+    return NO_MATCH.format(name=name or "that")
+
+
+# ---------------------------------------------------------------- find
+
+
+@_register("find", "Finds what a name or a word means in this guild: recipes, items, members, characters, raids, schedules, "
+                   "professions, commands and manual parts, the best matches first, with how many matched in all.",
+           _schema({"text": _string("The name or words to look up, as the person wrote them."),
+                    "kinds": {"type": "array", "items": {"type": "string", "enum": list(KINDS)}, "maxItems": len(KINDS),
+                              "description": "Only these kinds of thing."}}, ("text",)))
+def _find(v: Viewer, args: dict) -> str:
+    kinds = [k for k in (args.get("kinds") or []) if k in KINDS] if isinstance(args.get("kinds"), list) else None
+    return "\n".join(match_lines(*resolve(v.reg, _arg(args, "text"), kinds=kinds or None)))
+
+
+# ---------------------------------------------------------------- recipe
+
+
+def _reagents(e) -> str:
+    return ", ".join(f"{x.get('name')} × {int(x.get('quantity') or 1)}" for x in e.recipe.reagents)
+
+
+@_register("recipe", "One recipe by name, or '#<id>' from a find: who in the guild makes it, highest skill first, what it "
+                     "makes, its reagents, and its cost to make when prices show.",
+           _schema({"name": _string("The recipe's name, or '#' and its id.")}, ("name",)))
+def _recipe(v: Viewer, args: dict) -> str:
+    reg = v.reg
+    name = _arg(args, "name")
+    every = professions.who_can_make(reg, name, None)
+    hits = every[:FIND_RECIPES]
+    out = professions.answer_lines(reg, hits, len(every))
+    for e in hits:
+        if e.recipe is None:
+            continue
+        m = e.recipe.makes
+        if m:
+            lo, hi = int(m.get("quantity") or 1), int(m.get("quantity_max") or 0)
+            out.append(f"{e.name} makes {m.get('name')} × {lo if hi <= lo else f'{lo} to {hi}'}.")
+        if e.recipe.reagents:
+            out.append(f"{e.name} needs {_reagents(e)}.")
+        cost = prices.cost_line(reg, e.recipe)
+        if cost:
+            out.append(f"{e.name}: {cost}")
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- crafters
+
+
+def _profession(reg, text: str):
+    t = text.strip().lower()
+    return next((d for pid, d in reg.profile.professions.items() if t in (pid.lower(), d.name.lower())), None)
+
+
+def _recipe_name(reg, r) -> str:
+    d = reg.profile.recipes.get(r.id) if r.id is not None else None
+    return d.name if d is not None else r.name
+
+
+@_register("crafters", "Either one profession's crafters in the guild with their skill, highest first; or one character's "
+                       "professions with skill and the recipes on their record. Give a profession or a character, not both.",
+           _schema({"profession": _string("A profession's name."), "character": _string("A character's name.")}))
+def _crafters(v: Viewer, args: dict) -> str:
+    reg = v.reg
+    pname, cname = _arg(args, "profession"), _arg(args, "character")
+    if bool(pname) == bool(cname):
+        return PROFESSION_OR_CHARACTER
+    if pname:
+        d = _profession(reg, pname)
+        if d is None:
+            return _no_match(pname)
+        cs = professions.crafters_of(reg, d.id)
+        if not cs:
+            return f"Nobody in the guild has {d.name} on their record yet."
+        return "\n".join([f"{d.name}, highest skill first:"]
+                         + [f"{c.label} ({c.member}, {professions.skill_words(c.skill)})" for c in cs])
+    try:
+        found = reg.find(cname)
+    except RegistryError as e:  # two characters share the name: the registry's own sentence
+        return str(e)
+    if found is None or not professions.visible(reg, *found):
+        return _no_match(cname)
+    m, c = found
+    if not c.professions:
+        return f"{c.label} ({m.display_name}) has no profession on their record."
+    out = []
+    names: list[str] = []
+    for p in c.professions:
+        d = reg.profile.professions.get(p.id)
+        out.append(f"{c.label} ({m.display_name}): {d.name if d else p.id} {professions.skill_words(p.skill)}"
+                   + f", {len(p.recipes)} recipe{'' if len(p.recipes) == 1 else 's'}.")
+        names += [_recipe_name(reg, r) for r in p.recipes]
+    if names:
+        out.append("Recipes: " + ", ".join(names[:CHARACTER_RECIPES]) + ".")
+        if len(names) > CHARACTER_RECIPES:
+            out.append(f"and {len(names) - CHARACTER_RECIPES} more recipes.")
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- price
+
+
+def _has_auctions(profile: GameProfile) -> bool:
+    return bool(getattr(profile, "auctions", None))
+
+
+@_register("price", "An item's lowest price listed on the guild's auction house, how many are listed and as of when.",
+           _schema({"name": _string("The item's name, or '#' and its id.")}, ("name",)), available=_has_auctions)
+def _price(v: Viewer, args: dict) -> str:
+    return "\n".join(x for x in prices.price_answer(v.reg, _arg(args, "name"), v.owner, stamp=False) if x)
+
+
+# ---------------------------------------------------------------- member
+
+
+SELF_WORDS = frozenset({"me", "my", "myself", "mine", "i"})
+
+
+def _member_named(reg, name: str):
+    """The member a name means, through help.mentioned_members (the snapshot's own finder); test puppets never. An
+    exact display or character name wins over a part; several left → them all."""
+    hits = [m for m in help_mod.mentioned_members(reg, name) if not m.test]
+    n = name.strip().lower()
+    exact = [m for m in hits if n in {m.display_name.lower(), *(c.name.lower() for c in m.characters if c.name),
+                                       *(c.label.lower() for c in m.characters if c.name)}]
+    return exact or hits
+
+
+@_register("member", "One member's record by their name or a character's: their characters, class, spec and rank; more "
+                     "when the asker may see it. 'me' is the asker.",
+           _schema({"name": _string("A member's or a character's name, or 'me'.")}, ("name",)))
+def _member(v: Viewer, args: dict) -> str:
+    reg = v.reg
+    name = _arg(args, "name")
+    if name.lower() in SELF_WORDS:
+        m = reg.members.get(v.user_id)
+        if m is None or m.test:
+            return "The asker has no record in this guild yet. They add a character with /register or on the Me page."
+        found = [m]
+    else:
+        found = _member_named(reg, name)
+    if not found:
+        return _no_match(name)
+    if len(found) > 1:
+        return "\n".join([m.display_name for m in found] + [NAME_ONE])
+    m = found[0]
+    if m.discord_id == v.user_id:  # their own record — but not the private parts where others read the reply
+        return "\n".join(help_mod.member_lines(reg, v.rs, m, "Your record", officer_view=not v.audience_public))
+    if v.officer:
+        return "\n".join(help_mod.member_lines(reg, v.rs, m, "Member", officer_view=True))
+    return help_mod.who_line(reg, m) or f"{m.display_name} has no character on their record yet."
+
+
+# ---------------------------------------------------------------- event
+
+
+def _raid_of(reg, text: str) -> str | None:
+    t = text.strip().lower().removeprefix("the ").strip()
+    for rid in reg.profile.raids:
+        if t in {rid.lower(), rid.lower().replace("_", " "), str(reg.raid_def(rid).get("name", "")).lower()}:
+            return rid
+    return None
+
+
+def _events(reg, rs, which: str) -> list:
+    w = which.strip().lower()
+    live = rs.live()
+    closed = sorted((e for e in rs.events.values() if e.state in ("done", "cancelled")), key=lambda e: e.starts_at, reverse=True)
+    if w in ("next", "the next", "next event", "the next event"):
+        return live[:1]
+    if w in ("tonight", "today"):
+        today = reg.now_local().date()
+        return [e for e in live if e.start.astimezone(reg.tz).date() == today]
+    if w.startswith("last ") or w in ("last", "the last"):
+        rest = w.removeprefix("the ").removeprefix("last").strip()
+        if not rest:
+            return closed[:1]
+        rid = _raid_of(reg, rest)
+        return [e for e in closed if e.instance == rid][:1] if rid else []
+    titled = [e for e in [*live, *closed] if w in (run_title(reg, e).lower(), e.key.lower())]
+    if titled:
+        return titled
+    rid = _raid_of(reg, w)
+    return [e for e in live if e.instance == rid] if rid else []
+
+
+@_register("event", "One event as the asker may see it: its state, times, answers, rosters and recent activity. Name it "
+                    "'next', 'tonight', a raid's name, an event's title as a list shows it, or 'last' and a raid's name.",
+           _schema({"which": _string("'next', 'tonight', a raid's name, an event's title, or 'last <raid>'.")}, ("which",)))
+def _event(v: Viewer, args: dict) -> str:
+    reg, rs = v.reg, v.rs
+    which = _arg(args, "which")
+    found = _events(reg, rs, which) if rs is not None else []
+    if not found:
+        return _no_match(which)
+    if len(found) > 1:
+        return "\n".join([f"{run_title(reg, e)} · {rc.RUN_STATE_WORDS.get(e.state, e.state)}" for e in found] + [NAME_ONE])
+    ev = found[0]
+    out = [f"{run_title(reg, ev)} · {rc.RUN_STATE_WORDS.get(ev.state, ev.state)}"]
+    me = reg.members.get(v.user_id)
+    if me is not None and not me.test:
+        s = ev.signups.get(str(v.user_id))
+        seat = ev.seat_of(me) if ev.all_rosters else None
+        out.append(f"The asker's answer: {rc.answer_word(ev, s.status if s else None, seat[0] + 1 if seat else None)}.")
+    out += help_mod.run_lines(reg, rs, ev, v.officer, detail=True, viewer_id=v.user_id)
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- schedule
+
+
+@_register("schedule", "Each raid's schedules and the next three events of each, in the guild's time. Give a raid's name "
+                       "for that raid alone.",
+           _schema({"raid": _string("A raid's name.")}))
+def _schedule(v: Viewer, args: dict) -> str:
+    from .schedule_view import schedule_sections
+
+    reg = v.reg
+    raid = _arg(args, "raid")
+    sections = schedule_sections(reg)
+    if raid:
+        rid = _raid_of(reg, raid)
+        name = str(reg.raid_def(rid).get("name", rid)) if rid else None
+        sections = [s for s in sections if name is not None and s["raid"] == name]
+        if not sections:
+            return _no_match(raid) if rid is None else f"{name} has no schedule yet. Officers add one on the Schedules page."
+    if not sections:
+        return NO_SCHEDULES
+    out = []
+    for s in sections:
+        out.append(f"{s['raid']}" + (f" · {int(s['size'])} players" if s.get("size") else ""))
+        for r in s["schedules"]:
+            head = (f"{r['title']}: " if r.get("title") else "") + r["label"]
+            if r.get("paused"):
+                tail = "paused for now"
+            elif r["runs"]:
+                tail = "next: " + ", ".join(r["runs"])
+            else:
+                tail = ""
+            out.append(f"  {head}" + (f" — {tail}" if tail else ""))
+    return "\n".join(out)

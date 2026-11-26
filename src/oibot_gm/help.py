@@ -988,6 +988,17 @@ def _bank(ask: Ask) -> list[str]:
     return out
 
 
+def who_line(reg: Registry, m) -> str | None:
+    """One member's line in the who section: their characters as Label Spec Class role (* main) and rank, escaped.
+    None for a member with no character it shows (planned characters aren't shown). The answer tools' `member` tool
+    prints the same line for a member someone else asks about."""
+    chars = [c for c in m.active() if c.status != "planned"]
+    if not chars:
+        return None
+    cs = "; ".join(f"{_char(reg, c)}{'*' if c.is_main else ''} {c.rank}" for c in chars)
+    return _safe(f"- {m.display_name}: {cs}")
+
+
 def _who(ask: Ask) -> list[str]:
     """Who plays what, for every member (design §5.25, owner decision 2026-10-29): the site and the sheets already show
     every member's characters, mains, alts and ranks, so any member may read them anywhere the bot answers. Public-safe:
@@ -999,11 +1010,9 @@ def _who(ask: Ask) -> list[str]:
     rest = sorted((m for m in reg.members.values() if not m.test and m.discord_id not in first), key=lambda m: m.display_name.lower())
     out = ["### Who plays what (every member may read this): name: characters as Label Spec Class role (* main) · rank"]
     for m in named + rest:
-        chars = [c for c in m.active() if c.status != "planned"]
-        if not chars:
-            continue
-        cs = "; ".join(f"{_char(reg, c)}{'*' if c.is_main else ''} {c.rank}" for c in chars)
-        out.append(_safe(f"- {m.display_name}: {cs}"))
+        line = who_line(reg, m)
+        if line is not None:
+            out.append(line)
     if len(out) == 1:
         out.append("  no member has a character yet (members add one with /register or on the Me page)")
     return out
