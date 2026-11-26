@@ -109,7 +109,10 @@ understands; it answers in the words below.
   rostered* after it (joined, but not on the roster; dragging one into a group asks them to confirm). A pin icon on a
   name is an officer's pin: *pinned* (the lock keeps them where they were put) or *kept off* (the lock leaves them off
   the roster — set from the name's **⋮ › Keep off the roster**, and on the Events page the word *kept off* is on their
-  line).
+  line). Before the lock the Events page's board has a second list under *Not placed*: **Bench**, the Bench answers no
+  group holds (not shown when there are none). An officer may drag one into a group; dropping them back on either list
+  returns them to *Bench*. After the lock a Bench answer who isn't rostered is on neither list: **More › Fill seats…**
+  asks the bench first once a seat opens.
 - **Leftovers** — the joiners a full roster left out at the lock (more joined than there are places, or the roles
   didn't fit). They head the *Not rostered* list and the lock card, with what another event would be short.
 - **Suggest… / Fill seats…** — the same screen under two names, on the site and in Discord: **Suggest…** before the
@@ -1109,10 +1112,12 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays, *Tavi, Holy*); every pick
    shows the bot's sentences again, and **Record answer** writes. **Role switches** (only while a raid is short) and
    **Board** come next. The Board has a button per raid of the evening (*6:30 PM · Hyjal Summit*, *9:30 PM · Barrow
-   Deeps*; none for a one-raid event), then *Rosters* (*1 of 20*), *Placed* (*18 of 18 joined*) and *Short* (the role
-   icon and how many — what the raid lacks whoever is placed), then *Not placed* beside the groups — *Roster 1*,
+   Deeps*; none for a one-raid event), then *Rosters* (*1 of 20*), *Placed* (*18 of 18 joined*, or *16 of 18 joined and
+   2 from the bench* when Bench answers are in the groups) and *Short* (the role
+   icon and how many — what the raid lacks whoever is placed), then *Not placed* and under it *Bench* (the Bench answers
+   no group holds, each with its count; *Bench* is left out when nobody is on it) beside the groups — *Roster 1*,
    *Roster 2* when the raid makes several — and under them *The lock keeps these groups and fills any open seat from Not
-   placed. Auto-fill groups places them now the way the lock would.* with **Undo my moves** (greyed until you have moved
+   placed, then from the bench. Auto-fill groups places them now the way the lock would.* with **Undo my moves** (greyed until you have moved
    someone; its tooltip says so). Before the lock the board is what officers placed: nothing is worked out when the
    page opens, when someone answers or when a name is dragged. A drag (or a name's **⋮ › Move to…**, on a phone or a
    keyboard) moves at once, with no box; into a full group Move to… offers *Swap with Nyx*, one entry per person there.
@@ -1120,7 +1125,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    nothing else on the page moves. A move the bot refuses (a full group, an event that locked meanwhile) leaves the name
    where it was and says why. Everyone in *Not placed* is still joined: the lock seats them where a seat is open, unless
    they are kept off — with more joiners than seats (or late joiners on a first-to-join event) some stay out. Dropping a name
-   there, or pushing it there by a swap, only takes it out of its group. Keeping someone off the roster is their **⋮ ›
+   there, or pushing it there by a swap, only takes it out of its group. A Bench answer drags from *Bench* into a group
+   the same way, and dropped back on *Not placed* or *Bench* returns to *Bench*. Keeping someone off the roster is their **⋮ ›
    Keep off the roster** (a placed person comes off the board at once; the word *kept off* then shows on their line;
    **Unpin** takes it back; dragging them into a group takes it back too, and **Undo my moves** puts it back). A placed
    person whose answer leaves Join and Bench (No thanks, Can't make it, an absence, leaving the server, a retired
@@ -1269,7 +1275,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    for that raid, written into its groups; on a later raid of the evening it reads who the raids before it will roster,
    as the lock does). Each raid has its own board and its own button. A drag keeps that person where you put them when
    the lock comes; dropping on someone swaps the two, and dropping on *Not placed* only takes them out of their group —
-   the lock can still seat them. The lock fills the open seats from *Not placed*. **Undo my moves** takes back only your
+   the lock can still seat them. A Bench answer is listed apart under *Bench* and can be dragged into a group too. The
+   lock fills the open seats from *Not placed*, then from *Bench*. **Undo my moves** takes back only your
    own moves; another officer's and Auto-fill's stay. Its confirm counts them (*Your 2 moves on this board are dropped.
    Those people go back to Not placed.*), and if the board changed while it was open you see the new count first. A
    locked roster's seat a minimum still wants shows its role icon and *open seat*. Once the sheet locks the board is

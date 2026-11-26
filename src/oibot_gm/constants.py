@@ -75,6 +75,8 @@ PAGE_WORDS = {
     "priority": {"regular": "Regular", "rank": "Rank", "main": "Main character", "sat_out": "Sat out last time",
                  "signup_order": "Signed up early"},
     "rosters_of": "{n} of {size}", "placed_of": "{n} of {m} joined",
+    # Placed when the officers' board also holds Bench answers (b > 0): they are counted apart from the joiners
+    "placed_of_bench": "{n} of {m} joined and {b} from the bench",
     # a locked or finished raid's board counts who holds a seat, not who joined (the lock may seat someone from the Bench)
     "seats_of": "{n} of {size} seats",
     # Undo my moves greyed out: the officer has moved nobody on this board (also the route's refusal)
@@ -83,7 +85,7 @@ PAGE_WORDS = {
     "bank_empty": {"nobody": "Nobody has joined yet.", "placed": "Everyone who joined is placed.",
                    "rostered": "Everyone who joined is rostered."},
     # under the Board before the lock (the owner's tweaks C): the board is what the officers placed, the lock places the rest
-    "board_footer": "The lock keeps these groups and fills any open seat from Not placed. Auto-fill groups places them now the way the lock would.",
+    "board_footer": "The lock keeps these groups and fills any open seat from Not placed, then from the bench. Auto-fill groups places them now the way the lock would.",
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
     # Role switches: each row's button (rc.event_switches `button`), and why a short raid has no switch to show (`why`)
     "switch_button": "Switch", "answer_button": "Answer for them", "ask_button": "Ask",

@@ -1736,3 +1736,16 @@ def test_the_member_roster_has_no_officer_controls():
     for w in ("MemberMenu", "draggable", "PinMark", "onBoard", "api.post"):
         assert w not in roster, w
     assert "<SeatLine" in roster and "<RoleCounts" in roster and "run_words.bank.locked" in roster and "part.marks" in roster
+
+
+def test_the_event_board_draws_a_bench_section_from_the_servers_words():
+    """Bench last, Task 7: before the lock the event board's bank has a second section under Not placed — the Bench
+    answers no group holds (`board.bench`), headed by the server's word (run_words.bank.bench) and its count, each a
+    draggable line like a Not placed line; an empty Bench section is not drawn (no sentence on the board), and a drop on
+    it un-places the name as a drop on Not placed does."""
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    api = _code_only((SRC / "api.ts").read_text())
+    assert "bank.bench" in view and "board.bench" in view and '"Bench"' not in view and ">Bench<" not in view
+    assert "bench?: Seat[]" in api
+    assert 'zone("bench", () => drop("bank"))' in view, "a name dropped on the Bench section goes back to the bank"
+    assert "bench_note" not in view and "bench_empty" not in view, "no filler text on the board (the owner)"

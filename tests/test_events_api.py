@@ -880,3 +880,53 @@ def test_the_sentences_the_pages_wrote_are_the_servers_now(officer_client):
     assert words["weight_same"].format(n=3) == "Same as the raid (3)"
     f = words["schedule_fields"]
     assert f["nudge"] != f["nudge_hours_before"], "the switch and the select are told apart"
+
+
+# ---------------------------------------------------------------- the bench on the board (Task 7 of the Bench plan)
+
+def bench_event(reg, rs):
+    """An open Barrow Deeps one-off: 8 joined, then 2 answered Bench (in that order)."""
+    ms = people(reg, 10)
+    ev = rc.open_run(reg, rs, RID, start_in(reg, 3), by="t")
+    join(reg, rs, ev, ms[:8])
+    join(reg, rs, ev, ms[8:], "sub")
+    return rs.events[ev.key], ms
+
+
+def test_the_board_lists_bench_answers_apart_from_not_placed(officer_client, reg, rs):
+    ev, ms = bench_event(reg, rs)
+    part = officer_client.get(f"/api/event/{ev.key}").json()["parts"][0]
+    board = part["sheet"]["board"]
+    assert [s["display_name"] for s in board["bench"]] == [m.display_name for m in ms[8:]], "the Bench answers, in answer order"
+    assert {s["display_name"] for s in board["bank"]} == {m.display_name for m in ms[:8]}, "Not placed holds the joiners only"
+    assert {"display_name", "character", "cls", "spec", "role", "uid"} <= set(board["bench"][0])
+
+
+def test_placed_words_count_the_bench_apart(officer_client, web_bot, reg, rs):
+    ev, ms = bench_event(reg, rs)
+    benched = ms[8].display_name
+    r = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": benched, "to": {"r": 0, "g": 0, "i": 0}, "state": "open"}, headers=H())
+    assert r.status_code == 200, r.text
+    assert [s["display_name"] for s in r.json()["board"]["bench"]] == [ms[9].display_name], "the move's own answer: off the Bench section at once"
+    assert r.json()["board"]["rosters"][0]["groups"][0][0]["display_name"] == benched
+    part = officer_client.get(f"/api/event/{ev.key}").json()["parts"][0]
+    assert part["placed_words"] == "0 of 8 joined and 1 from the bench"
+    back = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": benched, "to": None, "state": "open"}, headers=H())
+    assert back.status_code == 200, back.text
+    assert [s["display_name"] for s in back.json()["board"]["bench"]] == [m.display_name for m in ms[8:]], "back to the Bench section, not Not placed"
+    assert benched not in {s["display_name"] for s in back.json()["board"]["bank"]}
+    assert officer_client.get(f"/api/event/{ev.key}").json()["parts"][0]["placed_words"] == "0 of 8 joined", "no bench clause at 0"
+
+
+def test_a_locked_board_lists_no_bench_and_refuses_an_unrostered_bench_answer(officer_client, web_bot, reg, rs):
+    ev, ms = bench_event(reg, rs)
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms[:8]])
+    part = officer_client.get(f"/api/event/{ev.key}").json()["parts"][0]
+    assert part["sheet"]["board"]["bench"] == [], "after the lock the bank is Not rostered: joiners the lock left out"
+    assert ms[8].display_name not in {s["display_name"] for s in part["sheet"]["board"]["bank"]}
+    r = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": ms[8].display_name, "to": {"r": 0, "g": 1, "i": 3}, "state": "locked"}, headers=H())
+    assert r.status_code == 409 and r.json()["error"] == rc.BENCH_LOCKED.format(name=ms[8].display_name) and r.json()["board"]["bench"] == []
+
+
+def test_meta_carries_the_bench_bank_word(officer_client):
+    assert officer_client.get("/api/meta").json()["run_words"]["bank"]["bench"] == "Bench"

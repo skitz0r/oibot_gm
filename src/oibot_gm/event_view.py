@@ -186,14 +186,18 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
     joined = p.by_status("in")
     names = {s.display_name for s in joined}
     state = "locked" if locked or p.state in CLOSED else "open"
-    placed = len(p.seated()) if locked else sum(1 for g in rc.board_layout(reg, p) for n in g if n in names)
+    on_board = [] if locked else [n for g in rc.board_layout(reg, p) for n in g]
+    placed = len(p.seated()) if locked else sum(1 for n in on_board if n in names)
+    benched = {s.display_name for s in p.by_status("sub")}
+    from_bench = sum(1 for n in on_board if n in benched)  # Bench names on the officers' board: Placed counts them apart
     n = len(p.all_rosters) if locked else rc.run_rosters(reg, p)
     live = p.state == "open"
     mine = rc.own_moves(p, viewer) if live else []
     seated = state == "locked"  # the roster stands: count seats (the lock may seat someone from the Bench), not joiners
     return {"key": p.key, "raid": p.instance, "raid_name": name, "label": f"{reg.local12(p.start, '%I:%M %p')} · {name}",
             "rosters_words": PAGE_WORDS["rosters_of"].format(n=n, size=rc.run_size(reg, p)),
-            "placed_words": None if seated else PAGE_WORDS["placed_of"].format(n=placed, m=len(joined)),
+            "placed_words": None if seated else (PAGE_WORDS["placed_of_bench"].format(n=placed, m=len(joined), b=from_bench) if from_bench
+                                                  else PAGE_WORDS["placed_of"].format(n=placed, m=len(joined))),
             "rostered_words": PAGE_WORDS["seats_of"].format(n=len(p.seated()), size=n * rc.run_size(reg, p)) if seated else None,
             "short": dict(rc.needs(reg, p)["roles"]) if p.state not in CLOSED else {},
             # open seats only on a locked roster: an officers' half-made board's empty places are not seats the lock leaves open

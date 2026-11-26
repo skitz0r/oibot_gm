@@ -28,7 +28,10 @@ type Verb = "move" | "roster" | "swap" | "substitute" | "release";
  *  into. `onHide`: before the lock the card collapses it back to one line.
  *  `variant="event"` (the Events page): before the lock the board is the OFFICERS' layout (nothing solved) — no Clear,
  *  Place the rest or split control here (Clear the board is in the event's More menu); `bankAction` (Auto-fill groups)
- *  sits beside Not placed (no note under it: issue #12), and a name kept off through the ⋮ menu carries the server's
+ *  sits beside Not placed (no note under it: issue #12); under Not placed a second section, the server's Bench word
+ *  and count, lists the Bench answers no group holds (`board.bench`, not drawn when empty) — each line drags like a Not
+ *  placed line, and a name dropped on either section is un-placed (the server's answer says which list it lands in);
+ *  a name kept off through the ⋮ menu carries the server's
  *  word `kept_off` on its line. A locked roster's `open` roles (the server's)
  *  are drawn as dashed slots, role icon + "open seat". A drop or Move to… sends ONE move and the page draws what the
  *  server answers (the answer's board, through `onBoard`), never a place of its own; while it is written the moved name
@@ -57,6 +60,8 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
   const pickSort = (v: string) => { setBankSort(v as BankSort); try { localStorage.setItem("oibot.bankSort", v); } catch { /* per-viewer convenience only */ } };
   const bank = sortBank(board.bank, bankSort, meta.roles);
   const { left, rest } = splitBank(board, bank);  // leftovers: joiners the full roster(s) left out
+  // the Events board before the lock: the Bench answers no group holds, a second section under Not placed (none = not drawn)
+  const bench = event && !locked ? sortBank(board.bench || [], bankSort, meta.roles) : [];
   const reason = e.split?.reason || null;
   const caps = meta.group_caps || {};
   const placed = board.rosters.reduce((n, r) => n + r.groups.reduce((m, g) => m + g.length, 0), 0);
@@ -252,9 +257,15 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
             {left.map((s) => chip(s, null))}
             {left.length > 0 && locked && reason && <SplitReasonLine meta={meta} r={reason} />}
             {left.length > 0 && board.another && <Text size="xs" c="dimmed">{board.another}</Text>}
-            {left.length > 0 && rest.length > 0 && <Text size="xs" fw={700} mt={6}>Bench</Text>}
+            {left.length > 0 && rest.length > 0 && <Text size="xs" fw={700} mt={6}>{words.bank.bench}</Text>}
             {rest.map((s) => chip(s, null))}
           </Stack>
+          {bench.length > 0 && <>
+            <Box mt="sm"><Eyebrow plain>{words.bank.bench} · {bench.length}</Eyebrow></Box>
+            <Stack gap={4} mt={6} p={8} style={{ border: `1px dashed ${over === "bench" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bench", () => drop("bank"))}>
+              {bench.map((s) => chip(s, null))}
+            </Stack>
+          </>}
         </Box>}
         <Stack gap="md" style={{ minWidth: 0 }}>
           {board.rosters.map((r, ri) => { const opens = openAt(ri); return (

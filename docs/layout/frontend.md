@@ -17,7 +17,9 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        a time in 15-minute steps; also the Raids page's First opens and the Test bench's Reschedule), components/lineup/LineupBuilder.tsx (THE lineup builder: up to lineup_max raids, rosters 1–4, starts
                        in 15-minute steps; StepNodes and the connectors) + LineupPicture.tsx (read-only), components/events/* (EventBoard = the raid
                        switch, Rosters / Placed / Short and BoardView variant="event" over the server's picture — working dimmed, failed with its
-                       sentence, Undo my moves greyed with the server's reason; a move's board is drawn from POST /move's own answer at once
+                       sentence, Undo my moves greyed with the server's reason; before the lock the bank has a second section under Not
+                       placed, run_words.bank.bench + count over board.bench (the Bench answers no group holds; not drawn when empty, no
+                       sentence), lines drag like Not placed's and a drop on either section un-places; a move's board is drawn from POST /move's own answer at once
                        (onBoard → `answered`, kept until a view whose GET was SENT later arrives: EventPane's `sentAt`), the rest of the page
                        follows the live `run:` reload — no page fetch of its own after a move, the moved name dimmed in place while it is
                        written, no "saving" line and no note under Not placed (issue #12); RoleSwitches (useSwitchPress(view, onReload) = THE press of one

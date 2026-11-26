@@ -478,3 +478,15 @@ def test_an_unanswered_regular_is_absent_by_name(reg, rs, monkeypatch):
             r = c.get(path, headers=h)
             assert r.status_code == 200, r.text
             assert f.regular.display_name not in dump(r.json()), path
+
+
+def test_the_member_page_has_no_board_and_no_bench_section_before_the_lock(lf, reg, rs):
+    """Bench last, Task 7: the officers' board gains a Bench section; the members' page gains nothing — before the lock
+    it draws no board at all, so a Bench answer placed on the officers' board shows only in the Bench tab."""
+    opened = rs.events[lf.opened.key]
+    rc.set_signup(reg, rs, opened, lf.benchy, None, "sub", source="test")
+    opened = rs.events[opened.key]
+    opened.layout = [[lf.plain.display_name, lf.fury.display_name, lf.benchy.display_name]]
+    rs.save(opened, "t: a Bench answer placed")
+    j = get(lf, f"/api/me/event/{opened.key}").json()
+    assert j["rosters"] == [] and not {"board", "bank", "bench_words", "placed_words"} & keys_of(j)

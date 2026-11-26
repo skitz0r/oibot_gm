@@ -146,7 +146,7 @@ export interface PageWords {
   one_off: string; first_to_join: string; not_asked: string; asked_at_lock: string; no_sheet_yet: string; from: string;
   open_in_discord: string; no_answer_yet: string; answers_one: string; bot_asks: string; officer_asks: string; every_main: string;
   used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
-  rosters_of: string; placed_of: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string; switch_item: string;
+  rosters_of: string; placed_of: string; placed_of_bench: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string; switch_item: string;
   sheet_waits: string; sheet_not_posted: string; open_seat: string; kept_off: string; seats_of: string; no_moves: string;
   bank_empty: Record<"nobody" | "placed" | "rostered", string>;
   /** Auto-fill groups (event_board.AutoFill): the button, its working line and its outcomes */
@@ -540,8 +540,9 @@ export interface Signup { uid: string; display_name: string; character: string; 
 export interface Seat { display_name: string; character: string; cls: string; spec: string; role: string; uid?: string | null; answer?: string | null; signed_at?: string | null }
 /** `open` = the roster's empty seats a minimum still wants, as roles (tank first): the page draws the role icon + "open seat"; null on the Events page's board before the lock. */
 export interface BoardRoster { n: number; rostered: number; synergy: number | null; advisories: string[]; groups: Seat[][]; summary: GroupSummary; open?: string[] | null }
-/** `leftovers` = joiners the full roster(s) left out (names, also in `bank`); `another` = one line when leftovers + bench + pool could make another run. */
-export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[]; leftovers?: string[]; another?: string | null; balance?: string | null }
+/** `leftovers` = joiners the full roster(s) left out (names, also in `bank`); `another` = one line when leftovers + bench + pool could make another run.
+ *  `bench` = before the lock, the Bench answers no group holds, in answer order (the Events board's second bank section); [] once locked. */
+export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; bench?: Seat[]; rosters: BoardRoster[]; leftovers?: string[]; another?: string | null; balance?: string | null }
 /** Why the joiners make fewer runs than the headcount allows: run `run` is short these tank/healer counts (roles_allow 0 = not even one). */
 export interface SplitReason { bodies_allow: number; roles_allow: number; run: number; short: Record<string, number> }
 export interface Confirmation { uid: string | null; display_name: string; character: string; cls: string; spec: string; role: string; roster: number; answer: string | null; asked_at: string | null }

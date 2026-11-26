@@ -45,7 +45,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        are the run dict's, seeded from its schedule at open (a run's own via reschedule). No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
                        THE run vocabulary (design §5.56 phase 2): RUN_STATE_WORDS, NO_CONFIRMATIONS, FIRST_COME, SHEET_ANSWERS (the open sheet's
                        footer: Bench = call me if a seat would stay empty), bench_promise(reg, signup) (the Bench receipt's tail: rostered only
-                       for a seat that would stay empty — or a tank / healer short, for one who plays it — and among the first asked), BANK_WORDS (Not placed / Not rostered),
+                       for a seat that would stay empty — or a tank / healer short, for one who plays it — and among the first asked), BANK_WORDS (Not placed / Not rostered / Bench — the Events board's second bank section before the lock),
                        LEFTOVERS, PIN_WORDS, NOT_ANSWERED_WORDS, ASK_HOW (how an ask reaches someone), ASK_ANSWER_WORDS, fill_state_text (sentences),
                        answer_word (the Me badge), balance_words (a split compared in words) — /api/meta carries them; the site keeps no copy
                        ONE planner (rc.role_plan; fill engine extended to before lock): ranked moves with alternates and a still-short line; nothing is
@@ -223,7 +223,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Signup sheet; locked: Confirmed, Open seats; _night_facts / _discord_links = the raid-night facts read from each raid's ev_json:
                        Reminder, Confirm by, Confirmations pending, Open seats per raid, Reminded, Automatic asks paused by, Also on another event, Away
                        that day, the officer card / updates thread / loot thread links), signups (counts + rows; none = rc.pool_unanswered), parts
-                       (_part_view: label, rosters_of, placed_of (names on the officers' board), short (rc.needs), sheet = ev_json (open seats only
+                       (_part_view: label, rosters_of, placed_of (joiners on the officers' board; placed_of_bench adds the Bench names placed, when any), short (rc.needs), sheet = ev_json (open seats only
                        when locked), board_state open | locked, autofill {working, words, failed} | None, mine, undo_box, layout, strategy — nothing
                        solves), activity, boxes {lock, cancel, reschedule}, actions (+ clear: More › Clear the board), switches (rc.event_switches), lineup,
                        timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks, edit (edit_options: Edit

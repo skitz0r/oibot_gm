@@ -941,8 +941,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         live = ev.state not in ("done", "cancelled")
         left = rc.leftovers(reg, ev, rosters) if live else []
         another = rc.another_run_hint(reg, ev, rosters, rc.run_split_reason(reg, ev)) if left else None
+        # before the lock, the Bench answers no group holds, in answer order (players_for's order): the bank's second
+        # section on the Events board; [] once locked (the bank is then the joiners the lock left out)
+        held = {m for r in rosters for g in r.groups for m in g}
+        benched = [p for p in rc.players_for(reg, ev) if p.status == "bench" and p.signup_name not in held] if ev.state == "open" else []
         return {"n_groups": rc.groups_per_roster(reg, size), "group_size": int(reg.profile.comp_rules["group_size"]), "size": size,
-                "bank": [seat_json(p, conf, uids, signed) for p in bench], "rosters": boards,
+                "bank": [seat_json(p, conf, uids, signed) for p in bench], "bench": [seat_json(p, conf, uids, signed) for p in benched], "rosters": boards,
                 "balance": rc.balance_words([r.synergy_value for r in rosters]),  # a split's rosters compared in words (never the numbers)
                 "leftovers": [p.signup_name for p in left], "another": another}
 

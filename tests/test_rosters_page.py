@@ -143,7 +143,7 @@ def test_the_run_vocabulary_reaches_the_site_from_python(c):
     assert m["ask_kinds"] == rc.ASK_HOW and m["ask_answers"]["waiting"] == rc.ASK_ANSWER_WORDS[None]
     assert m["level_words"] == {"green": "ready", "amber": "thin", "red": "short"}
     w = m["run_words"]
-    assert w["no_confirmations"] == rc.NO_CONFIRMATIONS and w["bank"] == {"open": "Not placed", "locked": "Not rostered"}
+    assert w["no_confirmations"] == rc.NO_CONFIRMATIONS and w["bank"] == {"open": "Not placed", "locked": "Not rostered", "bench": "Bench"}
     assert w["leftovers"] == "Leftovers" and set(w["pins"]) == {"in", "out"} and "bench" not in " ".join(w["pins"].values()).lower()
 
 

@@ -231,6 +231,8 @@ def seed(reg, rs) -> None:
     ev = rc.open_run(reg, rs, hyjal, start, by="scratch", lineup=[{"raid": barrow, "rosters": 2}])
     for m in mains[:18]:
         rc.set_signup(reg, rs, ev, m, None, "in", source="officer")
+    for m in mains[28:30]:  # two Bench answers: the Events board's Bench section under Not placed
+        rc.set_signup(reg, rs, ev, m, None, "sub", source="officer")
     late = (now + timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
     lk = rc.open_run(reg, rs, barrow, late, by="scratch")
     for m in mains[18:28]:
