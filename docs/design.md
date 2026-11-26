@@ -6235,7 +6235,8 @@ reads guild facts through read-only lookups over the readers the site already us
   after a restart) and `user_text` (the small start that replaces the snapshot: guild, time, where the reply is read,
   the asker and their characters, at most eight live events, the matched names, the officers' loot data in private,
   the conversation and memory blocks, the question ≤ 1,500 characters). Measured: the start runs about 400–1,000
-  characters against the snapshot's 14,700–19,300; the cached prefix (system + tools) about 23,400.
+  characters against the snapshot's 14,700–19,300; the cached prefix (system + tools) about 23,400 on the bench's tree and about 34,100 with the bot's full command
+  list (the system text 25,500, of which the command list 8,900; the tools 8,600).
 - `answer_loop.py` — `run` / `answer` → `AnswerResult` (the HelpAnswer help_answer posts, plus ending, rounds, requests,
   lookups, usage); `reply_spec()` = HelpAnswer's fields plus `choices`, strict, with its own sharper `acts` (`ACTS_DOC`);
   every limit below in code.
@@ -6268,7 +6269,9 @@ wrong…"* and today's ops warning.
 
 **The switch, the log, the routing.** `OIBOT_ANSWER_TOOLS` = `off` (default) | `on` | guild keys; read from the
 environment at call time, which `.env` sets at start, so a change needs a restart; a malformed value reads as off and is
-logged once without the value. Off, every entry point, prompt and call is byte-for-byte the old path (pinned: the parser
+logged once without the value. Off, every entry point, prompt and call is the old path (two things are reachable with it off, both
+harmless: the site's Tell the bot box keeps a reply's line breaks, and a help route overridden to claude-sonnet-5-5
+is priced by its own row) — otherwise byte-for-byte (pinned: the parser
 prompt's checksum, the help snapshot tests, `who_line`). On, `HelpMixin.help_answer` runs the loop instead of
 `help.answer` (`entry` names where the question came in) and everything after the answer is the same code. A question is
 never answered in the change parser's words: its verdict *question* (with or without questions of its own), or a
