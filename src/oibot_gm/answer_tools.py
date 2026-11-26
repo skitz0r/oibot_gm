@@ -374,18 +374,24 @@ def _tester(reg, ev) -> int | None:
     return (reg.config.team(ev.team) or {}).get("test_by")
 
 
-def _listed(reg, ev, viewer_id: int) -> bool:
-    """An event the lookup may pick: never a raid taken out of its event's lineup, never a rehearsal (rc.rehearsal_run,
-    as event_view leaves them out) — but the viewer's own rehearsal, which they are testing."""
+def visible_event(reg, ev, viewer_id: int, audience_public: bool = False) -> bool:
+    """An event the lookup and the start may show: never a raid taken out of its event's lineup, never a rehearsal
+    (rc.rehearsal_run, as event_view leaves them out) — but the viewer's own rehearsal, which they are testing, and
+    only where nobody else reads the reply (`audience_public` false)."""
     if ev.dropped:
         return False
-    return not rc.rehearsal_run(reg, ev) or _tester(reg, ev) == viewer_id
+    if not rc.rehearsal_run(reg, ev):
+        return True
+    return _tester(reg, ev) == viewer_id and not audience_public
 
 
-def _events(reg, rs, which: str, viewer_id: int) -> list:
+_listed = visible_event  # the older name, a pure alias
+
+
+def _events(reg, rs, which: str, viewer_id: int, audience_public: bool = False) -> list:
     w = which.strip().lower()
-    live = [e for e in rs.live() if _listed(reg, e, viewer_id)]
-    closed = sorted((e for e in rs.events.values() if e.state in ("done", "cancelled") and _listed(reg, e, viewer_id)),
+    live = [e for e in rs.live() if visible_event(reg, e, viewer_id, audience_public)]
+    closed = sorted((e for e in rs.events.values() if e.state in ("done", "cancelled") and visible_event(reg, e, viewer_id, audience_public)),
                     key=lambda e: e.starts_at, reverse=True)
     if w in ("next", "the next", "next event", "the next event"):
         return live[:1]
@@ -412,7 +418,7 @@ def _events(reg, rs, which: str, viewer_id: int) -> list:
 def _event(v: Viewer, args: dict) -> str:
     reg, rs = v.reg, v.rs
     which = _arg(args, "which")
-    found = _events(reg, rs, which, v.user_id) if rs is not None else []
+    found = _events(reg, rs, which, v.user_id, v.audience_public) if rs is not None else []
     if not found:
         return _no_match(which)
     if len(found) > 1:

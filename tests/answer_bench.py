@@ -105,6 +105,13 @@ def two_crafters(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     return out
 
 
+def alchemist(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
+    """Pellow's Briarwood knows Alchemy 300 with two flasks (Flask of the Titans 9978, Flask of Supreme Power 9980)."""
+    askers(reg)
+    reg.set_professions(PELLOW, "Briarwood", [{"id": "alchemy", "skill": 300, "recipes": [{"id": 9978}, {"id": 9980}]}])
+    return {"crafter": "Briarwood", "flask": "Flask of the Titans"}
+
+
 def real_event(reg: Registry, rs: rc.RaidStore, raid: str = "barrow_deeps", days: int = 3):
     """A schedule's event a few days out (conftest.open_test_run's events are rehearsals, which the `event` lookup
     leaves out)."""
@@ -200,11 +207,16 @@ BENCH: list[BenchCase] = [
               candidates=("Ironfeather Breastplate",), must=("made by Thornwick (300)",),  # from the start's matched names
               script=([reply(answer="Thornwick can make the Ironfeather Breastplate.")],)),
     BenchCase("ironfeather_pieces", "member", "public", "Bot who can make ironfeather leather working pieces", crafters,
-              # the answer is in the start's matched names: `find` gives back the same three recipe lines, so the
-              # case expects no lookup and reads its facts off the start
+              # the answer is in the start's matched names (a `find` would give back the same three recipe lines), so
+              # the case expects no lookup and reads its facts off the start; find_flasks is the case `find` must prove
               candidates=IRONFEATHER, must=("Ironfeather Breastplate · Leatherworking", "made by Thornwick (300)"),
-              script=([call("find", text="ironfeather", kinds=["recipe"])],
-                      [reply(answer="Thornwick can make the Ironfeather Breastplate. Nobody has the leggings or shoulders yet.")])),
+              script=([reply(answer="Thornwick can make the Ironfeather Breastplate. Nobody has the leggings or shoulders yet.")],)),
+    # a question naming nothing in the guild's names ("brew" matches none): the start holds no recipe, so only the
+    # model's own search of one kind finds the guild's flasks and their maker
+    BenchCase("find_flasks", "member", "public", "what can the guild brew?", alchemist,
+              must=("Flask of the Titans", "made by Briarwood (300)"), expect_tools=("find",),
+              script=([call("find", text="flask", kinds=["recipe"])],
+                      [reply(answer="Briarwood can make the Flask of the Titans and the Flask of Supreme Power.")])),
     BenchCase("ironfeather_choose", "member", "private", "who can make ironfeather?", two_crafters,
               candidates=IRONFEATHER, asks_back=True,
               script=([reply(answer="Which one?", choices=["Ironfeather Breastplate", "Ironfeather Leggings"])],)),

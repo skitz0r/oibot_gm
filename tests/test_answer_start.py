@@ -261,3 +261,11 @@ def test_a_failure_before_the_first_request_says_so(reg, rs, monkeypatch, bad):
     pv = ScriptedProvider([])
     res = al.answer(pv, None, viewer(reg, rs))
     assert res.ending == "error" and res.answer.answer == al.ANSWER_FAILED and pv.requests == []
+
+
+def test_the_system_text_says_what_to_do_when_the_bot_cannot_act(reg):
+    """Task 8 fix: the loop asked again with acting off asks for the missing detail or says how, never claims a change —
+    one general rule, so the system text stays the same string for every asker and question."""
+    text = st.system_text(None, reg.profile)
+    assert st.CANNOT_ACT in text and text.count(st.CANNOT_ACT) == 1
+    assert "never say a change was made" in st.CANNOT_ACT

@@ -358,6 +358,23 @@ def test_event_next_never_picks_a_rehearsal_but_the_tester_gets_their_own(reg, r
     assert at.run_title(reg, real) in other_officer and PAGE_WORDS["test_run"] not in other_officer
 
 
+def test_event_lookup_keeps_the_testers_rehearsal_out_where_members_read(reg, rs):
+    """The start's rule: a rehearsal is visible only to its tester AND only where nobody else reads the reply."""
+    from oibot_gm.constants import PAGE_WORDS
+
+    askers(reg)
+    test = rehearsal(reg, rs, MARROW, days=1)
+    real = real_event(reg, rs, days=3)
+    private = body(at.run_tool(viewer(reg, rs, MARROW, True, public=False), "event", {"which": "next"}))
+    assert at.run_title(reg, test) in private and private.split("\n")[1].endswith(f" · {PAGE_WORDS['test_run']}")
+    public = body(at.run_tool(viewer(reg, rs, MARROW, True, public=True), "event", {"which": "next"}))
+    assert at.run_title(reg, real) in public and PAGE_WORDS["test_run"] not in public
+    named = body(at.run_tool(viewer(reg, rs, MARROW, True, public=True), "event", {"which": at.run_title(reg, test)}))
+    assert PAGE_WORDS["test_run"] not in named, "not by its title either"
+    assert at.visible_event(reg, test, MARROW) and not at.visible_event(reg, test, MARROW, audience_public=True)
+    assert at._listed is at.visible_event
+
+
 def test_event_last_never_picks_a_closed_rehearsal_or_a_dropped_raid(reg, rs):
     askers(reg)
     real = real_event(reg, rs, days=3)

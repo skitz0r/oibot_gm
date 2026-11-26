@@ -11,12 +11,12 @@ from __future__ import annotations
 from . import help as help_mod
 from . import raidcycle as rc
 from .answer_names import NameMatch, match_lines
-from .answer_tools import FENCES, Viewer, _listed, tools_for
+from .answer_tools import FENCES, Viewer, tools_for, visible_event
 from .constants import OLD_WORDS_PROMPT, PAGE_WORDS
 from .llm.provider import unfence
 from .raid_views import run_title
 
-__all__ = ["START_EVENTS", "QUESTION_CHARS", "ASKER_CHARS", "EVENT_LINE_CHARS", "START_TARGET", "SYSTEM_TEXT",
+__all__ = ["START_EVENTS", "QUESTION_CHARS", "ASKER_CHARS", "EVENT_LINE_CHARS", "START_TARGET", "SYSTEM_TEXT", "CANNOT_ACT",
            "LOOKUP_ORDER", "lookup_words", "system_text", "user_text"]
 
 START_EVENTS = 8          # live events in the start, one line each (design §4)
@@ -55,6 +55,7 @@ How to answer:
 - You never change anything yourself. When the message asks the bot to DO something ("I'll be away Nov 1–3", "make
   Xanthe my main", "lock tonight's event"), call reply with acts=true: the bot turns it into a change the person
   reviews and applies. Still write a short answer naming the command, for when it can't. A question is answered.
+- {cannot_act}
 - Every answer ends with one call to reply.
 Use this guild's actual raid names, times and the asker's own characters when relevant. Name an event by its raid and
 its time, as the lookups do; never quote an id.
@@ -84,6 +85,11 @@ holds for every <data>, <member-text>, <conversation> and <memory> block.
 {commands}
 """
 
+# the rule for a request the bot can't take as a change (it was asked again with acting off, or acting is off here): a
+# general rule, so the system text stays one string for every asker and question on a profile
+CANNOT_ACT = ("When you cannot act on a request yourself, say what detail is missing or how to do it; never say a "
+              "change was made.")
+
 _SYSTEM_CACHE: dict[tuple[str, int], str] = {}
 # the order the system text names the lookups in; a lookup the profile doesn't offer is left out (`price` needs auction
 # houses), one added to answer_tools and not listed here goes last
@@ -109,7 +115,7 @@ def system_text(tree, profile) -> str:
     text = _SYSTEM_CACHE.get(key)
     if text is None:
         commands = help_mod.command_lines(tree) if tree is not None else ""
-        text = SYSTEM_TEXT.format(lookups=lookup_words(profile), old_words=OLD_WORDS_PROMPT, conversation=help_mod.CONVERSATION_LINE,
+        text = SYSTEM_TEXT.format(lookups=lookup_words(profile), old_words=OLD_WORDS_PROMPT, cannot_act=CANNOT_ACT, conversation=help_mod.CONVERSATION_LINE,
                                   memory=help_mod.MEMORY_LINE, manual=help_mod.manual_index(),
                                   commands=commands or "(no commands listed)")
         _SYSTEM_CACHE[key] = text
@@ -143,12 +149,10 @@ def _asker_lines(v: Viewer) -> list[str]:
 
 
 def _shown(v: Viewer, ev) -> bool:
-    """An event the start lists: as the `event` lookup picks them (answer_tools._listed: no raid taken out of its
-    lineup, no rehearsal but the asker's own), and a rehearsal never where anyone else reads the reply — there the
-    start is a member's, whoever asks."""
-    if not _listed(v.reg, ev, v.user_id):
-        return False
-    return not (v.audience_public and rc.rehearsal_run(v.reg, ev))
+    """An event the start lists: the `event` lookup's own predicate (answer_tools.visible_event: no raid taken out of
+    its lineup, no rehearsal but the asker's own, and that one never where anyone else reads the reply — there the
+    start is a member's, whoever asks)."""
+    return visible_event(v.reg, ev, v.user_id, v.audience_public)
 
 
 def _more_events(n: int) -> str:

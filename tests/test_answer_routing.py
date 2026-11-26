@@ -412,3 +412,128 @@ def test_entry_names_reach_the_answers_log(reg, rs, monkeypatch):
     asyncio.run(ask.callback(dm(OWNER), "status?"))
     assert said == ["Three."]
     assert [r["entry"] for r in rows()] == ["dm", "mention", "ask"]
+
+
+# ---------------------------------------------------------------- a change missing a detail (Task 8 fix, the ruling)
+
+OFF_PROMPT_SHA = "4c8f070a07dca73f109d598b66ca261f5d351be18825357f44146f28a2ce0798"  # SYSTEM.format(schema=…) before the fix
+
+
+class PromptSpy:
+    """A provider whose complete() records the parser's system text and answers a fixed verdict."""
+
+    def __init__(self, req):
+        self.systems, self.req = [], req
+
+    def complete(self, workload, system, user, schema):
+        self.systems.append(system)
+        return self.req
+
+
+def test_the_parsers_prompt_gains_the_change_rule_only_with_the_switch_on(reg, monkeypatch):
+    import hashlib
+
+    spy = PromptSpy(ConfigRequest(kind="ignore", reply=""))
+    switch(monkeypatch, False)
+    configops.parse(spy, reg, "mark me away")
+    off = spy.systems[-1]
+    assert off == configops.SYSTEM.format(schema=configops.SCHEMA_TEXT), "switch off: today's prompt, byte for byte"
+    assert hashlib.sha256(off.encode()).hexdigest() == OFF_PROMPT_SHA
+    assert configops.CHANGE_NEEDS_DETAIL not in off
+    switch(monkeypatch, True)
+    configops.parse(spy, reg, "mark me away")
+    on = spy.systems[-1]
+    assert configops.CHANGE_NEEDS_DETAIL in on and "is ambiguous (which raid? which\nmember?), return kind=question" not in on
+    monkeypatch.setenv(answer_switch.SWITCH_ENV, "someotherguild")
+    configops.parse(spy, reg, "mark me away")
+    assert spy.systems[-1] == off, "on for another guild only: this guild's prompt is today's"
+
+
+def owner_bot(reg, rs, provider):
+    real_member(reg, OWNER, "Oakhollow", "Mage", "Frost")
+    return chat_bot(reg, rs, provider)
+
+
+def test_mark_me_away_asks_for_the_dates_then_the_answer_makes_the_change(reg, rs, monkeypatch):
+    """(a) The parser (switch on) says change, no ops, "Which dates?": the person reads the question, the ring keeps it,
+    and the next message reaches the parser with the exchange and shows the diff with Apply. Nothing is written."""
+    switch(monkeypatch, True)
+    parsed = []
+    verdicts = [ConfigRequest(kind="change", reply="", ops=[], questions=["Which dates?"]),
+                ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="absence", start="2026-12-04", end="2026-12-06", reason="away")])]
+
+    def parse(provider, reg_, text, by=None, officer=False, **kw):
+        parsed.append((text, kw.get("conversation") or ""))
+        return verdicts[len(parsed) - 1]
+
+    monkeypatch.setattr(configops, "parse", parse)
+    provider = ScriptedProvider([[reply(answer="Use I'll be away.", acts=True)], [reply(answer="Use I'll be away.", acts=True)]])
+    bot = owner_bot(reg, rs, provider)
+    head = reg.store.head()
+    msg, said = message(OWNER)
+    asyncio.run(bot.plain_text(msg, reg, "mark me away", GENERAL_CH))
+    assert len(said) == 1 and "Which dates?" in said[0][0] and "I'll be away" not in said[0][0]
+    (ex,) = conversation.recall(reg, GENERAL_CH, OWNER)
+    assert ex.questions == ["Which dates?"]
+    msg2, said2 = message(OWNER, mid=7000)
+    asyncio.run(bot.plain_text(msg2, reg, "friday to sunday", GENERAL_CH))
+    assert parsed[1][0] == "friday to sunday"
+    assert "mark me away" in parsed[1][1] and "Which dates?" in parsed[1][1], "the parser reads the exchange"
+    assert said2[-1][1].get("embed") is not None and said2[-1][1].get("view") is not None, "the diff with Apply"
+    assert not reg.members[OWNER].absences, "nothing is written before Apply"
+    assert reg.store.head() == head
+
+
+def test_a_parser_that_still_says_question_for_a_change_gets_the_loops_question(reg, rs, monkeypatch):
+    """(b) The safety net: the parser answers kind=question (with its own question) for a change; the loop is asked
+    again with acting off, its system text carries the acting-off rule, the person reads the loop's words, and nothing
+    is written."""
+    from oibot_gm import answer_start
+
+    switch(monkeypatch, True)
+    parsed = fake_parser(monkeypatch, ConfigRequest(kind="question", reply="the parser's line", questions=["Which dates?"]))
+    loop_says = "Which dates will you be away? Tell me the first and last day."
+    provider = ScriptedProvider([[reply(answer="Marking you away.", acts=True)], [reply(answer=loop_says, acts=True)]])
+    bot = owner_bot(reg, rs, provider)
+    msg, said = message(OWNER)
+    asyncio.run(bot.plain_text(msg, reg, "mark me away", GENERAL_CH))
+    assert [c for c, _ in said] == [loop_says]
+    assert parsed == ["mark me away"] and provider.n == 2
+    assert answer_start.CANNOT_ACT in provider.requests[-1]["system"]
+    assert not reg.members[OWNER].absences
+
+
+def test_site_box_a_change_missing_a_detail_keeps_its_question_and_its_follow_up(reg, rs, monkeypatch):
+    """The site's box with the switch on: change, no ops, "Which dates?" → the questions come back (the box shows them
+    and keeps them in its own exchange), no loop, no token; the follow-up sends that exchange to the parser."""
+    from fastapi.testclient import TestClient
+    from test_mcp import TOKEN, bearer
+    from test_parity_verbs import Bot
+
+    from oibot_gm.web import app as web
+
+    switch(monkeypatch, True)
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    bot = Bot(reg, rs)
+    bot.ctx = types.SimpleNamespace(provider=object())
+    asked = []
+
+    async def help_answer(*a, **k):
+        asked.append(k)
+        return "the loop's answer"
+
+    bot.help_answer = help_answer
+    seen = []
+
+    def parse(provider, reg_, text, by=None, officer=False, **kw):
+        seen.append(kw.get("conversation") or "")
+        return ConfigRequest(kind="change", reply="", ops=[], questions=["Which dates?"])
+
+    monkeypatch.setattr(configops, "parse", parse)
+    c = TestClient(web.create_app(bot))
+    d = c.post("/api/ops/change", json={"text": "mark me away"}, headers=bearer()).json()
+    assert d["kind"] == "change" and d["questions"] == ["Which dates?"] and "token" not in d and not asked
+    turn = [{"request": "mark me away", "reply": d["reply"], "questions": d["questions"]}]
+    c.post("/api/ops/change", json={"text": "friday to sunday", "conversation": turn}, headers=bearer())
+    assert "mark me away" in seen[-1] and "Which dates?" in seen[-1]
